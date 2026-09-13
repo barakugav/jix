@@ -1,263 +1,231 @@
 # Benchmark plan
 
-One claim, one benchmark, one configuration. We are not sweeping a cartesian product; every
-measurement in the report exists because it supports a specific sentence we want to write.
+The report is organized **by operation**, not by claim. Each section shows one or two plots of a
+single operation across deliberately chosen cases, with every library side by side. The claims
+below are notes between you and me about what each section is likely to show - they do not appear
+in the report, and the measurement decides the wording.
 
-**The claims below are the report's outline, not hypotheses to be proved.** They say what we want
-the report to *talk about* and therefore what has to be measured. Whatever the numbers turn out to
-be is what gets published - a claim that lands at 0.8x instead of 3x is still a section, just a
-differently worded one. Nothing here is designed to reach a predetermined answer.
+We are not sweeping a cartesian product. Every case on every x axis is there because we chose it.
 
 ## Ground rules
 
-**Everything single-threaded.** jix has no threading. blosc2 and zarr do, and are pinned to one
-thread (`NTHREADS = 1`, already done in `array_impls.py`). NumPy's elementwise and reduction
-kernels are single-threaded anyway. This is stated at the top of the report, not in a footnote,
-because it is the first thing a reader will challenge.
+**Single-threaded everywhere.** jix has no threading. blosc2, zarr and numexpr are all pinned to
+one thread (numexpr matters: blosc2 evaluates lazy expressions through it and it keeps a separate
+pool - see `FINDINGS.md`). numpy's elementwise and reduction kernels are single-threaded anyway.
 
-**One baseline per language.** Rust normalizes to `ndarray`. Python normalizes to `numpy`.
-Every relative number in the report is against that baseline and nothing else.
+**One baseline per language.** Rust normalizes to `ndarray`, Python to `numpy`. The baseline is
+always drawn as a 1x bar.
 
-**Pinned defaults.** Unless a claim explicitly varies one of these:
+**Pinned defaults**, unless a section's cases vary one of them:
 
-| knob | value | why |
+| knob | value |
+|---|---|
+| math dtypes | **`f32` and `i32`, both, almost always** |
+| read dtype | **`i32` only** |
+| ndim | 2, except the axis-order section which needs 3 |
+| codec | zstd level 3 |
+| filters | byte-shuffle, with a no-shuffle arm where the filter is informative |
+| data distribution | `smooth`, except where distribution is a case |
+| python array | `[130_000, 200]` (104 MB f32) |
+| rust array | **`[300_000, 80]`** (96 MB f32) |
+
+Two dtypes is not a sweep - it is the minimum honest sample. The suite already shows the two
+diverging sharply (`sum` all-axis: jix beats numpy 3.2x on `i32` and 2.4x on `f32`), and showing
+only the flattering one would be a choice.
+
+**Do not get attached to the integer-reduction win.** jix's kernels are tuned on macOS arm64;
+numpy is a general-purpose library whose hot paths have had far more x86 attention. The 3.2x may
+shrink or invert on `linux-x86_64`. It is reported as a measurement in the reduction plot, not
+framed as a property of the library, and the per-platform stacking will show it either way.
+
+---
+
+## Sections, and what each one measures
+
+### 1. Compression
+
+Ratio and compression throughput. Cases on x: the three data distributions.
+
+| | |
+|---|---|
+| cases | `random`, `smooth`, `4 unique values` |
+| libraries | jix, jix-shuffle, blosc2, blosc2-shuffle, zarr |
+| dtype | `i32` |
+| status | EXISTS (`test_compress.py`); join ratio and throughput into one section |
+
+Two plots: compression ratio, and compress throughput. Both against the raw array as the 1x
+reference rather than numpy, since numpy does not compress.
+
+### 2. Read
+
+Random regions - each timed call reads a different one of 1024 pre-generated regions. This is the
+data-loader pattern, and the only read pattern worth measuring.
+
+| | |
+|---|---|
+| cases | see below |
+| libraries | numpy, jix, jix-shuffle, blosc2, blosc2-shuffle, zarr |
+| dtype | `i32` only |
+| status | ADAPT (`test_read.py`) |
+
+Cases, block shape and read shape together:
+
+| block | read | what it isolates |
 |---|---|---|
-| element dtype | `f32` for math, `i32` for storage/read | f32 is the ML default; i32 shuffles well and matches the existing suite |
-| ndim | 2 | every competitor handles 2-D well; higher ndim adds noise, not insight |
-| codec | zstd level 3 | blosc2 and zarr are configured identically; level 3 is everyone's default |
-| filters | byte-shuffle | the fair default; a no-shuffle arm appears only where the filter is the subject |
-| data profile | `smooth` | the existing generator; realistic and moderately compressible |
-| python array | `[130_000, 200] f32` (104 MB) | large enough to leave cache, small enough to run everywhere |
-| rust array | `[400_000, 64] f32` (102 MB) | same working set as the Python one, so the two halves are comparable |
+| `[16,70]` | `[1,70]` | one row, spans a block row |
+| `[16,70]` | `[16,70]` | read == block, the aligned best case |
+| `[64,70]` | `[16,16]` | read is a fraction of a block, the wasteful case |
+| `[64,70]` | `[256,70]` | **new** - several blocks per read |
+| `[64,70]` | `[4096,70]` | **new** - large slab, per-call overhead amortized |
+| `[64,70]` | full array | **new** - the pure-throughput limit |
 
-**Thread pinning is not just `blosc2.set_nthreads`.** blosc2 evaluates lazy expressions through
-numexpr, which keeps its own pool (12 threads by default on this machine). `array_impls.py` now
-calls `numexpr.set_num_threads(1)` as well. Without it the blosc2 elementwise arms were running
-multi-threaded against single-threaded jix and numpy - and still losing, but the comparison was
-not the one we claimed to be making.
+The three new rows are the ones that answer "how do these libraries behave once you stop measuring
+call overhead". zarr's flat ~330 us at every small read size looks like pure Python indexing cost;
+the large-read cases are where its codec performance actually shows.
 
----
+**Fairness arm to add:** blosc2 with `chunks == blocks`. blosc2 currently auto-selects 8.7 MiB
+chunks against a 4 KiB block, and silently rewrites a requested `(64,70)` block to `(52,70)` - so
+the `b64x70` case has never compared equal block shapes. See `FINDINGS.md`. Both are fixed by
+forcing `chunks`, which blosc2 accepts and honors exactly.
 
-## Claims and their benchmarks
+**Rust half:** jix `Compact` against `ndarray` slicing, `[11_000, 460] i32`, the three alignment
+cases. Existing Rust read sizes are fine as they are.
 
-Status key: `EXISTS` runs today as-is, `ADAPT` exists but needs an arm or a trim, `NEW` must be
-written from scratch.
+### 3. Negate, and 4. Add
 
-### Storage: compression and reads
+The two elementwise operations. Same structure for both.
 
-| id | claim | benchmark | status |
-|---|---|---|---|
-| S1 | jix compresses as well as blosc2 and zarr at matched codec settings | `test_compress` (py) | EXISTS |
-| S2 | Random reads from a compressed array are far cheaper in jix than blosc2 or zarr | `test_read` (py) | ADAPT |
-| S3 | A compressed read costs a small constant factor over a raw ndarray slice, and that factor is set by block/read alignment | `bench_read_vs_ndarray` (rust) | NEW |
+**Plot A - dtype and storage.** Cases: `f32` and `i32`. Bars: numpy, jix-plain, jix, jix-shuffle,
+blosc2, blosc2-shuffle, zarr. This puts the uncompressed comparison (jix-plain against numpy, where
+we expect parity) and the compressed comparison (against blosc2, where jix currently wins ~9x) in
+one picture.
 
-**S1** - already produces the ratio table. Change: join it with throughput so one table carries
-ratio, compress MB/s, and full-read MB/s per profile. Three profiles (`random`, `smooth`,
-`low_entropy`), four libraries, one array shape. No sweep.
+**Plot B - data distribution.** Cases: `random`, `smooth`, `16 unique`, `4 unique`. Bars: the
+compressed libraries plus the numpy 1x reference. This is where the "better compression makes ops
+faster" story lives - **not as its own section and not as its own axis**, just as extra cases in
+the same plot. The compression ratio achieved goes in the collapsed table underneath.
 
-**S2** - the existing three (block, read) pairs are well chosen and stay:
+An elementwise op writes a full-size uncompressed output whatever the input was, so compression
+only helps the read half. The distribution cases show how much that is worth; they are not
+expected to catch numpy.
 
-- `block=[16,70] read=[1,70]` - single row, read spans one block row
-- `block=[16,70] read=[16,70]` - read is exactly one block, the best case
-- `block=[64,70] read=[16,16]` - read is a fraction of a block, the wasteful case
+Status: ADAPT. `test_ops.py::_build` is hard-wired to the `smooth` profile and `f32`, so neither
+the dtype nor the distribution case exists today. Rust: NEW, there is no `ndarray` arm anywhere in
+`jix/benches/`.
 
-**Done:** the benchmark now cycles through 1024 pre-generated random regions instead of re-reading
-one fixed region. This is the data-loader pattern from the README, and it is the only read pattern
-that matters. The old version re-read a single region that stayed warm in cache, which flattered
-every library and hid jix's lack of a decompressed-block cache. Expect all the read numbers to get
-worse and the relative ordering to change.
+### 5. Reductions
 
-**Still to do:** a **blosc2 arm with `chunks == blocks`**. blosc2 currently gets `chunks=None`
-(auto), so a small read may decompress a much larger auto-selected chunk than jix does. Worth an
-arm to find out; it may explain a good part of the gap.
+One plot, `sum` and `std` together, because they behave differently and splitting them would be
+choosing which result to show.
 
-**S3** - new. Arms: jix `Compact` vs `ndarray` (`.slice(...).to_owned()`). Array
-`[11_000, 460] i32`. Three deliberate points, chosen because they bracket the alignment story
-rather than sweep it:
+| | |
+|---|---|
+| cases | `sum axis=0`, `sum axis=1`, `sum all`, `std axis=0`, `std all` - each for `f32` and `i32` |
+| libraries | numpy, jix-plain, jix-shuffle, blosc2-shuffle, zarr |
+| status | ADAPT |
 
-| block | read | what it shows |
-|---|---|---|
-| `[32,32]` | `[32,32]` | read == block: the floor, expect ~5x |
-| `[32,32]` | `[1,460]` | one row crossing 15 blocks: the pathological case, expect ~25x |
-| `[512,32]` | `[128,460]` | large slab, well aligned: expect ~4x |
+Expect `sum` above the line and `std` well below it (currently 3.2x slower than numpy). Both in
+the same chart, same axis. The `std` result is a real deficiency in the kernel and the plot says so
+without a paragraph apologizing for it.
 
-The point of S3 is not "jix is 5x slower". It is "the factor is yours to choose, and here is the
-rule". That doubles as user documentation.
+Note that blosc2 beats jix on compressed reductions (`std` all-axis 74 ms against 82 ms) while
+losing badly on compressed elementwise. Same plot, both facts visible.
 
-### Operations on plain (uncompressed) arrays
+### 6. Operation chains
 
-| id | claim | benchmark | status |
-|---|---|---|---|
-| O1 | Elementwise ops on `Plain` match ndarray / numpy | `bench_op_plain_vs_ndarray` (rust), `test_negate`/`test_add` (py) | NEW / EXISTS |
-| O2 | Integer and axis reductions are faster in jix than numpy | `test_sum` (py), `bench_op_plain_vs_ndarray` (rust) | ADAPT / NEW |
-| O3 | On awkwardly strided input, jix beats ndarray because it sorts axes | `bench_op_strided_vs_ndarray` (rust) | ADAPT |
+The no-intermediates story. Cases on x: **chain length 1, 2, 4, 8**, for `f32` and `i32`.
 
-**O1** - Rust side is entirely new; there is currently no ndarray arm anywhere in
-`jix/benches/`. Ops: `neg`, `a + b`. Python side already measures this and already shows parity
-(2.88 ms vs 2.89 ms) - no change needed beyond trimming sizes to the single canonical one.
+| | |
+|---|---|
+| chain | cheap elementwise only - `((a * 2 + b) - 3) * 0.5 ...` |
+| libraries | numpy, jix-plain, jix-shuffle |
+| status | NEW |
 
-**O2** - the Python suite already shows jix winning here (i32 full sum 1.36 ms vs numpy 4.39 ms).
-This was not on your original list and it is one of the strongest honest results in the data.
-Keep `sum` over `axis=0`, `axis=1`, and all; both `i32` and `f32`. Drop the `std` variants from
-this section and move them to "Where jix loses" - `std` is 3.2x slower and hiding it would be
-worse than showing it.
+Chain length stays a multi-point axis because the *slope* is the result: numpy makes one full pass
+per operation, jix makes one pass regardless. A single length would show a number with no mechanism
+behind it.
 
-**O3** - `op1.rs::bench_op1_plain_transposed` already has the jix half. Add an `ndarray` arm on
-the same transposed view. `[1200, 1200] f32`, source transposed, op `neg`, output in both C
-order and transposed. Python has no equivalent because numpy sorts axes too, so there is no
-claim to make there.
+**The existing chain benchmark measures the wrong thing.** `(exp(a) * 0.5 + 1).log()` is dominated
+by transcendental math rather than memory traffic, so numpy's vectorized libm decides the result
+and jix comes out 1.12x slower (90.9 ms against 80.9 ms). It stays in the report as one extra case
+labelled `exp/log`, next to the cheap-op cases, where the contrast is the point.
 
-### Operations on compressed arrays
+**Peak memory** is a second plot in this section, same cases: peak RSS from a fresh subprocess per
+(library, chain length), via `resource.getrusage(RUSAGE_SELF).ru_maxrss`. `tracemalloc` cannot see
+numpy's C allocations. Python only. Memory has no noise floor, which makes it the cleanest evidence
+on the page.
 
-| id | claim | benchmark | status |
-|---|---|---|---|
-| C1 | Elementwise ops on Compact beat blosc2 by a wide margin | `test_negate`/`test_add` (py) | ADAPT |
-| C2 | Better compression makes ops on Compact faster | `test_ops_by_entropy` (py), `bench_op_compact_by_entropy` (rust) | NEW |
-| C3 | Above some compression ratio, reducing the compressed array beats reducing the raw one | `test_reduce_breakeven` (py) | NEW |
+**Rust half:** the same cheap chain against idiomatic `ndarray` (one allocation per step), plus
+`normalize.rs` given an `ndarray` arm. That second one matters more - for pure elementwise chains
+Rust iterators already fuse for free, so the honest Rust claim is about chains that mix elementwise
+work with reductions and broadcasts.
 
-**C1** - holds in the existing data (negate: jix-shuffle 49.6 ms vs blosc2-shuffle 443 ms, 9x).
+### 7. Axis order (Rust only)
 
-**Fairness checked, and the arm is sound.** The worry was that `(-a)[:]` materializes into a
-*compressed* blosc2 array before handing back numpy, billing blosc2 for a compression pass jix
-never does. It does not. In `blosc2/lazyexpr.py`, `LazyExpr.__getitem__` passes `_getitem=True`,
-and the `blosc2.asarray(result)` re-compression branch inside `compute()` is guarded by
-`"_getitem" not in kwargs`. Further down in `fast_eval`, the destination is
-`np.empty(shape, dtype)` when `getitem` is set and `blosc2.empty(...)` only when it is not. So the
-existing arm decompresses straight into a plain numpy buffer, exactly as jix does.
+jix sorts all axes by descending stride; ndarray classifies into C, F, first-axis-contiguous,
+last-axis-contiguous, or nothing (`FINDINGS.md`). The benchmark has to hit the "nothing" case.
 
-(`.compute()` *is* the recompressing path. If we ever add a "compressed in, compressed out" arm,
-that is the method to call - and it would be a different, also interesting, comparison.)
+| | |
+|---|---|
+| cases | 3-D `[A,B,C]` permuted `[1,2,0]` (rotation, hits `Layout::none()`), `[2,1,0]` (reversal, is F-layout - the control), 2-D transpose (the control that shows no difference) |
+| libraries | ndarray, jix-plain |
+| dtypes | `f32`, `i32` |
+| status | NEW - the existing `bench_op1_plain_transposed` uses a 2-D transpose, which ndarray handles perfectly, so it measures nothing |
 
-The numexpr thread pin above is the fairness issue that was actually there.
-
-Note the flip side, which the report will state: reductions on Compact are *slower* in jix than
-blosc2 (`std` all-axis: 82 ms vs 74 ms; `exp().sum()`: 83 ms vs 39 ms). "jix beats blosc2" is
-true for elementwise and false for reductions.
-
-**C2 - the data these benchmarks run on today is the problem.** Every op benchmark, in both
-languages, is hard-wired to the `smooth` profile (`test_ops.py::_build` and `op1.rs` both pass
-`Smooth`). Nothing in the op suites has ever run on highly compressible data, so there is no
-measurement of this claim at all - not a weak one, none.
-
-The generators already have what we need: Python's `low_entropy` is `rng.integers(0, 4)`, four
-unique values; Rust's `Profile::LowEntropy` is `rng.i32(0..8)`, eight. They are only wired into
-`test_compress` and `compact.rs`.
-
-Two changes:
-
-1. Make the data profile a parameter of the op benchmarks, not a constant.
-2. Replace the fixed `low_entropy` profile with an explicit **unique-value count**
-   (`2, 4, 16, 256, random`), so the x-axis is a number we control rather than a profile name.
-   Report the achieved compression ratio next to each point.
-
-Then the op time and the compression ratio sit in one table and the reader can see whether they
-move together. Some evidence they do: jix-shuffle negates in 49.6 ms where no-shuffle jix takes
-69.5 ms, same op code, only a smaller compressed footprint between them.
-
-**C3** - the same setup, pointed at a **reduction** instead of an elementwise op, because the two
-have very different shapes. An elementwise op writes a full-size uncompressed output no matter
-what, so compression only ever helps the read side. A reduction's output is a handful of bytes, so
-the read side is the entire cost and the question reduces to something clean: is decompressing N
-bytes faster than reading N bytes from DRAM?
-
-Plot jix time relative to numpy against compression ratio, with the 1.0 line drawn, and report
-where it crosses - or that it does not. Report effective throughput in *raw array bytes per
-second* alongside, so it can be read against the machine's measured DRAM bandwidth. That makes the
-result a mechanism rather than a number, whichever way it lands.
-
-Rust mirror (`bench_op_compact_by_entropy`) runs the same unique-value counts against `ndarray`.
-
-### Operation chains
-
-| id | claim | benchmark | status |
-|---|---|---|---|
-| P1 | A chain of cheap elementwise ops beats numpy / ndarray, and the gap grows with chain length | `test_chain` (py), `bench_chain_vs_ndarray` (rust) | NEW |
-| P2 | Chains mixing elementwise with shape ops are where jix wins in Rust | `bench_chain_shape_ops_vs_ndarray` (rust) | ADAPT |
-| P3 | Peak memory for a chain is flat in jix and grows with chain length in numpy | `bench_peak_rss.py` (py) | NEW |
-
-**P1 - the existing chain benchmark measures the wrong thing.** `(exp(a) * 0.5 + 1).log()` is
-dominated by transcendental math, not memory traffic, so numpy's vectorized libm wins and jix
-comes out 1.12x *slower* (90.9 ms vs 80.9 ms). The intermediates being saved are noise next to the
-cost of `exp`.
-
-Replace it with a chain of cheap ops - `((a * 2 + b) - 3) * 0.5 ...` - where memory traffic is the
-entire cost. Chain length is an explicit axis (1, 2, 4, 8). This is the one place a multi-point
-axis earns its keep: the *slope* is the claim. numpy does one full pass per op; jix does one read
-and one write regardless of length. A single point proves nothing; the divergence proves the
-mechanism.
-
-Keep the `exp`/`log` chain, but move it to "Where jix loses" with an honest explanation.
-
-**P2** - `normalize.rs` already benchmarks
-`a / a.std(axis).insert_axis(axis).broadcast(shape)`, which is exactly the README's stated Rust
-pitch: elementwise fused with reductions and broadcasts, the thing that is awkward to hand-write
-as an iterator chain. It needs an `ndarray` arm. This is the most important Rust result, because
-for pure elementwise chains the README itself concedes that Rust iterators already fuse for free.
-
-**P3** - new, Python only. A subprocess per (library, chain length), peak RSS from
-`resource.getrusage(RUSAGE_SELF).ru_maxrss`. `tracemalloc` will not work: it does not see NumPy's
-C-level allocations. This is the most direct evidence for the no-intermediates claim and it is
-almost noise-free, unlike timing.
+No Python counterpart: numpy sorts axes too, so there is no comparison to make.
 
 ---
 
-## What has to be written
+## Work to do
 
-**New Rust benchmarks** (all of them need an `ndarray` arm, which does not exist anywhere today):
+### Python - trim to only what the report shows
 
-1. `benches/read_vs_ndarray.rs` - S3
-2. `benches/op_vs_ndarray.rs` - O1, O2, and the ndarray arm for O3
-3. `benches/chain_vs_ndarray.rs` - P1 Rust half
-4. `benches/op_compact_by_entropy.rs` - C2 Rust half
-5. ndarray arm added to `benches/normalize.rs` - P2
+The Python suite exists solely to compare against other libraries. Anything not on the page comes
+out.
 
-**New Python benchmarks:**
+- `test_ops.py`: drop the 5-size sweep to the single canonical size. Add `i32` alongside `f32`
+  throughout. Add the data-distribution cases. Replace `test_elementwise_pipeline` with the
+  chain-length benchmark, keeping `exp/log` as one case.
+- `test_read.py`: drop the 5-size sweep to the single canonical size, add the three large read
+  shapes.
+- `test_compress.py`: keep, one size.
+- `data.py`: add a unique-value-count generator to replace the fixed `low_entropy` profile.
+- `array_impls.py`: add `Blosc2ChunkedArray` with `chunks == blocks`.
+- New: `bench_peak_rss.py`, a standalone runner rather than a pytest-benchmark test.
 
-1. `test_ops_by_entropy.py` - C2, unique-value count as a parameter
-2. `test_reduce_breakeven.py` - C3
-3. `test_chain.py` - P1, replacing `test_elementwise_pipeline`
-4. `bench_peak_rss.py` - P3, a standalone runner, not a pytest-benchmark test
-5. `Blosc2ChunkedArray` impl with `chunks == blocks` - S2 fairness
-6. A `unique_values` generator in `data.py`, replacing the fixed `low_entropy` profile for op work
+### Rust - add only, never trim
 
-**Already done in this branch:**
+The Rust benches are development tools for optimizing the library, so they stay as they are. The
+report benchmarks go in new files alongside them:
 
-- `test_read.py` now cycles through 1024 random regions instead of re-reading one - S2
-- `numexpr.set_num_threads(1)` in `array_impls.py`, plus numexpr in `requirements.txt` - fairness
-- blosc2 elementwise arm verified as non-recompressing - C1, no change needed
+- `benches/vs_ndarray.rs` - reads, negate, add, sum, std, chains, axis order. Everything the report
+  needs, in one bench target with an `ndarray` arm throughout.
 
-**Reporting changes** (`benches/report.py`):
+`jix/benches/run.py` grows a `--report` flag that runs only that target
+(`cargo bench --bench vs_ndarray`) instead of the whole suite, so generating the report does not
+pay for the optimization benches.
 
-1. Baseline-relative bar renderer, log2 axis, 1.0 line, shaded noise band
-2. Claims table generator
-3. Chain-length line chart (time and peak RSS)
-4. Join the ratio table with throughput
-5. Retire `plot_throughput` - see `DISPLAY.md` for why
+### Reporting - `benches/report.py`
+
+- The grouped normalized bar renderer described in `DISPLAY.md`, replacing `plot_throughput`
+- Per-platform vertical stacking into a single PNG per operation
+- Collapsed absolute-number tables under each plot
+- A fixed library-to-color map shared by the Rust and Python halves
+
+### Already done on this branch
+
+- `test_read.py` cycles 1024 random regions instead of re-reading one cache-warm region
+- `numexpr.set_num_threads(1)` in `array_impls.py`; numexpr added to `requirements.txt`
 
 ---
 
-## Open risks
+## Open questions
 
-1. **Every existing read number is now stale.** The random-region change means reads no longer hit
-   a cache-warm region. All of S2's numbers have to be re-measured and the ordering may shift.
-2. **blosc2 chunk selection.** `chunks=None` may hand blosc2 a much larger decompression unit than
-   jix's block. Unmeasured; the matched-chunk arm settles it.
-3. **zarr's flat ~330 us read time** looks like per-call Python overhead, not decompression. If so,
-   the report should say "including zarr's indexing overhead" rather than implying a codec
-   difference.
-4. **No block cache.** `ReadContext` carries a buffer pool, not a decompressed-block cache, so
-   repeated reads of one region re-decompress. The random-region arm will make this visible one way
-   or the other. Decide whether to report it as a gap or leave it alone.
-5. **Single-run laptop numbers** are what the fake report is anchored to. The real report needs
-   the CI matrix across the three runners, and the `compare.py` statistics.
-
-## Questions for iteration 2
-
-1. Chain length (1/2/4/8) and unique-value count (5 points) are the only multi-point axes left in
-   the plan. Both are there because the *shape* of the curve is the result. Keep both?
-2. Does the report cover Rust and Python in one page, or split into two?
-3. Do we publish per-platform numbers (linux x86_64, linux aarch64, macos arm64) or pick one and
-   mention the others?
-4. `test_ops.py` currently runs 5 sizes x 7 libraries x every op. With the report driven by one
-   canonical size, most of that is dead weight. Trim it to the canonical size, or keep the sizes
-   for regression tracking and just not plot them?
+1. Python's canonical array stays `[130_000, 200]` while Rust moves to `[300_000, 80]`. Should the
+   Python one follow, or is matching wall-clock more useful than matching shape?
+2. The read section's "full array" case makes jix, blosc2 and zarr comparable on pure throughput
+   but has no meaningful numpy counterpart beyond a memcpy. Keep numpy's 1x bar there anyway?
+3. Compression ratio has no numpy baseline. Normalize those two plots against the raw array size
+   instead, or leave them as absolute values - the only plots on the page that are not ratios?
+4. `bench_peak_rss.py` runs outside pytest-benchmark, so its output does not land in `python.json`.
+   Separate JSON that `report.py` merges, or bend it into a pytest-benchmark test?

@@ -1,353 +1,370 @@
-> **THIS IS A DRAFT WITH PLACEHOLDER NUMBERS.**
-> Values tagged `[real]` come from an actual local run (single run, dev laptop, not a clean
-> measurement). Values tagged `[fake]` are invented and plausible - they show what a result would
-> have to look like to support the claim next to it. Nothing here is publishable yet.
+> **DRAFT with placeholder numbers.** `[real]` values come from an actual local run (single run,
+> dev laptop). `[fake]` values are invented and plausible. Plots are shown as ASCII sketches of the
+> real chart - each becomes a single PNG with the three platforms stacked vertically.
 
 # jix benchmarks
 
 jix is a multi-dimensional array library with block-compressed storage and lazy operation chains.
-This page measures both features against the libraries you would otherwise use: `ndarray` in Rust,
-and NumPy, Blosc2 and Zarr in Python.
+This page measures both against the libraries you would otherwise reach for: `ndarray` in Rust,
+NumPy, Blosc2 and Zarr in Python.
 
-**Machine.** Apple M2 Pro, 10 cores, 32 GB. macOS 15.6. rustc 1.89.0, Python 3.13, numpy 2.3.1,
-blosc2 3.2.0, zarr 3.0.6. `[fake]`
+**Machine.** Apple M2 Pro, 10 cores, 32 GB, macOS 15.6. rustc 1.89.0, Python 3.13, numpy 2.3.1,
+blosc2 4.9.1, zarr 3.0.6. `[fake]` Also run on linux-x86_64 and linux-aarch64; every plot shows all
+three.
 
-**Everything below is single-threaded.** jix has no threading at all. Blosc2 and Zarr are pinned
-to one thread so the comparison is like for like - including numexpr, which Blosc2 uses to
-evaluate lazy expressions and which keeps a separate thread pool. NumPy's elementwise and
-reduction kernels are single-threaded regardless. A multi-threaded Blosc2 will beat jix on
-throughput-bound work; that comparison is not on this page.
+**Everything is single-threaded** - jix has no threading, and Blosc2, Zarr and numexpr are pinned
+to one thread so the comparison is like for like. **Codec settings are matched**: zstd level 3,
+byte-shuffle.
 
-**Codec settings are matched.** zstd level 3 with byte-shuffle for jix, Blosc2 and Zarr alike.
-
----
-
-## Summary
-
-| claim | measured | configuration | where it stops holding |
-|---|---|---|---|
-| Random reads from a compressed array are much cheaper than Blosc2 | **38x faster** `[real]` | 130k x 70 i32, block 16x70, read 16x70 | Reads that straddle many blocks; see the read table |
-| ...and than Zarr | **211x faster** `[real]` | same | Zarr's number includes its Python indexing overhead |
-| Compressed reads cost a small factor over a raw slice | **5.0x** `[fake]` | Rust, read shape == block shape | 28x when a read crosses 15 blocks |
-| Elementwise ops on plain arrays match NumPy | **1.00x** `[real]` | 130k x 200 f32, `a + b` | - |
-| Integer reductions beat NumPy | **3.2x faster** `[real]` | 130k x 200 i32, full `sum` | Float reductions are 2.4x; `std` is 3.2x *slower* |
-| On strided input, jix beats ndarray | **3.4x faster** `[fake]` | Rust, 1200 x 1200 f32 transposed | No claim against NumPy, which also sorts axes |
-| Elementwise ops on compressed arrays beat Blosc2 | **9.0x faster** `[real]` | 130k x 200 f32, negate | Reductions are 1.1x *slower* than Blosc2 |
-| Op chains beat NumPy, and the gap grows with length | **3.7x faster** `[fake]` | 130k x 200 f32, 8 cheap ops | Chains of expensive math (`exp`, `log`) lose |
-| Peak memory for a chain is flat | **430 MB -> 135 MB** `[fake]` | 104 MB input, 8 ops | - |
-| Compressing the array makes reductions faster than NumPy | **break-even at ~150x compression** `[fake]` | 130k x 200 f32, full `sum` | Below that NumPy is faster, but uses 50x the memory |
-
-Two of these are losses and one is a break-even. They are here on purpose - see
-[Where jix loses](#where-jix-loses).
+**How to read the plots.** Each tick on the x axis is a configuration. Each bar is a library. The
+y axis is speed relative to NumPy (Rust: relative to `ndarray`), on a log scale anchored at 1.0 -
+**above the line is faster, below is slower**. The baseline is always drawn as its own 1x bar.
 
 ---
 
-## Storage
+## Compression
 
-### Compression ratio and throughput
+![compression ratio](plots/compress_ratio.png)
 
-Same codec, same level, same filter, so this mostly measures how much the block layout costs.
+```
+ratio vs raw array (higher = smaller on disk)
+       random          smooth         4 unique
+ 100x |                                  #@ %&
+  10x |                                  ^^ ^^
+   1x |--##@@%%&&-----##@@%%&&---------------------
+       # jix   @ jix-shuffle   % blosc2   & blosc2-shuffle   ^ zarr
+```
 
-| profile | library | ratio | compress MB/s | full-read MB/s |
+![compression throughput](plots/compress_throughput.png)
+
+Ratios track Blosc2 closely, which is expected - same codec, same filter, so this mostly measures
+what the block layout costs. The useful part is that highly compressible data is also *faster* to
+compress and decompress, which is the mechanism behind the distribution cases in the operation
+sections below.
+
+<details>
+<summary>Absolute numbers</summary>
+
+| distribution | library | ratio | compress MB/s | full-read MB/s |
 |---|---|---|---|---|
-| random | jix | 1.00 | 780 `[fake]` | 2100 `[fake]` |
-| random | blosc2 | 1.00 | 810 `[fake]` | 2250 `[fake]` |
-| random | zarr | 1.00 | 190 `[fake]` | 240 `[fake]` |
-| smooth | jix | 3.94 `[fake]` | 640 `[fake]` | 2850 `[fake]` |
-| smooth | blosc2 | 3.71 `[fake]` | 590 `[fake]` | 2700 `[fake]` |
+| random | jix | 1.00 `[fake]` | 780 `[fake]` | 2100 `[fake]` |
+| random | blosc2 | 1.00 `[fake]` | 810 `[fake]` | 2250 `[fake]` |
+| random | zarr | 1.00 `[fake]` | 190 `[fake]` | 240 `[fake]` |
+| smooth | jix-shuffle | 3.94 `[fake]` | 640 `[fake]` | 2850 `[fake]` |
+| smooth | blosc2-shuffle | 3.71 `[fake]` | 590 `[fake]` | 2700 `[fake]` |
 | smooth | zarr | 3.71 `[fake]` | 170 `[fake]` | 260 `[fake]` |
-| low entropy | jix | 55.2 `[fake]` | 1450 `[fake]` | 7900 `[fake]` |
-| low entropy | blosc2 | 48.6 `[fake]` | 1310 `[fake]` | 7100 `[fake]` |
-| low entropy | zarr | 48.6 `[fake]` | 380 `[fake]` | 520 `[fake]` |
+| 4 unique | jix-shuffle | 55.2 `[fake]` | 1450 `[fake]` | 7900 `[fake]` |
+| 4 unique | blosc2-shuffle | 48.6 `[fake]` | 1310 `[fake]` | 7100 `[fake]` |
+| 4 unique | zarr | 48.6 `[fake]` | 380 `[fake]` | 520 `[fake]` |
 
-Ratios track Blosc2 closely, which is the expected result - same codec, same filter. The
-interesting column is the last one, and it is the basis for everything in the
-[compressed operations](#operations-on-compressed-arrays) section: *decompression gets faster as
-compression gets better*, because there is less to read and the matches are longer.
+`i32`, `[130_000, 64]`. Ratio is raw bytes over stored bytes.
+</details>
 
-Zarr's numbers are dominated by its Python-level chunk handling rather than its codec.
+---
 
-### Random reads
+## Reading a region
 
 Each timed call reads a different randomly placed region, cycling through 1024 of them - the
-data-loader case, and a working set far larger than cache. Absolute microseconds per read, with
-the ratio to jix underneath.
+data-loader pattern, with a working set far larger than cache. `i32` throughout.
 
-> These numbers predate the random-region change and were measured re-reading a single cache-warm
-> region. They will all get worse and the ordering may shift. `[real, but stale]`
+![read](plots/read.png)
 
-| block / read | numpy | jix | blosc2 | zarr |
-|---|---|---|---|---|
-| `[16,70] / [1,70]` | 0.3 us `[real]` | **1.1 us** `[real]` | 69.1 us `[real]` | 327 us `[real]` |
-| | 0.27x | 1.00x | 63x | 297x |
-| `[16,70] / [16,70]` | 0.4 us `[real]` | **1.9 us** `[real]` | 72.0 us `[real]` | 401 us `[real]` |
-| | 0.21x | 1.00x | 38x | 211x |
-| `[64,70] / [16,16]` | 0.3 us `[real]` | **2.7 us** `[real]` | 47.2 us `[real]` | 334 us `[real]` |
-| | 0.11x | 1.00x | 17x | 124x |
+```
+speed vs numpy (log, anchored at 1.0)
+        b16x70      b16x70      b64x70      b64x70      b64x70      b64x70
+        r1x70       r16x70      r16x16      r256x70     r4096x70    r-full
+  1x  |---N----------N-----------N-----------N-----------N-----------N-----
+ 0.1x |   #@        #@          #@          #@          #@          #@
+0.01x |   %&        %&          %&          %&
+                                            %&          %&          %&
+ .001x|   ^         ^           ^           ^
+       N numpy  # jix  @ jix-shuffle  % blosc2  & blosc2-shuffle  ^ zarr
+```
 
-NumPy is the floor: an uncompressed slice and a memcpy, holding the full array in RAM. jix pays
-3x to 9x over that floor and stores the array in a quarter of the space. Blosc2 and Zarr pay one
-to two orders of magnitude more for the same compression ratio.
+NumPy is the floor here: an uncompressed slice out of an array held whole in RAM. jix pays a small
+multiple of that and stores the array in a quarter of the space. The three large-read cases on the
+right are where per-call overhead stops dominating - Zarr's flat cost at small reads is Python
+indexing, not its codec, and the gap narrows sharply once each read does real work.
 
-> **Unverified.** The Blosc2 arm uses automatic chunk selection, so a small read may be
-> decompressing a much larger chunk than jix does. A matched-chunk arm has to run before these
-> ratios are quoted anywhere. `[real, but suspect]`
+The `b64x70 / r16x16` case is the one to learn from: a read smaller than a block means decompressing
+a whole block and discarding most of it. Match your block shape to how you read.
 
-### Read cost against a raw slice (Rust)
+<details>
+<summary>Absolute numbers</summary>
 
-The factor over an uncompressed `ndarray` slice is not a property of jix - it is a property of how
-well your block shape matches your read shape.
+| block / read | numpy | jix | jix-shuffle | blosc2 | blosc2-shuffle | zarr |
+|---|---|---|---|---|---|---|
+| `[16,70] / [1,70]` | 0.3 us | 1.1 us | 1.2 us | 69.1 us | 68.5 us | 327 us |
+| `[16,70] / [16,70]` | 0.4 us | 1.9 us | 2.1 us | 72.0 us | 71.3 us | 401 us |
+| `[64,70] / [16,16]` | 0.3 us | 2.7 us | 3.5 us | 47.2 us | 43.9 us | 334 us |
+| `[64,70] / [256,70]` | - `[fake]` | - `[fake]` | - | - | - | - |
+| `[64,70] / [4096,70]` | - `[fake]` | - `[fake]` | - | - | - | - |
+| `[64,70] / full` | - `[fake]` | - `[fake]` | - | - | - | - |
+
+All `[real]` except the new large-read rows. **These predate the random-region change** and were
+measured re-reading one cache-warm region; they will all get worse and the ordering may shift.
+The Blosc2 arm also uses auto chunk selection (8.7 MiB chunks against a 4 KiB block) - a matched
+`chunks == blocks` arm has to run before these ratios are quoted.
+</details>
+
+### Rust: against a raw `ndarray` slice
+
+![rust read](plots/rust_read.png)
+
+<details>
+<summary>Absolute numbers</summary>
 
 | array | block | read | ndarray | jix | factor |
 |---|---|---|---|---|---|
-| `[11000,460]` | `[32,32]` | `[32,32]` | 0.28 us `[fake]` | 1.4 us `[fake]` | **5.0x** |
-| `[11000,460]` | `[32,32]` | `[1,460]` | 0.35 us `[fake]` | 9.8 us `[fake]` | **28x** |
-| `[11000,460]` | `[512,32]` | `[128,460]` | 11.0 us `[fake]` | 46 us `[fake]` | **4.2x** |
-
-The middle row is the trap: a single row read from a `[32,32]`-blocked array touches 15 blocks and
-throws away 31/32 of every one. The rule is the obvious one, and it is worth stating plainly in
-the docs: **choose a block shape that matches how you read.** jix auto-selects a block shape from
-the CPU cache sizes when you do not pass one, which is a reasonable default and a bad choice if
-your access pattern is lopsided.
+| `[11000,460]` | `[32,32]` | `[32,32]` | 0.28 us `[fake]` | 1.4 us `[fake]` | 5.0x slower |
+| `[11000,460]` | `[32,32]` | `[1,460]` | 0.35 us `[fake]` | 9.8 us `[fake]` | 28x slower |
+| `[11000,460]` | `[512,32]` | `[128,460]` | 11.0 us `[fake]` | 46 us `[fake]` | 4.2x slower |
+</details>
 
 ---
 
-## Operations on plain arrays
+## Negate
 
-`Plain` storage is a zero-copy view over a normal in-memory buffer. It exists so ordinary arrays
-can take part in jix op chains, and it is the right thing to measure against NumPy and ndarray
-when you want to isolate the op machinery from the compression.
-
-### Elementwise
-
-Baseline-relative, 1.0 is NumPy. `130_000 x 200 f32`, 104 MB.
+![negate](plots/negate.png)
 
 ```
-negate    jix-plain  |========== 1.01x (2.19 ms)   [real]
-add       jix-plain  |========== 1.00x (2.88 ms)   [real]
-                     1.0 (numpy)
+speed vs numpy            f32                    i32
+   10x |
+    1x |---N--P--------------------N--P------------------
+   0.1x|         #@                       #@
+  0.01x|           %&  ^                    %&  ^
+       N numpy  P jix-plain  # jix  @ jix-shuffle  % blosc2  & blosc2-shuffle  ^ zarr
 ```
 
-Parity, which is the claim. Nothing here is surprising: both are a single streaming pass over
-104 MB and both are memory-bandwidth bound. The value of this result is that it establishes there
-is no per-op tax for entering a jix chain - the chain results later in this page are not paying
-for overhead they then have to earn back.
+On uncompressed input jix matches NumPy - 2.19 ms against 2.16 ms `[real]`. That parity is what
+makes the chain results further down meaningful: entering a jix pipeline costs nothing that has to
+be earned back later.
 
-Rust is the same story against `ndarray`: `[400_000, 64] f32`, negate 11.2 ms vs 11.0 ms, add
-16.4 ms vs 16.1 ms. `[fake]`
+Against the other compressed-array libraries, jix negates 9x faster than Blosc2 `[real]`. Both
+write their result into a plain uncompressed NumPy buffer - Blosc2's `expr[:]` does not re-compress
+on the way out, so it is not being billed for a pass jix skips.
 
-### Reductions
+### By data distribution
 
-This one was not expected and is one of the better results in the suite.
+![negate by distribution](plots/negate_distribution.png)
 
-| reduction | numpy | jix-plain | speedup |
-|---|---|---|---|
-| `sum` i32, all | 4.39 ms `[real]` | **1.36 ms** `[real]` | **3.2x** |
-| `sum` i32, axis 0 | 11.70 ms `[real]` | **3.12 ms** `[real]` | **3.7x** |
-| `sum` i32, axis 1 | 4.78 ms `[real]` | **1.48 ms** `[real]` | **3.2x** |
-| `sum` f32, all | 3.21 ms `[real]` | **1.31 ms** `[real]` | **2.4x** |
-| `sum` f32, axis 1 | 3.97 ms `[real]` | **1.55 ms** `[real]` | **2.6x** |
-| `std` f32, all | **10.74 ms** `[real]` | 34.81 ms `[real]` | **0.31x** |
+```
+speed vs numpy      random      smooth     16 unique    4 unique
+    1x |-------N-----------N-----------N-----------N----------
+   0.1x|                       #@          #@ %&      #@ %&
+  0.01x|   #@ %&            %&
+```
 
-Integer reductions in NumPy are not well vectorized; jix's reduction kernels are, and they read in
-whatever layout the source is already in rather than forcing a canonical order. The `std` row is
-a real regression and is discussed in [Where jix loses](#where-jix-loses).
+Same operation, same code path; only the number of distinct values in the data changes. Better
+compression means less memory to move and longer zstd matches, so the operation gets faster -
+roughly 5x from random data to four unique values `[fake]`. The same effect shows in the filter
+choice: byte-shuffled data negates in 49.6 ms where unshuffled takes 69.5 ms `[real]`, identical op
+code on both sides.
 
-Rust against `ndarray`: `sum` axis 1 (contiguous) 4.9 ms vs 5.2 ms, `sum` axis 0 (strided) 5.4 ms
-vs 7.1 ms. `[fake]`
+This does not catch NumPy, and it is not expected to. An elementwise operation writes a full-size
+uncompressed output whatever the input was, so compression only ever helps the read half.
 
-### Awkward strides (Rust only)
+<details>
+<summary>Absolute numbers</summary>
 
-`ndarray` iterates in logical index order. jix sorts axes by stride before iterating, the way
-NumPy does, so a transposed source is read in memory order instead of jumping.
+| dtype | distribution | ratio | numpy | jix-plain | jix-shuffle | blosc2-shuffle |
+|---|---|---|---|---|---|---|
+| f32 | smooth | 3.9 | 2.16 ms `[real]` | 2.19 ms `[real]` | 49.6 ms `[real]` | 443 ms `[real]` |
+| f32 | random | 1.0 | 2.16 ms `[fake]` | 2.19 ms `[fake]` | 96.4 ms `[fake]` | 510 ms `[fake]` |
+| f32 | 16 unique | 31 | 2.16 ms `[fake]` | 2.19 ms `[fake]` | 34.5 ms `[fake]` | 210 ms `[fake]` |
+| f32 | 4 unique | 95 | 2.16 ms `[fake]` | 2.19 ms `[fake]` | 21.3 ms `[fake]` | 155 ms `[fake]` |
+| i32 | smooth | 4.1 | - `[fake]` | - `[fake]` | - `[fake]` | - `[fake]` |
 
-| input | operation | ndarray | jix | speedup |
-|---|---|---|---|---|
-| `[1200,1200] f32` transposed | negate, C-order out | 6.4 ms `[fake]` | **1.9 ms** `[fake]` | **3.4x** |
-| `[1200,1200] f32` transposed | negate, transposed out | 2.0 ms `[fake]` | **1.8 ms** `[fake]` | 1.1x |
-
-The second row is the control: when the output layout matches the input, there is nothing to sort
-and both libraries do the same work. The gap in the first row is entirely the axis ordering.
-
-There is no Python version of this claim. NumPy sorts axes too, so jix has no advantage to show.
+`[130_000, 200]`. Every op benchmark in the suite currently runs on `smooth` and `f32` only, so
+the dtype and distribution rows do not exist yet in either harness.
+</details>
 
 ---
 
-## Operations on compressed arrays
+## Add
 
-### Against Blosc2
+![add](plots/add.png)
 
-`130_000 x 200 f32`, 104 MB raw. Both libraries hold the array compressed and produce an
-uncompressed result.
+Same shape as negate, with two operands instead of one: parity with NumPy on uncompressed input
+(2.88 ms against 2.89 ms `[real]`), 5.7x faster than Blosc2 on compressed `[real]`, and the same
+gradient across data distributions.
 
-| operation | blosc2 | jix | speedup |
-|---|---|---|---|
-| negate | 443 ms `[real]` | **49.6 ms** `[real]` | **9.0x** |
-| add | 561 ms `[real]` | **99.1 ms** `[real]` | **5.7x** |
-| `sum` f32, all | **39.6 ms** `[real]` | 48.6 ms `[real]` | 0.81x |
-| `std` f32, all | **74.0 ms** `[real]` | 82.4 ms `[real]` | 0.90x |
+<details>
+<summary>Absolute numbers</summary>
 
-Elementwise is a clear win; reductions are a modest loss. Both halves ship.
+| dtype | storage | numpy | jix-plain | jix-shuffle | blosc2-shuffle | zarr |
+|---|---|---|---|---|---|---|
+| f32 | - | 2.886 ms `[real]` | 2.882 ms `[real]` | 99.1 ms `[real]` | 561 ms `[real]` | 59.2 ms `[real]` |
+| i32 | - | - `[fake]` | - `[fake]` | - `[fake]` | - `[fake]` | - `[fake]` |
+</details>
 
-Both libraries write their result into a plain uncompressed NumPy buffer here - Blosc2's
-`expr[:]` does not re-compress on the way out, so it is not being billed for a pass jix skips.
-(`expr.compute()` is the path that would; that is a different comparison and not this one.)
+---
 
-### How compression ratio affects operation speed
+## Reductions
 
-Same array shape, same code path, same operation. The only thing that changes is how many distinct
-values the data contains, and therefore how well it compresses.
+`sum` and `std` in one plot, because they land on opposite sides of the line and separating them
+would be choosing which result to show.
 
-| unique values | ratio | jix negate | vs `random` data |
-|---|---|---|---|
-| random (2^32) | 1.00 `[fake]` | 96.4 ms `[fake]` | 1.00x |
-| 256 | 7.2 `[fake]` | 61.0 ms `[fake]` | 1.6x |
-| 16 | 31 `[fake]` | 34.5 ms `[fake]` | 2.8x |
-| 4 | 95 `[fake]` | 21.3 ms `[fake]` | **4.5x** |
-| 2 | 180 `[fake]` | 18.1 ms `[fake]` | **5.3x** |
+![reductions](plots/reductions.png)
 
-Nothing about the operation changed; the array just got smaller, so there was less memory to move
-and the zstd matches got longer. The same effect shows up in the filter choice: byte-shuffled data
-compresses better and negates in 49.6 ms, unshuffled in 69.5 ms `[real]`, with identical op code
-on both sides.
+```
+speed vs numpy
+       sum f32   sum f32   sum f32   sum i32   sum i32   std f32   std f32
+       axis0     axis1     all       axis0     all       axis0     all
+   4x |            P                    P        P
+   2x |   P                  P
+   1x |---N---------N---------N---------N---------N---------N---------N----
+  0.5x|                                                        P
+  0.3x|                                                                  P
+  0.1x|  #@%&      #@%&      #@%&      #@%&      #@%&      #@%&      #@%&
+```
 
-For reference, NumPy negates the same 104 MB uncompressed array in 2.16 ms `[real]`. An
-elementwise op writes a full-size uncompressed output whatever the input was, so compression only
-ever helps the read half of the work - which is why this table is about the *slope*, not about
-catching NumPy.
+jix's reduction kernels read in whatever layout the source already has rather than forcing a
+canonical order, and they vectorize integer accumulation that NumPy leaves scalar. On this machine
+that is worth 2.4x on `f32` and 3.2x on `i32` for a full `sum` `[real]`.
 
-### Is a compressed reduction ever faster than a raw one?
+**That win is platform-specific and should not be read as a property of the library.** jix's
+kernels are tuned on macOS arm64; NumPy is general-purpose with far more x86 attention behind its
+hot paths. The stacked per-platform plot above is the honest picture, and the `linux-x86_64` row
+may well look different.
 
-A reduction is the case where the shape of the problem changes. The output is a handful of bytes,
-so the read side is the entire cost, and the question becomes clean: is decompressing N bytes
-faster than reading N bytes from DRAM?
+`std` goes the other way: 3.2x slower than NumPy on the full reduction `[real]`, and worst on
+`axis=1`. That is a real deficiency in the kernel rather than a measurement artifact. On compressed
+input Blosc2 also edges jix out on reductions (74 ms against 82 ms `[real]`) while losing badly on
+elementwise - visible in the same chart.
 
-| unique values | ratio | jix `sum` | vs numpy | effective throughput |
-|---|---|---|---|---|
-| random | 1.0 `[fake]` | 71.2 ms `[fake]` | 22x slower `[fake]` | 1.5 GB/s `[fake]` |
-| 256 | 7.2 `[fake]` | 22.0 ms `[fake]` | 6.8x slower `[fake]` | 4.7 GB/s `[fake]` |
-| 16 | 31 `[fake]` | 7.8 ms `[fake]` | 2.4x slower `[fake]` | 13.3 GB/s `[fake]` |
-| 4 | 95 `[fake]` | 3.6 ms `[fake]` | 1.1x slower `[fake]` | 28.9 GB/s `[fake]` |
-| 2 | 180 `[fake]` | 2.9 ms `[fake]` | **1.1x faster** `[fake]` | 35.9 GB/s `[fake]` |
-| *numpy baseline* | 1.0 | 3.21 ms `[real]` | 1.00x | 32.4 GB/s |
+<details>
+<summary>Absolute numbers</summary>
 
-The last column is the one that explains the result: it is the rate at which jix processes
-*original, uncompressed* array bytes. Once that number exceeds the machine's DRAM streaming
-bandwidth, decompressing beats reading, and the crossing point is not a coincidence - it is the
-same number.
+| reduction | numpy | jix-plain | jix-shuffle | blosc2-shuffle | zarr |
+|---|---|---|---|---|---|
+| `sum` i32 all | 4.39 ms | **1.36 ms** | 18.6 ms | 14.2 ms | 29.6 ms |
+| `sum` i32 axis 0 | 11.70 ms | **3.12 ms** | 22.0 ms | 20.4 ms | 37.1 ms |
+| `sum` i32 axis 1 | 4.78 ms | **1.48 ms** | 20.3 ms | 13.5 ms | 30.8 ms |
+| `sum` f32 all | 3.21 ms | **1.31 ms** | 48.6 ms | 39.6 ms | 31.5 ms |
+| `sum` f32 axis 0 | 2.33 ms | **2.03 ms** | 49.6 ms | 34.7 ms | 30.9 ms |
+| `sum` f32 axis 1 | 3.97 ms | **1.55 ms** | 49.0 ms | 36.3 ms | 32.9 ms |
+| `std` f32 all | **10.74 ms** | 34.81 ms | 82.4 ms | 74.0 ms | 39.1 ms |
+| `std` f32 axis 0 | **11.06 ms** | 14.44 ms | 61.7 ms | 72.9 ms | 41.9 ms |
 
-On these placeholder figures break-even lands near **150x compression** `[fake]`. Wherever it
-actually lands, the second reading of the table stands on its own: jix runs the same reduction
-within a small factor of NumPy while holding the array in a fraction of the memory. At 95x
-compression that is 1.1x the time for 1/95th the footprint. Whether that trade is worth taking is
-the reader's call, and the table is here so they can make it.
-
-> **Never measured.** Every operation benchmark in the suite, in both languages, currently runs on
-> the `smooth` profile only. The unique-value axis does not exist yet in either harness, so both
-> tables above are entirely invented. See `PLAN.md` C2/C3.
+All `[real]`, `[130_000, 200]`.
+</details>
 
 ---
 
 ## Operation chains
 
 Every jix operation returns a lazy view; the whole chain is encoded in the type and runs in a
-single pass when you ask for output. NumPy evaluates eagerly and allocates a full intermediate per
-step. The difference should grow with the length of the chain, and it does.
+single pass when output is requested. NumPy evaluates eagerly and allocates a full intermediate per
+step, so the gap should grow with the length of the chain.
 
-### Time
+![chain](plots/chain.png)
 
-Chain of cheap elementwise ops on `130_000 x 200 f32`, 104 MB.
+```
+speed vs numpy       1 op      2 ops     4 ops     8 ops    exp/log
+   4x |                                     P
+   2x |                          P
+   1x |-----N--P-------N---------N---------N---------N--------
+  0.8x|                                                    P
+```
 
-| ops in chain | numpy | jix-plain | speedup |
-|---|---|---|---|
-| 1 | 2.9 ms `[fake]` | 2.9 ms `[fake]` | 1.00x |
-| 2 | 6.1 ms `[fake]` | 3.4 ms `[fake]` | 1.8x |
-| 4 | 12.8 ms `[fake]` | 4.6 ms `[fake]` | 2.8x |
-| 8 | 26.0 ms `[fake]` | 7.1 ms `[fake]` | **3.7x** |
+NumPy's cost is linear in chain length because it makes one full pass per operation. jix's is
+nearly flat: read once, apply the fused chain in registers, write once.
 
-NumPy's line is linear in chain length because it makes one full pass per operation. jix's is
-nearly flat because it makes one pass regardless: read once, apply the fused chain in registers,
-write once. The slope is the claim - a single chain length would prove nothing.
+The `exp/log` case on the right is the counter-example, and it is on the plot for a reason.
+`(exp(a) * 0.5 + 1).log()` is dominated by transcendental math rather than memory traffic, so
+NumPy's vectorized libm decides the result and jix comes out 1.12x slower `[real]`. Chains win when
+the operations are cheap and the array is large; they do not when a single expensive kernel
+dominates.
 
 ### Peak memory
 
-The same runs, measured as peak RSS in a fresh subprocess.
+![chain memory](plots/chain_memory.png)
 
-| ops in chain | numpy | jix-plain | jix compact |
+```
+memory vs numpy (lower = better; bars below the line use less)
+                     1 op      2 ops     4 ops     8 ops
+   1x |-----N----------N---------N---------N--------
+  0.7x|        P         P         P         P
+  0.3x|        C         C         C         C
+       N numpy   P jix-plain   C jix compact
+```
+
+jix is flat at input plus output, whatever the chain does in between. The compact arm is flat and
+lower still, because the input is never held uncompressed. Measured as peak RSS in a fresh
+subprocess per configuration, so it includes NumPy's C-level allocations.
+
+<details>
+<summary>Absolute numbers</summary>
+
+| ops | numpy time | jix-plain time | numpy peak RSS | jix-plain RSS | jix compact RSS |
+|---|---|---|---|---|---|
+| 1 | 2.9 ms `[fake]` | 2.9 ms `[fake]` | 218 MB `[fake]` | 215 MB `[fake]` | 135 MB `[fake]` |
+| 2 | 6.1 ms `[fake]` | 3.4 ms `[fake]` | 322 MB `[fake]` | 215 MB `[fake]` | 135 MB `[fake]` |
+| 4 | 12.8 ms `[fake]` | 4.6 ms `[fake]` | 428 MB `[fake]` | 215 MB `[fake]` | 135 MB `[fake]` |
+| 8 | 26.0 ms `[fake]` | 7.1 ms `[fake]` | 430 MB `[fake]` | 215 MB `[fake]` | 135 MB `[fake]` |
+| exp/log | 80.9 ms `[real]` | 90.9 ms `[real]` | - | - | - |
+</details>
+
+### Rust: chains with shape operations
+
+For pure elementwise chains in Rust, plain iterators already fuse for free and hand-written
+iterator code will match jix. The comparison worth making is the other one - chains that mix
+elementwise work with reductions, broadcasts and axis permutations, which are awkward to express as
+iterators and which `ndarray` materializes at every step.
+
+![rust chain](plots/rust_chain.png)
+
+<details>
+<summary>Absolute numbers</summary>
+
+`a / a.std(axis).insert_axis(axis).broadcast(shape)` on `[300_000, 80] f32`:
+
+| | ndarray | jix | |
 |---|---|---|---|
-| 1 | 218 MB `[fake]` | 215 MB `[fake]` | 135 MB `[fake]` |
-| 2 | 322 MB `[fake]` | 215 MB `[fake]` | 135 MB `[fake]` |
-| 4 | 428 MB `[fake]` | 215 MB `[fake]` | 135 MB `[fake]` |
-| 8 | 430 MB `[fake]` | 215 MB `[fake]` | 135 MB `[fake]` |
-
-jix is flat: input plus output, whatever the chain does in between. The compact column is flat and
-lower still, because the input is never held uncompressed.
-
-This is the clearest evidence for the no-intermediates claim, and unlike the timing it has no
-noise floor.
-
-### Chains with shape operations (Rust)
-
-For pure elementwise chains in Rust, plain iterators already fuse for free, and hand-written
-iterator code will match jix. The claim worth making is the other one: chains that mix elementwise
-work with reductions, broadcasts and axis permutations, which are awkward to express as iterators
-and which `ndarray` materializes at each step.
-
-`a / a.std(axis).insert_axis(axis).broadcast(shape)` on `[40_000, 200] f32`:
-
-| | ndarray | jix | speedup |
-|---|---|---|---|
-| axis 0 | 96 ms `[fake]` | **38 ms** `[fake]` | **2.5x** |
-| axis 1 | 104 ms `[fake]` | **41 ms** `[fake]` | **2.5x** |
+| axis 0 | 96 ms `[fake]` | 38 ms `[fake]` | 2.5x faster |
+| axis 1 | 104 ms `[fake]` | 41 ms `[fake]` | 2.5x faster |
+</details>
 
 ---
 
-## Where jix loses
+## Axis order (Rust)
 
-Same charts, same baselines, bars to the left of 1.0.
+`ndarray` classifies an array's layout four ways - C, F, first-axis-contiguous,
+last-axis-contiguous - and falls back to logical-order iteration when none of them fit. jix sorts
+every axis by descending stride, so it always walks memory in order.
 
-### `std` and other multi-pass reductions, 3.2x slower than NumPy
+The difference needs three dimensions to appear at all. A 2-D transpose is exactly F-layout and
+`ndarray` handles it perfectly; a *rotation* of a 3-D array is neither C nor F, and leaves
+`ndarray` iterating with the largest stride in the innermost loop.
 
-`std` over 104 MB f32: NumPy 10.74 ms, jix-plain 34.81 ms `[real]`. The gap is worst on `axis=1`
-and the full reduction, and smaller on `axis=0` (1.3x). This is a real deficiency in the kernel,
-not a measurement artifact, and it is the clearest thing to fix next.
+![rust axis order](plots/rust_axis_order.png)
 
-### Chains of expensive math are slower than NumPy
+<details>
+<summary>Absolute numbers</summary>
 
-`(exp(a) * 0.5 + 1).log()`: NumPy 80.9 ms, jix-plain 90.9 ms `[real]`, a 1.12x loss. NumPy
-dispatches `exp` and `log` to a vectorized libm; jix's are scalar. When the per-element math costs
-more than the memory traffic, saving the intermediates buys nothing and the slower kernel decides
-the result.
+`negate` on `[300, 400, 500]`, permuted:
 
-The practical rule: jix chains win when the operations are cheap and the array is large. They lose
-when a single transcendental dominates.
+| permutation | ndarray layout | ndarray | jix | |
+|---|---|---|---|---|
+| `[1,2,0]` rotation | `none` | 88 ms `[fake]` | 12 ms `[fake]` | 7.3x faster |
+| `[2,1,0]` reversal | `f` | 12 ms `[fake]` | 12 ms `[fake]` | parity (control) |
+| 2-D transpose | `f` | 2.0 ms `[fake]` | 1.9 ms `[fake]` | parity (control) |
 
-### Reductions on compressed arrays lose to Blosc2
+The two controls are on the plot on purpose: they show the effect is specific to layouts `ndarray`
+cannot classify, not a general claim about strided data.
+</details>
 
-`sum` 0.81x, `std` 0.90x, `exp().sum()` 0.47x `[real]`. Blosc2 has native reduction paths over
-compressed chunks that are better tuned than jix's.
-
-### No threading
-
-jix is single-threaded throughout. Blosc2 with 8 threads will beat every compressed-array number
-on this page. If your workload is throughput-bound and you have cores to spare, that is the right
-comparison to make and jix does not win it.
-
-### No decompressed-block cache
-
-`ReadContext` carries a buffer pool, not a cache of decompressed blocks, so re-reading the same
-region decompresses it again. For access patterns with locality this leaves a large amount on the
-table.
+There is no Python counterpart - NumPy sorts axes too, so there is nothing to compare.
 
 ---
 
 ## Reproducing
 
-    python jix/benches/run.py                  # rust, criterion
-    python jix-py/python/benches/run_all.py    # python, pytest-benchmark
+    python jix/benches/run.py --report          # rust, only the comparison benches
+    python jix-py/python/benches/run_all.py     # python
 
-The CI matrix (three runners: linux x86_64, linux aarch64, macos arm64) is documented in
+The CI matrix across the three runners is documented in
 [`docs/benchmarks.md`](../docs/benchmarks.md), along with `scripts/bench/compare.py` for
-same-machine A/B against a base ref.
-
-Every number on this page is generated from the benchmark JSON; none are typed by hand.
+same-machine A/B against a base ref. Every number on this page is generated from the benchmark
+JSON; none are typed by hand.
