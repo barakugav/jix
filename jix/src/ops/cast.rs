@@ -1,6 +1,4 @@
-use crate::dtype::Dtyped;
-use crate::storage::{ArrayStorageInfo, ArrayStorageTyped};
-use crate::{Array, ArrayStorage};
+use crate::ops::prelude::*;
 
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
@@ -14,10 +12,10 @@ pub(crate) mod _traits {
     /// - Between any two integer types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
     /// - Between any two floating-point types: `f16` (requires the `half` feature), `f32`, `f64`.
     /// - Between any two complex types: `Complex<f16>` (requires the `half` feature), `Complex<f32>`, `Complex<f64>`.
-    /// - Between any integer to floating-point type, or vice versa.
+    /// - From any integer to floating-point type, or vice versa.
     /// - From any integer or floating-point type to a complex type. A complex value can only be
     ///   cast to another complex type or to `bool` - not to a real integer or floating-point type.
-    /// - Between `bool` and any other scalar, and visa versa: zero -> `false`, any non-zero value -> `true`.
+    /// - Between `bool` and any other scalar, and vice versa: zero -> `false`, any non-zero value -> `true`.
     pub trait Cast<D> {
         /// Casts `self` to `D`.
         fn cast(self) -> D;
@@ -149,10 +147,10 @@ pub(crate) mod _traits {
 /// - Between any two integer types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
 /// - Between any two floating-point types: `f16` (requires the `half` feature), `f32`, `f64`.
 /// - Between any two complex types: `Complex<f32>`, `Complex<f64>`.
-/// - Between any integer to floating-point type, or vice versa.
+/// - From any integer to floating-point type, or vice versa.
 /// - From any integer or floating-point type to a complex type. A complex value can only be
 ///   cast to another complex type or to `bool` - not to a real integer or floating-point type.
-/// - Between `bool` and any other scalar, and visa versa: zero -> `false`, any non-zero value -> `true`.
+/// - Between `bool` and any other scalar, and vice versa: zero -> `false`, any non-zero value -> `true`.
 ///
 /// The cast is checked via the [`Cast<T>`](crate::scalar::Cast) trait bound on the source element
 /// type; unsupported source-to-target type pairs are rejected at compile time.

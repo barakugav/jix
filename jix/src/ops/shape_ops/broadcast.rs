@@ -1,12 +1,4 @@
-use std::ops::Range;
-
-use crate::codec::ReadContext;
-use crate::dtype::Dtype;
-use crate::error::{bail, check_get_range, check_ndim, check_shape_overflow, ensure, Result};
-use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{check_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
-use crate::util::ScaleWeight;
-use crate::{Array, ArrayStorage, DimDyn, Dimension, SliceExt};
+use crate::ops::prelude::*;
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
 /// returned by [`Array::broadcast`](crate::Array::broadcast).
@@ -93,7 +85,7 @@ where
         let new_shape = S::Dimension::from_slice(new_shape);
 
         let inner_spec = array.spec();
-        let block_shape = inner_spec.block_shape().clone();
+        let block_shape = <_ as Clone>::clone(inner_spec.block_shape());
         let mut block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
         let mut read_shape_scale_weight =
             inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>();

@@ -72,7 +72,7 @@ define_op2!(
     ///
     /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
     /// smallest type that can represent both without information loss (Safe casting
-    /// rules). For example `u8 + i32 -> i32`.
+    /// rules). For example `u8 - i32 -> i32`.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///

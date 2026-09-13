@@ -14,7 +14,7 @@ Only the blocks that overlap a read request are decompressed, so random access i
 
 **Lazy operation chains.** Every operation - arithmetic, shape change, reduction, type cast - returns a new view that wraps the
 input(s) and records the transformation, nothing is computed until data is explicitly requested.
-A chain of such operations build a pipeline that runs in a single decompression pass the moment you ask for output.
+A chain of such operations builds a pipeline that runs in a single decompression pass the moment you ask for output.
 
 ```rust
 use jix::Array;
@@ -83,7 +83,7 @@ can be used independently, and each fits a different scenario.
 
     In Rust, plain iterators over regular ndarrays already
     give you lazy element-wise evaluation for free (although naive use of the `ndarray` crate may still
-    produces NumPy-style intermediates), so for simple `map`/`zip`-style pipelines
+    produce NumPy-style intermediates), so for simple `map`/`zip`-style pipelines
     jix offers little over hand-written iterator code.
     The advantage shows up once the pipeline includes
     operations that change the shape or the access pattern - reductions, broadcasts,

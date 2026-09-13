@@ -66,7 +66,7 @@
 //! Arrays loaded from disk carry [`TypeDyn`](crate::TypeDyn) and [`DimDyn`](crate::DimDyn) because
 //! the element type and shape are only known at runtime.
 //! Use [`Array::into_typed`](crate::Array::into_typed) and [`Array::into_dim`](crate::Array::into_dim)
-//! to assert the  expected element type and dimension and recover compile-time tracking:
+//! to assert the expected element type and dimension and recover compile-time tracking:
 //!
 //! ```no_run
 //! use std::path::Path;
@@ -155,3 +155,30 @@ pub use into_type::*;
 
 mod into_dim;
 pub use into_dim::*;
+
+pub(crate) mod prelude {
+    pub(crate) use std::ops::Range;
+
+    pub(crate) use super::AxesArg;
+    pub(crate) use crate::codec::ReadContext;
+    pub(crate) use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
+    pub(crate) use crate::error::*;
+    pub(crate) use crate::storage::params::{
+        combine_block_layout, combine_elementwise_hints, combine_select_hints,
+        read_layout_order_insert_dont_care_dim, ArraySpecDynamic,
+    };
+    pub(crate) use crate::storage::{
+        check_out_buf, materialize_out_buf, n_operands_sum, read_data_and_map_strides, ArraySpec,
+        ArrayStorageInfo, ArrayStorageTyped, BlockSize, ElementwisePipeline,
+        ElementwisePipelineImpl, Operand, StridedBuf,
+    };
+    pub(crate) use crate::util::{
+        array_from_fn_inline, calc_block_end, default_logical_strides, default_strides,
+        default_strides_from_iter, dim_arr, iter::NdIter, try_dim_arr, ArrayExt, DimArray, DimIdx,
+        IterExt, NdCopier, NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias,
+        ScaleWeight, SliceExt, REQUIRE_ALIGNED,
+    };
+    pub(crate) use crate::{
+        Array, ArrayStorage, DimDyn, DimVec, Dimension, ElementType, Ty, TypeDyn, NDIM_MAX,
+    };
+}

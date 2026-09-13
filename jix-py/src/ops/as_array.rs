@@ -10,8 +10,8 @@ use crate::ops::common::Operand;
 
 /// Convert any array-like object to a [`jix.Array`][jix.Array].
 ///
-/// This function differ from [`jix.compact()`][jix.compact] in that it does not compress the data -
-/// it always produces a view of the input data. In Some cases a copy may be necessary, for example
+/// This function differs from [`jix.compact()`][jix.compact] in that it does not compress the data -
+/// it always produces a view of the input data. In some cases a copy may be necessary, for example
 /// to convert from a raw python list to a typed buffer, but in general this function tries to avoid
 /// copying data when possible, and it never compresses the data.
 ///

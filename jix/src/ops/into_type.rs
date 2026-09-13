@@ -1,12 +1,7 @@
 use std::marker::PhantomData;
-use std::ops::Range;
 
-use crate::codec::ReadContext;
-use crate::dtype::Dtyped;
-use crate::error::{check_dtype, Result};
-use crate::storage::{ArrayStorageInfo, ElementwisePipeline, StridedBuf};
+use crate::ops::prelude::*;
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ArrayStorage, ElementType};
 
 /// A lazy storage adapter that re-tags an array's element-type parameter without copying data.
 ///

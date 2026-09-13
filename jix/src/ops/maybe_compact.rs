@@ -1,10 +1,6 @@
-use std::ops::Range;
-
-use crate::codec::ReadContext;
-use crate::dtype::Dtype;
-use crate::error::Result;
-use crate::storage::{ArrayStorageInfo, Compact, StridedBuf};
-use crate::{Array, ArrayParams, ArrayStorage, Dimension, ElementType};
+use crate::ops::prelude::*;
+use crate::storage::Compact;
+use crate::ArrayParams;
 
 /// Storage adaptor that guarantees the wrapped array is always in compact
 /// block-compressed form.

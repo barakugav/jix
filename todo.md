@@ -1,6 +1,6 @@
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
-- build wheels for wsam
+- build wheels for wasm
 - compress offsets array
 - delegate power to square/sqrt if exponent is 2/0.5
 - if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl
@@ -9,11 +9,9 @@
 - resolve TODOs across the repo
 - add read benchmark of the whole array, also for low entropy data
 - benchmark LANES of {32/64/128/256} / itemsize on x86
-- fast path for 0-stride operands in ElementwisePipeline
 - replace array_from_fn_inline with map_enumerate
 - arrays_map, arrays_map_enumerate
 - as_compact() doesnt work through Any
 - optimize reshape and its flags propagation
 - local_prelude
 - document archive compatibility
-- remove proc-macro-crate dependency

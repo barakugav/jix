@@ -84,7 +84,7 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
     /// * `strides` - byte distance between adjacent elements along each
     ///   dimension. Must have the same length as `shape`.
     /// * `dtype` - element type descriptor; used for itemsize.
-    /// * `params` - this arg never change how the plain buffer is stored - a `Plain` array is always an
+    /// * `params` - this arg never changes how the plain buffer is stored - a `Plain` array is always an
     ///   uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
     ///   storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
     ///   codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
@@ -269,7 +269,7 @@ impl<T, D: Dimension> Array<Plain<Vec<T>, Ty<T>, D>> {
 impl<'a, T, D: Dimension> Array<Plain<&'a (), Ty<T>, D>> {
     /// Internal implementation for creating a `Plain` array that borrows from an ndarray view.
     ///
-    /// Note this function does have any lifetime bounds on the input array.
+    /// Note this function does not have any lifetime bounds on the input array.
     ///
     /// # Safety
     ///
@@ -413,7 +413,7 @@ impl<ET, D: Dimension> Array<Plain<&(), ET, D>> {
     /// * `shape` - number of elements along each dimension.
     /// * `strides` - the array element strides in **bytes units**. Must have the same length as `shape`.
     /// * `dtype` - element type descriptor; used for itemsize.
-    /// * `params` - this arg never change how the plain buffer is stored - a `Plain` array is always an
+    /// * `params` - this arg never changes how the plain buffer is stored - a `Plain` array is always an
     ///   uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
     ///   storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
     ///   codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as

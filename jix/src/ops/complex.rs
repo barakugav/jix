@@ -1,7 +1,5 @@
-use crate::dtype::Dtyped;
+use crate::ops::prelude::*;
 use crate::scalar::Complex;
-use crate::storage::{ArrayStorageInfo, ArrayStorageTyped};
-use crate::{Array, ArrayStorage};
 
 /// Extracts the real part of each complex element.
 ///

@@ -1,17 +1,6 @@
-use std::ops::Range;
-
-use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, check_dtype_size_nonzero, ensure, Result};
+use crate::ops::prelude::*;
 use crate::ops::{Op1, Op2};
-use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
-use crate::storage::{
-    check_out_buf, ArrayStorageInfo, ArrayStorageTyped, ElementwisePipeline,
-    ElementwisePipelineImpl, Operand, StridedBuf,
-};
-use crate::{
-    array_from_fn_inline, Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped,
-    ArrayStorage, ElementwisePipelineTuple, ReadContext, Ty,
-};
+use crate::{ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ElementwisePipelineTuple};
 
 impl<S> Array<S>
 where

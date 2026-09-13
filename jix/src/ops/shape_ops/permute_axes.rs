@@ -1,14 +1,4 @@
-use std::ops::Range;
-
-use crate::codec::ReadContext;
-use crate::dtype::Dtype;
-use crate::error::{check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{
-    check_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo, StridedBuf,
-};
-use crate::util::{dim_arr, DimIdx};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::ops::prelude::*;
 
 /// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
 ///

@@ -24,15 +24,15 @@ pub const NDIM_MAX: usize = 8;
 /// - **[`Dim<N>`]** - static dimension. The compiler knows `ndim == N` at compile time. The
 ///   const generic `N` is the number of axes. Implemented for `N = 0..=8`.
 /// - **[`DimDyn`]** - dynamic dimension. The ndim is only known at runtime, and stored in a
-///   dynamic allocated array.
+///   stack-allocated array.
 ///
 /// # How operations propagate dimension
 ///
 /// Element wise operations (e.g. `+`, `*`, casts) do not change the dimension, so the output
 /// dimension is the same as the input dimension.
 /// Shape-changing operations adjust the dimension either by using the `Smaller` / `Larger`
-/// associated types of the input dimension, or by taking a argument that determines the output
-/// dimension such as `reshape` (that accept [`IntoDimension`] arguments) or reduction operations
+/// associated types of the input dimension, or by taking an argument that determines the output
+/// dimension such as `reshape` (that accepts [`IntoDimension`] arguments) or reduction operations
 /// (that accept [`AxesArg`](crate::ops::AxesArg)).
 ///
 /// Because `DimDyn::Smaller = DimDyn` and `DimDyn::Larger = DimDyn`, operations on a dynamic

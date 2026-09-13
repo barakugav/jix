@@ -1,18 +1,4 @@
-use std::ops::Range;
-
-use crate::codec::ReadContext;
-use crate::dtype::{Alignment, Dtype, Dtyped};
-use crate::error::{check_get_range, ensure, Result};
-use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
-use crate::storage::{
-    check_out_buf, materialize_out_buf, n_operands_sum, ArraySpec, ArrayStorageInfo,
-    ArrayStorageTyped, ElementwisePipeline, ElementwisePipelineImpl, Operand, StridedBuf,
-};
-use crate::util::REQUIRE_ALIGNED;
-use crate::{
-    array_from_fn_inline, Array, ArrayStorage, Dimension, NdIterUnordered, PtrExt, PtrMutExt,
-    PtrMutNoalias, PtrNoalias,
-};
+use crate::ops::prelude::*;
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
 /// examples.
@@ -35,7 +21,7 @@ where
     Where::new_array(condition, x, y).unwrap()
 }
 
-/// Selects elements element-wise from `x` or `y` depending on `condition`
+/// Selects elements element-wise from `x` or `y` depending on `condition`.
 ///
 /// For each index `i`, the output is `x[i]` if `condition[i]` is `true`, otherwise `y[i]`.
 /// Semantics match `numpy.where(condition, x, y)`.

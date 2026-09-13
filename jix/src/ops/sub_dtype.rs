@@ -1,11 +1,4 @@
-use std::ops::Range;
-
-use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Dtyped, Itemsize};
-use crate::error::{check_dtype_size_nonzero, check_get_range, ensure, Result};
-use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
-use crate::util::{NdCopier, PtrMutNoalias, PtrNoalias};
-use crate::{Array, ArrayStorage, Dimension, ElementType, Ty, TypeDyn};
+use crate::ops::prelude::*;
 
 impl<S> Array<S>
 where

@@ -3,7 +3,7 @@
 //
 #![doc = include_str!("../docs/module.md")]
 //!
-//! # Disclaimer
+//! # Acknowledgements
 //!
 //! This project would not exist without the work of several upstream authors and communities.
 //! Specifically, this project was greatly inspired by the [C-Blosc2](https://github.com/Blosc/c-blosc2) library.

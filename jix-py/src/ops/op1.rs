@@ -22,7 +22,7 @@ define_op1!(
     /// Args:
     ///     array: Input array. Unsigned integer inputs are automatically cast to the next
     ///         larger signed integer type before negation (Safe casting rules): `u8 -> i16`,
-    ///         `u16 -> i32`, `u32 -> i64`. This differs from numpy, which overflow for unsigned
+    ///         `u16 -> i32`, `u32 -> i64`. This differs from numpy, which overflows for unsigned
     ///         negation.
     ///         A `bool` input is cast to `i8` (False -> 0, True -> -1).
     ///
@@ -116,7 +116,7 @@ define_op1!(
     ///
     /// Ties (values exactly halfway between two integers) are broken by rounding away from
     /// zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from "round-half-to-even"
-    /// (banker's rounding) used by Python's built-in `round()` and `numpy.round_`.
+    /// (banker's rounding) used by Python's built-in `round()` and `numpy.round`.
     ///
     /// Args:
     ///     array: Input array.

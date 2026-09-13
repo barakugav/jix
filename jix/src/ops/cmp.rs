@@ -1,9 +1,7 @@
-use crate::error::Result;
 use crate::ops::common::define_array_op2_method;
 use crate::ops::op2::define_op2;
+use crate::ops::prelude::*;
 use crate::ops::{Op2, Op2Kernel};
-use crate::storage::{ArrayStorageInfo, ArrayStorageTyped};
-use crate::{Array, ArrayStorage, Ty};
 
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
@@ -442,7 +440,7 @@ define_op2!(
     /// For **integer** and **bool** types the result is `std::cmp::max(a, b)`.
     /// For **float** types this operation is NaN-propagating: if either operand is `NaN`,
     /// the result is `NaN`. This deviates from [`f32::max`], which returns the non-`NaN`
-    /// operand when exactly one is `NaN`, but matches the behaviour of `numpy.maximum`.
+    /// operand when exactly one is `NaN`, but matches the behavior of `numpy.maximum`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -477,7 +475,7 @@ define_op2!(
     /// For **integer** and **bool** types the result is `std::cmp::min(a, b)`.
     /// For **float** types this operation is NaN-propagating: if either operand is `NaN`,
     /// the result is `NaN`. This deviates from [`f32::min`], which returns the non-`NaN`
-    /// operand when exactly one is `NaN`, but matches the behaviour of `numpy.minimum`.
+    /// operand when exactly one is `NaN`, but matches the behavior of `numpy.minimum`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -573,7 +571,7 @@ impl<S1, S2> ApproxEq<S1, S2>
 where
     S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
 {
-    /// Constructs a [`ApproxEq`] storage. See the struct docs for semantics and examples.
+    /// Constructs an [`ApproxEq`] storage. See the struct docs for semantics and examples.
     pub fn new(
         a: S1,
         b: S2,

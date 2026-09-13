@@ -1,7 +1,7 @@
 use crate::ops::common::{define_array_op1_method, define_array_op2_method};
 use crate::ops::op2::define_op2;
+use crate::ops::prelude::*;
 use crate::ops::{define_op1, define_op2_rhs_fixed};
-use crate::{Array, ArrayStorage};
 
 define_op2!(
     /// Element-wise bitwise AND of two arrays.
@@ -12,7 +12,7 @@ define_op2!(
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// as the `&` operator or [`Array::bitand()`](core::ops::BitAnd::bitand).
+    /// the `&` operator or [`Array::bitand()`](core::ops::BitAnd::bitand).
     ///
     /// # Examples
     /// ```

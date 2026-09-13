@@ -29,7 +29,7 @@ pub enum Codec {
 /// Compression configuration used when encoding array blocks.
 ///
 /// Controls the codec, compression level, and the pre-compression filter pipeline. Filters
-/// are applied to the raw element bytes **before** compression and reversed in **after**
+/// are applied to the raw element bytes **before** compression and reversed **after**
 /// decompression. For numeric data, filters significantly improve the compression ratio by
 /// rearranging bytes or bits into a more compressible layout.
 ///
@@ -85,10 +85,10 @@ impl EncoderParams {
     /// better ratios for low-entropy data at the cost of higher CPU usage. Pass an empty
     /// slice to disable filtering entirely.
     ///
-    /// Not all combinations of filters make sense; for example,a byte shuffle followed by a bit
-    /// shuffle doesn't make sense because the bit shuffle will operate of the byte-shuffled data,
-    /// and the bti shuffle filter will incorrectly assume the data is in the original byte order -
-    /// it will not yield incorrect results, but its probably won't improve the compression ratio.
+    /// Not all combinations of filters make sense; for example, a byte shuffle followed by a bit
+    /// shuffle doesn't make sense because the bit shuffle will operate on the byte-shuffled data,
+    /// and the bit shuffle filter will incorrectly assume the data is in the original byte order -
+    /// it will not yield incorrect results, but it probably won't improve the compression ratio.
     ///
     /// # Errors
     ///

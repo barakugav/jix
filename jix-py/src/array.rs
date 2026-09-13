@@ -329,7 +329,7 @@ impl Array {
     /// The total number of elements in the array (the product of the axis lengths).
     ///
     /// Returns:
-    ///     The total element n_printed as an integer.
+    ///     The total element count as an integer.
     ///
     /// ```python
     /// import jix
@@ -1293,7 +1293,7 @@ impl Array {
         crate::ops::clamp(slf, min, max)
     }
 
-    /// Returns the sign of each element as a floating-point value. See [`jix.sign()`][jix.sign].
+    /// Returns the sign of each element. See [`jix.sign()`][jix.sign].
     pub fn sign(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::sign(slf)
     }

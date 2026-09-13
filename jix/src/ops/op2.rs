@@ -1,16 +1,6 @@
-use std::ops::Range;
-
-use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, check_dtype_size_nonzero, ensure, Result};
 use crate::ops::common::define_array_op2_method;
-use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
-use crate::storage::{
-    check_out_buf, n_operands_sum, ArraySpec, ArrayStorageInfo, ArrayStorageTyped,
-    ElementwisePipeline, ElementwisePipelineImpl, Operand, StridedBuf,
-};
+use crate::ops::prelude::*;
 use crate::util::assert_unchecked_eq;
-use crate::{array_from_fn_inline, Array, ArrayStorage, Ty};
 
 pub(crate) struct Op2<S1, S2, K> {
     pub(crate) a: S1,
@@ -562,7 +552,7 @@ define_op2!(
     /// Element-wise division of two arrays (`a / b`).
     ///
     /// For **integer** types the result is truncating (rounds towards zero); dividing
-    /// by zero panics in debug builds and the result is implementation-defined in release.
+    /// by zero panics in both debug and release builds.
     /// For **float** types semantics follow `f32::div`.
     /// For **complex** types this is full complex division.
     ///
