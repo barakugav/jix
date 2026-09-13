@@ -890,7 +890,7 @@ where
     T: Dtyped + std::fmt::Debug + Clone + PartialEq,
     D: ndarray::Dimension,
 {
-    assert_array_matches_with(actual, expected, |a, b| a == b);
+    assert_array_matches_with(actual, expected, &|a, b| a == b);
 }
 
 /// Like [`assert_array_matches`], but compares elements with [`ApproxEq`] under
@@ -912,7 +912,7 @@ pub(crate) fn assert_array_matches_approx<S, T, D>(
     T: Dtyped + std::fmt::Debug + Clone + crate::scalar::ApproxEq,
     D: ndarray::Dimension,
 {
-    assert_array_matches_with(actual, expected, move |a, b| a.approx_eq(b, &rtol, &atol));
+    assert_array_matches_with(actual, expected, &move |a, b| a.approx_eq(b, &rtol, &atol));
 }
 
 /// Shared implementation of [`assert_array_matches`] and
@@ -922,7 +922,7 @@ pub(crate) fn assert_array_matches_approx<S, T, D>(
 fn assert_array_matches_with<S, T, D>(
     actual: &Array<S>,
     expected: &ndarray::Array<T, D>,
-    eq: impl Fn(&T, &T) -> bool,
+    eq: &dyn Fn(&T, &T) -> bool,
 ) where
     S: ArrayStorage,
     T: Dtyped + std::fmt::Debug + Clone,
@@ -934,7 +934,7 @@ fn assert_array_matches_with<S, T, D>(
     let storage: &dyn ArrayStorage = &actual.storage;
     let actual = Array::from_storage(storage);
     let expected = expected.view().into_dyn();
-    assert_array_matches_dyn::<T>(&actual, expected, &eq);
+    assert_array_matches_dyn::<T>(&actual, expected, eq);
 }
 
 /// Storage- and dimension-agnostic core of [`assert_array_matches_with`]: checks storage
@@ -942,7 +942,7 @@ fn assert_array_matches_with<S, T, D>(
 fn assert_array_matches_dyn<T>(
     actual: &Array<&dyn ArrayStorage>,
     expected: ndarray::ArrayViewD<'_, T>,
-    eq: &impl Fn(&T, &T) -> bool,
+    eq: &dyn Fn(&T, &T) -> bool,
 ) where
     T: Dtyped + std::fmt::Debug + Clone,
 {
@@ -963,7 +963,7 @@ fn assert_array_matches_dyn<T>(
 
     let actual = actual.view().into_typed::<T>().unwrap();
     let full = actual.to_ndarray().unwrap().into_dyn();
-    if let Err(msg) = elementwise_eq(&full, &expected, eq) {
+    if let Err(msg) = elementwise_eq(full.view(), expected.view(), eq) {
         unreachable!("full array mismatch: {msg}");
     }
 
@@ -984,7 +984,7 @@ fn assert_array_matches_dyn<T>(
                 .map(|r| r.start as usize..r.end as usize)
                 .collect();
             let expected_sub = ndarray_slice(&expected, &ranges_usize);
-            elementwise_eq(&actual_sub.into_dyn(), &expected_sub, eq)
+            elementwise_eq(actual_sub.into_dyn().view(), expected_sub.view(), eq)
                 .map_err(TestCaseError::fail)?;
             Ok(())
         })
@@ -993,14 +993,12 @@ fn assert_array_matches_dyn<T>(
 
 /// Compares two dynamic-dimension arrays element-wise (in logical order) with
 /// `eq`. Returns `Err` describing the first shape or value mismatch found.
-fn elementwise_eq<A, B, T>(
-    actual: &ndarray::ArrayBase<A, ndarray::IxDyn>,
-    expected: &ndarray::ArrayBase<B, ndarray::IxDyn>,
-    eq: &impl Fn(&T, &T) -> bool,
+fn elementwise_eq<T>(
+    actual: ndarray::ArrayViewD<'_, T>,
+    expected: ndarray::ArrayViewD<'_, T>,
+    eq: &dyn Fn(&T, &T) -> bool,
 ) -> Result<(), String>
 where
-    A: ndarray::Data<Elem = T>,
-    B: ndarray::Data<Elem = T>,
     T: std::fmt::Debug,
 {
     if actual.shape() != expected.shape() {
