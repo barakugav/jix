@@ -21,6 +21,16 @@ import jix
 
 ZSTD_LEVEL = 3
 NTHREADS = 1
+
+# Read-region byte budget for the chain benchmarks, as (min, max). jix materializes a lazy chain
+# one read region at a time, so every intermediate for that region stays in cache while the inputs
+# and the output stream past it. A region small enough to sit in L1 is what turns that into a win;
+# the default is chosen for cache sizes generally rather than for long elementwise chains.
+#
+# Only for uncompressed storage. On a compact array a small read region is much worse than the
+# default: a region smaller than a block still decompresses the whole block and throws most of it
+# away, and neighbouring regions decompress it again.
+CHAIN_READ_SIZE = (12 * 1024, 24 * 1024)
 CODEC_DESC = f"zstd level {ZSTD_LEVEL}, byte-shuffle, {NTHREADS} thread (jix, blosc2, zarr matched)"
 
 blosc2.set_nthreads(NTHREADS)
@@ -73,7 +83,8 @@ class AbstractArray:
         self.raw = raw
 
     @classmethod
-    def from_numpy(cls, data, *, block_shape=None):
+    def from_numpy(cls, data, *, block_shape=None, read_size=None):
+        """Build this library's array. `read_size` is a jix-only hint; others ignore it."""
         raise NotImplementedError()
 
     def read(self, index):
@@ -124,7 +135,7 @@ class NumpyArray(AbstractArray):
     name = "numpy"
 
     @classmethod
-    def from_numpy(cls, data, *, block_shape=None):
+    def from_numpy(cls, data, *, block_shape=None, read_size=None):
         return cls(np.ascontiguousarray(data))
 
     def read(self, index):
@@ -156,18 +167,16 @@ class JixArray(AbstractArray):
     filters: ClassVar[list] = ["byte-shuffle"]
 
     @classmethod
-    def from_numpy(cls, data, *, block_shape=None):
-        return cls(
-            jix.compact(
-                np.ascontiguousarray(data),
-                params={
-                    "block_shape": block_shape,
-                    "codec": "zstd",
-                    "compression_level": ZSTD_LEVEL,
-                    "filters": cls.filters,
-                },
-            )
-        )
+    def from_numpy(cls, data, *, block_shape=None, read_size=None):
+        params = {
+            "block_shape": block_shape,
+            "codec": "zstd",
+            "compression_level": ZSTD_LEVEL,
+            "filters": cls.filters,
+        }
+        if read_size is not None:
+            params["read_size"] = read_size
+        return cls(jix.compact(np.ascontiguousarray(data), params=params))
 
     def read(self, index):
         return self.raw.numpy(index)
@@ -210,8 +219,9 @@ class JixPlainArray(JixArray):
     name = "jix-plain"
 
     @classmethod
-    def from_numpy(cls, data, *, block_shape=None):
-        return cls(jix.asarray(np.ascontiguousarray(data)))
+    def from_numpy(cls, data, *, block_shape=None, read_size=None):
+        params = None if read_size is None else {"read_size": read_size}
+        return cls(jix.asarray(np.ascontiguousarray(data), params=params))
 
     def stored_bytes(self):
         return int(np.prod(self.raw.shape)) * self.raw.dtype.itemsize
@@ -225,7 +235,7 @@ class Blosc2Array(AbstractArray):
     match_chunks_to_blocks = False
 
     @classmethod
-    def from_numpy(cls, data, *, block_shape=None):
+    def from_numpy(cls, data, *, block_shape=None, read_size=None):
         return cls(
             blosc2.asarray(
                 np.ascontiguousarray(data),
@@ -285,7 +295,7 @@ class ZarrArray(AbstractArray):
     name = "zarr"
 
     @classmethod
-    def from_numpy(cls, data, *, block_shape=None):
+    def from_numpy(cls, data, *, block_shape=None, read_size=None):
         return cls(
             zarr.create_array(
                 store=zarr.storage.MemoryStore(),

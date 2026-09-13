@@ -97,9 +97,9 @@ Found by the cross-check test that runs every library's operations against NumPy
 a = np.arange(12, dtype=np.float32).reshape(3, 4) / 4.0
 b = blosc2.asarray(a)
 
-np.asarray((b + -3.0)[:])                          # correct
-np.asarray((((b * 2.0) + 1.0) * 0.5 + -3.0)[:])    # WRONG
-np.asarray((((b * 2.0) + 1.0) * 0.5 - 3.0)[:])     # correct
+np.asarray((b + -3.0)[:])  # correct
+np.asarray((((b * 2.0) + 1.0) * 0.5 + -3.0)[:])  # WRONG
+np.asarray((((b * 2.0) + 1.0) * 0.5 - 3.0)[:])  # correct
 ```
 
 For input `[0, 0.25, 0.5, 0.75]` the third line gives `[-3, -1.25, -3, -1.1875]` where the right
@@ -166,6 +166,55 @@ hypothesis from the type signatures rather than something confirmed from the gen
 
 Prediction worth checking on the x86 runner: Python jix should *win* on a machine whose memory
 bandwidth is lower relative to its compute, since numpy's cost is traffic and jix's is not.
+
+### Where jix does beat numpy: a cache-sized read region
+
+The flat 0.102 ns per element-op above is not the whole story. jix materializes a lazy chain one
+read region at a time, so every intermediate for that region stays in cache while the inputs and
+the output stream past it - no compiler fusion required, the block-wise iteration alone gives it.
+What decides whether that pays is the size of the read region, and the default is chosen for cache
+sizes generally rather than for long elementwise chains.
+
+Sweeping `read_size` on `[130000, 200] f32` x2, arms alternated round by round to cancel drift:
+
+| steps | numpy | jix default | jix `read_size=(12K, 24K)` | speedup |
+|---|---|---|---|---|
+| 4 | 10.9 ms | 10.8 ms (1.02x) | 12.2 ms | 0.89x |
+| 8 | 22.8 ms | 22.3 ms (1.03x) | 20.5 ms | **1.11x** |
+| 16 | 51.6 ms | 45.6 ms (1.13x) | 38.5 ms | **1.34x** |
+| 32 | 105.1 ms | 92.1 ms (1.22x) | 73.9 ms | **1.42x** |
+| 64 | 202.7 ms | 184.7 ms (1.23x) | 146.6 ms | **1.38x** |
+
+Tuning drops jix's cost from 0.111 to 0.088 ns per element-op, and the win grows with chain length
+because numpy's per-step cost is DRAM traffic while jix's is an L1 round-trip. 8K-16K and 12K-24K
+were the best of a sweep from 1K to 16M; below 4K the per-region overhead takes over (1K-2K is
+0.35x) and above 32K the intermediates stop fitting.
+
+The win is modest here because an M3 Pro has a lot of memory bandwidth, so numpy's DRAM penalty is
+small. The gap should be wider on a machine with less bandwidth per core - the x86 runner will say.
+
+**The optimal read region is opposite for compact storage.** A region smaller than a block still
+decompresses the whole block and discards most of it, and the next region decompresses it again.
+The same `(12K, 24K)` that wins on `Plain` takes a compact unary chain from 45 ms to 244 ms.
+
+### Compact beats numpy too, but only on very long chains
+
+Unary chain (one leaf reference, so the array is decompressed once), default read region:
+
+| steps | numpy | jix compact (14.3x ratio) | speedup |
+|---|---|---|---|
+| 8 | 17.3 ms | 58.4 ms | 0.30x |
+| 32 | 76.7 ms | 104.1 ms | 0.74x |
+| 64 | 162.5 ms | 165.5 ms | 0.98x |
+| 128 | 340.0 ms | 287.3 ms | **1.18x** |
+
+Decompression is a fixed ~45 ms; after that jix grows at ~1.9 ms per step against numpy's ~2.6 ms,
+so the crossover is near 64 steps. The arithmetic predicts 64 and the measurement agrees.
+
+**Reusing an operand multiplies decompression.** A binary chain that references `a` and `b` at every
+step decompresses their blocks once per reference - a 32-step binary chain on compact cost 1430 ms,
+about 29 times a single full decompression. There is no reuse of a decompressed block across
+references within one pipeline. That is worth knowing independently of the report.
 
 ### Correction: an earlier version of this measurement was wrong
 
