@@ -15,3 +15,5 @@
 - as_compact() doesnt work through Any
 - optimize reshape and its flags propagation
 - reduce binary size and improve compile times
+- local_prelude
+- document archive compatibility
