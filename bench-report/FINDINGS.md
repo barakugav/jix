@@ -132,40 +132,54 @@ use that, and would be a different benchmark.
 against single-threaded jix and numpy. Fixed in `array_impls.py` with
 `numexpr.set_num_threads(NTHREADS)`.
 
-## jix fuses chains; the Python scalar-operand path costs 2.6x per element-op
+## Chains: fusion pays off in Rust, and is flat in Python
 
-Rust fuses exactly as claimed. `[130000, 200] f32`, alternating `* 2.0` / `+ 1.0`, Criterion at
-`--fast`:
+Measured on an Apple M3 Pro, `[130000, 200] f32` x2, chain of array-operand steps starting from
+`a*a` (see `array_impls.CHAIN_STEPS`). Criterion at `--fast` for Rust; best of five warm rounds for
+Python. `ns/op` is per element per step - 26M elements x N steps - which is the number that matters,
+since a chain of N steps is N x 26M element-ops whether or not it is fused.
 
-| steps | ndarray | jix-plain |
-|---|---|---|
-| 1 | 2.6 ms | 2.6 ms |
-| 8 | 20.9 ms | **4.0 ms** |
+| steps | ndarray | Rust jix | ratio | ns/op | numpy | Python jix | ratio | ns/op |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2.4 ms | 2.3 ms | 0.99x | 0.090 | 2.2 ms | 2.3 ms | 1.02x | 0.088 |
+| 2 | 5.0 ms | 3.2 ms | 0.64x | 0.061 | 5.2 ms | 5.4 ms | 1.04x | 0.104 |
+| 4 | 10.6 ms | 4.5 ms | 0.42x | 0.043 | 11.1 ms | 10.6 ms | 0.96x | 0.102 |
+| 8 | 21.0 ms | 6.9 ms | 0.33x | 0.033 | 22.0 ms | 21.3 ms | 0.97x | 0.102 |
+| 16 | 43.5 ms | **11.5 ms** | **0.26x** | 0.028 | 46.3 ms | 42.5 ms | 0.92x | 0.102 |
 
-ndarray is linear because it allocates per step; jix is flat, 5.2x faster at eight steps.
+**Rust is the claim working.** The per-element-op cost *falls* with chain length, 0.090 down to
+0.028 ns - at one step the pass is memory-bound, and every extra step amortizes that fixed traffic
+over more arithmetic. At sixteen steps jix is 3.8x faster than ndarray and runs about 9 element-ops
+per cycle.
 
-Python fuses too - eight steps build one nested view materialized once - but a chain of eight steps
-is 208M element-ops whether or not it is fused, so the number that matters is the cost per
-element-op, not whether the total is flat. Normalized, on an Apple M3 Pro:
+**Python is flat at 0.102 ns per element-op**, so extra steps buy nothing and the result sits at
+parity with numpy throughout. Flatness is the signature: it is what per-step passes cost, not what
+a fused loop costs. Parity with numpy is a coincidence of this machine - numpy is memory-bound here
+at roughly the same rate that Python jix is bound by whatever it is bound by.
 
-| 8-step chain | numpy | jix-plain | ratio | jix ns per element-op |
-|---|---|---|---|---|
-| unary `-a` | 17.8 ms | **15.2 ms** | **0.85x** | 0.073 |
-| `a * 2.0` / `a + 1.0` | 16.7 ms | 39.2 ms | 2.34x | 0.189 |
+The likely cause is type erasure at the binding boundary. `jix-py`'s `Array` is
+`pub struct Array { arr: ArrayAny }`, and `ArrayAny` is `Arc<dyn ArrayStorage>` - so each Python-level
+operation wraps a trait object and the compiler cannot inline one step into the next. In Rust the
+whole chain is one static type and collapses into a single loop. The 3.7x gap at sixteen steps
+(11.5 ms against 42.5 ms, same arithmetic, same arrays) is consistent with that, though it is a
+hypothesis from the type signatures rather than something confirmed from the generated code.
 
-**The unary chain already wins**, so fusion pays off in Python as well. The scalar-operand path
-costs 2.6x more per element-op than the unary path, and that difference is the whole gap. At
-0.073 ns per element-op the unary kernel runs about 3.3 element-ops per cycle - vectorized. At
-0.189 it runs about 1.3, which is what a stride-0 broadcast operand fetched inside the loop would
-cost rather than one hoisted out of it.
+Prediction worth checking on the x86 runner: Python jix should *win* on a machine whose memory
+bandwidth is lower relative to its compute, since numpy's cost is traffic and jix's is not.
 
-Bringing `Mul<X, Scalar>` to the throughput `Neg<X>` already reaches would put the eight-step chain
-near 15 ms against numpy's 16.7 ms, widening with chain length.
+### Correction: an earlier version of this measurement was wrong
 
-An earlier round of this measurement also showed a `Cast<Scalar>` in the tree for Python float
-constants. That has since been fixed - `a * 2.0` now builds `Mul<Plain, Scalar>` directly and
-Python floats cost the same as `np.float32` constants - which took about 19% off the chain
-(48.6 ms to 39.4 ms at eight steps). The per-element-op gap above is what remains underneath it.
+The first Rust chain benchmark chained `.map(|x| x * 2.0)` closures with literal constants and
+reported jix as flat at 2.6-4.0 ms from one to eight steps, 5.2x faster than ndarray. That result
+is withdrawn. An affine chain of scalar closures constant-folds: LLVM inlines all eight and
+collapses them to a single multiply-add, so the benchmark measured one operation no matter how many
+were written. The numbers above use two array operands, which cannot be folded away.
+
+The same mistake is why the chain now avoids scalar constants entirely - and separately, why it
+should: jix has no specialized loop for a 0-stride operand, so a scalar is read through the same
+strided loop as a real array. A scalar chain measures that gap rather than whether fusing pays off.
+An earlier round of this also found a `Cast<Scalar>` in the tree for Python float constants, since
+fixed - `a * 2.0` now builds `Mul<Plain, Scalar>` directly.
 
 ## `normalize` over a long axis re-runs the reduction per output element
 
