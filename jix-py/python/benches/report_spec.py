@@ -235,16 +235,16 @@ SECTIONS = [
     {
         "key": "rust_axis_order",
         "title": "Rust: axis order",
-        "subtitle": "negate on [300, 400, 500] = 240 MB as f32; ndarray classifies layout four ways",
+        "subtitle": "negate on a sliced, permuted view of [300, 400, 500] = 240 MB as f32",
         "baseline": "ndarray",
         "metric": "time",
         "cases": [
-            "3-D rotate\n[1,2,0] f32",
-            "3-D rotate\n[1,2,0] i32",
-            "3-D reverse\n[2,1,0] f32",
-            "2-D\ntranspose f32",
+            "sliced rotate\n[1,2,0] f32",
+            "sliced rotate\n[1,2,0] i32",
+            "sliced\nidentity f32",
+            "contiguous\nrotate f32",
         ],
-        "case_ids": ["rotate_f32", "rotate_i32", "reverse_f32", "transpose2d_f32"],
+        "case_ids": ["rotate_f32", "rotate_i32", "identity_f32", "contig_rotate_f32"],
         "libraries": ["ndarray", "jix-plain"],
     },
 ]
