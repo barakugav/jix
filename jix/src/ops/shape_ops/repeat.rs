@@ -1,14 +1,4 @@
-use std::ops::Range;
-
-use crate::codec::ReadContext;
-use crate::dtype::Dtype;
-use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, error, Result};
-use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{
-    check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
-};
-use crate::util::{calc_block_end, PtrMutNoalias, PtrNoalias};
-use crate::{Array, ArrayStorage, DimDyn, DimIdx, Dimension, NdCopier, SliceExt, NDIM_MAX};
+use crate::ops::prelude::*;
 
 /// Replicates each element along an axis by a scalar count, returned by
 /// [`Array::repeat`](crate::Array::repeat).
@@ -74,7 +64,7 @@ impl<S: ArrayStorage> Repeat<S> {
         check_shape_overflow(new_shape.as_slice(), array.dtype().itemsize() as _)?;
 
         let inner_spec = array.spec();
-        let mut block_shape = inner_spec.block_shape().clone();
+        let mut block_shape = <_ as Clone>::clone(inner_spec.block_shape());
         // A repeat preserves whether the repeated dimension is fixed: a fixed block length is
         // scaled with the repeat count and stays fixed, a non-fixed one stays non-fixed.
         let block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();

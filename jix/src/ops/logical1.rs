@@ -1,7 +1,6 @@
-use crate::array::Array;
 use crate::ops::common::define_array_op1_method;
 use crate::ops::define_op1;
-use crate::ArrayStorage;
+use crate::ops::prelude::*;
 
 define_op1!(
     /// Tests whether each element is `NaN` (not a number).

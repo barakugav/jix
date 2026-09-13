@@ -1,9 +1,7 @@
-use crate::error::Result;
 use crate::ops::common::define_array_op2_method;
 use crate::ops::op2::define_op2;
+use crate::ops::prelude::*;
 use crate::ops::{Op2, Op2Kernel};
-use crate::storage::{ArrayStorageInfo, ArrayStorageTyped};
-use crate::{Array, ArrayStorage, Ty};
 
 pub(crate) mod _traits {
     #[cfg(feature = "half")]

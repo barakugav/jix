@@ -16,4 +16,3 @@
 - optimize reshape and its flags propagation
 - local_prelude
 - document archive compatibility
-- remove proc-macro-crate dependency

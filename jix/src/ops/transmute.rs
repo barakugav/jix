@@ -1,10 +1,4 @@
-use std::ops::Range;
-
-use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Dtyped};
-use crate::error::{ensure, Result};
-use crate::storage::{ArraySpec, ArrayStorageInfo, StridedBuf};
-use crate::{Array, ArrayStorage, ElementType, Ty, TypeDyn};
+use crate::ops::prelude::*;
 
 impl<S> Array<S>
 where

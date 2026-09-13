@@ -1,15 +1,6 @@
 use std::cmp::Ordering;
-use std::ops::Range;
 
-use crate::codec::ReadContext;
-use crate::dtype::Dtype;
-use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, error, Result};
-use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{
-    check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
-};
-use crate::util::{NdCopier, PtrMutNoalias, PtrNoalias, ScaleWeight};
-use crate::{Array, ArrayStorage, DimDyn, DimIdx, Dimension, SliceExt, NDIM_MAX};
+use crate::ops::prelude::*;
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
@@ -89,7 +80,7 @@ impl<S: ArrayStorage> Tile<S> {
         check_shape_overflow(new_shape.as_slice(), array.dtype().itemsize() as _)?;
 
         let inner_spec = array.spec();
-        let mut block_shape = inner_spec.block_shape().clone();
+        let mut block_shape = <_ as Clone>::clone(inner_spec.block_shape());
         block_shape[axis] = block_shape[axis]
             .min(new_len.min(BlockSize::MAX as u64) as BlockSize)
             .max(1);

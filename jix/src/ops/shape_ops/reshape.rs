@@ -1,18 +1,5 @@
-use std::ops::Range;
-
-use crate::array::Array;
-use crate::codec::ReadContext;
-use crate::dtype::Dtype;
-use crate::error::{check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{
-    check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
-};
-use crate::util::iter::NdIter;
-use crate::util::{dim_arr, DimArray, DimIdx, IterExt, ScaleWeight};
-use crate::{
-    default_logical_strides, default_strides_from_iter, ArrayStorage, Dimension, IntoDimension,
-};
+use crate::ops::prelude::*;
+use crate::IntoDimension;
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
 ///

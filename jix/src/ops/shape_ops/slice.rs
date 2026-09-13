@@ -1,14 +1,6 @@
-use std::ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
+use std::ops::{Bound, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
 
-use crate::codec::ReadContext;
-use crate::dtype::Dtype;
-use crate::error::{check_get_range, check_ndim, ensure, Result};
-use crate::storage::block::BlockSize;
-use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
-use crate::util::iter::NdIter;
-use crate::util::{try_dim_arr, DimArray};
-use crate::{Array, ArrayStorage, DimDyn, Dimension, SliceExt};
+use crate::ops::prelude::*;
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
@@ -95,7 +87,7 @@ impl<S: ArrayStorage> Slice<S> {
         let shape = S::Dimension::from_fn(ndim, |dim| slice[dim].len());
 
         let inner_spec = array.spec();
-        let mut block_shape = inner_spec.block_shape().clone();
+        let mut block_shape = <_ as Clone>::clone(inner_spec.block_shape());
         for dim in 0..ndim {
             if shape[dim] == input_shape[dim] {
                 continue; // dim is unchanged

@@ -1,16 +1,4 @@
-use std::ops::Range;
-
-use crate::codec::ReadContext;
-use crate::dtype::Dtype;
-use crate::error::{check_get_range, check_ndim, ensure, Result};
-use crate::ops::AxesArg;
-use crate::storage::params::{read_layout_order_insert_dont_care_dim, ArraySpecDynamic};
-use crate::storage::{
-    check_out_buf, materialize_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo,
-    StridedBuf,
-};
-use crate::util::{DimArray, DimIdx, ScaleWeight};
-use crate::{dim_arr, Array, ArrayStorage, DimDyn, Dimension, IterExt, SliceExt};
+use crate::ops::prelude::*;
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape,
 /// returned by [`Array::insert_axis`](crate::Array::insert_axis). The inverse operation
@@ -122,7 +110,7 @@ where
         let mut is_inserted = dim_arr(orig_ndim, |_| false);
         let mut shape = DimArray::from_slice(array.shape()).unwrap();
         let orig_spec = array.spec();
-        let mut block_shape = orig_spec.block_shape().clone();
+        let mut block_shape = <_ as Clone>::clone(orig_spec.block_shape());
         let mut block_shape_fixed_dims = orig_spec.block_shape_fixed_dims();
         for (inserted_dim_count, &dim) in axes.iter().enumerate() {
             let insert_pos = dim as usize + inserted_dim_count;

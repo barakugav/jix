@@ -1,12 +1,7 @@
 use std::marker::PhantomData;
-use std::ops::Range;
 
-use crate::codec::ReadContext;
-use crate::dtype::Dtyped;
-use crate::error::{ensure, Result};
-use crate::storage::{ArrayStorageInfo, ElementwisePipeline, StridedBuf};
+use crate::ops::prelude::*;
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ArrayStorage, Dimension};
 
 /// A lazy storage adapter that re-tags an array's dimension parameter without copying data.
 ///

@@ -1,6 +1,4 @@
-use crate::dtype::Dtyped;
-use crate::storage::{ArrayStorageInfo, ArrayStorageTyped};
-use crate::{Array, ArrayStorage};
+use crate::ops::prelude::*;
 
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
