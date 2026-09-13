@@ -291,11 +291,12 @@ cheap and the array is large; they do not when one expensive kernel dominates.
 
 | case | numpy | jix-plain | jix |
 |---|---|---|---|
-| 1 op | 2.60 ms | 2.71 ms | 59.00 ms |
-| 2 ops | 6.14 ms | 6.37 ms | 62.54 ms |
-| 4 ops | 13.10 ms | 12.51 ms | 68.44 ms |
-| 8 ops | 25.96 ms | 25.13 ms | 80.24 ms |
-| 16 ops | 54.63 ms | 50.15 ms | 106.20 ms |
+| 1 op | 2.83 ms | 3.07 ms | 53.57 ms |
+| 2 ops | 6.14 ms | 6.37 ms | 56.64 ms |
+| 4 ops | 12.86 ms | 14.40 ms | 61.36 ms |
+| 8 ops | 26.90 ms | 24.19 ms | 68.91 ms |
+| 16 ops | 60.89 ms | 45.43 ms | 88.50 ms |
+| 32 ops | 124.02 ms | 87.20 ms | 122.84 ms |
 | exp/log | 134.28 ms | 136.76 ms | 194.70 ms |
 
 </details>
@@ -319,6 +320,7 @@ makes this the cleanest evidence on the page.
 | 4 ops | 430 MB | 318 MB | 180 MB |
 | 8 ops | 432 MB | 318 MB | 180 MB |
 | 16 ops | 434 MB | 318 MB | 180 MB |
+| 32 ops | 436 MB | 318 MB | 180 MB |
 
 </details>
 

@@ -78,7 +78,7 @@ def reduction_label(op, dtype, axis):
 
 # Number of elementwise steps, then the transcendental chain that behaves differently. Every step
 # is a binary op over the two source arrays - see `array_impls.CHAIN_STEPS` for why no scalars.
-CHAIN_CASES = [1, 2, 4, 8, 16, "exp/log"]
+CHAIN_CASES = [1, 2, 4, 8, 16, 32, "exp/log"]
 
 
 def chain_label(steps):
@@ -157,7 +157,7 @@ SECTIONS = [
     {
         "key": "chain",
         "title": "Operation chains",
-        "subtitle": f"f32 {ARRAY} x2; array-operand steps, plus one chain dominated by exp/log",
+        "subtitle": f"f32 {ARRAY} x2; array-operand steps at a cache-sized read region, plus an exp/log chain",
         "baseline": "numpy",
         "metric": "time",
         "cases": [chain_label(case) for case in CHAIN_CASES],
