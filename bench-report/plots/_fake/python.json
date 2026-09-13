@@ -1575,7 +1575,7 @@
   {
    "name": "chain[numpy]",
    "stats": {
-    "mean": 0.0025960000000000002,
+    "mean": 0.002832,
     "rounds": 20
    },
    "extra_info": {
@@ -1599,7 +1599,7 @@
   {
    "name": "chain[numpy]",
    "stats": {
-    "mean": 0.013098,
+    "mean": 0.012862000000000002,
     "rounds": 20
    },
    "extra_info": {
@@ -1611,7 +1611,7 @@
   {
    "name": "chain[numpy]",
    "stats": {
-    "mean": 0.02596,
+    "mean": 0.026904,
     "rounds": 20
    },
    "extra_info": {
@@ -1623,12 +1623,24 @@
   {
    "name": "chain[numpy]",
    "stats": {
-    "mean": 0.054634,
+    "mean": 0.060888000000000005,
     "rounds": 20
    },
    "extra_info": {
     "section": "chain",
     "case": "16 ops",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "chain[numpy]",
+   "stats": {
+    "mean": 0.124018,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "32 ops",
     "library": "numpy"
    }
   },
@@ -1647,7 +1659,7 @@
   {
    "name": "chain[jix-plain]",
    "stats": {
-    "mean": 0.002714,
+    "mean": 0.0030680000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -1671,7 +1683,7 @@
   {
    "name": "chain[jix-plain]",
    "stats": {
-    "mean": 0.012508,
+    "mean": 0.014395999999999999,
     "rounds": 20
    },
    "extra_info": {
@@ -1683,7 +1695,7 @@
   {
    "name": "chain[jix-plain]",
    "stats": {
-    "mean": 0.025134000000000004,
+    "mean": 0.02419,
     "rounds": 20
    },
    "extra_info": {
@@ -1695,12 +1707,24 @@
   {
    "name": "chain[jix-plain]",
    "stats": {
-    "mean": 0.05015,
+    "mean": 0.045430000000000005,
     "rounds": 20
    },
    "extra_info": {
     "section": "chain",
     "case": "16 ops",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "chain[jix-plain]",
+   "stats": {
+    "mean": 0.08720200000000002,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "32 ops",
     "library": "jix-plain"
    }
   },
@@ -1719,7 +1743,7 @@
   {
    "name": "chain[jix]",
    "stats": {
-    "mean": 0.059000000000000004,
+    "mean": 0.053572,
     "rounds": 20
    },
    "extra_info": {
@@ -1731,7 +1755,7 @@
   {
    "name": "chain[jix]",
    "stats": {
-    "mean": 0.06254,
+    "mean": 0.05664,
     "rounds": 20
    },
    "extra_info": {
@@ -1743,7 +1767,7 @@
   {
    "name": "chain[jix]",
    "stats": {
-    "mean": 0.06844,
+    "mean": 0.061360000000000005,
     "rounds": 20
    },
    "extra_info": {
@@ -1755,7 +1779,7 @@
   {
    "name": "chain[jix]",
    "stats": {
-    "mean": 0.08024,
+    "mean": 0.068912,
     "rounds": 20
    },
    "extra_info": {
@@ -1767,12 +1791,24 @@
   {
    "name": "chain[jix]",
    "stats": {
-    "mean": 0.1062,
+    "mean": 0.08850000000000001,
     "rounds": 20
    },
    "extra_info": {
     "section": "chain",
     "case": "16 ops",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "chain[jix]",
+   "stats": {
+    "mean": 0.122838,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "32 ops",
     "library": "jix"
    }
   },

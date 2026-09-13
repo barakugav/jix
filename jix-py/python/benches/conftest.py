@@ -23,10 +23,10 @@ def record(benchmark, *, section, case, library, **extra):
 
 
 @functools.lru_cache(maxsize=8)
-def build(library, distribution, dtype, shape, block_shape=None, seed=0):
+def build(library, distribution, dtype, shape, block_shape=None, seed=0, read_size=None):
     """Build one library's array. Cached, because a single array usually feeds several cases.
 
-    `shape` and `block_shape` must be tuples - this is an lru_cache key.
+    `shape`, `block_shape` and `read_size` must be tuples - these are lru_cache keys.
     """
     data = make_data(distribution, shape, dtype=DTYPES[dtype], seed=seed)
-    return ARRAY_IMPLS[library].from_numpy(data, block_shape=block_shape)
+    return ARRAY_IMPLS[library].from_numpy(data, block_shape=block_shape, read_size=read_size)
