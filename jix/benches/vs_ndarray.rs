@@ -249,61 +249,91 @@ fn bench_op(c: &mut Criterion) {
 // report_rust_chain - the cost of intermediates, as the chain gets longer.
 // ---------------------------------------------------------------------------------------------
 
-// The same alternating multiply/add chain the Python suite runs, so the two halves agree. jix has
-// no scalar-operand operators, so each step is a `map` - which is still a separate lazy wrapper,
-// and that is exactly the thing being measured.
+// The same chain the Python suite runs, over array operands only - see `array_impls.CHAIN_STEPS`.
+// Starting from `a`, the cycle builds up the shape of `a*a + b*b + a*b`. No scalar constants: jix
+// reads a 0-stride operand through the same strided loop as a real array, so a scalar chain would
+// measure that rather than whether fusing pays off.
+//
+// Unrolled because each step produces a distinct storage type, so the chain cannot be built in a
+// loop. `.view()` on every use because the operand types are not `Clone`.
 macro_rules! jix_chain {
-    ($a:expr, 1) => {
-        $a.map(|x: f32| x * 2.0)
+    ($a:expr, $b:expr, 1) => {
+        $a.view() * $a.view()
     };
-    ($a:expr, 2) => {
-        jix_chain!($a, 1).map(|x: f32| x + 1.0)
+    ($a:expr, $b:expr, 2) => {
+        jix_chain!($a, $b, 1) + $b.view()
     };
-    ($a:expr, 3) => {
-        jix_chain!($a, 2).map(|x: f32| x * 0.5)
+    ($a:expr, $b:expr, 3) => {
+        jix_chain!($a, $b, 2) * $b.view()
     };
-    ($a:expr, 4) => {
-        jix_chain!($a, 3).map(|x: f32| x - 3.0)
+    ($a:expr, $b:expr, 4) => {
+        jix_chain!($a, $b, 3) - $a.view()
     };
-    ($a:expr, 5) => {
-        jix_chain!($a, 4).map(|x: f32| x * 2.0)
+    ($a:expr, $b:expr, 5) => {
+        jix_chain!($a, $b, 4) * $a.view()
     };
-    ($a:expr, 6) => {
-        jix_chain!($a, 5).map(|x: f32| x + 1.0)
+    ($a:expr, $b:expr, 6) => {
+        jix_chain!($a, $b, 5) + $b.view()
     };
-    ($a:expr, 7) => {
-        jix_chain!($a, 6).map(|x: f32| x * 0.5)
+    ($a:expr, $b:expr, 7) => {
+        jix_chain!($a, $b, 6) * $b.view()
     };
-    ($a:expr, 8) => {
-        jix_chain!($a, 7).map(|x: f32| x - 3.0)
+    ($a:expr, $b:expr, 8) => {
+        jix_chain!($a, $b, 7) - $a.view()
+    };
+    ($a:expr, $b:expr, 9) => {
+        jix_chain!($a, $b, 8) * $a.view()
+    };
+    ($a:expr, $b:expr, 10) => {
+        jix_chain!($a, $b, 9) + $b.view()
+    };
+    ($a:expr, $b:expr, 11) => {
+        jix_chain!($a, $b, 10) * $b.view()
+    };
+    ($a:expr, $b:expr, 12) => {
+        jix_chain!($a, $b, 11) - $a.view()
+    };
+    ($a:expr, $b:expr, 13) => {
+        jix_chain!($a, $b, 12) * $a.view()
+    };
+    ($a:expr, $b:expr, 14) => {
+        jix_chain!($a, $b, 13) + $b.view()
+    };
+    ($a:expr, $b:expr, 15) => {
+        jix_chain!($a, $b, 14) * $b.view()
+    };
+    ($a:expr, $b:expr, 16) => {
+        jix_chain!($a, $b, 15) - $a.view()
     };
 }
 
-/// `ndarray` has no lazy views, so every step allocates. That is the comparison.
-fn ndarray_chain(data: &ArrayD<f32>, steps: usize) -> ArrayD<f32> {
-    let mut out = data.mapv(|x| x * 2.0);
+/// `ndarray` in its efficient form: an owned left operand reuses its buffer, so this does not
+/// allocate per step - but it still makes one full read-write pass per step, which is what fusing
+/// the chain avoids.
+fn ndarray_chain(a: &ArrayD<f32>, b: &ArrayD<f32>, steps: usize) -> ArrayD<f32> {
+    let mut out = a * a;
     for index in 1..steps {
         out = match index % 4 {
-            1 => out.mapv(|x| x + 1.0),
-            2 => out.mapv(|x| x * 0.5),
-            3 => out.mapv(|x| x - 3.0),
-            _ => out.mapv(|x| x * 2.0),
+            1 => out + b,
+            2 => out * b,
+            3 => out - a,
+            _ => out * a,
         };
     }
     out
 }
 
 macro_rules! bench_chain_len {
-    ($group:expr, $steps:tt, $data:expr, $plain:expr, $array:expr) => {{
+    ($group:expr, $steps:tt, $a_data:expr, $b_data:expr, $a_plain:expr, $b_plain:expr, $a_arr:expr, $b_arr:expr) => {{
         let case = concat!($steps, "op");
         $group.bench_function(BenchmarkId::new("ndarray", case), |b| {
-            b.iter(|| ndarray_chain($data, $steps));
+            b.iter(|| ndarray_chain($a_data, $b_data, $steps));
         });
         $group.bench_function(BenchmarkId::new("jix-plain", case), |b| {
-            b.iter(|| jix_chain!($plain.view(), $steps).to_ndarray().unwrap());
+            b.iter(|| jix_chain!($a_plain, $b_plain, $steps).to_ndarray().unwrap());
         });
         $group.bench_function(BenchmarkId::new("jix", case), |b| {
-            b.iter(|| jix_chain!($array.view(), $steps).to_ndarray().unwrap());
+            b.iter(|| jix_chain!($a_arr, $b_arr, $steps).to_ndarray().unwrap());
         });
     }};
 }
@@ -312,13 +342,62 @@ fn bench_chain(c: &mut Criterion) {
     let mut group = c.benchmark_group("report_rust_chain");
     group.sample_size(SAMPLES);
     let data = create_data::<f32>(Profile::Smooth, &SHAPE, SEED);
+    let other = create_data::<f32>(Profile::Smooth, &SHAPE, SEED ^ 1);
     let plain = Array::plain_ndarray_ref(&data).unwrap();
+    let plain_other = Array::plain_ndarray_ref(&other).unwrap();
     let array = compact(&data, None);
+    let array_other = compact(&other, None);
 
-    bench_chain_len!(group, 1, &data, plain, array);
-    bench_chain_len!(group, 2, &data, plain, array);
-    bench_chain_len!(group, 4, &data, plain, array);
-    bench_chain_len!(group, 8, &data, plain, array);
+    bench_chain_len!(
+        group,
+        1,
+        &data,
+        &other,
+        plain,
+        plain_other,
+        array,
+        array_other
+    );
+    bench_chain_len!(
+        group,
+        2,
+        &data,
+        &other,
+        plain,
+        plain_other,
+        array,
+        array_other
+    );
+    bench_chain_len!(
+        group,
+        4,
+        &data,
+        &other,
+        plain,
+        plain_other,
+        array,
+        array_other
+    );
+    bench_chain_len!(
+        group,
+        8,
+        &data,
+        &other,
+        plain,
+        plain_other,
+        array,
+        array_other
+    );
+    bench_chain_len!(
+        group,
+        16,
+        &data,
+        &other,
+        plain,
+        plain_other,
+        array,
+        array_other
+    );
 
     // `normalize` mixes elementwise work with a reduction and a broadcast - the shape that is
     // awkward to hand-write as an iterator chain, which is jix's actual pitch in Rust.
