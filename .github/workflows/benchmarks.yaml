@@ -20,6 +20,10 @@ on:
         description: "Fast, low-fidelity run (quick dev cycle)"
         type: boolean
         default: false
+      all_rust_benches:
+        description: "Run the whole Criterion suite, not just the benches the report uses"
+        type: boolean
+        default: false
       rust_harness_args:
         description: "Extra args forwarded to jix/benches/run.py (space-separated)"
         type: string
@@ -94,7 +98,8 @@ jobs:
             --suites "${{ inputs.suites }}" \
             --rust-args "${{ inputs.rust_harness_args }}" \
             --py-args "${{ inputs.python_harness_args }}" \
-            ${{ inputs.fast && '--fast' || '' }}
+            ${{ inputs.fast && '--fast' || '' }} \
+            ${{ inputs.all_rust_benches && '--all-rust-benches' || '' }}
       - name: Run benchmarks (base ref)
         if: inputs.compare_to != ''
         run: |
@@ -103,7 +108,8 @@ jobs:
             --rust-args "${{ inputs.rust_harness_args }}" \
             --py-args "${{ inputs.python_harness_args }}" \
             --gitsha "${{ inputs.compare_to }}" \
-            ${{ inputs.fast && '--fast' || '' }}
+            ${{ inputs.fast && '--fast' || '' }} \
+            ${{ inputs.all_rust_benches && '--all-rust-benches' || '' }}
       - uses: actions/upload-artifact@v7
         with:
           name: bench-${{ matrix.os }}-${{ matrix.arch }}-${{ github.run_id }}
