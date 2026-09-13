@@ -169,23 +169,29 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 ## Operation chains
 
 Every jix operation returns a lazy view; the whole chain is encoded in the type and runs in a
-single pass when output is requested. NumPy evaluates eagerly and allocates a full intermediate per
-step, so the gap should grow with the length of the chain.
+single pass when output is requested. NumPy and `ndarray` make a full pass per step, so the gap
+should widen as the chain gets longer.
+
+Every step is a binary operation over two source arrays, starting from `a*a` - no scalar constants
+anywhere. Two reasons: a chain of scalar operations would measure jix's handling of a 0-stride
+operand rather than whether fusing pays off, and a chain of scalar constants can be constant-folded
+by a compiler into a single operation, which measures nothing at all.
 
 <!-- plot:chain -->
 
-NumPy's cost is linear in chain length because it makes one full pass per operation. jix's is
-nearly flat: read once, apply the fused chain in registers, write once. Since bars are relative to
-NumPy and NumPy is the one growing, jix's bars *fall* as the chain gets longer - that descent is
-the result. A single chain length would be a number with no mechanism behind it.
+A chain of N steps is N x 26M element-operations whether or not it is fused, so the total time
+grows either way. What fusing removes is the memory traffic: NumPy re-reads an operand and writes a
+full intermediate per step, while jix reads both arrays once and keeps the running value in
+registers. The bars therefore show whether jix's arithmetic throughput is high enough to convert
+that saved traffic into a win - which is why the descent across chain lengths is the result, and a
+single chain length would be a number with no mechanism behind it.
 
 `f32` only here; the integer chain behaves the same way and adds nothing but width.
 
-The `exp/log` case is the counter-example, and it is on the plot on purpose.
-`(exp(a) * 0.5 + 1).log()` is dominated by transcendental math rather than memory traffic, so
-NumPy's vectorized libm decides the outcome and the intermediates jix saves are noise beside it.
-Chains win when the operations are cheap and the array is large; they do not when one expensive
-kernel dominates.
+The `exp/log` case is the counter-example, and it is on the plot on purpose. `log(exp(a) + exp(b))`
+is dominated by transcendental math rather than memory traffic, so the libm implementation decides
+the outcome and the intermediates jix saves are noise beside it. Chains win when the operations are
+cheap and the array is large; they do not when one expensive kernel dominates.
 
 <!-- table:chain -->
 
@@ -202,10 +208,16 @@ makes this the cleanest evidence on the page.
 
 ### Rust
 
-For pure elementwise chains in Rust, plain iterators already fuse for free and hand-written
-iterator code will match jix. The comparison worth making is the other one - chains that mix
-elementwise work with reductions, broadcasts and axis permutations, which are awkward to write as
-iterators and which `ndarray` materializes at every step.
+The Rust half runs the same chain against `ndarray` in its efficient form - an owned left operand
+reuses its buffer, so it does not allocate per step, but it still makes one full read-write pass
+per step.
+
+The two `normalize` cases are a different shape: elementwise work mixed with a reduction and a
+broadcast. Read the axis-0 bar with care. The reduction sits inside the lazy pipeline, so producing
+an output element re-runs it over that element's whole column - O(N*M) rather than O(N+M) when the
+reduced axis is long. Over axis 1, where the reduced axis is 200 elements, jix comes out ahead. The
+rule is the one the `ops` module already gives for reshape: materialize a reduction before
+broadcasting it when the reduced axis is long.
 
 <!-- plot:rust_chain -->
 

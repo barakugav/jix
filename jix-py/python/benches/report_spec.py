@@ -76,8 +76,9 @@ def reduction_label(op, dtype, axis):
     return f"{op} {dtype}\n{'all' if axis is None else f'axis {axis}'}"
 
 
-# Number of cheap elementwise steps, then the transcendental chain that behaves differently.
-CHAIN_CASES = [1, 2, 4, 8, "exp/log"]
+# Number of elementwise steps, then the transcendental chain that behaves differently. Every step
+# is a binary op over the two source arrays - see `array_impls.CHAIN_STEPS` for why no scalars.
+CHAIN_CASES = [1, 2, 4, 8, 16, "exp/log"]
 
 
 def chain_label(steps):
@@ -156,7 +157,7 @@ SECTIONS = [
     {
         "key": "chain",
         "title": "Operation chains",
-        "subtitle": f"f32 {ARRAY}; cheap elementwise steps, plus one chain dominated by exp/log",
+        "subtitle": f"f32 {ARRAY} x2; array-operand steps, plus one chain dominated by exp/log",
         "baseline": "numpy",
         "metric": "time",
         "cases": [chain_label(case) for case in CHAIN_CASES],
@@ -165,7 +166,7 @@ SECTIONS = [
     {
         "key": "chain_memory",
         "title": "Operation chains: peak memory",
-        "subtitle": f"f32 {ARRAY}; peak RSS of a fresh subprocess running the same chain",
+        "subtitle": f"f32 {ARRAY} x2; peak RSS of a fresh subprocess running the same chain",
         "baseline": "numpy",
         "metric": "bytes",
         "cases": [chain_label(case) for case in CHAIN_CASES if case != "exp/log"],
@@ -210,11 +211,11 @@ SECTIONS = [
     {
         "key": "rust_chain",
         "title": "Rust: operation chains",
-        "subtitle": f"f32 {ARRAY}; ndarray allocates one intermediate per step",
+        "subtitle": f"f32 {ARRAY} x2; ndarray makes one full pass per step",
         "baseline": "ndarray",
         "metric": "time",
-        "cases": ["1 op", "2 ops", "4 ops", "8 ops", "normalize\naxis 0", "normalize\naxis 1"],
-        "case_ids": ["1op", "2op", "4op", "8op", "normalize_axis0", "normalize_axis1"],
+        "cases": ["1 op", "2 ops", "4 ops", "8 ops", "16 ops", "normalize\naxis 0", "normalize\naxis 1"],
+        "case_ids": ["1op", "2op", "4op", "8op", "16op", "normalize_axis0", "normalize_axis1"],
         "libraries": ["ndarray", "jix-plain", "jix"],
     },
     {

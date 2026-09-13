@@ -30,21 +30,30 @@ blosc2.nthreads = NTHREADS
 # jix and numpy run on one core.
 numexpr.set_num_threads(NTHREADS)
 
-# The cheap elementwise chain, as (operator, constant) steps. Alternating multiply and add keeps
-# each step memory-bound rather than arithmetic-bound, and stops a compiler folding the chain into
-# one operation. Every library runs exactly these steps.
+# The elementwise chain, built from array operands only - no scalar constants.
 #
-# The last step subtracts rather than adding a negative, because blosc2 gets
-# `(nested expr) + -3.0` wrong - it builds an expression string and mis-evaluates the negative
-# literal once the left side is itself an expression. `(nested expr) - 3.0` is correct, and so is
-# `bare array + -3.0`; only the nested form is broken.
-CHAIN_STEPS = [("mul", 2.0), ("add", 1.0), ("mul", 0.5), ("sub", 3.0)]
-
-APPLY = {
-    "mul": lambda value, constant: value * constant,
-    "add": lambda value, constant: value + constant,
-    "sub": lambda value, constant: value - constant,
-}
+# jix has no specialized loop for a 0-stride operand, so a scalar is read through the same strided
+# loop as a real array. A chain of scalar ops therefore measures that gap rather than the thing
+# this section is about, which is whether fusing a chain beats materializing each step.
+#
+# Reusing the two source arrays keeps every step a real binary op. NumPy re-reads an operand and
+# writes an intermediate per step; jix reads both arrays once and keeps the running value in
+# registers. That difference is the whole point.
+#
+# Starting from `out = a`, the cycle builds up the shape of an expression like `a*a + b*b + a*b`:
+# the first step is a square, and products of both operands accumulate from there. Squares are
+# spelled `a*a` rather than `a**2` on purpose - an exponent is a scalar operand, which is exactly
+# what this chain is avoiding.
+#
+# The cycle alternates multiplication with addition and subtraction to keep magnitudes bounded.
+# Repeated multiplication alone would decay toward denormals, which are slow on some CPUs and would
+# end up measuring that instead.
+CHAIN_STEPS = [
+    ("out * a", lambda out, a, b: out * a),
+    ("out + b", lambda out, a, b: out + b),
+    ("out * b", lambda out, a, b: out * b),
+    ("out - a", lambda out, a, b: out - a),
+]
 
 
 def chain_steps(count):
@@ -87,19 +96,24 @@ class AbstractArray:
         """Turn the result of a chain into a NumPy array."""
         raise NotImplementedError()
 
-    def chain(self, count):
-        """`count` steps of the canonical chain.
+    def chain(self, other, count):
+        """`count` steps of the canonical chain over two arrays.
 
         Shared rather than reimplemented per library on purpose: the arms have to run identical
         arithmetic, and four copies of this loop is four chances for them to stop doing so.
         """
-        out = self._operand()
-        for step, constant in chain_steps(count):
-            out = APPLY[step](out, constant)
+        a, b = self._operand(), other._operand()
+        out = a
+        for _, step in chain_steps(count):
+            out = step(out, a, b)
         return self._materialize(out)
 
-    def exp_log(self):
-        """The transcendental chain `log(exp(a) * 0.5 + 1)` - dominated by libm, not by memory."""
+    def exp_log(self, other):
+        """`log(exp(a) + exp(b))` - dominated by libm rather than by memory traffic.
+
+        The counter-example to the chain results: when one expensive kernel decides the outcome,
+        the intermediates a fused pipeline saves stop mattering.
+        """
         raise NotImplementedError()
 
     def stored_bytes(self):
@@ -128,8 +142,8 @@ class NumpyArray(AbstractArray):
     def _materialize(self, value):
         return value
 
-    def exp_log(self):
-        return np.log(np.exp(self.raw) * 0.5 + 1.0)
+    def exp_log(self, other):
+        return np.log(np.exp(self.raw) + np.exp(other.raw))
 
     def stored_bytes(self):
         return int(self.raw.nbytes)
@@ -170,8 +184,8 @@ class JixArray(AbstractArray):
     def _materialize(self, value):
         return np.asarray(value.numpy())
 
-    def exp_log(self):
-        return np.asarray((self.raw.exp() * 0.5 + 1.0).log().numpy())
+    def exp_log(self, other):
+        return np.asarray((self.raw.exp() + other.raw.exp()).log().numpy())
 
     def stored_bytes(self):
         buf = io.BytesIO()
@@ -242,8 +256,8 @@ class Blosc2Array(AbstractArray):
     def _materialize(self, value):
         return np.asarray(value[:])
 
-    def exp_log(self):
-        return np.asarray(blosc2.log(blosc2.exp(self.raw) * 0.5 + 1.0)[:])
+    def exp_log(self, other):
+        return np.asarray(blosc2.log(blosc2.exp(self.raw) + blosc2.exp(other.raw))[:])
 
     def stored_bytes(self):
         return int(self.raw.schunk.cbytes)
@@ -304,9 +318,8 @@ class ZarrArray(AbstractArray):
     def _materialize(self, value):
         return value
 
-    def exp_log(self):
-        dense = self._dense()
-        return np.log(np.exp(dense) * 0.5 + 1.0)
+    def exp_log(self, other):
+        return np.log(np.exp(self._dense()) + np.exp(other._dense()))
 
     def stored_bytes(self):
         return int(self.raw.nbytes_stored())

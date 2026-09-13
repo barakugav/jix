@@ -79,13 +79,16 @@ def main(argv=None):
     parser.add_argument("--steps", required=True, type=int, help="number of cheap elementwise steps")
     args = parser.parse_args(argv)
 
-    data = make_data("smooth", report_spec.SHAPE, dtype=DTYPES["f32"], seed=0)
-    arr = ARRAY_IMPLS[args.library].from_numpy(data)
-    del data  # the source is not part of what we are measuring
+    impl = ARRAY_IMPLS[args.library]
+    arrays = []
+    for seed in (0, 1):
+        data = make_data("smooth", report_spec.SHAPE, dtype=DTYPES["f32"], seed=seed)
+        arrays.append(impl.from_numpy(data))
+        del data  # the source ndarray is not part of what we are measuring
     gc.collect()
 
     with PeakSampler() as sampler:
-        out = arr.chain(args.steps)
+        out = arrays[0].chain(arrays[1], args.steps)
         assert out is not None
     print(json.dumps({"peak_rss_bytes": sampler.peak, "sampled": SAMPLED}))
     return sampler.peak

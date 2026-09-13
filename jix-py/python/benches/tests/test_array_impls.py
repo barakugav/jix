@@ -53,15 +53,18 @@ def test_uncompressed_stored_size_is_raw_size(name):
 # Every operation the report measures, as (method name, args). This is the cross-check that the
 # libraries are being asked to do the same work - a benchmark where one arm quietly does less is
 # worse than no benchmark.
-OPERATIONS = [
+UNARY_OPERATIONS = [
     ("negate", ()),
     *[("reduce", (op, axis)) for op in ("sum", "std") for axis in (0, 1, None)],
-    *[("chain", (count,)) for count in (1, 2, 4, 8)],
+]
+BINARY_OPERATIONS = [
+    ("add", ()),
+    *[("chain", (count,)) for count in (1, 2, 4, 8, 16)],
     ("exp_log", ()),
 ]
 
 
-@pytest.mark.parametrize("method,args", OPERATIONS, ids=lambda v: str(v))
+@pytest.mark.parametrize("method,args", UNARY_OPERATIONS, ids=lambda v: str(v))
 @pytest.mark.parametrize("name", [n for n in LIBRARIES if n != "numpy"])
 def test_operations_agree_with_numpy(name, method, args):
     _, arr = build(name, dtype=np.float32)
@@ -71,14 +74,25 @@ def test_operations_agree_with_numpy(name, method, args):
     assert np.allclose(got, want, rtol=1e-4, atol=1e-4), f"{name} disagrees with numpy on {method}{args}"
 
 
+@pytest.mark.parametrize("method,args", BINARY_OPERATIONS, ids=lambda v: str(v))
 @pytest.mark.parametrize("name", [n for n in LIBRARIES if n != "numpy"])
-def test_add_agrees_with_numpy(name):
+def test_binary_operations_agree_with_numpy(name, method, args):
     lhs, rhs = build(name, seed=0)[1], build(name, seed=1)[1]
     ref_l, ref_r = build("numpy", seed=0)[1], build("numpy", seed=1)[1]
-    assert np.allclose(lhs.add(rhs), ref_l.add(ref_r), rtol=1e-4, atol=1e-4)
+    got = getattr(lhs, method)(rhs, *args)
+    want = getattr(ref_l, method)(ref_r, *args)
+    assert np.allclose(got, want, rtol=1e-4, atol=1e-4), f"{name} disagrees with numpy on {method}{args}"
 
 
 def test_chain_steps_cycle():
     assert len(chain_steps(8)) == 8
     assert chain_steps(8)[:4] == chain_steps(4)
     assert chain_steps(8)[4:] == chain_steps(4)
+
+
+def test_chain_uses_no_scalar_operands():
+    """A scalar step would measure jix's 0-stride loop, not whether fusing a chain pays off."""
+    a, b = np.full((4, 3), 2.0), np.full((4, 3), 3.0)
+    for _, step in chain_steps(len(chain_steps(4))):
+        # Every step must accept two arrays and use them; a scalar-constant step would not.
+        assert step(a, a, b).shape == a.shape
