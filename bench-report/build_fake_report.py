@@ -159,25 +159,6 @@ def write_fake_python_json(path, platform):
     return path
 
 
-def render_report(rows, template, out_path, plots_dir):
-    """Expand `<!-- plot:KEY -->` and `<!-- table:KEY -->` markers in a template.
-
-    Keeps the report's numbers generated rather than typed: the tables come from the same rows the
-    plots do, so a table can never drift from the chart above it.
-    """
-    text = Path(template).read_text()
-    for section in report_spec.SECTIONS:
-        key = section["key"]
-        rel = f"{Path(plots_dir).name}/{key}.png"
-        text = text.replace(f"<!-- plot:{key} -->", f"![{section['title']}]({rel})")
-        text = text.replace(f"<!-- table:{key} -->", report_bars.markdown_table(rows, section))
-    leftover = [line for line in text.splitlines() if "<!-- plot:" in line or "<!-- table:" in line]
-    if leftover:
-        raise SystemExit(f"unknown markers in {template}: {leftover}")
-    Path(out_path).write_text(text)
-    return out_path
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Render report plots from fake benchmark output.")
     parser.add_argument("--out", type=Path, default=Path(__file__).parent / "plots")
@@ -198,7 +179,12 @@ def main(argv=None):
     if args.template.exists():
         # Tables carry the first platform only; the plots carry the rest.
         single = [row for row in rows if row["platform"] == platforms[0]]
-        print(render_report(single, args.template, args.report, args.out))
+        banner = (
+            "> **DRAFT - these numbers are invented.** Rendered by `build_fake_report.py` so the\n"
+            "> plot style can be worked on without waiting for a benchmark run. Do not quote\n"
+            "> anything here."
+        )
+        print(report_bars.render_report(single, args.template, args.report, args.out, report_spec.SECTIONS, banner))
 
 
 if __name__ == "__main__":

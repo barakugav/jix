@@ -47,9 +47,10 @@ def main(argv=None):
     if not runs:
         raise SystemExit(f"no meta.json under {args.artifacts} - is that the download directory?")
 
-    rows, platforms = [], []
+    rows, platforms, metas = [], [], {}
     for meta_path in runs:
         platform, run_rows, meta = load_run(meta_path.parent)
+        metas[platform] = meta
         if not run_rows:
             print(f"warning: {meta_path.parent} has no results, skipping")
             continue
@@ -73,7 +74,9 @@ def main(argv=None):
 
     # Tables carry the first platform only; the plots carry the rest.
     single = [row for row in rows if row["platform"] == ordered[0]]
-    print(report_bars.render_report(single, args.template, args.report, args.out, report_spec.SECTIONS))
+    stamp = ", ".join(f"{p} ({metas[p]['platform']['cpu_model']})" for p in ordered)
+    banner = f"*Measured on {stamp}. Benched commit `{metas[ordered[0]]['sha'][:8]}`.*"
+    print(report_bars.render_report(single, args.template, args.report, args.out, report_spec.SECTIONS, banner))
 
 
 if __name__ == "__main__":

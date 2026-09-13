@@ -27,6 +27,10 @@ def run_suite(
         shutil.rmtree(dst)  # a rerun must start clean (shutil.copytree below refuses an existing dir)
     dst.mkdir(parents=True)
     if suites in ("both", "rust"):
+        # Criterion keeps results from previous runs, and the cached `target` dir on CI can carry
+        # them across commits. A benchmark that failed to run would otherwise be reported with
+        # whatever it measured last time.
+        shutil.rmtree(repo / "jix" / "target" / "criterion", ignore_errors=True)
         (dst / "rust").mkdir(parents=True, exist_ok=True)
         subprocess.check_call(
             [
