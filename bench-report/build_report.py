@@ -41,6 +41,7 @@ def main(argv=None):
     parser.add_argument("--out", type=Path, default=Path(__file__).parent / "plots")
     parser.add_argument("--template", type=Path, default=Path(__file__).parent / "report.template.md")
     parser.add_argument("--report", type=Path, default=Path(__file__).parent / "report.md")
+    parser.add_argument("--note", default="", help="extra provenance line, e.g. when meta predates --fast")
     args = parser.parse_args(argv)
 
     runs = sorted(args.artifacts.glob("**/meta.json"))
@@ -76,6 +77,9 @@ def main(argv=None):
     single = [row for row in rows if row["platform"] == ordered[0]]
     stamp = ", ".join(f"{p} ({metas[p]['platform']['cpu_model']})" for p in ordered)
     banner = f"*Measured on {stamp}. Benched commit `{metas[ordered[0]]['sha'][:8]}`.*"
+    if any(meta.get("fast") for meta in metas.values()) or args.note:
+        note = args.note or "a --fast run: reduced sampling, enough to check the pipeline, not to quote"
+        banner = f"> **These numbers are low-fidelity** - {note}.\n\n{banner}"
     print(report_bars.render_report(single, args.template, args.report, args.out, report_spec.SECTIONS, banner))
 
 

@@ -27,3 +27,6 @@ scripts/bench/.results/
 
 jix/Cargo.lock
 jix-macros/Cargo.lock
+
+# downloaded benchmark artifacts (see bench-report/README.md)
+/bench-artifacts/

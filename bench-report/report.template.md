@@ -204,9 +204,15 @@ cheap and the array is large; they do not when one expensive kernel dominates.
 <!-- plot:chain_memory -->
 
 Peak RSS of a fresh subprocess running the same chain, so NumPy's C-level allocations are included.
-jix is flat at input plus output whatever the chain does in between, and the compact arm is flat
-and lower still because the input is never held uncompressed. Memory has no noise floor, which
-makes this the cleanest evidence on the page.
+
+All three are flat across chain length, and that is worth being precise about: NumPy allocates an
+intermediate per step but frees each one as the next is produced, so its peak is the two inputs
+plus one live intermediate, not a growing pile. Avoiding intermediates entirely is therefore worth
+a fifth, not a multiple.
+
+The real difference is what the arrays cost to hold. The compact arm keeps its inputs compressed
+for the whole computation, and that is where the factor comes from. Memory has no noise floor,
+which makes this the cleanest measurement on the page.
 
 <!-- table:chain_memory -->
 
@@ -216,16 +222,29 @@ The Rust half runs the same chain against `ndarray` in its efficient form - an o
 reuses its buffer, so it does not allocate per step, but it still makes one full read-write pass
 per step.
 
-The two `normalize` cases are a different shape: elementwise work mixed with a reduction and a
-broadcast. Read the axis-0 bar with care. The reduction sits inside the lazy pipeline, so producing
-an output element re-runs it over that element's whole column - O(N*M) rather than O(N+M) when the
-reduced axis is long. Over axis 1, where the reduced axis is 200 elements, jix comes out ahead. The
-rule is the one the `ops` module already gives for reshape: materialize a reduction before
-broadcasting it when the reduced axis is long.
-
 <!-- plot:rust_chain -->
 
 <!-- table:rust_chain -->
+
+---
+
+## A reduction inside a broadcast
+
+`a / a.std(axis)`, with the reduction broadcast back over the array, is a different shape from an
+elementwise chain, and it is the case where laziness costs rather than pays.
+
+<!-- plot:rust_normalize -->
+
+The reduction sits inside the lazy pipeline, so producing an output element re-runs it over that
+element's whole column: O(N*M) instead of O(N+M). Over axis 0 the reduced axis is 130000 elements
+long and the result is what the plot shows. Over axis 1 it is 200 elements and jix comes out ahead.
+
+This is not a kernel deficiency, it is what fusing a broadcast reduction means, and the remedy is
+the one the `ops` module already gives for reshape: materialize the reduction before broadcasting
+it when the reduced axis is long. It is on the page because a caller who writes this expression
+without knowing that will pay for it.
+
+<!-- table:rust_normalize -->
 
 ---
 

@@ -1,6 +1,6 @@
-> **DRAFT - these numbers are invented.** Rendered by `build_fake_report.py` so the
-> plot style can be worked on without waiting for a benchmark run. Do not quote
-> anything here.
+> **These numbers are low-fidelity** - a --fast validation run: reduced sampling, enough to check the pipeline, not to quote.
+
+*Measured on linux-x86_64 (AMD EPYC 7763 64-Core Processor), linux-aarch64 (aarch64). Benched commit `94f72a73`.*
 
 # jix benchmarks
 
@@ -67,12 +67,12 @@ so Blosc2 is shown at its best as well as at its default.
 
 | case | numpy | jix-plain | jix | blosc2 | blosc2-chunked | zarr |
 |---|---|---|---|---|---|---|
-| block 16x200 read 1x200 800 B | 472 ns | 590 ns | 1.89 us | 89.68 us | 40.12 us | 389.40 us |
-| block 16x200 read 16x200 13 KB | 708 ns | 826 ns | 3.07 us | 94.40 us | 42.48 us | 401.20 us |
-| block 64x200 read 16x16 1 KB | 413 ns | 531 ns | 4.25 us | 61.36 us | 49.56 us | 396.48 us |
-| block 64x200 read 256x200 205 KB | 14.16 us | 15.34 us | 30.68 us | 151.04 us | 112.10 us | 495.60 us |
-| block 64x200 read 4096x200 3 MB | 224.20 us | 236.00 us | 448.40 us | 1.04 ms | 920.40 us | 1.42 ms |
-| block 64x200 read whole array 104 MB | 6.14 ms | 6.49 ms | 14.16 ms | 27.14 ms | 25.96 ms | 47.20 ms |
+| block 16x200 read 1x200 800 B | 720 ns | 842 ns | 2.63 us | 87.49 us | 24.53 us | 464.17 us |
+| block 16x200 read 16x200 13 KB | 1.34 us | 1.49 us | 4.44 us | 89.71 us | 26.48 us | 646.75 us |
+| block 64x200 read 16x16 1 KB | 909 ns | 977 ns | 7.99 us | 46.40 us | 28.14 us | 518.90 us |
+| block 64x200 read 256x200 205 KB | 10.36 us | 10.49 us | 30.28 us | 71.83 us | 52.16 us | 1.55 ms |
+| block 64x200 read 4096x200 3 MB | 141.63 us | 142.87 us | 361.85 us | 432.85 us | 383.34 us | 15.29 ms |
+| block 64x200 read whole array 104 MB | 13.07 ms | 13.53 ms | 19.12 ms | 24.96 ms | 24.27 ms | 472.53 ms |
 
 </details>
 
@@ -85,9 +85,9 @@ so Blosc2 is shown at its best as well as at its default.
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| block 32x32 read 32x32 4 KB | 330 ns | 354 ns | 1.89 us |
-| block 32x32 read 1x200 800 B | 413 ns | 448 ns | 12.39 us |
-| block 512x32 read 128x200 102 KB | 12.98 us | 13.57 us | 49.56 us |
+| block 32x32 read 32x32 4 KB | 4.87 us | 387 ns | 8.87 us |
+| block 32x32 read 1x200 800 B | 135 ns | 173 ns | 15.90 us |
+| block 512x32 read 128x200 102 KB | 4.65 us | 5.16 us | 262.83 us |
 
 </details>
 
@@ -111,9 +111,9 @@ same numbers.
 | case | numpy | jix-noshuffle | jix | blosc2-noshuffle | blosc2 | zarr |
 |---|---|---|---|---|---|---|
 | random | 1.0x smaller | 1.0x smaller | 1.0x smaller | 1.0x smaller | 1.0x smaller | 1.0x smaller |
-| smooth | 1.0x smaller | 3.5x smaller | 3.9x smaller | 3.4x smaller | 3.7x smaller | 3.7x smaller |
-| 16 unique | 1.0x smaller | 24.0x smaller | 31.0x smaller | 22.5x smaller | 28.4x smaller | 28.4x smaller |
-| 4 unique | 1.0x smaller | 46.0x smaller | 55.2x smaller | 41.0x smaller | 48.6x smaller | 48.6x smaller |
+| smooth | 1.0x smaller | 753.7x smaller | 769.3x smaller | 720.5x smaller | 668.5x smaller | 649.2x smaller |
+| 16 unique | 1.0x smaller | 4.8x smaller | 7.9x smaller | 4.5x smaller | 7.6x smaller | 7.6x smaller |
+| 4 unique | 1.0x smaller | 7.3x smaller | 12.2x smaller | 7.7x smaller | 12.7x smaller | 12.7x smaller |
 
 </details>
 
@@ -131,10 +131,10 @@ behind the distribution cases in the next section.
 
 | case | jix-noshuffle | jix | blosc2-noshuffle | blosc2 | zarr |
 |---|---|---|---|---|---|
-| random | 157 ms | 224 ms | 151 ms | 231 ms | 637 ms |
-| smooth | 192 ms | 157 ms | 208 ms | 173 ms | 720 ms |
-| 16 unique | 104 ms | 87 ms | 120 ms | 104 ms | 496 ms |
-| 4 unique | 84 ms | 73 ms | 99 ms | 85 ms | 460 ms |
+| random | 62 ms | 82 ms | 106 ms | 194 ms | 901 ms |
+| smooth | 23 ms | 49 ms | 20 ms | 47 ms | 896 ms |
+| 16 unique | 376 ms | 92 ms | 1208 ms | 413 ms | 1029 ms |
+| 4 unique | 328 ms | 205 ms | 1084 ms | 446 ms | 1024 ms |
 
 </details>
 
@@ -156,8 +156,8 @@ it is not being billed for a pass jix skips.
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| f32 | 2.55 ms | 2.58 ms | 58.53 ms | 522.74 ms | 36.34 ms |
-| i32 | 2.61 ms | 2.66 ms | 53.10 ms | 495.60 ms | 35.40 ms |
+| f32 | 11.37 ms | 13.03 ms | 69.13 ms | 104.46 ms | 79.11 ms |
+| i32 | 12.79 ms | 16.19 ms | 22.68 ms | 69.23 ms | 56.80 ms |
 
 </details>
 
@@ -179,10 +179,10 @@ of the work.
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| random | 2.55 ms | 2.58 ms | 113.75 ms | 601.80 ms | 51.92 ms |
-| smooth | 2.55 ms | 2.58 ms | 58.53 ms | 522.74 ms | 36.34 ms |
-| 16 unique | 2.55 ms | 2.58 ms | 40.71 ms | 247.80 ms | 24.78 ms |
-| 4 unique | 2.55 ms | 2.58 ms | 25.13 ms | 182.90 ms | 18.88 ms |
+| random | 12.22 ms | 13.88 ms | 67.49 ms | 102.04 ms | 71.31 ms |
+| smooth | 11.55 ms | 12.66 ms | 69.83 ms | 104.45 ms | 79.59 ms |
+| 16 unique | 12.63 ms | 13.27 ms | 90.71 ms | 139.43 ms | 88.62 ms |
+| 4 unique | 12.28 ms | 12.90 ms | 96.30 ms | 141.46 ms | 87.23 ms |
 
 </details>
 
@@ -199,8 +199,8 @@ The same shape as negate with two operands instead of one.
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| f32 | 3.41 ms | 3.40 ms | 116.94 ms | 661.98 ms | 69.86 ms |
-| i32 | 3.48 ms | 3.47 ms | 110.92 ms | 637.20 ms | 68.44 ms |
+| f32 | 15.13 ms | 16.79 ms | 130.72 ms | 167.22 ms | 152.62 ms |
+| i32 | 15.90 ms | 19.53 ms | 35.32 ms | 78.05 ms | 155.76 ms |
 
 </details>
 
@@ -228,13 +228,13 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| sum f32 axis 0 | 2.75 ms | 2.40 ms | 58.53 ms | 40.95 ms | 36.46 ms |
-| sum f32 axis 1 | 4.68 ms | 1.83 ms | 57.82 ms | 42.83 ms | 38.82 ms |
-| sum f32 all | 3.79 ms | 1.55 ms | 57.35 ms | 46.73 ms | 37.17 ms |
-| sum i32 axis 0 | 13.81 ms | 9.57 ms | 67.50 ms | 24.07 ms | 43.78 ms |
-| sum i32 all | 5.18 ms | 4.65 ms | 63.65 ms | 16.76 ms | 34.93 ms |
-| std f32 axis 0 | 13.05 ms | 17.04 ms | 72.81 ms | 86.02 ms | 49.44 ms |
-| std f32 all | 12.67 ms | 41.08 ms | 97.23 ms | 87.32 ms | 46.14 ms |
+| sum f32 axis 0 | 6.83 ms | 6.38 ms | 61.27 ms | 64.12 ms | 81.58 ms |
+| sum f32 axis 1 | 8.01 ms | 6.57 ms | 61.63 ms | 66.58 ms | 82.54 ms |
+| sum f32 all | 6.71 ms | 5.50 ms | 60.31 ms | 67.62 ms | 77.55 ms |
+| sum i32 axis 0 | 12.30 ms | 8.26 ms | 18.77 ms | 22.75 ms | 65.14 ms |
+| sum i32 all | 9.24 ms | 7.21 ms | 16.91 ms | 25.05 ms | 59.63 ms |
+| std f32 axis 0 | 35.48 ms | 41.42 ms | 98.45 ms | 176.38 ms | 109.11 ms |
+| std f32 all | 33.26 ms | 121.73 ms | 182.49 ms | 156.46 ms | 104.73 ms |
 
 </details>
 
@@ -247,13 +247,13 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| negate f32 | 12.98 ms | 13.22 ms | 58.41 ms |
-| negate i32 | 12.86 ms | 13.10 ms | 53.10 ms |
-| add f32 | 19.00 ms | 19.35 ms | 116.82 ms |
-| add i32 | 18.88 ms | 19.23 ms | 112.10 ms |
-| sum f32 axis 0 | 8.38 ms | 6.37 ms | 57.82 ms |
-| sum f32 axis 1 | 6.14 ms | 5.78 ms | 56.64 ms |
-| sum i32 all | 8.02 ms | 3.30 ms | 22.42 ms |
+| negate f32 | 13.69 ms | 13.81 ms | 53.13 ms |
+| negate i32 | 12.94 ms | 13.93 ms | 42.49 ms |
+| add f32 | 16.07 ms | 17.15 ms | 97.65 ms |
+| add i32 | 14.84 ms | 16.36 ms | 76.16 ms |
+| sum f32 axis 0 | 13.07 ms | 6.39 ms | 44.17 ms |
+| sum f32 axis 1 | 5.99 ms | 6.68 ms | 44.44 ms |
+| sum i32 all | 5.12 ms | 7.09 ms | 36.35 ms |
 
 </details>
 
@@ -297,13 +297,13 @@ cheap and the array is large; they do not when one expensive kernel dominates.
 
 | case | numpy | jix-plain | jix |
 |---|---|---|---|
-| 1 op | 2.83 ms | 3.07 ms | 53.57 ms |
-| 2 ops | 6.14 ms | 6.37 ms | 56.64 ms |
-| 4 ops | 12.86 ms | 14.40 ms | 61.36 ms |
-| 8 ops | 26.90 ms | 24.19 ms | 68.91 ms |
-| 16 ops | 60.89 ms | 45.43 ms | 88.50 ms |
-| 32 ops | 124.02 ms | 87.20 ms | 122.84 ms |
-| exp/log | 134.28 ms | 136.76 ms | 194.70 ms |
+| 1 op | 12.36 ms | 13.94 ms | 125.82 ms |
+| 2 ops | 27.97 ms | 22.31 ms | 187.35 ms |
+| 4 ops | 57.96 ms | 32.36 ms | 305.53 ms |
+| 8 ops | 116.56 ms | 49.61 ms | 527.52 ms |
+| 16 ops | 236.31 ms | 83.17 ms | 969.28 ms |
+| 32 ops | 488.79 ms | 152.44 ms | 1.87 s |
+| exp/log | 140.82 ms | 224.97 ms | 339.82 ms |
 
 </details>
 
@@ -312,21 +312,27 @@ cheap and the array is large; they do not when one expensive kernel dominates.
 ![Operation chains: peak memory](plots/chain_memory.png)
 
 Peak RSS of a fresh subprocess running the same chain, so NumPy's C-level allocations are included.
-jix is flat at input plus output whatever the chain does in between, and the compact arm is flat
-and lower still because the input is never held uncompressed. Memory has no noise floor, which
-makes this the cleanest evidence on the page.
+
+All three are flat across chain length, and that is worth being precise about: NumPy allocates an
+intermediate per step but frees each one as the next is produced, so its peak is the two inputs
+plus one live intermediate, not a growing pile. Avoiding intermediates entirely is therefore worth
+a fifth, not a multiple.
+
+The real difference is what the arrays cost to hold. The compact arm keeps its inputs compressed
+for the whole computation, and that is where the factor comes from. Memory has no noise floor,
+which makes this the cleanest measurement on the page.
 
 <details>
 <summary>Absolute numbers</summary>
 
 | case | numpy | jix-plain | jix |
 |---|---|---|---|
-| 1 op | 322 MB | 318 MB | 180 MB |
-| 2 ops | 428 MB | 318 MB | 180 MB |
-| 4 ops | 430 MB | 318 MB | 180 MB |
-| 8 ops | 432 MB | 318 MB | 180 MB |
-| 16 ops | 434 MB | 318 MB | 180 MB |
-| 32 ops | 436 MB | 318 MB | 180 MB |
+| 1 op | 385 MB | 382 MB | 193 MB |
+| 2 ops | 480 MB | 382 MB | 194 MB |
+| 4 ops | 484 MB | 382 MB | 194 MB |
+| 8 ops | 484 MB | 382 MB | 194 MB |
+| 16 ops | 484 MB | 382 MB | 193 MB |
+| 32 ops | 484 MB | 382 MB | 194 MB |
 
 </details>
 
@@ -336,13 +342,6 @@ The Rust half runs the same chain against `ndarray` in its efficient form - an o
 reuses its buffer, so it does not allocate per step, but it still makes one full read-write pass
 per step.
 
-The two `normalize` cases are a different shape: elementwise work mixed with a reduction and a
-broadcast. Read the axis-0 bar with care. The reduction sits inside the lazy pipeline, so producing
-an output element re-runs it over that element's whole column - O(N*M) rather than O(N+M) when the
-reduced axis is long. Over axis 1, where the reduced axis is 200 elements, jix comes out ahead. The
-rule is the one the `ops` module already gives for reshape: materialize a reduction before
-broadcasting it when the reduced axis is long.
-
 ![Rust: operation chains](plots/rust_chain.png)
 
 <details>
@@ -350,13 +349,39 @@ broadcasting it when the reduced axis is long.
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| 1 op | 3.07 ms | 3.07 ms | 47.20 ms |
-| 2 ops | 6.14 ms | 6.02 ms | 50.74 ms |
-| 4 ops | 11.68 ms | 11.80 ms | 56.64 ms |
-| 8 ops | 24.66 ms | 23.60 ms | 68.44 ms |
-| 16 ops | 49.56 ms | 47.20 ms | 92.04 ms |
-| normalize axis 0 | 7.32 ms | 128.62 ms | 468.46 ms |
-| normalize axis 1 | 99.24 ms | 57.11 ms | 143.02 ms |
+| 1 op | 13.94 ms | 14.69 ms | 90.93 ms |
+| 2 ops | 22.32 ms | 17.21 ms | 134.37 ms |
+| 4 ops | 39.09 ms | 18.66 ms | 216.06 ms |
+| 8 ops | 72.89 ms | 22.71 ms | 377.45 ms |
+| 16 ops | 136.14 ms | 36.68 ms | 702.41 ms |
+
+</details>
+
+---
+
+## A reduction inside a broadcast
+
+`a / a.std(axis)`, with the reduction broadcast back over the array, is a different shape from an
+elementwise chain, and it is the case where laziness costs rather than pays.
+
+![Rust: normalize, a reduction inside a broadcast](plots/rust_normalize.png)
+
+The reduction sits inside the lazy pipeline, so producing an output element re-runs it over that
+element's whole column: O(N*M) instead of O(N+M). Over axis 0 the reduced axis is 130000 elements
+long and the result is what the plot shows. Over axis 1 it is 200 elements and jix comes out ahead.
+
+This is not a kernel deficiency, it is what fusing a broadcast reduction means, and the remedy is
+the one the `ops` module already gives for reshape: materialize the reduction before broadcasting
+it when the reduced axis is long. It is on the page because a caller who writes this expression
+without knowing that will pay for it.
+
+<details>
+<summary>Absolute numbers</summary>
+
+| case | ndarray | jix-plain | jix |
+|---|---|---|---|
+| normalize axis 0 | 103.22 ms | 8.32 s | 16.76 s |
+| normalize axis 1 | 139.82 ms | 131.06 ms | 211.82 ms |
 
 </details>
 
@@ -382,10 +407,10 @@ specific to layouts `ndarray` cannot classify, not a general claim about strided
 
 | case | ndarray | jix-plain |
 |---|---|---|
-| 3-D rotate [1,2,0] f32 | 103.84 ms | 14.16 ms |
-| 3-D rotate [1,2,0] i32 | 101.48 ms | 13.92 ms |
-| 3-D reverse [2,1,0] f32 | 14.16 ms | 14.40 ms |
-| 2-D transpose f32 | 2.36 ms | 2.24 ms |
+| 3-D rotate [1,2,0] f32 | 28.76 ms | 36.14 ms |
+| 3-D rotate [1,2,0] i32 | 29.31 ms | 38.27 ms |
+| 3-D reverse [2,1,0] f32 | 29.23 ms | 37.69 ms |
+| 2-D transpose f32 | 199.91 us | 251.82 us |
 
 </details>
 
