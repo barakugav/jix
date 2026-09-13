@@ -17,3 +17,4 @@
 - reduce binary size and improve compile times
 - local_prelude
 - document archive compatibility
+- remove proc-macro-crate dependency
