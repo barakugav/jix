@@ -226,9 +226,10 @@ pay for the optimization benches.
 
 ---
 
-## Open questions
+## Status
 
-1. The renderer, the spec and the fake-data harness are in place; the plots in `report.md` are real
-   output from fake numbers. Style feedback on those is the next thing needed.
-2. `report_spec.py` declares every case label. The benchmarks do not tag themselves with those
-   labels yet - that is the next chunk of work, and it touches every Python bench file.
+Everything in this plan is implemented. The Python suite and `jix/benches/vs_ndarray.rs` both
+parametrize themselves from `report_spec.py`, so the benchmarks and the plots cannot disagree
+about what a case is. `bench-report/README.md` is the runbook.
+
+What has not happened yet: a real run on CI. The numbers in `report.md` are still fake.

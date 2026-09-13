@@ -92,5 +92,9 @@ harness = false
 name = "normalize"
 harness = false
 
+[[bench]]
+name = "vs_ndarray"
+harness = false
+
 [lib]
 bench = false

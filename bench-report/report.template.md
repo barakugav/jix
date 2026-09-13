@@ -8,8 +8,8 @@ jix is a multi-dimensional array library with block-compressed storage and lazy 
 This page measures both against the libraries you would otherwise reach for: `ndarray` in Rust,
 NumPy, Blosc2 and Zarr in Python.
 
-**Machine.** Apple M2 Pro, 10 cores, 32 GB, macOS 15.6; plus linux-x86_64 and linux-aarch64 CI
-runners. rustc 1.89.0, Python 3.13, numpy 2.3.1, blosc2 4.9.1, zarr 3.0.6.
+**Machines.** GitHub-hosted runners: `ubuntu-24.04` (x86_64) and `ubuntu-24.04-arm` (aarch64).
+rustc 1.89.0, Python 3.13, numpy 2.3.1, blosc2 4.9.1, zarr 3.0.6.
 
 **Everything is single-threaded.** jix has no threading. Blosc2, Zarr and numexpr are each pinned to
 one thread, and NumPy's elementwise and reduction kernels are single-threaded regardless. A
@@ -148,7 +148,7 @@ would be choosing which result to show.
 
 jix's reduction kernels read in whatever layout the source already has rather than forcing a
 canonical order, and they vectorize integer accumulation that NumPy leaves scalar. **Compare the
-three platform rows before reading anything into the integer numbers**: jix's kernels are tuned on
+two platform rows before reading anything into the integer numbers**: jix's kernels are tuned on
 arm64, and NumPy is a general-purpose library with far more x86 attention behind its hot paths.
 That is a statement about which machine you are on, not about which library is faster.
 

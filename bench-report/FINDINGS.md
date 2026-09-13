@@ -89,6 +89,31 @@ Two separate problems:
    benchmark case labelled `b64x70` has never compared equal block shapes between jix and blosc2.
    Forcing `chunks` as well makes blosc2 honor `(64, 70)` exactly.
 
+## blosc2 mis-evaluates a negative literal added to a nested expression
+
+Found by the cross-check test that runs every library's operations against NumPy on the same data.
+
+```python
+a = np.arange(12, dtype=np.float32).reshape(3, 4) / 4.0
+b = blosc2.asarray(a)
+
+np.asarray((b + -3.0)[:])                          # correct
+np.asarray((((b * 2.0) + 1.0) * 0.5 + -3.0)[:])    # WRONG
+np.asarray((((b * 2.0) + 1.0) * 0.5 - 3.0)[:])     # correct
+```
+
+For input `[0, 0.25, 0.5, 0.75]` the third line gives `[-3, -1.25, -3, -1.1875]` where the right
+answer is `[-2.5, -2.25, -2, -1.75]`. blosc2 builds the expression as a string - the failing one is
+`'((((o0 * 2.0) + 1.0) * 0.5) + -3.0)'` - and something in that path mishandles the negative
+literal once the left operand is itself an expression. A bare array plus a negative literal is
+fine, so it is specific to the nested form.
+
+Worth reporting upstream. Until then the benchmark chain ends with `- 3.0` rather than `+ -3.0`,
+which is the same arithmetic and which every library agrees on.
+
+This is the whole argument for the cross-check test: a benchmark where one arm silently computes
+something else is worse than no benchmark, and nothing about the timings would have revealed it.
+
 ## blosc2's `expr[:]` does not re-compress
 
 `blosc2/lazyexpr.py`: `LazyExpr.__getitem__` passes `_getitem=True`. The `blosc2.asarray(result)`
