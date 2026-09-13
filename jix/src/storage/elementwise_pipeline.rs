@@ -736,6 +736,7 @@ fn pick_output_layout<'s>(
     for operand in operands {
         let strides = operand.strides();
         debug_assert_eq!(strides.len(), ndim);
+        #[allow(clippy::needless_range_loop)]
         for d in 0..ndim {
             if strides[d] != 0 {
                 real_axes.set(d, true);
