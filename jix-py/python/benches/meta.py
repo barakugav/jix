@@ -57,7 +57,7 @@ def _version(dist: str):
         return None
 
 
-def collect(sha: str, ref: str | None):
+def collect(sha: str, ref: str | None, fast: bool = False):
     """Return the meta.json dict for this runner and the benched sha.
 
     Workflow-run identifiers (run id / attempt) are intentionally omitted: they are available
@@ -68,6 +68,8 @@ def collect(sha: str, ref: str | None):
         "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sha": sha,
         "ref": ref,
+        # Reduced sampling: enough to check the plumbing, not to quote.
+        "fast": fast,
         "platform": {
             "os": _OS_NAMES.get(platform.system(), platform.system().lower()),
             "arch": platform.machine(),
@@ -89,8 +91,9 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--sha", required=True, type=str)
     parser.add_argument("--ref", default=None, type=str)
+    parser.add_argument("--fast", action="store_true", help="record that this was a low-fidelity run")
     args = parser.parse_args(argv)
-    result = collect(args.sha, args.ref)
+    result = collect(args.sha, args.ref, args.fast)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2))
     return result

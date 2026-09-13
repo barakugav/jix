@@ -102,9 +102,14 @@ FAKE = {
         "jix": [49.5, 45.0, 99.0, 95.0, 49.0, 48.0, 19.0],
     },
     "rust_chain": {
-        "ndarray": [2.6, 5.2, 9.9, 20.9, 42.0, 6.2, 84.1],
-        "jix-plain": [2.6, 5.1, 10.0, 20.0, 40.0, 109.0, 48.4],
-        "jix": [40.0, 43.0, 48.0, 58.0, 78.0, 397.0, 121.2],
+        "ndarray": [2.6, 5.2, 9.9, 20.9, 42.0],
+        "jix-plain": [2.6, 5.1, 10.0, 20.0, 40.0],
+        "jix": [40.0, 43.0, 48.0, 58.0, 78.0],
+    },
+    "rust_normalize": {
+        "ndarray": [6.2, 84.1],
+        "jix-plain": [503.0, 73.2],
+        "jix": [1007.0, 125.3],
     },
     "rust_axis_order": {
         "ndarray": [88.0, 86.0, 12.0, 2.0],
@@ -132,12 +137,15 @@ def rows_for(platform):
         for library, values in by_library.items():
             if len(values) != len(section["cases"]):
                 raise SystemExit(f"{key}/{library}: {len(values)} values for {len(section['cases'])} cases")
+            tag = section.get("source", key)
             for index, (case, value) in enumerate(zip(section["cases"], values)):
                 if metric in ("time", "throughput"):
                     value *= 1e-3 * scale  # ms -> s, then the platform's overall speed
                     if library.startswith("jix"):
                         value *= tweaks.get((key, index), 1.0)
-                rows.append({"platform": platform, "section": key, "case": case, "library": library, "value": value})
+                rows.append(
+                    {"platform": platform, "section": tag, "case": case, "library": library, "value": value}
+                )
     return rows
 
 

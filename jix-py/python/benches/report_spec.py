@@ -214,8 +214,22 @@ SECTIONS = [
         "subtitle": f"f32 {ARRAY} x2; ndarray makes one full pass per step",
         "baseline": "ndarray",
         "metric": "time",
-        "cases": ["1 op", "2 ops", "4 ops", "8 ops", "16 ops", "normalize\naxis 0", "normalize\naxis 1"],
-        "case_ids": ["1op", "2op", "4op", "8op", "16op", "normalize_axis0", "normalize_axis1"],
+        "cases": ["1 op", "2 ops", "4 ops", "8 ops", "16 ops"],
+        "case_ids": ["1op", "2op", "4op", "8op", "16op"],
+        "libraries": ["ndarray", "jix-plain", "jix"],
+    },
+    {
+        # Same Criterion group as rust_chain, but a plot of its own: a reduction inside a broadcast
+        # costs two orders of magnitude more than the elementwise steps, and sharing an axis with
+        # them would squash the chain result into a band.
+        "key": "rust_normalize",
+        "source": "rust_chain",
+        "title": "Rust: normalize, a reduction inside a broadcast",
+        "subtitle": f"f32 {ARRAY}; a / a.std(axis) broadcast back over the array",
+        "baseline": "ndarray",
+        "metric": "time",
+        "cases": ["normalize\naxis 0", "normalize\naxis 1"],
+        "case_ids": ["normalize_axis0", "normalize_axis1"],
         "libraries": ["ndarray", "jix-plain", "jix"],
     },
     {
@@ -239,8 +253,10 @@ BY_KEY = {section["key"]: section for section in SECTIONS}
 
 # Criterion benchmark ids have to be filesystem-safe, so the Rust suite uses short case ids and
 # this maps them back to the labels the plots show.
+# Keyed by the section the rows are *tagged* with, which is the Criterion group name - not the
+# plot's key, since a plot may draw from another section's group.
 RUST_CASE_LABELS = {
-    (section["key"], case_id): case
+    (section.get("source", section["key"]), case_id): case
     for section in SECTIONS
     if "case_ids" in section
     for case_id, case in zip(section["case_ids"], section["cases"], strict=True)
