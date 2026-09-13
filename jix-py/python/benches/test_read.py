@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 import pytest
 
@@ -24,18 +26,15 @@ def test_read(benchmark, library, cfg, size):
     block, read = cfg
     data = make_data("smooth", (size, NCOLS), dtype=np.int32, seed=0)
     arr = ARRAY_IMPLS[library].from_numpy(data, block_shape=block)
-    region = random_region((size, NCOLS), read, seed=1)
+    regions = itertools.cycle(random_regions((size, NCOLS), read, 100_000, seed=1))
     case = f"read_b{block[0]}x{block[1]}_r{read[0]}x{read[1]}"
     record(benchmark, case=case, library=library, size=size)
-    out = benchmark(arr.read, region)
+    out = benchmark(lambda: arr.read(next(regions)))
     assert out is not None
 
 
-def random_region(shape, read_shape, seed):
+def random_regions(shape, read_shape, count, seed):
     rng = np.random.default_rng(seed)
-    slices = []
-    for dim, rs in zip(shape, read_shape):
-        rs = min(rs, dim)
-        start = int(rng.integers(0, dim - rs + 1))
-        slices.append(slice(start, start + rs))
-    return tuple(slices)
+    sizes = [min(rs, dim) for dim, rs in zip(shape, read_shape)]
+    starts = [rng.integers(0, dim - rs + 1, size=count) for dim, rs in zip(shape, sizes)]
+    return [tuple(slice(int(s[i]), int(s[i]) + rs) for s, rs in zip(starts, sizes)) for i in range(count)]
