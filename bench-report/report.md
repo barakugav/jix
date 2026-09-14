@@ -1,4 +1,6 @@
-*Measured on linux-x86_64 (INTEL(R) XEON(R) PLATINUM 8573C), linux-aarch64 (aarch64). Benched commit `94f72a73`.*
+> **DRAFT - these numbers are invented.** Rendered by `build_fake_report.py` so the
+> plot style can be worked on without waiting for a benchmark run. Do not quote
+> anything here.
 
 # jix benchmarks
 
@@ -65,12 +67,12 @@ so Blosc2 is shown at its best as well as at its default.
 
 | case | numpy | jix-plain | jix | blosc2 | blosc2-chunked | zarr |
 |---|---|---|---|---|---|---|
-| block 16x200 read 1x200 800 B | 525 ns | 599 ns | 4.57 us | 385.95 us | 18.11 us | 316.62 us |
-| block 16x200 read 16x200 13 KB | 1.14 us | 1.27 us | 8.40 us | 389.09 us | 19.89 us | 527.69 us |
-| block 64x200 read 16x16 1 KB | 669 ns | 723 ns | 19.48 us | 134.98 us | 22.92 us | 403.09 us |
-| block 64x200 read 256x200 205 KB | 9.48 us | 10.54 us | 73.94 us | 168.73 us | 53.91 us | 1.27 ms |
-| block 64x200 read 4096x200 3 MB | 243.59 us | 250.70 us | 946.03 us | 1.13 ms | 669.71 us | 12.52 ms |
-| block 64x200 read whole array 104 MB | 18.52 ms | 18.46 ms | 39.11 ms | 48.36 ms | 33.58 ms | 394.03 ms |
+| block 16x200 read 1x200 800 B | 472 ns | 590 ns | 1.89 us | 89.68 us | 40.12 us | 389.40 us |
+| block 16x200 read 16x200 13 KB | 708 ns | 826 ns | 3.07 us | 94.40 us | 42.48 us | 401.20 us |
+| block 64x200 read 16x16 1 KB | 413 ns | 531 ns | 4.25 us | 61.36 us | 49.56 us | 396.48 us |
+| block 64x200 read 256x200 205 KB | 14.16 us | 15.34 us | 30.68 us | 151.04 us | 112.10 us | 495.60 us |
+| block 64x200 read 4096x200 3 MB | 224.20 us | 236.00 us | 448.40 us | 1.04 ms | 920.40 us | 1.42 ms |
+| block 64x200 read whole array 104 MB | 6.14 ms | 6.49 ms | 14.16 ms | 27.14 ms | 25.96 ms | 47.20 ms |
 
 </details>
 
@@ -83,9 +85,9 @@ so Blosc2 is shown at its best as well as at its default.
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| block 32x32 read 32x32 4 KB | 2.01 us | 521 ns | 9.61 us |
-| block 32x32 read 1x200 800 B | 101 ns | 147 ns | 17.82 us |
-| block 512x32 read 128x200 102 KB | 4.29 us | 4.35 us | 302.92 us |
+| block 32x32 read 32x32 4 KB | 330 ns | 354 ns | 1.89 us |
+| block 32x32 read 1x200 800 B | 413 ns | 448 ns | 12.39 us |
+| block 512x32 read 128x200 102 KB | 12.98 us | 13.57 us | 49.56 us |
 
 </details>
 
@@ -109,9 +111,9 @@ same numbers.
 | case | numpy | jix-noshuffle | jix | blosc2-noshuffle | blosc2 | zarr |
 |---|---|---|---|---|---|---|
 | random | 1.0x smaller | 1.0x smaller | 1.0x smaller | 1.0x smaller | 1.0x smaller | 1.0x smaller |
-| smooth | 1.0x smaller | 753.7x smaller | 769.3x smaller | 724.4x smaller | 672.3x smaller | 649.2x smaller |
-| 16 unique | 1.0x smaller | 4.8x smaller | 7.9x smaller | 4.5x smaller | 7.6x smaller | 7.6x smaller |
-| 4 unique | 1.0x smaller | 7.3x smaller | 12.2x smaller | 7.7x smaller | 12.7x smaller | 12.7x smaller |
+| smooth | 1.0x smaller | 3.5x smaller | 3.9x smaller | 3.4x smaller | 3.7x smaller | 3.7x smaller |
+| 16 unique | 1.0x smaller | 24.0x smaller | 31.0x smaller | 22.5x smaller | 28.4x smaller | 28.4x smaller |
+| 4 unique | 1.0x smaller | 46.0x smaller | 55.2x smaller | 41.0x smaller | 48.6x smaller | 48.6x smaller |
 
 </details>
 
@@ -129,10 +131,10 @@ behind the distribution cases in the next section.
 
 | case | jix-noshuffle | jix | blosc2-noshuffle | blosc2 | zarr |
 |---|---|---|---|---|---|
-| random | 56 ms | 61 ms | 92 ms | 186 ms | 758 ms |
-| smooth | 24 ms | 29 ms | 17 ms | 48 ms | 735 ms |
-| 16 unique | 312 ms | 63 ms | 949 ms | 416 ms | 887 ms |
-| 4 unique | 297 ms | 168 ms | 908 ms | 430 ms | 877 ms |
+| random | 157 ms | 224 ms | 151 ms | 231 ms | 637 ms |
+| smooth | 192 ms | 157 ms | 208 ms | 173 ms | 720 ms |
+| 16 unique | 104 ms | 87 ms | 120 ms | 104 ms | 496 ms |
+| 4 unique | 84 ms | 73 ms | 99 ms | 85 ms | 460 ms |
 
 </details>
 
@@ -154,8 +156,8 @@ it is not being billed for a pass jix skips.
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| f32 | 17.80 ms | 19.02 ms | 84.03 ms | 125.95 ms | 85.73 ms |
-| i32 | 18.15 ms | 18.99 ms | 44.90 ms | 86.05 ms | 72.33 ms |
+| f32 | 2.55 ms | 2.58 ms | 58.53 ms | 522.74 ms | 36.34 ms |
+| i32 | 2.61 ms | 2.66 ms | 53.10 ms | 495.60 ms | 35.40 ms |
 
 </details>
 
@@ -177,10 +179,10 @@ of the work.
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| random | 18.71 ms | 19.64 ms | 76.08 ms | 117.55 ms | 80.34 ms |
-| smooth | 18.00 ms | 18.67 ms | 83.72 ms | 124.71 ms | 85.80 ms |
-| 16 unique | 18.30 ms | 19.58 ms | 98.76 ms | 156.74 ms | 94.67 ms |
-| 4 unique | 18.21 ms | 18.83 ms | 106.65 ms | 153.80 ms | 93.31 ms |
+| random | 2.55 ms | 2.58 ms | 113.75 ms | 601.80 ms | 51.92 ms |
+| smooth | 2.55 ms | 2.58 ms | 58.53 ms | 522.74 ms | 36.34 ms |
+| 16 unique | 2.55 ms | 2.58 ms | 40.71 ms | 247.80 ms | 24.78 ms |
+| 4 unique | 2.55 ms | 2.58 ms | 25.13 ms | 182.90 ms | 18.88 ms |
 
 </details>
 
@@ -197,8 +199,8 @@ The same shape as negate with two operands instead of one.
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| f32 | 25.44 ms | 24.92 ms | 154.11 ms | 185.11 ms | 177.76 ms |
-| i32 | 25.89 ms | 24.98 ms | 76.65 ms | 101.98 ms | 166.03 ms |
+| f32 | 3.41 ms | 3.40 ms | 116.94 ms | 661.98 ms | 69.86 ms |
+| i32 | 3.48 ms | 3.47 ms | 110.92 ms | 637.20 ms | 68.44 ms |
 
 </details>
 
@@ -226,13 +228,13 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| sum f32 axis 0 | 9.81 ms | 6.90 ms | 70.34 ms | 102.35 ms | 90.83 ms |
-| sum f32 axis 1 | 9.72 ms | 6.23 ms | 69.54 ms | 102.04 ms | 92.82 ms |
-| sum f32 all | 8.68 ms | 5.81 ms | 69.02 ms | 69.69 ms | 91.70 ms |
-| sum i32 axis 0 | 15.71 ms | 10.98 ms | 36.24 ms | 60.92 ms | 87.18 ms |
-| sum i32 all | 12.14 ms | 9.93 ms | 34.37 ms | 26.90 ms | 83.36 ms |
-| std f32 axis 0 | 53.72 ms | 31.49 ms | 97.98 ms | 252.73 ms | 144.39 ms |
-| std f32 all | 45.86 ms | 81.65 ms | 145.99 ms | 235.41 ms | 127.85 ms |
+| sum f32 axis 0 | 2.75 ms | 2.40 ms | 58.53 ms | 40.95 ms | 36.46 ms |
+| sum f32 axis 1 | 4.68 ms | 1.83 ms | 57.82 ms | 42.83 ms | 38.82 ms |
+| sum f32 all | 3.79 ms | 1.55 ms | 57.35 ms | 46.73 ms | 37.17 ms |
+| sum i32 axis 0 | 13.81 ms | 9.57 ms | 67.50 ms | 24.07 ms | 43.78 ms |
+| sum i32 all | 5.18 ms | 4.65 ms | 63.65 ms | 16.76 ms | 34.93 ms |
+| std f32 axis 0 | 13.05 ms | 17.04 ms | 72.81 ms | 86.02 ms | 49.44 ms |
+| std f32 all | 12.67 ms | 41.08 ms | 97.23 ms | 87.32 ms | 46.14 ms |
 
 </details>
 
@@ -245,13 +247,13 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| negate f32 | 19.73 ms | 19.03 ms | 67.42 ms |
-| negate i32 | 18.90 ms | 20.41 ms | 62.25 ms |
-| add f32 | 24.89 ms | 25.17 ms | 121.56 ms |
-| add i32 | 25.18 ms | 25.63 ms | 112.14 ms |
-| sum f32 axis 0 | 13.95 ms | 6.98 ms | 52.62 ms |
-| sum f32 axis 1 | 7.75 ms | 6.36 ms | 52.26 ms |
-| sum i32 all | 4.97 ms | 9.18 ms | 49.69 ms |
+| negate f32 | 12.98 ms | 13.22 ms | 58.41 ms |
+| negate i32 | 12.86 ms | 13.10 ms | 53.10 ms |
+| add f32 | 19.00 ms | 19.35 ms | 116.82 ms |
+| add i32 | 18.88 ms | 19.23 ms | 112.10 ms |
+| sum f32 axis 0 | 8.38 ms | 6.37 ms | 57.82 ms |
+| sum f32 axis 1 | 6.14 ms | 5.78 ms | 56.64 ms |
+| sum i32 all | 8.02 ms | 3.30 ms | 22.42 ms |
 
 </details>
 
@@ -295,13 +297,13 @@ cheap and the array is large; they do not when one expensive kernel dominates.
 
 | case | numpy | jix-plain | jix |
 |---|---|---|---|
-| 1 op | 19.35 ms | 19.13 ms | 151.57 ms |
-| 2 ops | 49.17 ms | 30.92 ms | 223.85 ms |
-| 4 ops | 106.82 ms | 42.33 ms | 358.31 ms |
-| 8 ops | 225.77 ms | 56.09 ms | 616.84 ms |
-| 16 ops | 459.47 ms | 85.79 ms | 1.12 s |
-| 32 ops | 934.29 ms | 142.36 ms | 2.11 s |
-| exp/log | 91.43 ms | 223.73 ms | 353.62 ms |
+| 1 op | 2.83 ms | 3.07 ms | 53.57 ms |
+| 2 ops | 6.14 ms | 6.37 ms | 56.64 ms |
+| 4 ops | 12.86 ms | 14.40 ms | 61.36 ms |
+| 8 ops | 26.90 ms | 24.19 ms | 68.91 ms |
+| 16 ops | 60.89 ms | 45.43 ms | 88.50 ms |
+| 32 ops | 124.02 ms | 87.20 ms | 122.84 ms |
+| exp/log | 134.28 ms | 136.76 ms | 194.70 ms |
 
 </details>
 
@@ -309,28 +311,31 @@ cheap and the array is large; they do not when one expensive kernel dominates.
 
 ![Operation chains: peak memory](plots/chain_memory.png)
 
-Peak RSS of a fresh subprocess running the same chain, so NumPy's C-level allocations are included.
+Peak RSS of a fresh subprocess, in absolute megabytes rather than relative to anything. The inputs
+and the output are allocated and touched *before* the measurement starts, so what is left is the
+memory the engine needs on top of the data the caller was always going to hold.
 
-All three are flat across chain length, and that is worth being precise about: NumPy allocates an
-intermediate per step but frees each one as the next is produced, so its peak is the two inputs
-plus one live intermediate, not a growing pile. Avoiding intermediates entirely is therefore worth
-a fifth, not a multiple.
+That gives the plot a zero to calibrate against: a one-step NumPy chain writes straight into the
+output with `out=` and allocates nothing at all, and the measurement says so. Every bar above that
+is an engine holding something the caller did not ask for.
 
-The real difference is what the arrays cost to hold. The compact arm keeps its inputs compressed
-for the whole computation, and that is where the factor comes from. Memory has no noise floor,
-which makes this the cleanest measurement on the page.
+NumPy's cost rises to a plateau of two live intermediates - it allocates one per step and frees the
+previous, so the peak stops growing rather than climbing forever. jix stays within a few megabytes
+whatever the chain does, because it never materializes a whole intermediate: each read region is
+computed, consumed and reused. Memory has no noise floor, which makes this the cleanest measurement
+on the page.
 
 <details>
 <summary>Absolute numbers</summary>
 
-| case | numpy | jix-plain | jix |
-|---|---|---|---|
-| 1 op | 385 MB | 382 MB | 191 MB |
-| 2 ops | 484 MB | 382 MB | 192 MB |
-| 4 ops | 484 MB | 382 MB | 191 MB |
-| 8 ops | 484 MB | 382 MB | 191 MB |
-| 16 ops | 484 MB | 382 MB | 192 MB |
-| 32 ops | 484 MB | 382 MB | 191 MB |
+| case | numpy | jix-plain | jix | blosc2 |
+|---|---|---|---|---|
+| 1 op | 0.0 MB | 0.5 MB | 0.7 MB | 39.5 MB |
+| 2 ops | 104.0 MB | 1.0 MB | 0.7 MB | 45.0 MB |
+| 4 ops | 208.0 MB | 2.0 MB | 0.8 MB | 50.0 MB |
+| 8 ops | 208.0 MB | 2.7 MB | 0.8 MB | 52.7 MB |
+| 16 ops | 208.0 MB | 3.0 MB | 0.8 MB | 55.0 MB |
+| 32 ops | 208.0 MB | 3.1 MB | 0.9 MB | 56.0 MB |
 
 </details>
 
@@ -347,11 +352,11 @@ per step.
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| 1 op | 19.91 ms | 20.70 ms | 117.81 ms |
-| 2 ops | 32.90 ms | 28.69 ms | 171.67 ms |
-| 4 ops | 56.22 ms | 29.19 ms | 269.76 ms |
-| 8 ops | 103.05 ms | 30.08 ms | 467.18 ms |
-| 16 ops | 197.82 ms | 34.10 ms | 855.87 ms |
+| 1 op | 3.07 ms | 3.07 ms | 47.20 ms |
+| 2 ops | 6.14 ms | 6.02 ms | 50.74 ms |
+| 4 ops | 11.68 ms | 11.80 ms | 56.64 ms |
+| 8 ops | 24.66 ms | 23.60 ms | 68.44 ms |
+| 16 ops | 49.56 ms | 47.20 ms | 92.04 ms |
 
 </details>
 
@@ -378,8 +383,8 @@ without knowing that will pay for it.
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| normalize axis 0 | 100.07 ms | 1.61 s | 4.21 s |
-| normalize axis 1 | 189.74 ms | 114.51 ms | 212.31 ms |
+| normalize axis 0 | 7.32 ms | 593.54 ms | 1.19 s |
+| normalize axis 1 | 99.24 ms | 86.38 ms | 147.85 ms |
 
 </details>
 

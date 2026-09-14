@@ -93,6 +93,6 @@ def test_chain_steps_cycle():
 def test_chain_uses_no_scalar_operands():
     """A scalar step would measure jix's 0-stride loop, not whether fusing a chain pays off."""
     a, b = np.full((4, 3), 2.0), np.full((4, 3), 3.0)
-    for _, step in chain_steps(len(chain_steps(4))):
+    for _, step, _, _ in chain_steps(len(chain_steps(4))):
         # Every step must accept two arrays and use them; a scalar-constant step would not.
         assert step(a, a, b).shape == a.shape

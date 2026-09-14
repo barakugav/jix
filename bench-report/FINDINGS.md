@@ -37,6 +37,44 @@ nothing. `build_report.py` now warns when a section's cases are only partly pres
 that looks like: surviving benchmark ids get drawn under the new labels, which is worse than an
 empty plot. Restore the section once a run includes the fixed benchmark.
 
+## Compression ratio does not predict decode speed; the kind of redundancy does
+
+Two report results looked wrong and turned out to be the same thing: `smooth` compressed better
+than either unique-value set, and `negate` on compact storage got *slower* as the data compressed
+better. From `debug_whole_array_read.py`, whole-array decode of `[130000, 200] i32`:
+
+| distribution | ratio | jix MB/s | jix-noshuffle MB/s |
+|---|---|---|---|
+| random | 1.0x | **20216** | **45246** |
+| smooth (fixed generator) | 34.5x | 5700 | 6591 |
+| 16 unique | 7.9x | 3254 | 1034 |
+| 4 unique | 12.2x | **1864** | 777 |
+
+Decode throughput runs almost opposite to the ratio. The reason is *how* zstd achieves each ratio:
+
+- **random** is incompressible, so zstd stores raw blocks and decoding is a memcpy - the fastest
+  case on the page, at 1.0x compression.
+- **smooth** compresses through long matches, which decode cheaply.
+- **the unique-value sets** compress through entropy coding over a small alphabet, and entropy
+  decoding costs real work per output byte. 4 unique is slower than 16 unique *despite* a better
+  ratio.
+
+blosc2 shows the same ordering, so this is a property of zstd rather than of jix. The practical
+consequence for anyone choosing settings: a compression ratio tells you about storage, not about
+read speed, and the two can point in opposite directions.
+
+Byte-shuffle is worth noting separately. On random data it costs 2.2x on decode (45 GB/s to
+20 GB/s) for no ratio benefit at all; on 16-unique data it *gains* 3.1x (1034 to 3254 MB/s) by
+making three of four byte planes constant.
+
+### The `smooth` generator was size-dependent, and has been fixed
+
+It built its sine with `linspace(0, 8*pi, n)` - four periods across the array *however large the
+array was*. At 26M elements consecutive values were almost always equal after rounding, giving a
+769x ratio: runs, not the moderate redundancy the profile is supposed to represent, and a
+compressibility that changed with every array size. It now uses a fixed period of 1000 elements,
+which gives 34.5x and 2249 distinct values at any size.
+
 ## blosc2's decompression unit is the block, but chunk size still costs
 
 Measured directly (one-off, 130000x70 i32, 16x70 block, reading 16x70 regions, single-threaded):
@@ -270,6 +308,41 @@ should: jix has no specialized loop for a 0-stride operand, so a scalar is read 
 strided loop as a real array. A scalar chain measures that gap rather than whether fusing pays off.
 An earlier round of this also found a `Cast<Scalar>` in the tree for Python float constants, since
 fixed - `a * 2.0` now builds `Mul<Plain, Scalar>` directly.
+
+## A Compact chain costs one full decompression per operand *reference*
+
+Why the Rust chain gets slower with every step on compact storage, from run 34788352028 (x86_64,
+`[130000, 200] f32` x2):
+
+| steps | leaf references | jix compact | delta | per reference |
+|---|---|---|---|---|
+| 1 | 2 | 117.8 ms | - | - |
+| 2 | 3 | 171.7 ms | 53.9 ms | 53.9 ms |
+| 4 | 5 | 269.8 ms | 98.1 ms | 49.1 ms |
+| 8 | 9 | 467.2 ms | 197.4 ms | 49.4 ms |
+| 16 | 17 | 855.9 ms | 388.7 ms | 48.6 ms |
+
+A least-squares fit gives 49.2 ms per reference with a 19.4 ms intercept - and that intercept is
+jix-plain's own cost for the same chain (20.7 ms), while 49 ms is what decompressing this array
+once costs. So the model is exact:
+
+    compact chain time = (number of operand references) x (one full decompression) + plain chain time
+
+Each time the chain names `a` or `b`, that operand's blocks are decompressed again. A decompressed
+block is not reused across references within a single pipeline, so a 16-step chain that mentions an
+operand every step decompresses 17 times what it needs twice.
+
+The contrast with `jix-plain` is the confirmation: 20.7 ms to 34.1 ms across the same range, nearly
+flat, because re-reading an *uncompressed* operand is just a memory read and costs almost nothing.
+
+Two consequences:
+
+- The benchmark's chain is close to the worst case for compact storage by construction, since every
+  step references a source array. A chain of unary steps references its leaf once and does not
+  degrade this way - which is why the Compact crossover measurement above uses one.
+- A per-pipeline cache of decompressed blocks, keyed by (storage, block index), would collapse the
+  17 decompressions to 2 and make the compact chain track the plain one. That is the single largest
+  lever on these numbers.
 
 ## `normalize` over a long axis re-runs the reduction per output element
 

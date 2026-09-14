@@ -1,9 +1,12 @@
 import numpy as np
 
+# Elements per sine period for the `smooth` distribution.
+SMOOTH_PERIOD = 1000
+
 # The distributions the report varies, keyed by the label report_spec uses on the x axis.
 DISTRIBUTIONS = {
     "random": "uniform over the whole dtype range; incompressible",
-    "smooth": "sine plus gradient; moderately compressible",
+    "smooth": "sine plus gradient, one period per 1000 elements; moderately compressible",
     "16 unique": "16 distinct values; highly compressible",
     "4 unique": "4 distinct values; extremely compressible",
 }
@@ -26,7 +29,11 @@ def make_data(distribution: str, shape: tuple[int, ...], dtype=np.int32, seed: i
     elif distribution == "smooth":
         n = int(np.prod(shape))
         phase = rng.random() * 2.0 * np.pi
-        t = np.linspace(0.0, 8.0 * np.pi, n)
+        # One period per SMOOTH_PERIOD elements, not per array. Scaling the period with the array
+        # made compressibility a function of array size: at 26M elements the old generator fitted
+        # four periods across the whole thing, so consecutive values were almost always equal after
+        # rounding and it compressed 769x - runs, not the moderate redundancy this is meant to be.
+        t = np.arange(n) * (2.0 * np.pi / SMOOTH_PERIOD)
         field = np.sin(t + phase) + 0.25 * np.linspace(0.0, 1.0, n)
         # scale to a moderate integer amplitude so it stays smooth but not near-constant
         out = (field * 1000.0 if is_int else field).reshape(shape)

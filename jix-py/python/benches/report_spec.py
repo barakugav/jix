@@ -166,11 +166,13 @@ SECTIONS = [
     {
         "key": "chain_memory",
         "title": "Operation chains: peak memory",
-        "subtitle": f"f32 {ARRAY} x2; peak RSS of a fresh subprocess running the same chain",
-        "baseline": "numpy",
-        "metric": "bytes",
+        "subtitle": (f"f32 {ARRAY} x2; peak RSS above the inputs and output, which are allocated first"),
+        "baseline": None,
+        "metric": "memory",
+        "log": False,
+        "unit": "MB",
         "cases": [chain_label(case) for case in CHAIN_CASES if case != "exp/log"],
-        "libraries": ["numpy", "jix-plain", "jix"],
+        "libraries": ["numpy", "jix-plain", "jix", "blosc2"],
     },
     {
         "key": "rust_read",

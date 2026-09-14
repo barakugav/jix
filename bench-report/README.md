@@ -64,6 +64,11 @@ Or run one suite on its own:
 Drop `--fast` for real timings. `--report` restricts the Rust run to `vs_ndarray`, the only target
 the report uses; `scripts/bench/run.py` does that by default, and `--all-rust-benches` turns it off.
 
+## Changing the suite
+
+See `DEVELOPER.md` - how the pieces fit, how to add a benchmark or a plot, and the mistakes this
+suite has already made.
+
 ## Iterating on the plot style
 
 `build_fake_report.py` makes up plausible numbers and drives the same renderer, so the layout and
@@ -80,5 +85,7 @@ colors can be changed without waiting for a real run:
 | `readme-snippet.md` | generated - the block for the top-level README |
 | `../jix-py/python/benches/report_spec.py` | every plot's cases and libraries; the benches read it too |
 | `../jix-py/python/benches/report_bars.py` | the renderer |
+| `DEVELOPER.md` | how the suite is built, and how to add a benchmark |
 | `FINDINGS.md` | what we learned about jix, numpy, blosc2 and ndarray while building this |
+| `debug_whole_array_read.py` | standalone decode-throughput probe; shares none of the suite's machinery |
 | `NOTES.md` | design notes and the decision log |
