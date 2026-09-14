@@ -38,9 +38,13 @@ def build(rows, platform, fast=False):
         value, ratio = report_bars.headline(on, section, case, library, baseline)
         return value, ratio
 
+    # The aligned case: the read is exactly one block. Compared against `blosc2-chunked` rather
+    # than `blosc2`, because that is Blosc2 given chunks matched to its blocks - its best showing
+    # here, and the only comparison worth putting in a headline. Its default chunking is far worse,
+    # which the report shows but the README should not lean on.
     read_case = report_spec.read_label(*report_spec.READ_CASES[1])
     read_jix, _ = one("read", read_case, "jix", "numpy")
-    read_blosc2, _ = one("read", read_case, "blosc2", "numpy")
+    read_blosc2, _ = one("read", read_case, "blosc2-chunked", "numpy")
 
     chain_case = report_spec.chain_label(32)
     chain_jix, chain_speedup = one("chain", chain_case, "jix-plain", "numpy")
@@ -79,9 +83,10 @@ def build(rows, platform, fast=False):
         )
     if read_jix and read_blosc2:
         lines.append(
-            f"- **Random reads from a compressed array: {read_blosc2 / read_jix:.0f}x faster than "
+            f"- **Random reads from a compressed array: {read_blosc2 / read_jix:.1f}x faster than "
             f"Blosc2** at the same compression ratio - {fmt_time(read_jix)} against "
-            f"{fmt_time(read_blosc2)} for one block-sized region."
+            f"{fmt_time(read_blosc2)} for one block-sized region, with Blosc2 given chunks matched "
+            "to its blocks."
         )
     if mem_jix and mem_numpy:
         lines.append(
