@@ -70,6 +70,15 @@ def main(argv=None):
         raise SystemExit("no usable results found")
 
     for section in report_spec.SECTIONS:
+        source = section.get("source", section["key"])
+        present = {row["case"] for row in rows if row["section"] == source}
+        missing = [c for c in section["cases"] if c not in present]
+        if missing and len(missing) < len(section["cases"]):
+            # Partial coverage usually means the benchmark changed since the run: surviving cases
+            # keep their ids and get drawn under the new labels, which is worse than no plot.
+            names = ", ".join(repr(c.replace("\n", " ")) for c in missing)
+            print(f"WARNING: {section['key']} is missing {len(missing)}/{len(section['cases'])} cases ({names})")
+            print("         The run probably predates a change to this benchmark. Do not publish it.")
         out = report_bars.plot_section(rows, {**section, "platforms": ordered}, args.out)
         print(out if out else f"(no data for {section['key']})")
 

@@ -31,9 +31,11 @@ up on the innermost logical axis and `ndarray` jumps a full plane per element, w
 walks memory in order. Controls: a permutation that keeps logical order near memory order, and a
 contiguous rotation that still reaches the fast path.
 
-**This is not yet confirmed.** The fix has not run on CI, and the honest state of the claim is that
-the mechanism is real in the source but has never been demonstrated in a measurement. It should not
-appear in a published report until a run says otherwise.
+**This is not yet confirmed**, and the section is withheld from the published report. The first
+full run (94f72a73) predates the fix, so its axis-order numbers come from the version that measured
+nothing. `build_report.py` now warns when a section's cases are only partly present, which is what
+that looks like: surviving benchmark ids get drawn under the new labels, which is worse than an
+empty plot. Restore the section once a run includes the fixed benchmark.
 
 ## blosc2's decompression unit is the block, but chunk size still costs
 
@@ -118,7 +120,29 @@ use that, and would be a different benchmark.
 against single-threaded jix and numpy. Fixed in `array_impls.py` with
 `numexpr.set_num_threads(NTHREADS)`.
 
-## Chains: fusion pays off in Rust, and is flat in Python
+## Chains: measured on CI at full fidelity
+
+Run 34788352028, both runners, `[130000, 200] f32` x2, default read region. Ratios are against the
+language's baseline, lower is better.
+
+| steps | Python numpy=1 (x86) | (aarch64) | Rust ndarray=1 (x86) | (aarch64) |
+|---|---|---|---|---|
+| 1 | 0.99x | 1.23x | 1.04x | 1.01x |
+| 4 | 0.40x | 0.66x | 0.52x | 0.72x |
+| 8 | 0.25x | 0.50x | 0.29x | 0.49x |
+| 16 | **0.19x** | 0.40x | **0.17x** | 0.39x |
+| 32 | **0.15x** | 0.36x | - | - |
+| exp/log | 2.45x | 1.01x | - | - |
+
+**6.7x faster than numpy at 32 steps on x86_64**, with no tuning - the default read region. The
+Intel Xeon 8573C has far less memory bandwidth per core than the M3 Pro the earlier local numbers
+came from, so numpy's per-step DRAM traffic costs much more there and jix's cache-resident regions
+win outright. The mechanism predicted this before the run; see the section below on read regions.
+
+`exp/log` is the counter-example and it is much sharper on x86 (2.45x slower) than on aarch64
+(1.01x): when one transcendental kernel decides the result, saving memory traffic buys nothing.
+
+## Earlier local measurements: fusion pays off in Rust, and is flat in Python
 
 Measured on an Apple M3 Pro, `[130000, 200] f32` x2, chain of array-operand steps starting from
 `a*a` (see `array_impls.CHAIN_STEPS`). Criterion at `--fast` for Rust; best of five warm rounds for
