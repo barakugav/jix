@@ -53,11 +53,14 @@ numexpr.set_num_threads(NTHREADS)
 # The cycle alternates multiplication with addition and subtraction to keep magnitudes bounded.
 # Repeated multiplication alone would decay toward denormals, which are slow on some CPUs and would
 # end up measuring that instead.
+# (label, expression, numpy ufunc, which operand) - the ufunc form lets the peak-memory benchmark
+# write the final step straight into a preallocated buffer, so a single operation allocates nothing
+# and the measurement has a zero to calibrate against.
 CHAIN_STEPS = [
-    ("out * a", lambda out, a, b: out * a),
-    ("out + b", lambda out, a, b: out + b),
-    ("out * b", lambda out, a, b: out * b),
-    ("out - a", lambda out, a, b: out - a),
+    ("out * a", lambda out, a, b: out * a, "multiply", "a"),
+    ("out + b", lambda out, a, b: out + b, "add", "b"),
+    ("out * b", lambda out, a, b: out * b, "multiply", "b"),
+    ("out - a", lambda out, a, b: out - a, "subtract", "a"),
 ]
 
 
@@ -110,9 +113,25 @@ class AbstractArray:
         """
         a, b = self._operand(), other._operand()
         out = a
-        for _, step in chain_steps(count):
+        for _, step, _, _ in chain_steps(count):
             out = step(out, a, b)
         return self._materialize(out)
+
+    def chain_into(self, other, count, out):
+        """Run the chain, writing the result into the preallocated `out`.
+
+        Used by the peak-memory benchmark: with the inputs and the output already allocated, what
+        is left to measure is the memory the engine itself needs. The lazy engines build the whole
+        chain and materialize once into `out`; NumPy overrides this.
+        """
+        a, b = self._operand(), other._operand()
+        value = a
+        for _, step, _, _ in chain_steps(count):
+            value = step(value, a, b)
+        self._materialize_into(value, out)
+
+    def _materialize_into(self, value, out):
+        raise NotImplementedError()
 
     def exp_log(self, other):
         """`log(exp(a) + exp(b))` - dominated by libm rather than by memory traffic.
@@ -147,6 +166,23 @@ class NumpyArray(AbstractArray):
 
     def _materialize(self, value):
         return value
+
+    def _materialize_into(self, value, out):
+        out[...] = value
+
+    def chain_into(self, other, count, out):
+        """Idiomatic NumPy, except the last step writes into `out`.
+
+        A one-step chain therefore allocates nothing at all, which is the zero the plot is read
+        against. Longer chains hold one live intermediate - NumPy frees each as the next is made.
+        """
+        a, b = self.raw, other.raw
+        steps = chain_steps(count)
+        value = a
+        for _, step, _, _ in steps[:-1]:
+            value = step(value, a, b)
+        _, _, ufunc, operand = steps[-1]
+        getattr(np, ufunc)(value, a if operand == "a" else b, out=out)
 
     def exp_log(self, other):
         return np.log(np.exp(self.raw) + np.exp(other.raw))
@@ -187,6 +223,9 @@ class JixArray(AbstractArray):
 
     def _materialize(self, value):
         return np.asarray(value.numpy())
+
+    def _materialize_into(self, value, out):
+        value.numpy(out=out)
 
     def exp_log(self, other):
         return np.asarray((self.raw.exp() + other.raw.exp()).log().numpy())
@@ -261,6 +300,9 @@ class Blosc2Array(AbstractArray):
     def _materialize(self, value):
         return np.asarray(value[:])
 
+    def _materialize_into(self, value, out):
+        value.compute(out=out)
+
     def exp_log(self, other):
         return np.asarray(blosc2.log(blosc2.exp(self.raw) + blosc2.exp(other.raw))[:])
 
@@ -322,6 +364,9 @@ class ZarrArray(AbstractArray):
 
     def _materialize(self, value):
         return value
+
+    def _materialize_into(self, value, out):
+        out[...] = value
 
     def exp_log(self, other):
         return np.log(np.exp(self._dense()) + np.exp(other._dense()))

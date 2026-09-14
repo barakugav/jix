@@ -81,7 +81,9 @@ def load_python(path, platform):
         common = {"platform": platform, "case": info["case"], "library": info["library"]}
         field = info.get("value_field")
         value = info[field] if field else bench["stats"]["mean"]
-        rows.append({**common, "section": info["section"], "value": value})
+        # Only the timing carries a spread; a recorded metric like a stored size has none.
+        spread = None if field else bench["stats"].get("stddev")
+        rows.append({**common, "section": info["section"], "value": value, "spread": spread})
         for section, extra_field in info.get("also", {}).items():
             rows.append({**common, "section": section, "value": info[extra_field]})
     return rows
@@ -104,6 +106,7 @@ def load_rust(criterion_root, platform, case_labels=None):
             continue
         section = parts[0].removeprefix("report_")
         case_id = "/".join(parts[2:])
+        mean = json.loads(estimates.read_text())["mean"]
         rows.append(
             {
                 "platform": platform,
@@ -111,7 +114,8 @@ def load_rust(criterion_root, platform, case_labels=None):
                 "library": parts[1],
                 "case": case_labels.get((section, case_id), case_id),
                 # Criterion reports nanoseconds; the rest of the report is in seconds.
-                "value": json.loads(estimates.read_text())["mean"]["point_estimate"] * 1e-9,
+                "value": mean["point_estimate"] * 1e-9,
+                "spread": mean.get("standard_error", 0.0) * 1e-9 or None,
             }
         )
     return rows
@@ -125,13 +129,18 @@ RELATIVE = {
     "bytes": "shorter is less memory",
     "stored": "shorter is smaller on disk",
 }
-ABSOLUTE = {"throughput": "taller is faster"}
+ABSOLUTE = {
+    "throughput": "taller is faster",
+    "memory": "absolute peak above the arrays themselves; shorter is less",
+}
 
 
 def _score(value, baseline, metric, section):
     """Turn a raw measurement into a bar height."""
     if metric == "throughput":
         return section["raw_bytes"] / value / 1e6  # MB/s of original array bytes
+    if metric == "memory":
+        return value / 1e6  # MB
     if metric == "stored":
         return 1.0 / value  # recorded as raw/stored; shown as the fraction of the raw array kept
     return value / baseline  # time and bytes: a multiple of the baseline, less is better
@@ -140,14 +149,33 @@ def _score(value, baseline, metric, section):
 def _format_score(score, metric="time"):
     """A bar's label: a multiple of the baseline, or an absolute rate for throughput."""
     if metric in ABSOLUTE:
-        return f"{score:,.0f}"
+        return f"{score:,.0f}" if score >= 1 or score == 0 else f"{score:,.2f}"
     for threshold, digits in ((100, 0), (10, 0), (2, 1), (0.1, 2), (0.01, 3)):
         if score >= threshold:
             return f"{score:.{digits}f}x"
     return f"{score:.4f}x"
 
 
+def _format_cell(cell, metric):
+    """One table cell: the measurement, plus its spread where the harness reported one.
+
+    pytest-benchmark gives a standard deviation, Criterion a standard error of the mean. Both are
+    taken as reported rather than converted, so the column means "how noisy was this" and not a
+    confidence interval.
+    """
+    value, spread = cell
+    text = _format_value(value, metric)
+    if not spread:
+        return text
+    # Express the spread in the same unit as the value, so the two are comparable at a glance.
+    unit = text.split(" ", 1)[1] if " " in text else ""
+    scale = {"s": 1.0, "ms": 1e-3, "us": 1e-6, "ns": 1e-9}.get(unit)
+    return f"{text} +/- {spread / scale:.2f}" if scale else text
+
+
 def _format_value(value, metric):
+    if metric == "memory":
+        return f"{value / 1e6:.1f} MB"
     if metric == "stored":
         return f"{value:.1f}x smaller"
     if metric == "throughput":
@@ -191,14 +219,20 @@ def plot_section(rows, section, out_dir):
                 if value is None or (baseline is None and metric in RELATIVE and metric != "stored"):
                     continue
                 score = _score(value, baseline, metric, section)
-                if score > 0:
+                # A log axis cannot draw a zero; a linear one can, and for absolute memory zero is
+                # the calibration value rather than missing data.
+                if score > 0 or not section.get("log", True):
                     got[(case, library)] = score
         scores[platform] = got
     everything = [s for got in scores.values() for s in got.values()]
     if not everything:
         return None
-    floor = 10 ** (math.floor(math.log10(min(everything))) - 0.15)
-    ceiling = 10 ** (math.log10(max(everything)) + 0.55)
+    log_scale = section.get("log", True)
+    if not log_scale:
+        floor, ceiling = 0.0, max(everything) * 1.3
+    else:
+        floor = 10 ** (math.floor(math.log10(min(everything))) - 0.15)
+        ceiling = 10 ** (math.log10(max(everything)) + 0.55)
     if metric in RELATIVE:
         # Keep headroom on both sides of the 1x rule, so it reads as a reference line rather than
         # the top or bottom edge of the plot when every library lands on one side of it.
@@ -224,7 +258,8 @@ def plot_section(rows, section, out_dir):
             ax.spines[side].set_visible(False)
         ax.spines["bottom"].set_color(THEME["axis"])
         ax.tick_params(colors=THEME["muted"], labelsize=8, length=0)
-        ax.set_yscale("log")
+        if log_scale:
+            ax.set_yscale("log")
         ax.set_ylim(floor, ceiling)
         ax.grid(axis="y", color=THEME["grid"], lw=0.7, zorder=0)
         ax.set_axisbelow(True)
@@ -261,10 +296,11 @@ def plot_section(rows, section, out_dir):
         if metric in RELATIVE:
             # Every bar is read against this line, and it is where the baseline's own bar tops out.
             ax.axhline(1.0, color=THEME["ink"], lw=1.2, zorder=4)
-        decades = range(math.floor(math.log10(floor)), math.ceil(math.log10(ceiling)) + 1)
-        ticks = [10.0**d for d in decades if floor <= 10.0**d <= ceiling]
-        ax.yaxis.set_major_locator(FixedLocator(ticks))
-        ax.set_yticklabels([_format_score(t, metric) for t in ticks], fontsize=7.5)
+        if log_scale:
+            decades = range(math.floor(math.log10(floor)), math.ceil(math.log10(ceiling)) + 1)
+            ticks = [10.0**d for d in decades if floor <= 10.0**d <= ceiling]
+            ax.yaxis.set_major_locator(FixedLocator(ticks))
+            ax.set_yticklabels([_format_score(t, metric) for t in ticks], fontsize=7.5)
         ax.minorticks_off()
         ax.set_ylabel(
             f"{platform}\n{section['unit']}" if "unit" in section else platform, color=THEME["sub"], fontsize=9
@@ -312,7 +348,7 @@ def markdown_table(rows, section):
     source = section.get("source", section["key"])
     for row in rows:
         if row["section"] == source:
-            cells[row["case"]][row["library"]] = row["value"]
+            cells[row["case"]][row["library"]] = (row["value"], row.get("spread"))
     libraries = section["libraries"]
     lines = [
         "<details>",
@@ -323,7 +359,7 @@ def markdown_table(rows, section):
     ]
     for case in section["cases"]:
         got = cells.get(case, {})
-        values = [_format_value(got[lib], metric) if lib in got else "-" for lib in libraries]
+        values = [_format_cell(got[lib], metric) if lib in got else "-" for lib in libraries]
         # case labels are two-line on the plots; a markdown table row cannot contain a newline
         lines.append(f"| {case.replace(chr(10), ' ')} | " + " | ".join(values) + " |")
     lines += ["", "</details>"]
@@ -357,9 +393,7 @@ def render_report(rows, template, out_path, plots_dir, sections, banner=""):
 def headline(rows, section, case, library, baseline=None):
     """One (absolute, ratio-to-baseline) pair, for the handful of numbers the README quotes."""
     found = {
-        (row["case"], row["library"]): row["value"]
-        for row in rows
-        if row["section"] == section and row["case"] == case
+        (row["case"], row["library"]): row["value"] for row in rows if row["section"] == section and row["case"] == case
     }
     value = found.get((case, library))
     base = found.get((case, baseline)) if baseline else None

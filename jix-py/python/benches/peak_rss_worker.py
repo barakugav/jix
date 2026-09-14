@@ -4,6 +4,10 @@ Run as a subprocess by `test_peak_rss.py`. A separate process per measurement is
 get a clean number: a peak is a high-water mark, so anything measured in the pytest process would
 carry every allocation every earlier test made.
 
+The inputs and the output are allocated before the baseline is taken, so the number reported is
+the engine's own overhead rather than the cost of the data. A one-step NumPy chain writes straight
+into the output and should therefore come out at roughly zero.
+
 Sampling RSS in a thread rather than reading `ru_maxrss` is deliberate. `ru_maxrss` only ever
 increases, so it would report the transient of building the array - identical for every library and
 large enough to bury the thing being measured. Sampling bounds the window to the chain itself.
@@ -23,6 +27,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # put python/ on the path
+
+import numpy as np
 
 from benches import report_spec
 from benches.array_impls import ARRAY_IMPLS
@@ -85,13 +91,30 @@ def main(argv=None):
         data = make_data("smooth", report_spec.SHAPE, dtype=DTYPES["f32"], seed=seed)
         arrays.append(impl.from_numpy(data))
         del data  # the source ndarray is not part of what we are measuring
+
+    # Allocate the destination up front and touch every page, so it is resident before the
+    # baseline is taken. What is left to measure is then the memory the engine needs on top of the
+    # arrays the caller was always going to hold - and a single operation writing straight into
+    # `out` should need none, which is the zero this measurement is calibrated against.
+    out = np.empty(report_spec.SHAPE, dtype=DTYPES["f32"])
+    out.fill(0.0)  # np.zeros leaves the pages unfaulted, so they would land in the measurement
     gc.collect()
+    baseline = rss_bytes()
 
     with PeakSampler() as sampler:
-        out = arrays[0].chain(arrays[1], args.steps)
-        assert out is not None
-    print(json.dumps({"peak_rss_bytes": sampler.peak, "sampled": SAMPLED}))
-    return sampler.peak
+        arrays[0].chain_into(arrays[1], args.steps, out)
+    overhead = max(0, sampler.peak - baseline)
+    print(
+        json.dumps(
+            {
+                "peak_rss_bytes": overhead,
+                "baseline_rss_bytes": baseline,
+                "absolute_peak_bytes": sampler.peak,
+                "sampled": SAMPLED,
+            }
+        )
+    )
+    return overhead
 
 
 if __name__ == "__main__":
