@@ -11,9 +11,34 @@ def _bench(section, case, library, mean, **extra):
 
 def test_load_python_reads_section_case_library(tmp_path):
     path = tmp_path / "python.json"
-    path.write_text(json.dumps({"benchmarks": [_bench("negate", "f32", "jix", 0.25)]}))
+    entry = _bench("negate", "f32", "jix", 0.25)
+    entry["stats"]["stddev"] = 0.01
+    path.write_text(json.dumps({"benchmarks": [entry]}))
     (row,) = report_bars.load_python(path, "linux-x86_64")
-    assert row == {"platform": "linux-x86_64", "section": "negate", "case": "f32", "library": "jix", "value": 0.25}
+    assert row == {
+        "platform": "linux-x86_64",
+        "section": "negate",
+        "case": "f32",
+        "library": "jix",
+        "value": 0.25,
+        "spread": 0.01,
+    }
+
+
+def test_recorded_metrics_carry_no_spread(tmp_path):
+    """A stored size or an RSS reading has no standard deviation; only the timing does."""
+    path = tmp_path / "python.json"
+    entry = _bench("chain_memory", "4 ops", "jix", 9.9, peak_rss_bytes=1234, value_field="peak_rss_bytes")
+    entry["stats"]["stddev"] = 0.5
+    path.write_text(json.dumps({"benchmarks": [entry]}))
+    (row,) = report_bars.load_python(path, "linux-x86_64")
+    assert row["spread"] is None
+
+
+def test_absolute_table_cell_shows_spread():
+    section = {**SECTION, "cases": ["a"], "libraries": ["numpy"]}
+    rows = [{"platform": "p", "section": "demo", "case": "a", "library": "numpy", "value": 0.25, "spread": 0.01}]
+    assert "+/-" in report_bars.markdown_table(rows, section)
 
 
 def test_load_python_skips_untagged_benchmarks(tmp_path):

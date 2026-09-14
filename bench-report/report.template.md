@@ -203,16 +203,19 @@ cheap and the array is large; they do not when one expensive kernel dominates.
 
 <!-- plot:chain_memory -->
 
-Peak RSS of a fresh subprocess running the same chain, so NumPy's C-level allocations are included.
+Peak RSS of a fresh subprocess, in absolute megabytes rather than relative to anything. The inputs
+and the output are allocated and touched *before* the measurement starts, so what is left is the
+memory the engine needs on top of the data the caller was always going to hold.
 
-All three are flat across chain length, and that is worth being precise about: NumPy allocates an
-intermediate per step but frees each one as the next is produced, so its peak is the two inputs
-plus one live intermediate, not a growing pile. Avoiding intermediates entirely is therefore worth
-a fifth, not a multiple.
+That gives the plot a zero to calibrate against: a one-step NumPy chain writes straight into the
+output with `out=` and allocates nothing at all, and the measurement says so. Every bar above that
+is an engine holding something the caller did not ask for.
 
-The real difference is what the arrays cost to hold. The compact arm keeps its inputs compressed
-for the whole computation, and that is where the factor comes from. Memory has no noise floor,
-which makes this the cleanest measurement on the page.
+NumPy's cost rises to a plateau of two live intermediates - it allocates one per step and frees the
+previous, so the peak stops growing rather than climbing forever. jix stays within a few megabytes
+whatever the chain does, because it never materializes a whole intermediate: each read region is
+computed, consumed and reused. Memory has no noise floor, which makes this the cleanest measurement
+on the page.
 
 <!-- table:chain_memory -->
 

@@ -1,5 +1,10 @@
 # Benchmarks: CI matrix and cross-run comparison
 
+This page is about running the suite and comparing two runs, which is what you want when checking
+a change for regressions. **To produce the published benchmark report, see
+[`bench-report/README.md`](../bench-report/README.md)** - it covers the workflow, downloading the
+artifacts, and building the plots. `bench-report/DEVELOPER.md` covers changing the suite itself.
+
 ## Running the matrix
 
 Trigger the `Benchmarks` workflow manually (Actions -> Benchmarks -> Run workflow):
@@ -25,6 +30,10 @@ to the harness (`cargo bench --` for the Rust runner, pytest for the Python one)
 
     python jix/benches/run.py --fast -- reduction
     python jix-py/python/benches/run_all.py --fast -- -k op2
+
+`jix/benches/run.py --report` restricts the Rust run to the `vs_ndarray` target, which is the only
+one the report uses; `scripts/bench/run.py` passes it by default and `--all-rust-benches` turns it
+off.
 
 `--fast` trades fidelity for speed; drop it for real measurements.
 
