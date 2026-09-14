@@ -246,32 +246,11 @@ without knowing that will pay for it.
 
 <!-- table:rust_normalize -->
 
----
-
-## Axis order (Rust)
-
-`ndarray` has no general axis sort: it classifies a layout four ways and otherwise iterates in
-logical index order, however the strides actually run. jix sorts every axis by descending stride,
-so it always walks memory in order.
-
-Getting `ndarray` to that fallback takes some care. Its contiguity check sorts the strides before
-testing, so a permutation of a contiguous array is still contiguous *in memory order* and takes a
-flat fast path - no permutation of a plain array shows any difference at all. The view has to be
-genuinely non-contiguous first, which is why these cases slice an axis before permuting. With
-`[1,2,0]` on a sliced view the largest stride lands on the innermost logical axis.
-
-<!-- plot:rust_axis_order -->
-
-The last two cases are controls, on the plot deliberately. One keeps logical order close to memory
-order, so there is nothing to sort; the other drops the slice, so the view is contiguous and
-`ndarray` reaches its fast path. If the three do not separate, this section is measuring nothing -
-which is exactly what an earlier version of it did.
-
-<!-- table:rust_axis_order -->
-
-There is no Python counterpart - NumPy sorts axes too, so there is nothing to compare.
-
----
+<!--
+The axis-order section is withheld. The benchmark it relied on measured nothing - see
+FINDINGS.md - and the fixed version has not been run yet. Restore this section, with
+<!- - plot:rust_axis_order - -> and <!- - table:rust_axis_order - ->, once a run includes it.
+-->
 
 ## Reproducing
 

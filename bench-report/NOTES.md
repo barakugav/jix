@@ -191,3 +191,25 @@ than merely incomplete:
 Also: `meta.json` now records whether a run was `--fast`, and both builders stamp low-fidelity
 output. `readme-snippet.md` is now generated from the same rows as the report, so the README's
 numbers cannot drift from it.
+
+### Iteration 9 - the real run
+
+Run 34788352028, branch `bench`, sha 94f72a73, both runners, ~20 minutes each. Full fidelity
+(Criterion's 5s measurement window in the log, not `--fast`'s 1s). `report.md` and
+`readme-snippet.md` are generated from it.
+
+The headline: a 32-step elementwise chain is **6.7x faster than numpy on x86_64** and 2.8x on
+aarch64, at the default read region. Rust is 5.9x faster than ndarray at 16 steps. Full fidelity is
+much stronger than the fast run suggested (0.15x against 0.31x at 32 steps) - reduced sampling was
+flattering numpy.
+
+Two judgement calls worth recording:
+
+- **The axis-order section is withheld.** This run predates the fix, so its numbers come from the
+  version that measured nothing. `build_report.py` now warns when a section's cases are only
+  partly present - stale benchmark ids get drawn under new labels, which is worse than an empty
+  plot. The section returns when a run includes the fixed benchmark.
+- **The README quotes Blosc2 at its best, not its default.** Against default chunking jix reads
+  46x faster; against `chunks == blocks` it is 2.4x. The 46x is real and is in the report, but a
+  headline that beats a competitor's default when a better configuration exists is not a claim
+  worth making.

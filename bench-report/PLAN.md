@@ -232,4 +232,6 @@ Everything in this plan is implemented. The Python suite and `jix/benches/vs_nda
 parametrize themselves from `report_spec.py`, so the benchmarks and the plots cannot disagree
 about what a case is. `bench-report/README.md` is the runbook.
 
-What has not happened yet: a real run on CI. The numbers in `report.md` are still fake.
+The numbers in `report.md` are real, from run 34788352028 at full fidelity on both runners.
+
+Outstanding: the axis-order section is withheld pending a run that includes its fixed benchmark.
