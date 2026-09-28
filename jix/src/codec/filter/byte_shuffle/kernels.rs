@@ -111,6 +111,11 @@ const MIN_BYTES_PER_ITER: usize = 256;
 ///
 /// Each chunk is a transpose of ITEMSIZE vectors (one per byte plane): log2(ITEMSIZE) rounds of
 /// a perfect shuffle, pairing plane `j` with plane `j + ITEMSIZE / 2`.
+///
+/// Optimized by static analysis of the generated asm (cargo-asm + llvm-mca, steady-state cycles
+/// of the main loop), for x86-64 SSE4.2 (Sandy Bridge, Jaguar), AVX2 (Skylake, Alder Lake, Zen 3)
+/// and AVX-512 (Ice Lake, Sapphire Rapids, Zen 4), i686 SSE2 (Skylake), and aarch64 NEON
+/// (Cortex-A72, Neoverse N1 / V2, Apple M1).
 #[inline(always)]
 pub fn decode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mut [u8]) -> usize {
     let shuffle_steps = const {

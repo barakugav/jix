@@ -130,14 +130,32 @@ class Kernel:
     fixed: bool  # fixed itemsize (flattened, the objective) vs runtime itemsize (informational)
 
 
-def _decode_kernel(itemsize: int) -> Kernel:
-    sym = f"probe_byte_shuffle_decode_{itemsize}"
-    return Kernel(f"decode_{itemsize}", sym, sym, True)
+def _kernel(direction: str, itemsize: int) -> Kernel:
+    sym = f"probe_byte_shuffle_{direction}_{itemsize}"
+    return Kernel(f"{direction}_{itemsize}", sym, sym, True)
 
 
-# Only the decode main loop is analyzed. The kernel table must match the `probe_*` exports in
-# src/lib.rs.
-KERNELS = [_decode_kernel(s) for s in (2, 4, 8, 16)]
+# Main loops of the fixed-itemsize kernels, per direction (`--direction`). Must match the
+# `probe_*` exports in src/lib.rs.
+KERNELS = {d: [_kernel(d, s) for s in (2, 4, 8, 16)] for d in ("decode", "encode")}
+# The auto-vectorized `encode_impl::<ITEMSIZE, 128 / ITEMSIZE>` (`#[inline(never)]`, so analyzed
+# directly), for the encode baseline. Drop once `encode_impl` is gone.
+KERNELS["encode-legacy"] = [
+    Kernel(
+        f"encode_{s}",
+        f"jix_probe::byte_shuffle::encode_impl::<{s}, {128 // s}>",
+        f"11encode_implKj{s:x}_Kj{128 // s:x}_",
+        True,
+    )
+    for s in (2, 4, 8, 16)
+]
+
+# x86 feature sets of the `multiversion` clones (x86-64-v2/v3/v4), used by the baselines, which
+# measured the auto-vectorized kernels (`--x86-levels multiversion`).
+MULTIVERSION_V2 = "+sse3,+ssse3,+sse4.1,+sse4.2,+popcnt,+cmpxchg16b"
+MULTIVERSION_V3 = MULTIVERSION_V2 + ",+avx,+avx2,+bmi1,+bmi2,+f16c,+fma,+lzcnt,+movbe,+xsave"
+MULTIVERSION_V4 = MULTIVERSION_V3 + ",+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
+MULTIVERSION_FEATURES = {"x86_64-v2": MULTIVERSION_V2, "x86_64-v3": MULTIVERSION_V3, "x86_64-v4": MULTIVERSION_V4}
 
 
 # --------------------------------------------------------------------------------------------------
@@ -644,7 +662,7 @@ def write_summary(
             return "-"
         return f"{geo(old) / geo([cost(r, i) for r in rs]):.2f}x"
 
-    fixed_names = [k.name for k in KERNELS if k.fixed and any(r.kernel == k.name for r in results)]
+    fixed_names = list(dict.fromkeys(r.kernel for r in results if r.mode == "outer"))
     lines += [
         "## Overview",
         "",
@@ -719,11 +737,22 @@ def main() -> None:
     ap.add_argument("--label", default="baseline", help="results sub-directory name")
     ap.add_argument("--platform", action="append", help="restrict to these platforms (repeatable)")
     ap.add_argument("--compare", help="also report the geomean speedup over this results label")
+    ap.add_argument("--direction", choices=sorted(KERNELS), default="decode", help="kernels to analyze")
+    ap.add_argument(
+        "--x86-levels",
+        choices=["fearless", "multiversion"],
+        default="fearless",
+        help="x86-64-v2/v3/v4 feature sets: fearless_simd's dispatch levels, or the multiversion clones",
+    )
     ap.add_argument("--fn", action="append", dest="kernels", help="restrict to these kernels (repeatable)")
     args = ap.parse_args()
 
     platforms = [p for p in PLATFORMS if not args.platform or p.name in args.platform]
-    kernels = [k for k in KERNELS if not args.kernels or k.name in args.kernels]
+    kernels = [k for k in KERNELS[args.direction] if not args.kernels or k.name in args.kernels]
+    if args.x86_levels == "multiversion":
+        for p in platforms:
+            if p.name in MULTIVERSION_FEATURES:
+                p.rustflags = [f"-Ctarget-feature={MULTIVERSION_FEATURES[p.name]}"]
     if not platforms or not kernels:
         sys.exit("error: nothing selected")
 

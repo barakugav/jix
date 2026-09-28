@@ -47,3 +47,21 @@ probe! {
     probe_byte_shuffle_decode_8 => 8;
     probe_byte_shuffle_decode_16 => 16;
 }
+
+macro_rules! probe_encode {
+    ($($name:ident => $f:path;)*) => {
+        $(
+            #[unsafe(no_mangle)]
+            pub fn $name(src: &[u8], dst: &mut [u8]) {
+                $f(src, dst)
+            }
+        )*
+    };
+}
+
+probe_encode! {
+    probe_byte_shuffle_encode_2 => byte_shuffle::encode_impl::<2, 64>;
+    probe_byte_shuffle_encode_4 => byte_shuffle::encode_impl::<4, 32>;
+    probe_byte_shuffle_encode_8 => byte_shuffle::encode_impl::<8, 16>;
+    probe_byte_shuffle_encode_16 => byte_shuffle::encode_impl::<16, 8>;
+}
