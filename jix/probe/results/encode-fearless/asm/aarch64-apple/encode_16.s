@@ -1,10 +1,9 @@
 _probe_byte_shuffle_encode_16:
 Lfunc_begin8:
-	stp d11, d10, [sp, #-64]!
-	stp d9, d8, [sp, #16]
-	stp x20, x19, [sp, #32]
-	stp x29, x30, [sp, #48]
-	add x29, sp, #48
+	stp d9, d8, [sp, #-48]!
+	stp x20, x19, [sp, #16]
+	stp x29, x30, [sp, #32]
+	add x29, sp, #32
 	and x9, x1, #0x7ffffffffffffff0
 	cmp x3, x9
 	b.lo LBB8_5
@@ -42,78 +41,102 @@ Lfunc_begin8:
 	add x19, x2, x19
 	add x8, x8, #128
 LBB8_3:
-	sub x20, x8, #128
-	ld4.16b { v0, v1, v2, v3 }, [x20]
-	sub x20, x8, #64
-	ld4.16b { v4, v5, v6, v7 }, [x20]
-	ldp q16, q17, [x8]
-	add x20, x8, #64
-	ld4.16b { v18, v19, v20, v21 }, [x20]
-	add x20, x8, #32
-	ld2.16b { v22, v23 }, [x20]
-	uzp1.16b v24, v16, v17
-	uzp2.16b v16, v16, v17
-	uzp1.16b v17, v24, v22
-	uzp2.16b v24, v24, v22
-	uzp1.16b v25, v16, v23
-	uzp2.16b v16, v16, v23
-	uzp1.16b v22, v0, v4
-	uzp2.16b v23, v0, v4
-	uzp1.16b v26, v17, v18
-	uzp1.16b v27, v1, v5
-	uzp1.16b v28, v25, v19
-	uzp1.16b v29, v2, v6
-	uzp1.16b v30, v24, v20
-	uzp1.16b v31, v3, v7
-	uzp1.16b v8, v16, v21
-	uzp1.16b v9, v22, v26
-	uzp1.16b v10, v27, v28
-	str q9, [x2, x9]
-	uzp1.16b v9, v29, v30
-	str q10, [x16, x9]
-	uzp1.16b v10, v31, v8
-	str q9, [x19, x9]
-	str q10, [x7, x9]
-	uzp2.16b v17, v17, v18
-	uzp1.16b v9, v23, v17
-	str q9, [x6, x9]
-	uzp2.16b v9, v1, v5
-	uzp2.16b v25, v25, v19
-	uzp1.16b v10, v9, v25
-	str q10, [x5, x9]
-	uzp2.16b v10, v2, v6
-	uzp2.16b v0, v3, v7
-	uzp2.16b v1, v24, v20
-	uzp1.16b v2, v10, v1
-	str q2, [x4, x9]
-	uzp2.16b v2, v16, v21
-	uzp1.16b v3, v0, v2
-	str q3, [x3, x9]
-	uzp2.16b v3, v22, v26
-	str q3, [x1, x9]
-	uzp2.16b v3, v27, v28
-	str q3, [x17, x9]
-	uzp2.16b v3, v29, v30
-	str q3, [x15, x9]
-	uzp2.16b v3, v31, v8
-	str q3, [x14, x9]
-	uzp2.16b v3, v23, v17
-	str q3, [x13, x9]
-	uzp2.16b v3, v9, v25
-	str q3, [x11, x9]
-	uzp2.16b v1, v10, v1
-	str q1, [x10, x9]
-	uzp2.16b v0, v0, v2
+	ldp q0, q1, [x8, #-128]
+	ldp q2, q3, [x8]
+	zip1.16b v16, v0, v2
+	zip2.16b v0, v0, v2
+	zip1.16b v17, v1, v3
+	zip2.16b v1, v1, v3
+	ldp q2, q3, [x8, #-96]
+	ldp q4, q5, [x8, #32]
+	zip1.16b v18, v2, v4
+	zip2.16b v2, v2, v4
+	zip1.16b v19, v3, v5
+	zip2.16b v3, v3, v5
+	ldp q4, q5, [x8, #-64]
+	ldp q6, q7, [x8, #64]
+	zip1.16b v20, v4, v6
+	zip2.16b v4, v4, v6
+	zip1.16b v21, v5, v7
+	zip2.16b v5, v5, v7
+	ldp q6, q7, [x8, #-32]
+	ldp q22, q23, [x8, #96]
+	zip1.16b v24, v6, v22
+	zip2.16b v6, v6, v22
+	zip1.16b v22, v7, v23
+	zip2.16b v7, v7, v23
+	zip1.16b v23, v16, v20
+	zip2.16b v16, v16, v20
+	zip1.16b v20, v0, v4
+	zip1.16b v25, v17, v21
+	zip2.16b v17, v17, v21
+	zip1.16b v21, v1, v5
+	zip1.16b v26, v18, v24
+	zip2.16b v18, v18, v24
+	zip1.16b v24, v2, v6
+	zip1.16b v27, v19, v22
+	zip2.16b v19, v19, v22
+	zip1.16b v22, v3, v7
+	zip1.16b v28, v23, v26
+	zip2.16b v30, v23, v26
+	zip1.16b v8, v16, v18
+	zip1.16b v29, v25, v27
+	zip2.16b v31, v25, v27
+	zip1.16b v9, v17, v19
+	zip2.16b v23, v28, v29
+	add x20, x2, x9
+	st2.8b { v28, v29 }, [x20]
+	str q23, [x16, x9]
+	zip2.16b v23, v30, v31
+	add x20, x19, x9
+	st2.8b { v30, v31 }, [x20]
+	str q23, [x7, x9]
+	zip2.16b v23, v8, v9
+	add x20, x6, x9
+	st2.8b { v8, v9 }, [x20]
+	str q23, [x5, x9]
+	zip2.16b v25, v16, v18
+	add x20, x4, x9
+	zip1.16b v27, v20, v24
+	zip2.16b v23, v20, v24
+	zip2.16b v26, v17, v19
+	zip1.16b v28, v21, v22
+	zip2.16b v24, v21, v22
+	zip2.16b v16, v25, v26
+	st2.8b { v25, v26 }, [x20]
+	str q16, [x3, x9]
+	zip2.16b v16, v27, v28
+	add x20, x1, x9
+	st2.8b { v27, v28 }, [x20]
+	str q16, [x17, x9]
+	zip2.16b v16, v23, v24
+	add x20, x15, x9
+	st2.8b { v23, v24 }, [x20]
+	str q16, [x14, x9]
+	zip2.16b v0, v0, v4
+	add x20, x13, x9
+	zip2.16b v1, v1, v5
+	zip2.16b v2, v2, v6
+	zip2.16b v3, v3, v7
+	zip1.16b v4, v0, v2
+	zip1.16b v5, v1, v3
+	zip2.16b v6, v4, v5
+	st2.8b { v4, v5 }, [x20]
+	str q6, [x11, x9]
+	add x20, x10, x9
+	zip2.16b v4, v0, v2
+	zip2.16b v5, v1, v3
+	st2.8b { v4, v5 }, [x20]
+	zip2.16b v0, v4, v5
 	str q0, [x12, x9]
 	add x9, x9, #16
 	add x8, x8, #256
 	cmp x0, x9
 	b.ne LBB8_3
 LBB8_4:
-	ldp x29, x30, [sp, #48]
-	ldp x20, x19, [sp, #32]
-	ldp d9, d8, [sp, #16]
-	ldp d11, d10, [sp], #64
+	ldp x29, x30, [sp, #32]
+	ldp x20, x19, [sp, #16]
+	ldp d9, d8, [sp], #48
 	ret
 LBB8_5:
 Lloh24:

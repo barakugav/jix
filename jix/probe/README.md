@@ -237,27 +237,33 @@ everywhere, 512 mixed +-3%).
 The transpose is the inverse of decode's. A decode round (`interleave`) is a perfect shuffle of
 the chunk's `ITEMSIZE * lanes` bytes, i.e. a rotation of the byte index bits by one, and decode
 rotates by log2(ITEMSIZE). So encode is either log2(ITEMSIZE) inverse rounds (`deinterleave`), or
-log2(lanes) more decode rounds. `shuffle_costs` picks the cheaper one from the instruction counts
-of fearless_simd's implementations (interleave / deinterleave per pair): SSE2 2 / scalar,
-SSE4.2 2 / 4, AVX2 4 / 6, AVX-512 and NEON 2 / 2. That rule matched every measured winner:
-SSE2 always interleaves, SSE4.2 for itemsize >= 8, AVX2 for itemsize 16, AVX-512 / NEON never.
-Without it, i686 (SSE2) regressed to 0.82x of the baseline (scalar `deinterleave`, plus spills and
-`memcpy` calls for `encode_16`).
+log2(lanes) more decode rounds. Instructions per pair in fearless_simd (interleave / deinterleave):
+SSE2 2 / scalar, SSE4.2 2 / 4, AVX2 4 / 6, AVX-512 and NEON 2 / 2.
+
+A per-level cost table picked the best form everywhere, but a `simd.level()` switch was not
+wanted. The level-agnostic rule kept: `interleave` is never more expensive than `deinterleave`, so
+use it when it needs no more rounds (`lanes <= ITEMSIZE`, i.e. only itemsize 16 on 128-bit ISAs).
+It is exact on x86-64-v3/v4 for itemsizes 2/4/8 and on NEON for 2/4/8 (the common cases); vs the
+per-level table it loses SSE4.2 `encode_8` (Sandy Bridge 641 -> 778, Jaguar 1050 -> 2273), AVX2
+`encode_16` (Skylake 1283 -> 1538), Cortex-A72 / Neoverse V2 `encode_16`, and SSE2 itemsizes 2/4/8,
+which stay scalar (fearless_simd's SSE2 `deinterleave`), at the baseline's speed. Without any
+rule (always `deinterleave`), i686 `encode_16` spills and calls `memcpy` (18084, 0.47x of the
+baseline).
 
 `results/encode-fearless`, cycles per 4096 bytes:
 
 | platform | cpu | geomean | vs encode-baseline | encode_2 | encode_4 | encode_8 | encode_16 |
 |---|---|---:|---:|---:|---:|---:|---:|
-| x86_64-v2 | sandybridge | **525** | 6.92x | 302 | 522 | 641 | 753 |
-| x86_64-v2 | btver2 | **1186** | 3.31x | 929 | 1633 | 1050 | 1242 |
-| x86_64-v3 | skylake | **815** | 3.85x | 386 | 770 | 1155 | 1283 |
-| x86_64-v3 | alderlake | **420** | 4.29x | 196 | 420 | 581 | 651 |
-| x86_64-v3 | znver3 | **419** | 8.20x | 194 | 387 | 580 | 707 |
+| x86_64-v2 | sandybridge | **551** | 6.59x | 302 | 522 | 778 | 753 |
+| x86_64-v2 | btver2 | **1439** | 2.73x | 929 | 1633 | 2273 | 1242 |
+| x86_64-v3 | skylake | **853** | 3.68x | 386 | 770 | 1155 | 1538 |
+| x86_64-v3 | alderlake | **438** | 4.11x | 196 | 420 | 581 | 771 |
+| x86_64-v3 | znver3 | **430** | 7.99x | 194 | 387 | 580 | 782 |
 | x86_64-v4 | icelake-server | **148** | 3.48x | 74 | 131 | 193 | 257 |
 | x86_64-v4 | sapphirerapids | **287** | 1.93x | 132 | 260 | 386 | 513 |
 | x86_64-v4 | znver4 | **144** | 3.03x | 67 | 131 | 194 | 257 |
-| i686 | skylake | **825** | 5.95x | 343 | 1026 | 1026 | 1283 |
-| aarch64 | cortex-a72 | **764** | 5.53x | 546 | 626 | 898 | 1108 |
-| aarch64 | neoverse-n1 | **830** | 5.58x | 768 | 768 | 864 | 929 |
-| aarch64 | neoverse-v2 | **276** | 10.19x | 242 | 241 | 306 | 323 |
-| aarch64-apple | apple-m1 | **303** | 12.61x | 249 | 266 | 339 | 373 |
+| i686 | skylake | **3080** | 1.59x | 4097 | 4113 | 4162 | 1283 |
+| aarch64 | cortex-a72 | **818** | 5.16x | 546 | 626 | 898 | 1459 |
+| aarch64 | neoverse-n1 | **815** | 5.68x | 768 | 768 | 864 | 865 |
+| aarch64 | neoverse-v2 | **288** | 9.75x | 242 | 241 | 306 | 386 |
+| aarch64-apple | apple-m1 | **297** | 12.86x | 249 | 266 | 339 | 344 |

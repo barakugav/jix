@@ -34,22 +34,6 @@ pub fn decode(src: &[u8], dst: &mut [u8], itemsize: usize) {
     }
 }
 
-/// Instructions per `(interleave, deinterleave)` of two native vectors, in fearless_simd's
-/// implementation for the level of `simd`. SSE2 has no byte shuffle (`pshufb`), and falls back to
-/// scalar code for `deinterleave`.
-#[inline(always)]
-fn shuffle_costs<S: Simd>(simd: S) -> (u32, u32) {
-    match simd.level() {
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        Level::Sse2(_) => (2, 64),
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        Level::Sse4_2(_) => (2, 4),
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        Level::Avx2(_) => (4, 6),
-        _ => (2, 2),
-    }
-}
-
 fn encode_dispatch<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) {
     let done = dispatch!(Level::new(), simd => encode_simd::<_, ITEMSIZE>(simd, src, dst));
     // Tail of the remaining items
@@ -79,9 +63,9 @@ pub fn encode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mu
     // A decode round is a perfect shuffle of the chunk's ITEMSIZE * lanes bytes (a rotation of the
     // byte index bits by one), and decode rotates by log2(ITEMSIZE). The inverse is either
     // log2(ITEMSIZE) inverse rounds (`deinterleave`), or log2(lanes) more decode rounds
-    // (`interleave`), whichever is cheaper on this level.
-    let (interleave_cost, deinterleave_cost) = shuffle_costs(simd);
-    let use_deinterleave = deinterleave_cost * shuffle_steps <= interleave_cost * lanes.ilog2();
+    // (`interleave`). `interleave` is never more expensive than `deinterleave`, and much cheaper on
+    // some levels (e.g. SSE2, which has no byte shuffle), so use it when it needs no more rounds.
+    let use_deinterleave = shuffle_steps < lanes.ilog2();
     let nitems = src.len() / ITEMSIZE;
     assert!(dst.len() >= nitems * ITEMSIZE);
     let nchunks = nitems / (lanes * unroll) * unroll;
