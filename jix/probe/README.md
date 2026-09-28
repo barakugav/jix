@@ -502,8 +502,9 @@ Findings:
   clean. Small losses on Neoverse V2 (`add`, `chain`: 0.9-0.95x, a different instruction order).
 - i686 has 8 `xmm` registers: with `LANES` = 128 bytes per operand, the SIMD body's order (all
   loads, then the ops) spilled one vector per iteration (geomean 404, 0.90x). fearless_simd exposes
-  the vector widths (`S::f32s::LEN`, ...) but not the register count, so `pick_inner_loop` halves
-  `LANES` of the contiguous loop on 32-bit x86 (`cfg!(target_arch = "x86")`): 366, 0.99x.
+  the vector widths (`S::f32s::LEN`, ...) but not the register count. Halving `LANES` on 32-bit x86
+  fixed it (366, 0.99x); this table is from that version. The lanes are now picked per level,
+  see the next section.
 - The first version chained the per-type attempts with `Option::or_else`, which is not always
   inlined: on the `Sse2` arm, the emulated i32 multiply stayed behind a call in the hot loop
   (`chain_i32` 2-3x slower). Plain `if let ... return` fixed it.
@@ -512,4 +513,75 @@ Analyzer changes: `len` reaches the loop through a stack slot (the dispatch clos
 reference and is passed to the non-inlined higher-level arms), and its IR argument can be
 unnamed (`%1`). `IrValues` resolves a `load` from `%len` (or from a slot stored once), and the
 kernel's last argument is bound whatever its name.
+
+
+
+### Lanes per SIMD level (`results/elementwise-k{1,2,4}`)
+
+The contiguous loop now takes `CONTIGUOUS_VECTORS` (k) vectors of its level per iteration:
+`LANES = k * S::u8s::LEN / size_of::<T>()`, i.e. k * 16 bytes on SSE/NEON, k * 32 on AVX2, k * 64
+on AVX-512 (before: 128 bytes on every level, 64 on i686). `LANES` depends on the level, so
+`inner_loop_level` matches on it as an inline `const` inside the dispatch arm: only the taken arm is
+codegened. The strided/staged loops keep their fixed lanes. k = 4 is committed.
+
+Bytes per iteration are not only k * vector: on x86, LLVM's unroller also unrolls small loop bodies
+(`neg` runs 64 B/iteration on SSE whatever k, 256 B on AVX-512), while on aarch64 it does not.
+
+f32 (f64 is identical per byte): `neg` / `add` / `chain`:
+
+| platform | cpu | 128 B (before) | k=1 | k=2 | k=4 |
+|---|---|---|---|---|---|
+| x86_64 | sandybridge | 291 / 387 / 644 | 325 / 390 / 663 | 325 / 390 / 663 | 325 / 390 / 650 |
+| x86_64 | skylake | 259 / 261 / 517 | 262 / 264 / 538 | 262 / 265 / 538 | 262 / 266 / 525 |
+| x86_64 | znver3 | 260 / 387 / 644 | 264 / 390 / 659 | 264 / 390 / 659 | 264 / 390 / 648 |
+| x86_64-v2 | sandybridge | 291 / 387 / 644 | 325 / 390 / 663 | 325 / 390 / 663 | 325 / 390 / 650 |
+| x86_64-v2 | btver2 | 436 / 564 / 1076 | 485 / 615 / 1231 | 485 / 615 / 1231 | 486 / 616 / 1128 |
+| x86_64-v3 | skylake | 132 / 132 / 263 | 132 / 133 / 269 | 132 / 133 / 269 | 132 / 132 / 263 |
+| x86_64-v3 | alderlake | 103 / 136 / 214 | 103 / 126 / 255 | 103 / 126 / 255 | 103 / 136 / 214 |
+| x86_64-v3 | znver3 | 132 / 195 / 324 | 132 / 195 / 329 | 132 / 195 / 329 | 132 / 195 / 324 |
+| x86_64-v4 | icelake-server | 55 / 77 / 198 | 55 / 77 / 198 | 55 / 77 / 198 | 55 / 77 / 195 |
+| x86_64-v4 | sapphirerapids | 52 / 63 / 119 | 52 / 63 / 120 | 52 / 63 / 119 | 52 / 63 / 108 |
+| x86_64-v4 | znver4 | 66 / 97 / 164 | 66 / 97 / 164 | 66 / 97 / 164 | 66 / 97 / 163 |
+| i686 | skylake | 262 / 264 / 524 | 333 / 374 / 563 | 269 / 305 / 539 | 262 / 264 / 524 |
+| aarch64 | cortex-a72 | 579 / 899 / 1667 | 1290 / 1298 / 2337 | 781 / 1166 / 1939 | 646 / 966 / 1734 |
+| aarch64 | neoverse-n1 | 610 / 834 / 1314 | 1044 / 1300 / 1820 | 780 / 1036 / 1550 | 645 / 837 / 1349 |
+| aarch64 | neoverse-v2 | 227 / 323 / 611 | 540 / 796 / 1062 | 270 / 398 / 658 | 262 / 454 / 838 |
+| aarch64-apple | apple-m1 | 196 / 260 / 389 | 335 / 420 / 689 | 270 / 337 / 535 | 203 / 266 / 459 |
+
+i32: `neg` / `add` / `chain`:
+
+| platform | cpu | 128 B (before) | k=1 | k=2 | k=4 |
+|---|---|---|---|---|---|
+| x86_64 | sandybridge | 283 / 387 / 1074 | 310 / 390 / 1139 | 310 / 390 / 1014 | 310 / 390 / 958 |
+| x86_64 | skylake | 259 / 260 / 1287 | 262 / 262 / 1321 | 262 / 263 / 1302 | 262 / 264 / 1292 |
+| x86_64 | znver3 | 260 / 387 / 694 | 264 / 390 / 776 | 264 / 390 / 687 | 264 / 390 / 675 |
+| x86_64-v2 | sandybridge | 283 / 387 / 644 | 310 / 390 / 658 | 310 / 390 / 658 | 310 / 390 / 648 |
+| x86_64-v2 | btver2 | 564 / 564 / 1348 | 613 / 614 / 1549 | 613 / 614 / 1549 | 614 / 614 / 1415 |
+| x86_64-v3 | skylake | 132 / 132 / 263 | 132 / 132 / 301 | 132 / 132 / 270 | 132 / 132 / 263 |
+| x86_64-v3 | alderlake | 103 / 125 / 236 | 103 / 125 / 280 | 103 / 125 / 280 | 103 / 125 / 236 |
+| x86_64-v3 | znver3 | 132 / 195 / 323 | 132 / 195 / 327 | 132 / 195 / 327 | 132 / 195 / 323 |
+| x86_64-v4 | icelake-server | 55 / 76 / 150 | 55 / 76 / 167 | 55 / 76 / 150 | 55 / 76 / 139 |
+| x86_64-v4 | sapphirerapids | 52 / 63 / 150 | 52 / 63 / 150 | 52 / 63 / 150 | 52 / 63 / 144 |
+| x86_64-v4 | znver4 | 66 / 97 / 164 | 66 / 97 / 164 | 66 / 97 / 164 | 66 / 97 / 162 |
+| i686 | skylake | 262 / 262 / 1289 | 366 / 366 / 1318 | 301 / 301 / 1300 | 262 / 262 / 1289 |
+| aarch64 | cortex-a72 | 579 / 739 / 1411 | 1290 / 1293 / 1818 | 781 / 1037 / 1681 | 646 / 901 / 1544 |
+| aarch64 | neoverse-n1 | 642 / 770 / 1411 | 1044 / 1300 / 1823 | 780 / 1036 / 1679 | 645 / 837 / 1415 |
+| aarch64 | neoverse-v2 | 227 / 323 / 548 | 540 / 796 / 1062 | 270 / 398 / 658 | 262 / 454 / 776 |
+| aarch64-apple | apple-m1 | 196 / 260 / 390 | 335 / 415 / 724 | 270 / 334 / 531 | 203 / 264 / 458 |
+
+Findings, per type:
+- **f32 / f64** (identical per byte, as the code is the same): k = 4 is the best of the three
+  almost everywhere. Exceptions: Neoverse V2, where k = 2 wins `add` and `chain` (398 / 658 vs
+  454 / 838: non-monotonic, so likely a scheduling effect of the model), and Alder Lake `add`
+  (126 vs 136). k = 1 and 2 cost up to 2.3x on the other NEON CPUs (loop overhead: LLVM does not
+  unroll there) and up to 1.4x on i686; on x86-64 they are within a few percent (LLVM unrolls).
+  Against 128 bytes: k = 4 wins on AVX-512 (`chain`, 256 B: Sapphire Rapids 119 -> 108), ties on
+  AVX2 (the same 128 B), and loses on the 16-byte levels where it halves the bytes: SSE (Sandy
+  Bridge `neg` 291 -> 325, Jaguar `chain` 1076 -> 1128) and NEON (A72 `add` 899 -> 966, Neoverse V2
+  `add` 323 -> 454, M1 `chain` 389 -> 459).
+- **i32**: the same picture, plus `chain` on the SSE2 arm (emulated multiply), where more vectors
+  help: x86_64 Sandy Bridge 1139 / 1014 / 958 for k = 1 / 2 / 4 (1074 at 128 B).
+- So: 16-byte vector levels want ~8 vectors (128 B) except i686 (8 registers: 4), AVX2 4 (128 B),
+  AVX-512 4 (256 B). k = 4 is the best uniform multiple; a per-level k (8 for NEON and 64-bit
+  SSE) would recover the 16-byte-level losses.
 

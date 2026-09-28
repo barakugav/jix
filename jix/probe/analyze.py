@@ -154,12 +154,8 @@ class Kernel:
     elem_size: int | None = None
 
     def symbol_for(self, platform: Platform) -> str:
-        """`symbol`, with an element-wise loop's `{lanes}`: `LanesInfo::LANES = 128 / size`,
-        halved on 32-bit x86 (see `pick_inner_loop`)."""
-        if self.elem_size is None:
-            return self.symbol
-        lanes = 128 // self.elem_size // (2 if platform.target.startswith("i686") else 1)
-        return self.symbol.replace("{lanes}", str(lanes))
+        """`symbol` on `platform` (the same on all platforms, for now)."""
+        return self.symbol
 
     def scev_env(self, length: int) -> dict[str, int]:
         """Values of the function arguments, for an input of `length` bytes."""
@@ -197,7 +193,7 @@ def _elementwise_kernel(name: str, ty: str, pipeline: str) -> Kernel:
     `inner_loop::<T, LANES, true, true, _>`.)"""
     size = {"f32": 4, "f64": 8, "i32": 4}[ty]
     ew = "jix::storage::elementwise_pipeline"
-    sym = f"{ew}::inner_loop_contiguous::<{ty}, {{lanes}}, {pipeline}>"
+    sym = f"{ew}::inner_loop_contiguous::<{ty}, {pipeline}>"
     return Kernel(f"{name}_{ty}", sym, None, crate="elementwise", elem_size=size)
 
 

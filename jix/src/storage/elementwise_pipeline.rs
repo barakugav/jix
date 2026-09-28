@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use fearless_simd::{dispatch, Level, Simd};
+use fearless_simd::{dispatch, Level, Simd, SimdBase};
 use std::cmp::Reverse;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -517,10 +517,14 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
     );
 }
 
+/// Vectors of the SIMD level per iteration of [`inner_loop_contiguous`].
+const CONTIGUOUS_VECTORS: usize = 4;
+
 /// [`inner_loop`] for all operands contiguous, compiled for each SIMD level and dispatched at
-/// runtime: the pipeline reads through [`read_bulk_simd`](ElementwisePipelineImpl::read_bulk_simd).
+/// runtime: the pipeline reads through [`read_bulk_simd`](ElementwisePipelineImpl::read_bulk_simd),
+/// [`CONTIGUOUS_VECTORS`] vectors of the level per iteration.
 #[inline(never)]
-fn inner_loop_contiguous<T, const LANES: usize>(
+fn inner_loop_contiguous<T>(
     pipeline: &impl ElementwisePipelineImpl<T>,
     dst: PtrMutNoalias<T>,
     dst_stride: usize,
@@ -528,13 +532,37 @@ fn inner_loop_contiguous<T, const LANES: usize>(
 ) where
     T: Dtyped,
 {
-    dispatch!(Level::new(), simd => inner_loop_impl::<T, LANES, true, true>(
-        dst,
-        dst_stride,
-        len,
-        |i| unsafe { pipeline.read_bulk_simd::<_, LANES, true>(simd, i) },
-        |i| unsafe { pipeline.read_bulk_simd::<_, 1, true>(simd, i) },
-    ));
+    dispatch!(Level::new(), simd => inner_loop_level(simd, pipeline, dst, dst_stride, len));
+}
+
+/// One arm of [`inner_loop_contiguous`]. The lanes depend on the level, so they are matched on as
+/// a constant: only the taken arm is codegened.
+#[inline(always)]
+fn inner_loop_level<S: Simd, T: Dtyped>(
+    simd: S,
+    pipeline: &impl ElementwisePipelineImpl<T>,
+    dst: PtrMutNoalias<T>,
+    dst_stride: usize,
+    len: usize,
+) {
+    macro_rules! with_lanes {
+        ($($lanes:literal)*) => {
+            match const {
+                let per_vector = S::u8s::LEN / size_of::<T>();
+                CONTIGUOUS_VECTORS * if per_vector > 0 { per_vector } else { 1 }
+            } {
+                $($lanes => inner_loop_impl::<T, $lanes, true, true>(
+                    dst,
+                    dst_stride,
+                    len,
+                    |i| unsafe { pipeline.read_bulk_simd::<_, $lanes, true>(simd, i) },
+                    |i| unsafe { pipeline.read_bulk_simd::<_, 1, true>(simd, i) },
+                ),)*
+                _ => unreachable!(),
+            }
+        };
+    }
+    with_lanes!(1 2 3 4 6 8 12 16 24 32 48 64 96 128 192 256);
 }
 
 /// Body of the inner loops: `read_lanes(i)` / `read_one(i)` read the elements at `i`.
@@ -608,35 +636,17 @@ where
     P: ElementwisePipelineImpl<T>,
 {
     const {
-        let default_lanes = <T as LanesInfo>::LANES;
-        const STRIDED_LANES: usize = 4;
-        let lanes = if IN_CONTIGUOUS && OUT_CONTIGUOUS || default_lanes < STRIDED_LANES {
-            default_lanes
-        } else {
-            STRIDED_LANES
-        };
         if IN_CONTIGUOUS && OUT_CONTIGUOUS {
-            // 32-bit x86 has 8 vector registers: 128 bytes per operand would spill.
-            let lanes = if cfg!(target_arch = "x86") && lanes > 1 {
-                lanes / 2
-            } else {
-                lanes
-            };
-            match lanes {
-                1 => inner_loop_contiguous::<_, 1>,
-                2 => inner_loop_contiguous::<_, 2>,
-                4 => inner_loop_contiguous::<_, 4>,
-                8 => inner_loop_contiguous::<_, 8>,
-                16 => inner_loop_contiguous::<_, 16>,
-                32 => inner_loop_contiguous::<_, 32>,
-                64 => inner_loop_contiguous::<_, 64>,
-                128 => inner_loop_contiguous::<_, 128>,
-                256 => inner_loop_contiguous::<_, 256>,
-                512 => inner_loop_contiguous::<_, 512>,
-                _ => inner_loop_contiguous::<_, 1024>,
-            }
+            // Picks its lanes per SIMD level.
+            inner_loop_contiguous::<_>
         } else {
-            match lanes {
+            const STRIDED_LANES: usize = 4;
+            let lanes = <T as LanesInfo>::LANES;
+            match if lanes < STRIDED_LANES {
+                lanes
+            } else {
+                STRIDED_LANES
+            } {
                 1 => inner_loop::<_, 1, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
                 2 => inner_loop::<_, 2, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
                 4 => inner_loop::<_, 4, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
