@@ -175,5 +175,5 @@ jix_probe::byte_shuffle::decode_impl_generic:
 	popq %rbp
 	retq
 .LBB8_6:
-	leaq .Lanon.bc1a8278342cb0a09c647aa48cb9aec1.1(%rip), %rdi
+	leaq .Lanon.541dfd7828f123e2376bd9c83f3f80e1.1(%rip), %rdi
 	callq *core::panicking::panic_const::panic_const_div_by_zero@GOTPCREL(%rip)

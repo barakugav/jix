@@ -50,6 +50,6 @@ jix_probe::byte_shuffle::decode_impl_generic:
 	popl %ebp
 	retl
 .LBB8_3:
-	leal .Lanon.8aa56d0f43c569882aff702370a80287.1@GOTOFF(%ebx), %eax
+	leal .Lanon.c72d680871b01e1cea23b7bc18039fda.1@GOTOFF(%ebx), %eax
 	movl %eax, (%esp)
 	calll core::panicking::panic_const::panic_const_div_by_zero@PLT

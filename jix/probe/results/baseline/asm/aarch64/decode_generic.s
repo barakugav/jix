@@ -63,6 +63,6 @@ jix_probe::byte_shuffle::decode_impl_generic:
 	ldp x29, x30, [sp], #16
 	ret
 .LBB8_12:
-	adrp x0, .Lanon.557518dcc8a715771bee216ade4f749e.1
-	add x0, x0, :lo12:.Lanon.557518dcc8a715771bee216ade4f749e.1
+	adrp x0, .Lanon.4a3613c5db160acb30c4e33b3e9c0513.1
+	add x0, x0, :lo12:.Lanon.4a3613c5db160acb30c4e33b3e9c0513.1
 	bl core::panicking::panic_const::panic_const_div_by_zero

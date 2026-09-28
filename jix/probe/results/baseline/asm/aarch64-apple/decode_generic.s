@@ -65,7 +65,7 @@ LBB8_11:
 	ret
 LBB8_12:
 Lloh12:
-	adrp x0, l_anon.bc1f2f7c2f312fc2f015440ea3f2cec5.1@PAGE
+	adrp x0, l_anon.59f850015e44614f7d450d21f3fdb0f9.1@PAGE
 Lloh13:
-	add x0, x0, l_anon.bc1f2f7c2f312fc2f015440ea3f2cec5.1@PAGEOFF
+	add x0, x0, l_anon.59f850015e44614f7d450d21f3fdb0f9.1@PAGEOFF
 	bl core::panicking::panic_const::panic_const_div_by_zero

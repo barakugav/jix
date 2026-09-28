@@ -1,8 +1,9 @@
-# jix-probe: static asm analysis of the byte-shuffle kernels
+# jix-probe: static asm analysis of the byte-shuffle decode kernels
 
-Experimental tooling for optimizing `jix/src/codec/filter/byte_shuffle/kernels.rs` across
-platforms **without running benchmarks**. The objective is llvm-mca's steady-state throughput of
-each kernel's hot loop, for every platform jix ships wheels for.
+Experimental tooling for optimizing the **decode** path of
+`jix/src/codec/filter/byte_shuffle/kernels.rs` across platforms **without running benchmarks**.
+The objective is llvm-mca's steady-state throughput of each decode kernel's hot loop, on the
+targeted platforms. The encode path is out of scope, and it is neither probed nor analyzed.
 
 ## Why a separate crate and not a `jix` example
 
@@ -36,7 +37,7 @@ about 2 seconds, with no linker or C compiler. Keep `kernels.rs` free of `crate:
 ```bash
 python jix/probe/analyze.py                         # all platforms, results/baseline/
 python jix/probe/analyze.py --label my-variant      # results/my-variant/
-python jix/probe/analyze.py --platform x86_64-v3 --platform aarch64 --fn encode_4
+python jix/probe/analyze.py --platform x86_64-v3 --platform aarch64 --fn decode_4
 cd jix/probe && cargo asm --release --lib --target aarch64-unknown-linux-gnu   # list symbols
 ```
 
@@ -52,17 +53,15 @@ Platforms (see `PLATFORMS` in `analyze.py`):
 
 | platform | target | ISA level | llvm-mca CPUs |
 |---|---|---|---|
-| x86_64-v1 | x86_64-unknown-linux-gnu | SSE2 (no multiversion / pre-2009 CPUs) | x86-64, skylake |
 | x86_64-v2 | x86_64-unknown-linux-gnu | multiversion v2 clone features | sandybridge, btver2 |
 | x86_64-v3 | x86_64-unknown-linux-gnu | multiversion v3 clone features | skylake, alderlake, znver3 |
 | x86_64-v4 | x86_64-unknown-linux-gnu | multiversion v4 clone features | icelake-server, sapphirerapids, znver4 |
 | i686 | i686-unknown-linux-gnu | SSE2 | skylake |
 | aarch64 | aarch64-unknown-linux-gnu | armv8-a + NEON | cortex-a72, neoverse-n1, neoverse-v2 |
 | aarch64-apple | aarch64-apple-darwin | apple-m1 | apple-m1 |
-| armv7 | armv7-unknown-linux-gnueabihf | VFPv3-D16, **no NEON** | cortex-a9, cortex-a57 |
-| ppc64le | powerpc64le-unknown-linux-gnu | POWER8 (VSX) | pwr8, pwr9 |
 
-Windows and musl wheels share the ISA of their linux counterparts. For x86-64, the multiversion
+x86-64 v1 (SSE2 only), armv7 and ppc64le are out of scope. Windows and musl wheels share the ISA
+of their linux counterparts. For x86-64, the multiversion
 clones get exactly `#[target_feature(enable = ...)]` (generic tuning). The probe reproduces each
 clone by building without `multiversion` and with the same features in `-C target-feature`.
 
@@ -70,67 +69,67 @@ For each (platform, kernel):
 1. `cargo asm --simplify` gives the asm, and the loop tree comes from back-edge branches.
 2. `cargo asm --llvm` gives the final LLVM IR. The toolchain's own `opt` prints the IR loop tree
    (`print<loops>`) and exact trip counts (`print<scalar-evolution>`).
-3. The trees are matched by shape, which gives every asm loop its trip count. The outer loop's
-   SCEV expression is checked to step by `LANES`, so one outer iteration is always 128 bytes.
-4. One outer iteration is flattened: inner loops that LLVM did not unroll are repeated by their
+3. The trees are matched by shape, which gives every asm loop its trip count.
+4. The bytes per outer-loop iteration (`B/iter`) come from the outer loop's SCEV trip count,
+   evaluated at a concrete input length. They are not assumed, so a kernel can use any step:
+   128 B/iter today, and more for a 512-bit variant or a loop LLVM unrolled.
+5. One outer iteration is flattened: inner loops that LLVM did not unroll are repeated by their
    trip count. llvm-mca simulates that trace (100 iterations) on each CPU.
 
-**Metric: cycles per 128 bytes. Lower is better.** The per-(platform, CPU) geomean over the 8
-fixed-itemsize kernels (encode/decode x itemsize 2/4/8/16) is the headline number.
+**Metric: cycles per 4096 bytes = cycles per outer iteration * 4096 / B/iter. Lower is better.**
+The per-(platform, CPU) geomean over the 4 fixed-itemsize decode kernels (itemsize 2/4/8/16) is
+the headline number. The unit is only a scale. What makes kernels with different steps comparable
+is that `B/iter` is measured.
 
 Caveats:
 - llvm-mca assumes every load hits L1 and ignores the front end. Branches are not followed.
 - **Calls are free in llvm-mca.** Kernels that call something (e.g. `memcpy`) inside the hot loop
   are flagged `*`, and their real cost is higher.
-- Instructions with no scheduling info on a CPU are skipped and listed as warnings. So far this is
-  only ppc `mtctr` on pwr8, once per 128 bytes in `encode_16`, so the effect is negligible.
+- Steady state only: the per-call prologue and epilogue and the `<LANES` tail (handled by
+  `decode_impl_generic`) are not counted. This matters more as the step grows.
+- Instructions with no scheduling info on a CPU are skipped and listed as warnings (none so far).
 - `*_generic` (runtime itemsize: odd sizes, struct dtypes, and the `<LANES` tail) cannot be
   flattened. Only the cycles per iteration of their largest innermost loop are reported, for
   information.
 
-## Baseline (auto-vectorized kernels, commit introducing this probe)
+## Baseline (auto-vectorized kernels)
 
-Full tables: [`results/baseline/summary.md`](results/baseline/summary.md).
+Full tables: [`results/baseline/summary.md`](results/baseline/summary.md). Cycles per 4096 bytes:
 
-| platform | cpu | geomean | encode | decode | worst kernel |
-|---|---|---:|---:|---:|---|
-| x86_64-v1 | x86-64 | **94.3** | 123.3 | 72.1 | decode_16 (136.1) |
-| x86_64-v1 | skylake | **85.9** | 113.2 | 65.2 | decode_16 (136.1) |
-| x86_64-v2 | sandybridge | **59.0** | 113.6 | 30.6 | decode_16 (136.1) |
-| x86_64-v2 | btver2 | **87.4** | 122.7 | 62.3 | decode_16 (204.1) |
-| x86_64-v3 | skylake | **67.2** | 98.1 | 46.1 | decode_16 (180.2) |
-| x86_64-v3 | alderlake | **39.2** | 56.4 | 27.2 | decode_16 (107.3) |
-| x86_64-v3 | znver3 | **60.1** | 107.3 | 33.7 | decode_8 (128.1) |
-| x86_64-v4 | icelake-server | **17.9** | 16.1 | 19.8 | encode_8 (49.7) |
-| x86_64-v4 | sapphirerapids | **19.8** | 17.3 | 22.5 | decode_16 (60.2) |
-| x86_64-v4 | znver4 | **15.3** | 13.7 | 17.1 | encode_8 (36.2) |
-| i686 | skylake | **105.7** | 153.5 | 72.8 | encode_16 (264.1) |
-| aarch64 | cortex-a72 | **93.9** | 131.9 | 66.9 | decode_16 (203.2) |
-| aarch64 | neoverse-n1 | **89.8** | 144.7 | 55.8 | encode_16 (189.1) |
-| aarch64 | neoverse-v2 | **44.2** | 87.7 | 22.3 | encode_16 (95.2) |
-| aarch64-apple | apple-m1 | **45.6** | 119.2 | 17.4 | encode_2 (128.1) |
-| armv7 | cortex-a9 | **524.6** | 507.2 | 542.7 | decode_8 (624.0) |
-| armv7 | cortex-a57 | **231.8** | 232.6 | 231.0 | encode_2 (256.1) |
-| ppc64le | pwr8 | **80.0** | 114.9 | 55.7 | encode_16 (126.1) |
-| ppc64le | pwr9 | **68.2** | 99.1 | 46.9 | decode_16 (127.0) |
+| platform | cpu | geomean | decode_2 | decode_4 | decode_8 | decode_16 |
+|---|---|---:|---:|---:|---:|---:|
+| x86_64-v2 | sandybridge | **980** | 387 | 677 | 811 | 4355 |
+| x86_64-v2 | btver2 | **1993** | 563 | 1860 | 2307 | 6532 |
+| x86_64-v3 | skylake | **1474** | 388 | 516 | 4099 | 5765 |
+| x86_64-v3 | alderlake | **871** | 264 | 306 | 2071 | 3435 |
+| x86_64-v3 | znver3 | **1078** | 327 | 388 | 4099 | 2603 |
+| x86_64-v4 | icelake-server | **634** | 389 | 415 | 964 | 1035 |
+| x86_64-v4 | sapphirerapids | **721** | 393 | 394 | 905 | 1926 |
+| x86_64-v4 | znver4 | **547** | 388 | 356 | 838 | 775 |
+| i686 | skylake | **2330*** | 259 | 4099 | 4100 | 6768* |
+| aarch64 | cortex-a72 | **2140** | 803 | 1669 | 2409 | 6503 |
+| aarch64 | neoverse-n1 | **1784** | 801 | 1601 | 1604 | 4930 |
+| aarch64 | neoverse-v2 | **713** | 243 | 616 | 649 | 2662 |
+| aarch64-apple | apple-m1 | **557** | 259 | 599 | 584 | 1063 |
+
+`*` = the hot loop calls a function llvm-mca does not simulate. Here that is only i686 `decode_16`,
+which calls `memcpy@PLT` (128 bytes) once per outer iteration, to copy the block it transposed in a
+stack buffer out to `dst`. The real cost is higher than shown.
 
 Observations:
-- **Encode is not vectorized at all below AVX-512.** `encode_2/4/8` compile to 128
-  `movzbl`+`movb` pairs (or `ldrb`+`strb`, `lbz`+`stb`) per 128 bytes on x86 v1-v3, i686, NEON,
-  ppc64le and armv7. They are store-port bound at 128 cycles on 1-store/cycle cores, 64 on
-  Alder Lake and 85 on Neoverse V2. Only x86-64-v4 gets `vpshufb`+`vpermt2q`, at 4-12 cycles for
-  itemsize 2/4.
-- **Decode is only partially vectorized.** `decode_2` becomes `punpcklbw` / `zip1` everywhere
-  (8-25 cycles). `decode_4/8` are vectorized on some levels only. `decode_8` on x86-64-v3 is
-  *worse* than on v2 (128 vs 25 cycles on Sandy Bridge-class): the v3 build falls back to scalar
-  bytes.
-- **Itemsize 16 is the worst case almost everywhere.** LLVM does not unroll the `for b in
-  0..ITEMSIZE` loop (16 iterations, `loops = ?[16]`). The block round-trips through the stack
-  (x86 v1/v2, i686, armv7, ppc64le). i686 `decode_16` and armv7 `encode_16`/`decode_16` even call
-  `memcpy` for 128 bytes inside the hot loop, which is not counted.
-- **armv7 has no NEON in its baseline**, so everything is scalar at 230-620 cycles. A NEON path
-  would need runtime detection, and on arm32 `std::arch::is_arm_feature_detected!` is still
-  nightly-only.
-- Headroom: a clean SIMD transpose should reach roughly 8-16 cycles per 128 bytes with 128-bit
-  vectors (bounded by the 8-16 vector loads and stores per 128 bytes), and less with 256/512-bit.
-  That is about 5-10x the current geomean on most platforms.
+- Every kernel steps 128 B/iter (`ITEMSIZE * LANES`). v3 uses ymm and v4 uses zmm in places, but
+  one 128-byte iteration is only two 512-bit stores. So the step, not the register width, limits
+  wide vectors. A 512-bit variant should use a larger step, which the metric now supports.
+- `decode_2` is vectorized everywhere (`punpcklbw` / `zip1`), at 250-400 cycles per 4096 bytes
+  (800 on Cortex-A72 / Neoverse N1).
+- `decode_4` / `decode_8` are vectorized on some levels only. On x86-64-v3, `decode_8` falls back
+  to 128 scalar byte `movzbl`+`movb` pairs per 128 bytes (4099 on Skylake / Zen 3, store-port
+  bound). The v2 build of the same code is vectorized (811 on Sandy Bridge). i686 `decode_4/8` are
+  scalar too.
+- `decode_16` is the worst kernel everywhere except Zen 4. On x86-64-v2 and i686, the
+  `for b in 0..16` loop is not unrolled (`loops = ?[16]`) and the data round-trips through the
+  stack. Elsewhere it is unrolled, but it transposes through long `tbl` (NEON) or shuffle chains.
+- Store bandwidth sets the floor: 4096 bytes need 64 x 512-bit, 128 x 256-bit or 256 x 128-bit
+  stores (the same number of loads). A clean transpose should land around 100-300 cycles per
+  4096 bytes with 128-bit vectors, and below 100 with 512-bit ones. That is 3-20x better than the
+  current geomeans.

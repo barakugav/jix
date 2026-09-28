@@ -8,21 +8,24 @@ every kernel:
 2. `cargo asm --llvm` emits the final (post-optimization) LLVM IR, and LLVM's own `opt` reports the
    IR loop tree (`print<loops>`) and each loop's exact trip count (`print<scalar-evolution>`).
 3. The two loop trees are matched by shape, which gives every asm loop its trip count.
-4. One iteration of the kernel's outer loop - the `while` loop over LANES items, i.e. 128 bytes for
-   every fixed-itemsize kernel - is flattened into a straight-line trace (inner loops repeated by
-   their constant trip counts), and llvm-mca simulates that trace in a steady state on each
+4. The bytes processed per outer-loop iteration are derived from the outer loop's SCEV trip count
+   (evaluated for a concrete input length), so kernels may use any step (e.g. 512-bit variants
+   processing more than 128 bytes per iteration, or loops LLVM unrolled).
+5. One iteration of the outer loop is flattened into a straight-line trace (inner loops repeated
+   by their constant trip counts), and llvm-mca simulates that trace in a steady state on each
    representative CPU of the platform.
 
-The objective is llvm-mca's **cycles per 128 bytes** (= cycles per outer iteration). Lower is
-better. It is a static model: memory is assumed to hit L1, and calls (e.g. to `memcpy`) are not
-followed - the `calls` column flags kernels whose hot loop still calls something.
+The objective is llvm-mca's **cycles per 4096 bytes** (= cycles per outer iteration * 4096 /
+bytes per iteration). Lower is better. It is a static model: memory is assumed to hit L1, calls
+(e.g. to `memcpy`) are not followed - the `calls` column flags kernels whose hot loop still calls
+something - and the per-call prologue/epilogue and the `<LANES` tail are not included.
 
 The runtime-itemsize fallback kernels (`*_generic`) have runtime trip counts, so they cannot be
 flattened; for them only the cycles per iteration of the largest innermost loop are reported, as
 an informational number.
 
 Usage (from anywhere):
-    python jix/probe/analyze.py [--label baseline] [--platform x86_64-v3 ...] [--fn encode_4 ...]
+    python jix/probe/analyze.py [--label baseline] [--platform x86_64-v3 ...] [--fn decode_4 ...]
 
 Outputs, under jix/probe/results/<label>/:
     summary.md                      the tables
@@ -51,6 +54,11 @@ from pathlib import Path
 
 PROBE_DIR = Path(__file__).resolve().parent
 MCA_ITERATIONS = 100
+# Reporting unit: cycles per this many bytes of input.
+BYTES_UNIT = 4096
+# Input length (bytes) at which the outer loop's SCEV trip count is evaluated to derive its bytes
+# per iteration. A multiple of any plausible step, so there is no remainder.
+SCEV_EVAL_LEN = 1 << 20
 
 # x86-64 microarchitecture levels, exactly as enabled by the `multiversion` clones in
 # jix/src/codec/filter/byte_shuffle/kernels.rs (target features only, generic tuning).
@@ -89,9 +97,6 @@ class Platform:
 
 
 PLATFORMS = [
-    # x86-64 v1 (SSE2) runs on modern CPUs only when `multiversion` is disabled (or on pre-2009
-    # CPUs); with multiversion (the default) modern CPUs take the v2/v3/v4 clones.
-    Platform("x86_64-v1", "x86_64-unknown-linux-gnu", [], ["x86-64", "skylake"]),
     Platform("x86_64-v2", "x86_64-unknown-linux-gnu", [f"-Ctarget-feature={X86_V2}"], ["sandybridge", "btver2"]),
     Platform(
         "x86_64-v3", "x86_64-unknown-linux-gnu", [f"-Ctarget-feature={X86_V3}"], ["skylake", "alderlake", "znver3"]
@@ -108,10 +113,6 @@ PLATFORMS = [
     Platform("aarch64", "aarch64-unknown-linux-gnu", [], ["cortex-a72", "neoverse-n1", "neoverse-v2"]),
     # macOS arm64 wheels: the target's default CPU is apple-m1.
     Platform("aarch64-apple", "aarch64-apple-darwin", [], ["apple-m1"]),
-    # armv7 linux wheels: the gnueabihf baseline has VFPv3-D16 and *no* NEON.
-    Platform("armv7", "armv7-unknown-linux-gnueabihf", [], ["cortex-a9", "cortex-a57"]),
-    # ppc64le linux wheels: POWER8 baseline (VSX / AltiVec).
-    Platform("ppc64le", "powerpc64le-unknown-linux-gnu", [], ["pwr8", "pwr9"]),
 ]
 
 
@@ -120,23 +121,25 @@ class Kernel:
     name: str
     symbol: str  # demangled, as `cargo asm` lists it
     ir_hint: str  # substring of the v0-mangled symbol, to find the function in the LLVM IR
-    lanes: int | None  # items per outer iteration; None for the runtime-itemsize kernels
+    fixed: bool  # fixed itemsize (flattened, the objective) vs runtime itemsize (informational)
 
 
-def _fixed_kernel(direction: str, itemsize: int) -> Kernel:
-    lanes = 128 // itemsize
+def _decode_kernel(itemsize: int, lanes: int) -> Kernel:
     return Kernel(
-        f"{direction}_{itemsize}",
-        f"jix_probe::byte_shuffle::{direction}_impl::<{itemsize}, {lanes}>",
-        f"11{direction}_implKj{itemsize:x}_Kj{lanes:x}_",
-        lanes,
+        f"decode_{itemsize}",
+        f"jix_probe::byte_shuffle::decode_impl::<{itemsize}, {lanes}>",
+        f"11decode_implKj{itemsize:x}_Kj{lanes:x}_",
+        True,
     )
 
 
+# Only the decode path is analyzed. The kernel table must match the `probe_*` exports in src/lib.rs.
 KERNELS = [
-    *[_fixed_kernel(d, s) for d in ("encode", "decode") for s in (2, 4, 8, 16)],
-    Kernel("encode_generic", "jix_probe::byte_shuffle::encode_impl_generic", "19encode_impl_generic", None),
-    Kernel("decode_generic", "jix_probe::byte_shuffle::decode_impl_generic", "19decode_impl_generic", None),
+    _decode_kernel(2, 64),
+    _decode_kernel(4, 32),
+    _decode_kernel(8, 16),
+    _decode_kernel(16, 8),
+    Kernel("decode_generic", "jix_probe::byte_shuffle::decode_impl_generic", "19decode_impl_generic", False),
 ]
 
 
@@ -346,6 +349,18 @@ def flatten(lines: list[str], loop: Loop) -> list[str] | None:
     return out
 
 
+def eval_scev(expr: str, length: int) -> int | None:
+    """Evaluate a SCEV backedge-taken count expression of the input length (`%src.1`)."""
+    e = re.sub(r"<[a-z]+>", "", expr)  # wrap flags: <nuw>, <nsw>, <nw>
+    e = e.replace("/u", "//").replace("%src.1", "L").replace("%dst.1", "L")
+    if not re.fullmatch(r"[\dL+\-*/() ]+", e):
+        return None
+    try:
+        return eval(e, {"__builtins__": {}}, {"L": length})  # noqa: S307 - validated above
+    except (SyntaxError, ZeroDivisionError):
+        return None
+
+
 def innermost(loops: list[Loop]) -> list[Loop]:
     return [x for lp in loops for x in (innermost(lp.children) if lp.children else [lp])]
 
@@ -416,12 +431,13 @@ class KernelResult:
     platform: str
     kernel: str
     fn_instructions: int
-    # `outer`: one flattened outer iteration (= 128 bytes). `inner`: the largest innermost loop,
-    # per iteration (runtime-itemsize kernels, or when flattening failed).
+    # `outer`: one flattened outer iteration. `inner`: the largest innermost loop, per iteration
+    # (runtime-itemsize kernels, or when flattening failed).
     mode: str
     trace_instructions: int
-    calls: int
+    calls: list[str]  # callees inside the hot loop
     loop_tree: str
+    bytes_per_iter: int | None
     warnings: list[str] = field(default_factory=list)
     mca: list[McaResult] = field(default_factory=list)
 
@@ -449,21 +465,24 @@ def analyze_kernel(
     if not attach_trip_counts(roots, ir_loops(ll, opt, kernel.ir_hint)):
         warnings.append("asm and IR loop trees differ, trip counts unknown")
 
-    trace, mode = None, "inner"
-    if kernel.lanes is not None and roots:
+    trace, mode, bytes_per_iter = None, "inner", None
+    if kernel.fixed and roots:
         # The outer `while` loop over LANES items: the top-level loop with a runtime trip count.
         outer = [lp for lp in roots if lp.trip_count is None]
         if len(outer) != 1:
             warnings.append(f"expected one top-level loop with runtime trip count, found {len(outer)}")
         else:
-            if f"/u {kernel.lanes})" not in outer[0].trip_expr:
-                warnings.append(f"outer loop may not step by LANES={kernel.lanes}: {outer[0].trip_expr!r}")
-            trace = flatten(lines, outer[0])
-            mode = "outer"
-            if trace is None:
-                warnings.append("inner loop with unknown trip count")
+            backedges = eval_scev(outer[0].trip_expr, SCEV_EVAL_LEN)
+            if backedges is None or SCEV_EVAL_LEN % (backedges + 1) != 0:
+                warnings.append(f"cannot derive bytes per iteration from {outer[0].trip_expr!r}")
+            else:
+                bytes_per_iter = SCEV_EVAL_LEN // (backedges + 1)
+                trace = flatten(lines, outer[0])
+                mode = "outer"
+                if trace is None:
+                    warnings.append("inner loop with unknown trip count")
     if trace is None:
-        mode = "inner"
+        mode, bytes_per_iter = "inner", None
         inner = innermost(roots)
         if inner:
             best = max(inner, key=lambda lp: sum(1 for x in lines[lp.start : lp.end + 1] if not is_label(x)))
@@ -475,8 +494,9 @@ def analyze_kernel(
         fn_instrs,
         mode,
         len(trace or []),
-        sum(1 for x in trace or [] if is_call(platform.isa, mnemonic(x))),
+        sorted({x.split(None, 1)[-1] for x in trace or [] if is_call(platform.isa, mnemonic(x))}),
         describe_tree(roots),
+        bytes_per_iter,
         warnings,
     )
     for w in warnings:
@@ -510,41 +530,45 @@ def write_summary(results: list[KernelResult], platforms: list[Platform], out_di
         "",
         *header,
         "",
-        "Fixed-itemsize kernels: llvm-mca steady-state **cycles per 128 bytes** (one outer-loop",
-        "iteration, inner loops flattened by their trip counts). Lower is better. `geomean` is the",
-        "per-CPU geometric mean over the 8 kernels, the single number to optimize.",
+        f"Fixed-itemsize decode kernels: llvm-mca steady-state **cycles per {BYTES_UNIT} bytes** (one",
+        "outer-loop iteration, inner loops flattened by their trip counts, scaled by the bytes per",
+        "iteration). Lower is better. `geomean` is the per-CPU geometric mean over the fixed-itemsize",
+        "kernels, the single number to optimize.",
         "",
-        "- `instrs`: instructions per 128 bytes (flattened trace).",
+        "- `B/iter`: bytes per outer-loop iteration (from the SCEV trip count).",
+        "- `instrs`: instructions per outer-loop iteration (flattened trace).",
         "- `loops`: asm loop tree with trip counts; `?` = runtime trip count (the outer loop).",
-        "- `calls`: calls inside the hot loop, whose cost llvm-mca does NOT include (flagged `*`).",
+        "- `calls`: calls inside the hot loop, whose cost llvm-mca does NOT include. Values of such",
+        "  kernels (and geomeans including them) are flagged `*`: the real cost is higher.",
         "",
     ]
     by_platform: dict[str, list[KernelResult]] = {}
     for r in results:
         by_platform.setdefault(r.platform, []).append(r)
 
-    def geomean(rs: list[KernelResult], i: int) -> float:
-        return math.exp(sum(math.log(r.mca[i].cycles_per_iter) for r in rs) / len(rs))
+    def cost(r: KernelResult, i: int) -> float:
+        return r.mca[i].cycles_per_iter * BYTES_UNIT / r.bytes_per_iter
 
+    def star(rs: list[KernelResult]) -> str:
+        return "*" if any(r.calls for r in rs) else ""
+
+    def geomean(rs: list[KernelResult], i: int) -> str:
+        return f"{math.exp(sum(math.log(cost(r, i)) for r in rs) / len(rs)):.0f}{star(rs)}"
+
+    fixed_names = [k.name for k in KERNELS if k.fixed and any(r.kernel == k.name for r in results)]
     lines += [
         "## Overview",
         "",
-        "| platform | cpu | geomean | encode | decode | worst kernel |",
-        "|---|---|---:|---:|---:|---|",
+        "| platform | cpu | geomean | " + " | ".join(fixed_names) + " |",
+        "|---|---|---:|" + "---:|" * len(fixed_names),
     ]
     for platform in platforms:
         fixed = [r for r in by_platform.get(platform.name, []) if r.mode == "outer"]
-        enc = [r for r in fixed if r.kernel.startswith("encode")]
-        dec = [r for r in fixed if r.kernel.startswith("decode")]
+        if not fixed:
+            continue
         for i, cpu in enumerate(platform.mca_cpus):
-            if not fixed:
-                continue
-            worst = max(fixed, key=lambda r: r.mca[i].cycles_per_iter)
-            cells = [f"{geomean(x, i):.1f}" if x else "-" for x in (fixed, enc, dec)]
-            lines.append(
-                f"| {platform.name} | {cpu} | **{cells[0]}** | {cells[1]} | {cells[2]} | "
-                f"{worst.kernel} ({worst.mca[i].cycles_per_iter:.1f}) |"
-            )
+            cells = [f"{cost(r, i):.0f}{star([r])}" for r in fixed]
+            lines.append(f"| {platform.name} | {cpu} | **{geomean(fixed, i)}** | " + " | ".join(cells) + " |")
     lines.append("")
 
     for platform in platforms:
@@ -556,16 +580,18 @@ def write_summary(results: list[KernelResult], platforms: list[Platform], out_di
         if platform.rustflags:
             lines += [f"`RUSTFLAGS={' '.join(platform.rustflags)}`", ""]
         if fixed:
-            lines.append("| kernel | instrs | loops | calls | " + " | ".join(cpus) + " |")
-            lines.append("|---|---:|---|---:|" + "---:|" * len(cpus))
+            lines.append("| kernel | B/iter | instrs | loops | calls | " + " | ".join(cpus) + " |")
+            lines.append("|---|---:|---:|---|---|" + "---:|" * len(cpus))
             for r in fixed:
-                star = "*" if r.calls else ""
-                cells = [f"{m.cycles_per_iter:.1f}{star}" for m in r.mca]
+                cells = [f"{cost(r, i):.0f}{star([r])}" for i in range(len(cpus))]
+                calls = ", ".join(f"`{c}`" for c in r.calls) or "-"
                 lines.append(
-                    f"| {r.kernel} | {r.trace_instructions} | {r.loop_tree} | {r.calls} | " + " | ".join(cells) + " |"
+                    f"| {r.kernel} | {r.bytes_per_iter} | {r.trace_instructions} | {r.loop_tree} | {calls} | "
+                    + " | ".join(cells)
+                    + " |"
                 )
             geo = [geomean(fixed, i) for i in range(len(cpus))]
-            lines.append("| **geomean** | | | | " + " | ".join(f"**{g:.1f}**" for g in geo) + " |")
+            lines.append("| **geomean** | | | | | " + " | ".join(f"**{g}**" for g in geo) + " |")
             lines.append("")
         if other:
             lines += [
@@ -574,11 +600,12 @@ def write_summary(results: list[KernelResult], platforms: list[Platform], out_di
                 "",
             ]
             lines.append("| kernel | loop instrs | loops | calls | " + " | ".join(cpus) + " |")
-            lines.append("|---|---:|---|---:|" + "---:|" * len(cpus))
+            lines.append("|---|---:|---|---|" + "---:|" * len(cpus))
             for r in other:
                 cells = [f"{m.cycles_per_iter:.1f}" for m in r.mca] or ["-"] * len(cpus)
+                calls = ", ".join(f"`{c}`" for c in r.calls) or "-"
                 lines.append(
-                    f"| {r.kernel} | {r.trace_instructions} | {r.loop_tree} | {r.calls} | " + " | ".join(cells) + " |"
+                    f"| {r.kernel} | {r.trace_instructions} | {r.loop_tree} | {calls} | " + " | ".join(cells) + " |"
                 )
             lines.append("")
         warns = [f"- {r.kernel}: {w}" for r in rs for w in r.warnings]

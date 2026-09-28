@@ -1,5 +1,5 @@
 # Experimental branch: pinned nightly so rustc's LLVM (23.1.1) matches the llvm-mca used by
-# `scripts/byte_shuffle_asm.py`. See `jix/examples/byte_shuffle_probe.rs`.
+# `jix/probe/analyze.py`. See `jix/probe/README.md`.
 [toolchain]
 channel = "nightly-2026-09-27"
 components = ["rustfmt", "clippy", "llvm-tools", "rust-src"]
@@ -7,6 +7,4 @@ targets = [
     "i686-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
     "aarch64-apple-darwin",
-    "armv7-unknown-linux-gnueabihf",
-    "powerpc64le-unknown-linux-gnu",
 ]
