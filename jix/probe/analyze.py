@@ -203,6 +203,7 @@ class Loop:
     children: list[Loop] = field(default_factory=list)
     trip_count: int | None = None  # constant trip count, if any
     trip_expr: str = ""  # IR only: SCEV backedge-taken count expression
+    size: int = 0  # instructions in the loop (IR or asm), to match sibling loops of the same shape
 
     def shape(self) -> tuple:
         return tuple(c.shape() for c in self.children)
@@ -271,12 +272,36 @@ def asm_loops(lines: list[str], isa: str) -> list[Loop]:
             j = labels.get(tok)
             if j is not None and j < i:
                 ends[tok] = max(ends.get(tok, i), i)
-    loops = sorted((Loop(labels[h], e, h) for h, e in ends.items()), key=lambda lp: (lp.start, -lp.end))
+    loops = sorted(
+        (
+            Loop(labels[h], e, h, size=sum(1 for x in lines[labels[h] : e + 1] if not is_label(x)))
+            for h, e in ends.items()
+        ),
+        key=lambda lp: (lp.start, -lp.end),
+    )
     for a in loops:
         for b in loops:
             if a.start < b.start <= a.end < b.end:
                 raise RuntimeError(f"overlapping asm loops {a.header} and {b.header}")
     return build_tree(loops, lambda outer, inner: inner.end <= outer.end)
+
+
+def ir_block_sizes(ll: Path, ir_hint: str) -> dict[str, int]:
+    """Instruction count of each basic block of the function whose name contains `ir_hint`."""
+    sizes: dict[str, int] = {}
+    in_fn, block = False, None
+    for line in ll.read_text().splitlines():
+        if line.startswith("define "):
+            in_fn = ir_hint in line.split("(")[0]
+            block = "start" if in_fn else None
+        elif in_fn and line.startswith("}"):
+            in_fn = False
+        elif in_fn:
+            if m := re.match(r"^([\w.$\-]+):", line):
+                block = m.group(1)
+            elif line.startswith("  ") and block is not None:
+                sizes[block] = sizes.get(block, 0) + 1
+    return sizes
 
 
 def ir_loops(ll: Path, opt: str, ir_hint: str) -> list[Loop]:
@@ -291,6 +316,7 @@ def ir_loops(ll: Path, opt: str, ir_hint: str) -> list[Loop]:
         raise RuntimeError(p.stderr)
     text = p.stderr
 
+    block_sizes = ir_block_sizes(ll, ir_hint)
     fn_loops: list[tuple[int, Loop]] = []
     trips: dict[str, tuple[str, int | None]] = {}
     in_fn = False
@@ -301,8 +327,11 @@ def ir_loops(ll: Path, opt: str, ir_hint: str) -> list[Loop]:
             in_fn = ir_hint in m.group(1).strip('"')
         elif not in_fn:
             continue
-        elif m := re.match(r"( *)Loop at depth (\d+) containing: .*?%([^,<]+)<header>", line):
-            fn_loops.append((int(m.group(2)), Loop(0, 0, m.group(3))))
+        elif m := re.match(r"( *)Loop at depth (\d+) containing: (.*)$", line):
+            blocks = [re.sub(r"<[a-z]+>", "", b).lstrip("%") for b in m.group(3).split(",")]
+            header = next(re.sub(r"<[a-z]+>", "", b).lstrip("%") for b in m.group(3).split(",") if "<header>" in b)
+            lp = Loop(0, 0, header, size=sum(block_sizes.get(b, 0) for b in blocks))
+            fn_loops.append((int(m.group(2)), lp))
         elif m := re.match(r"Loop %(\S+): backedge-taken count is (.*)$", line):
             expr = m.group(2).strip()
             c = re.fullmatch(r"i\d+ (\d+)", expr)
@@ -315,12 +344,21 @@ def ir_loops(ll: Path, opt: str, ir_hint: str) -> list[Loop]:
 
 
 def attach_trip_counts(asm_roots: list[Loop], ir_roots: list[Loop]) -> bool:
-    """Copy trip counts from the IR loop tree onto the asm one; False if their shapes differ."""
-    if tuple(r.shape() for r in asm_roots) != tuple(r.shape() for r in ir_roots):
+    """Copy trip counts from the IR loop tree onto the asm one; False if their shapes differ.
+
+    Sibling loops are matched by shape, and siblings of the same shape by size rank: `opt` does not
+    list loops in asm layout order (e.g. a main loop between an inlined tail and its vectorized
+    version).
+    """
+    if sorted(r.shape() for r in asm_roots) != sorted(r.shape() for r in ir_roots):
         return False
-    for a, i in zip(asm_roots, ir_roots):
-        a.trip_count, a.trip_expr = i.trip_count, i.trip_expr
-        attach_trip_counts(a.children, i.children)
+    for shape in {r.shape() for r in asm_roots}:
+        a_group = sorted((r for r in asm_roots if r.shape() == shape), key=lambda r: r.size)
+        i_group = sorted((r for r in ir_roots if r.shape() == shape), key=lambda r: r.size)
+        for a, i in zip(a_group, i_group):
+            a.trip_count, a.trip_expr = i.trip_count, i.trip_expr
+            if not attach_trip_counts(a.children, i.children):
+                return False
     return True
 
 
@@ -489,19 +527,26 @@ def analyze_kernel(
     trace, mode, bytes_per_iter = None, "inner", None
     if kernel.fixed and roots:
         # The outer `while` loop over LANES items: the top-level loop with a runtime trip count.
-        outer = [lp for lp in roots if lp.trip_count is None]
-        if len(outer) != 1:
-            warnings.append(f"expected one top-level loop with runtime trip count, found {len(outer)}")
+        # The main loop: of the top-level loops with a runtime trip count (the main loop, plus
+        # e.g. an inlined scalar tail), the one processing the most bytes per iteration.
+        candidates = []
+        for lp in roots:
+            if lp.trip_count is None:
+                # The main loop's trip count is linear in the input length; a tail's is not.
+                b1 = eval_scev(lp.trip_expr, SCEV_EVAL_LEN)
+                b2 = eval_scev(lp.trip_expr, 2 * SCEV_EVAL_LEN)
+                if b1 is not None and b2 is not None and b1 >= 0 and 2 * (b1 + 1) == b2 + 1:
+                    if SCEV_EVAL_LEN % (b1 + 1) == 0:
+                        candidates.append((SCEV_EVAL_LEN // (b1 + 1), lp))
+        if not candidates:
+            exprs = [lp.trip_expr for lp in roots if lp.trip_count is None]
+            warnings.append(f"no top-level loop with a derivable bytes per iteration: {exprs!r}")
         else:
-            backedges = eval_scev(outer[0].trip_expr, SCEV_EVAL_LEN)
-            if backedges is None or SCEV_EVAL_LEN % (backedges + 1) != 0:
-                warnings.append(f"cannot derive bytes per iteration from {outer[0].trip_expr!r}")
-            else:
-                bytes_per_iter = SCEV_EVAL_LEN // (backedges + 1)
-                trace = flatten(lines, outer[0])
-                mode = "outer"
-                if trace is None:
-                    warnings.append("inner loop with unknown trip count")
+            bytes_per_iter, main_loop = max(candidates, key=lambda c: c[0])
+            trace = flatten(lines, main_loop)
+            mode = "outer"
+            if trace is None:
+                warnings.append("inner loop with unknown trip count")
     if trace is None:
         mode, bytes_per_iter = "inner", None
         inner = innermost(roots)
