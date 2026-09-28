@@ -1,4 +1,4 @@
-//! Asm probe for the byte-shuffle filter kernels (encode and decode main loops).
+//! Asm probe for the byte-shuffle and bit-shuffle filter kernels.
 //!
 //! The kernels are `#[path]`-included straight from the `jix` sources, so this crate compiles the
 //! exact code `jix` ships, without `jix`'s C dependencies (zstd), for any rustup target.
@@ -12,6 +12,10 @@
 
 #[path = "../../src/codec/filter/byte_shuffle/kernels.rs"]
 pub mod byte_shuffle;
+// The bit-shuffle passes take a runtime itemsize, as `BitShuffleFilter` calls them: `analyze.py`
+// analyzes these `pub fn`s directly, binding the itemsize when it evaluates the trip counts.
+#[path = "../../src/codec/filter/bit_shuffle/kernels.rs"]
+pub mod bit_shuffle;
 
 /// The fearless_simd token of the level enabled at compile time.
 #[inline(always)]
@@ -51,3 +55,4 @@ probe! {
     probe_byte_shuffle_encode_8 => encode_simd::<8>;
     probe_byte_shuffle_encode_16 => encode_simd::<16>;
 }
+
