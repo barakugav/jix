@@ -60,11 +60,17 @@ BYTES_UNIT = 4096
 # per iteration. A multiple of any plausible step, so there is no remainder.
 SCEV_EVAL_LEN = 1 << 20
 
-# x86-64 microarchitecture levels, exactly as enabled by the `multiversion` clones in
-# jix/src/codec/filter/byte_shuffle/kernels.rs (target features only, generic tuning).
-X86_V2 = "+sse3,+ssse3,+sse4.1,+sse4.2,+popcnt,+cmpxchg16b"
-X86_V3 = X86_V2 + ",+avx,+avx2,+bmi1,+bmi2,+f16c,+fma,+lzcnt,+movbe,+xsave"
-X86_V4 = X86_V3 + ",+avx512f,+avx512bw,+avx512cd,+avx512dq,+avx512vl"
+# x86 levels, exactly as enabled by fearless_simd's `dispatch!` arms (`Simd::vectorize` of the
+# Sse4_2 / Avx2 / Avx512 tokens). The platform names keep the x86-64-vN labels of the baseline.
+X86_V2 = "+fxsr,+sse4.2,+cmpxchg16b,+popcnt"
+X86_V3 = "+avx2,+bmi1,+bmi2,+cmpxchg16b,+f16c,+fma,+fxsr,+lzcnt,+movbe,+popcnt,+xsave"
+# fearless_simd's AVX-512 level is Ice Lake (includes VBMI), not x86-64-v4.
+X86_V4 = ",".join(
+    "+" + f
+    for f in "adx,aes,avx512bitalg,avx512bw,avx512cd,avx512dq,avx512f,avx512ifma,avx512vbmi,avx512vbmi2,"
+    "avx512vl,avx512vnni,avx512vpopcntdq,bmi1,bmi2,cmpxchg16b,fma,fxsr,gfni,lzcnt,movbe,pclmulqdq,popcnt,"
+    "rdrand,rdseed,sha,vaes,vpclmulqdq,xsave,xsavec,xsaveopt,xsaves".split(",")
+)
 
 
 @dataclass
@@ -124,24 +130,14 @@ class Kernel:
     fixed: bool  # fixed itemsize (flattened, the objective) vs runtime itemsize (informational)
 
 
-def _decode_kernel(itemsize: int, lanes: int) -> Kernel:
-    return Kernel(
-        f"decode_{itemsize}",
-        f"jix_probe::byte_shuffle::decode_impl::<{itemsize}, {lanes}>",
-        f"11decode_implKj{itemsize:x}_Kj{lanes:x}_",
-        True,
-    )
+def _decode_kernel(itemsize: int) -> Kernel:
+    sym = f"probe_byte_shuffle_decode_{itemsize}"
+    return Kernel(f"decode_{itemsize}", sym, sym, True)
 
 
-# Only the decode path is analyzed. The kernel table must match the `probe_*` exports in src/lib.rs.
-KERNELS = [
-    _decode_kernel(2, 64),
-    _decode_kernel(4, 32),
-    _decode_kernel(8, 16),
-    _decode_kernel(16, 8),
-    # The runtime-itemsize tail (`decode_impl_generic`) is out of scope: only the steady state of
-    # the main loop matters. Add it back with `Kernel(..., fixed=False)` to get informational numbers.
-]
+# Only the decode main loop is analyzed. The kernel table must match the `probe_*` exports in
+# src/lib.rs.
+KERNELS = [_decode_kernel(s) for s in (2, 4, 8, 16)]
 
 
 # --------------------------------------------------------------------------------------------------
@@ -351,15 +347,33 @@ def flatten(lines: list[str], loop: Loop) -> list[str] | None:
 
 
 def eval_scev(expr: str, length: int) -> int | None:
-    """Evaluate a SCEV backedge-taken count expression of the input length (`%src.1`)."""
+    """Evaluate a SCEV backedge-taken count expression of the input length (`%src.1`).
+
+    Supports `+ - * /u` and the n-ary `umax umin smax smin`, which SCEV always parenthesizes, so
+    innermost parenthesized groups are evaluated first.
+    """
     e = re.sub(r"<[a-z]+>", "", expr)  # wrap flags: <nuw>, <nsw>, <nw>
-    e = e.replace("/u", "//").replace("%src.1", "L").replace("%dst.1", "L")
-    if not re.fullmatch(r"[\dL+\-*/() ]+", e):
-        return None
-    try:
-        return eval(e, {"__builtins__": {}}, {"L": length})  # noqa: S307 - validated above
-    except (SyntaxError, ZeroDivisionError):
-        return None
+    e = e.replace("/u", "//").replace("%src.1", str(length)).replace("%dst.1", str(length))
+    minmax = {"umax": max, "umin": min, "smax": max, "smin": min}
+
+    def arith(t: str) -> int | None:
+        for op, f in minmax.items():
+            if f" {op} " in t:
+                vals = [arith(x) for x in t.split(f" {op} ")]
+                return None if None in vals else f(vals)
+        if not re.fullmatch(r"[\d+\-*/ ]+", t):
+            return None
+        try:
+            return eval(t, {"__builtins__": {}})  # noqa: S307 - validated above
+        except (SyntaxError, ZeroDivisionError):
+            return None
+
+    while (m := re.search(r"\(([^()]*)\)", e)) is not None:
+        v = arith(m.group(1))
+        if v is None:
+            return None
+        e = e[: m.start()] + str(v) + e[m.end() :]
+    return arith(e)
 
 
 def innermost(loops: list[Loop]) -> list[Loop]:
@@ -389,7 +403,13 @@ class McaResult:
 def run_mca(mca: str, platform: Platform, cpu: str, trace: list[str], all_lines: list[str]) -> tuple[McaResult, str]:
     # llvm-mca does not follow branches, but their target labels must exist: define them as
     # stubs after the trace.
-    all_labels = {m.group(1) for line in all_lines if (m := LABEL_RE.match(line))}
+    # Call targets can be demangled Rust paths, which the assembler cannot parse: point direct
+    # calls at a stub symbol instead.
+    trace = [
+        f"{mnemonic(x)} __probe_callee" if is_call(platform.isa, mnemonic(x)) and "*" not in x and "%" not in x else x
+        for x in trace
+    ]
+    all_labels = {m.group(1) for line in all_lines if (m := LABEL_RE.match(line))} | {"__probe_callee"}
     referenced = {tok for line in trace for tok in TOKEN_RE.findall(line)[1:]} & all_labels
     src = "\n".join(trace + [f"{lab}:" for lab in sorted(referenced)]) + "\n"
     if platform.isa == "x86":
@@ -525,7 +545,19 @@ def analyze_platform(
     return [analyze_kernel(platform, k, ll, opt, mca, target_dir, out_dir) for k in kernels]
 
 
-def write_summary(results: list[KernelResult], platforms: list[Platform], out_dir: Path, header: list[str]) -> str:
+def load_costs(label: str) -> dict[tuple[str, str, str], float]:
+    """(platform, cpu, kernel) -> cycles per BYTES_UNIT, from a previous run's summary.json."""
+    costs = {}
+    for r in json.loads((PROBE_DIR / "results" / label / "summary.json").read_text()):
+        if r["mode"] == "outer":
+            for m in r["mca"]:
+                costs[(r["platform"], m["cpu"], r["kernel"])] = m["cycles_per_iter"] * BYTES_UNIT / r["bytes_per_iter"]
+    return costs
+
+
+def write_summary(
+    results: list[KernelResult], platforms: list[Platform], out_dir: Path, header: list[str], compare: str | None
+) -> str:
     lines = [
         f"# Byte-shuffle llvm-mca summary: `{out_dir.name}`",
         "",
@@ -553,15 +585,26 @@ def write_summary(results: list[KernelResult], platforms: list[Platform], out_di
     def star(rs: list[KernelResult]) -> str:
         return "*" if any(r.calls for r in rs) else ""
 
+    def geo(xs: list[float]) -> float:
+        return math.exp(sum(math.log(x) for x in xs) / len(xs))
+
     def geomean(rs: list[KernelResult], i: int) -> str:
-        return f"{math.exp(sum(math.log(cost(r, i)) for r in rs) / len(rs)):.0f}{star(rs)}"
+        return f"{geo([cost(r, i) for r in rs]):.0f}{star(rs)}"
+
+    base = load_costs(compare) if compare else {}
+
+    def speedup(platform: str, cpu: str, rs: list[KernelResult], i: int) -> str:
+        old = [base.get((platform, cpu, r.kernel)) for r in rs]
+        if None in old:
+            return "-"
+        return f"{geo(old) / geo([cost(r, i) for r in rs]):.2f}x"
 
     fixed_names = [k.name for k in KERNELS if k.fixed and any(r.kernel == k.name for r in results)]
     lines += [
         "## Overview",
         "",
-        "| platform | cpu | geomean | " + " | ".join(fixed_names) + " |",
-        "|---|---|---:|" + "---:|" * len(fixed_names),
+        "| platform | cpu | geomean | " + (f"vs {compare} | " if compare else "") + " | ".join(fixed_names) + " |",
+        "|---|---|---:|" + ("---:|" if compare else "") + "---:|" * len(fixed_names),
     ]
     for platform in platforms:
         fixed = [r for r in by_platform.get(platform.name, []) if r.mode == "outer"]
@@ -569,7 +612,8 @@ def write_summary(results: list[KernelResult], platforms: list[Platform], out_di
             continue
         for i, cpu in enumerate(platform.mca_cpus):
             cells = [f"{cost(r, i):.0f}{star([r])}" for r in fixed]
-            lines.append(f"| {platform.name} | {cpu} | **{geomean(fixed, i)}** | " + " | ".join(cells) + " |")
+            vs = f"{speedup(platform.name, cpu, fixed, i)} | " if compare else ""
+            lines.append(f"| {platform.name} | {cpu} | **{geomean(fixed, i)}** | {vs}" + " | ".join(cells) + " |")
     lines.append("")
 
     for platform in platforms:
@@ -591,8 +635,8 @@ def write_summary(results: list[KernelResult], platforms: list[Platform], out_di
                     + " | ".join(cells)
                     + " |"
                 )
-            geo = [geomean(fixed, i) for i in range(len(cpus))]
-            lines.append("| **geomean** | | | | | " + " | ".join(f"**{g}**" for g in geo) + " |")
+            geos = [geomean(fixed, i) for i in range(len(cpus))]
+            lines.append("| **geomean** | | | | | " + " | ".join(f"**{g}**" for g in geos) + " |")
             lines.append("")
         if other:
             lines += [
@@ -629,6 +673,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--label", default="baseline", help="results sub-directory name")
     ap.add_argument("--platform", action="append", help="restrict to these platforms (repeatable)")
+    ap.add_argument("--compare", help="also report the geomean speedup over this results label")
     ap.add_argument("--fn", action="append", dest="kernels", help="restrict to these kernels (repeatable)")
     args = ap.parse_args()
 
@@ -654,7 +699,7 @@ def main() -> None:
         futures = [ex.submit(analyze_platform, p, kernels, opt, mca, out_dir) for p in platforms]
         results = [r for f in futures for r in f.result()]
 
-    print(write_summary(results, platforms, out_dir, header))
+    print(write_summary(results, platforms, out_dir, header, args.compare))
 
 
 if __name__ == "__main__":

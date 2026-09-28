@@ -10,7 +10,7 @@ targeted platforms. The encode path is out of scope, and it is neither probed no
 A `jix` example would build all of `jix`'s dependencies for the target, including `zstd-sys` (C),
 which needs a C cross toolchain and sysroot for every target (and a macOS SDK for
 `aarch64-apple-darwin`). Instead, the kernels live in a self-contained file (`core`/`std` +
-the optional `multiversion` attribute only). `jix` uses it as a module, and this crate
+`fearless_simd` and the optional `multiversion` attribute only). `jix` uses it as a module, and this crate
 `#[path]`-includes it. So the probe compiles the exact code `jix` ships, for any rustup target, in
 about 2 seconds, with no linker or C compiler. Keep `kernels.rs` free of `crate::` dependencies.
 
@@ -53,17 +53,21 @@ Platforms (see `PLATFORMS` in `analyze.py`):
 
 | platform | target | ISA level | llvm-mca CPUs |
 |---|---|---|---|
-| x86_64-v2 | x86_64-unknown-linux-gnu | multiversion v2 clone features | sandybridge, btver2 |
-| x86_64-v3 | x86_64-unknown-linux-gnu | multiversion v3 clone features | skylake, alderlake, znver3 |
-| x86_64-v4 | x86_64-unknown-linux-gnu | multiversion v4 clone features | icelake-server, sapphirerapids, znver4 |
-| i686 | i686-unknown-linux-gnu | SSE2 (the target baseline; no multiversion clones) | skylake |
+| x86_64-v2 | x86_64-unknown-linux-gnu | fearless_simd `Sse4_2` level features | sandybridge, btver2 |
+| x86_64-v3 | x86_64-unknown-linux-gnu | fearless_simd `Avx2` level features | skylake, alderlake, znver3 |
+| x86_64-v4 | x86_64-unknown-linux-gnu | fearless_simd `Avx512` level features (Ice Lake: includes VBMI) | icelake-server, sapphirerapids, znver4 |
+| i686 | i686-unknown-linux-gnu | SSE2 (the target baseline; fearless_simd `Sse2`) | skylake |
 | aarch64 | aarch64-unknown-linux-gnu | armv8-a + NEON | cortex-a72, neoverse-n1, neoverse-v2 |
 | aarch64-apple | aarch64-apple-darwin | apple-m1 | apple-m1 |
 
 x86-64 v1 (SSE2 only), armv7 and ppc64le are out of scope. Windows and musl wheels share the ISA
-of their linux counterparts. For x86-64, the multiversion
-clones get exactly `#[target_feature(enable = ...)]` (generic tuning). The probe reproduces each
-clone by building without `multiversion` and with the same features in `-C target-feature`.
+of their linux counterparts. `jix` runs the decode main loop through `fearless_simd::dispatch!`,
+which calls it inside a `#[target_feature(enable = ...)]` function of the detected level (generic
+tuning). The probe reproduces each dispatch arm by building with the same features in
+`-C target-feature` and passing the matching token (`simd()` in `src/lib.rs`). The `baseline`
+results were produced the same way, but with the `multiversion` x86-64-v2/v3/v4 feature sets.
+
+Compare a run with a previous one with `--compare <label>`, which adds a geomean speedup column.
 
 For each (platform, kernel):
 1. `cargo asm --simplify` gives the asm, and the loop tree comes from back-edge branches.
@@ -137,3 +141,49 @@ Observations:
   scalar. Only x86-64-v4 gained: `decode_2` by 30-40% and `decode_8` by 7-22%.
 - i686: the `i686-*` targets enable SSE2 (128-bit integer SIMD, but no SSSE3 `pshufb`). The
   `multiversion` targets are x86_64-only, so i686 never gets wider clones.
+
+## fearless_simd kernel (`results/fearless`)
+
+`decode_simd` in `kernels.rs` is generic over the fearless_simd level. Each chunk loads one
+native vector (`S::u8s`) per byte plane, then transposes them with log2(ITEMSIZE) rounds of the
+portable `interleave` (a perfect shuffle: plane `j` with plane `j + ITEMSIZE / 2`), and stores
+ITEMSIZE vectors. Each loop iteration processes chunks until it covers at least 256 bytes. The
+`<LANES` tail still goes to `decode_impl_generic`.
+
+| platform | cpu | geomean | vs baseline | decode_2 | decode_4 | decode_8 | decode_16 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| x86_64-v2 | sandybridge | **429** | 2.29x | 258 | 338 | 513 | 754 |
+| x86_64-v2 | btver2 | **761** | 2.62x | 473 | 665 | 858 | 1243 |
+| x86_64-v3 | skylake | **569** | 2.59x | 258 | 514 | 770 | 1025 |
+| x86_64-v3 | alderlake | **304** | 2.86x | 132 | 292 | 405 | 547 |
+| x86_64-v3 | znver3 | **300** | 3.59x | 130 | 275 | 403 | 562 |
+| x86_64-v4 | icelake-server | **148** | 4.28x | 74 | 131 | 193 | 257 |
+| x86_64-v4 | sapphirerapids | **287** | 2.51x | 132 | 260 | 386 | 513 |
+| x86_64-v4 | znver4 | **144** | 3.80x | 67 | 131 | 194 | 257 |
+| i686 | skylake | **602** | 3.87x | 258 | 514 | 771 | 1284 |
+| aarch64 | cortex-a72 | **1080** | 1.98x | 705 | 993 | 1236 | 1572 |
+| aarch64 | neoverse-n1 | **699** | 2.55x | 576 | 624 | 753 | 881 |
+| aarch64 | neoverse-v2 | **270** | 2.64x | 209 | 273 | 290 | 322 |
+| aarch64-apple | apple-m1 | **244** | 2.29x | 194 | 203 | 260 | 345 |
+
+Every kernel is faster than its baseline on every CPU. Findings while tuning on Ice Lake:
+- On AVX-512 (VBMI), `interleave` is two `vpermt2b`, so the loop is port-5 bound at
+  log2(ITEMSIZE) shuffles per 64 output bytes: 64 / 128 / 192 / 256 cycles per 4096 bytes. Ice
+  Lake and Zen 4 reach that bound. `decode_2` is near the 64-cycle store floor.
+- Bounds checks: safe slicing left 1-2 compare+branch pairs per plane in the loop (LLVM does not
+  hoist them), which also hid the trip count from SCEV. The loads and stores use
+  `get_unchecked` with one SAFETY argument.
+- `array::from_fn` in the hot loop was not inlined (a call per iteration). Plain loops over a
+  splat-initialized array are used instead.
+- Loop form: a counted `for` over chunks beat `while i + lanes <= nitems` (`decode_2` 100 -> 77).
+  Manual unrolling gains only about 3% on AVX-512. On NEON (16-byte vectors, 32 B/iter for
+  `decode_2`) it matters much more, so the loop is unrolled to at least 256 bytes per iteration
+  (sweep: 64/128/256/512 bytes; 512 starts to hurt `decode_16`).
+- A fixed `u8x64` type on every level instead of the native one helped small itemsizes on
+  128-bit ISAs, but hurt `decode_16` badly (register spills, and `memcpy` on i686) and AVX2 in
+  general, so it was dropped in favor of the unroll.
+- Sapphire Rapids is 2x behind Ice Lake only because llvm-mca's model gives `vpermt2b` a
+  throughput of 2 cycles there.
+- AVX2: fearless_simd's `interleave_u8x32` is `vpunpckl/hbw` plus two lane-fixup `vperm2i128`,
+  i.e. 2 shuffles per output vector per round. Avoiding the fixups needs in-lane unpacks, which
+  the portable API does not expose.
