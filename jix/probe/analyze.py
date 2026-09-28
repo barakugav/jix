@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Static performance analysis of the byte/bit-shuffle kernels: cargo-asm + llvm-mca, per platform.
+"""Static performance analysis of the byte/bit-shuffle kernels and of the element-wise pipeline's
+inner loop (`--direction elementwise`, from the `elementwise/` probe crate): cargo-asm + llvm-mca,
+per platform.
 
 For every platform (target triple + ISA level) the probe crate is compiled in release mode, and for
 every kernel:
@@ -124,18 +126,33 @@ PLATFORMS = [
     Platform("aarch64-apple", "aarch64-apple-darwin", [], ["apple-m1"]),
 ]
 
+# The element-wise pipeline has no runtime dispatch (yet): x86-64 wheels run it at the target's
+# SSE2 baseline. The x86-64-v2/v3/v4 platforms show what auto-vectorization gives at each level.
+PLATFORMS_ELEMENTWISE = [
+    Platform("x86_64", "x86_64-unknown-linux-gnu", [], ["sandybridge", "skylake", "znver3"]),
+    *PLATFORMS,
+]
+
 
 @dataclass
 class Kernel:
     name: str
     symbol: str  # demangled, as `cargo asm` lists it
-    ir_hint: str  # substring of the v0-mangled symbol, to find the function in the LLVM IR
+    # Substring of the v0-mangled symbol, to find the function in the LLVM IR. None: looked up.
+    ir_hint: str | None
     # Itemsize passed at runtime as the `typesize` argument, bound when the trip counts are
     # evaluated (the former bit-shuffle passes). None: no such argument.
     runtime_itemsize: int | None = None
+    # The probe crate the kernel is in (its directory, relative to this one).
+    crate: str = "."
+    # Element size of an element-wise inner loop, whose `len` argument counts elements (of the
+    # output: its bytes are the "input bytes" of the cost model). None: not such a loop.
+    elem_size: int | None = None
 
     def scev_env(self, length: int) -> dict[str, int]:
         """Values of the function arguments, for an input of `length` bytes."""
+        if self.elem_size is not None:
+            return {"%len": length // self.elem_size}
         env = {"%src.1": length, "%dst.1": length, "%buf.1": length}
         if self.runtime_itemsize is not None:
             t = self.runtime_itemsize
@@ -154,7 +171,48 @@ KERNELS = {d: [_byte_kernel(d, s) for s in ITEMSIZES] for d in ("decode", "encod
 # The bit transpose of the bit-shuffle filter (its other passes are byte-shuffle kernels:
 # `encode_8` / `decode_8` per byte-plane, and the element-sized one). The results of the
 # former kernels (`bit-{encode,decode}-*`) were produced by earlier versions of this script.
-KERNELS["bit"] = [Kernel("transpose_bit_rows", "probe_bit_shuffle_transpose_bit_rows", "probe_bit_shuffle_transpose_bit_rows")]
+KERNELS["bit"] = [
+    Kernel("transpose_bit_rows", "probe_bit_shuffle_transpose_bit_rows", "probe_bit_shuffle_transpose_bit_rows")
+]
+
+
+def _elementwise_kernel(name: str, ty: str, pipeline: str) -> Kernel:
+    """The inner loop of the element-wise pipeline, for all operands contiguous (`true, true`)."""
+    size = {"f32": 4, "f64": 8, "i32": 4}[ty]
+    lanes = 128 // size  # `LanesInfo::LANES`
+    ew = "jix::storage::elementwise_pipeline"
+    sym = f"{ew}::inner_loop::<{ty}, {lanes}, true, true, {pipeline}>"
+    return Kernel(f"{name}_{ty}", sym, None, crate="elementwise", elem_size=size)
+
+
+def _pipeline(ty: str, expr) -> str:
+    """Demangled type of the pipeline of `expr`: a leaf operand (None), ("neg", x) or (op2, x, y)."""
+    if expr is None:
+        return f"jix::storage::elementwise_pipeline::OperandTyped<{ty}>"
+    if expr[0] == "neg":
+        a = _pipeline(ty, expr[1])
+        return (
+            "<jix::ops::op1::Op1<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
+            f"::Op1Pipeline<{a}, jix::ops::op1::NegKernel, {ty}>"
+        )
+    a, b = _pipeline(ty, expr[1]), _pipeline(ty, expr[2])
+    return (
+        "<jix::ops::op2::Op2<_, _, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
+        f"::Op2Pipeline<{a}, {b}, jix::ops::op2::{expr[0].capitalize()}Kernel, {ty}, {ty}>"
+    )
+
+
+# The element-wise pipeline (`elementwise/src/lib.rs`): each op chain's inner loop.
+ELEMENTWISE_EXPRS = {
+    "neg": ("neg", None),
+    "add": ("add", None, None),
+    "chain": ("sub", ("mul", ("add", None, None), None), None),  # (a + b) * c - d
+}
+KERNELS["elementwise"] = [
+    _elementwise_kernel(name, ty, _pipeline(ty, expr))
+    for ty in ("f32", "f64", "i32")
+    for name, expr in ELEMENTWISE_EXPRS.items()
+]
 
 # x86 feature sets of the `multiversion` clones (x86-64-v2/v3/v4), used by the baselines, which
 # measured the auto-vectorized kernels (`--x86-levels multiversion`).
@@ -206,13 +264,39 @@ def cargo_env(platform: Platform, target_dir: Path) -> dict:
     env = dict(os.environ)
     env["RUSTFLAGS"] = " ".join(["-Csymbol-mangling-version=v0", *platform.rustflags])
     env["CARGO_TARGET_DIR"] = str(target_dir)
+    # C dependencies (zstd, for the element-wise probe) are built with a stand-in toolchain: the
+    # probe is an rlib that is never linked, so no C cross compiler or sysroot is needed.
+    fake = str(PROBE_DIR / "elementwise" / "fake_cc.sh")
+    t = platform.target.replace("-", "_")
+    env |= {f"CC_{t}": fake, f"AR_{t}": fake}
     return env
 
 
-def cargo_asm(platform: Platform, symbol: str, target_dir: Path, llvm: bool = False) -> str:
-    mode = ["--llvm"] if llvm else ["--simplify", *(["--att"] if platform.isa == "x86" else [])]
+def cargo_asm(
+    platform: Platform, symbol: str, target_dir: Path, crate: str = ".", mode: list[str] | None = None
+) -> str:
+    if mode is None:
+        mode = ["--simplify", *([f"--{x86_syntax(crate)}"] if platform.isa == "x86" else [])]
     cmd = ["cargo", "asm", "--release", "--lib", "--target", platform.target, *mode, symbol]
-    return run(cmd, env=cargo_env(platform, target_dir), cwd=PROBE_DIR)
+    return run(cmd, env=cargo_env(platform, target_dir), cwd=PROBE_DIR / crate)
+
+
+def x86_syntax(crate: str) -> str:
+    """x86 asm syntax: AT&T, but Intel for the element-wise probe, as cargo-show-asm fails to parse
+    some of `jix`'s i686 AT&T asm (`rep;movsl`)."""
+    return "att" if crate == "." else "intel"
+
+
+def mangled_name(ll: Path, symbol: str) -> str:
+    """The v0-mangled name, in the LLVM IR `ll`, of the function `cargo asm` lists as `symbol`."""
+    names = re.findall(r"^define [^@]*@(\S+?)\(", ll.read_text(), re.M)
+    names = [n.strip('"') for n in names]
+    # binutils demangles v0 with crate hashes and typed const generics: `jix[0123abcd]`, `32: usize`.
+    out = run(["c++filt"], input="\n".join(names)).splitlines()
+    for mangled, d in zip(names, out):
+        if re.sub(r": (?:usize|bool)\b", "", re.sub(r"\[[0-9a-f]+\]", "", d)) == symbol:
+            return mangled
+    raise RuntimeError(f"{symbol} not found in {ll}")
 
 
 # --------------------------------------------------------------------------------------------------
@@ -292,15 +376,26 @@ def clean_lines(asm: str, comment: str) -> list[str]:
 
 def asm_loops(lines: list[str], isa: str) -> list[Loop]:
     labels = {m.group(1): i for i, line in enumerate(lines) if (m := LABEL_RE.match(line))}
+    branches = [
+        (i, labels[tok])
+        for i, line in enumerate(lines)
+        if not is_label(line) and is_branch(isa, mnemonic(line))
+        for tok in TOKEN_RE.findall(line)[1:]
+        if tok in labels
+    ]
+
+    def single_entry(h: int, e: int) -> bool:
+        """No branch from outside lines h..e jumps into them, other than to h: a backward jump to
+        code that does not dominate it (e.g. to a vector epilogue laid out before the main
+        vector loop) is not a loop."""
+        return not any(h < j <= e and not h <= i <= e for i, j in branches)
+
     ends: dict[str, int] = {}
-    for i, line in enumerate(lines):
-        if is_label(line) or not is_branch(isa, mnemonic(line)):
-            continue
-        for tok in TOKEN_RE.findall(line)[1:]:
-            j = labels.get(tok)
-            if j is not None and j < i:
-                ends[tok] = max(ends.get(tok, i), i)
-    vreg = re.compile(r"%[xyz]mm\d+" if isa == "x86" else r"\b[vq]\d+\b")
+    for i, j in sorted(branches, reverse=True):
+        h = LABEL_RE.match(lines[j]).group(1)
+        if j < i and h not in ends and single_entry(j, i):
+            ends[h] = i
+    vreg = re.compile(r"\b[xyz]mm\d+\b" if isa == "x86" else r"\b[vq]\d+\b")
 
     def make(h: str, e: int) -> Loop:
         body = [x for x in lines[labels[h] : e + 1] if not is_label(x)]
@@ -757,7 +852,9 @@ def split_writeback_stores(trace: list[str]) -> list[str]:
     return [re.sub(r"^add (\w+), (\w+), #-(\d+)$", r"sub \1, \2, #\3", x) for x in out]
 
 
-def run_mca(mca: str, platform: Platform, cpu: str, trace: list[str], all_lines: list[str]) -> tuple[McaResult, str]:
+def run_mca(
+    mca: str, platform: Platform, cpu: str, trace: list[str], all_lines: list[str], crate: str
+) -> tuple[McaResult, str]:
     if platform.isa == "aarch64":
         trace = split_writeback_stores(trace)
     # llvm-mca does not follow branches, but their target labels must exist: define them as
@@ -772,7 +869,7 @@ def run_mca(mca: str, platform: Platform, cpu: str, trace: list[str], all_lines:
     referenced = {tok for line in trace for tok in TOKEN_RE.findall(line)[1:]} & all_labels
     src = "\n".join(trace + [f"{lab}:" for lab in sorted(referenced)]) + "\n"
     if platform.isa == "x86":
-        src = ".att_syntax\n" + src
+        src = {"att": ".att_syntax\n", "intel": ".intel_syntax noprefix\n"}[x86_syntax(crate)] + src
     cmd = [
         mca,
         f"-mtriple={platform.target}",
@@ -836,7 +933,7 @@ def describe_tree(loops: list[Loop]) -> str:
 def analyze_kernel(
     platform: Platform, kernel: Kernel, ll: Path, opt: str, mca: str, target_dir: Path, out_dir: Path
 ) -> KernelResult:
-    asm = cargo_asm(platform, kernel.symbol, target_dir)
+    asm = cargo_asm(platform, kernel.symbol, target_dir, kernel.crate)
     asm_path = out_dir / "asm" / platform.name / f"{kernel.name}.s"
     asm_path.parent.mkdir(parents=True, exist_ok=True)
     asm_path.write_text(asm)
@@ -849,7 +946,8 @@ def analyze_kernel(
     except RuntimeError as e:  # a loop LLVM laid out in non-contiguous pieces
         roots = []
         warnings.append(str(e))
-    if not attach_trip_counts(roots, ir_loops(ll, opt, kernel.ir_hint)):
+    ir_hint = kernel.ir_hint or mangled_name(ll, kernel.symbol)
+    if not attach_trip_counts(roots, ir_loops(ll, opt, ir_hint)):
         warnings.append("asm and IR loop trees differ, trip counts unknown")
 
     hot = hot_loops(roots, kernel)
@@ -888,7 +986,7 @@ def analyze_kernel(
     for cpu in platform.mca_cpus:
         cost = 0.0
         for k, trace in enumerate(traces):
-            m, report = run_mca(mca, platform, cpu, trace, lines)
+            m, report = run_mca(mca, platform, cpu, trace, lines, kernel.crate)
             r.mca.append(m)
             if m.skipped:
                 r.warnings.append(f"llvm-mca -mcpu={cpu} skipped (no sched info): {', '.join(m.skipped)}")
@@ -908,10 +1006,12 @@ def analyze_platform(
     # One target dir per feature set: the IR file is picked by mtime, and cargo does not rewrite
     # an up-to-date one, so builds with other RUSTFLAGS must not share the directory.
     flags = hashlib.sha1(" ".join(platform.rustflags).encode()).hexdigest()[:8]
-    target_dir = PROBE_DIR / "target" / "analyze" / f"{platform.name}-{flags}"
+    crate = kernels[0].crate
+    target_dir = PROBE_DIR / crate / "target" / "analyze" / f"{platform.name}-{flags}"
     # Emits the whole crate's final LLVM IR next to the build artifacts.
-    cargo_asm(platform, kernels[0].symbol, target_dir, llvm=True)
-    ll = max(target_dir.glob(f"{platform.target}/release/**/jix_probe-*.ll"), key=lambda p: p.stat().st_mtime)
+    cargo_asm(platform, kernels[0].symbol, target_dir, crate, ["--llvm"])
+    lib = "jix_probe" if crate == "." else f"jix_probe_{crate}"
+    ll = max(target_dir.glob(f"{platform.target}/release/**/{lib}-*.ll"), key=lambda p: p.stat().st_mtime)
     return [analyze_kernel(platform, k, ll, opt, mca, target_dir, out_dir) for k in kernels]
 
 
@@ -1066,7 +1166,8 @@ def main() -> None:
     ap.add_argument("--fn", action="append", dest="kernels", help="restrict to these kernels (repeatable)")
     args = ap.parse_args()
 
-    platforms = [p for p in PLATFORMS if not args.platform or p.name in args.platform]
+    all_platforms = PLATFORMS_ELEMENTWISE if args.direction == "elementwise" else PLATFORMS
+    platforms = [p for p in all_platforms if not args.platform or p.name in args.platform]
     kernels = [k for k in KERNELS[args.direction] if not args.kernels or k.name in args.kernels]
     if args.x86_levels == "multiversion":
         for p in platforms:
@@ -1082,6 +1183,12 @@ def main() -> None:
         f"- rustc: `{run(['rustc', '--version'], cwd=PROBE_DIR).strip()}`",
         f"- llvm-mca: `{mca_version}`",
     ]
+
+    if args.direction == "elementwise":
+        header.append(
+            "- kernels: the pipeline's inner loop for contiguous operands (`inner_loop::<T, LANES, true, true, _>`);"
+            " the bytes are output bytes"
+        )
 
     out_dir = PROBE_DIR / "results" / args.label
     if out_dir.exists():

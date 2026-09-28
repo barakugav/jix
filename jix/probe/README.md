@@ -1,11 +1,12 @@
-# jix-probe: static asm analysis of the byte- and bit-shuffle kernels
+# jix-probe: static asm analysis of the filter kernels and the element-wise pipeline
 
 Experimental tooling for optimizing the filter kernels in
 `jix/src/codec/filter/{byte_shuffle,bit_shuffle}/kernels.rs` across platforms **without running
 benchmarks**. The objective is llvm-mca's steady-state throughput of each kernel's hot loops, on
 the targeted platforms. Byte-shuffle decode was optimized first and is frozen (`results/fearless`);
 encode followed (`--direction encode`, `results/encode-*`). The bit-shuffle bit transpose is analyzed
-with `--direction bit` (`results/bit-*`).
+with `--direction bit` (`results/bit-*`). The element-wise pipeline's inner loop is analyzed with
+`--direction elementwise` (`results/elementwise-*`), from a second probe crate, see the last section.
 
 ## Why a separate crate and not a `jix` example
 
@@ -39,6 +40,7 @@ about 2 seconds, with no linker or C compiler. Keep the `kernels.rs` files free 
 python jix/probe/analyze.py                         # decode, all platforms, results/baseline/
 python jix/probe/analyze.py --label my-variant      # results/my-variant/
 python jix/probe/analyze.py --direction bit --label x --compare bit-fearless
+python jix/probe/analyze.py --direction elementwise --label x --compare elementwise-baseline
 python jix/probe/analyze.py --platform x86_64-v3 --platform aarch64 --fn decode_4
 cd jix/probe && cargo asm --release --lib --target aarch64-unknown-linux-gnu   # list symbols
 ```
@@ -373,3 +375,78 @@ Findings:
   byte-shuffle results reproduce exactly.
 - AVX-512 CPUs without VBMI (Skylake-X, Cascade Lake) take the AVX2 arm: on the `skylake-avx512`
   model, 1541 (encode) and 1156 (decode), vs 2579 and 849 for the former v4 clone.
+
+## Element-wise pipeline (`--direction elementwise`)
+
+The pipeline is not self-contained like the filter kernels, so it gets its own probe crate,
+`elementwise/`, which depends on `jix` itself. Its `probe_*` functions evaluate an op chain over
+`Plain` arrays into a packed output through the public API (`to_ndarray_slice`):
+
+| kernel | expression | element types |
+|---|---|---|
+| `neg` | `-a` | f32, f64, i32 |
+| `add` | `a + b` | f32, f64, i32 |
+| `chain` | `(a + b) * c - d` (`Add`, `Mul`, `Sub`) | f32, f64, i32 |
+
+What is analyzed is the pipeline's inner loop that each probe instantiates,
+`elementwise_pipeline::inner_loop::<T, LANES, true, true, Pipeline>`: the variant for all operands
+(inputs and output) contiguous in the inner dimension. `analyze.py` finds it by its demangled name,
+built from the op chain (`ELEMENTWISE_EXPRS`), and binds its `len` argument (elements). Its hot
+loop is the main loop over `LANES` elements (`read_bulk::<LANES, true>`, `LANES = 128 / size_of::<T>()`).
+The unit is the same, **cycles per 4096 bytes of output**, e.g. 1024 f32 elements whatever the
+number of inputs. Not counted: the per-call setup in `to_buf_type_erased` (the pipeline calls the
+inner loop once per contiguous run of at most 8192 elements, `Staging::BUFFER_SIZE`) and the
+remainder of `len % LANES` elements.
+
+`jix` depends on `zstd-sys` (C). The probe is an rlib that is never linked, so the C code is
+"compiled" by a stand-in, `elementwise/fake_cc.sh` (empty objects and archives, set as `CC_<target>`
+/ `AR_<target>`): no C cross toolchain or macOS SDK is needed. x86 asm is read in Intel syntax for
+this crate, as cargo-show-asm fails to parse some of `jix`'s i686 AT&T output (`rep;movsl`).
+
+The pipeline has no runtime dispatch: x86-64 wheels run it at the SSE2 baseline, which is the
+extra `x86_64` platform. The x86_64-v2/v3/v4 rows are the same code compiled with fearless_simd's
+level features, i.e. what auto-vectorization gives in a dispatch arm of that level.
+
+### Baseline (`results/elementwise-baseline`)
+
+| platform | cpu | geomean | neg_f32 | add_f32 | chain_f32 | neg_f64 | add_f64 | chain_f64 | neg_i32 | add_i32 | chain_i32 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| x86_64 (SSE2) | sandybridge | **433** | 291 | 387 | 645 | 291 | 387 | 645 | 283 | 387 | 934 |
+| x86_64 (SSE2) | skylake | **362** | 259 | 260 | 518 | 259 | 260 | 518 | 259 | 259 | 1285 |
+| x86_64 (SSE2) | znver3 | **402** | 260 | 387 | 645 | 260 | 387 | 645 | 260 | 387 | 647 |
+| x86_64-v2 | sandybridge | **416** | 291 | 387 | 645 | 291 | 387 | 645 | 283 | 387 | 644 |
+| x86_64-v2 | btver2 | **676** | 435 | 564 | 1076 | 435 | 564 | 1077 | 563 | 563 | 1348 |
+| x86_64-v3 | skylake | **167** | 132 | 132 | 262 | 132 | 132 | 262 | 132 | 132 | 279 |
+| x86_64-v3 | alderlake | **151** | 103 | 136 | 236 | 103 | 136 | 236 | 103 | 136 | 268 |
+| x86_64-v3 | znver3 | **203** | 132 | 195 | 324 | 132 | 195 | 324 | 132 | 195 | 324 |
+| x86_64-v4 | icelake-server | **1125** | 961 | 1481 | 2567 | 362 | 574 | 1086 | 953 | 1469 | 2515 |
+| x86_64-v4 | sapphirerapids | **3059** | 2476 | 4583 | 6429 | 456 | 1923 | 5635 | 2243 | 4443 | 6513 |
+| x86_64-v4 | znver4 | **226** | 198 | 265 | 457 | 88 | 160 | 288 | 169 | 232 | 401 |
+| i686 | skylake | **362** | 259 | 260 | 518 | 259 | 260 | 518 | 259 | 259 | 1285 |
+| aarch64 | cortex-a72 | **925** | 611 | 898 | 1635 | 611 | 898 | 1635 | 579 | 771 | 1380 |
+| aarch64 | neoverse-n1 | **878** | 610 | 802 | 1378 | 610 | 802 | 1378 | 642 | 770 | 1380 |
+| aarch64 | neoverse-v2 | **339** | 227 | 292 | 579 | 227 | 292 | 579 | 227 | 323 | 548 |
+| aarch64-apple | apple-m1 | **277** | 195 | 260 | 422 | 195 | 260 | 423 | 195 | 259 | 420 |
+
+Findings:
+- SSE2, AVX2 and NEON: clean code. The `LANES` elements of `read_bulk` become plain unrolled vector
+  loads, ops and stores (e.g. `neg_f32` on AVX2: 4 x (`vxorps` with a memory operand, `vmovups`)
+  per 128 bytes; bound by the stores on Skylake). AVX2 is 2.2x faster than the SSE2 build that
+  ships today (geomean, Skylake).
+- **AVX-512 is broken**: the loop vectorizer vectorizes the already-unrolled main loop again, across
+  16 (f32/i32) or 8 (f64) of its iterations, which turns every load into a stride-`LANES` gather
+  (`vgatherqps` / `vgatherqpd`). The geomean is 6.7x (Ice Lake) and 18x (Sapphire Rapids) that of
+  AVX2 on Skylake. llvm-mca's `znver4` model prices the gathers much lower, which is likely
+  optimistic.
+- `chain_i32` without SSE4.1 (SSE2 builds, x86_64 and i686) has no `pmulld`: the multiply is
+  emulated with `pmuludq` and shuffles, up to 2.5x the cost of `chain_f32` (Skylake).
+- f64 costs the same as f32 per byte everywhere except AVX-512 (fewer gathers).
+
+Analyzer changes for this crate (the filter results reproduce exactly):
+- A backward branch is a loop only if no branch from outside jumps into its body. On AVX-512,
+  a jump from after the main vector loop back to the vector-epilogue setup laid out before it
+  looked like a loop around both.
+- x86 vector registers are recognized in Intel syntax too.
+- The function's mangled name in the IR is found by demangling all `define`s with `c++filt`
+  (binutils demangles Rust v0).
+
