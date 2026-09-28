@@ -1,8 +1,8 @@
 //! Byte-shuffle kernels.
 //!
-//! This file is intentionally self-contained (only `core`/`std`, `fearless_simd`, plus the optional
-//! `multiversion` attribute) so that `jix/probe` can `#[path]`-include it and compile it for any
-//! target without pulling in the C dependencies of `jix` (zstd). Keep it that way.
+//! This file is intentionally self-contained (only `core`/`std` and `fearless_simd`) so that
+//! `jix/probe` can `#[path]`-include it and compile it for any target without pulling in the C
+//! dependencies of `jix` (zstd). Keep it that way.
 
 use fearless_simd::{dispatch, Level, Simd, SimdBase};
 
@@ -117,28 +117,25 @@ pub fn encode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mu
     nchunks * lanes
 }
 
+/// Scalar encode of the items from `start` on, for any itemsize. Compiled for each SIMD level
+/// (auto-vectorized).
 #[inline(never)]
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
 pub fn encode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
     debug_assert!(src.len().is_multiple_of(itemsize));
     let nitems = src.len() / itemsize;
+    assert!(dst.len() >= nitems * itemsize);
     let src = src.as_ptr();
     let dst = dst.as_mut_ptr();
-    for b in 0..itemsize {
-        for i in start..nitems {
-            unsafe {
-                let elm = src.add(i * itemsize + b).read();
-                dst.add(b * nitems + i).write(elm);
+    dispatch!(Level::new(), _ => {
+        for b in 0..itemsize {
+            for i in start..nitems {
+                unsafe {
+                    let elm = src.add(i * itemsize + b).read();
+                    dst.add(b * nitems + i).write(elm);
+                }
             }
         }
-    }
+    })
 }
 
 fn decode_dispatch<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) {
@@ -198,26 +195,23 @@ pub fn decode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mu
     nchunks * lanes
 }
 
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
+/// Scalar decode of the items from `start` on, for any itemsize. Compiled for each SIMD level
+/// (auto-vectorized).
 #[inline(never)]
 pub fn decode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
     debug_assert!(src.len().is_multiple_of(itemsize));
     let nitems = src.len() / itemsize;
+    assert!(dst.len() >= nitems * itemsize);
     let src = src.as_ptr();
     let dst = dst.as_mut_ptr();
-    for i in start..nitems {
-        for b in 0..itemsize {
-            unsafe {
-                let elm = src.add(b * nitems + i).read();
-                dst.add(i * itemsize + b).write(elm);
+    dispatch!(Level::new(), _ => {
+        for i in start..nitems {
+            for b in 0..itemsize {
+                unsafe {
+                    let elm = src.add(b * nitems + i).read();
+                    dst.add(i * itemsize + b).write(elm);
+                }
             }
         }
-    }
+    })
 }
