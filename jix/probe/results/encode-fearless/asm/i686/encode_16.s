@@ -8,8 +8,8 @@ probe_byte_shuffle_encode_16:
 	calll .L34$pb
 .L34$pb:
 	popl %ebx
-.Ltmp4412:
-	addl $_GLOBAL_OFFSET_TABLE_+(.Ltmp4412-.L34$pb), %ebx
+.Ltmp4129:
+	addl $_GLOBAL_OFFSET_TABLE_+(.Ltmp4129-.L34$pb), %ebx
 	movl %ecx, %eax
 	andl $2147483632, %eax
 	cmpl %eax, 284(%esp)

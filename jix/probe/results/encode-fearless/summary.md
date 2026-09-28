@@ -26,7 +26,7 @@ kernels, the single number to optimize.
 | x86_64-v4 | icelake-server | **148** | 3.48x | 74 | 131 | 193 | 257 |
 | x86_64-v4 | sapphirerapids | **287** | 1.93x | 132 | 260 | 386 | 513 |
 | x86_64-v4 | znver4 | **144** | 3.03x | 67 | 131 | 194 | 257 |
-| i686 | skylake | **3080** | 1.59x | 4097 | 4113 | 4162 | 1283 |
+| i686 | skylake | **825** | 5.95x | 343 | 1026 | 1026 | 1283 |
 | aarch64 | cortex-a72 | **818** | 5.16x | 546 | 626 | 898 | 1459 |
 | aarch64 | neoverse-n1 | **815** | 5.68x | 768 | 768 | 864 | 865 |
 | aarch64 | neoverse-v2 | **288** | 9.75x | 242 | 241 | 306 | 386 |
@@ -72,11 +72,11 @@ kernels, the single number to optimize.
 
 | kernel | B/iter | instrs | loops | calls | skylake |
 |---|---:|---:|---|---|---:|
-| encode_2 | 256 | 534 | ?[8] | - | 4097 |
-| encode_4 | 256 | 534 | ?[4] | - | 4113 |
-| encode_8 | 256 | 551 | ?[2] | - | 4162 |
+| encode_2 | 256 | 99 | ? | - | 343 |
+| encode_4 | 256 | 148 | ?[4] | - | 1026 |
+| encode_8 | 256 | 233 | ?[4 4] | - | 1026 |
 | encode_16 | 256 | 300 | ?[4] | - | 1283 |
-| **geomean** | | | | | **3080** |
+| **geomean** | | | | | **825** |
 
 ## aarch64 (`aarch64-unknown-linux-gnu`)
 

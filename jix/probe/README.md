@@ -245,10 +245,9 @@ wanted. The level-agnostic rule kept: `interleave` is never more expensive than 
 use it when it needs no more rounds (`lanes <= ITEMSIZE`, i.e. only itemsize 16 on 128-bit ISAs).
 It is exact on x86-64-v3/v4 for itemsizes 2/4/8 and on NEON for 2/4/8 (the common cases); vs the
 per-level table it loses SSE4.2 `encode_8` (Sandy Bridge 641 -> 778, Jaguar 1050 -> 2273), AVX2
-`encode_16` (Skylake 1283 -> 1538), Cortex-A72 / Neoverse V2 `encode_16`, and SSE2 itemsizes 2/4/8,
-which stay scalar (fearless_simd's SSE2 `deinterleave`), at the baseline's speed. Without any
-rule (always `deinterleave`), i686 `encode_16` spills and calls `memcpy` (18084, 0.47x of the
-baseline).
+`encode_16` (Skylake 1283 -> 1538), and Cortex-A72 / Neoverse V2 `encode_16`. One manual override:
+SSE2 always uses `interleave`, since fearless_simd's SSE2 `deinterleave` is scalar code (without
+it, i686 itemsizes 2/4/8 stay scalar at the baseline's speed, geomean 3080 vs 825).
 
 `results/encode-fearless`, cycles per 4096 bytes:
 
@@ -262,7 +261,7 @@ baseline).
 | x86_64-v4 | icelake-server | **148** | 3.48x | 74 | 131 | 193 | 257 |
 | x86_64-v4 | sapphirerapids | **287** | 1.93x | 132 | 260 | 386 | 513 |
 | x86_64-v4 | znver4 | **144** | 3.03x | 67 | 131 | 194 | 257 |
-| i686 | skylake | **3080** | 1.59x | 4097 | 4113 | 4162 | 1283 |
+| i686 | skylake | **825** | 5.95x | 343 | 1026 | 1026 | 1283 |
 | aarch64 | cortex-a72 | **818** | 5.16x | 546 | 626 | 898 | 1459 |
 | aarch64 | neoverse-n1 | **815** | 5.68x | 768 | 768 | 864 | 865 |
 | aarch64 | neoverse-v2 | **288** | 9.75x | 242 | 241 | 306 | 386 |

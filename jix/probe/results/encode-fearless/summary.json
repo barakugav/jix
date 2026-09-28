@@ -478,32 +478,32 @@
   {
     "platform": "i686",
     "kernel": "encode_2",
-    "fn_instructions": 108,
+    "fn_instructions": 136,
     "mode": "outer",
-    "trace_instructions": 534,
+    "trace_instructions": 99,
     "calls": [],
-    "loop_tree": "?[8]",
+    "loop_tree": "?",
     "bytes_per_iter": 256,
     "warnings": [],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 53400,
-        "total_cycles": 25609,
-        "uops": 53400,
-        "block_rthroughput": 256.0,
+        "instructions": 9900,
+        "total_cycles": 2146,
+        "uops": 11500,
+        "block_rthroughput": 19.2,
         "skipped": [],
-        "cycles_per_iter": 256.09
+        "cycles_per_iter": 21.46
       }
     ]
   },
   {
     "platform": "i686",
     "kernel": "encode_4",
-    "fn_instructions": 183,
+    "fn_instructions": 84,
     "mode": "outer",
-    "trace_instructions": 534,
+    "trace_instructions": 148,
     "calls": [],
     "loop_tree": "?[4]",
     "bytes_per_iter": 256,
@@ -512,35 +512,35 @@
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 53400,
-        "total_cycles": 25708,
-        "uops": 53400,
-        "block_rthroughput": 257.0,
+        "instructions": 14800,
+        "total_cycles": 6415,
+        "uops": 16400,
+        "block_rthroughput": 64.0,
         "skipped": [],
-        "cycles_per_iter": 257.08
+        "cycles_per_iter": 64.15
       }
     ]
   },
   {
     "platform": "i686",
     "kernel": "encode_8",
-    "fn_instructions": 319,
+    "fn_instructions": 140,
     "mode": "outer",
-    "trace_instructions": 551,
+    "trace_instructions": 233,
     "calls": [],
-    "loop_tree": "?[2]",
+    "loop_tree": "?[4 4]",
     "bytes_per_iter": 256,
     "warnings": [],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 55100,
-        "total_cycles": 26014,
-        "uops": 55500,
-        "block_rthroughput": 260.0,
+        "instructions": 23300,
+        "total_cycles": 6415,
+        "uops": 27300,
+        "block_rthroughput": 64.0,
         "skipped": [],
-        "cycles_per_iter": 260.14
+        "cycles_per_iter": 64.15
       }
     ]
   },
