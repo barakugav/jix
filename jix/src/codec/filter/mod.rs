@@ -48,7 +48,7 @@ impl Filter {
     ) {
         match self {
             Filter::ByteShuffle => ByteShuffleFilter.encode(src, dst, dtype, tmp_buffers),
-            Filter::BitShuffle => BitShuffleFilter::default().encode(src, dst, dtype, tmp_buffers),
+            Filter::BitShuffle => BitShuffleFilter.encode(src, dst, dtype, tmp_buffers),
         }
     }
 
@@ -61,7 +61,7 @@ impl Filter {
     ) {
         match self {
             Filter::ByteShuffle => ByteShuffleFilter.decode(src, dst, dtype, tmp_buffers),
-            Filter::BitShuffle => BitShuffleFilter::default().decode(src, dst, dtype, tmp_buffers),
+            Filter::BitShuffle => BitShuffleFilter.decode(src, dst, dtype, tmp_buffers),
         }
     }
 }

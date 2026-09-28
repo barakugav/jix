@@ -1,4 +1,4 @@
-jix_probe::bit_shuffle::trans_bit_byte:
+probe_bit_shuffle_trans_bit_byte:
 	pushq %rbp
 	pushq %r15
 	pushq %r14
@@ -7,14 +7,14 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	pushq %rbx
 	subq $136, %rsp
 	vpbroadcastq %r8, %ymm0
-	vpsrlvq .LCPI12_0(%rip), %ymm0, %ymm0
+	vpsrlvq .LCPI22_0(%rip), %ymm0, %ymm0
 	vpextrq $1, %xmm0, %r10
 	testq %r9, %r9
 	sete %al
 	testq %r10, %r10
 	sete %r11b
 	orb %al, %r11b
-	jne .LBB12_28
+	jne .LBB22_28
 	movq %r9, %r11
 	imulq %r10, %r11
 	leaq (%r11,%r11), %rbx
@@ -28,11 +28,11 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	vpmullq %xmm2, %xmm1, %xmm6
 	vpermq $80, %ymm6, %ymm1
 	vpbroadcastq %xmm6, %xmm2
-	vpmullq .LCPI12_1(%rip), %xmm2, %xmm4
+	vpmullq .LCPI22_1(%rip), %xmm2, %xmm4
 	vpermq $64, %ymm6, %ymm3
-	vpmullq .LCPI12_2(%rip), %ymm1, %ymm1
-	vpmullq .LCPI12_3(%rip), %xmm6, %xmm2
-	vpmullq .LCPI12_4(%rip), %ymm3, %ymm5
+	vpmullq .LCPI22_2(%rip), %ymm1, %ymm1
+	vpmullq .LCPI22_3(%rip), %xmm6, %xmm2
+	vpmullq .LCPI22_4(%rip), %ymm3, %ymm5
 	movq %rax, 88(%rsp)
 	vmovq %rax, %xmm3
 	vmovq %r15, %xmm7
@@ -48,7 +48,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	vinserti128 $1, %xmm6, %ymm8, %ymm6
 	vpcmpeqd %ymm8, %ymm8, %ymm8
 	vpaddq %ymm7, %ymm8, %ymm7
-	vpcmpltuq .LCPI12_5(%rip){1to4}, %ymm7, %k0
+	vpcmpltuq .LCPI22_5(%rip){1to4}, %ymm7, %k0
 	leaq (%r11,%r11,4), %rax
 	decq %rax
 	cmpq $7, %rax
@@ -85,12 +85,12 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movq %rax, 80(%rsp)
 	leaq (%rdx,%r11,2), %rax
 	movq %rax, 96(%rsp)
-	vmovdqa64 .LCPI12_6(%rip), %zmm7
-	vmovdqa64 .LCPI12_7(%rip), %zmm8
-	vmovdqa64 .LCPI12_8(%rip), %zmm9
-	vpbroadcastq .LCPI12_9(%rip), %zmm10
-	vpbroadcastq .LCPI12_10(%rip), %zmm11
-	vpbroadcastq .LCPI12_11(%rip), %zmm12
+	vmovdqa64 .LCPI22_6(%rip), %zmm7
+	vmovdqa64 .LCPI22_7(%rip), %zmm8
+	vmovdqa64 .LCPI22_8(%rip), %zmm9
+	vpbroadcastq .LCPI22_9(%rip), %zmm10
+	vpbroadcastq .LCPI22_10(%rip), %zmm11
+	vpbroadcastq .LCPI22_11(%rip), %zmm12
 	leaq (%rdx,%r11), %r13
 	movq $0, 8(%rsp)
 	movq %r11, %rbp
@@ -98,7 +98,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	xorl %eax, %eax
 	movq %r9, 128(%rsp)
 	movq %r8, 120(%rsp)
-.LBB12_3:
+.LBB22_3:
 	movq %r8, %r15
 	movq %r10, %r14
 	imulq %rax, %r14
@@ -151,10 +151,10 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	setb %al
 	orb 7(%rsp), %al
 	testb $1, %al
-	je .LBB12_5
+	je .LBB22_5
 	xorl %r14d, %r14d
-	jmp .LBB12_7
-.LBB12_5:
+	jmp .LBB22_7
+.LBB22_5:
 	incq %r14
 	movl %r14d, %eax
 	andl $7, %eax
@@ -162,7 +162,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	cmoveq %r8, %rax
 	subq %rax, %r14
 	xorl %eax, %eax
-.LBB12_6:
+.LBB22_6:
 	vmovdqu64 (%rdi,%rax,8), %zmm13
 	vpmovqb %zmm13, %xmm14
 	vpsrlq $8, %zmm13, %zmm15
@@ -234,38 +234,38 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	vpmovqb %zmm13, (%r11,%r8)
 	addq $8, %rax
 	cmpq %rax, %r14
-	jne .LBB12_6
-.LBB12_7:
+	jne .LBB22_6
+.LBB22_7:
 	incq 16(%rsp)
 	movq 8(%rsp), %rax
 	leaq (%rax,%r14,8), %r8
-.LBB12_8:
+.LBB22_8:
 	cmpq %rsi, %r8
-	jae .LBB12_9
+	jae .LBB22_9
 	leaq 1(%r8), %rax
 	cmpq %rsi, %rax
-	jae .LBB12_10
+	jae .LBB22_10
 	leaq 2(%r8), %rax
 	cmpq %rsi, %rax
-	jae .LBB12_10
+	jae .LBB22_10
 	leaq 3(%r8), %rax
 	cmpq %rsi, %rax
-	jae .LBB12_10
+	jae .LBB22_10
 	leaq 4(%r8), %rax
 	cmpq %rsi, %rax
-	jae .LBB12_10
+	jae .LBB22_10
 	leaq 5(%r8), %rax
 	cmpq %rsi, %rax
-	jae .LBB12_10
+	jae .LBB22_10
 	leaq 6(%r8), %rax
 	cmpq %rsi, %rax
-	jae .LBB12_10
+	jae .LBB22_10
 	leaq 7(%r8), %rax
 	cmpq %rsi, %rax
-	jae .LBB12_10
+	jae .LBB22_10
 	leaq (%rbx,%r14), %rax
 	cmpq %rcx, %rax
-	jae .LBB12_27
+	jae .LBB22_27
 	leaq 1(%r14), %r9
 	movzbl (%rdi,%r14,8), %eax
 	movzbl -2(%rdi,%r9,8), %r15d
@@ -317,14 +317,14 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movb %r15b, (%rdx,%r14)
 	leaq (%r14,%rbp), %rax
 	cmpq %rcx, %rax
-	jae .LBB12_27
+	jae .LBB22_27
 	movl %r15d, %eax
 	shrl $8, %eax
 	movb %al, (%r13,%r14)
 	movq 112(%rsp), %rax
 	addq %r14, %rax
 	cmpq %rcx, %rax
-	jae .LBB12_27
+	jae .LBB22_27
 	movl %r15d, %eax
 	shrl $16, %eax
 	movq 96(%rsp), %r12
@@ -332,7 +332,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movq 104(%rsp), %rax
 	addq %r14, %rax
 	cmpq %rcx, %rax
-	jae .LBB12_27
+	jae .LBB22_27
 	movl %r15d, %eax
 	shrl $24, %eax
 	movq 80(%rsp), %r12
@@ -340,7 +340,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movq 88(%rsp), %rax
 	addq %r14, %rax
 	cmpq %rcx, %rax
-	jae .LBB12_27
+	jae .LBB22_27
 	movq %r15, %rax
 	shrq $32, %rax
 	movq 64(%rsp), %r12
@@ -348,7 +348,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movq 72(%rsp), %rax
 	addq %r14, %rax
 	cmpq %rcx, %rax
-	jae .LBB12_27
+	jae .LBB22_27
 	movq %r15, %rax
 	shrq $40, %rax
 	movq 48(%rsp), %r12
@@ -356,7 +356,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movq 56(%rsp), %rax
 	addq %r14, %rax
 	cmpq %rcx, %rax
-	jae .LBB12_27
+	jae .LBB22_27
 	movq %r15, %rax
 	shrq $48, %rax
 	movq 32(%rsp), %r12
@@ -364,14 +364,14 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movq 40(%rsp), %rax
 	addq %r14, %rax
 	cmpq %rcx, %rax
-	jae .LBB12_27
+	jae .LBB22_27
 	shrq $56, %r15
 	movq 24(%rsp), %rax
 	movb %r15b, (%rax,%r14)
 	addq $8, %r8
 	movq %r9, %r14
 	cmpq %r9, %r10
-	jne .LBB12_8
+	jne .LBB22_8
 	addq %r10, %rdx
 	movq 120(%rsp), %r8
 	addq %r8, %rdi
@@ -394,8 +394,8 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movq 128(%rsp), %r9
 	movq 16(%rsp), %rax
 	cmpq %r9, %rax
-	jne .LBB12_3
-.LBB12_28:
+	jne .LBB22_3
+.LBB22_28:
 	addq $136, %rsp
 	popq %rbx
 	popq %r12
@@ -405,16 +405,16 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	popq %rbp
 	vzeroupper
 	retq
-.LBB12_27:
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.9(%rip), %rdx
+.LBB22_27:
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.11(%rip), %rdx
 	movq %rax, %rdi
 	movq %rcx, %rsi
 	vzeroupper
 	callq *core::panicking::panic_bounds_check@GOTPCREL(%rip)
-.LBB12_9:
+.LBB22_9:
 	movq %r8, %rax
-.LBB12_10:
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.10(%rip), %rdx
+.LBB22_10:
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.12(%rip), %rdx
 	movq %rax, %rdi
 	vzeroupper
 	callq *core::panicking::panic_bounds_check@GOTPCREL(%rip)

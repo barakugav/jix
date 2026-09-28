@@ -1,15 +1,15 @@
-jix_probe::bit_shuffle::untrans_bit_byte:
+probe_bit_shuffle_untrans_bit_byte:
 	pushl %ebp
 	pushl %ebx
 	pushl %edi
 	pushl %esi
 	subl $252, %esp
 	movl 288(%esp), %ebx
-	calll .L33$pb
-.L33$pb:
+	calll .L47$pb
+.L47$pb:
 	popl %eax
-.Ltmp3277:
-	addl $_GLOBAL_OFFSET_TABLE_+(.Ltmp3277-.L33$pb), %eax
+.Ltmp5566:
+	addl $_GLOBAL_OFFSET_TABLE_+(.Ltmp5566-.L47$pb), %eax
 	movl %eax, 12(%esp)
 	shrl $3, %ebx
 	cmpl $0, 292(%esp)
@@ -17,7 +17,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	testl %ebx, %ebx
 	sete %cl
 	orb %al, %cl
-	jne .LBB33_19
+	jne .LBB47_19
 	movl 12(%esp), %eax
 	movl 292(%esp), %ecx
 	movl 276(%esp), %edi
@@ -29,11 +29,11 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	movl $0, 60(%esp)
 	movl $0, 8(%esp)
 	movl %ebx, 172(%esp)
-	movdqa .LCPI33_0@GOTOFF(%eax), %xmm1
+	movdqa .LCPI47_0@GOTOFF(%eax), %xmm1
 	imull %ebx, %ecx
-	movdqa .LCPI33_1@GOTOFF(%eax), %xmm3
-	movdqa .LCPI33_3@GOTOFF(%eax), %xmm6
-	movdqa .LCPI33_4@GOTOFF(%eax), %xmm7
+	movdqa .LCPI47_1@GOTOFF(%eax), %xmm3
+	movdqa .LCPI47_3@GOTOFF(%eax), %xmm6
+	movdqa .LCPI47_4@GOTOFF(%eax), %xmm7
 	movd %ecx, %xmm0
 	leal (%ecx,%ecx), %esi
 	leal (,%ecx,8), %edx
@@ -63,7 +63,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	movl %edx, 84(%esp)
 	pmuludq %xmm0, %xmm2
 	pmuludq %xmm3, %xmm0
-	movdqa .LCPI33_2@GOTOFF(%eax), %xmm3
+	movdqa .LCPI47_2@GOTOFF(%eax), %xmm3
 	movl 284(%esp), %eax
 	movdqa %xmm1, 224(%esp)
 	pshufd $232, %xmm2, %xmm2
@@ -110,7 +110,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	movl 20(%esp), %edx
 	movl %edx, 56(%esp)
 	xorl %edx, %edx
-.LBB33_3:
+.LBB47_3:
 	movl %ecx, 64(%esp)
 	movl %ebp, 148(%esp)
 	movl 152(%esp), %ecx
@@ -231,7 +231,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	movl $0, %esi
 	cmovbl %ebp, %eax
 	cmpl $2, %eax
-	jb .LBB33_7
+	jb .LBB47_7
 	movl 32(%esp), %ebp
 	movl 4(%esp), %ecx
 	movl 160(%esp), %edx
@@ -276,7 +276,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	andl $-2, %ecx
 	movl %ecx, 4(%esp)
 	movl 44(%esp), %ecx
-.LBB33_5:
+.LBB47_5:
 	movzwl (%ebx,%esi), %eax
 	movd %eax, %xmm1
 	movl 76(%esp), %eax
@@ -354,7 +354,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	movdqa %xmm0, %xmm1
 	psrlq $28, %xmm1
 	pxor %xmm0, %xmm1
-	pand .LCPI33_5@GOTOFF(%eax), %xmm1
+	pand .LCPI47_5@GOTOFF(%eax), %xmm1
 	movl 148(%esp), %eax
 	movdqa %xmm1, %xmm2
 	psllq $28, %xmm2
@@ -363,50 +363,50 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	movdqu %xmm2, (%eax,%esi,8)
 	addl $2, %esi
 	cmpl %esi, 4(%esp)
-	jne .LBB33_5
+	jne .LBB47_5
 	movl 36(%esp), %esi
-.LBB33_7:
+.LBB47_7:
 	movl 40(%esp), %eax
 	incl 8(%esp)
 	leal (%eax,%esi,8), %eax
-.LBB33_8:
+.LBB47_8:
 	movl 60(%esp), %ecx
 	leal (%ecx,%esi), %edx
 	cmpl %edi, %edx
-	jae .LBB33_21
+	jae .LBB47_21
 	movl 144(%esp), %ecx
 	leal (%ecx,%esi), %edx
 	cmpl %edi, %edx
-	jae .LBB33_21
+	jae .LBB47_21
 	movl 140(%esp), %ecx
 	leal (%ecx,%esi), %edx
 	cmpl %edi, %edx
-	jae .LBB33_21
+	jae .LBB47_21
 	movl 136(%esp), %ecx
 	leal (%ecx,%esi), %edx
 	cmpl %edi, %edx
-	jae .LBB33_21
+	jae .LBB47_21
 	movl 132(%esp), %ecx
 	leal (%ecx,%esi), %edx
 	cmpl %edi, %edx
-	jae .LBB33_21
+	jae .LBB47_21
 	movl 128(%esp), %ecx
 	leal (%ecx,%esi), %edx
 	cmpl %edi, %edx
-	jae .LBB33_21
+	jae .LBB47_21
 	movl 56(%esp), %ecx
 	leal (%ecx,%esi), %edx
 	cmpl %edi, %edx
-	jae .LBB33_21
+	jae .LBB47_21
 	movl 52(%esp), %ecx
 	leal (%ecx,%esi), %edx
 	cmpl %edi, %edx
-	jae .LBB33_21
+	jae .LBB47_21
 	cmpl $-9, %eax
-	ja .LBB33_20
+	ja .LBB47_20
 	leal 8(%eax), %ecx
 	cmpl 284(%esp), %ecx
-	ja .LBB33_20
+	ja .LBB47_20
 	movl 80(%esp), %eax
 	movl %ecx, 4(%esp)
 	movl 76(%esp), %ecx
@@ -482,7 +482,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	movl %edx, 4(%ebp,%esi,8)
 	incl %esi
 	cmpl %esi, %ebx
-	jne .LBB33_8
+	jne .LBB47_8
 	movl 288(%esp), %eax
 	movl 144(%esp), %esi
 	movl 64(%esp), %ecx
@@ -515,27 +515,27 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	addl %ebx, %eax
 	cmpl 292(%esp), %edx
 	movl 40(%esp), %edx
-	jne .LBB33_3
-.LBB33_19:
+	jne .LBB47_3
+.LBB47_19:
 	addl $252, %esp
 	popl %esi
 	popl %edi
 	popl %ebx
 	popl %ebp
 	retl
-.LBB33_20:
+.LBB47_20:
 	movl 12(%esp), %ebx
 	leal 8(%eax), %ecx
-	leal .Lanon.a00c3abf785d8e01d4f036d98a3600d1.11@GOTOFF(%ebx), %edx
+	leal .Lanon.52bf38722a5bfecdfb3cf7aba91d383f.15@GOTOFF(%ebx), %edx
 	pushl %edx
 	pushl 288(%esp)
 	pushl %ecx
 	pushl %eax
 	calll core::slice::index::slice_index_fail@PLT
-.LBB33_21:
+.LBB47_21:
 	subl $4, %esp
 	movl 16(%esp), %ebx
-	leal .Lanon.a00c3abf785d8e01d4f036d98a3600d1.12@GOTOFF(%ebx), %eax
+	leal .Lanon.52bf38722a5bfecdfb3cf7aba91d383f.16@GOTOFF(%ebx), %eax
 	pushl %eax
 	pushl %edi
 	pushl %edx

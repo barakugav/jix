@@ -22,7 +22,7 @@ iteration * 4096 / bytes per iteration). Lower is better. It is a static model: 
 to hit L1, calls (e.g. to `memcpy`) are not followed - the `calls` column flags kernels whose hot
 loop still calls something - and the per-call prologue/epilogue and the tails are not included.
 
-Kernels without a hot loop (e.g. the bit-shuffle `*bitrow_eight` passes, whose loops run 8 *
+Kernels without a hot loop (e.g. the former bit-shuffle `*bitrow_eight` passes, whose loops ran 8 *
 itemsize `memcpy` calls whatever the input length) are reported with the cycles per iteration of
 their largest innermost loop, as an informational number.
 
@@ -130,13 +130,13 @@ class Kernel:
     name: str
     symbol: str  # demangled, as `cargo asm` lists it
     ir_hint: str  # substring of the v0-mangled symbol, to find the function in the LLVM IR
-    # Itemsize passed at runtime as the `typesize` argument (bit-shuffle passes), bound when the
-    # trip counts are evaluated. None: the itemsize is a compile-time constant of the symbol.
+    # Itemsize passed at runtime as the `typesize` argument, bound when the trip counts are
+    # evaluated (the former bit-shuffle passes). None: no such argument.
     runtime_itemsize: int | None = None
 
     def scev_env(self, length: int) -> dict[str, int]:
         """Values of the function arguments, for an input of `length` bytes."""
-        env = {"%src.1": length, "%dst.1": length}
+        env = {"%src.1": length, "%dst.1": length, "%buf.1": length}
         if self.runtime_itemsize is not None:
             t = self.runtime_itemsize
             env |= {"%typesize": t, "%n_full": length // t // 8 * 8}
@@ -148,21 +148,13 @@ def _byte_kernel(direction: str, itemsize: int) -> Kernel:
     return Kernel(f"{direction}_{itemsize}", sym, sym)
 
 
-def _bit_kernel(fn: str, itemsize: int) -> Kernel:
-    if fn.endswith("bit_byte"):  # the `probe_*` export of the dispatched body
-        sym = f"probe_bit_shuffle_{fn}"
-        return Kernel(f"{fn}_{itemsize}", sym, sym, itemsize)
-    # v0 mangling length-prefixes identifiers: `18trans_bitrow_eight` does not match
-    # `untrans_bitrow_eight`.
-    return Kernel(f"{fn}_{itemsize}", f"jix_probe::bit_shuffle::{fn}", f"{len(fn)}{fn}", itemsize)
-
-
 # Kernels per `--direction`. Must match the `probe_*` exports and modules in src/lib.rs.
 ITEMSIZES = (2, 4, 8, 16)
 KERNELS = {d: [_byte_kernel(d, s) for s in ITEMSIZES] for d in ("decode", "encode")}
-# The bit-level passes of the bit-shuffle filter (its byte-shuffle pass is the byte-shuffle kernel).
-KERNELS["bit-encode"] = [_bit_kernel(f, s) for f in ("trans_bit_byte", "trans_bitrow_eight") for s in ITEMSIZES]
-KERNELS["bit-decode"] = [_bit_kernel(f, s) for f in ("untrans_bitrow_eight", "untrans_bit_byte") for s in ITEMSIZES]
+# The bit transpose of the bit-shuffle filter (its other passes are byte-shuffle kernels:
+# `encode_8` / `decode_8` per byte-plane, and the element-sized one). The results of the
+# former kernels (`bit-{encode,decode}-*`) were produced by earlier versions of this script.
+KERNELS["bit"] = [Kernel("transpose_bit_rows", "probe_bit_shuffle_transpose_bit_rows", "probe_bit_shuffle_transpose_bit_rows")]
 
 # x86 feature sets of the `multiversion` clones (x86-64-v2/v3/v4), used by the baselines, which
 # measured the auto-vectorized kernels (`--x86-levels multiversion`).
@@ -236,6 +228,9 @@ class Loop:
     trip_count: int | None = None  # constant trip count, if any
     trip_expr: str = ""  # IR only: SCEV backedge-taken count expression
     size: int = 0  # instructions in the loop (IR or asm), to match sibling loops of the same shape
+    # Share of the loop's instructions on vector types (IR) / registers (asm), to match a vector
+    # loop and its scalar remainder, whose sizes can rank differently in IR and asm.
+    vec: float = 0.0
     ir: IrValues | None = None  # IR only: the function's values, to resolve SCEV operands
 
     def shape(self) -> tuple:
@@ -305,13 +300,13 @@ def asm_loops(lines: list[str], isa: str) -> list[Loop]:
             j = labels.get(tok)
             if j is not None and j < i:
                 ends[tok] = max(ends.get(tok, i), i)
-    loops = sorted(
-        (
-            Loop(labels[h], e, h, size=sum(1 for x in lines[labels[h] : e + 1] if not is_label(x)))
-            for h, e in ends.items()
-        ),
-        key=lambda lp: (lp.start, -lp.end),
-    )
+    vreg = re.compile(r"%[xyz]mm\d+" if isa == "x86" else r"\b[vq]\d+\b")
+
+    def make(h: str, e: int) -> Loop:
+        body = [x for x in lines[labels[h] : e + 1] if not is_label(x)]
+        return Loop(labels[h], e, h, size=len(body), vec=sum(1 for x in body if vreg.search(x)) / len(body))
+
+    loops = sorted((make(h, e) for h, e in ends.items()), key=lambda lp: (lp.start, -lp.end))
     for a in loops:
         for b in loops:
             if a.start < b.start <= a.end < b.end:
@@ -448,9 +443,11 @@ class IrValues:
         return None
 
 
-def ir_block_sizes(ll: Path, ir_hint: str) -> dict[str, int]:
-    """Instruction count of each basic block of the function whose name contains `ir_hint`."""
+def ir_block_sizes(ll: Path, ir_hint: str) -> tuple[dict[str, int], dict[str, int]]:
+    """Instruction count, and count of instructions on vector types, of each basic block of the
+    function whose name contains `ir_hint`."""
     sizes: dict[str, int] = {}
+    vecs: dict[str, int] = {}
     in_fn, block = False, None
     for line in ll.read_text().splitlines():
         if line.startswith("define "):
@@ -463,7 +460,8 @@ def ir_block_sizes(ll: Path, ir_hint: str) -> dict[str, int]:
                 block = m.group(1)
             elif line.startswith("  ") and block is not None:
                 sizes[block] = sizes.get(block, 0) + 1
-    return sizes
+                vecs[block] = vecs.get(block, 0) + bool(re.search(r"<\d+ x ", line))
+    return sizes, vecs
 
 
 def ir_loops(ll: Path, opt: str, ir_hint: str) -> list[Loop]:
@@ -478,7 +476,7 @@ def ir_loops(ll: Path, opt: str, ir_hint: str) -> list[Loop]:
         raise RuntimeError(p.stderr)
     text = p.stderr
 
-    block_sizes = ir_block_sizes(ll, ir_hint)
+    block_sizes, block_vecs = ir_block_sizes(ll, ir_hint)
     bounded: set[str] = set()
     cur_value = None
     fn_loops: list[tuple[int, Loop]] = []
@@ -500,7 +498,9 @@ def ir_loops(ll: Path, opt: str, ir_hint: str) -> list[Loop]:
         elif m := re.match(r"( *)Loop at depth (\d+) containing: (.*)$", line):
             blocks = [re.sub(r"<[a-z]+>", "", b).lstrip("%") for b in m.group(3).split(",")]
             header = next(re.sub(r"<[a-z]+>", "", b).lstrip("%") for b in m.group(3).split(",") if "<header>" in b)
-            lp = Loop(0, 0, header, size=sum(block_sizes.get(b, 0) for b in blocks))
+            size = sum(block_sizes.get(b, 0) for b in blocks)
+            vec = sum(block_vecs.get(b, 0) for b in blocks) / max(size, 1)
+            lp = Loop(0, 0, header, size=size, vec=vec)
             fn_loops.append((int(m.group(2)), lp))
         elif m := re.match(r"Loop %(\S+): (?:<multiple exits> )?(symbolic max )?backedge-taken count is (.*)$", line):
             # The exact count, else the symbolic max: loops whose other exits are panics (bounds
@@ -523,15 +523,16 @@ def ir_loops(ll: Path, opt: str, ir_hint: str) -> list[Loop]:
 def attach_trip_counts(asm_roots: list[Loop], ir_roots: list[Loop]) -> bool:
     """Copy trip counts from the IR loop tree onto the asm one; False if their shapes differ.
 
-    Sibling loops are matched by shape, and siblings of the same shape by size rank: `opt` does not
-    list loops in asm layout order (e.g. a main loop between an inlined tail and its vectorized
-    version).
+    Sibling loops are matched by shape, and siblings of the same shape by rank of vector share,
+    then size: `opt` does not list loops in asm layout order (e.g. a main loop between an inlined
+    tail and its vectorized version), and a vector loop can be smaller than its scalar remainder in
+    IR (bounds checks) but larger in asm.
     """
     if sorted(r.shape() for r in asm_roots) != sorted(r.shape() for r in ir_roots):
         return False
     for shape in {r.shape() for r in asm_roots}:
-        a_group = sorted((r for r in asm_roots if r.shape() == shape), key=lambda r: r.size)
-        i_group = sorted((r for r in ir_roots if r.shape() == shape), key=lambda r: r.size)
+        a_group = sorted((r for r in asm_roots if r.shape() == shape), key=lambda r: (r.vec > 0.25, r.size))
+        i_group = sorted((r for r in ir_roots if r.shape() == shape), key=lambda r: (r.vec > 0.25, r.size))
         for a, i in zip(a_group, i_group):
             a.trip_count, a.trip_expr, a.ir = i.trip_count, i.trip_expr, i.ir
             if not attach_trip_counts(a.children, i.children):
@@ -730,7 +731,35 @@ class McaResult:
         return self.total_cycles / self.iterations
 
 
+POST_INDEX_STORE_RE = re.compile(r"^(st\w*)\s+(.*), \[(\w+)\], #(-?\d+)$")
+PRE_INDEX_STORE_RE = re.compile(r"^(st\w*)\s+(.*), \[(\w+), #(-?\d+)\]!$")
+
+
+def split_writeback_stores(trace: list[str]) -> list[str]:
+    """aarch64: rewrite a store with base-register writeback as a plain store plus an add.
+
+    llvm-mca issues an instruction when all its operands are ready, so a post-indexed store's new
+    base register waits for the stored data. When the next iteration's loads use that register,
+    this serializes the whole loop behind its dependency chain (5-7x too slow for a loop of
+    shifts). Real cores split a store into address and data micro-ops, so the writeback depends on
+    the base register only, as it does after this rewrite.
+    """
+    out = []
+    for x in trace:
+        if m := POST_INDEX_STORE_RE.match(x):
+            op, data, base, imm = m.groups()
+            out += [f"{op} {data}, [{base}]", f"add {base}, {base}, #{imm}"]
+        elif m := PRE_INDEX_STORE_RE.match(x):
+            op, data, base, imm = m.groups()
+            out += [f"add {base}, {base}, #{imm}", f"{op} {data}, [{base}]"]
+        else:
+            out.append(x)
+    return [re.sub(r"^add (\w+), (\w+), #-(\d+)$", r"sub \1, \2, #\3", x) for x in out]
+
+
 def run_mca(mca: str, platform: Platform, cpu: str, trace: list[str], all_lines: list[str]) -> tuple[McaResult, str]:
+    if platform.isa == "aarch64":
+        trace = split_writeback_stores(trace)
     # llvm-mca does not follow branches, but their target labels must exist: define them as
     # stubs after the trace.
     # Call targets can be demangled Rust paths, which the assembler cannot parse: point direct
@@ -814,8 +843,12 @@ def analyze_kernel(
 
     lines = clean_lines(asm, platform.comment)
     fn_instrs = sum(1 for line in lines if not is_label(line))
-    roots = asm_loops(lines, platform.isa)
     warnings = []
+    try:
+        roots = asm_loops(lines, platform.isa)
+    except RuntimeError as e:  # a loop LLVM laid out in non-contiguous pieces
+        roots = []
+        warnings.append(str(e))
     if not attach_trip_counts(roots, ir_loops(ll, opt, kernel.ir_hint)):
         warnings.append("asm and IR loop trees differ, trip counts unknown")
 

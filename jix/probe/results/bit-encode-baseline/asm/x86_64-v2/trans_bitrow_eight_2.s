@@ -11,24 +11,24 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	movq %rsi, 8(%rsp)
 	movq %rdi, 24(%rsp)
 	testq %r9, %r9
-	je .LBB24_49
+	je .LBB28_49
 	movq %r8, %rbp
 	shrq $3, %rbp
 	xorl %r12d, %r12d
 	movq %r9, 40(%rsp)
 	movq %r9, %rbx
 	xorl %r15d, %r15d
-.LBB24_2:
+.LBB28_2:
 	movq %rbp, %r13
 	addq %r15, %r13
-	jb .LBB24_50
+	jb .LBB28_50
 	cmpq 16(%rsp), %r13
-	ja .LBB24_50
+	ja .LBB28_50
 	movq %rbp, %r14
 	addq %r12, %r14
-	jb .LBB24_51
+	jb .LBB28_51
 	cmpq 8(%rsp), %r14
-	ja .LBB24_51
+	ja .LBB28_51
 	movq 32(%rsp), %rax
 	leaq (%rax,%r15), %rdi
 	addq 24(%rsp), %r12
@@ -39,7 +39,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addq %rax, %r15
 	movq %r14, %r12
 	decq %rbx
-	jne .LBB24_2
+	jne .LBB28_2
 	leaq (,%rbp,2), %r13
 	movq 40(%rsp), %rbx
 	movq %rbx, %r12
@@ -47,15 +47,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	leaq 1(%rbx), %r14
 	imulq %rbp, %r14
 	movq %rbp, %r15
-.LBB24_8:
+.LBB28_8:
 	cmpq %r15, %r13
-	jb .LBB24_50
+	jb .LBB28_50
 	cmpq 16(%rsp), %r13
-	ja .LBB24_50
+	ja .LBB28_50
 	cmpq %r12, %r14
-	jb .LBB24_52
+	jb .LBB28_52
 	cmpq 8(%rsp), %r14
-	ja .LBB24_52
+	ja .LBB28_52
 	movq 32(%rsp), %rax
 	leaq (%rax,%r15), %rdi
 	movq 24(%rsp), %rax
@@ -68,7 +68,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addq %rbp, %r12
 	addq %rbp, %r14
 	decq %rbx
-	jne .LBB24_8
+	jne .LBB28_8
 	leaq (,%rbp,2), %r15
 	leaq (,%rbp,2), %r13
 	addq %rbp, %r13
@@ -79,15 +79,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	leaq (%rax,%rax), %r12
 	leaq 1(,%rbx,2), %r14
 	imulq %rbp, %r14
-.LBB24_14:
+.LBB28_14:
 	cmpq %r15, %r13
-	jb .LBB24_50
+	jb .LBB28_50
 	cmpq 16(%rsp), %r13
-	ja .LBB24_50
+	ja .LBB28_50
 	cmpq %r12, %r14
-	jb .LBB24_52
+	jb .LBB28_52
 	cmpq 8(%rsp), %r14
-	ja .LBB24_52
+	ja .LBB28_52
 	movq 32(%rsp), %rax
 	leaq (%rax,%r15), %rdi
 	movq 24(%rsp), %rax
@@ -100,7 +100,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addq %rbp, %r12
 	addq %rbp, %r14
 	decq %rbx
-	jne .LBB24_14
+	jne .LBB28_14
 	movq 40(%rsp), %rbx
 	leaq (%rbx,%rbx,2), %r12
 	leaq (,%rbp,2), %r15
@@ -110,15 +110,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	leaq (%rbx,%rbx,2), %r14
 	incq %r14
 	imulq %rbp, %r14
-.LBB24_20:
+.LBB28_20:
 	cmpq %r15, %r13
-	jb .LBB24_50
+	jb .LBB28_50
 	cmpq 16(%rsp), %r13
-	ja .LBB24_50
+	ja .LBB28_50
 	cmpq %r12, %r14
-	jb .LBB24_52
+	jb .LBB28_52
 	cmpq 8(%rsp), %r14
-	ja .LBB24_52
+	ja .LBB28_52
 	movq 32(%rsp), %rax
 	leaq (%rax,%r15), %rdi
 	movq 24(%rsp), %rax
@@ -131,7 +131,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addq %rbp, %r12
 	addq %rbp, %r14
 	decq %rbx
-	jne .LBB24_20
+	jne .LBB28_20
 	leaq (,%rbp,4), %r15
 	leaq (,%rbp,4), %r13
 	addq %rbp, %r13
@@ -140,15 +140,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	movq 40(%rsp), %rbx
 	leaq 1(,%rbx,4), %r14
 	imulq %rbp, %r14
-.LBB24_26:
+.LBB28_26:
 	cmpq %r15, %r13
-	jb .LBB24_50
+	jb .LBB28_50
 	cmpq 16(%rsp), %r13
-	ja .LBB24_50
+	ja .LBB28_50
 	cmpq %r12, %r14
-	jb .LBB24_52
+	jb .LBB28_52
 	cmpq 8(%rsp), %r14
-	ja .LBB24_52
+	ja .LBB28_52
 	movq 32(%rsp), %rax
 	leaq (%rax,%r15), %rdi
 	movq 24(%rsp), %rax
@@ -161,7 +161,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addq %rbp, %r12
 	addq %rbp, %r14
 	decq %rbx
-	jne .LBB24_26
+	jne .LBB28_26
 	movq 40(%rsp), %rbx
 	leaq (%rbx,%rbx,4), %r12
 	leaq (,%rbp,4), %r15
@@ -172,15 +172,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	leaq (%rbx,%rbx,4), %r14
 	incq %r14
 	imulq %rbp, %r14
-.LBB24_32:
+.LBB28_32:
 	cmpq %r15, %r13
-	jb .LBB24_50
+	jb .LBB28_50
 	cmpq 16(%rsp), %r13
-	ja .LBB24_50
+	ja .LBB28_50
 	cmpq %r12, %r14
-	jb .LBB24_52
+	jb .LBB28_52
 	cmpq 8(%rsp), %r14
-	ja .LBB24_52
+	ja .LBB28_52
 	movq 32(%rsp), %rax
 	leaq (%rax,%r15), %rdi
 	movq 24(%rsp), %rax
@@ -193,7 +193,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addq %rbp, %r12
 	addq %rbp, %r14
 	decq %rbx
-	jne .LBB24_32
+	jne .LBB28_32
 	movq 40(%rsp), %rbx
 	leaq (%rbx,%rbx), %rax
 	leaq (%rax,%rax,2), %r12
@@ -205,15 +205,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	leaq (%rax,%rax,2), %r14
 	incq %r14
 	imulq %rbp, %r14
-.LBB24_38:
+.LBB28_38:
 	cmpq %r15, %r13
-	jb .LBB24_50
+	jb .LBB28_50
 	cmpq 16(%rsp), %r13
-	ja .LBB24_50
+	ja .LBB28_50
 	cmpq %r12, %r14
-	jb .LBB24_52
+	jb .LBB28_52
 	cmpq 8(%rsp), %r14
-	ja .LBB24_52
+	ja .LBB28_52
 	movq 32(%rsp), %rax
 	leaq (%rax,%r15), %rdi
 	movq 24(%rsp), %rax
@@ -226,7 +226,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addq %rbp, %r12
 	addq %rbp, %r14
 	decq %rbx
-	jne .LBB24_38
+	jne .LBB28_38
 	movq 40(%rsp), %rbx
 	leaq (,%rbx,8), %r14
 	subq %rbx, %r14
@@ -237,15 +237,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	imulq %rbp, %r12
 	incq %r14
 	imulq %rbp, %r14
-.LBB24_44:
+.LBB28_44:
 	cmpq %r15, %r13
-	jb .LBB24_50
+	jb .LBB28_50
 	cmpq 16(%rsp), %r13
-	ja .LBB24_50
+	ja .LBB28_50
 	cmpq %r12, %r14
-	jb .LBB24_52
+	jb .LBB28_52
 	cmpq 8(%rsp), %r14
-	ja .LBB24_52
+	ja .LBB28_52
 	movq 32(%rsp), %rax
 	leaq (%rax,%r15), %rdi
 	movq 24(%rsp), %rax
@@ -258,8 +258,8 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addq %rbp, %r12
 	addq %rbp, %r14
 	decq %rbx
-	jne .LBB24_44
-.LBB24_49:
+	jne .LBB28_44
+.LBB28_49:
 	addq $56, %rsp
 	popq %rbx
 	popq %r12
@@ -268,17 +268,17 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	popq %r15
 	popq %rbp
 	retq
-.LBB24_50:
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.14(%rip), %rcx
+.LBB28_50:
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.10(%rip), %rcx
 	movq %r15, %rdi
 	movq %r13, %rsi
 	movq 16(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB24_51:
+.LBB28_51:
 	addq %r12, %rbp
 	movq %rbp, %r14
-.LBB24_52:
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.13(%rip), %rcx
+.LBB28_52:
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.9(%rip), %rcx
 	movq %r12, %rdi
 	movq %r14, %rsi
 	movq 8(%rsp), %rdx

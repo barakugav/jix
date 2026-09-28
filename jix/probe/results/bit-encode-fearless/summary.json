@@ -716,46 +716,46 @@
     "kernel": "trans_bit_byte_2",
     "fn_instructions": 655,
     "mode": "outer",
-    "trace_instructions": "132",
+    "trace_instructions": "292",
     "calls": [],
     "loop_tree": "?[? ?]",
     "bytes_per_iter": "~256",
     "warnings": [],
     "costs": [
-      483.36,
-      362.72,
-      356.8
+      2707.52,
+      3141.44,
+      2084.8
     ],
     "mca": [
       {
         "cpu": "icelake-server",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 3021,
-        "uops": 13200,
-        "block_rthroughput": 22.0,
+        "instructions": 29200,
+        "total_cycles": 16922,
+        "uops": 34400,
+        "block_rthroughput": 144.0,
         "skipped": [],
-        "cycles_per_iter": 30.21
+        "cycles_per_iter": 169.22
       },
       {
         "cpu": "sapphirerapids",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 2267,
-        "uops": 13000,
-        "block_rthroughput": 21.7,
+        "instructions": 29200,
+        "total_cycles": 19634,
+        "uops": 35700,
+        "block_rthroughput": 160.0,
         "skipped": [],
-        "cycles_per_iter": 22.67
+        "cycles_per_iter": 196.34
       },
       {
         "cpu": "znver4",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 2230,
-        "uops": 13200,
-        "block_rthroughput": 22.0,
+        "instructions": 29200,
+        "total_cycles": 13030,
+        "uops": 29200,
+        "block_rthroughput": 96.0,
         "skipped": [],
-        "cycles_per_iter": 22.3
+        "cycles_per_iter": 130.3
       }
     ]
   },
@@ -764,46 +764,46 @@
     "kernel": "trans_bit_byte_4",
     "fn_instructions": 655,
     "mode": "outer",
-    "trace_instructions": "132",
+    "trace_instructions": "292",
     "calls": [],
     "loop_tree": "?[? ?]",
     "bytes_per_iter": "~256",
     "warnings": [],
     "costs": [
-      483.36,
-      362.72,
-      356.8
+      2707.52,
+      3141.44,
+      2084.8
     ],
     "mca": [
       {
         "cpu": "icelake-server",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 3021,
-        "uops": 13200,
-        "block_rthroughput": 22.0,
+        "instructions": 29200,
+        "total_cycles": 16922,
+        "uops": 34400,
+        "block_rthroughput": 144.0,
         "skipped": [],
-        "cycles_per_iter": 30.21
+        "cycles_per_iter": 169.22
       },
       {
         "cpu": "sapphirerapids",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 2267,
-        "uops": 13000,
-        "block_rthroughput": 21.7,
+        "instructions": 29200,
+        "total_cycles": 19634,
+        "uops": 35700,
+        "block_rthroughput": 160.0,
         "skipped": [],
-        "cycles_per_iter": 22.67
+        "cycles_per_iter": 196.34
       },
       {
         "cpu": "znver4",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 2230,
-        "uops": 13200,
-        "block_rthroughput": 22.0,
+        "instructions": 29200,
+        "total_cycles": 13030,
+        "uops": 29200,
+        "block_rthroughput": 96.0,
         "skipped": [],
-        "cycles_per_iter": 22.3
+        "cycles_per_iter": 130.3
       }
     ]
   },
@@ -812,46 +812,46 @@
     "kernel": "trans_bit_byte_8",
     "fn_instructions": 655,
     "mode": "outer",
-    "trace_instructions": "132",
+    "trace_instructions": "292",
     "calls": [],
     "loop_tree": "?[? ?]",
     "bytes_per_iter": "~256",
     "warnings": [],
     "costs": [
-      483.36,
-      362.72,
-      356.8
+      2707.52,
+      3141.44,
+      2084.8
     ],
     "mca": [
       {
         "cpu": "icelake-server",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 3021,
-        "uops": 13200,
-        "block_rthroughput": 22.0,
+        "instructions": 29200,
+        "total_cycles": 16922,
+        "uops": 34400,
+        "block_rthroughput": 144.0,
         "skipped": [],
-        "cycles_per_iter": 30.21
+        "cycles_per_iter": 169.22
       },
       {
         "cpu": "sapphirerapids",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 2267,
-        "uops": 13000,
-        "block_rthroughput": 21.7,
+        "instructions": 29200,
+        "total_cycles": 19634,
+        "uops": 35700,
+        "block_rthroughput": 160.0,
         "skipped": [],
-        "cycles_per_iter": 22.67
+        "cycles_per_iter": 196.34
       },
       {
         "cpu": "znver4",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 2230,
-        "uops": 13200,
-        "block_rthroughput": 22.0,
+        "instructions": 29200,
+        "total_cycles": 13030,
+        "uops": 29200,
+        "block_rthroughput": 96.0,
         "skipped": [],
-        "cycles_per_iter": 22.3
+        "cycles_per_iter": 130.3
       }
     ]
   },
@@ -860,46 +860,46 @@
     "kernel": "trans_bit_byte_16",
     "fn_instructions": 655,
     "mode": "outer",
-    "trace_instructions": "132",
+    "trace_instructions": "292",
     "calls": [],
     "loop_tree": "?[? ?]",
     "bytes_per_iter": "~256",
     "warnings": [],
     "costs": [
-      483.36,
-      362.72,
-      356.8
+      2707.52,
+      3141.44,
+      2084.8
     ],
     "mca": [
       {
         "cpu": "icelake-server",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 3021,
-        "uops": 13200,
-        "block_rthroughput": 22.0,
+        "instructions": 29200,
+        "total_cycles": 16922,
+        "uops": 34400,
+        "block_rthroughput": 144.0,
         "skipped": [],
-        "cycles_per_iter": 30.21
+        "cycles_per_iter": 169.22
       },
       {
         "cpu": "sapphirerapids",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 2267,
-        "uops": 13000,
-        "block_rthroughput": 21.7,
+        "instructions": 29200,
+        "total_cycles": 19634,
+        "uops": 35700,
+        "block_rthroughput": 160.0,
         "skipped": [],
-        "cycles_per_iter": 22.67
+        "cycles_per_iter": 196.34
       },
       {
         "cpu": "znver4",
         "iterations": 100,
-        "instructions": 13200,
-        "total_cycles": 2230,
-        "uops": 13200,
-        "block_rthroughput": 22.0,
+        "instructions": 29200,
+        "total_cycles": 13030,
+        "uops": 29200,
+        "block_rthroughput": 96.0,
         "skipped": [],
-        "cycles_per_iter": 22.3
+        "cycles_per_iter": 130.3
       }
     ]
   },

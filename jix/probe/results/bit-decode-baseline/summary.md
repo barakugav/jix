@@ -28,10 +28,10 @@ per-CPU geometric mean over the kernels, the single number to optimize.
 | x86_64-v4 | sapphirerapids | **1030** | 1030 | 1030 | 1030 | 1030 |
 | x86_64-v4 | znver4 | **1076** | 1076 | 1076 | 1076 | 1076 |
 | i686 | skylake | **8540** | 8540 | 8540 | 8540 | 8540 |
-| aarch64 | cortex-a72 | **809** | 809 | 809 | 809 | 809 |
-| aarch64 | neoverse-n1 | **725** | 725 | 725 | 725 | 725 |
-| aarch64 | neoverse-v2 | **365** | 365 | 365 | 365 | 365 |
-| aarch64-apple | apple-m1 | **1400** | 1400 | 1400 | 1400 | 1400 |
+| aarch64 | cortex-a72 | **5400** | 5400 | 5400 | 5400 | 5400 |
+| aarch64 | neoverse-n1 | **6757** | 6757 | 6757 | 6757 | 6757 |
+| aarch64 | neoverse-v2 | **3380** | 3380 | 3380 | 3380 | 3380 |
+| aarch64-apple | apple-m1 | **3658** | 3658 | 3658 | 3658 | 3658 |
 
 ## x86_64-v2 (`x86_64-unknown-linux-gnu`)
 
@@ -147,11 +147,11 @@ Warnings:
 
 | kernel | B/iter | instrs | loops | calls | cortex-a72 | neoverse-n1 | neoverse-v2 |
 |---|---:|---:|---|---|---:|---:|---:|
-| untrans_bit_byte_2 | ~128 | 66 | ?[? ?] | - | 809 | 725 | 365 |
-| untrans_bit_byte_4 | ~128 | 66 | ?[? ?] | - | 809 | 725 | 365 |
-| untrans_bit_byte_8 | ~128 | 66 | ?[? ?] | - | 809 | 725 | 365 |
-| untrans_bit_byte_16 | ~128 | 66 | ?[? ?] | - | 809 | 725 | 365 |
-| **geomean** | | | | | **809** | **725** | **365** |
+| untrans_bit_byte_2 | ~128 | 352 | ?[? ?] | - | 5400 | 6757 | 3380 |
+| untrans_bit_byte_4 | ~128 | 352 | ?[? ?] | - | 5400 | 6757 | 3380 |
+| untrans_bit_byte_8 | ~128 | 352 | ?[? ?] | - | 5400 | 6757 | 3380 |
+| untrans_bit_byte_16 | ~128 | 352 | ?[? ?] | - | 5400 | 6757 | 3380 |
+| **geomean** | | | | | **5400** | **6757** | **3380** |
 
 Kernels without a flattenable hot loop, cycles per iteration of the largest innermost loop (informational):
 
@@ -173,11 +173,11 @@ Warnings:
 
 | kernel | B/iter | instrs | loops | calls | apple-m1 |
 |---|---:|---:|---|---|---:|
-| untrans_bit_byte_2 | ~128 | 69 | ?[? ?] | - | 1400 |
-| untrans_bit_byte_4 | ~128 | 69 | ?[? ?] | - | 1400 |
-| untrans_bit_byte_8 | ~128 | 69 | ?[? ?] | - | 1400 |
-| untrans_bit_byte_16 | ~128 | 69 | ?[? ?] | - | 1400 |
-| **geomean** | | | | | **1400** |
+| untrans_bit_byte_2 | ~128 | 352 | ?[? ?] | - | 3658 |
+| untrans_bit_byte_4 | ~128 | 352 | ?[? ?] | - | 3658 |
+| untrans_bit_byte_8 | ~128 | 352 | ?[? ?] | - | 3658 |
+| untrans_bit_byte_16 | ~128 | 352 | ?[? ?] | - | 3658 |
+| **geomean** | | | | | **3658** |
 
 Kernels without a flattenable hot loop, cycles per iteration of the largest innermost loop (informational):
 

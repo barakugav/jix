@@ -1,15 +1,15 @@
-jix_probe::bit_shuffle::trans_bit_byte:
+probe_bit_shuffle_trans_bit_byte:
 	pushl %ebp
 	pushl %ebx
 	pushl %edi
 	pushl %esi
 	subl $604, %esp
 	movl 640(%esp), %edi
-	calll .L32$pb
-.L32$pb:
+	calll .L46$pb
+.L46$pb:
 	popl %eax
-.Ltmp3075:
-	addl $_GLOBAL_OFFSET_TABLE_+(.Ltmp3075-.L32$pb), %eax
+.Ltmp5356:
+	addl $_GLOBAL_OFFSET_TABLE_+(.Ltmp5356-.L46$pb), %eax
 	movl %eax, 12(%esp)
 	shrl $3, %edi
 	cmpl $0, 644(%esp)
@@ -17,16 +17,16 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	testl %edi, %edi
 	sete %cl
 	orb %al, %cl
-	jne .LBB32_29
+	jne .LBB46_29
 	movl 12(%esp), %esi
 	movl 644(%esp), %ebx
 	movl $0, 300(%esp)
 	movl $0, 288(%esp)
 	movl $0, 188(%esp)
 	movl %edi, 380(%esp)
-	movdqa .LCPI32_0@GOTOFF(%esi), %xmm0
-	movdqa .LCPI32_1@GOTOFF(%esi), %xmm2
-	movdqa .LCPI32_2@GOTOFF(%esi), %xmm7
+	movdqa .LCPI46_0@GOTOFF(%esi), %xmm0
+	movdqa .LCPI46_1@GOTOFF(%esi), %xmm2
+	movdqa .LCPI46_2@GOTOFF(%esi), %xmm7
 	imull %edi, %ebx
 	movd %ebx, %xmm4
 	leal (%ebx,%ebx), %ebp
@@ -56,7 +56,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movl %ebp, 296(%esp)
 	pmuludq %xmm5, %xmm1
 	pmuludq %xmm5, %xmm3
-	pmuludq .LCPI32_3@GOTOFF(%esi), %xmm5
+	pmuludq .LCPI46_3@GOTOFF(%esi), %xmm5
 	movl %eax, 272(%esp)
 	leal -1(%ebx,%ebx,4), %eax
 	pshufd $232, %xmm0, %xmm0
@@ -74,8 +74,8 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	punpcklqdq %xmm5, %xmm4
 	pcmpeqd %xmm5, %xmm5
 	paddd %xmm4, %xmm5
-	pxor .LCPI32_4@GOTOFF(%esi), %xmm5
-	pcmpgtd .LCPI32_5@GOTOFF(%esi), %xmm5
+	pxor .LCPI46_4@GOTOFF(%esi), %xmm5
+	pcmpgtd .LCPI46_5@GOTOFF(%esi), %xmm5
 	movmskps %xmm5, %edx
 	pshufd $232, %xmm2, %xmm5
 	cmpl $15, %edx
@@ -97,17 +97,17 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movl 624(%esp), %eax
 	pshufd $0, %xmm0, %xmm0
 	movdqa %xmm0, 512(%esp)
-	movaps .LCPI32_6@GOTOFF(%esi), %xmm0
+	movaps .LCPI46_6@GOTOFF(%esi), %xmm0
 	leal 127(%eax), %ecx
 	addl $3, %eax
 	movl %eax, 324(%esp)
 	movl 184(%esp), %eax
 	movaps %xmm0, 496(%esp)
-	movaps .LCPI32_7@GOTOFF(%esi), %xmm0
+	movaps .LCPI46_7@GOTOFF(%esi), %xmm0
 	leal (%edx,%eax), %ebp
 	movl 180(%esp), %eax
 	movaps %xmm0, 480(%esp)
-	movdqa .LCPI32_4@GOTOFF(%esi), %xmm0
+	movdqa .LCPI46_4@GOTOFF(%esi), %xmm0
 	addl %edx, %eax
 	movl %eax, 208(%esp)
 	leal (%ebx,%ebx,4), %eax
@@ -115,7 +115,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	leal (%ebx,%ebx,4), %eax
 	pxor %xmm0, %xmm1
 	movdqa %xmm0, 464(%esp)
-	movaps .LCPI32_8@GOTOFF(%esi), %xmm0
+	movaps .LCPI46_8@GOTOFF(%esi), %xmm0
 	leal (%edx,%eax), %eax
 	movdqa %xmm1, 448(%esp)
 	movl %eax, 212(%esp)
@@ -125,7 +125,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movl %eax, 216(%esp)
 	leal (%ebx,%ebx,2), %eax
 	movaps %xmm0, 432(%esp)
-	movdqa .LCPI32_9@GOTOFF(%esi), %xmm0
+	movdqa .LCPI46_9@GOTOFF(%esi), %xmm0
 	xorl %esi, %esi
 	movl %eax, 316(%esp)
 	addl %edx, %eax
@@ -144,7 +144,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movl 180(%esp), %eax
 	movl %eax, 200(%esp)
 	movl 640(%esp), %eax
-.LBB32_3:
+.LBB46_3:
 	movl %ebp, 332(%esp)
 	movl 636(%esp), %ebp
 	movl %edx, 220(%esp)
@@ -285,7 +285,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	orb 47(%esp), %cl
 	testb $1, %cl
 	movl $0, %ecx
-	jne .LBB32_7
+	jne .LBB46_7
 	addl 280(%esp), %edx
 	movl 192(%esp), %ebx
 	movl 16(%esp), %ebp
@@ -317,7 +317,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	subl %ecx, %ebx
 	incl %ebx
 	movl %ebx, 192(%esp)
-.LBB32_5:
+.LBB46_5:
 	movl 304(%esp), %ecx
 	movzbl -105(%ecx,%ebp,8), %edx
 	movzbl -121(%ecx,%ebp,8), %eax
@@ -989,7 +989,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movdqa %xmm2, 144(%esp)
 	movdqa 96(%esp), %xmm2
 	movdqa %xmm1, 16(%esp)
-	movdqa .LCPI32_10@GOTOFF(%eax), %xmm1
+	movdqa .LCPI46_10@GOTOFF(%eax), %xmm1
 	pxor 144(%esp), %xmm7
 	psrlq $7, %xmm2
 	pand %xmm1, %xmm0
@@ -1090,7 +1090,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movdqa 16(%esp), %xmm1
 	xorps 112(%esp), %xmm0
 	movaps %xmm0, 48(%esp)
-	movdqa .LCPI32_11@GOTOFF(%eax), %xmm0
+	movdqa .LCPI46_11@GOTOFF(%eax), %xmm0
 	pxor 64(%esp), %xmm1
 	pand %xmm0, %xmm1
 	pand %xmm0, %xmm3
@@ -1182,7 +1182,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movaps 16(%esp), %xmm0
 	xorps 80(%esp), %xmm0
 	movaps %xmm0, 16(%esp)
-	movdqa .LCPI32_12@GOTOFF(%eax), %xmm0
+	movdqa .LCPI46_12@GOTOFF(%eax), %xmm0
 	pand %xmm0, %xmm1
 	pand %xmm0, %xmm3
 	pand %xmm0, %xmm5
@@ -1239,7 +1239,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movdqa 64(%esp), %xmm3
 	pxor 256(%esp), %xmm4
 	movdqa %xmm0, %xmm1
-	movdqa .LCPI32_13@GOTOFF(%eax), %xmm0
+	movdqa .LCPI46_13@GOTOFF(%eax), %xmm0
 	psrlq $8, %xmm2
 	pxor 384(%esp), %xmm5
 	movl 220(%esp), %eax
@@ -1511,38 +1511,38 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movdqu %xmm4, (%ecx,%ebp)
 	addl $16, %ebp
 	cmpl %ebp, 192(%esp)
-	jne .LBB32_5
+	jne .LBB46_5
 	movl 336(%esp), %ecx
-.LBB32_7:
+.LBB46_7:
 	movl 300(%esp), %eax
 	incl 188(%esp)
 	movl %ecx, 336(%esp)
 	leal (%eax,%ecx,8), %esi
-.LBB32_8:
+.LBB46_8:
 	movl 628(%esp), %edx
 	cmpl %edx, %esi
-	jae .LBB32_9
+	jae .LBB46_9
 	leal 1(%esi), %eax
 	cmpl %edx, %eax
-	jae .LBB32_10
+	jae .LBB46_10
 	leal 2(%esi), %eax
 	cmpl %edx, %eax
-	jae .LBB32_10
+	jae .LBB46_10
 	leal 3(%esi), %eax
 	cmpl %edx, %eax
-	jae .LBB32_10
+	jae .LBB46_10
 	leal 4(%esi), %eax
 	cmpl %edx, %eax
-	jae .LBB32_10
+	jae .LBB46_10
 	leal 5(%esi), %eax
 	cmpl %edx, %eax
-	jae .LBB32_10
+	jae .LBB46_10
 	leal 6(%esi), %eax
 	cmpl %edx, %eax
-	jae .LBB32_10
+	jae .LBB46_10
 	leal 7(%esi), %eax
 	cmpl %edx, %eax
-	jae .LBB32_10
+	jae .LBB46_10
 	movl %esi, 16(%esp)
 	movl 324(%esp), %ebp
 	movl 336(%esp), %esi
@@ -1606,21 +1606,21 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	leal (%edi,%esi), %ebp
 	movl 636(%esp), %edi
 	cmpl %edi, %ebp
-	jae .LBB32_19
+	jae .LBB46_19
 	movl 204(%esp), %ebp
 	xorl %ebx, %eax
 	movl 220(%esp), %ebx
 	addl %esi, %ebp
 	movb %al, (%ebx,%esi)
 	cmpl %edi, %ebp
-	jae .LBB32_19
+	jae .LBB46_19
 	movl 140(%esp), %edi
 	movb %ah, (%edi,%esi)
 	movl 320(%esp), %edi
 	leal (%edi,%esi), %ebp
 	movl 636(%esp), %edi
 	cmpl %edi, %ebp
-	jae .LBB32_19
+	jae .LBB46_19
 	movl 136(%esp), %ebp
 	movl 336(%esp), %esi
 	movl %eax, %ebx
@@ -1630,7 +1630,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movl 336(%esp), %esi
 	leal (%ebx,%esi), %ebp
 	cmpl %edi, %ebp
-	jae .LBB32_19
+	jae .LBB46_19
 	movl 132(%esp), %ebx
 	movl 336(%esp), %esi
 	shrl $24, %eax
@@ -1639,7 +1639,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	movl 312(%esp), %ebx
 	leal (%ebx,%esi), %ebp
 	cmpl %edi, %ebp
-	jae .LBB32_19
+	jae .LBB46_19
 	xorl %ecx, %edx
 	movl 308(%esp), %ecx
 	movl 216(%esp), %eax
@@ -1647,13 +1647,13 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	leal (%ecx,%esi), %ebp
 	movb %dl, (%eax,%esi)
 	cmpl %edi, %ebp
-	jae .LBB32_20
+	jae .LBB46_20
 	movl 200(%esp), %ecx
 	movl 212(%esp), %eax
 	leal (%ecx,%esi), %ebp
 	movb %dh, (%eax,%esi)
 	cmpl %edi, %ebp
-	jae .LBB32_20
+	jae .LBB46_20
 	movl 196(%esp), %ebx
 	movl 208(%esp), %ecx
 	movl %edx, %eax
@@ -1661,7 +1661,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	leal (%ebx,%esi), %ebp
 	movb %al, (%ecx,%esi)
 	cmpl %edi, %ebp
-	jae .LBB32_19
+	jae .LBB46_19
 	movl 16(%esp), %eax
 	movl 332(%esp), %ebp
 	movl 380(%esp), %edi
@@ -1675,7 +1675,7 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	cmpl %esi, %edi
 	movl %eax, %esi
 	movl 132(%esp), %eax
-	jne .LBB32_8
+	jne .LBB46_8
 	addl %edi, %ecx
 	addl %edi, %eax
 	addl %edi, %edx
@@ -1710,29 +1710,29 @@ jix_probe::bit_shuffle::trans_bit_byte:
 	addl %eax, 324(%esp)
 	cmpl 644(%esp), %ebx
 	movl 204(%esp), %ebx
-	jne .LBB32_3
-.LBB32_29:
+	jne .LBB46_3
+.LBB46_29:
 	addl $604, %esp
 	popl %esi
 	popl %edi
 	popl %ebx
 	popl %ebp
 	retl
-.LBB32_19:
+.LBB46_19:
 	movl 12(%esp), %ebx
-.LBB32_20:
+.LBB46_20:
 	subl $4, %esp
-	leal .Lanon.a00c3abf785d8e01d4f036d98a3600d1.9@GOTOFF(%ebx), %eax
+	leal .Lanon.52bf38722a5bfecdfb3cf7aba91d383f.11@GOTOFF(%ebx), %eax
 	pushl %eax
 	pushl %edi
 	pushl %ebp
 	calll core::panicking::panic_bounds_check@PLT
-.LBB32_9:
+.LBB46_9:
 	movl %esi, %eax
-.LBB32_10:
+.LBB46_10:
 	subl $4, %esp
 	movl 16(%esp), %ebx
-	leal .Lanon.a00c3abf785d8e01d4f036d98a3600d1.10@GOTOFF(%ebx), %ecx
+	leal .Lanon.52bf38722a5bfecdfb3cf7aba91d383f.12@GOTOFF(%ebx), %ecx
 	pushl %ecx
 	pushl %edx
 	pushl %eax

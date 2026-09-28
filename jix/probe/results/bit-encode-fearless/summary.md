@@ -24,9 +24,9 @@ per-CPU geometric mean over the kernels, the single number to optimize.
 | x86_64-v3 | skylake | **9732** | 1.00x | 9732 | 9732 | 9732 | 9732 |
 | x86_64-v3 | alderlake | **6633** | 1.00x | 6633 | 6633 | 6633 | 6633 |
 | x86_64-v3 | znver3 | **9102** | 1.00x | 9102 | 9102 | 9102 | 9102 |
-| x86_64-v4 | icelake-server | **483** | 5.33x | 483 | 483 | 483 | 483 |
-| x86_64-v4 | sapphirerapids | **363** | 7.74x | 363 | 363 | 363 | 363 |
-| x86_64-v4 | znver4 | **357** | 5.63x | 357 | 357 | 357 | 357 |
+| x86_64-v4 | icelake-server | **2708** | 0.95x | 2708 | 2708 | 2708 | 2708 |
+| x86_64-v4 | sapphirerapids | **3141** | 0.89x | 3141 | 3141 | 3141 | 3141 |
+| x86_64-v4 | znver4 | **2085** | 0.96x | 2085 | 2085 | 2085 | 2085 |
 | i686 | skylake | **11736** | 1.00x | 11736 | 11736 | 11736 | 11736 |
 | aarch64 | cortex-a72 | **12743** | 1.00x | 12743 | 12743 | 12743 | 12743 |
 | aarch64 | neoverse-n1 | **11972** | 1.00x | 11972 | 11972 | 11972 | 11972 |
@@ -95,11 +95,11 @@ Warnings:
 
 | kernel | B/iter | instrs | loops | calls | icelake-server | sapphirerapids | znver4 |
 |---|---:|---:|---|---|---:|---:|---:|
-| trans_bit_byte_2 | ~256 | 132 | ?[? ?] | - | 483 | 363 | 357 |
-| trans_bit_byte_4 | ~256 | 132 | ?[? ?] | - | 483 | 363 | 357 |
-| trans_bit_byte_8 | ~256 | 132 | ?[? ?] | - | 483 | 363 | 357 |
-| trans_bit_byte_16 | ~256 | 132 | ?[? ?] | - | 483 | 363 | 357 |
-| **geomean** | | | | | **483** | **363** | **357** |
+| trans_bit_byte_2 | ~256 | 292 | ?[? ?] | - | 2708 | 3141 | 2085 |
+| trans_bit_byte_4 | ~256 | 292 | ?[? ?] | - | 2708 | 3141 | 2085 |
+| trans_bit_byte_8 | ~256 | 292 | ?[? ?] | - | 2708 | 3141 | 2085 |
+| trans_bit_byte_16 | ~256 | 292 | ?[? ?] | - | 2708 | 3141 | 2085 |
+| **geomean** | | | | | **2708** | **3141** | **2085** |
 
 Kernels without a flattenable hot loop, cycles per iteration of the largest innermost loop (informational):
 

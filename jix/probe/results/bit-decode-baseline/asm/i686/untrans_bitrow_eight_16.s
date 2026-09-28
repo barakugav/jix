@@ -4,14 +4,14 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	pushl %edi
 	pushl %esi
 	subl $172, %esp
-	calll .L35$pb
-.L35$pb:
+	calll .L41$pb
+.L41$pb:
 	popl %eax
-.Ltmp3522:
-	addl $_GLOBAL_OFFSET_TABLE_+(.Ltmp3522-.L35$pb), %eax
+.Ltmp4160:
+	addl $_GLOBAL_OFFSET_TABLE_+(.Ltmp4160-.L41$pb), %eax
 	cmpl $0, 212(%esp)
 	movl %eax, 16(%esp)
-	je .LBB35_35
+	je .LBB41_35
 	movl 212(%esp), %ebx
 	movl 208(%esp), %edx
 	movl 192(%esp), %eax
@@ -98,16 +98,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movl %ebx, %edi
 	xorl %eax, %eax
 	movl %ecx, 120(%esp)
-.LBB35_2:
+.LBB41_2:
 	movl %ebp, %ecx
 	movl %edx, %ebx
 	movl %eax, 32(%esp)
 	imull %edx, %ecx
 	addl %edx, %ecx
 	addl %eax, %edx
-	jb .LBB35_53
+	jb .LBB41_53
 	cmpl 204(%esp), %edx
-	ja .LBB35_53
+	ja .LBB41_53
 	leal (,%ebp,8), %ecx
 	movl %ebx, %esi
 	movl %edx, 164(%esp)
@@ -116,9 +116,9 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	imull %ebx, %eax
 	addl %ebx, %eax
 	addl 8(%esp), %esi
-	jb .LBB35_56
+	jb .LBB41_56
 	cmpl 196(%esp), %esi
-	ja .LBB35_56
+	ja .LBB41_56
 	movl 200(%esp), %eax
 	movl 32(%esp), %edi
 	movl %ebp, 20(%esp)
@@ -139,16 +139,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	addl %edi, %eax
 	addl %edi, %ecx
 	cmpl %eax, %ecx
-	jb .LBB35_36
+	jb .LBB41_36
 	cmpl 204(%esp), %ecx
-	ja .LBB35_36
+	ja .LBB41_36
 	movl 8(%esp), %eax
 	movl 156(%esp), %ecx
 	addl %ecx, %eax
 	cmpl %esi, %eax
-	jb .LBB35_37
+	jb .LBB41_37
 	cmpl 196(%esp), %eax
-	ja .LBB35_37
+	ja .LBB41_37
 	movl %eax, 28(%esp)
 	movl 144(%esp), %eax
 	addl 12(%esp), %ebp
@@ -165,16 +165,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movl 152(%esp), %eax
 	addl %edi, %eax
 	cmpl %ecx, %eax
-	jb .LBB35_38
+	jb .LBB41_38
 	cmpl 204(%esp), %eax
-	ja .LBB35_38
+	ja .LBB41_38
 	movl 8(%esp), %eax
 	movl 44(%esp), %ecx
 	leal (%ecx,%eax), %esi
 	cmpl 28(%esp), %esi
-	jb .LBB35_39
+	jb .LBB41_39
 	cmpl 196(%esp), %esi
-	ja .LBB35_39
+	ja .LBB41_39
 	movl 136(%esp), %eax
 	addl 12(%esp), %ebp
 	leal (%eax,%edi,8), %eax
@@ -190,16 +190,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	addl %edi, %eax
 	addl %edi, %ecx
 	cmpl %eax, %ecx
-	jb .LBB35_40
+	jb .LBB41_40
 	cmpl 204(%esp), %ecx
-	ja .LBB35_40
+	ja .LBB41_40
 	movl 8(%esp), %eax
 	movl 132(%esp), %ecx
 	addl %ecx, %eax
 	cmpl %esi, %eax
-	jb .LBB35_41
+	jb .LBB41_41
 	cmpl 196(%esp), %eax
-	ja .LBB35_41
+	ja .LBB41_41
 	movl %eax, 28(%esp)
 	movl 120(%esp), %eax
 	addl 12(%esp), %ebp
@@ -216,16 +216,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movl 128(%esp), %eax
 	addl %edi, %eax
 	cmpl %ecx, %eax
-	jb .LBB35_42
+	jb .LBB41_42
 	cmpl 204(%esp), %eax
-	ja .LBB35_42
+	ja .LBB41_42
 	movl 8(%esp), %eax
 	movl 116(%esp), %ecx
 	leal (%ecx,%eax), %esi
 	cmpl 28(%esp), %esi
-	jb .LBB35_43
+	jb .LBB41_43
 	cmpl 196(%esp), %esi
-	ja .LBB35_43
+	ja .LBB41_43
 	movl 104(%esp), %eax
 	addl 12(%esp), %ebp
 	leal (%eax,%edi,8), %eax
@@ -241,16 +241,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	addl %edi, %eax
 	addl %edi, %ecx
 	cmpl %eax, %ecx
-	jb .LBB35_44
+	jb .LBB41_44
 	cmpl 204(%esp), %ecx
-	ja .LBB35_44
+	ja .LBB41_44
 	movl 8(%esp), %eax
 	movl 100(%esp), %ecx
 	addl %ecx, %eax
 	cmpl %esi, %eax
-	jb .LBB35_46
+	jb .LBB41_46
 	cmpl 196(%esp), %eax
-	ja .LBB35_46
+	ja .LBB41_46
 	movl %eax, %esi
 	movl 88(%esp), %eax
 	addl 12(%esp), %ebp
@@ -267,16 +267,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movl 96(%esp), %eax
 	addl %edi, %eax
 	cmpl %ecx, %eax
-	jb .LBB35_48
+	jb .LBB41_48
 	cmpl 204(%esp), %eax
-	ja .LBB35_48
+	ja .LBB41_48
 	movl 84(%esp), %eax
 	movl 8(%esp), %ecx
 	addl %ecx, %eax
 	cmpl %esi, %eax
-	jb .LBB35_49
+	jb .LBB41_49
 	cmpl 196(%esp), %eax
-	ja .LBB35_49
+	ja .LBB41_49
 	movl %eax, 28(%esp)
 	movl 72(%esp), %eax
 	addl 12(%esp), %ebp
@@ -293,17 +293,17 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	addl %edi, %eax
 	addl %edi, %ecx
 	cmpl %eax, %ecx
-	jb .LBB35_50
+	jb .LBB41_50
 	cmpl 204(%esp), %ecx
-	ja .LBB35_50
+	ja .LBB41_50
 	movl 36(%esp), %eax
 	movl 8(%esp), %ecx
 	movl 168(%esp), %edi
 	leal (%eax,%ecx), %esi
 	cmpl 28(%esp), %esi
-	jb .LBB35_51
+	jb .LBB41_51
 	cmpl 196(%esp), %esi
-	ja .LBB35_51
+	ja .LBB41_51
 	movl 68(%esp), %eax
 	movl 32(%esp), %ecx
 	addl 12(%esp), %ebp
@@ -321,28 +321,28 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movl %esi, 8(%esp)
 	incl %ebp
 	decl %edi
-	jne .LBB35_2
-.LBB35_35:
+	jne .LBB41_2
+.LBB41_35:
 	addl $172, %esp
 	popl %esi
 	popl %edi
 	popl %ebx
 	popl %ebp
 	retl
-.LBB35_53:
+.LBB41_53:
 	movl 32(%esp), %eax
-	jmp .LBB35_54
-.LBB35_56:
+	jmp .LBB41_54
+.LBB41_56:
 	movl 8(%esp), %esi
-	jmp .LBB35_57
-.LBB35_36:
+	jmp .LBB41_57
+.LBB41_36:
 	movl 212(%esp), %edx
-	jmp .LBB35_45
-.LBB35_37:
+	jmp .LBB41_45
+.LBB41_37:
 	movl 24(%esp), %ecx
 	incl %ecx
-	jmp .LBB35_47
-.LBB35_38:
+	jmp .LBB41_47
+.LBB41_38:
 	movl 64(%esp), %ecx
 	movl 4(%esp), %eax
 	addl 20(%esp), %ecx
@@ -350,8 +350,8 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	addl %eax, %ecx
 	movl 12(%esp), %eax
 	leal (%edi,%eax,2), %eax
-	jmp .LBB35_54
-.LBB35_39:
+	jmp .LBB41_54
+.LBB41_39:
 	movl 24(%esp), %edx
 	movl 4(%esp), %eax
 	movl 8(%esp), %ecx
@@ -360,15 +360,15 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	imull %eax, %edx
 	addl %eax, %edx
 	movl %edx, %eax
-	jmp .LBB35_57
-.LBB35_40:
+	jmp .LBB41_57
+.LBB41_40:
 	movl 60(%esp), %edx
-	jmp .LBB35_45
-.LBB35_41:
+	jmp .LBB41_45
+.LBB41_41:
 	movl 24(%esp), %ecx
 	orl $3, %ecx
-	jmp .LBB35_47
-.LBB35_42:
+	jmp .LBB41_47
+.LBB41_42:
 	movl 56(%esp), %ecx
 	movl 4(%esp), %eax
 	addl 20(%esp), %ecx
@@ -376,8 +376,8 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	addl %eax, %ecx
 	movl 12(%esp), %eax
 	leal (%edi,%eax,4), %eax
-	jmp .LBB35_54
-.LBB35_43:
+	jmp .LBB41_54
+.LBB41_43:
 	movl 24(%esp), %edx
 	movl 4(%esp), %eax
 	movl 8(%esp), %ecx
@@ -386,26 +386,26 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	imull %eax, %edx
 	addl %eax, %edx
 	movl %edx, %eax
-	jmp .LBB35_57
-.LBB35_44:
+	jmp .LBB41_57
+.LBB41_44:
 	movl 52(%esp), %edx
-.LBB35_45:
+.LBB41_45:
 	addl 20(%esp), %edx
 	movl 4(%esp), %ecx
 	imull %ecx, %edx
 	addl %ecx, %edx
 	movl %edx, %ecx
-	jmp .LBB35_54
-.LBB35_46:
+	jmp .LBB41_54
+.LBB41_46:
 	movl 24(%esp), %ecx
 	orl $5, %ecx
-.LBB35_47:
+.LBB41_47:
 	movl 4(%esp), %eax
 	imull %eax, %ecx
 	addl %eax, %ecx
 	movl %ecx, %eax
-	jmp .LBB35_57
-.LBB35_48:
+	jmp .LBB41_57
+.LBB41_48:
 	movl 48(%esp), %ecx
 	movl 4(%esp), %eax
 	addl 20(%esp), %ecx
@@ -413,8 +413,8 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	addl %eax, %ecx
 	movl 40(%esp), %eax
 	leal (%edi,%eax,2), %eax
-	jmp .LBB35_54
-.LBB35_49:
+	jmp .LBB41_54
+.LBB41_49:
 	movl 24(%esp), %edx
 	movl 4(%esp), %eax
 	movl 44(%esp), %ecx
@@ -424,29 +424,29 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movl 8(%esp), %eax
 	leal (%eax,%ecx,2), %esi
 	movl %edx, %eax
-	jmp .LBB35_57
-.LBB35_50:
+	jmp .LBB41_57
+.LBB41_50:
 	movl 12(%esp), %edx
 	leal (%edi,%edx,8), %eax
 	subl %edx, %eax
-.LBB35_54:
+.LBB41_54:
 	movl 16(%esp), %ebx
-	leal .Lanon.a00c3abf785d8e01d4f036d98a3600d1.16@GOTOFF(%ebx), %edx
+	leal .Lanon.52bf38722a5bfecdfb3cf7aba91d383f.14@GOTOFF(%ebx), %edx
 	pushl %edx
 	pushl 208(%esp)
 	pushl %ecx
 	pushl %eax
 	calll core::slice::index::slice_index_fail@PLT
-.LBB35_51:
+.LBB41_51:
 	movl 4(%esp), %eax
 	movl 8(%esp), %ecx
 	leal (%ecx,%eax,8), %esi
 	subl %eax, %esi
 	movl 36(%esp), %eax
 	addl %ecx, %eax
-.LBB35_57:
+.LBB41_57:
 	movl 16(%esp), %ebx
-	leal .Lanon.a00c3abf785d8e01d4f036d98a3600d1.15@GOTOFF(%ebx), %ecx
+	leal .Lanon.52bf38722a5bfecdfb3cf7aba91d383f.13@GOTOFF(%ebx), %ecx
 	pushl %ecx
 	pushl 200(%esp)
 	pushl %eax

@@ -4,8 +4,8 @@ Experimental tooling for optimizing the filter kernels in
 `jix/src/codec/filter/{byte_shuffle,bit_shuffle}/kernels.rs` across platforms **without running
 benchmarks**. The objective is llvm-mca's steady-state throughput of each kernel's hot loops, on
 the targeted platforms. Byte-shuffle decode was optimized first and is frozen (`results/fearless`);
-encode followed (`--direction encode`, `results/encode-*`). The bit-shuffle passes are analyzed with
-`--direction bit-encode` / `bit-decode` (`results/bit-*`).
+encode followed (`--direction encode`, `results/encode-*`). The bit-shuffle bit transpose is analyzed
+with `--direction bit` (`results/bit-*`).
 
 ## Why a separate crate and not a `jix` example
 
@@ -38,7 +38,7 @@ about 2 seconds, with no linker or C compiler. Keep the `kernels.rs` files free 
 ```bash
 python jix/probe/analyze.py                         # decode, all platforms, results/baseline/
 python jix/probe/analyze.py --label my-variant      # results/my-variant/
-python jix/probe/analyze.py --direction bit-encode --label x --compare bit-encode-baseline
+python jix/probe/analyze.py --direction bit --label x --compare bit-fearless
 python jix/probe/analyze.py --platform x86_64-v3 --platform aarch64 --fn decode_4
 cd jix/probe && cargo asm --release --lib --target aarch64-unknown-linux-gnu   # list symbols
 ```
@@ -104,6 +104,8 @@ Caveats:
   are flagged `*`, and their real cost is higher.
 - Steady state of the hot loops only, by design. The per-call prologue and epilogue and the
   tails (`decode_impl_generic`, vector-loop remainders) are neither counted nor analyzed.
+- aarch64 stores with base-register writeback are split into a store and an `add` before
+  llvm-mca (see the bit-shuffle section).
 - Instructions with no scheduling info on a CPU are skipped and listed as warnings (none so far).
 
 ## Baseline (auto-vectorized kernels)
@@ -279,56 +281,95 @@ it, i686 itemsizes 2/4/8 stay scalar at the baseline's speed, geomean 3080 vs 82
 | aarch64 | neoverse-v2 | **288** | 9.75x | 242 | 241 | 306 | 386 |
 | aarch64-apple | apple-m1 | **297** | 12.86x | 249 | 266 | 339 | 344 |
 
-## Bit shuffle (`--direction bit-encode` / `bit-decode`)
+## Bit shuffle (`--direction bit`)
 
-`BitShuffleFilter` runs three passes: a byte shuffle (the byte-shuffle kernels above), a bit
-transpose of each 8-byte group (`trans_bit_byte` / `untrans_bit_byte`, 8x8 bit transpose with
-scatter or gather to the 8 bit planes), and an outer-axis swap (`trans_bitrow_eight` /
-`untrans_bitrow_eight`). These are in `bit_shuffle/kernels.rs`, with a runtime itemsize, so the
-`_2/_4/_8/_16` kernels are the same function evaluated at different `typesize` (same cost per byte
-today). The `*bitrow_eight` passes are `8 * typesize` `memcpy` calls of `N / 8` bytes each: no loop
-scales with the input, so they are only reported as informational, and their cost is libc's
-`memcpy` of the whole buffer.
+`BitShuffleFilter` used to run three passes: a byte shuffle, a bit transpose of each 8-byte group
+with a strided scatter / gather to the 8 bit planes (`trans_bit_byte` / `untrans_bit_byte`,
+auto-vectorized), and an outer-axis swap of `8 * itemsize` `memcpy` calls (`*bitrow_eight`).
+Their results, analyzed with the former `--direction bit-encode` / `bit-decode`, are kept in
+`results/bit-{encode,decode}-{baseline,fearless}` (`baseline`: `multiversion` x86 levels;
+`fearless`: the same code under fearless_simd `dispatch!`). Cycles per 4096 bytes of the bit
+pass (runtime itemsize, equal for all itemsizes):
 
-Baselines (`results/bit-{encode,decode}-baseline`, `multiversion` x86 levels), and the kernels with
-`multiversion` replaced by fearless_simd `dispatch!` (still auto-vectorized, the body is
-`*_bit_byte_impl`; `results/bit-{encode,decode}-fearless`). Cycles per 4096 bytes of the
-bit-transpose pass (equal for all itemsizes):
+| platform | cpu | encode baseline | encode fearless | decode baseline | decode fearless |
+|---|---|---:|---:|---:|---:|
+| x86_64-v2 | sandybridge | 6951 | 6951 | 4774 | 4774 |
+| x86_64-v2 | btver2 | 15045 | 15045 | 7990 | 7990 |
+| x86_64-v3 | skylake | 9732 | 9732 | 1829 | 1829 |
+| x86_64-v3 | alderlake | 6633 | 6633 | 1815 | 1815 |
+| x86_64-v3 | znver3 | 9102 | 9102 | 2527 | 2527 |
+| x86_64-v4 | icelake-server | 2579 | 2708 | 849 | 849 |
+| x86_64-v4 | sapphirerapids | 2806 | 3141 | 1030 | 1030 |
+| x86_64-v4 | znver4 | 2007 | 2085 | 1076 | 1076 |
+| i686 | skylake | 11736 | 11736 | 8540 | 8540 |
+| aarch64 | cortex-a72 | 12743 | 12743 | 5400 | 5400 |
+| aarch64 | neoverse-n1 | 11972 | 11972 | 6757 | 6757 |
+| aarch64 | neoverse-v2 | 5523 | 5523 | 3380 | 3380 |
+| aarch64-apple | apple-m1 | 6726 | 6726 | 3658 | 3658 |
 
-| platform | cpu | encode baseline | encode fearless | vs | decode baseline | decode fearless | vs |
+**Correction**: an earlier version of this section reported the fearless encode pass 5.3-7.7x
+faster on AVX-512, and a much cheaper decode pass on aarch64. Both were analyzer bugs, fixed since:
+- The asm/IR loop matching paired a vector loop with its scalar remainder loop (sibling loops of
+  the same shape were matched by size rank, and a vector loop can be smaller than its scalar
+  remainder in IR because of the latter's bounds checks, but larger in asm). Siblings are now
+  matched by vector share first. The scalar loop had been credited with the vector loop's trip
+  count.
+- llvm-mca serializes a loop behind an aarch64 store with base-register writeback
+  (`str q0, [x0], #16`): it issues an instruction when all its operands are ready, so the new
+  base register waits for the stored data. Real cores split stores into address and data
+  micro-ops. The analyzer now rewrites such stores as a plain store plus an `add` (5-7x on a
+  shift-bound loop; no effect on the byte-shuffle results).
+
+So the dispatch change was neutral, except 0.89-0.96x on AVX-512 (fearless_simd's Ice Lake level
+vs the `multiversion` v4 clone). The expensive part was the byte gather: LLVM vectorized the loop
+over groups with one 64-bit lane per group, building each vector with one `vpinsrb` / `ld1 {v.b}`
+per byte.
+
+### Current: two byte shuffles and a row transpose (`results/bit-fearless`)
+
+After the byte shuffle, a byte shuffle with itemsize 8 of each byte plane gives 8 rows per plane,
+row `k` holding byte `k` of every group. The bit planes are then a bit transpose of each column of
+8 bytes, *across* the rows: `transpose8x8_rows` is the recursive block-swap transpose applied to 8
+row values (`u64`, or fearless_simd `u64` vectors, byte-wise masks), 12 swaps of 6 ops per 8
+vectors. The rows are contiguous, so the loads and stores are plain vector ones, and the result
+is directly in the final `(B, 8, G)` layout: no scatter, no gather, no `memcpy` pass. The same
+code decodes (the transpose is self-inverse). Portable SIMD is used only in
+`transpose_bit_rows_simd` (plus the existing byte-shuffle kernels).
+
+Cycles per 4096 bytes, excluding the element-sized byte shuffle and the tails, common to both.
+Old: the bit pass alone (the `memcpy` pass is not counted); new: the per-plane byte shuffle
+(`encode_8` / `decode_8`) plus `transpose_bit_rows`:
+
+| platform | cpu | encode old | encode new | | decode old | decode new | |
 |---|---|---:|---:|---:|---:|---:|---:|
-| x86_64-v2 | sandybridge | 6951 | 6951 | 1.00x | 4774 | 4774 | 1.00x |
-| x86_64-v2 | btver2 | 15045 | 15045 | 1.00x | 7990 | 7990 | 1.00x |
-| x86_64-v3 | skylake | 9732 | 9732 | 1.00x | 1829 | 1829 | 1.00x |
-| x86_64-v3 | alderlake | 6633 | 6633 | 1.00x | 1815 | 1815 | 1.00x |
-| x86_64-v3 | znver3 | 9102 | 9102 | 1.00x | 2527 | 2527 | 1.00x |
-| x86_64-v4 | icelake-server | 2579 | **483** | 5.33x | 849 | 849 | 1.00x |
-| x86_64-v4 | sapphirerapids | 2806 | **363** | 7.74x | 1030 | 1030 | 1.00x |
-| x86_64-v4 | znver4 | 2007 | **357** | 5.63x | 1076 | 1076 | 1.00x |
-| i686 | skylake | 11736 | 11736 | 1.00x | 8540 | 8540 | 1.00x |
-| aarch64 | cortex-a72 | 12743 | 12743 | 1.00x | 809 | 809 | 1.00x |
-| aarch64 | neoverse-n1 | 11972 | 11972 | 1.00x | 725 | 725 | 1.00x |
-| aarch64 | neoverse-v2 | 5523 | 5523 | 1.00x | 365 | 365 | 1.00x |
-| aarch64-apple | apple-m1 | 6726 | 6726 | 1.00x | 1400 | 1400 | 1.00x |
+| x86_64-v2 | sandybridge | 6951 | 778 + 1154 = **1932** | 3.6x | 4774 | 1154 + 513 = **1667** | 2.9x |
+| x86_64-v2 | btver2 | 15045 | 2273 + 1717 = **3990** | 3.8x | 7990 | 1717 + 858 = **2575** | 3.1x |
+| x86_64-v3 | skylake | 9732 | 1155 + 386 = **1541** | 6.3x | 1829 | 386 + 770 = **1157** | 1.6x |
+| x86_64-v3 | alderlake | 6633 | 581 + 388 = **969** | 6.8x | 1815 | 388 + 405 = **793** | 2.3x |
+| x86_64-v3 | znver3 | 9102 | 580 + 291 = **871** | 10.5x | 2527 | 291 + 403 = **694** | 3.6x |
+| x86_64-v4 | icelake-server | 2708 | 193 + 225 = **418** | 6.5x | 849 | 225 + 193 = **418** | 2.0x |
+| x86_64-v4 | sapphirerapids | 3141 | 386 + 242 = **628** | 5.0x | 1030 | 242 + 386 = **628** | 1.6x |
+| x86_64-v4 | znver4 | 2085 | 194 + 209 = **403** | 5.2x | 1076 | 209 + 194 = **403** | 2.7x |
+| i686 | skylake | 11736 | 1026 + 903 = **1929** | 6.1x | 8540 | 903 + 771 = **1674** | 5.1x |
+| aarch64 | cortex-a72 | 12743 | 898 + 1385 = **2283** | 5.6x | 5400 | 1385 + 1236 = **2621** | 2.1x |
+| aarch64 | neoverse-n1 | 11972 | 864 + 1477 = **2342** | 5.1x | 6757 | 1477 + 753 = **2230** | 3.0x |
+| aarch64 | neoverse-v2 | 5523 | 306 + 664 = **969** | 5.7x | 3380 | 664 + 290 = **954** | 3.5x |
+| aarch64-apple | apple-m1 | 6726 | 339 + 776 = **1115** | 6.0x | 3658 | 776 + 260 = **1035** | 3.5x |
 
-Observations:
-- For scale: the frozen byte-shuffle kernels run at 150-1500 cycles per 4096 bytes. The encode bit
-  transpose is 2000-15000, the most expensive pass of the filter everywhere.
-- Encode: LLVM vectorizes the loop over groups (8-32 groups, 64-256 bytes per iteration), with
-  one 64-bit lane per group. It builds those vectors with a byte gather (`vpinsrb` / `ld1 {v.b}[i]`,
-  one instruction per input byte), then narrows the transposed lanes back to bytes for the 8
-  contiguous bit-plane stores.
-- Decode is 3-16x cheaper than encode (1.4x on x86-64-v2 and i686). LLVM handles only 2-16 groups
-  per iteration (16-128 bytes), and on x86 keeps most of the transpose in 64-bit scalar registers.
-- The dispatch change is a no-op for SSE4.2 and AVX2 (the fearless_simd levels enable the same
-  features as the `multiversion` clones), and on i686 and aarch64 (no multiversion there). On
-  AVX-512, fearless_simd's level is Ice Lake (VBMI, GFNI...), and LLVM uses `vpermt2b` for the
-  encode gather: 5-8x faster. The flip side: AVX-512 CPUs without VBMI (Skylake-X, Cascade Lake)
-  now take the AVX2 arm. On the `skylake-avx512` model, the pass goes from 2579 (v4 clone) to
-  9732 on encode (3.8x slower) and from 849 to 1829 on decode (2.2x slower).
-- Sensitivity (not adopted, as this step only swaps the dispatch): loading the encode group with
-  `src[..].try_into()` instead of 8 byte reads changes the vectorized loop completely. Geomean
-  speedup vs `bit-encode-fearless`: SSE4.2 1.1-1.2x, AVX2 2.4-2.7x, NEON 5-16x (Cortex-A72 806,
-  Neoverse V2 395, M1 1235), but AVX-512 0.3-0.5x and i686 0.9x. `array::from_fn` is 1.4-30x
-  worse everywhere.
-
+Findings:
+- Faster on every CPU, 3.6-10.5x (encode) and 1.6-5.1x (decode), before counting the removed
+  `memcpy` pass.
+- The transpose alone: 209-242 on AVX-512, 291-388 on AVX2, 664-1477 on NEON (72 bitwise ops per
+  8 vectors, ALU bound). The byte shuffle with itemsize 8 is now the larger half on x86-64 v3.
+- The vertical form halves the ALU work of the horizontal one (the existing 8x8 transpose on one
+  `u64` per group, 3 delta swaps of 6 ops per vector): prototyped, the horizontal in-place group
+  transpose cost 300-3900, portable SIMD or auto-vectorized.
+- Written with iterators (`for (s, m) in [...]`, `(0..8).filter(..)`), LLVM did not unroll the
+  swap loops and kept the rows on the stack; plain loops in an `#[inline(always)]` helper are fully
+  unrolled.
+- The loads use `load_array_ref` on a pointer cast instead of `from_slice`: adding a
+  `from_slice`-based prototype to the crate changed the inlining of the frozen byte-shuffle
+  kernels (length `unwrap` checks, `encode_2` on NEON 546 -> 962). With `load_array_ref`, the
+  byte-shuffle results reproduce exactly.
+- AVX-512 CPUs without VBMI (Skylake-X, Cascade Lake) take the AVX2 arm: on the `skylake-avx512`
+  model, 1541 (encode) and 1156 (decode), vs 2579 and 849 for the former v4 clone.

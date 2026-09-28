@@ -1,196 +1,104 @@
-//! Bit-shuffle kernels: the bit-level passes of [`super::BitShuffleFilter`] (the byte-shuffle
-//! pass is the byte-shuffle filter's own).
+//! Bit-shuffle kernels: the bit transpose of [`super::BitShuffleFilter`] (its other passes are
+//! byte shuffles).
 //!
 //! This file is intentionally self-contained (only `core`/`std` and `fearless_simd`) so that
 //! `jix/probe` can `#[path]`-include it and compile it for any target without pulling in the C
 //! dependencies of `jix` (zstd). Keep it that way.
 
-use fearless_simd::{dispatch, Level};
+use core::ops::{BitAnd, BitXor, Shl, Shr};
+use fearless_simd::{dispatch, Bytes, Level, Simd, SimdBase};
 
-/// Encode pass 2 - combined bit-transpose and scatter.
+/// Bit-transpose the 8 rows of `src` into the 8 rows of `dst`, column by column: bit `i` of
+/// `src` row `k` goes to bit `k` of `dst` row `i`. Both are 8 rows of `src.len() / 8` bytes.
 ///
-/// Reads input in `(B, G, 8)`-byte layout and writes output in `(8, B, G)`-byte
-/// layout, with a bit-level transpose applied in between.
-///
-/// **Indexing.**
-///
-/// * Input:  `src[b * N + g * 8 + k]` - byte-plane `b`, group `g`, byte-in-group `k`.
-/// * Output: `dst[i * B*G + b * G + g]` - bit-plane `i`, byte-plane `b`, group `g`,
-///   where the output stride between consecutive bit-planes is
-///   `bit_row_skip = B * G = typesize * n_per_plane`.
-///
-/// **What actually happens in one iteration.** For each `(b, g)` we pull the
-/// 8 consecutive input bytes `src[b*N + g*8 + 0..8]` into a `u64` via
-/// [`transpose8x8`]. These 8 bytes are the 8 consecutive elements
-/// `g*8 .. g*8+8` of byte-plane `b`. Viewed as an 8*8 bit matrix, rows index
-/// elements within the group and columns index bit-position within a byte.
-/// After [`transpose8x8`], rows index bit-position and columns index
-/// element-within-group, so output byte `k` now contains bit `k` of those 8
-/// elements - exactly what belongs in bit-plane `k` at position `(b, g)` of
-/// the bit-plane-major output.
-///
-/// Equivalent to `bshuf_trans_bit_byte_scal` from the reference C
-/// implementation on little-endian targets (the `u64` read + `TRANS_BIT_8X8`
-/// + strided scatter pattern).
-pub fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
-    dispatch!(Level::new(), _ => trans_bit_byte_impl(src, dst, n_full, typesize))
+/// Self-inverse, so it serves both directions of the filter.
+pub fn transpose_bit_rows(src: &[u8], dst: &mut [u8]) {
+    let done = dispatch!(Level::new(), simd => transpose_bit_rows_simd(simd, src, dst));
+    // Tail of the remaining columns, one at a time.
+    let g = src.len() / 8;
+    for j in done..g {
+        let mut r = [0u64; 8];
+        for (k, x) in r.iter_mut().enumerate() {
+            *x = src[k * g + j].into();
+        }
+        transpose8x8_rows(&mut r);
+        for (k, x) in r.iter().enumerate() {
+            dst[k * g + j] = *x as u8;
+        }
+    }
 }
 
-/// Body of [`trans_bit_byte`], compiled for each SIMD level (auto-vectorized).
+/// Main loop of [`transpose_bit_rows`]: transposes whole vectors of columns, and returns the
+/// number of columns transposed.
+///
+/// Optimized by static analysis of the generated asm (cargo-asm + llvm-mca, steady-state cycles
+/// of the main loop), for x86-64 SSE4.2 (Sandy Bridge, Jaguar), AVX2 (Skylake, Alder Lake, Zen 3)
+/// and AVX-512 (Ice Lake, Sapphire Rapids, Zen 4), i686 SSE2 (Skylake), and aarch64 NEON
+/// (Cortex-A72, Neoverse N1 / V2, Apple M1).
 #[inline(always)]
-pub fn trans_bit_byte_impl(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
-    let n_per_plane = n_full / 8;
-    let bit_row_skip = typesize * n_per_plane; // = B * G
-
-    for b in 0..typesize {
-        for g in 0..n_per_plane {
-            let src_off = b * n_full + g * 8;
-            let mut group = [0u8; 8];
-            // A slice copy (`try_into`) or `array::from_fn` changes the auto-vectorized code a lot
-            // (better or worse depending on the target), so this keeps the original per-byte form.
-            #[allow(clippy::manual_memcpy)]
-            for k in 0..8 {
-                group[k] = src[src_off + k];
-            }
-
-            // Bit-matrix transpose of the 8 bytes viewed as an 8*8 bit square.
-            let transposed = transpose8x8(group);
-
-            // Scatter: byte `k` of the transposed group goes to bit-plane `k`
-            // at position (byte-plane `b`, group `g`). The 8 writes land in
-            // 8 distant regions of the output, `bit_row_skip` bytes apart.
-            for k in 0..8 {
-                dst[k * bit_row_skip + b * n_per_plane + g] = transposed[k];
-            }
+pub fn transpose_bit_rows_simd<S: Simd>(simd: S, src: &[u8], dst: &mut [u8]) -> usize {
+    let g = src.len() / 8;
+    assert!(dst.len() >= 8 * g);
+    let lanes = S::u8s::LEN;
+    let (src, dst) = (src.as_ptr(), dst.as_mut_ptr());
+    for c in 0..g / lanes {
+        let j = c * lanes;
+        // SAFETY (all pointer accesses below): `k < 8` and `j + lanes <= g`, so each vector is in
+        // row `k` of `src` / `dst`. `S::u8s::Array` is `[u8; lanes]`, with alignment 1.
+        // Loading through `load_array_ref` rather than `from_slice` avoids a length `unwrap`
+        // that LLVM does not always fold away.
+        let mut r = [S::u64s::splat(simd, 0); 8];
+        for (k, x) in r.iter_mut().enumerate() {
+            *x = S::u8s::load_array_ref(simd, unsafe { &*src.add(k * g + j).cast() }).bitcast();
+        }
+        transpose8x8_rows(&mut r);
+        for (k, x) in r.iter().enumerate() {
+            x.bitcast::<S::u8s>()
+                .store_array(unsafe { &mut *dst.add(k * g + j).cast() });
         }
     }
+    g / lanes * lanes
 }
 
-/// Encode pass 3 - outer-axis swap.
+/// Bit-transpose 8 rows, byte-wise: in every byte position, bit `i` of row `k` goes to bit `k` of
+/// row `i`. A row is a `u64` or a vector of `u64`s, i.e. a run of bytes of one row.
 ///
-/// Swaps the `(8, B)` outer axes of an `(8, B, G)` byte array, keeping each
-/// length-`G` innermost run intact. No bits are permuted within a byte; this
-/// pass is pure data movement via `copy_from_slice` on length-`G` runs.
-///
-/// * Input:  `src[i * B*G + b * G + g]` - bit-plane `i`, byte-plane `b`, group `g`.
-/// * Output: `dst[b * 8*G + i * G + g]` - byte-plane `b`, bit-plane `i`, group `g`.
-///
-/// The final layout `(B, 8, G)` is the bitshuffle wire format: for each
-/// byte-plane (outermost), the 8 bit-planes in order, each a contiguous run
-/// of `G = N/8` bytes.
-///
-/// Equivalent to `bshuf_trans_bitrow_eight` in the reference, itself a
-/// specialization of `bshuf_trans_elem(lda=8, ldb=B, elem_size=G)`.
-///
-/// Its loops run `8 * typesize` `memcpy`s whatever the input length, so it needs no SIMD dispatch.
-pub fn trans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
-    let n_per_plane = n_full / 8;
-    for i in 0..8 {
-        for b in 0..typesize {
-            let src_off = i * typesize * n_per_plane + b * n_per_plane;
-            let dst_off = b * 8 * n_per_plane + i * n_per_plane;
-            dst[dst_off..dst_off + n_per_plane]
-                .copy_from_slice(&src[src_off..src_off + n_per_plane]);
-        }
-    }
-}
-
-/// Decode pass 1 - inverse of [`trans_bitrow_eight`].
-///
-/// `(B, 8, G) -> (8, B, G)` byte-level outer-axis swap. Pure data movement in
-/// length-`G` runs; reads and writes are just the encode-side roles flipped. No SIMD dispatch, as
-/// for [`trans_bitrow_eight`].
-pub fn untrans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
-    let n_per_plane = n_full / 8;
-    for b in 0..typesize {
-        for i in 0..8 {
-            let src_off = b * 8 * n_per_plane + i * n_per_plane;
-            let dst_off = i * typesize * n_per_plane + b * n_per_plane;
-            dst[dst_off..dst_off + n_per_plane]
-                .copy_from_slice(&src[src_off..src_off + n_per_plane]);
-        }
-    }
-}
-
-/// Decode pass 2 - inverse of [`trans_bit_byte`]; gather + bit-transpose.
-///
-/// `(8, B, G) -> (B, G, 8)` bytes. For each `(b, g)` we read 8 bytes, one from
-/// each of the 8 bit-plane regions of the input (`src[k * bit_row_skip + b * G + g]`
-/// for `k in 0..8`). These 8 bytes are the encode-pass-2 output for that
-/// `(b, g)`, in bit-transposed form. Applying [`transpose8x8`] again - which
-/// is self-inverse - restores the original element-major 8-byte group, which
-/// we then write contiguously at `dst[b * N + g * 8 .. b * N + g * 8 + 8]`.
-pub fn untrans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
-    dispatch!(Level::new(), _ => untrans_bit_byte_impl(src, dst, n_full, typesize))
-}
-
-/// Body of [`untrans_bit_byte`], compiled for each SIMD level (auto-vectorized).
+/// The classic recursive transpose (Hacker's Delight 7-3), across rows: swap the off-diagonal
+/// 4x4 blocks of every 8x8 bit matrix, then the 2x2 blocks within the 4x4s, then single bits.
+/// Swapping blocks of size `s` exchanges the bits in the upper half (mask `!m`) of each `2s`-bit
+/// group of row `k` with the bits in the lower half (mask `m`) of row `k + s`. Self-inverse.
 #[inline(always)]
-pub fn untrans_bit_byte_impl(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
-    let n_per_plane = n_full / 8;
-    let bit_row_skip = typesize * n_per_plane;
+pub fn transpose8x8_rows<T: Rows>(r: &mut [T; 8]) {
+    swap_blocks(r, 4, 0x0F0F_0F0F_0F0F_0F0F);
+    swap_blocks(r, 2, 0x3333_3333_3333_3333);
+    swap_blocks(r, 1, 0x5555_5555_5555_5555);
+}
 
-    for b in 0..typesize {
-        for g in 0..n_per_plane {
-            // Gather: one byte from each of 8 bit-plane regions.
-            let mut transposed = [0u8; 8];
-            for k in 0..8 {
-                transposed[k] = src[k * bit_row_skip + b * n_per_plane + g];
-            }
-
-            // Self-inverse bit transpose: applying it a second time recovers
-            // the original element-major 8-byte group.
-            let group = transpose8x8(transposed);
-
-            let dst_off = b * n_full + g * 8;
-            dst[dst_off..dst_off + 8].copy_from_slice(&group);
+#[inline(always)]
+fn swap_blocks<T: Rows>(r: &mut [T; 8], s: usize, m: u64) {
+    for k in 0..8 {
+        if k & s == 0 {
+            let t = ((r[k] >> s as u32) ^ r[k + s]) & m;
+            r[k + s] = r[k + s] ^ t;
+            r[k] = r[k] ^ (t << s as u32);
         }
     }
 }
 
-/// Transpose an 8*8 bit matrix packed into 8 bytes, using Warren's delta-swap
-/// (Hacker's Delight 7-3). Branchless, constant-time, self-inverse.
-///
-/// **Input/output convention (little-endian).** The 8 bytes are loaded as a
-/// `u64` with byte 0 at the least-significant position, and within each byte
-/// bit 0 is the LSB. We view this `u64` as an 8*8 bit matrix with
-/// **rows = byte index** and **columns = bit-within-byte**; the return value
-/// is the same `u64` with rows and columns swapped, written back as 8 bytes.
-///
-/// **Delta-swap structure.** The three stages swap progressively larger
-/// blocks across the anti-diagonal of the matrix, following the classic
-/// recursive 8*8 -> two 4*4s -> four 2*2s -> sixteen 1*1s decomposition:
-///
-/// | stage | delta | mask                     | what it swaps              |
-/// |-------|-------|--------------------------|----------------------------|
-/// | 1     | 7     | `0x00AA00AA00AA00AA`     | 1*1 blocks within 2*2s     |
-/// | 2     | 14    | `0x0000CCCC0000CCCC`     | 2*2 blocks within 4*4s     |
-/// | 3     | 28    | `0x00000000F0F0F0F0`     | 4*4 blocks within the 8*8  |
-///
-/// Each stage is the classic XOR-swap `t = (x ^ (x >> k)) & mask;
-/// x ^= t ^ (t << k)` which simultaneously exchanges bits at distance k
-/// wherever the mask is set. Applying the three stages in order performs the
-/// full 8*8 bit transpose; applying them a second time performs the inverse
-/// (and, since transpose is an involution, returns the original value).
-///
-/// Only little-endian targets are supported - a big-endian transpose would
-/// require a mirrored mask schedule. A compile-time assert enforces this.
-#[inline(always)]
-pub fn transpose8x8(x: [u8; 8]) -> [u8; 8] {
-    const _: () = const {
-        assert!(
-            cfg!(target_endian = "little"),
-            "Only little-endian is supported"
-        );
-    };
-
-    let mut x = u64::from_le_bytes(x);
-    let mut t;
-    t = (x ^ (x >> 7)) & 0x00AA_00AA_00AA_00AAu64;
-    x = x ^ t ^ (t << 7);
-    t = (x ^ (x >> 14)) & 0x0000_CCCC_0000_CCCCu64;
-    x = x ^ t ^ (t << 14);
-    t = (x ^ (x >> 28)) & 0x0000_0000_F0F0_F0F0u64;
-    x = x ^ t ^ (t << 28);
-    x.to_le_bytes()
+/// The operations [`transpose8x8_rows`] needs: `u64` and fearless_simd's `u64` vectors.
+pub trait Rows:
+    Copy
+    + Shr<u32, Output = Self>
+    + Shl<u32, Output = Self>
+    + BitXor<Output = Self>
+    + BitAnd<u64, Output = Self>
+{
+}
+impl<T> Rows for T where
+    T: Copy
+        + Shr<u32, Output = T>
+        + Shl<u32, Output = T>
+        + BitXor<Output = T>
+        + BitAnd<u64, Output = T>
+{
 }

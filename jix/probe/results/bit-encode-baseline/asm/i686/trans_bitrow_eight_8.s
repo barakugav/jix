@@ -5,15 +5,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	pushl %esi
 	subl $28, %esp
 	movl 68(%esp), %ecx
-	calll .L34$pb
-.L34$pb:
+	calll .L40$pb
+.L40$pb:
 	popl %eax
-.Ltmp3360:
-	addl $_GLOBAL_OFFSET_TABLE_+(.Ltmp3360-.L34$pb), %eax
+.Ltmp3998:
+	addl $_GLOBAL_OFFSET_TABLE_+(.Ltmp3998-.L40$pb), %eax
 	movl %eax, 8(%esp)
 	testl %ecx, %ecx
 	movl %ecx, 24(%esp)
-	je .LBB34_49
+	je .LBB40_49
 	movl 64(%esp), %edx
 	xorl %ebp, %ebp
 	xorl %esi, %esi
@@ -22,17 +22,17 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	movl %edx, 16(%esp)
 	movl %eax, 12(%esp)
 	movl 68(%esp), %eax
-.LBB34_2:
+.LBB40_2:
 	movl %edx, %edi
 	addl %esi, %edi
-	jb .LBB34_51
+	jb .LBB40_51
 	cmpl 60(%esp), %edi
-	ja .LBB34_51
+	ja .LBB40_51
 	movl %edx, %edi
 	addl %ebp, %edi
-	jb .LBB34_52
+	jb .LBB40_52
 	cmpl 52(%esp), %edi
-	ja .LBB34_52
+	ja .LBB40_52
 	movl %eax, (%esp)
 	movl 56(%esp), %eax
 	addl 48(%esp), %ebp
@@ -49,7 +49,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addl 12(%esp), %esi
 	decl %eax
 	movl %edi, %ebp
-	jne .LBB34_2
+	jne .LBB40_2
 	movl 68(%esp), %esi
 	movl 56(%esp), %eax
 	leal (%edx,%edx), %ecx
@@ -61,19 +61,19 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	imull %edx, %ebp
 	imull %edx, %ecx
 	movl %eax, 20(%esp)
-.LBB34_8:
+.LBB40_8:
 	movl 4(%esp), %eax
 	movl %esi, %ebx
 	leal (%edx,%edi), %esi
 	addl %edi, %eax
 	cmpl %esi, %eax
-	jb .LBB34_50
+	jb .LBB40_50
 	cmpl 60(%esp), %eax
-	ja .LBB34_50
+	ja .LBB40_50
 	cmpl %ebp, %ecx
-	jb .LBB34_53
+	jb .LBB40_53
 	cmpl 52(%esp), %ecx
-	ja .LBB34_53
+	ja .LBB40_53
 	movl %ecx, (%esp)
 	movl 48(%esp), %ecx
 	movl 20(%esp), %eax
@@ -93,7 +93,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addl %edx, %ebp
 	addl %edx, %ecx
 	decl %esi
-	jne .LBB34_8
+	jne .LBB40_8
 	movl 68(%esp), %esi
 	leal (%edx,%edx,2), %edi
 	movl %esi, %eax
@@ -104,15 +104,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	leal (%eax,%eax), %ebp
 	movl %esi, %eax
 	movl 4(%esp), %esi
-.LBB34_14:
+.LBB40_14:
 	cmpl %esi, %edi
-	jb .LBB34_51
+	jb .LBB40_51
 	cmpl 60(%esp), %edi
-	ja .LBB34_51
+	ja .LBB40_51
 	cmpl %ebp, %ecx
-	jb .LBB34_53
+	jb .LBB40_53
 	cmpl 52(%esp), %ecx
-	ja .LBB34_53
+	ja .LBB40_53
 	movl %eax, 4(%esp)
 	movl 56(%esp), %eax
 	movl %ecx, (%esp)
@@ -135,7 +135,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addl %eax, %edi
 	movl 4(%esp), %eax
 	decl %eax
-	jne .LBB34_14
+	jne .LBB40_14
 	movl 68(%esp), %eax
 	leal (%edx,%edx,2), %esi
 	leal (,%edx,4), %edi
@@ -143,15 +143,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	leal 1(%eax,%eax,2), %ecx
 	imull %edx, %ebp
 	imull %edx, %ecx
-.LBB34_20:
+.LBB40_20:
 	cmpl %esi, %edi
-	jb .LBB34_51
+	jb .LBB40_51
 	cmpl 60(%esp), %edi
-	ja .LBB34_51
+	ja .LBB40_51
 	cmpl %ebp, %ecx
-	jb .LBB34_53
+	jb .LBB40_53
 	cmpl 52(%esp), %ecx
-	ja .LBB34_53
+	ja .LBB40_53
 	movl %eax, 4(%esp)
 	movl 56(%esp), %eax
 	movl %ecx, (%esp)
@@ -174,7 +174,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addl %eax, %edi
 	movl 4(%esp), %eax
 	decl %eax
-	jne .LBB34_20
+	jne .LBB40_20
 	movl 68(%esp), %eax
 	movl 20(%esp), %ebp
 	leal (,%edx,4), %esi
@@ -182,15 +182,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	leal 1(,%eax,4), %ecx
 	shll $2, %ebp
 	imull %edx, %ecx
-.LBB34_26:
+.LBB40_26:
 	cmpl %esi, %edi
-	jb .LBB34_51
+	jb .LBB40_51
 	cmpl 60(%esp), %edi
-	ja .LBB34_51
+	ja .LBB40_51
 	cmpl %ebp, %ecx
-	jb .LBB34_53
+	jb .LBB40_53
 	cmpl 52(%esp), %ecx
-	ja .LBB34_53
+	ja .LBB40_53
 	movl %eax, 4(%esp)
 	movl 56(%esp), %eax
 	movl %ecx, (%esp)
@@ -213,7 +213,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addl %eax, %edi
 	movl 4(%esp), %eax
 	decl %eax
-	jne .LBB34_26
+	jne .LBB40_26
 	movl 68(%esp), %eax
 	leal (%edx,%edx), %ecx
 	leal (%edx,%edx,4), %esi
@@ -223,15 +223,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	leal 1(%eax,%eax,4), %ecx
 	imull %edx, %ebp
 	imull %edx, %ecx
-.LBB34_32:
+.LBB40_32:
 	cmpl %esi, %edi
-	jb .LBB34_51
+	jb .LBB40_51
 	cmpl 60(%esp), %edi
-	ja .LBB34_51
+	ja .LBB40_51
 	cmpl %ebp, %ecx
-	jb .LBB34_53
+	jb .LBB40_53
 	cmpl 52(%esp), %ecx
-	ja .LBB34_53
+	ja .LBB40_53
 	movl %eax, 4(%esp)
 	movl 56(%esp), %eax
 	movl %ecx, (%esp)
@@ -254,7 +254,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addl %eax, %edi
 	movl 4(%esp), %eax
 	decl %eax
-	jne .LBB34_32
+	jne .LBB40_32
 	movl 68(%esp), %ebx
 	movl 20(%esp), %esi
 	movl 12(%esp), %edi
@@ -266,15 +266,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	imull %edx, %eax
 	imull %edx, %ebp
 	movl %eax, %ecx
-.LBB34_38:
+.LBB40_38:
 	cmpl %esi, %edi
-	jb .LBB34_51
+	jb .LBB40_51
 	cmpl 60(%esp), %edi
-	ja .LBB34_51
+	ja .LBB40_51
 	cmpl %ebp, %ecx
-	jb .LBB34_53
+	jb .LBB40_53
 	cmpl 52(%esp), %ecx
-	ja .LBB34_53
+	ja .LBB40_53
 	movl %ecx, (%esp)
 	movl 48(%esp), %ecx
 	movl 56(%esp), %eax
@@ -297,7 +297,7 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addl %eax, %esi
 	addl %eax, %edi
 	decl %ebx
-	jne .LBB34_38
+	jne .LBB40_38
 	movl 68(%esp), %eax
 	movl 12(%esp), %edi
 	leal (,%eax,8), %ecx
@@ -308,15 +308,15 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	incl %ecx
 	imull %edx, %ebp
 	imull %edx, %ecx
-.LBB34_44:
+.LBB40_44:
 	cmpl %esi, %edi
-	jb .LBB34_51
+	jb .LBB40_51
 	cmpl 60(%esp), %edi
-	ja .LBB34_51
+	ja .LBB40_51
 	cmpl %ebp, %ecx
-	jb .LBB34_53
+	jb .LBB40_53
 	cmpl 52(%esp), %ecx
-	ja .LBB34_53
+	ja .LBB40_53
 	movl %ecx, (%esp)
 	movl 48(%esp), %ecx
 	movl 56(%esp), %eax
@@ -337,30 +337,30 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	addl %eax, %esi
 	addl %eax, %edi
 	decl 24(%esp)
-	jne .LBB34_44
-.LBB34_49:
+	jne .LBB40_44
+.LBB40_49:
 	addl $28, %esp
 	popl %esi
 	popl %edi
 	popl %ebx
 	popl %ebp
 	retl
-.LBB34_52:
+.LBB40_52:
 	addl %ebp, %edx
 	movl %edx, %ecx
-.LBB34_53:
+.LBB40_53:
 	movl 8(%esp), %ebx
-	leal .Lanon.a00c3abf785d8e01d4f036d98a3600d1.13@GOTOFF(%ebx), %eax
+	leal .Lanon.52bf38722a5bfecdfb3cf7aba91d383f.9@GOTOFF(%ebx), %eax
 	pushl %eax
 	pushl 56(%esp)
 	pushl %ecx
 	pushl %ebp
 	calll core::slice::index::slice_index_fail@PLT
-.LBB34_50:
+.LBB40_50:
 	leal (%edi,%edx,2), %edi
-.LBB34_51:
+.LBB40_51:
 	movl 8(%esp), %ebx
-	leal .Lanon.a00c3abf785d8e01d4f036d98a3600d1.14@GOTOFF(%ebx), %eax
+	leal .Lanon.52bf38722a5bfecdfb3cf7aba91d383f.10@GOTOFF(%ebx), %eax
 	pushl %eax
 	pushl 64(%esp)
 	pushl %edi

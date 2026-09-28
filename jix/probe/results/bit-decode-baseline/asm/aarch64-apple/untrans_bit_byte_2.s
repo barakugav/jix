@@ -1,5 +1,5 @@
-jix_probe::bit_shuffle::untrans_bit_byte:
-Lfunc_begin1:
+_probe_bit_shuffle_untrans_bit_byte:
+Lfunc_begin9:
 	sub sp, sp, #352
 	stp d13, d12, [sp, #208]
 	stp d11, d10, [sp, #224]
@@ -13,9 +13,9 @@ Lfunc_begin1:
 	add x29, sp, #336
 	stur x3, [x29, #-144]
 	str x5, [sp, #64]
-	cbz x5, LBB1_19
+	cbz x5, LBB9_19
 	lsr x10, x4, #3
-	cbz x10, LBB1_19
+	cbz x10, LBB9_19
 	str xzr, [sp, #168]
 	mov x12, #0
 	mov x15, #0
@@ -75,7 +75,7 @@ Lfunc_begin1:
 	str x16, [sp, #128]
 	str x5, [sp, #48]
 	str x4, [sp, #8]
-LBB1_3:
+LBB9_3:
 	mov x11, #0
 	ldr x14, [sp, #56]
 	cmp x13, x14
@@ -162,7 +162,7 @@ LBB1_3:
 	csel x13, x9, x8, lo
 	cmp x13, #16
 	mov x4, x2
-	b.lo LBB1_6
+	b.lo LBB9_6
 	mov x8, #0
 	ldr x9, [sp, #152]
 	ldp x11, x15, [sp, #72]
@@ -206,7 +206,7 @@ LBB1_3:
 	sub x9, x9, x13
 	add x9, x9, #1
 	mov x2, x4
-LBB1_5:
+LBB9_5:
 	ldr q17, [x27, x8]
 	ushll.8h v16, v17, #0
 	ushll.4s v18, v16, #0
@@ -558,44 +558,44 @@ LBB1_5:
 	stp q31, q25, [x2], #128
 	add x8, x8, #16
 	cmp x9, x8
-	b.ne LBB1_5
-LBB1_6:
+	b.ne LBB9_5
+LBB9_6:
 	ldur x8, [x29, #-152]
 	add x8, x8, #1
 	stur x8, [x29, #-152]
 	ldur x8, [x29, #-160]
 	add x8, x8, x11, lsl #3
-LBB1_7:
+LBB9_7:
 	add x9, x12, x11
 	cmp x9, x1
-	b.hs LBB1_21
+	b.hs LBB9_21
 	add x9, x5, x11
 	cmp x9, x1
-	b.hs LBB1_21
+	b.hs LBB9_21
 	add x9, x17, x11
 	cmp x9, x1
-	b.hs LBB1_21
+	b.hs LBB9_21
 	add x9, x6, x11
 	cmp x9, x1
-	b.hs LBB1_21
+	b.hs LBB9_21
 	add x9, x19, x11
 	cmp x9, x1
-	b.hs LBB1_21
+	b.hs LBB9_21
 	add x9, x20, x11
 	cmp x9, x1
-	b.hs LBB1_21
+	b.hs LBB9_21
 	add x9, x26, x11
 	cmp x9, x1
-	b.hs LBB1_21
+	b.hs LBB9_21
 	add x9, x3, x11
 	cmp x9, x1
-	b.hs LBB1_21
+	b.hs LBB9_21
 	add x9, x8, #8
 	cmn x8, #9
-	b.hi LBB1_20
+	b.hi LBB9_20
 	ldur x13, [x29, #-144]
 	cmp x9, x13
-	b.hi LBB1_20
+	b.hi LBB9_20
 	ldrb w9, [x0, x11]
 	ldrb w13, [x21, x11]
 	ldrb w15, [x23, x11]
@@ -634,7 +634,7 @@ LBB1_7:
 	add x11, x11, #1
 	add x8, x8, #8
 	cmp x10, x11
-	b.ne LBB1_7
+	b.ne LBB9_7
 	mov x2, x4
 	ldr x4, [sp, #8]
 	ldr x13, [sp, #120]
@@ -679,8 +679,8 @@ LBB1_7:
 	ldr x8, [sp, #64]
 	ldur x15, [x29, #-152]
 	cmp x15, x8
-	b.ne LBB1_3
-LBB1_19:
+	b.ne LBB9_3
+LBB9_19:
 	ldp x29, x30, [sp, #336]
 	ldp x20, x19, [sp, #320]
 	ldp x22, x21, [sp, #304]
@@ -692,19 +692,19 @@ LBB1_19:
 	ldp d13, d12, [sp, #208]
 	add sp, sp, #352
 	ret
-LBB1_20:
-Lloh20:
-	adrp x3, l_anon.86fcf0a1111718708cdca7b99afbb18a.7@PAGE
-Lloh21:
-	add x3, x3, l_anon.86fcf0a1111718708cdca7b99afbb18a.7@PAGEOFF
+LBB9_20:
+Lloh94:
+	adrp x3, l_anon.2649d3bd1fda821ec307976ec34fb359.11@PAGE
+Lloh95:
+	add x3, x3, l_anon.2649d3bd1fda821ec307976ec34fb359.11@PAGEOFF
 	mov x0, x8
 	mov x1, x9
 	ldur x2, [x29, #-144]
 	bl core::slice::index::slice_index_fail
-LBB1_21:
-Lloh22:
-	adrp x2, l_anon.86fcf0a1111718708cdca7b99afbb18a.8@PAGE
-Lloh23:
-	add x2, x2, l_anon.86fcf0a1111718708cdca7b99afbb18a.8@PAGEOFF
+LBB9_21:
+Lloh96:
+	adrp x2, l_anon.2649d3bd1fda821ec307976ec34fb359.12@PAGE
+Lloh97:
+	add x2, x2, l_anon.2649d3bd1fda821ec307976ec34fb359.12@PAGEOFF
 	mov x0, x9
 	bl core::panicking::panic_bounds_check

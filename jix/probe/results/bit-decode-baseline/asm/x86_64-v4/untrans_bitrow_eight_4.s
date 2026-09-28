@@ -12,7 +12,7 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq %rdi, 88(%rsp)
 	movq %r9, 56(%rsp)
 	testq %r9, %r9
-	je .LBB15_35
+	je .LBB17_35
 	movq %r8, %rbx
 	shrq $3, %rbx
 	movq 56(%rsp), %rax
@@ -101,24 +101,24 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq %rax, %r14
 	xorl %ebp, %ebp
 	xorl %eax, %eax
-.LBB15_2:
+.LBB17_2:
 	movq %rax, %rsi
 	imulq %rbx, %rsi
 	addq %rbx, %rsi
 	movq %rbx, %r13
 	addq %rbp, %r13
-	jb .LBB15_53
+	jb .LBB17_53
 	cmpq 32(%rsp), %r13
-	ja .LBB15_53
+	ja .LBB17_53
 	leaq (,%rax,8), %rcx
 	movq %rcx, %rsi
 	imulq %rbx, %rsi
 	addq %rbx, %rsi
 	movq %rbx, %r15
 	addq 8(%rsp), %r15
-	jb .LBB15_55
+	jb .LBB17_55
 	cmpq 24(%rsp), %r15
-	ja .LBB15_55
+	ja .LBB17_55
 	movq %rcx, 48(%rsp)
 	movq %rax, 40(%rsp)
 	movq 328(%rsp), %rax
@@ -133,17 +133,17 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 320(%rsp), %rax
 	addq %rbp, %rax
 	cmpq %rdi, %rax
-	jb .LBB15_36
+	jb .LBB17_36
 	cmpq 32(%rsp), %rax
-	ja .LBB15_36
+	ja .LBB17_36
 	movq %r14, 336(%rsp)
 	movq 8(%rsp), %rax
 	movq 312(%rsp), %rcx
 	leaq (%rcx,%rax), %r14
 	cmpq %r15, %r14
-	jb .LBB15_37
+	jb .LBB17_37
 	cmpq 24(%rsp), %r14
-	ja .LBB15_37
+	ja .LBB17_37
 	movq 288(%rsp), %rax
 	leaq (%rax,%rbp,8), %rsi
 	addq 16(%rsp), %r12
@@ -155,16 +155,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 304(%rsp), %rax
 	addq %rbp, %rax
 	cmpq %rcx, %rax
-	jb .LBB15_38
+	jb .LBB17_38
 	cmpq 32(%rsp), %rax
-	ja .LBB15_38
+	ja .LBB17_38
 	movq 8(%rsp), %rax
 	movq 80(%rsp), %rcx
 	leaq (%rcx,%rax), %r15
 	cmpq %r14, %r15
-	jb .LBB15_39
+	jb .LBB17_39
 	cmpq 24(%rsp), %r15
-	ja .LBB15_39
+	ja .LBB17_39
 	movq 272(%rsp), %rax
 	leaq (%rax,%rbp,8), %rsi
 	addq 16(%rsp), %r12
@@ -177,16 +177,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 280(%rsp), %rax
 	addq %rbp, %rax
 	cmpq %rdi, %rax
-	jb .LBB15_40
+	jb .LBB17_40
 	cmpq 32(%rsp), %rax
-	ja .LBB15_40
+	ja .LBB17_40
 	movq 8(%rsp), %rax
 	movq 264(%rsp), %rcx
 	leaq (%rcx,%rax), %r14
 	cmpq %r15, %r14
-	jb .LBB15_41
+	jb .LBB17_41
 	cmpq 24(%rsp), %r14
-	ja .LBB15_41
+	ja .LBB17_41
 	movq 240(%rsp), %rax
 	leaq (%rax,%rbp,8), %rsi
 	addq 16(%rsp), %r12
@@ -198,16 +198,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 256(%rsp), %rax
 	addq %rbp, %rax
 	cmpq %rcx, %rax
-	jb .LBB15_42
+	jb .LBB17_42
 	cmpq 32(%rsp), %rax
-	ja .LBB15_42
+	ja .LBB17_42
 	movq 8(%rsp), %rax
 	movq 232(%rsp), %rcx
 	leaq (%rcx,%rax), %r15
 	cmpq %r14, %r15
-	jb .LBB15_43
+	jb .LBB17_43
 	cmpq 24(%rsp), %r15
-	ja .LBB15_43
+	ja .LBB17_43
 	movq 208(%rsp), %rax
 	leaq (%rax,%rbp,8), %rsi
 	addq 16(%rsp), %r12
@@ -220,16 +220,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 224(%rsp), %rax
 	addq %rbp, %rax
 	cmpq %rdi, %rax
-	jb .LBB15_44
+	jb .LBB17_44
 	cmpq 32(%rsp), %rax
-	ja .LBB15_44
+	ja .LBB17_44
 	movq 8(%rsp), %rax
 	movq 200(%rsp), %rcx
 	leaq (%rcx,%rax), %r14
 	cmpq %r15, %r14
-	jb .LBB15_46
+	jb .LBB17_46
 	cmpq 24(%rsp), %r14
-	ja .LBB15_46
+	ja .LBB17_46
 	movq 176(%rsp), %rax
 	leaq (%rax,%rbp,8), %rsi
 	addq 16(%rsp), %r12
@@ -241,16 +241,16 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 192(%rsp), %rax
 	addq %rbp, %rax
 	cmpq %rcx, %rax
-	jb .LBB15_48
+	jb .LBB17_48
 	cmpq 32(%rsp), %rax
-	ja .LBB15_48
+	ja .LBB17_48
 	movq 168(%rsp), %rax
 	movq 8(%rsp), %rcx
 	leaq (%rax,%rcx), %r15
 	cmpq %r14, %r15
-	jb .LBB15_49
+	jb .LBB17_49
 	cmpq 24(%rsp), %r15
-	ja .LBB15_49
+	ja .LBB17_49
 	movq 144(%rsp), %rax
 	leaq (%rax,%rbp,8), %rsi
 	addq 16(%rsp), %r12
@@ -262,17 +262,17 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 160(%rsp), %rcx
 	leaq (%rcx,%rbp), %rsi
 	cmpq %rax, %rsi
-	jb .LBB15_50
+	jb .LBB17_50
 	cmpq 32(%rsp), %rsi
-	ja .LBB15_50
+	ja .LBB17_50
 	movq 64(%rsp), %rax
 	movq 8(%rsp), %rcx
 	leaq (%rax,%rcx), %r14
 	cmpq %r15, %r14
 	movq 336(%rsp), %r15
-	jb .LBB15_51
+	jb .LBB17_51
 	cmpq 24(%rsp), %r14
-	ja .LBB15_51
+	ja .LBB17_51
 	movq 136(%rsp), %rax
 	leaq (%rax,%rbp,8), %rsi
 	addq 16(%rsp), %r12
@@ -285,8 +285,8 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq %r13, %rbp
 	decq %r15
 	movq %r15, %r14
-	jne .LBB15_2
-.LBB15_35:
+	jne .LBB17_2
+.LBB17_35:
 	addq $344, %rsp
 	popq %rbx
 	popq %r12
@@ -295,30 +295,30 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	popq %r15
 	popq %rbp
 	retq
-.LBB15_53:
+.LBB17_53:
 	movq %rbp, %rdi
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.16(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.14(%rip), %rcx
 	movq 32(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_55:
+.LBB17_55:
 	movq 8(%rsp), %r15
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.15(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.13(%rip), %rcx
 	movq %r15, %rdi
 	movq 24(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_36:
+.LBB17_36:
 	movq 56(%rsp), %rsi
 	addq 40(%rsp), %rsi
 	imulq %rbx, %rsi
 	addq %rbx, %rsi
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.16(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.14(%rip), %rcx
 	movq 32(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_37:
+.LBB17_37:
 	movq 48(%rsp), %rsi
 	incq %rsi
-	jmp .LBB15_47
-.LBB15_38:
+	jmp .LBB17_47
+.LBB17_38:
 	movq 128(%rsp), %rsi
 	addq 40(%rsp), %rsi
 	imulq %rbx, %rsi
@@ -326,28 +326,28 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 16(%rsp), %rax
 	leaq (,%rax,2), %rdi
 	addq %rbp, %rdi
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.16(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.14(%rip), %rcx
 	movq 32(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_39:
+.LBB17_39:
 	movq 48(%rsp), %rsi
 	orq $2, %rsi
 	imulq %rbx, %rsi
 	addq %rbx, %rsi
 	movq 8(%rsp), %rax
 	leaq (%rax,%rbx,2), %r15
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.15(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.13(%rip), %rcx
 	movq %r15, %rdi
 	movq 24(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_40:
+.LBB17_40:
 	movq 120(%rsp), %rsi
-	jmp .LBB15_45
-.LBB15_41:
+	jmp .LBB17_45
+.LBB17_41:
 	movq 48(%rsp), %rsi
 	orq $3, %rsi
-	jmp .LBB15_47
-.LBB15_42:
+	jmp .LBB17_47
+.LBB17_42:
 	movq 112(%rsp), %rsi
 	addq 40(%rsp), %rsi
 	imulq %rbx, %rsi
@@ -355,40 +355,40 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 16(%rsp), %rax
 	leaq (,%rax,4), %rdi
 	addq %rbp, %rdi
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.16(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.14(%rip), %rcx
 	movq 32(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_43:
+.LBB17_43:
 	movq 48(%rsp), %rsi
 	orq $4, %rsi
 	imulq %rbx, %rsi
 	addq %rbx, %rsi
 	movq 8(%rsp), %rax
 	leaq (%rax,%rbx,4), %r15
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.15(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.13(%rip), %rcx
 	movq %r15, %rdi
 	movq 24(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_44:
+.LBB17_44:
 	movq 104(%rsp), %rsi
-.LBB15_45:
+.LBB17_45:
 	addq 40(%rsp), %rsi
 	imulq %r14, %rsi
 	addq %r14, %rsi
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.16(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.14(%rip), %rcx
 	movq 32(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_46:
+.LBB17_46:
 	movq 48(%rsp), %rsi
 	orq $5, %rsi
-.LBB15_47:
+.LBB17_47:
 	imulq %rbx, %rsi
 	addq %rbx, %rsi
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.15(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.13(%rip), %rcx
 	movq %r15, %rdi
 	movq 24(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_48:
+.LBB17_48:
 	movq 96(%rsp), %rsi
 	addq 40(%rsp), %rsi
 	imulq %rbx, %rsi
@@ -396,10 +396,10 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 72(%rsp), %rax
 	leaq (,%rax,2), %rdi
 	addq %rbp, %rdi
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.16(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.14(%rip), %rcx
 	movq 32(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_49:
+.LBB17_49:
 	movq 48(%rsp), %rsi
 	orq $6, %rsi
 	imulq %rbx, %rsi
@@ -407,25 +407,25 @@ jix_probe::bit_shuffle::untrans_bitrow_eight:
 	movq 8(%rsp), %rax
 	movq 80(%rsp), %rcx
 	leaq (%rax,%rcx,2), %r15
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.15(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.13(%rip), %rcx
 	movq %r15, %rdi
 	movq 24(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_50:
+.LBB17_50:
 	movq 16(%rsp), %rax
 	leaq (,%rax,8), %rdi
 	addq %rbp, %rdi
 	subq %rax, %rdi
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.16(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.14(%rip), %rcx
 	movq 32(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB15_51:
+.LBB17_51:
 	movq 8(%rsp), %rax
 	leaq (%rax,%rbx,8), %r15
 	subq %rbx, %r15
 	movq 64(%rsp), %rsi
 	addq %rax, %rsi
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.15(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.13(%rip), %rcx
 	movq %r15, %rdi
 	movq 24(%rsp), %rdx
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)

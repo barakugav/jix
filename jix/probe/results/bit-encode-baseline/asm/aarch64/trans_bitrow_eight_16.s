@@ -243,8 +243,8 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 	ret
 .LBB2_50:
 	add x28, x25, x27
-	adrp x3, .Lanon.5e183fe0a34aeb9c6619c58bb96c331f.10
-	add x3, x3, :lo12:.Lanon.5e183fe0a34aeb9c6619c58bb96c331f.10
+	adrp x3, .Lanon.bd4fc3f0c3cd03cd6429fc05320c1acf.6
+	add x3, x3, :lo12:.Lanon.bd4fc3f0c3cd03cd6429fc05320c1acf.6
 	mov x0, x27
 	mov x1, x28
 	mov x2, x19
@@ -252,8 +252,8 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 .LBB2_51:
 	add x26, x25, x23
 .LBB2_52:
-	adrp x3, .Lanon.5e183fe0a34aeb9c6619c58bb96c331f.9
-	add x3, x3, :lo12:.Lanon.5e183fe0a34aeb9c6619c58bb96c331f.9
+	adrp x3, .Lanon.bd4fc3f0c3cd03cd6429fc05320c1acf.5
+	add x3, x3, :lo12:.Lanon.bd4fc3f0c3cd03cd6429fc05320c1acf.5
 	mov x0, x23
 	mov x1, x26
 	mov x2, x20
@@ -261,8 +261,8 @@ jix_probe::bit_shuffle::trans_bitrow_eight:
 .LBB2_53:
 	add x28, x28, x25, lsl #1
 .LBB2_54:
-	adrp x3, .Lanon.5e183fe0a34aeb9c6619c58bb96c331f.10
-	add x3, x3, :lo12:.Lanon.5e183fe0a34aeb9c6619c58bb96c331f.10
+	adrp x3, .Lanon.bd4fc3f0c3cd03cd6429fc05320c1acf.6
+	add x3, x3, :lo12:.Lanon.bd4fc3f0c3cd03cd6429fc05320c1acf.6
 	mov x0, x27
 	mov x1, x28
 	mov x2, x19

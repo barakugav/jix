@@ -238,9 +238,9 @@ LBB2_48:
 LBB2_49:
 	add x28, x25, x26
 Lloh24:
-	adrp x3, l_anon.86fcf0a1111718708cdca7b99afbb18a.10@PAGE
+	adrp x3, l_anon.2649d3bd1fda821ec307976ec34fb359.6@PAGE
 Lloh25:
-	add x3, x3, l_anon.86fcf0a1111718708cdca7b99afbb18a.10@PAGEOFF
+	add x3, x3, l_anon.2649d3bd1fda821ec307976ec34fb359.6@PAGEOFF
 	mov x0, x26
 	mov x1, x28
 	mov x2, x19
@@ -249,9 +249,9 @@ LBB2_50:
 	add x27, x25, x21
 LBB2_51:
 Lloh26:
-	adrp x3, l_anon.86fcf0a1111718708cdca7b99afbb18a.9@PAGE
+	adrp x3, l_anon.2649d3bd1fda821ec307976ec34fb359.5@PAGE
 Lloh27:
-	add x3, x3, l_anon.86fcf0a1111718708cdca7b99afbb18a.9@PAGEOFF
+	add x3, x3, l_anon.2649d3bd1fda821ec307976ec34fb359.5@PAGEOFF
 	mov x0, x21
 	mov x1, x27
 	mov x2, x20
@@ -261,9 +261,9 @@ LBB2_52:
 	mov x26, x8
 LBB2_53:
 Lloh28:
-	adrp x3, l_anon.86fcf0a1111718708cdca7b99afbb18a.10@PAGE
+	adrp x3, l_anon.2649d3bd1fda821ec307976ec34fb359.6@PAGE
 Lloh29:
-	add x3, x3, l_anon.86fcf0a1111718708cdca7b99afbb18a.10@PAGEOFF
+	add x3, x3, l_anon.2649d3bd1fda821ec307976ec34fb359.6@PAGEOFF
 	mov x0, x26
 	mov x1, x28
 	mov x2, x19

@@ -1,4 +1,4 @@
-jix_probe::bit_shuffle::untrans_bit_byte:
+probe_bit_shuffle_untrans_bit_byte:
 	sub sp, sp, #352
 	stp d15, d14, [sp, #192]
 	stp d13, d12, [sp, #208]
@@ -12,9 +12,9 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	stp x20, x19, [sp, #336]
 	add x29, sp, #256
 	str x5, [sp, #72]
-	cbz x5, .LBB1_20
+	cbz x5, .LBB9_20
 	lsr x10, x4, #3
-	cbz x10, .LBB1_20
+	cbz x10, .LBB9_20
 	ldr x8, [sp, #72]
 	mov x14, x2
 	mov x24, xzr
@@ -74,7 +74,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	mov w15, #8
 	stp x4, x9, [sp, #24]
 	str q1, [sp]
-.LBB1_3:
+.LBB9_3:
 	mul x8, x10, x5
 	add x13, x3, #1
 	stp x15, x5, [sp, #120]
@@ -166,7 +166,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	csel x9, x17, x8, lo
 	mov x17, xzr
 	cmp x9, #16
-	b.lo .LBB1_7
+	b.lo .LBB9_7
 	ldur x13, [x29, #-88]
 	ldr x2, [sp, #80]
 	add x9, x9, #1
@@ -208,7 +208,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	sub x13, x13, x2
 	mov x2, x14
 	add x9, x13, #1
-.LBB1_5:
+.LBB9_5:
 	ldr q16, [x25, x8]
 	ldr q30, [x26, x8]
 	ushll v17.8h, v16.8b, #0
@@ -560,43 +560,43 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	stp q17, q16, [x2, #32]
 	eor v18.16b, v18.16b, v23.16b
 	stp q18, q1, [x2], #128
-	b.ne .LBB1_5
+	b.ne .LBB9_5
 	ldr q1, [sp]
-.LBB1_7:
+.LBB9_7:
 	ldur x2, [x29, #-120]
 	ldr x5, [sp, #128]
 	add x8, x2, x17, lsl #3
 	add x5, x5, #1
-.LBB1_8:
+.LBB9_8:
 	add x9, x12, x17
 	cmp x9, x1
-	b.hs .LBB1_22
+	b.hs .LBB9_22
 	add x9, x22, x17
 	cmp x9, x1
-	b.hs .LBB1_22
+	b.hs .LBB9_22
 	add x9, x18, x17
 	cmp x9, x1
-	b.hs .LBB1_22
+	b.hs .LBB9_22
 	add x9, x19, x17
 	cmp x9, x1
-	b.hs .LBB1_22
+	b.hs .LBB9_22
 	add x9, x7, x17
 	cmp x9, x1
-	b.hs .LBB1_22
+	b.hs .LBB9_22
 	add x9, x20, x17
 	cmp x9, x1
-	b.hs .LBB1_22
+	b.hs .LBB9_22
 	add x9, x6, x17
 	cmp x9, x1
-	b.hs .LBB1_22
+	b.hs .LBB9_22
 	add x9, x11, x17
 	cmp x9, x1
-	b.hs .LBB1_22
+	b.hs .LBB9_22
 	cmn x8, #9
 	add x9, x8, #8
-	b.hi .LBB1_21
+	b.hi .LBB9_21
 	cmp x9, x3
-	b.hi .LBB1_21
+	b.hi .LBB9_21
 	ldrb w9, [x27, x17]
 	ldrb w13, [x25, x17]
 	add x8, x8, #8
@@ -633,7 +633,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	eor x9, x13, x9
 	str x9, [x14, x17, lsl #3]
 	mov x17, x15
-	b.ne .LBB1_8
+	b.ne .LBB9_8
 	ldr x4, [sp, #24]
 	ldur x8, [x29, #-88]
 	add x22, x22, x10
@@ -673,8 +673,8 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	stur x8, [x29, #-104]
 	ldr x8, [sp, #72]
 	cmp x5, x8
-	b.ne .LBB1_3
-.LBB1_20:
+	b.ne .LBB9_3
+.LBB9_20:
 	ldp x20, x19, [sp, #336]
 	ldp x22, x21, [sp, #320]
 	ldp x24, x23, [sp, #304]
@@ -687,16 +687,16 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	ldp d15, d14, [sp, #192]
 	add sp, sp, #352
 	ret
-.LBB1_21:
-	adrp x10, .Lanon.5e183fe0a34aeb9c6619c58bb96c331f.7
-	add x10, x10, :lo12:.Lanon.5e183fe0a34aeb9c6619c58bb96c331f.7
+.LBB9_21:
+	adrp x10, .Lanon.bd4fc3f0c3cd03cd6429fc05320c1acf.11
+	add x10, x10, :lo12:.Lanon.bd4fc3f0c3cd03cd6429fc05320c1acf.11
 	mov x0, x8
 	mov x1, x9
 	mov x2, x3
 	mov x3, x10
 	bl core::slice::index::slice_index_fail
-.LBB1_22:
-	adrp x2, .Lanon.5e183fe0a34aeb9c6619c58bb96c331f.8
-	add x2, x2, :lo12:.Lanon.5e183fe0a34aeb9c6619c58bb96c331f.8
+.LBB9_22:
+	adrp x2, .Lanon.bd4fc3f0c3cd03cd6429fc05320c1acf.12
+	add x2, x2, :lo12:.Lanon.bd4fc3f0c3cd03cd6429fc05320c1acf.12
 	mov x0, x9
 	bl core::panicking::panic_bounds_check

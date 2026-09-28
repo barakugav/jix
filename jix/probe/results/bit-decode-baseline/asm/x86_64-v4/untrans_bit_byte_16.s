@@ -1,4 +1,4 @@
-jix_probe::bit_shuffle::untrans_bit_byte:
+probe_bit_shuffle_untrans_bit_byte:
 	pushq %rbp
 	pushq %r15
 	pushq %r14
@@ -15,24 +15,24 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	testq %r11, %r11
 	sete %cl
 	orb %al, %cl
-	jne .LBB13_19
+	jne .LBB23_19
 	movq 24(%rsp), %r12
 	vmovq %r12, %xmm0
 	vmovq %r11, %xmm3
 	vpmullq %xmm3, %xmm0, %xmm5
 	vpbroadcastq %xmm5, %ymm4
-	vpmullq .LCPI13_0(%rip), %ymm4, %ymm6
-	vpmullq .LCPI13_1(%rip), %ymm4, %ymm0
+	vpmullq .LCPI23_0(%rip), %ymm4, %ymm6
+	vpmullq .LCPI23_1(%rip), %ymm4, %ymm0
 	movq 16(%rsp), %rax
 	incq %rax
 	movq %rax, 160(%rsp)
-	vpmullq .LCPI13_2(%rip), %xmm4, %xmm1
+	vpmullq .LCPI23_2(%rip), %xmm4, %xmm1
 	vpbroadcastq %rsi, %zmm2
-	vpblendd $252, .LCPI13_3(%rip), %ymm3, %ymm3
+	vpblendd $252, .LCPI23_3(%rip), %ymm3, %ymm3
 	vmovq %xmm5, 152(%rsp)
-	vpmullq .LCPI13_4(%rip), %xmm4, %xmm4
+	vpmullq .LCPI23_4(%rip), %xmm4, %xmm4
 	vinserti32x4 $2, %xmm4, %zmm6, %zmm6
-	vmovdqa64 .LCPI13_5(%rip), %zmm4
+	vmovdqa64 .LCPI23_5(%rip), %zmm4
 	vpermi2q %zmm5, %zmm6, %zmm4
 	imulq %r11, %r12
 	leaq (,%r12,8), %rax
@@ -60,12 +60,12 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	movq %rcx, 128(%rsp)
 	leaq (%rdi,%rcx), %rax
 	movq %rax, 56(%rsp)
-	vmovdqa .LCPI13_6(%rip), %ymm5
-	vbroadcasti32x4 .LCPI13_8(%rip), %zmm6
-	vpbroadcastq .LCPI13_9(%rip), %zmm7
-	vpbroadcastq .LCPI13_10(%rip), %zmm8
-	vmovdqa64 .LCPI13_7(%rip), %zmm9
-	vpbroadcastq .LCPI13_11(%rip), %zmm10
+	vmovdqa .LCPI23_6(%rip), %ymm5
+	vbroadcasti32x4 .LCPI23_8(%rip), %zmm6
+	vpbroadcastq .LCPI23_9(%rip), %zmm7
+	vpbroadcastq .LCPI23_10(%rip), %zmm8
+	vmovdqa64 .LCPI23_7(%rip), %zmm9
+	vpbroadcastq .LCPI23_11(%rip), %zmm10
 	leaq (%rdi,%r12,2), %r9
 	leaq (%rdi,%r12), %r14
 	movq $-1, 40(%rsp)
@@ -77,7 +77,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	movl $8, %r10d
 	xorl %r15d, %r15d
 	movq %r8, 144(%rsp)
-.LBB13_3:
+.LBB23_3:
 	movq %r15, 8(%rsp)
 	movq 160(%rsp), %rbp
 	cmpq %rbp, %r10
@@ -139,7 +139,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	cmovbq %r8, %r10
 	movl $0, %r8d
 	cmpq $8, %r10
-	jb .LBB13_7
+	jb .LBB23_7
 	addq 40(%rsp), %rax
 	shrq $3, %rax
 	movq %rbp, %r15
@@ -163,7 +163,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	subq %rcx, %rax
 	incq %rax
 	xorl %r10d, %r10d
-.LBB13_5:
+.LBB23_5:
 	leaq (%rdi,%r10), %rcx
 	vpmovzxbq (%rdi,%r10), %zmm11
 	vpmovzxbq (%r12,%rcx), %zmm12
@@ -205,50 +205,50 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	vmovdqu64 %zmm13, (%rdx,%r10,8)
 	addq $8, %r10
 	cmpq %r10, %rax
-	jne .LBB13_5
+	jne .LBB23_5
 	movq 8(%rsp), %r15
-.LBB13_7:
+.LBB23_7:
 	incq %r15
 	movq %r15, 8(%rsp)
 	movq 48(%rsp), %rax
 	leaq (%rax,%r8,8), %rax
 	movabsq $47851476196393130, %r15
-.LBB13_8:
+.LBB23_8:
 	leaq (%r8,%r13), %r10
 	cmpq %rsi, %r10
-	jae .LBB13_21
+	jae .LBB23_21
 	leaq (%rbx,%r8), %r10
 	cmpq %rsi, %r10
-	jae .LBB13_21
+	jae .LBB23_21
 	movq 136(%rsp), %rcx
 	leaq (%rcx,%r8), %r10
 	cmpq %rsi, %r10
-	jae .LBB13_21
+	jae .LBB23_21
 	movq 128(%rsp), %rcx
 	leaq (%rcx,%r8), %r10
 	cmpq %rsi, %r10
-	jae .LBB13_21
+	jae .LBB23_21
 	movq 120(%rsp), %rcx
 	leaq (%rcx,%r8), %r10
 	cmpq %rsi, %r10
-	jae .LBB13_21
+	jae .LBB23_21
 	movq 112(%rsp), %rcx
 	leaq (%rcx,%r8), %r10
 	cmpq %rsi, %r10
-	jae .LBB13_21
+	jae .LBB23_21
 	movq 104(%rsp), %rcx
 	leaq (%rcx,%r8), %r10
 	cmpq %rsi, %r10
-	jae .LBB13_21
+	jae .LBB23_21
 	movq 96(%rsp), %rcx
 	leaq (%rcx,%r8), %r10
 	cmpq %rsi, %r10
-	jae .LBB13_21
+	jae .LBB23_21
 	cmpq $-9, %rax
-	ja .LBB13_20
+	ja .LBB23_20
 	leaq 8(%rax), %r10
 	cmpq 16(%rsp), %r10
-	ja .LBB13_20
+	ja .LBB23_20
 	movzbl (%rdi,%r8), %eax
 	movq 80(%rsp), %rcx
 	movzbl (%rcx,%r8), %ecx
@@ -304,7 +304,7 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	incq %r8
 	movq %r10, %rax
 	cmpq %r8, %r11
-	jne .LBB13_8
+	jne .LBB23_8
 	movq 144(%rsp), %r8
 	movq 176(%rsp), %r10
 	addq %r8, %r10
@@ -331,8 +331,8 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	addq %r11, %r13
 	movq 8(%rsp), %r15
 	cmpq 24(%rsp), %r15
-	jne .LBB13_3
-.LBB13_19:
+	jne .LBB23_3
+.LBB23_19:
 	addq $184, %rsp
 	popq %rbx
 	popq %r12
@@ -342,15 +342,15 @@ jix_probe::bit_shuffle::untrans_bit_byte:
 	popq %rbp
 	vzeroupper
 	retq
-.LBB13_20:
+.LBB23_20:
 	leaq 8(%rax), %rsi
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.11(%rip), %rcx
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.15(%rip), %rcx
 	movq %rax, %rdi
 	movq 16(%rsp), %rdx
 	vzeroupper
 	callq *core::slice::index::slice_index_fail@GOTPCREL(%rip)
-.LBB13_21:
-	leaq .Lanon.927cf18b8d3ae4b4a6a609b888a1827a.12(%rip), %rdx
+.LBB23_21:
+	leaq .Lanon.a4d27c521192673f4882b6c46f85c6f4.16(%rip), %rdx
 	movq %r10, %rdi
 	vzeroupper
 	callq *core::panicking::panic_bounds_check@GOTPCREL(%rip)

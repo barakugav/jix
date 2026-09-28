@@ -1,5 +1,5 @@
-jix_probe::bit_shuffle::trans_bit_byte:
-Lfunc_begin0:
+_probe_bit_shuffle_trans_bit_byte:
+Lfunc_begin8:
 	stp d15, d14, [sp, #-160]!
 	stp d13, d12, [sp, #16]
 	stp d11, d10, [sp, #32]
@@ -13,9 +13,9 @@ Lfunc_begin0:
 	add x29, sp, #144
 	sub sp, sp, #416
 	str x5, [sp, #288]
-	cbz x5, LBB0_26
+	cbz x5, LBB8_26
 	lsr x10, x4, #3
-	cbz x10, LBB0_26
+	cbz x10, LBB8_26
 	stp xzr, xzr, [x29, #-232]
 	mov x13, #0
 	mov x5, #0
@@ -84,40 +84,40 @@ Lfunc_begin0:
 	add x22, x2, x19
 	add x8, x0, #63
 	stur x8, [x29, #-248]
-Lloh0:
-	adrp x8, lCPI0_0@PAGE
-Lloh1:
-	ldr q22, [x8, lCPI0_0@PAGEOFF]
-Lloh2:
-	adrp x8, lCPI0_1@PAGE
-Lloh3:
-	ldr q23, [x8, lCPI0_1@PAGEOFF]
-Lloh4:
-	adrp x8, lCPI0_2@PAGE
-Lloh5:
-	ldr q24, [x8, lCPI0_2@PAGEOFF]
-Lloh6:
-	adrp x8, lCPI0_3@PAGE
-Lloh7:
-	ldr q25, [x8, lCPI0_3@PAGEOFF]
-Lloh8:
-	adrp x8, lCPI0_4@PAGE
-Lloh9:
-	ldr q26, [x8, lCPI0_4@PAGEOFF]
-Lloh10:
-	adrp x8, lCPI0_5@PAGE
-Lloh11:
-	ldr q27, [x8, lCPI0_5@PAGEOFF]
-Lloh12:
-	adrp x8, lCPI0_6@PAGE
-Lloh13:
-	ldr q28, [x8, lCPI0_6@PAGEOFF]
+Lloh74:
+	adrp x8, lCPI8_0@PAGE
+Lloh75:
+	ldr q22, [x8, lCPI8_0@PAGEOFF]
+Lloh76:
+	adrp x8, lCPI8_1@PAGE
+Lloh77:
+	ldr q23, [x8, lCPI8_1@PAGEOFF]
+Lloh78:
+	adrp x8, lCPI8_2@PAGE
+Lloh79:
+	ldr q24, [x8, lCPI8_2@PAGEOFF]
+Lloh80:
+	adrp x8, lCPI8_3@PAGE
+Lloh81:
+	ldr q25, [x8, lCPI8_3@PAGEOFF]
+Lloh82:
+	adrp x8, lCPI8_4@PAGE
+Lloh83:
+	ldr q26, [x8, lCPI8_4@PAGEOFF]
+Lloh84:
+	adrp x8, lCPI8_5@PAGE
+Lloh85:
+	ldr q27, [x8, lCPI8_5@PAGEOFF]
+Lloh86:
+	adrp x8, lCPI8_6@PAGE
+Lloh87:
+	ldr q28, [x8, lCPI8_6@PAGEOFF]
 	mov x17, #52428
 	movk x17, #52428, lsl #32
-Lloh14:
-	adrp x8, lCPI0_7@PAGE
-Lloh15:
-	ldr q29, [x8, lCPI0_7@PAGEOFF]
+Lloh88:
+	adrp x8, lCPI8_7@PAGE
+Lloh89:
+	ldr q29, [x8, lCPI8_7@PAGEOFF]
 	str x24, [sp, #248]
 	stur x24, [x29, #-256]
 	str x27, [sp, #240]
@@ -133,7 +133,7 @@ Lloh15:
 	stp q25, q24, [sp, #64]
 	stp q27, q26, [sp, #32]
 	stp q29, q28, [sp]
-LBB0_3:
+LBB8_3:
 	mov x4, #0
 	cmp x3, x19
 	csel x14, x3, x19, hi
@@ -234,7 +234,7 @@ LBB0_3:
 	ldr w15, [sp, #236]
 	orr w8, w8, w15
 	mov w5, #-252645136
-	tbnz w8, #0, LBB0_7
+	tbnz w8, #0, LBB8_7
 	mov x8, #0
 	add x9, x9, #1
 	ands x4, x9, #0xf
@@ -267,8 +267,8 @@ LBB0_3:
 	add x9, x9, #1
 	mov w15, #1
 	movk w15, #4096, lsl #16
-	adrp x24, lCPI0_8@PAGE
-LBB0_5:
+	adrp x24, lCPI8_8@PAGE
+LBB8_5:
 	sub x14, x27, #48
 	ldur b23, [x27, #-56]
 	ld1.b { v23 }[1], [x14]
@@ -865,7 +865,7 @@ LBB0_5:
 	ushr.2d v6, v29, #8
 	ushr.2d v5, v28, #8
 	ushr.2d v4, v27, #8
-	ldr q31, [x24, lCPI0_8@PAGEOFF]
+	ldr q31, [x24, lCPI8_8@PAGEOFF]
 	ushr.2d v19, v26, #16
 	ushr.2d v18, v25, #16
 	ushr.2d v17, v24, #16
@@ -949,7 +949,7 @@ LBB0_5:
 	add x8, x8, #16
 	add x27, x27, #128
 	cmp x9, x8
-	b.ne LBB0_5
+	b.ne LBB8_5
 	ldp q2, q1, [sp, #192]
 	ldp q4, q3, [sp, #160]
 	ldp q21, q5, [sp, #128]
@@ -957,39 +957,39 @@ LBB0_5:
 	ldp q25, q24, [sp, #64]
 	ldp q27, q26, [sp, #32]
 	ldp q29, q28, [sp]
-LBB0_7:
+LBB8_7:
 	ldur x8, [x29, #-216]
 	add x8, x8, #1
 	stur x8, [x29, #-216]
 	ldur x8, [x29, #-224]
 	add x8, x8, x4, lsl #3
-LBB0_8:
+LBB8_8:
 	cmp x8, x1
-	b.hs LBB0_29
+	b.hs LBB8_29
 	add x9, x8, #1
 	cmp x9, x1
-	b.hs LBB0_28
+	b.hs LBB8_28
 	add x9, x8, #2
 	cmp x9, x1
-	b.hs LBB0_28
+	b.hs LBB8_28
 	add x9, x8, #3
 	cmp x9, x1
-	b.hs LBB0_28
+	b.hs LBB8_28
 	add x9, x8, #4
 	cmp x9, x1
-	b.hs LBB0_28
+	b.hs LBB8_28
 	add x9, x8, #5
 	cmp x9, x1
-	b.hs LBB0_28
+	b.hs LBB8_28
 	add x9, x8, #6
 	cmp x9, x1
-	b.hs LBB0_28
+	b.hs LBB8_28
 	add x9, x8, #7
 	cmp x9, x1
-	b.hs LBB0_28
+	b.hs LBB8_28
 	add x9, x13, x4
 	cmp x9, x3
-	b.hs LBB0_27
+	b.hs LBB8_27
 	ldrb w9, [x0, x8]
 	add x14, x0, x8
 	ldrb w23, [x14, #1]
@@ -1031,44 +1031,44 @@ LBB0_8:
 	strb w14, [x2, x4]
 	add x9, x19, x4
 	cmp x9, x3
-	b.hs LBB0_27
+	b.hs LBB8_27
 	lsr x9, x14, #8
 	strb w9, [x22, x4]
 	add x9, x16, x4
 	cmp x9, x3
-	b.hs LBB0_27
+	b.hs LBB8_27
 	lsr x9, x14, #16
 	strb w9, [x21, x4]
 	ldur x9, [x29, #-160]
 	add x9, x9, x4
 	cmp x9, x3
-	b.hs LBB0_27
+	b.hs LBB8_27
 	lsr x9, x14, #24
 	strb w9, [x6, x4]
 	add x9, x7, x4
 	cmp x9, x3
-	b.hs LBB0_27
+	b.hs LBB8_27
 	lsr x9, x14, #32
 	strb w9, [x26, x4]
 	add x9, x20, x4
 	cmp x9, x3
-	b.hs LBB0_27
+	b.hs LBB8_27
 	lsr x9, x14, #40
 	strb w9, [x30, x4]
 	add x9, x11, x4
 	cmp x9, x3
-	b.hs LBB0_27
+	b.hs LBB8_27
 	lsr x9, x14, #48
 	strb w9, [x28, x4]
 	add x9, x12, x4
 	cmp x9, x3
-	b.hs LBB0_27
+	b.hs LBB8_27
 	lsr x9, x14, #56
 	strb w9, [x25, x4]
 	add x4, x4, #1
 	add x8, x8, #8
 	cmp x10, x4
-	b.ne LBB0_8
+	b.ne LBB8_8
 	add x19, x19, x10
 	ldur x8, [x29, #-240]
 	sub x8, x8, x10
@@ -1108,8 +1108,8 @@ LBB0_8:
 	stur x8, [x29, #-224]
 	ldr x8, [sp, #288]
 	cmp x5, x8
-	b.ne LBB0_3
-LBB0_26:
+	b.ne LBB8_3
+LBB8_26:
 	add sp, sp, #416
 	ldp x29, x30, [sp, #144]
 	ldp x20, x19, [sp, #128]
@@ -1122,20 +1122,20 @@ LBB0_26:
 	ldp d13, d12, [sp, #16]
 	ldp d15, d14, [sp], #160
 	ret
-LBB0_27:
-Lloh16:
-	adrp x2, l_anon.86fcf0a1111718708cdca7b99afbb18a.5@PAGE
-Lloh17:
-	add x2, x2, l_anon.86fcf0a1111718708cdca7b99afbb18a.5@PAGEOFF
+LBB8_27:
+Lloh90:
+	adrp x2, l_anon.2649d3bd1fda821ec307976ec34fb359.7@PAGE
+Lloh91:
+	add x2, x2, l_anon.2649d3bd1fda821ec307976ec34fb359.7@PAGEOFF
 	mov x0, x9
 	mov x1, x3
 	bl core::panicking::panic_bounds_check
-LBB0_28:
+LBB8_28:
 	mov x8, x9
-LBB0_29:
-Lloh18:
-	adrp x2, l_anon.86fcf0a1111718708cdca7b99afbb18a.6@PAGE
-Lloh19:
-	add x2, x2, l_anon.86fcf0a1111718708cdca7b99afbb18a.6@PAGEOFF
+LBB8_29:
+Lloh92:
+	adrp x2, l_anon.2649d3bd1fda821ec307976ec34fb359.8@PAGE
+Lloh93:
+	add x2, x2, l_anon.2649d3bd1fda821ec307976ec34fb359.8@PAGEOFF
 	mov x0, x8
 	bl core::panicking::panic_bounds_check
