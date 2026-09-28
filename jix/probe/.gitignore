@@ -1,3 +1,4 @@
 target
 results/*/mca
+results/*/asm
 Cargo.lock

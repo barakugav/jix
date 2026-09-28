@@ -34,7 +34,7 @@ Usage (from anywhere):
 Outputs, under jix/probe/results/<label>/:
     summary.md                      the tables
     summary.json                    same data, machine readable
-    asm/<platform>/<fn>.s           full function asm (cargo asm --simplify)
+    asm/<platform>/<fn>.s           full function asm (cargo asm --simplify, gitignored)
     mca/<platform>/<fn>.<cpu>.txt   full llvm-mca report (gitignored)
 
 Requirements: the pinned nightly (rust-toolchain.toml, with the llvm-tools component for `opt`),

@@ -47,7 +47,7 @@ cd jix/probe && cargo asm --release --lib --target aarch64-unknown-linux-gnu   #
 
 A full run takes about 20 seconds. Outputs go to `results/<label>/`:
 - `summary.md` / `summary.json`: the tables.
-- `asm/<platform>/<kernel>.s`: the full function asm. It is committed, so variants can be diffed.
+- `asm/<platform>/<kernel>.s`: the full function asm (gitignored, like `mca/`).
 - `mca/...`: the raw llvm-mca reports, with resource pressure and bottleneck analysis
   (gitignored).
 
@@ -446,7 +446,7 @@ Analyzer changes for this crate (the filter results reproduce exactly):
 - asm loops are natural loops (back edges to a dominating block, from a CFG of the asm), not
   just backward branches. On AVX-512, a jump from after the main vector loop back to the
   vector-epilogue setup laid out before it looked like a loop around both; and a rotated loop
-  entered in the middle must still be found. On all committed asm files, the loop trees are the
+  entered in the middle must still be found. On all the asm files then committed, the loop trees are the
   same as with backward branches, except for these two cases.
 - x86 vector registers are recognized in Intel syntax too.
 - The function's mangled name in the IR is found by demangling all `define`s with `c++filt`
