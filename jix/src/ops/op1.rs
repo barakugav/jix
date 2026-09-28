@@ -9,6 +9,18 @@ pub(crate) struct Op1<S, K> {
 pub(crate) trait Op1Kernel<T> {
     type Output;
     fn apply(&self, x: T) -> Self::Output;
+
+    /// [`apply`](Self::apply) on `N` elements, computing with `simd`'s vectors where the kernel
+    /// has a SIMD body for `T`.
+    #[inline(always)]
+    fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+        &self,
+        simd: S,
+        xs: [T; N],
+    ) -> [Self::Output; N] {
+        let _ = simd;
+        xs.map_inline(|x| self.apply(x))
+    }
 }
 impl<S, K> Op1<S, K> {
     pub(crate) fn new(array: S, kernel: K) -> Result<Self>
@@ -95,6 +107,24 @@ where
                     unsafe { std::mem::transmute_copy::<K::Output, T>(&x) }
                 })
             }
+
+            #[inline(always)]
+            unsafe fn read_bulk_simd<
+                S: fearless_simd::Simd,
+                const N: usize,
+                const CONTIGUOUS: bool,
+            >(
+                &self,
+                simd: S,
+                offset: usize,
+            ) -> [T; N] {
+                let xs = unsafe { self.inner.read_bulk_simd::<S, N, CONTIGUOUS>(simd, offset) };
+                let ys = self.kernel.apply_bulk(simd, xs);
+
+                const { assert!(size_of::<K::Output>() == size_of::<T>()) };
+                // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
+                unsafe { std::mem::transmute_copy::<[K::Output; N], [T; N]>(&ys) }
+            }
         }
 
         Ok(Op1Pipeline {
@@ -159,11 +189,12 @@ macro_rules! define_op1 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident,
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
+        $(simd = $simd:path,)?
     ) => {
         struct $Kernel;
         impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
         where
-            T: $($trait)::+,
+            T: $($trait)::+ + Copy + 'static,
         {
             type Output = <T as $($trait)::+>::Output;
 
@@ -171,6 +202,17 @@ macro_rules! define_op1 {
             fn apply(&self, x: T) -> Self::Output {
                 <T as $($trait)::+>::$kernel_fn(x)
             }
+
+            $(
+                #[inline(always)]
+                fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+                    &self,
+                    simd: S,
+                    xs: [T; N],
+                ) -> [Self::Output; N] {
+                    $simd(simd, xs, |x| self.apply(x))
+                }
+            )?
         }
         $(#[$meta])*
         pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
@@ -447,6 +489,7 @@ define_op1!(
     NegKernel,
     <core::ops::Neg>::neg,
     core_op = Neg::neg,
+    simd = crate::ops::simd_kernels::neg,
 );
 define_op1!(
     /// Rounds each element down to the nearest integer (towards -inf).

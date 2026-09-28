@@ -11,6 +11,23 @@ pub(crate) struct Op2<S1, S2, K> {
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
     fn apply(&self, a: T1, b: T2) -> Self::Output;
+
+    /// [`apply`](Self::apply) on `N` element pairs, computing with `simd`'s vectors where the
+    /// kernel has a SIMD body for `T1` and `T2`.
+    #[inline(always)]
+    fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+        &self,
+        simd: S,
+        a: [T1; N],
+        b: [T2; N],
+    ) -> [Self::Output; N]
+    where
+        T1: Copy,
+        T2: Copy,
+    {
+        let _ = simd;
+        array_from_fn_inline(|i| self.apply(a[i], b[i]))
+    }
 }
 impl<S1, S2, K> Op2<S1, S2, K> {
     pub(crate) fn new(a: S1, b: S2, kernel: K) -> Result<Self>
@@ -134,6 +151,25 @@ where
                     unsafe { std::mem::transmute_copy::<K::Output, T>(&x) }
                 })
             }
+
+            #[inline(always)]
+            unsafe fn read_bulk_simd<
+                S: fearless_simd::Simd,
+                const N: usize,
+                const CONTIGUOUS: bool,
+            >(
+                &self,
+                simd: S,
+                offset: usize,
+            ) -> [T; N] {
+                let a = unsafe { self.a.read_bulk_simd::<S, N, CONTIGUOUS>(simd, offset) };
+                let b = unsafe { self.b.read_bulk_simd::<S, N, CONTIGUOUS>(simd, offset) };
+                let ys = self.kernel.apply_bulk(simd, a, b);
+
+                const { assert!(size_of::<K::Output>() == size_of::<T>()) };
+                // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
+                unsafe { std::mem::transmute_copy::<[K::Output; N], [T; N]>(&ys) }
+            }
         }
 
         Ok(Op2Pipeline {
@@ -202,6 +238,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
+        $(simd = $simd:path,)?
     ) => {
         define_op2!(@kernel_dispatch
             $Kernel,
@@ -209,6 +246,7 @@ macro_rules! define_op2 {
             $kernel_fn,
             ($($call_args)*),
             type Output = <T1 as $($trait)::+<T2>>::Output,
+            $(simd = $simd,)?
         );
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
@@ -327,11 +365,13 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         ($a:ident, $b:ident),
         type Output = $output_type:ty,
+        $(simd = $simd:path,)?
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, ($a, $b),
             type Output = $output_type,
+            $(simd = $simd,)?
         );
     };
     (
@@ -341,11 +381,13 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         (&$a:ident, &$b:ident),
         type Output = $output_type:ty,
+        $(simd = $simd:path,)?
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, (&$a, &$b),
             type Output = $output_type,
+            $(simd = $simd,)?
         );
     };
 
@@ -356,17 +398,31 @@ macro_rules! define_op2 {
         $Kernel:ident, $($trait:ident)::+, $kernel_fn:ident,
         $a:ident, $b:ident, ($($call_args:tt)*),
         type Output = $output_type:ty,
+        $(simd = $simd:path,)?
     ) => {
         struct $Kernel;
         impl<T1, T2> crate::ops::op2::Op2Kernel<T1, T2> for $Kernel
         where
-            T1: $($trait)::+<T2>,
+            T1: $($trait)::+<T2> + Copy + 'static,
+            T2: Copy + 'static,
         {
             type Output = $output_type;
             #[inline(always)]
             fn apply(&self, $a: T1, $b: T2) -> Self::Output {
                 <T1 as $($trait)::+<T2>>::$kernel_fn($($call_args)*)
             }
+
+            $(
+                #[inline(always)]
+                fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+                    &self,
+                    simd: S,
+                    a: [T1; N],
+                    b: [T2; N],
+                ) -> [Self::Output; N] {
+                    $simd(simd, a, b, |a, b| self.apply(a, b))
+                }
+            )?
         }
     };
 
@@ -490,6 +546,7 @@ define_op2!(
     AddKernel,
     <core::ops::Add>::add(a, b),
     core_op = Add::add,
+    simd = crate::ops::simd_kernels::add,
 );
 define_op2!(
     /// Element-wise subtraction of two arrays (`a - b`).
@@ -518,6 +575,7 @@ define_op2!(
     SubKernel,
     <core::ops::Sub>::sub(a, b),
     core_op = Sub::sub,
+    simd = crate::ops::simd_kernels::sub,
 );
 define_op2!(
     /// Element-wise multiplication of two arrays.
@@ -546,6 +604,7 @@ define_op2!(
     MulKernel,
     <core::ops::Mul>::mul(a, b),
     core_op = Mul::mul,
+    simd = crate::ops::simd_kernels::mul,
 );
 
 define_op2!(

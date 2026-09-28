@@ -443,10 +443,71 @@ Findings:
 - f64 costs the same as f32 per byte everywhere except AVX-512 (fewer gathers).
 
 Analyzer changes for this crate (the filter results reproduce exactly):
-- A backward branch is a loop only if no branch from outside jumps into its body. On AVX-512,
-  a jump from after the main vector loop back to the vector-epilogue setup laid out before it
-  looked like a loop around both.
+- asm loops are natural loops (back edges to a dominating block, from a CFG of the asm), not
+  just backward branches. On AVX-512, a jump from after the main vector loop back to the
+  vector-epilogue setup laid out before it looked like a loop around both; and a rotated loop
+  entered in the middle must still be found. On all committed asm files, the loop trees are the
+  same as with backward branches, except for these two cases.
 - x86 vector registers are recognized in Intel syntax too.
 - The function's mangled name in the IR is found by demangling all `define`s with `c++filt`
   (binutils demangles Rust v0).
+
+### fearless_simd dispatch and SIMD kernels (`results/elementwise-fearless`)
+
+The design:
+- `inner_loop_contiguous` (the all-operands-contiguous variant only) runs its loop inside
+  `fearless_simd::dispatch!`, and reads through `ElementwisePipelineImpl::read_bulk_simd`, which
+  takes the level's token. Its default forwards to `read_bulk`; only `Op1Pipeline` and
+  `Op2Pipeline` override it, and pass the token to their kernel's new `apply_bulk(simd, xs)`. The
+  strided/staged variants are unchanged (no dispatch, `read_bulk`).
+- `apply_bulk` defaults to the scalar `apply` per element. `Neg`, `Add`, `Sub` and `Mul` get SIMD
+  bodies (`ops/simd_kernels.rs`) for f32, f64 and i32, selected by `TypeId` (resolved at compile
+  time), so the ops' bounds are unchanged and every other type keeps the scalar kernel.
+- Nodes still pass `[T; N]` arrays; the SIMD bodies load them into vectors and store the result
+  into an array. **Verified in the asm: along `(a + b) * c - d` the values stay in vector
+  registers**, e.g. AVX-512 `chain_f32`: per `zmm`, one `vmovups` load, `vaddps`, `vmulps`,
+  `vsubps` with memory operands, one `vmovups` store, no stack traffic; the same on AVX2 and NEON.
+
+How the rows map to what runs: the probe is compiled with each platform's features, which makes
+that level's `dispatch!` arm the one inlined into `inner_loop_contiguous` (higher levels stay
+separate `vectorize_*` functions). So x86_64-v2/v3/v4 are the Sse4_2/Avx2/Avx512 arms, aarch64
+the Neon arm, and x86_64/i686 (no features) the baseline `Sse2` arm, which only CPUs without
+SSE4.2 run. **A shipped x86-64 wheel now runs the v3/v4 rows on AVX2/AVX-512 CPUs**, instead of
+the SSE2 code of the baseline's `x86_64` row: e.g. Skylake 362 -> 166 (2.2x).
+
+| platform | cpu | geomean | vs baseline | neg_f32 | add_f32 | chain_f32 | neg_f64 | add_f64 | chain_f64 | neg_i32 | add_i32 | chain_i32 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| x86_64 (Sse2 arm) | sandybridge | **440** | 0.99x | 291 | 387 | 644 | 291 | 387 | 644 | 283 | 387 | 1074 |
+| x86_64 (Sse2 arm) | skylake | **362** | 1.00x | 259 | 261 | 517 | 259 | 261 | 517 | 259 | 260 | 1287 |
+| x86_64 (Sse2 arm) | znver3 | **405** | 0.99x | 260 | 387 | 644 | 260 | 387 | 644 | 260 | 387 | 694 |
+| x86_64-v2 | sandybridge | **416** | 1.00x | 291 | 387 | 644 | 291 | 387 | 644 | 283 | 387 | 644 |
+| x86_64-v2 | btver2 | **677** | 1.00x | 436 | 564 | 1076 | 436 | 564 | 1079 | 564 | 564 | 1348 |
+| x86_64-v3 | skylake | **166** | 1.01x | 132 | 132 | 263 | 132 | 132 | 263 | 132 | 132 | 263 |
+| x86_64-v3 | alderlake | **144** | 1.05x | 103 | 136 | 214 | 103 | 136 | 214 | 103 | 125 | 236 |
+| x86_64-v3 | znver3 | **203** | 1.00x | 132 | 195 | 324 | 132 | 195 | 324 | 132 | 195 | 323 |
+| x86_64-v4 | icelake-server | **91** | 12.32x | 55 | 77 | 198 | 55 | 77 | 198 | 55 | 76 | 150 |
+| x86_64-v4 | sapphirerapids | **75** | 40.95x | 52 | 63 | 119 | 52 | 63 | 119 | 52 | 63 | 150 |
+| x86_64-v4 | znver4 | **102** | 2.22x | 66 | 97 | 164 | 66 | 97 | 164 | 66 | 97 | 164 |
+| i686 (Sse2 arm) | skylake | **404** | 0.90x | 292 | 293 | 597 | 292 | 293 | 597 | 291 | 293 | 1286 |
+| aarch64 | cortex-a72 | **916** | 1.01x | 579 | 899 | 1667 | 579 | 899 | 1667 | 579 | 739 | 1411 |
+| aarch64 | neoverse-n1 | **878** | 1.00x | 610 | 834 | 1314 | 610 | 834 | 1314 | 642 | 770 | 1411 |
+| aarch64 | neoverse-v2 | **351** | 0.97x | 227 | 323 | 611 | 227 | 323 | 611 | 227 | 323 | 548 |
+| aarch64-apple | apple-m1 | **271** | 1.02x | 196 | 260 | 389 | 196 | 260 | 391 | 196 | 260 | 390 |
+
+Findings:
+- **AVX-512 fixed**: with the work in vector types, the loop vectorizer no longer re-vectorizes
+  the main loop with gathers: 12x (Ice Lake), 41x (Sapphire Rapids), 2.2x (Zen 4) over the
+  baseline's AVX-512 code, and now about 2x faster than AVX2 per byte, as expected.
+- SSE4.2, AVX2 and NEON: the same as the auto-vectorized code (0.97-1.05x), which was already
+  clean. Small losses on Neoverse V2 (`add`, `chain`: 0.9-0.95x, a different instruction order).
+- i686 `Sse2` arm 0.90x: with 8 `xmm` registers, the SIMD body's order (all loads, then the ops)
+  spills one vector per iteration. Only i686 CPUs without SSE4.2 run it.
+- The first version chained the per-type attempts with `Option::or_else`, which is not always
+  inlined: on the `Sse2` arm, the emulated i32 multiply stayed behind a call in the hot loop
+  (`chain_i32` 2-3x slower). Plain `if let ... return` fixed it.
+
+Analyzer changes: `len` reaches the loop through a stack slot (the dispatch closure captures it by
+reference and is passed to the non-inlined higher-level arms), and its IR argument can be
+unnamed (`%1`). `IrValues` resolves a `load` from `%len` (or from a slot stored once), and the
+kernel's last argument is bound whatever its name.
 

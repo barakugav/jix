@@ -134,6 +134,10 @@ PLATFORMS_ELEMENTWISE = [
 ]
 
 
+# Key of `Kernel.scev_env` binding the function's last argument, whatever its IR name.
+LAST_ARG = "$last_arg"
+
+
 @dataclass
 class Kernel:
     name: str
@@ -152,7 +156,8 @@ class Kernel:
     def scev_env(self, length: int) -> dict[str, int]:
         """Values of the function arguments, for an input of `length` bytes."""
         if self.elem_size is not None:
-            return {"%len": length // self.elem_size}
+            # `len`, the last argument, whose IR name can be lost (`%1`) to its stack slot's.
+            return {"%len": length // self.elem_size, LAST_ARG: length // self.elem_size}
         env = {"%src.1": length, "%dst.1": length, "%buf.1": length}
         if self.runtime_itemsize is not None:
             t = self.runtime_itemsize
@@ -177,11 +182,15 @@ KERNELS["bit"] = [
 
 
 def _elementwise_kernel(name: str, ty: str, pipeline: str) -> Kernel:
-    """The inner loop of the element-wise pipeline, for all operands contiguous (`true, true`)."""
+    """The inner loop of the element-wise pipeline for all operands contiguous,
+    `inner_loop_contiguous`. It dispatches on the SIMD level at runtime; the arm of the level that
+    the platform's target features enable is inlined into it (the fallback arm without features),
+    the higher levels are separate functions. (The baseline analyzed its predecessor,
+    `inner_loop::<T, LANES, true, true, _>`.)"""
     size = {"f32": 4, "f64": 8, "i32": 4}[ty]
     lanes = 128 // size  # `LanesInfo::LANES`
     ew = "jix::storage::elementwise_pipeline"
-    sym = f"{ew}::inner_loop::<{ty}, {lanes}, true, true, {pipeline}>"
+    sym = f"{ew}::inner_loop_contiguous::<{ty}, {lanes}, {pipeline}>"
     return Kernel(f"{name}_{ty}", sym, None, crate="elementwise", elem_size=size)
 
 
@@ -374,34 +383,73 @@ def clean_lines(asm: str, comment: str) -> list[str]:
     return out
 
 
+def is_unconditional(isa: str, mn: str) -> bool:
+    """A branch or return that never falls through."""
+    if isa == "x86":
+        return mn in ("jmp", "jmpq", "ret", "retq", "retl", "ud2")
+    return mn in ("b", "br", "ret", "udf", "brk")
+
+
 def asm_loops(lines: list[str], isa: str) -> list[Loop]:
+    """The natural loops of the asm: back edges (to a block that dominates the branch) and the
+    blocks that reach them. A loop spans the lines from its first to its last block, so a rotated
+    loop entered in the middle is found, and a backward jump that is not a back edge (e.g. to a
+    vector epilogue laid out before the main vector loop) is not a loop."""
     labels = {m.group(1): i for i, line in enumerate(lines) if (m := LABEL_RE.match(line))}
-    branches = [
-        (i, labels[tok])
-        for i, line in enumerate(lines)
-        if not is_label(line) and is_branch(isa, mnemonic(line))
-        for tok in TOKEN_RE.findall(line)[1:]
-        if tok in labels
+    ends_block = [
+        not is_label(x) and (is_branch(isa, mnemonic(x)) or is_unconditional(isa, mnemonic(x))) for x in lines
     ]
+    starts = sorted({0, *labels.values(), *(i + 1 for i, e in enumerate(ends_block) if e)} - {len(lines)})
+    blocks = list(zip(starts, [*starts[1:], len(lines)]))  # [start, end)
+    block_at = {s: b for b, (s, _) in enumerate(blocks)}
+    succs: list[set[int]] = []
+    for b, (_, e) in enumerate(blocks):
+        last = lines[e - 1]
+        out = set()
+        if not is_label(last) and is_branch(isa, mnemonic(last)):
+            out |= {block_at[labels[t]] for t in TOKEN_RE.findall(last)[1:] if t in labels}
+        if not (not is_label(last) and is_unconditional(isa, mnemonic(last))) and b + 1 < len(blocks):
+            out.add(b + 1)
+        succs.append(out)
+    preds: list[set[int]] = [set() for _ in blocks]
+    for b, out in enumerate(succs):
+        for t in out:
+            preds[t].add(b)
 
-    def single_entry(h: int, e: int) -> bool:
-        """No branch from outside lines h..e jumps into them, other than to h: a backward jump to
-        code that does not dominate it (e.g. to a vector epilogue laid out before the main
-        vector loop) is not a loop."""
-        return not any(h < j <= e and not h <= i <= e for i, j in branches)
+    # Dominators, iteratively; blocks unreachable from the entry dominate nothing.
+    everything = set(range(len(blocks)))
+    dom = [everything.copy() for _ in blocks]
+    dom[0] = {0}
+    changed = True
+    while changed:
+        changed = False
+        for b in range(1, len(blocks)):
+            ps = [dom[p] for p in preds[b]]
+            d = {b} | (set.intersection(*ps) if ps else set())
+            if d != dom[b]:
+                dom[b], changed = d, True
 
-    ends: dict[str, int] = {}
-    for i, j in sorted(branches, reverse=True):
-        h = LABEL_RE.match(lines[j]).group(1)
-        if j < i and h not in ends and single_entry(j, i):
-            ends[h] = i
+    bodies: dict[int, set[int]] = {}
+    for u, out in enumerate(succs):
+        for h in out:
+            if h in dom[u] and dom[u] != everything:
+                body, stack = {h, u}, [u] if u != h else []
+                while stack:
+                    for p in preds[stack.pop()]:
+                        if p not in body:
+                            body.add(p)
+                            stack.append(p)
+                bodies.setdefault(h, set()).update(body)
+
     vreg = re.compile(r"\b[xyz]mm\d+\b" if isa == "x86" else r"\b[vq]\d+\b")
 
-    def make(h: str, e: int) -> Loop:
-        body = [x for x in lines[labels[h] : e + 1] if not is_label(x)]
-        return Loop(labels[h], e, h, size=len(body), vec=sum(1 for x in body if vreg.search(x)) / len(body))
+    def make(h: int, body: set[int]) -> Loop:
+        start, end = min(blocks[b][0] for b in body), max(blocks[b][1] for b in body) - 1
+        instrs = [x for x in lines[start : end + 1] if not is_label(x)]
+        header = LABEL_RE.match(lines[blocks[h][0]]).group(1)
+        return Loop(start, end, header, size=len(instrs), vec=sum(1 for x in instrs if vreg.search(x)) / len(instrs))
 
-    loops = sorted((make(h, e) for h, e in ends.items()), key=lambda lp: (lp.start, -lp.end))
+    loops = sorted((make(h, body) for h, body in bodies.items()), key=lambda lp: (lp.start, -lp.end))
     for a in loops:
         for b in loops:
             if a.start < b.start <= a.end < b.end:
@@ -429,27 +477,37 @@ class IrValues:
     }
     FLAGS = {"nuw", "nsw", "exact", "disjoint"}
 
-    def __init__(self, defs: dict[str, str]):
+    def __init__(self, defs: dict[str, str], stores: dict[str, str | None], params: list[str]):
         self.defs = defs  # `%name` -> the instruction's right-hand side
+        self.params = params  # the function's parameters
+        # `%ptr` -> the value stored to it, if stored once (e.g. an argument spilled to a stack
+        # slot, as when a closure capturing it by reference is passed to another function).
+        self.stores = stores
         # Values SCEV cannot analyze but proves a small range of (`print<scalar-evolution>`).
         self.bounded: set[str] = set()
 
     @staticmethod
     def parse(ll: Path, ir_hint: str) -> IrValues:
-        defs, in_fn = {}, False
+        defs, stores, params, in_fn = {}, {}, [], False
         for line in ll.read_text().splitlines():
             if line.startswith("define "):
                 in_fn = ir_hint in line.split("(")[0]
+                if in_fn:
+                    params = re.findall(r"(%[\w.]+)[,)]", line)
             elif in_fn and line.startswith("}"):
                 in_fn = False
             elif in_fn and (m := re.match(r"^\s+(%[\w.]+) = (.*?)(?:, !.*)?$", line)):
                 defs[m.group(1)] = m.group(2)
-        return IrValues(defs)
+            elif in_fn and (m := re.match(r"^\s+store (i\d+ [^,]+), ptr (%[\w.]+)", line)):
+                stores[m.group(2)] = None if m.group(2) in stores else m.group(1)
+        return IrValues(defs, stores, params)
 
     def value(self, name: str, env: dict[str, int], depth: int = 0):
         """Value of `%name` (int, or list of ints for a vector), or None."""
         if name in env:
             return env[name]
+        if self.params and name == self.params[-1] and LAST_ARG in env:
+            return env[LAST_ARG]
         rhs = self.defs.get(name)
         if rhs is None or depth > 64:
             return None
@@ -508,6 +566,13 @@ class IrValues:
                 return None if a is None or b is None else f(a, b)
             a, b = vec(a), vec(b)
             return None if a is None or b is None else [f(x, y) for x, y in zip(a, b)]
+        if op == "load":
+            # A stack slot named after an argument (`%len`) holds that argument.
+            m = re.match(r"i\d+, ptr (%[\w.]+)", rest)
+            if m.group(1) in env:
+                return env[m.group(1)]
+            stored = self.stores.get(m.group(1))
+            return None if stored is None else self._operand(stored, env, depth)
         if op in ("zext", "sext", "trunc", "freeze"):
             m = re.match(r"(?:<\d+ x )?i\d+>? (\S+)", rest)
             return self._operand(m.group(1), env, depth)
@@ -1186,8 +1251,8 @@ def main() -> None:
 
     if args.direction == "elementwise":
         header.append(
-            "- kernels: the pipeline's inner loop for contiguous operands (`inner_loop::<T, LANES, true, true, _>`);"
-            " the bytes are output bytes"
+            "- kernels: the pipeline's inner loop for contiguous operands (`inner_loop_contiguous`, the arm of the"
+            " platform's SIMD level); the bytes are output bytes"
         )
 
     out_dir = PROBE_DIR / "results" / args.label

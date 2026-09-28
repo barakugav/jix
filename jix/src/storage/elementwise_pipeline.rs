@@ -1,4 +1,6 @@
 use std::cell::Cell;
+
+use fearless_simd::{dispatch, Level, Simd};
 use std::cmp::Reverse;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -44,6 +46,22 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// set, and elements `offset..offset + N` at `inner_stride` must be in bounds of its
     /// `original_data`.
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N];
+
+    /// [`read_bulk`](Self::read_bulk) inside a `fearless_simd` dispatch of `simd`'s level: nodes
+    /// may compute with `simd`'s vectors. By default, the same as `read_bulk`.
+    ///
+    /// # Safety
+    ///
+    /// Same as [`read_bulk`](Self::read_bulk).
+    #[inline(always)]
+    unsafe fn read_bulk_simd<S: Simd, const N: usize, const CONTIGUOUS: bool>(
+        &self,
+        simd: S,
+        offset: usize,
+    ) -> [T; N] {
+        let _ = simd;
+        unsafe { self.read_bulk::<N, CONTIGUOUS>(offset) }
+    }
 
     fn to_buf<'b>(
         &mut self,
@@ -490,6 +508,49 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
 ) where
     T: Dtyped,
 {
+    inner_loop_impl::<T, LANES, IN_CONTIGUOUS, OUT_CONTIGUOUS>(
+        dst,
+        dst_stride,
+        len,
+        |i| unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS>(i) },
+        |i| unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS>(i) },
+    );
+}
+
+/// [`inner_loop`] for all operands contiguous, compiled for each SIMD level and dispatched at
+/// runtime: the pipeline reads through [`read_bulk_simd`](ElementwisePipelineImpl::read_bulk_simd).
+#[inline(never)]
+fn inner_loop_contiguous<T, const LANES: usize>(
+    pipeline: &impl ElementwisePipelineImpl<T>,
+    dst: PtrMutNoalias<T>,
+    dst_stride: usize,
+    len: usize,
+) where
+    T: Dtyped,
+{
+    dispatch!(Level::new(), simd => inner_loop_impl::<T, LANES, true, true>(
+        dst,
+        dst_stride,
+        len,
+        |i| unsafe { pipeline.read_bulk_simd::<_, LANES, true>(simd, i) },
+        |i| unsafe { pipeline.read_bulk_simd::<_, 1, true>(simd, i) },
+    ));
+}
+
+/// Body of the inner loops: `read_lanes(i)` / `read_one(i)` read the elements at `i`.
+///
+/// Callers guarantee the [`read_bulk`](ElementwisePipelineImpl::read_bulk) contract for every
+/// `i + LANES <= len` / `i < len`.
+#[inline(always)]
+fn inner_loop_impl<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
+    dst: PtrMutNoalias<T>,
+    dst_stride: usize,
+    len: usize,
+    read_lanes: impl Fn(usize) -> [T; LANES],
+    read_one: impl Fn(usize) -> [T; 1],
+) where
+    T: Dtyped,
+{
     if OUT_CONTIGUOUS {
         debug_assert_eq!(dst_stride, size_of::<T>());
     }
@@ -501,7 +562,7 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
     let body_limit = len - len % LANES;
     let mut i = 0;
     while i < body_limit {
-        let chunk = unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS>(i) };
+        let chunk = read_lanes(i);
         if OUT_CONTIGUOUS {
             unsafe {
                 dst.add(i)
@@ -520,7 +581,7 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
         i += LANES;
     }
     while i < len {
-        let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS>(i) };
+        let [val] = read_one(i);
         if OUT_CONTIGUOUS {
             unsafe { dst.add(i).write_maybe_aligned::<REQUIRE_ALIGNED>(val) };
         } else {
@@ -554,18 +615,34 @@ where
         } else {
             STRIDED_LANES
         };
-        match lanes {
-            1 => inner_loop::<_, 1, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            2 => inner_loop::<_, 2, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            4 => inner_loop::<_, 4, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            8 => inner_loop::<_, 8, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            16 => inner_loop::<_, 16, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            32 => inner_loop::<_, 32, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            64 => inner_loop::<_, 64, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            128 => inner_loop::<_, 128, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            256 => inner_loop::<_, 256, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            512 => inner_loop::<_, 512, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            _ => inner_loop::<_, 1024, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+        if IN_CONTIGUOUS && OUT_CONTIGUOUS {
+            match lanes {
+                1 => inner_loop_contiguous::<_, 1>,
+                2 => inner_loop_contiguous::<_, 2>,
+                4 => inner_loop_contiguous::<_, 4>,
+                8 => inner_loop_contiguous::<_, 8>,
+                16 => inner_loop_contiguous::<_, 16>,
+                32 => inner_loop_contiguous::<_, 32>,
+                64 => inner_loop_contiguous::<_, 64>,
+                128 => inner_loop_contiguous::<_, 128>,
+                256 => inner_loop_contiguous::<_, 256>,
+                512 => inner_loop_contiguous::<_, 512>,
+                _ => inner_loop_contiguous::<_, 1024>,
+            }
+        } else {
+            match lanes {
+                1 => inner_loop::<_, 1, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+                2 => inner_loop::<_, 2, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+                4 => inner_loop::<_, 4, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+                8 => inner_loop::<_, 8, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+                16 => inner_loop::<_, 16, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+                32 => inner_loop::<_, 32, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+                64 => inner_loop::<_, 64, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+                128 => inner_loop::<_, 128, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+                256 => inner_loop::<_, 256, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+                512 => inner_loop::<_, 512, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+                _ => inner_loop::<_, 1024, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            }
         }
     }
 }

@@ -105,6 +105,7 @@ mod shape_ops;
 pub use shape_ops::*;
 
 mod op1;
+mod simd_kernels;
 pub use op1::*;
 
 mod op2;
