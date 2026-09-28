@@ -108,6 +108,43 @@ mod tests {
         level.as_neon().map(check);
     }
 
+    /// `encode_simd` at every SIMD level this CPU supports (not only the one `dispatch!` picks),
+    /// against the reference, for every power-of-two itemsize and lengths around the chunk sizes.
+    #[test]
+    fn encode_simd_all_levels() {
+        use super::kernels::{encode_impl_generic, encode_simd};
+        use fearless_simd::{Level, Simd};
+
+        fn check<S: Simd>(simd: S) {
+            fn one<S: Simd, const ITEMSIZE: usize>(simd: S) {
+                for nitems in [0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 300] {
+                    let src: Vec<u8> = (0..nitems * ITEMSIZE).map(|x| (x * 7 + 3) as u8).collect();
+                    let mut expected = vec![0u8; src.len()];
+                    byte_shuffle_encode_reference(&src, &mut expected, ITEMSIZE);
+                    let mut dst = vec![0u8; src.len()];
+                    let done = simd.vectorize(|| encode_simd::<S, ITEMSIZE>(simd, &src, &mut dst));
+                    encode_impl_generic(&src, &mut dst, ITEMSIZE, done);
+                    assert_eq!(dst, expected, "itemsize {ITEMSIZE}, nitems {nitems}");
+                }
+            }
+            one::<S, 2>(simd);
+            one::<S, 4>(simd);
+            one::<S, 8>(simd);
+            one::<S, 16>(simd);
+        }
+
+        let level = Level::new();
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            level.as_sse2().map(check);
+            level.as_sse4_2().map(check);
+            level.as_avx2().map(check);
+            level.as_avx512().map(check);
+        }
+        #[cfg(target_arch = "aarch64")]
+        level.as_neon().map(check);
+    }
+
     macro_rules! test_roundtrip {
         ($ty:ty, $fn_name:ident) => {
             #[test]

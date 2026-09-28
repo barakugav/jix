@@ -1,9 +1,10 @@
-# jix-probe: static asm analysis of the byte-shuffle decode kernels
+# jix-probe: static asm analysis of the byte-shuffle kernels
 
 Experimental tooling for optimizing the **decode** path of
 `jix/src/codec/filter/byte_shuffle/kernels.rs` across platforms **without running benchmarks**.
-The objective is llvm-mca's steady-state throughput of each decode kernel's hot loop, on the
-targeted platforms. The encode path is out of scope, and it is neither probed nor analyzed.
+The objective is llvm-mca's steady-state throughput of each kernel's hot loop, on the targeted
+platforms. Decode was optimized first and is frozen (`results/fearless`); encode followed
+(`--direction encode`, `results/encode-*`).
 
 ## Why a separate crate and not a `jix` example
 
@@ -224,3 +225,39 @@ Every kernel is faster than its baseline on every CPU. Findings while tuning on 
   Lake, in a prototype that still had bounds checks). On AVX2/SSE, `swizzle_dyn` on vectors wider than 16 bytes is emulated. Not adopted.
 - AVX-512 CPUs without VBMI (Skylake-X, Cascade Lake) take the fearless AVX2 path: 569 on the
   `skylake-avx512` model, vs 801 for the baseline's x86-64-v4 multiversion clone.
+
+## Encode (`--direction encode`)
+
+`results/encode-baseline` is the auto-vectorized `encode_impl::<ITEMSIZE, 128 / ITEMSIZE>` with
+the `multiversion` x86 feature sets (`--x86-levels multiversion`, analyzed at the commit that
+still had it). `encode_simd` mirrors `decode_simd`: load ITEMSIZE vectors of whole items, transpose,
+store one vector per byte plane, same unroll rule (at least 256 bytes per iteration; 128 is worse
+everywhere, 512 mixed +-3%).
+
+The transpose is the inverse of decode's. A decode round (`interleave`) is a perfect shuffle of
+the chunk's `ITEMSIZE * lanes` bytes, i.e. a rotation of the byte index bits by one, and decode
+rotates by log2(ITEMSIZE). So encode is either log2(ITEMSIZE) inverse rounds (`deinterleave`), or
+log2(lanes) more decode rounds. `shuffle_costs` picks the cheaper one from the instruction counts
+of fearless_simd's implementations (interleave / deinterleave per pair): SSE2 2 / scalar,
+SSE4.2 2 / 4, AVX2 4 / 6, AVX-512 and NEON 2 / 2. That rule matched every measured winner:
+SSE2 always interleaves, SSE4.2 for itemsize >= 8, AVX2 for itemsize 16, AVX-512 / NEON never.
+Without it, i686 (SSE2) regressed to 0.82x of the baseline (scalar `deinterleave`, plus spills and
+`memcpy` calls for `encode_16`).
+
+`results/encode-fearless`, cycles per 4096 bytes:
+
+| platform | cpu | geomean | vs encode-baseline | encode_2 | encode_4 | encode_8 | encode_16 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| x86_64-v2 | sandybridge | **525** | 6.92x | 302 | 522 | 641 | 753 |
+| x86_64-v2 | btver2 | **1186** | 3.31x | 929 | 1633 | 1050 | 1242 |
+| x86_64-v3 | skylake | **815** | 3.85x | 386 | 770 | 1155 | 1283 |
+| x86_64-v3 | alderlake | **420** | 4.29x | 196 | 420 | 581 | 651 |
+| x86_64-v3 | znver3 | **419** | 8.20x | 194 | 387 | 580 | 707 |
+| x86_64-v4 | icelake-server | **148** | 3.48x | 74 | 131 | 193 | 257 |
+| x86_64-v4 | sapphirerapids | **287** | 1.93x | 132 | 260 | 386 | 513 |
+| x86_64-v4 | znver4 | **144** | 3.03x | 67 | 131 | 194 | 257 |
+| i686 | skylake | **825** | 5.95x | 343 | 1026 | 1026 | 1283 |
+| aarch64 | cortex-a72 | **764** | 5.53x | 546 | 626 | 898 | 1108 |
+| aarch64 | neoverse-n1 | **830** | 5.58x | 768 | 768 | 864 | 929 |
+| aarch64 | neoverse-v2 | **276** | 10.19x | 242 | 241 | 306 | 323 |
+| aarch64-apple | apple-m1 | **303** | 12.61x | 249 | 266 | 339 | 373 |

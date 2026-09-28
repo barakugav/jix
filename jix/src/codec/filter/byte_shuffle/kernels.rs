@@ -12,10 +12,10 @@ pub fn encode(src: &[u8], dst: &mut [u8], itemsize: usize) {
     debug_assert!(src.len().is_multiple_of(itemsize));
     match itemsize {
         1 => dst.copy_from_slice(src), // identity permutation
-        2 => encode_impl::<2, 64>(src, dst),
-        4 => encode_impl::<4, 32>(src, dst),
-        8 => encode_impl::<8, 16>(src, dst),
-        16 => encode_impl::<16, 8>(src, dst),
+        2 => encode_dispatch::<2>(src, dst),
+        4 => encode_dispatch::<4>(src, dst),
+        8 => encode_dispatch::<8>(src, dst),
+        16 => encode_dispatch::<16>(src, dst),
         _ => encode_impl_generic(src, dst, itemsize, 0),
     }
 }
@@ -34,44 +34,91 @@ pub fn decode(src: &[u8], dst: &mut [u8], itemsize: usize) {
     }
 }
 
-#[inline(never)]
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
-pub fn encode_impl<const ITEMSIZE: usize, const LANES: usize>(src: &[u8], dst: &mut [u8]) {
-    let nitems = src.len() / ITEMSIZE;
+/// Instructions per `(interleave, deinterleave)` of two native vectors, in fearless_simd's
+/// implementation for the level of `simd`. SSE2 has no byte shuffle (`pshufb`), and falls back to
+/// scalar code for `deinterleave`.
+#[inline(always)]
+fn shuffle_costs<S: Simd>(simd: S) -> (u32, u32) {
+    match simd.level() {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        Level::Sse2(_) => (2, 64),
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        Level::Sse4_2(_) => (2, 4),
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        Level::Avx2(_) => (4, 6),
+        _ => (2, 2),
+    }
+}
 
-    let src_ptr = src.as_ptr();
-    let dst_ptr = dst.as_mut_ptr();
-    let mut i = 0;
-    let body_limit = nitems - nitems % LANES;
-    while i < body_limit {
-        let elms = unsafe {
-            src_ptr
-                .cast::<[u8; ITEMSIZE]>()
-                .add(i)
-                .cast::<[[u8; ITEMSIZE]; LANES]>()
-                .read()
-        };
-        #[allow(clippy::needless_range_loop)]
-        for b in 0..ITEMSIZE {
-            let byte_elms = std::array::from_fn(|j| elms[j][b]);
-            unsafe {
-                dst_ptr
-                    .add(b * nitems + i)
-                    .cast::<[u8; LANES]>()
-                    .write(byte_elms);
+fn encode_dispatch<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) {
+    let done = dispatch!(Level::new(), simd => encode_simd::<_, ITEMSIZE>(simd, src, dst));
+    // Tail of the remaining items
+    encode_impl_generic(src, dst, ITEMSIZE, done);
+}
+
+/// Encode main loop: shuffles whole chunks of `S::u8s::LEN` items, and returns the number of
+/// items encoded. `ITEMSIZE` must be a power of two (checked at compile time).
+///
+/// Each chunk is a transpose of ITEMSIZE vectors of whole items into one vector per byte plane:
+/// log2(ITEMSIZE) rounds of the inverse perfect shuffle, the exact inverse of [`decode_simd`].
+///
+/// Optimized by static analysis of the generated asm (cargo-asm + llvm-mca, steady-state cycles
+/// of the main loop), for x86-64 SSE4.2 (Sandy Bridge, Jaguar), AVX2 (Skylake, Alder Lake, Zen 3)
+/// and AVX-512 (Ice Lake, Sapphire Rapids, Zen 4), i686 SSE2 (Skylake), and aarch64 NEON
+/// (Cortex-A72, Neoverse N1 / V2, Apple M1).
+#[inline(always)]
+pub fn encode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mut [u8]) -> usize {
+    let shuffle_steps = const {
+        assert!(ITEMSIZE.is_power_of_two());
+        ITEMSIZE.ilog2()
+    };
+    let lanes = S::u8s::LEN;
+    // Chunks per loop iteration, so an iteration covers at least MIN_BYTES_PER_ITER bytes: amortizes
+    // the loop overhead for narrow vectors and small itemsizes.
+    let unroll = (MIN_BYTES_PER_ITER / (ITEMSIZE * lanes)).max(1);
+    // A decode round is a perfect shuffle of the chunk's ITEMSIZE * lanes bytes (a rotation of the
+    // byte index bits by one), and decode rotates by log2(ITEMSIZE). The inverse is either
+    // log2(ITEMSIZE) inverse rounds (`deinterleave`), or log2(lanes) more decode rounds
+    // (`interleave`), whichever is cheaper on this level.
+    let (interleave_cost, deinterleave_cost) = shuffle_costs(simd);
+    let use_deinterleave = deinterleave_cost * shuffle_steps <= interleave_cost * lanes.ilog2();
+    let nitems = src.len() / ITEMSIZE;
+    assert!(dst.len() >= nitems * ITEMSIZE);
+    let nchunks = nitems / (lanes * unroll) * unroll;
+    for c in (0..nchunks).step_by(unroll) {
+        for u in 0..unroll {
+            let i = (c + u) * lanes;
+            // SAFETY (all `get_unchecked*` below): `b < ITEMSIZE` and `i + lanes <= nitems`, so
+            // the ranges are within the `nitems * ITEMSIZE` bytes of `src` and `dst`.
+            let mut v = [S::u8s::splat(simd, 0); ITEMSIZE];
+            for (b, x) in v.iter_mut().enumerate() {
+                let start = i * ITEMSIZE + b * lanes;
+                *x = S::u8s::from_slice(simd, unsafe { src.get_unchecked(start..start + lanes) });
+            }
+            if use_deinterleave {
+                for _ in 0..shuffle_steps {
+                    let mut w = v;
+                    for j in 0..ITEMSIZE / 2 {
+                        (w[j], w[j + ITEMSIZE / 2]) = v[2 * j].deinterleave(v[2 * j + 1]);
+                    }
+                    v = w;
+                }
+            } else {
+                for _ in 0..lanes.ilog2() {
+                    let mut w = v;
+                    for j in 0..ITEMSIZE / 2 {
+                        (w[2 * j], w[2 * j + 1]) = v[j].interleave(v[j + ITEMSIZE / 2]);
+                    }
+                    v = w;
+                }
+            }
+            for (b, x) in v.iter().enumerate() {
+                let start = b * nitems + i;
+                x.store_slice(unsafe { dst.get_unchecked_mut(start..start + lanes) });
             }
         }
-        i += LANES;
     }
-    // Tail of the remaining <LANES items
-    encode_impl_generic(src, dst, ITEMSIZE, i);
+    nchunks * lanes
 }
 
 #[inline(never)]

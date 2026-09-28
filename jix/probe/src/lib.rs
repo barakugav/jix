@@ -1,9 +1,9 @@
-//! Asm probe for the byte-shuffle filter kernels (decode main loop only).
+//! Asm probe for the byte-shuffle filter kernels (encode and decode main loops).
 //!
 //! The kernels are `#[path]`-included straight from the `jix` sources, so this crate compiles the
 //! exact code `jix` ships, without `jix`'s C dependencies (zstd), for any rustup target.
 //!
-//! `jix` reaches `decode_simd` through `fearless_simd::dispatch!`, which runs it inside a
+//! `jix` reaches `encode_simd` / `decode_simd` through `fearless_simd::dispatch!`, which runs it inside a
 //! `#[target_feature]` function of the detected level. Here the level is chosen statically instead:
 //! `analyze.py` compiles the whole crate with that level's target features, and `simd()` returns
 //! the matching token, so each `probe_*` function contains the same code as that dispatch arm.
@@ -31,37 +31,23 @@ fn simd() -> impl fearless_simd::Simd {
 }
 
 macro_rules! probe {
-    ($($name:ident => $itemsize:literal;)*) => {
+    ($($name:ident => $f:ident::<$itemsize:literal>;)*) => {
         $(
             #[unsafe(no_mangle)]
             pub fn $name(src: &[u8], dst: &mut [u8]) -> usize {
-                byte_shuffle::decode_simd::<_, $itemsize>(simd(), src, dst)
+                byte_shuffle::$f::<_, $itemsize>(simd(), src, dst)
             }
         )*
     };
 }
 
 probe! {
-    probe_byte_shuffle_decode_2 => 2;
-    probe_byte_shuffle_decode_4 => 4;
-    probe_byte_shuffle_decode_8 => 8;
-    probe_byte_shuffle_decode_16 => 16;
-}
-
-macro_rules! probe_encode {
-    ($($name:ident => $f:path;)*) => {
-        $(
-            #[unsafe(no_mangle)]
-            pub fn $name(src: &[u8], dst: &mut [u8]) {
-                $f(src, dst)
-            }
-        )*
-    };
-}
-
-probe_encode! {
-    probe_byte_shuffle_encode_2 => byte_shuffle::encode_impl::<2, 64>;
-    probe_byte_shuffle_encode_4 => byte_shuffle::encode_impl::<4, 32>;
-    probe_byte_shuffle_encode_8 => byte_shuffle::encode_impl::<8, 16>;
-    probe_byte_shuffle_encode_16 => byte_shuffle::encode_impl::<16, 8>;
+    probe_byte_shuffle_decode_2 => decode_simd::<2>;
+    probe_byte_shuffle_decode_4 => decode_simd::<4>;
+    probe_byte_shuffle_decode_8 => decode_simd::<8>;
+    probe_byte_shuffle_decode_16 => decode_simd::<16>;
+    probe_byte_shuffle_encode_2 => encode_simd::<2>;
+    probe_byte_shuffle_encode_4 => encode_simd::<4>;
+    probe_byte_shuffle_encode_8 => encode_simd::<8>;
+    probe_byte_shuffle_encode_16 => encode_simd::<16>;
 }

@@ -138,17 +138,6 @@ def _kernel(direction: str, itemsize: int) -> Kernel:
 # Main loops of the fixed-itemsize kernels, per direction (`--direction`). Must match the
 # `probe_*` exports in src/lib.rs.
 KERNELS = {d: [_kernel(d, s) for s in (2, 4, 8, 16)] for d in ("decode", "encode")}
-# The auto-vectorized `encode_impl::<ITEMSIZE, 128 / ITEMSIZE>` (`#[inline(never)]`, so analyzed
-# directly), for the encode baseline. Drop once `encode_impl` is gone.
-KERNELS["encode-legacy"] = [
-    Kernel(
-        f"encode_{s}",
-        f"jix_probe::byte_shuffle::encode_impl::<{s}, {128 // s}>",
-        f"11encode_implKj{s:x}_Kj{128 // s:x}_",
-        True,
-    )
-    for s in (2, 4, 8, 16)
-]
 
 # x86 feature sets of the `multiversion` clones (x86-64-v2/v3/v4), used by the baselines, which
 # measured the auto-vectorized kernels (`--x86-levels multiversion`).
