@@ -107,12 +107,16 @@ fn decode_dispatch<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) {
 const MIN_BYTES_PER_ITER: usize = 256;
 
 /// Decode main loop: un-shuffles whole chunks of `S::u8s::LEN` items, and returns the number of
-/// items decoded. `ITEMSIZE` must be a power of two.
+/// items decoded. `ITEMSIZE` must be a power of two (checked at compile time).
 ///
 /// Each chunk is a transpose of ITEMSIZE vectors (one per byte plane): log2(ITEMSIZE) rounds of
 /// a perfect shuffle, pairing plane `j` with plane `j + ITEMSIZE / 2`.
 #[inline(always)]
 pub fn decode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mut [u8]) -> usize {
+    let shuffle_steps = const {
+        assert!(ITEMSIZE.is_power_of_two());
+        ITEMSIZE.ilog2()
+    };
     let lanes = S::u8s::LEN;
     // Chunks per loop iteration, so an iteration covers at least MIN_BYTES_PER_ITER bytes: amortizes
     // the loop overhead for narrow vectors and small itemsizes.
@@ -130,7 +134,7 @@ pub fn decode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mu
                 let start = b * nitems + i;
                 *x = S::u8s::from_slice(simd, unsafe { src.get_unchecked(start..start + lanes) });
             }
-            for _ in 0..ITEMSIZE.trailing_zeros() {
+            for _ in 0..shuffle_steps {
                 let mut w = v;
                 for j in 0..ITEMSIZE / 2 {
                     (w[2 * j], w[2 * j + 1]) = v[j].interleave(v[j + ITEMSIZE / 2]);
