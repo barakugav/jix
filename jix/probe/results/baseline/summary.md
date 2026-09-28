@@ -44,16 +44,6 @@ kernels, the single number to optimize.
 | decode_16 | 128 | 408 | ?[16] | - | 4355 | 6532 |
 | **geomean** | | | | | **980** | **1993** |
 
-Runtime-itemsize / unflattenable kernels, cycles per iteration of the largest innermost loop (informational):
-
-| kernel | loop instrs | loops | calls | sandybridge | btver2 |
-|---|---:|---|---|---:|---:|
-| decode_generic | 54 | ?[?[? ?] ?] | - | 17.8 | 64.1 |
-
-Warnings:
-
-- decode_generic: asm and IR loop trees differ, trip counts unknown
-
 ## x86_64-v3 (`x86_64-unknown-linux-gnu`)
 
 `RUSTFLAGS=-Ctarget-feature=+sse3,+ssse3,+sse4.1,+sse4.2,+popcnt,+cmpxchg16b,+avx,+avx2,+bmi1,+bmi2,+f16c,+fma,+lzcnt,+movbe,+xsave`
@@ -65,12 +55,6 @@ Warnings:
 | decode_8 | 128 | 260 | ? | - | 4099 | 2071 | 4099 |
 | decode_16 | 128 | 273 | ? | - | 5765 | 3435 | 2603 |
 | **geomean** | | | | | **1474** | **871** | **1078** |
-
-Runtime-itemsize / unflattenable kernels, cycles per iteration of the largest innermost loop (informational):
-
-| kernel | loop instrs | loops | calls | skylake | alderlake | znver3 |
-|---|---:|---|---|---:|---:|---:|
-| decode_generic | 104 | ?[? ? ?] | - | 47.6 | 65.4 | 48.5 |
 
 ## x86_64-v4 (`x86_64-unknown-linux-gnu`)
 
@@ -84,12 +68,6 @@ Runtime-itemsize / unflattenable kernels, cycles per iteration of the largest in
 | decode_16 | 128 | 41 | ? | - | 1035 | 1926 | 775 |
 | **geomean** | | | | | **634** | **721** | **547** |
 
-Runtime-itemsize / unflattenable kernels, cycles per iteration of the largest innermost loop (informational):
-
-| kernel | loop instrs | loops | calls | icelake-server | sapphirerapids | znver4 |
-|---|---:|---|---|---:|---:|---:|
-| decode_generic | 179 | ?[? ? ?] | - | 94.3 | 88.8 | 158.8 |
-
 ## i686 (`i686-unknown-linux-gnu`)
 
 | kernel | B/iter | instrs | loops | calls | skylake |
@@ -99,12 +77,6 @@ Runtime-itemsize / unflattenable kernels, cycles per iteration of the largest in
 | decode_8 | 128 | 320 | ? | - | 4100 |
 | decode_16 | 128 | 479 | ?[16] | `memcpy@PLT` | 6768* |
 | **geomean** | | | | | **2330*** |
-
-Runtime-itemsize / unflattenable kernels, cycles per iteration of the largest innermost loop (informational):
-
-| kernel | loop instrs | loops | calls | skylake |
-|---|---:|---|---|---:|
-| decode_generic | 8 | ?[?] | - | 2.1 |
 
 ## aarch64 (`aarch64-unknown-linux-gnu`)
 
@@ -116,12 +88,6 @@ Runtime-itemsize / unflattenable kernels, cycles per iteration of the largest in
 | decode_16 | 128 | 175 | ? | - | 6503 | 4930 | 2662 |
 | **geomean** | | | | | **2140** | **1784** | **713** |
 
-Runtime-itemsize / unflattenable kernels, cycles per iteration of the largest innermost loop (informational):
-
-| kernel | loop instrs | loops | calls | cortex-a72 | neoverse-n1 | neoverse-v2 |
-|---|---:|---|---|---:|---:|---:|
-| decode_generic | 19 | ?[? ?] | - | 8.1 | 12.1 | 4.1 |
-
 ## aarch64-apple (`aarch64-apple-darwin`)
 
 | kernel | B/iter | instrs | loops | calls | apple-m1 |
@@ -131,9 +97,3 @@ Runtime-itemsize / unflattenable kernels, cycles per iteration of the largest in
 | decode_8 | 128 | 70 | ? | - | 584 |
 | decode_16 | 128 | 112 | ? | - | 1063 |
 | **geomean** | | | | | **557** |
-
-Runtime-itemsize / unflattenable kernels, cycles per iteration of the largest innermost loop (informational):
-
-| kernel | loop instrs | loops | calls | apple-m1 |
-|---|---:|---|---|---:|
-| decode_generic | 19 | ?[? ?] | - | 4.2 |

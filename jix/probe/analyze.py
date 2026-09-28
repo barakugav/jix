@@ -139,7 +139,8 @@ KERNELS = [
     _decode_kernel(4, 32),
     _decode_kernel(8, 16),
     _decode_kernel(16, 8),
-    Kernel("decode_generic", "jix_probe::byte_shuffle::decode_impl_generic", "19decode_impl_generic", False),
+    # The runtime-itemsize tail (`decode_impl_generic`) is out of scope: only the steady state of
+    # the main loop matters. Add it back with `Kernel(..., fixed=False)` to get informational numbers.
 ]
 
 

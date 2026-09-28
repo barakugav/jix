@@ -56,7 +56,7 @@ Platforms (see `PLATFORMS` in `analyze.py`):
 | x86_64-v2 | x86_64-unknown-linux-gnu | multiversion v2 clone features | sandybridge, btver2 |
 | x86_64-v3 | x86_64-unknown-linux-gnu | multiversion v3 clone features | skylake, alderlake, znver3 |
 | x86_64-v4 | x86_64-unknown-linux-gnu | multiversion v4 clone features | icelake-server, sapphirerapids, znver4 |
-| i686 | i686-unknown-linux-gnu | SSE2 | skylake |
+| i686 | i686-unknown-linux-gnu | SSE2 (the target baseline; no multiversion clones) | skylake |
 | aarch64 | aarch64-unknown-linux-gnu | armv8-a + NEON | cortex-a72, neoverse-n1, neoverse-v2 |
 | aarch64-apple | aarch64-apple-darwin | apple-m1 | apple-m1 |
 
@@ -85,12 +85,9 @@ Caveats:
 - llvm-mca assumes every load hits L1 and ignores the front end. Branches are not followed.
 - **Calls are free in llvm-mca.** Kernels that call something (e.g. `memcpy`) inside the hot loop
   are flagged `*`, and their real cost is higher.
-- Steady state only: the per-call prologue and epilogue and the `<LANES` tail (handled by
-  `decode_impl_generic`) are not counted. This matters more as the step grows.
+- Steady state of the main loop only, by design. The per-call prologue and epilogue and the
+  `<LANES` tail (`decode_impl_generic`) are neither counted nor analyzed.
 - Instructions with no scheduling info on a CPU are skipped and listed as warnings (none so far).
-- `*_generic` (runtime itemsize: odd sizes, struct dtypes, and the `<LANES` tail) cannot be
-  flattened. Only the cycles per iteration of their largest innermost loop are reported, for
-  information.
 
 ## Baseline (auto-vectorized kernels)
 
@@ -133,3 +130,10 @@ Observations:
   stores (the same number of loads). A clean transpose should land around 100-300 cycles per
   4096 bytes with 128-bit vectors, and below 100 with 512-bit ones. That is 3-20x better than the
   current geomeans.
+- `LANES` is honored: one iteration handles `ITEMSIZE * LANES` bytes, and `decode()` picks
+  `LANES = 128 / ITEMSIZE`. A one-off sweep of 256/512/1024-byte steps (not committed) confirmed
+  the measured `B/iter` tracks `ITEMSIZE * LANES`. For most kernels it made the auto-vectorized
+  code worse: LLVM starts calling `memcpy`/`memset` for the `elms` buffer, or it falls back to
+  scalar. x86-64-v4 `decode_2/8` gained 10-40%.
+- i686: the `i686-*` targets enable SSE2 (128-bit integer SIMD, but no SSSE3 `pshufb`). The
+  `multiversion` targets are x86_64-only, so i686 never gets wider clones.

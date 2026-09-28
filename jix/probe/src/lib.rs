@@ -27,9 +27,3 @@ probe! {
     probe_byte_shuffle_decode_8 => byte_shuffle::decode_impl::<8, 16>;
     probe_byte_shuffle_decode_16 => byte_shuffle::decode_impl::<16, 8>;
 }
-
-/// Runtime-itemsize fallback (odd itemsizes, struct dtypes, and the `<LANES` tail).
-#[unsafe(no_mangle)]
-pub fn probe_byte_shuffle_decode_generic(src: &[u8], dst: &mut [u8], itemsize: usize) {
-    byte_shuffle::decode_impl_generic(src, dst, itemsize, 0)
-}
