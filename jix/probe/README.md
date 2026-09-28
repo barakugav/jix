@@ -187,3 +187,40 @@ Every kernel is faster than its baseline on every CPU. Findings while tuning on 
 - AVX2: fearless_simd's `interleave_u8x32` is `vpunpckl/hbw` plus two lane-fixup `vperm2i128`,
   i.e. 2 shuffles per output vector per round. Avoiding the fixups needs in-lane unpacks, which
   the portable API does not expose.
+
+### Round 2 experiments (kernel unchanged except the const `shuffle_steps`)
+
+- `shuffle_steps = const { assert!(ITEMSIZE.is_power_of_two()); ITEMSIZE.ilog2() }`: identical asm
+  on all 24 (platform, itemsize) functions.
+- Unroll, per-CPU geomean (cycles / 4096 B), `unroll = clamp(CAP / (ITEMSIZE * lanes), 1, U)`:
+
+  | cpu | U=1 | U=2 | U=4 | U=4 cap 256 | U=4 cap 512 | U=4 cap 1024 | cap 256 (kept) | cap 512 |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|
+  | x86_64-v2/sandybridge | 471 | 448 | 432 | 429 | 437 | 432 | 429 | 432 |
+  | x86_64-v2/btver2 | 853 | 824 | 798 | 771 | 813 | 798 | 761 | 793 |
+  | x86_64-v3/skylake | 573 | 570 | 568 | 569 | 568 | 568 | 569 | 568 |
+  | x86_64-v3/alderlake | 313 | 306 | 303 | 304 | 303 | 303 | 304 | 302 |
+  | x86_64-v3/znver3 | 305 | 301 | 299 | 300 | 299 | 299 | 300 | 299 |
+  | x86_64-v4/icelake-server | 149 | 148 | 145 | 148 | 145 | 145 | 148 | 145 |
+  | x86_64-v4/sapphirerapids | 287 | 286 | 285 | 287 | 286 | 285 | 287 | 286 |
+  | x86_64-v4/znver4 | 144 | 144 | 143 | 144 | 143 | 143 | 144 | 143 |
+  | i686/skylake | 612 | 607 | 603 | 603 | 604 | 603 | 602 | 607 |
+  | aarch64/cortex-a72 | 1182 | 1143 | 1099 | 1105 | 1099 | 1099 | 1080 | 1049 |
+  | aarch64/neoverse-n1 | 817 | 745 | 701 | 699 | 706 | 701 | 699 | 707 |
+  | aarch64/neoverse-v2 | 278 | 282 | 285 | 285 | 285 | 285 | 270 | 261 |
+  | aarch64-apple/apple-m1 | 293 | 255 | 248 | 244 | 248 | 248 | 244 | 244 |
+
+  "cap 256" (unroll until an iteration covers 256 bytes, no count limit) is kept. Fixed U=4 is
+  within 1% overall (5% on btver2 / Neoverse V2).
+- Inlining the scalar tail into `decode_simd`: the SIMD body's steady state is unchanged
+  (register renames; +2% on btver2 `decode_16`). But LLVM auto-vectorizes the tail into a
+  never-taken 64-item vector loop plus a bounds-checked scalar loop, so functions grow 2.5-16x
+  (x86_64-v4 `decode_16`: 205 -> 3335 instructions). The tail stays in `decode_impl_generic`.
+- Swizzle instead of interleave: fearless's `swizzle_dyn` is single-source, so a variant gathers
+  one piece of each plane with `combine` (`vinserti64x4` from memory, p0 or p5) and does one
+  `vpermb` per output vector. Core loop, cycles / 4096 B for `decode_2`: Ice Lake 84 (vs 74),
+  Sapphire Rapids 89 (vs 132), Zen 4 126 (vs 67). It needs ITEMSIZE pieces of 64 / ITEMSIZE
+  bytes per output, so it degrades quickly for larger itemsizes (`decode_4` about 2.5x worse on
+  Ice Lake). On AVX2/SSE, `swizzle_dyn` on vectors wider than 16 bytes is emulated. Not adopted.
+- AVX-512 CPUs without VBMI (Skylake-X, Cascade Lake) take the fearless AVX2 path: 569 on the
+  `skylake-avx512` model, vs 801 for the baseline's x86-64-v4 multiversion clone.
