@@ -1,19 +1,19 @@
-# jix-probe: static asm analysis of the byte-shuffle kernels
+# jix-probe: static asm analysis of the byte- and bit-shuffle kernels
 
-Experimental tooling for optimizing the **decode** path of
-`jix/src/codec/filter/byte_shuffle/kernels.rs` across platforms **without running benchmarks**.
-The objective is llvm-mca's steady-state throughput of each kernel's hot loop, on the targeted
-platforms. Decode was optimized first and is frozen (`results/fearless`); encode followed
-(`--direction encode`, `results/encode-*`).
+Experimental tooling for optimizing the filter kernels in
+`jix/src/codec/filter/{byte_shuffle,bit_shuffle}/kernels.rs` across platforms **without running
+benchmarks**. The objective is llvm-mca's steady-state throughput of each kernel's hot loops, on
+the targeted platforms. Byte-shuffle decode was optimized first and is frozen (`results/fearless`);
+encode followed (`--direction encode`, `results/encode-*`). The bit-shuffle passes are analyzed with
+`--direction bit-encode` / `bit-decode` (`results/bit-*`).
 
 ## Why a separate crate and not a `jix` example
 
 A `jix` example would build all of `jix`'s dependencies for the target, including `zstd-sys` (C),
 which needs a C cross toolchain and sysroot for every target (and a macOS SDK for
-`aarch64-apple-darwin`). Instead, the kernels live in a self-contained file (`core`/`std` +
-`fearless_simd` and the optional `multiversion` attribute only). `jix` uses it as a module, and this crate
-`#[path]`-includes it. So the probe compiles the exact code `jix` ships, for any rustup target, in
-about 2 seconds, with no linker or C compiler. Keep `kernels.rs` free of `crate::` dependencies.
+`aarch64-apple-darwin`). Instead, the kernels live in self-contained files (`core`/`std` +
+`fearless_simd` only). `jix` uses them as modules, and this crate `#[path]`-includes them. So the probe compiles the exact code `jix` ships, for any rustup target, in
+about 2 seconds, with no linker or C compiler. Keep the `kernels.rs` files free of `crate::` dependencies.
 
 ## Setup
 
@@ -36,8 +36,9 @@ about 2 seconds, with no linker or C compiler. Keep `kernels.rs` free of `crate:
 ## Usage
 
 ```bash
-python jix/probe/analyze.py                         # all platforms, results/baseline/
+python jix/probe/analyze.py                         # decode, all platforms, results/baseline/
 python jix/probe/analyze.py --label my-variant      # results/my-variant/
+python jix/probe/analyze.py --direction bit-encode --label x --compare bit-encode-baseline
 python jix/probe/analyze.py --platform x86_64-v3 --platform aarch64 --fn decode_4
 cd jix/probe && cargo asm --release --lib --target aarch64-unknown-linux-gnu   # list symbols
 ```
@@ -65,8 +66,9 @@ x86-64 v1 (SSE2 only), armv7 and ppc64le are out of scope. Windows and musl whee
 of their linux counterparts. `jix` runs the decode main loop through `fearless_simd::dispatch!`,
 which calls it inside a `#[target_feature(enable = ...)]` function of the detected level (generic
 tuning). The probe reproduces each dispatch arm by building with the same features in
-`-C target-feature` and passing the matching token (`simd()` in `src/lib.rs`). The `baseline`
-results were produced the same way, but with the `multiversion` x86-64-v2/v3/v4 feature sets.
+`-C target-feature` and passing the matching token (`simd()` in `src/lib.rs`). The baselines
+(`baseline`, `encode-baseline`, `bit-*-baseline`) were produced the same way, but with the
+feature sets of the former `multiversion` x86-64-v2/v3/v4 clones (`--x86-levels multiversion`).
 
 Compare a run with a previous one with `--compare <label>`, which adds a geomean speedup column.
 
@@ -75,23 +77,33 @@ For each (platform, kernel):
 2. `cargo asm --llvm` gives the final LLVM IR. The toolchain's own `opt` prints the IR loop tree
    (`print<loops>`) and exact trip counts (`print<scalar-evolution>`).
 3. The trees are matched by shape, which gives every asm loop its trip count.
-4. The bytes per outer-loop iteration (`B/iter`) come from the outer loop's SCEV trip count,
-   evaluated at a concrete input length. They are not assumed, so a kernel can use any step:
-   128 B/iter today, and more for a 512-bit variant or a loop LLVM unrolled.
-5. One outer iteration is flattened: inner loops that LLVM did not unroll are repeated by their
-   trip count. llvm-mca simulates that trace (100 iterations) on each CPU.
+4. The hot loops are the loops whose total iteration count (their trip count times their
+   ancestors', from SCEV evaluated at two concrete input lengths) is linear in the input length:
+   the byte-shuffle main loop, or the vectorized loop over groups inside a bit-shuffle pass's loop
+   over byte planes. Tails and loops over the itemsize do not scale and are ignored. The slope gives
+   the bytes per iteration (`B/iter`), which is measured, not assumed, so a kernel can use any step.
+5. One iteration of each hot loop is flattened: inner loops that LLVM did not unroll are repeated
+   by their trip count. llvm-mca simulates that trace (100 iterations) on each CPU.
 
-**Metric: cycles per 4096 bytes = cycles per outer iteration * 4096 / B/iter. Lower is better.**
-The per-(platform, CPU) geomean over the 4 fixed-itemsize decode kernels (itemsize 2/4/8/16) is
-the headline number. The unit is only a scale. What makes kernels with different steps comparable
-is that `B/iter` is measured.
+**Metric: cycles per 4096 bytes = sum over the hot loops of cycles per iteration * 4096 / B/iter.
+Lower is better.** The per-(platform, CPU) geomean over the kernels (itemsize 2/4/8/16) is the
+headline number. The unit is only a scale. What makes kernels with different steps comparable is
+that `B/iter` is measured.
+
+SCEV trip counts are evaluated with the arguments bound (input length, and `typesize` / `n_full`
+for the runtime-itemsize bit-shuffle passes). Values SCEV cannot see through (e.g. a scalar
+extracted from SLP-vectorized setup code) are constant-folded from the IR. The auto-vectorized
+bit-shuffle loops also depend on non-argument values, which are approximated, and their `B/iter`
+is marked `~`: bounds-check limits in a `umin` are dropped (they do not bind in the steady state),
+a remainder size SCEV proves small is taken as 0, and an enclosing loop's add recurrence is
+evaluated at its first iteration.
 
 Caveats:
 - llvm-mca assumes every load hits L1 and ignores the front end. Branches are not followed.
 - **Calls are free in llvm-mca.** Kernels that call something (e.g. `memcpy`) inside the hot loop
   are flagged `*`, and their real cost is higher.
-- Steady state of the main loop only, by design. The per-call prologue and epilogue and the
-  `<LANES` tail (`decode_impl_generic`) are neither counted nor analyzed.
+- Steady state of the hot loops only, by design. The per-call prologue and epilogue and the
+  tails (`decode_impl_generic`, vector-loop remainders) are neither counted nor analyzed.
 - Instructions with no scheduling info on a CPU are skipped and listed as warnings (none so far).
 
 ## Baseline (auto-vectorized kernels)
@@ -266,3 +278,57 @@ it, i686 itemsizes 2/4/8 stay scalar at the baseline's speed, geomean 3080 vs 82
 | aarch64 | neoverse-n1 | **815** | 5.68x | 768 | 768 | 864 | 865 |
 | aarch64 | neoverse-v2 | **288** | 9.75x | 242 | 241 | 306 | 386 |
 | aarch64-apple | apple-m1 | **297** | 12.86x | 249 | 266 | 339 | 344 |
+
+## Bit shuffle (`--direction bit-encode` / `bit-decode`)
+
+`BitShuffleFilter` runs three passes: a byte shuffle (the byte-shuffle kernels above), a bit
+transpose of each 8-byte group (`trans_bit_byte` / `untrans_bit_byte`, 8x8 bit transpose with
+scatter or gather to the 8 bit planes), and an outer-axis swap (`trans_bitrow_eight` /
+`untrans_bitrow_eight`). These are in `bit_shuffle/kernels.rs`, with a runtime itemsize, so the
+`_2/_4/_8/_16` kernels are the same function evaluated at different `typesize` (same cost per byte
+today). The `*bitrow_eight` passes are `8 * typesize` `memcpy` calls of `N / 8` bytes each: no loop
+scales with the input, so they are only reported as informational, and their cost is libc's
+`memcpy` of the whole buffer.
+
+Baselines (`results/bit-{encode,decode}-baseline`, `multiversion` x86 levels), and the kernels with
+`multiversion` replaced by fearless_simd `dispatch!` (still auto-vectorized, the body is
+`*_bit_byte_impl`; `results/bit-{encode,decode}-fearless`). Cycles per 4096 bytes of the
+bit-transpose pass (equal for all itemsizes):
+
+| platform | cpu | encode baseline | encode fearless | vs | decode baseline | decode fearless | vs |
+|---|---|---:|---:|---:|---:|---:|---:|
+| x86_64-v2 | sandybridge | 6951 | 6951 | 1.00x | 4774 | 4774 | 1.00x |
+| x86_64-v2 | btver2 | 15045 | 15045 | 1.00x | 7990 | 7990 | 1.00x |
+| x86_64-v3 | skylake | 9732 | 9732 | 1.00x | 1829 | 1829 | 1.00x |
+| x86_64-v3 | alderlake | 6633 | 6633 | 1.00x | 1815 | 1815 | 1.00x |
+| x86_64-v3 | znver3 | 9102 | 9102 | 1.00x | 2527 | 2527 | 1.00x |
+| x86_64-v4 | icelake-server | 2579 | **483** | 5.33x | 849 | 849 | 1.00x |
+| x86_64-v4 | sapphirerapids | 2806 | **363** | 7.74x | 1030 | 1030 | 1.00x |
+| x86_64-v4 | znver4 | 2007 | **357** | 5.63x | 1076 | 1076 | 1.00x |
+| i686 | skylake | 11736 | 11736 | 1.00x | 8540 | 8540 | 1.00x |
+| aarch64 | cortex-a72 | 12743 | 12743 | 1.00x | 809 | 809 | 1.00x |
+| aarch64 | neoverse-n1 | 11972 | 11972 | 1.00x | 725 | 725 | 1.00x |
+| aarch64 | neoverse-v2 | 5523 | 5523 | 1.00x | 365 | 365 | 1.00x |
+| aarch64-apple | apple-m1 | 6726 | 6726 | 1.00x | 1400 | 1400 | 1.00x |
+
+Observations:
+- For scale: the frozen byte-shuffle kernels run at 150-1500 cycles per 4096 bytes. The encode bit
+  transpose is 2000-15000, the most expensive pass of the filter everywhere.
+- Encode: LLVM vectorizes the loop over groups (8-32 groups, 64-256 bytes per iteration), with
+  one 64-bit lane per group. It builds those vectors with a byte gather (`vpinsrb` / `ld1 {v.b}[i]`,
+  one instruction per input byte), then narrows the transposed lanes back to bytes for the 8
+  contiguous bit-plane stores.
+- Decode is 3-16x cheaper than encode (1.4x on x86-64-v2 and i686). LLVM handles only 2-16 groups
+  per iteration (16-128 bytes), and on x86 keeps most of the transpose in 64-bit scalar registers.
+- The dispatch change is a no-op for SSE4.2 and AVX2 (the fearless_simd levels enable the same
+  features as the `multiversion` clones), and on i686 and aarch64 (no multiversion there). On
+  AVX-512, fearless_simd's level is Ice Lake (VBMI, GFNI...), and LLVM uses `vpermt2b` for the
+  encode gather: 5-8x faster. The flip side: AVX-512 CPUs without VBMI (Skylake-X, Cascade Lake)
+  now take the AVX2 arm. On the `skylake-avx512` model, the pass goes from 2579 (v4 clone) to
+  9732 on encode (3.8x slower) and from 849 to 1829 on decode (2.2x slower).
+- Sensitivity (not adopted, as this step only swaps the dispatch): loading the encode group with
+  `src[..].try_into()` instead of 8 byte reads changes the vectorized loop completely. Geomean
+  speedup vs `bit-encode-fearless`: SSE4.2 1.1-1.2x, AVX2 2.4-2.7x, NEON 5-16x (Cortex-A72 806,
+  Neoverse V2 395, M1 1235), but AVX-512 0.3-0.5x and i686 0.9x. `array::from_fn` is 1.4-30x
+  worse everywhere.
+

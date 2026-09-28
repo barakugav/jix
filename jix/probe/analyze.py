@@ -149,7 +149,11 @@ def _byte_kernel(direction: str, itemsize: int) -> Kernel:
 
 
 def _bit_kernel(fn: str, itemsize: int) -> Kernel:
-    # v0 mangling length-prefixes identifiers: `14trans_bit_byte` does not match `untrans_bit_byte`.
+    if fn.endswith("bit_byte"):  # the `probe_*` export of the dispatched body
+        sym = f"probe_bit_shuffle_{fn}"
+        return Kernel(f"{fn}_{itemsize}", sym, sym, itemsize)
+    # v0 mangling length-prefixes identifiers: `18trans_bitrow_eight` does not match
+    # `untrans_bitrow_eight`.
     return Kernel(f"{fn}_{itemsize}", f"jix_probe::bit_shuffle::{fn}", f"{len(fn)}{fn}", itemsize)
 
 

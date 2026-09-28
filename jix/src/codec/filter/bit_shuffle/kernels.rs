@@ -1,9 +1,11 @@
 //! Bit-shuffle kernels: the bit-level passes of [`super::BitShuffleFilter`] (the byte-shuffle
 //! pass is the byte-shuffle filter's own).
 //!
-//! This file is intentionally self-contained (only `core`/`std`, plus the optional `multiversion`
-//! attribute) so that `jix/probe` can `#[path]`-include it and compile it for any target without
-//! pulling in the C dependencies of `jix` (zstd). Keep it that way.
+//! This file is intentionally self-contained (only `core`/`std` and `fearless_simd`) so that
+//! `jix/probe` can `#[path]`-include it and compile it for any target without pulling in the C
+//! dependencies of `jix` (zstd). Keep it that way.
+
+use fearless_simd::{dispatch, Level};
 
 /// Encode pass 2 - combined bit-transpose and scatter.
 ///
@@ -30,15 +32,13 @@
 /// Equivalent to `bshuf_trans_bit_byte_scal` from the reference C
 /// implementation on little-endian targets (the `u64` read + `TRANS_BIT_8X8`
 /// + strided scatter pattern).
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
 pub fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
+    dispatch!(Level::new(), _ => trans_bit_byte_impl(src, dst, n_full, typesize))
+}
+
+/// Body of [`trans_bit_byte`], compiled for each SIMD level (auto-vectorized).
+#[inline(always)]
+pub fn trans_bit_byte_impl(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     let n_per_plane = n_full / 8;
     let bit_row_skip = typesize * n_per_plane; // = B * G
 
@@ -46,6 +46,9 @@ pub fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize
         for g in 0..n_per_plane {
             let src_off = b * n_full + g * 8;
             let mut group = [0u8; 8];
+            // A slice copy (`try_into`) or `array::from_fn` changes the auto-vectorized code a lot
+            // (better or worse depending on the target), so this keeps the original per-byte form.
+            #[allow(clippy::manual_memcpy)]
             for k in 0..8 {
                 group[k] = src[src_off + k];
             }
@@ -78,14 +81,8 @@ pub fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize
 ///
 /// Equivalent to `bshuf_trans_bitrow_eight` in the reference, itself a
 /// specialization of `bshuf_trans_elem(lda=8, ldb=B, elem_size=G)`.
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
+///
+/// Its loops run `8 * typesize` `memcpy`s whatever the input length, so it needs no SIMD dispatch.
 pub fn trans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     let n_per_plane = n_full / 8;
     for i in 0..8 {
@@ -101,15 +98,8 @@ pub fn trans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: u
 /// Decode pass 1 - inverse of [`trans_bitrow_eight`].
 ///
 /// `(B, 8, G) -> (8, B, G)` byte-level outer-axis swap. Pure data movement in
-/// length-`G` runs; reads and writes are just the encode-side roles flipped.
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
+/// length-`G` runs; reads and writes are just the encode-side roles flipped. No SIMD dispatch, as
+/// for [`trans_bitrow_eight`].
 pub fn untrans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     let n_per_plane = n_full / 8;
     for b in 0..typesize {
@@ -130,15 +120,13 @@ pub fn untrans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize:
 /// `(b, g)`, in bit-transposed form. Applying [`transpose8x8`] again - which
 /// is self-inverse - restores the original element-major 8-byte group, which
 /// we then write contiguously at `dst[b * N + g * 8 .. b * N + g * 8 + 8]`.
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
 pub fn untrans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
+    dispatch!(Level::new(), _ => untrans_bit_byte_impl(src, dst, n_full, typesize))
+}
+
+/// Body of [`untrans_bit_byte`], compiled for each SIMD level (auto-vectorized).
+#[inline(always)]
+pub fn untrans_bit_byte_impl(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     let n_per_plane = n_full / 8;
     let bit_row_skip = typesize * n_per_plane;
 

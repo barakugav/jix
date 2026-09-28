@@ -12,8 +12,6 @@
 
 #[path = "../../src/codec/filter/byte_shuffle/kernels.rs"]
 pub mod byte_shuffle;
-// The bit-shuffle passes take a runtime itemsize, as `BitShuffleFilter` calls them: `analyze.py`
-// analyzes these `pub fn`s directly, binding the itemsize when it evaluates the trip counts.
 #[path = "../../src/codec/filter/bit_shuffle/kernels.rs"]
 pub mod bit_shuffle;
 
@@ -56,3 +54,23 @@ probe! {
     probe_byte_shuffle_encode_16 => encode_simd::<16>;
 }
 
+
+// The bit-shuffle passes take a runtime itemsize, as `BitShuffleFilter` calls them: `analyze.py`
+// binds `typesize` when it evaluates the trip counts. `*_impl` is the body `jix` runs in each
+// `dispatch!` arm; the `memcpy` passes (`*bitrow_eight`), which have no dispatch, are analyzed
+// directly.
+macro_rules! probe_bit {
+    ($($name:ident => $f:ident;)*) => {
+        $(
+            #[unsafe(no_mangle)]
+            pub fn $name(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
+                bit_shuffle::$f(src, dst, n_full, typesize)
+            }
+        )*
+    };
+}
+
+probe_bit! {
+    probe_bit_shuffle_trans_bit_byte => trans_bit_byte_impl;
+    probe_bit_shuffle_untrans_bit_byte => untrans_bit_byte_impl;
+}
