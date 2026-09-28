@@ -1,0 +1,2988 @@
+[
+  {
+    "platform": "x86_64-v1",
+    "kernel": "encode_2",
+    "fn_instructions": 268,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "x86-64",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v1",
+    "kernel": "encode_4",
+    "fn_instructions": 272,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "x86-64",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v1",
+    "kernel": "encode_8",
+    "fn_instructions": 282,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "x86-64",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v1",
+    "kernel": "encode_16",
+    "fn_instructions": 79,
+    "mode": "outer",
+    "trace_instructions": 440,
+    "calls": 0,
+    "loop_tree": "?[16]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "x86-64",
+        "iterations": 100,
+        "instructions": 44000,
+        "total_cycles": 11016,
+        "uops": 44000,
+        "block_rthroughput": 110.0,
+        "skipped": [],
+        "cycles_per_iter": 110.16
+      },
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 44000,
+        "total_cycles": 7813,
+        "uops": 44800,
+        "block_rthroughput": 74.7,
+        "skipped": [],
+        "cycles_per_iter": 78.13
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v1",
+    "kernel": "decode_2",
+    "fn_instructions": 49,
+    "mode": "outer",
+    "trace_instructions": 35,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "x86-64",
+        "iterations": 100,
+        "instructions": 3500,
+        "total_cycles": 1208,
+        "uops": 3500,
+        "block_rthroughput": 12.0,
+        "skipped": [],
+        "cycles_per_iter": 12.08
+      },
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 3500,
+        "total_cycles": 809,
+        "uops": 4300,
+        "block_rthroughput": 8.0,
+        "skipped": [],
+        "cycles_per_iter": 8.09
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v1",
+    "kernel": "decode_4",
+    "fn_instructions": 272,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "x86-64",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v1",
+    "kernel": "decode_8",
+    "fn_instructions": 282,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "x86-64",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v1",
+    "kernel": "decode_16",
+    "fn_instructions": 69,
+    "mode": "outer",
+    "trace_instructions": 408,
+    "calls": 0,
+    "loop_tree": "?[16]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "x86-64",
+        "iterations": 100,
+        "instructions": 40800,
+        "total_cycles": 13609,
+        "uops": 40800,
+        "block_rthroughput": 136.0,
+        "skipped": [],
+        "cycles_per_iter": 136.09
+      },
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 40800,
+        "total_cycles": 13609,
+        "uops": 41600,
+        "block_rthroughput": 136.0,
+        "skipped": [],
+        "cycles_per_iter": 136.09
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v1",
+    "kernel": "encode_generic",
+    "fn_instructions": 102,
+    "mode": "inner",
+    "trace_instructions": 8,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "x86-64",
+        "iterations": 100,
+        "instructions": 800,
+        "total_cycles": 209,
+        "uops": 800,
+        "block_rthroughput": 2.0,
+        "skipped": [],
+        "cycles_per_iter": 2.09
+      },
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 800,
+        "total_cycles": 209,
+        "uops": 1000,
+        "block_rthroughput": 2.0,
+        "skipped": [],
+        "cycles_per_iter": 2.09
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v1",
+    "kernel": "decode_generic",
+    "fn_instructions": 82,
+    "mode": "inner",
+    "trace_instructions": 19,
+    "calls": 0,
+    "loop_tree": "?[? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "x86-64",
+        "iterations": 100,
+        "instructions": 1900,
+        "total_cycles": 487,
+        "uops": 1900,
+        "block_rthroughput": 4.8,
+        "skipped": [],
+        "cycles_per_iter": 4.87
+      },
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 1900,
+        "total_cycles": 412,
+        "uops": 1900,
+        "block_rthroughput": 4.0,
+        "skipped": [],
+        "cycles_per_iter": 4.12
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v2",
+    "kernel": "encode_2",
+    "fn_instructions": 268,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "sandybridge",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "btver2",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 13006,
+        "uops": 26000,
+        "block_rthroughput": 130.0,
+        "skipped": [],
+        "cycles_per_iter": 130.06
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v2",
+    "kernel": "encode_4",
+    "fn_instructions": 272,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "sandybridge",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "btver2",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 13006,
+        "uops": 26000,
+        "block_rthroughput": 130.0,
+        "skipped": [],
+        "cycles_per_iter": 130.06
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v2",
+    "kernel": "encode_8",
+    "fn_instructions": 282,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "sandybridge",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "btver2",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 13006,
+        "uops": 26000,
+        "block_rthroughput": 130.0,
+        "skipped": [],
+        "cycles_per_iter": 130.06
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v2",
+    "kernel": "encode_16",
+    "fn_instructions": 262,
+    "mode": "outer",
+    "trace_instructions": 203,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "sandybridge",
+        "iterations": 100,
+        "instructions": 20300,
+        "total_cycles": 7917,
+        "uops": 29100,
+        "block_rthroughput": 72.8,
+        "skipped": [],
+        "cycles_per_iter": 79.17
+      },
+      {
+        "cpu": "btver2",
+        "iterations": 100,
+        "instructions": 20300,
+        "total_cycles": 10316,
+        "uops": 20300,
+        "block_rthroughput": 101.5,
+        "skipped": [],
+        "cycles_per_iter": 103.16
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v2",
+    "kernel": "decode_2",
+    "fn_instructions": 49,
+    "mode": "outer",
+    "trace_instructions": 35,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "sandybridge",
+        "iterations": 100,
+        "instructions": 3500,
+        "total_cycles": 1208,
+        "uops": 3500,
+        "block_rthroughput": 12.0,
+        "skipped": [],
+        "cycles_per_iter": 12.08
+      },
+      {
+        "cpu": "btver2",
+        "iterations": 100,
+        "instructions": 3500,
+        "total_cycles": 1759,
+        "uops": 3500,
+        "block_rthroughput": 17.5,
+        "skipped": [],
+        "cycles_per_iter": 17.59
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v2",
+    "kernel": "decode_4",
+    "fn_instructions": 82,
+    "mode": "outer",
+    "trace_instructions": 68,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "sandybridge",
+        "iterations": 100,
+        "instructions": 6800,
+        "total_cycles": 2116,
+        "uops": 8400,
+        "block_rthroughput": 21.0,
+        "skipped": [],
+        "cycles_per_iter": 21.16
+      },
+      {
+        "cpu": "btver2",
+        "iterations": 100,
+        "instructions": 6800,
+        "total_cycles": 5811,
+        "uops": 10000,
+        "block_rthroughput": 52.0,
+        "skipped": [],
+        "cycles_per_iter": 58.11
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v2",
+    "kernel": "decode_8",
+    "fn_instructions": 108,
+    "mode": "outer",
+    "trace_instructions": 75,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "sandybridge",
+        "iterations": 100,
+        "instructions": 7500,
+        "total_cycles": 2533,
+        "uops": 9900,
+        "block_rthroughput": 24.8,
+        "skipped": [],
+        "cycles_per_iter": 25.33
+      },
+      {
+        "cpu": "btver2",
+        "iterations": 100,
+        "instructions": 7500,
+        "total_cycles": 7208,
+        "uops": 10700,
+        "block_rthroughput": 56.0,
+        "skipped": [],
+        "cycles_per_iter": 72.08
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v2",
+    "kernel": "decode_16",
+    "fn_instructions": 69,
+    "mode": "outer",
+    "trace_instructions": 408,
+    "calls": 0,
+    "loop_tree": "?[16]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "sandybridge",
+        "iterations": 100,
+        "instructions": 40800,
+        "total_cycles": 13609,
+        "uops": 40800,
+        "block_rthroughput": 136.0,
+        "skipped": [],
+        "cycles_per_iter": 136.09
+      },
+      {
+        "cpu": "btver2",
+        "iterations": 100,
+        "instructions": 40800,
+        "total_cycles": 20411,
+        "uops": 40800,
+        "block_rthroughput": 204.0,
+        "skipped": [],
+        "cycles_per_iter": 204.11
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v2",
+    "kernel": "encode_generic",
+    "fn_instructions": 102,
+    "mode": "inner",
+    "trace_instructions": 8,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "sandybridge",
+        "iterations": 100,
+        "instructions": 800,
+        "total_cycles": 209,
+        "uops": 800,
+        "block_rthroughput": 2.0,
+        "skipped": [],
+        "cycles_per_iter": 2.09
+      },
+      {
+        "cpu": "btver2",
+        "iterations": 100,
+        "instructions": 800,
+        "total_cycles": 407,
+        "uops": 800,
+        "block_rthroughput": 4.0,
+        "skipped": [],
+        "cycles_per_iter": 4.07
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v2",
+    "kernel": "decode_generic",
+    "fn_instructions": 166,
+    "mode": "inner",
+    "trace_instructions": 54,
+    "calls": 0,
+    "loop_tree": "?[?[? ?] ?]",
+    "warnings": [
+      "asm and IR loop trees differ, trip counts unknown"
+    ],
+    "mca": [
+      {
+        "cpu": "sandybridge",
+        "iterations": 100,
+        "instructions": 5400,
+        "total_cycles": 1775,
+        "uops": 6900,
+        "block_rthroughput": 17.3,
+        "skipped": [],
+        "cycles_per_iter": 17.75
+      },
+      {
+        "cpu": "btver2",
+        "iterations": 100,
+        "instructions": 5400,
+        "total_cycles": 6413,
+        "uops": 5500,
+        "block_rthroughput": 64.0,
+        "skipped": [],
+        "cycles_per_iter": 64.13
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v3",
+    "kernel": "encode_2",
+    "fn_instructions": 268,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "alderlake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 6470,
+        "uops": 38700,
+        "block_rthroughput": 64.5,
+        "skipped": [],
+        "cycles_per_iter": 64.7
+      },
+      {
+        "cpu": "znver3",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12807,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.07
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v3",
+    "kernel": "encode_4",
+    "fn_instructions": 272,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "alderlake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 6470,
+        "uops": 38700,
+        "block_rthroughput": 64.5,
+        "skipped": [],
+        "cycles_per_iter": 64.7
+      },
+      {
+        "cpu": "znver3",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12807,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.07
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v3",
+    "kernel": "encode_8",
+    "fn_instructions": 282,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "alderlake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 6470,
+        "uops": 38700,
+        "block_rthroughput": 64.5,
+        "skipped": [],
+        "cycles_per_iter": 64.7
+      },
+      {
+        "cpu": "znver3",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12807,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.07
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v3",
+    "kernel": "encode_16",
+    "fn_instructions": 175,
+    "mode": "outer",
+    "trace_instructions": 116,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 11600,
+        "total_cycles": 4415,
+        "uops": 17300,
+        "block_rthroughput": 44.0,
+        "skipped": [],
+        "cycles_per_iter": 44.15
+      },
+      {
+        "cpu": "alderlake",
+        "iterations": 100,
+        "instructions": 11600,
+        "total_cycles": 3728,
+        "uops": 17100,
+        "block_rthroughput": 36.0,
+        "skipped": [],
+        "cycles_per_iter": 37.28
+      },
+      {
+        "cpu": "znver3",
+        "iterations": 100,
+        "instructions": 11600,
+        "total_cycles": 6318,
+        "uops": 12400,
+        "block_rthroughput": 62.0,
+        "skipped": [],
+        "cycles_per_iter": 63.18
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v3",
+    "kernel": "decode_2",
+    "fn_instructions": 42,
+    "mode": "outer",
+    "trace_instructions": 27,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 2700,
+        "total_cycles": 1212,
+        "uops": 3100,
+        "block_rthroughput": 12.0,
+        "skipped": [],
+        "cycles_per_iter": 12.12
+      },
+      {
+        "cpu": "alderlake",
+        "iterations": 100,
+        "instructions": 2700,
+        "total_cycles": 826,
+        "uops": 3000,
+        "block_rthroughput": 8.0,
+        "skipped": [],
+        "cycles_per_iter": 8.26
+      },
+      {
+        "cpu": "znver3",
+        "iterations": 100,
+        "instructions": 2700,
+        "total_cycles": 1021,
+        "uops": 3500,
+        "block_rthroughput": 8.0,
+        "skipped": [],
+        "cycles_per_iter": 10.21
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v3",
+    "kernel": "decode_4",
+    "fn_instructions": 56,
+    "mode": "outer",
+    "trace_instructions": 44,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 4400,
+        "total_cycles": 1611,
+        "uops": 5200,
+        "block_rthroughput": 16.0,
+        "skipped": [],
+        "cycles_per_iter": 16.11
+      },
+      {
+        "cpu": "alderlake",
+        "iterations": 100,
+        "instructions": 4400,
+        "total_cycles": 956,
+        "uops": 5100,
+        "block_rthroughput": 8.5,
+        "skipped": [],
+        "cycles_per_iter": 9.56
+      },
+      {
+        "cpu": "znver3",
+        "iterations": 100,
+        "instructions": 4400,
+        "total_cycles": 1211,
+        "uops": 4400,
+        "block_rthroughput": 12.0,
+        "skipped": [],
+        "cycles_per_iter": 12.11
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v3",
+    "kernel": "decode_8",
+    "fn_instructions": 282,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      },
+      {
+        "cpu": "alderlake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 6471,
+        "uops": 38700,
+        "block_rthroughput": 64.5,
+        "skipped": [],
+        "cycles_per_iter": 64.71
+      },
+      {
+        "cpu": "znver3",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v3",
+    "kernel": "decode_16",
+    "fn_instructions": 342,
+    "mode": "outer",
+    "trace_instructions": 273,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 27300,
+        "total_cycles": 18015,
+        "uops": 31400,
+        "block_rthroughput": 180.0,
+        "skipped": [],
+        "cycles_per_iter": 180.15
+      },
+      {
+        "cpu": "alderlake",
+        "iterations": 100,
+        "instructions": 27300,
+        "total_cycles": 10734,
+        "uops": 31000,
+        "block_rthroughput": 84.0,
+        "skipped": [],
+        "cycles_per_iter": 107.34
+      },
+      {
+        "cpu": "znver3",
+        "iterations": 100,
+        "instructions": 27300,
+        "total_cycles": 8133,
+        "uops": 29700,
+        "block_rthroughput": 57.0,
+        "skipped": [],
+        "cycles_per_iter": 81.33
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v3",
+    "kernel": "encode_generic",
+    "fn_instructions": 107,
+    "mode": "inner",
+    "trace_instructions": 12,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 1200,
+        "total_cycles": 410,
+        "uops": 1600,
+        "block_rthroughput": 4.0,
+        "skipped": [],
+        "cycles_per_iter": 4.1
+      },
+      {
+        "cpu": "alderlake",
+        "iterations": 100,
+        "instructions": 1200,
+        "total_cycles": 288,
+        "uops": 1500,
+        "block_rthroughput": 2.5,
+        "skipped": [],
+        "cycles_per_iter": 2.88
+      },
+      {
+        "cpu": "znver3",
+        "iterations": 100,
+        "instructions": 1200,
+        "total_cycles": 411,
+        "uops": 1200,
+        "block_rthroughput": 4.0,
+        "skipped": [],
+        "cycles_per_iter": 4.11
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v3",
+    "kernel": "decode_generic",
+    "fn_instructions": 215,
+    "mode": "inner",
+    "trace_instructions": 104,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 10400,
+        "total_cycles": 4763,
+        "uops": 13600,
+        "block_rthroughput": 32.0,
+        "skipped": [],
+        "cycles_per_iter": 47.63
+      },
+      {
+        "cpu": "alderlake",
+        "iterations": 100,
+        "instructions": 10400,
+        "total_cycles": 6542,
+        "uops": 13200,
+        "block_rthroughput": 63.0,
+        "skipped": [],
+        "cycles_per_iter": 65.42
+      },
+      {
+        "cpu": "znver3",
+        "iterations": 100,
+        "instructions": 10400,
+        "total_cycles": 4850,
+        "uops": 10400,
+        "block_rthroughput": 48.0,
+        "skipped": [],
+        "cycles_per_iter": 48.5
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v4",
+    "kernel": "encode_2",
+    "fn_instructions": 34,
+    "mode": "outer",
+    "trace_instructions": 15,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "icelake-server",
+        "iterations": 100,
+        "instructions": 1500,
+        "total_cycles": 614,
+        "uops": 2100,
+        "block_rthroughput": 6.0,
+        "skipped": [],
+        "cycles_per_iter": 6.14
+      },
+      {
+        "cpu": "sapphirerapids",
+        "iterations": 100,
+        "instructions": 1500,
+        "total_cycles": 628,
+        "uops": 2000,
+        "block_rthroughput": 6.0,
+        "skipped": [],
+        "cycles_per_iter": 6.28
+      },
+      {
+        "cpu": "znver4",
+        "iterations": 100,
+        "instructions": 1500,
+        "total_cycles": 418,
+        "uops": 1500,
+        "block_rthroughput": 4.0,
+        "skipped": [],
+        "cycles_per_iter": 4.18
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v4",
+    "kernel": "encode_4",
+    "fn_instructions": 52,
+    "mode": "outer",
+    "trace_instructions": 27,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "icelake-server",
+        "iterations": 100,
+        "instructions": 2700,
+        "total_cycles": 1214,
+        "uops": 3900,
+        "block_rthroughput": 12.0,
+        "skipped": [],
+        "cycles_per_iter": 12.14
+      },
+      {
+        "cpu": "sapphirerapids",
+        "iterations": 100,
+        "instructions": 2700,
+        "total_cycles": 1228,
+        "uops": 3800,
+        "block_rthroughput": 12.0,
+        "skipped": [],
+        "cycles_per_iter": 12.28
+      },
+      {
+        "cpu": "znver4",
+        "iterations": 100,
+        "instructions": 2700,
+        "total_cycles": 818,
+        "uops": 2700,
+        "block_rthroughput": 8.0,
+        "skipped": [],
+        "cycles_per_iter": 8.18
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v4",
+    "kernel": "encode_8",
+    "fn_instructions": 159,
+    "mode": "outer",
+    "trace_instructions": 123,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "icelake-server",
+        "iterations": 100,
+        "instructions": 12300,
+        "total_cycles": 4967,
+        "uops": 15500,
+        "block_rthroughput": 40.0,
+        "skipped": [],
+        "cycles_per_iter": 49.67
+      },
+      {
+        "cpu": "sapphirerapids",
+        "iterations": 100,
+        "instructions": 12300,
+        "total_cycles": 4833,
+        "uops": 15400,
+        "block_rthroughput": 40.0,
+        "skipped": [],
+        "cycles_per_iter": 48.33
+      },
+      {
+        "cpu": "znver4",
+        "iterations": 100,
+        "instructions": 12300,
+        "total_cycles": 3621,
+        "uops": 12300,
+        "block_rthroughput": 32.0,
+        "skipped": [],
+        "cycles_per_iter": 36.21
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v4",
+    "kernel": "encode_16",
+    "fn_instructions": 63,
+    "mode": "outer",
+    "trace_instructions": 47,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "icelake-server",
+        "iterations": 100,
+        "instructions": 4700,
+        "total_cycles": 1827,
+        "uops": 9900,
+        "block_rthroughput": 18.0,
+        "skipped": [],
+        "cycles_per_iter": 18.27
+      },
+      {
+        "cpu": "sapphirerapids",
+        "iterations": 100,
+        "instructions": 4700,
+        "total_cycles": 2425,
+        "uops": 9700,
+        "block_rthroughput": 20.0,
+        "skipped": [],
+        "cycles_per_iter": 24.25
+      },
+      {
+        "cpu": "znver4",
+        "iterations": 100,
+        "instructions": 4700,
+        "total_cycles": 2814,
+        "uops": 4700,
+        "block_rthroughput": 24.0,
+        "skipped": [],
+        "cycles_per_iter": 28.14
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v4",
+    "kernel": "decode_2",
+    "fn_instructions": 42,
+    "mode": "outer",
+    "trace_instructions": 27,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "icelake-server",
+        "iterations": 100,
+        "instructions": 2700,
+        "total_cycles": 1216,
+        "uops": 3300,
+        "block_rthroughput": 10.0,
+        "skipped": [],
+        "cycles_per_iter": 12.16
+      },
+      {
+        "cpu": "sapphirerapids",
+        "iterations": 100,
+        "instructions": 2700,
+        "total_cycles": 1227,
+        "uops": 2800,
+        "block_rthroughput": 10.0,
+        "skipped": [],
+        "cycles_per_iter": 12.27
+      },
+      {
+        "cpu": "znver4",
+        "iterations": 100,
+        "instructions": 2700,
+        "total_cycles": 1212,
+        "uops": 2700,
+        "block_rthroughput": 10.0,
+        "skipped": [],
+        "cycles_per_iter": 12.12
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v4",
+    "kernel": "decode_4",
+    "fn_instructions": 49,
+    "mode": "outer",
+    "trace_instructions": 36,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "icelake-server",
+        "iterations": 100,
+        "instructions": 3600,
+        "total_cycles": 1298,
+        "uops": 3800,
+        "block_rthroughput": 8.5,
+        "skipped": [],
+        "cycles_per_iter": 12.98
+      },
+      {
+        "cpu": "sapphirerapids",
+        "iterations": 100,
+        "instructions": 3600,
+        "total_cycles": 1231,
+        "uops": 3700,
+        "block_rthroughput": 8.0,
+        "skipped": [],
+        "cycles_per_iter": 12.31
+      },
+      {
+        "cpu": "znver4",
+        "iterations": 100,
+        "instructions": 3600,
+        "total_cycles": 1114,
+        "uops": 3600,
+        "block_rthroughput": 8.0,
+        "skipped": [],
+        "cycles_per_iter": 11.14
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v4",
+    "kernel": "decode_8",
+    "fn_instructions": 96,
+    "mode": "outer",
+    "trace_instructions": 55,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "icelake-server",
+        "iterations": 100,
+        "instructions": 5500,
+        "total_cycles": 3011,
+        "uops": 5900,
+        "block_rthroughput": 28.0,
+        "skipped": [],
+        "cycles_per_iter": 30.11
+      },
+      {
+        "cpu": "sapphirerapids",
+        "iterations": 100,
+        "instructions": 5500,
+        "total_cycles": 2828,
+        "uops": 5600,
+        "block_rthroughput": 28.0,
+        "skipped": [],
+        "cycles_per_iter": 28.28
+      },
+      {
+        "cpu": "znver4",
+        "iterations": 100,
+        "instructions": 5500,
+        "total_cycles": 2618,
+        "uops": 5500,
+        "block_rthroughput": 18.0,
+        "skipped": [],
+        "cycles_per_iter": 26.18
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v4",
+    "kernel": "decode_16",
+    "fn_instructions": 57,
+    "mode": "outer",
+    "trace_instructions": 41,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "icelake-server",
+        "iterations": 100,
+        "instructions": 4100,
+        "total_cycles": 3234,
+        "uops": 9700,
+        "block_rthroughput": 32.0,
+        "skipped": [],
+        "cycles_per_iter": 32.34
+      },
+      {
+        "cpu": "sapphirerapids",
+        "iterations": 100,
+        "instructions": 4100,
+        "total_cycles": 6018,
+        "uops": 10700,
+        "block_rthroughput": 36.0,
+        "skipped": [],
+        "cycles_per_iter": 60.18
+      },
+      {
+        "cpu": "znver4",
+        "iterations": 100,
+        "instructions": 4100,
+        "total_cycles": 2421,
+        "uops": 4100,
+        "block_rthroughput": 24.0,
+        "skipped": [],
+        "cycles_per_iter": 24.21
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v4",
+    "kernel": "encode_generic",
+    "fn_instructions": 107,
+    "mode": "inner",
+    "trace_instructions": 12,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "icelake-server",
+        "iterations": 100,
+        "instructions": 1200,
+        "total_cycles": 343,
+        "uops": 2000,
+        "block_rthroughput": 3.3,
+        "skipped": [],
+        "cycles_per_iter": 3.43
+      },
+      {
+        "cpu": "sapphirerapids",
+        "iterations": 100,
+        "instructions": 1200,
+        "total_cycles": 288,
+        "uops": 1600,
+        "block_rthroughput": 2.7,
+        "skipped": [],
+        "cycles_per_iter": 2.88
+      },
+      {
+        "cpu": "znver4",
+        "iterations": 100,
+        "instructions": 1200,
+        "total_cycles": 411,
+        "uops": 1200,
+        "block_rthroughput": 4.0,
+        "skipped": [],
+        "cycles_per_iter": 4.11
+      }
+    ]
+  },
+  {
+    "platform": "x86_64-v4",
+    "kernel": "decode_generic",
+    "fn_instructions": 304,
+    "mode": "inner",
+    "trace_instructions": 179,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "icelake-server",
+        "iterations": 100,
+        "instructions": 17900,
+        "total_cycles": 9432,
+        "uops": 28800,
+        "block_rthroughput": 88.0,
+        "skipped": [],
+        "cycles_per_iter": 94.32
+      },
+      {
+        "cpu": "sapphirerapids",
+        "iterations": 100,
+        "instructions": 17900,
+        "total_cycles": 8877,
+        "uops": 28700,
+        "block_rthroughput": 88.0,
+        "skipped": [],
+        "cycles_per_iter": 88.77
+      },
+      {
+        "cpu": "znver4",
+        "iterations": 100,
+        "instructions": 17900,
+        "total_cycles": 15884,
+        "uops": 21100,
+        "block_rthroughput": 158.5,
+        "skipped": [],
+        "cycles_per_iter": 158.84
+      }
+    ]
+  },
+  {
+    "platform": "i686",
+    "kernel": "encode_2",
+    "fn_instructions": 291,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 12808,
+        "uops": 26000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "i686",
+    "kernel": "encode_4",
+    "fn_instructions": 296,
+    "mode": "outer",
+    "trace_instructions": 261,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26100,
+        "total_cycles": 12808,
+        "uops": 26100,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "i686",
+    "kernel": "encode_8",
+    "fn_instructions": 305,
+    "mode": "outer",
+    "trace_instructions": 266,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26600,
+        "total_cycles": 12808,
+        "uops": 26600,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "i686",
+    "kernel": "encode_16",
+    "fn_instructions": 552,
+    "mode": "outer",
+    "trace_instructions": 474,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 47400,
+        "total_cycles": 26411,
+        "uops": 49100,
+        "block_rthroughput": 264.0,
+        "skipped": [],
+        "cycles_per_iter": 264.11
+      }
+    ]
+  },
+  {
+    "platform": "i686",
+    "kernel": "decode_2",
+    "fn_instructions": 68,
+    "mode": "outer",
+    "trace_instructions": 35,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 3500,
+        "total_cycles": 810,
+        "uops": 4300,
+        "block_rthroughput": 8.0,
+        "skipped": [],
+        "cycles_per_iter": 8.1
+      }
+    ]
+  },
+  {
+    "platform": "i686",
+    "kernel": "decode_4",
+    "fn_instructions": 296,
+    "mode": "outer",
+    "trace_instructions": 261,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 26100,
+        "total_cycles": 12808,
+        "uops": 26100,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "i686",
+    "kernel": "decode_8",
+    "fn_instructions": 360,
+    "mode": "outer",
+    "trace_instructions": 320,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 32000,
+        "total_cycles": 12813,
+        "uops": 32000,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.13
+      }
+    ]
+  },
+  {
+    "platform": "i686",
+    "kernel": "decode_16",
+    "fn_instructions": 79,
+    "mode": "outer",
+    "trace_instructions": 479,
+    "calls": 1,
+    "loop_tree": "?[16]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 47900,
+        "total_cycles": 21151,
+        "uops": 48100,
+        "block_rthroughput": 211.0,
+        "skipped": [],
+        "cycles_per_iter": 211.51
+      }
+    ]
+  },
+  {
+    "platform": "i686",
+    "kernel": "encode_generic",
+    "fn_instructions": 121,
+    "mode": "inner",
+    "trace_instructions": 9,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 900,
+        "total_cycles": 209,
+        "uops": 1100,
+        "block_rthroughput": 2.0,
+        "skipped": [],
+        "cycles_per_iter": 2.09
+      }
+    ]
+  },
+  {
+    "platform": "i686",
+    "kernel": "decode_generic",
+    "fn_instructions": 48,
+    "mode": "inner",
+    "trace_instructions": 8,
+    "calls": 0,
+    "loop_tree": "?[?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "skylake",
+        "iterations": 100,
+        "instructions": 800,
+        "total_cycles": 210,
+        "uops": 800,
+        "block_rthroughput": 1.3,
+        "skipped": [],
+        "cycles_per_iter": 2.1
+      }
+    ]
+  },
+  {
+    "platform": "aarch64",
+    "kernel": "encode_2",
+    "fn_instructions": 268,
+    "mode": "outer",
+    "trace_instructions": 262,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a72",
+        "iterations": 100,
+        "instructions": 26200,
+        "total_cycles": 12810,
+        "uops": 26200,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.1
+      },
+      {
+        "cpu": "neoverse-n1",
+        "iterations": 100,
+        "instructions": 26200,
+        "total_cycles": 13105,
+        "uops": 39000,
+        "block_rthroughput": 130.0,
+        "skipped": [],
+        "cycles_per_iter": 131.05
+      },
+      {
+        "cpu": "neoverse-v2",
+        "iterations": 100,
+        "instructions": 26200,
+        "total_cycles": 8540,
+        "uops": 39000,
+        "block_rthroughput": 65.0,
+        "skipped": [],
+        "cycles_per_iter": 85.4
+      }
+    ]
+  },
+  {
+    "platform": "aarch64",
+    "kernel": "encode_4",
+    "fn_instructions": 272,
+    "mode": "outer",
+    "trace_instructions": 264,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a72",
+        "iterations": 100,
+        "instructions": 26400,
+        "total_cycles": 12809,
+        "uops": 26400,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.09
+      },
+      {
+        "cpu": "neoverse-n1",
+        "iterations": 100,
+        "instructions": 26400,
+        "total_cycles": 13205,
+        "uops": 39200,
+        "block_rthroughput": 130.7,
+        "skipped": [],
+        "cycles_per_iter": 132.05
+      },
+      {
+        "cpu": "neoverse-v2",
+        "iterations": 100,
+        "instructions": 26400,
+        "total_cycles": 8540,
+        "uops": 39200,
+        "block_rthroughput": 65.3,
+        "skipped": [],
+        "cycles_per_iter": 85.4
+      }
+    ]
+  },
+  {
+    "platform": "aarch64",
+    "kernel": "encode_8",
+    "fn_instructions": 281,
+    "mode": "outer",
+    "trace_instructions": 268,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a72",
+        "iterations": 100,
+        "instructions": 26800,
+        "total_cycles": 12809,
+        "uops": 26800,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.09
+      },
+      {
+        "cpu": "neoverse-n1",
+        "iterations": 100,
+        "instructions": 26800,
+        "total_cycles": 13405,
+        "uops": 39600,
+        "block_rthroughput": 132.0,
+        "skipped": [],
+        "cycles_per_iter": 134.05
+      },
+      {
+        "cpu": "neoverse-v2",
+        "iterations": 100,
+        "instructions": 26800,
+        "total_cycles": 8540,
+        "uops": 39600,
+        "block_rthroughput": 66.0,
+        "skipped": [],
+        "cycles_per_iter": 85.4
+      }
+    ]
+  },
+  {
+    "platform": "aarch64",
+    "kernel": "encode_16",
+    "fn_instructions": 368,
+    "mode": "outer",
+    "trace_instructions": 329,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a72",
+        "iterations": 100,
+        "instructions": 32900,
+        "total_cycles": 14421,
+        "uops": 36400,
+        "block_rthroughput": 144.0,
+        "skipped": [],
+        "cycles_per_iter": 144.21
+      },
+      {
+        "cpu": "neoverse-n1",
+        "iterations": 100,
+        "instructions": 32900,
+        "total_cycles": 18912,
+        "uops": 36700,
+        "block_rthroughput": 184.0,
+        "skipped": [],
+        "cycles_per_iter": 189.12
+      },
+      {
+        "cpu": "neoverse-v2",
+        "iterations": 100,
+        "instructions": 32900,
+        "total_cycles": 9517,
+        "uops": 35600,
+        "block_rthroughput": 92.0,
+        "skipped": [],
+        "cycles_per_iter": 95.17
+      }
+    ]
+  },
+  {
+    "platform": "aarch64",
+    "kernel": "decode_2",
+    "fn_instructions": 34,
+    "mode": "outer",
+    "trace_instructions": 26,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a72",
+        "iterations": 100,
+        "instructions": 2600,
+        "total_cycles": 2508,
+        "uops": 6600,
+        "block_rthroughput": 22.0,
+        "skipped": [],
+        "cycles_per_iter": 25.08
+      },
+      {
+        "cpu": "neoverse-n1",
+        "iterations": 100,
+        "instructions": 2600,
+        "total_cycles": 2503,
+        "uops": 6200,
+        "block_rthroughput": 20.7,
+        "skipped": [],
+        "cycles_per_iter": 25.03
+      },
+      {
+        "cpu": "neoverse-v2",
+        "iterations": 100,
+        "instructions": 2600,
+        "total_cycles": 760,
+        "uops": 4200,
+        "block_rthroughput": 7.0,
+        "skipped": [],
+        "cycles_per_iter": 7.6
+      }
+    ]
+  },
+  {
+    "platform": "aarch64",
+    "kernel": "decode_4",
+    "fn_instructions": 96,
+    "mode": "outer",
+    "trace_instructions": 67,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a72",
+        "iterations": 100,
+        "instructions": 6700,
+        "total_cycles": 5215,
+        "uops": 12900,
+        "block_rthroughput": 43.0,
+        "skipped": [],
+        "cycles_per_iter": 52.15
+      },
+      {
+        "cpu": "neoverse-n1",
+        "iterations": 100,
+        "instructions": 6700,
+        "total_cycles": 5003,
+        "uops": 12200,
+        "block_rthroughput": 40.7,
+        "skipped": [],
+        "cycles_per_iter": 50.03
+      },
+      {
+        "cpu": "neoverse-v2",
+        "iterations": 100,
+        "instructions": 6700,
+        "total_cycles": 1926,
+        "uops": 10500,
+        "block_rthroughput": 17.5,
+        "skipped": [],
+        "cycles_per_iter": 19.26
+      }
+    ]
+  },
+  {
+    "platform": "aarch64",
+    "kernel": "decode_8",
+    "fn_instructions": 113,
+    "mode": "outer",
+    "trace_instructions": 72,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a72",
+        "iterations": 100,
+        "instructions": 7200,
+        "total_cycles": 7529,
+        "uops": 18300,
+        "block_rthroughput": 61.0,
+        "skipped": [],
+        "cycles_per_iter": 75.29
+      },
+      {
+        "cpu": "neoverse-n1",
+        "iterations": 100,
+        "instructions": 7200,
+        "total_cycles": 5013,
+        "uops": 12900,
+        "block_rthroughput": 43.0,
+        "skipped": [],
+        "cycles_per_iter": 50.13
+      },
+      {
+        "cpu": "neoverse-v2",
+        "iterations": 100,
+        "instructions": 7200,
+        "total_cycles": 2029,
+        "uops": 10700,
+        "block_rthroughput": 17.8,
+        "skipped": [],
+        "cycles_per_iter": 20.29
+      }
+    ]
+  },
+  {
+    "platform": "aarch64",
+    "kernel": "decode_16",
+    "fn_instructions": 230,
+    "mode": "outer",
+    "trace_instructions": 175,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a72",
+        "iterations": 100,
+        "instructions": 17500,
+        "total_cycles": 20321,
+        "uops": 49700,
+        "block_rthroughput": 165.7,
+        "skipped": [],
+        "cycles_per_iter": 203.21
+      },
+      {
+        "cpu": "neoverse-n1",
+        "iterations": 100,
+        "instructions": 17500,
+        "total_cycles": 15405,
+        "uops": 41400,
+        "block_rthroughput": 138.0,
+        "skipped": [],
+        "cycles_per_iter": 154.05
+      },
+      {
+        "cpu": "neoverse-v2",
+        "iterations": 100,
+        "instructions": 17500,
+        "total_cycles": 8319,
+        "uops": 39300,
+        "block_rthroughput": 65.5,
+        "skipped": [],
+        "cycles_per_iter": 83.19
+      }
+    ]
+  },
+  {
+    "platform": "aarch64",
+    "kernel": "encode_generic",
+    "fn_instructions": 72,
+    "mode": "inner",
+    "trace_instructions": 8,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a72",
+        "iterations": 100,
+        "instructions": 800,
+        "total_cycles": 508,
+        "uops": 1400,
+        "block_rthroughput": 4.7,
+        "skipped": [],
+        "cycles_per_iter": 5.08
+      },
+      {
+        "cpu": "neoverse-n1",
+        "iterations": 100,
+        "instructions": 800,
+        "total_cycles": 607,
+        "uops": 1500,
+        "block_rthroughput": 5.0,
+        "skipped": [],
+        "cycles_per_iter": 6.07
+      },
+      {
+        "cpu": "neoverse-v2",
+        "iterations": 100,
+        "instructions": 800,
+        "total_cycles": 209,
+        "uops": 1200,
+        "block_rthroughput": 2.0,
+        "skipped": [],
+        "cycles_per_iter": 2.09
+      }
+    ]
+  },
+  {
+    "platform": "aarch64",
+    "kernel": "decode_generic",
+    "fn_instructions": 59,
+    "mode": "inner",
+    "trace_instructions": 19,
+    "calls": 0,
+    "loop_tree": "?[? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a72",
+        "iterations": 100,
+        "instructions": 1900,
+        "total_cycles": 809,
+        "uops": 2300,
+        "block_rthroughput": 7.7,
+        "skipped": [],
+        "cycles_per_iter": 8.09
+      },
+      {
+        "cpu": "neoverse-n1",
+        "iterations": 100,
+        "instructions": 1900,
+        "total_cycles": 1209,
+        "uops": 2300,
+        "block_rthroughput": 12.0,
+        "skipped": [],
+        "cycles_per_iter": 12.09
+      },
+      {
+        "cpu": "neoverse-v2",
+        "iterations": 100,
+        "instructions": 1900,
+        "total_cycles": 408,
+        "uops": 2300,
+        "block_rthroughput": 3.8,
+        "skipped": [],
+        "cycles_per_iter": 4.08
+      }
+    ]
+  },
+  {
+    "platform": "aarch64-apple",
+    "kernel": "encode_2",
+    "fn_instructions": 268,
+    "mode": "outer",
+    "trace_instructions": 262,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "apple-m1",
+        "iterations": 100,
+        "instructions": 26200,
+        "total_cycles": 12808,
+        "uops": 26200,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "aarch64-apple",
+    "kernel": "encode_4",
+    "fn_instructions": 272,
+    "mode": "outer",
+    "trace_instructions": 264,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "apple-m1",
+        "iterations": 100,
+        "instructions": 26400,
+        "total_cycles": 12808,
+        "uops": 26400,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "aarch64-apple",
+    "kernel": "encode_8",
+    "fn_instructions": 281,
+    "mode": "outer",
+    "trace_instructions": 268,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "apple-m1",
+        "iterations": 100,
+        "instructions": 26800,
+        "total_cycles": 12808,
+        "uops": 26800,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 128.08
+      }
+    ]
+  },
+  {
+    "platform": "aarch64-apple",
+    "kernel": "encode_16",
+    "fn_instructions": 378,
+    "mode": "outer",
+    "trace_instructions": 340,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "apple-m1",
+        "iterations": 100,
+        "instructions": 34000,
+        "total_cycles": 9620,
+        "uops": 35600,
+        "block_rthroughput": 96.0,
+        "skipped": [],
+        "cycles_per_iter": 96.2
+      }
+    ]
+  },
+  {
+    "platform": "aarch64-apple",
+    "kernel": "decode_2",
+    "fn_instructions": 34,
+    "mode": "outer",
+    "trace_instructions": 26,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "apple-m1",
+        "iterations": 100,
+        "instructions": 2600,
+        "total_cycles": 810,
+        "uops": 3800,
+        "block_rthroughput": 8.0,
+        "skipped": [],
+        "cycles_per_iter": 8.1
+      }
+    ]
+  },
+  {
+    "platform": "aarch64-apple",
+    "kernel": "decode_4",
+    "fn_instructions": 96,
+    "mode": "outer",
+    "trace_instructions": 67,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "apple-m1",
+        "iterations": 100,
+        "instructions": 6700,
+        "total_cycles": 1871,
+        "uops": 10100,
+        "block_rthroughput": 18.5,
+        "skipped": [],
+        "cycles_per_iter": 18.71
+      }
+    ]
+  },
+  {
+    "platform": "aarch64-apple",
+    "kernel": "decode_8",
+    "fn_instructions": 112,
+    "mode": "outer",
+    "trace_instructions": 70,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "apple-m1",
+        "iterations": 100,
+        "instructions": 7000,
+        "total_cycles": 1826,
+        "uops": 10300,
+        "block_rthroughput": 18.0,
+        "skipped": [],
+        "cycles_per_iter": 18.26
+      }
+    ]
+  },
+  {
+    "platform": "aarch64-apple",
+    "kernel": "decode_16",
+    "fn_instructions": 151,
+    "mode": "outer",
+    "trace_instructions": 112,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "apple-m1",
+        "iterations": 100,
+        "instructions": 11200,
+        "total_cycles": 3321,
+        "uops": 14000,
+        "block_rthroughput": 29.3,
+        "skipped": [],
+        "cycles_per_iter": 33.21
+      }
+    ]
+  },
+  {
+    "platform": "aarch64-apple",
+    "kernel": "encode_generic",
+    "fn_instructions": 74,
+    "mode": "inner",
+    "trace_instructions": 9,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "apple-m1",
+        "iterations": 100,
+        "instructions": 900,
+        "total_cycles": 308,
+        "uops": 1400,
+        "block_rthroughput": 3.0,
+        "skipped": [],
+        "cycles_per_iter": 3.08
+      }
+    ]
+  },
+  {
+    "platform": "aarch64-apple",
+    "kernel": "decode_generic",
+    "fn_instructions": 59,
+    "mode": "inner",
+    "trace_instructions": 19,
+    "calls": 0,
+    "loop_tree": "?[? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "apple-m1",
+        "iterations": 100,
+        "instructions": 1900,
+        "total_cycles": 418,
+        "uops": 2300,
+        "block_rthroughput": 4.0,
+        "skipped": [],
+        "cycles_per_iter": 4.18
+      }
+    ]
+  },
+  {
+    "platform": "armv7",
+    "kernel": "encode_2",
+    "fn_instructions": 524,
+    "mode": "outer",
+    "trace_instructions": 505,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a9",
+        "iterations": 100,
+        "instructions": 50500,
+        "total_cycles": 56805,
+        "uops": 50500,
+        "block_rthroughput": 499.0,
+        "skipped": [],
+        "cycles_per_iter": 568.05
+      },
+      {
+        "cpu": "cortex-a57",
+        "iterations": 100,
+        "instructions": 50500,
+        "total_cycles": 25610,
+        "uops": 50800,
+        "block_rthroughput": 251.0,
+        "skipped": [],
+        "cycles_per_iter": 256.1
+      }
+    ]
+  },
+  {
+    "platform": "armv7",
+    "kernel": "encode_4",
+    "fn_instructions": 534,
+    "mode": "outer",
+    "trace_instructions": 510,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a9",
+        "iterations": 100,
+        "instructions": 51000,
+        "total_cycles": 57503,
+        "uops": 51000,
+        "block_rthroughput": 501.0,
+        "skipped": [],
+        "cycles_per_iter": 575.03
+      },
+      {
+        "cpu": "cortex-a57",
+        "iterations": 100,
+        "instructions": 51000,
+        "total_cycles": 25412,
+        "uops": 51400,
+        "block_rthroughput": 253.0,
+        "skipped": [],
+        "cycles_per_iter": 254.12
+      }
+    ]
+  },
+  {
+    "platform": "armv7",
+    "kernel": "encode_8",
+    "fn_instructions": 545,
+    "mode": "outer",
+    "trace_instructions": 511,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a9",
+        "iterations": 100,
+        "instructions": 51100,
+        "total_cycles": 57705,
+        "uops": 51100,
+        "block_rthroughput": 501.0,
+        "skipped": [],
+        "cycles_per_iter": 577.05
+      },
+      {
+        "cpu": "cortex-a57",
+        "iterations": 100,
+        "instructions": 51100,
+        "total_cycles": 25509,
+        "uops": 51700,
+        "block_rthroughput": 255.0,
+        "skipped": [],
+        "cycles_per_iter": 255.09
+      }
+    ]
+  },
+  {
+    "platform": "armv7",
+    "kernel": "encode_16",
+    "fn_instructions": 57,
+    "mode": "outer",
+    "trace_instructions": 348,
+    "calls": 1,
+    "loop_tree": "?[16]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a9",
+        "iterations": 100,
+        "instructions": 34800,
+        "total_cycles": 35105,
+        "uops": 34800,
+        "block_rthroughput": 174.0,
+        "skipped": [],
+        "cycles_per_iter": 351.05
+      },
+      {
+        "cpu": "cortex-a57",
+        "iterations": 100,
+        "instructions": 34800,
+        "total_cycles": 17620,
+        "uops": 34900,
+        "block_rthroughput": 130.0,
+        "skipped": [],
+        "cycles_per_iter": 176.2
+      }
+    ]
+  },
+  {
+    "platform": "armv7",
+    "kernel": "decode_2",
+    "fn_instructions": 521,
+    "mode": "outer",
+    "trace_instructions": 499,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a9",
+        "iterations": 100,
+        "instructions": 49900,
+        "total_cycles": 62305,
+        "uops": 49900,
+        "block_rthroughput": 494.0,
+        "skipped": [],
+        "cycles_per_iter": 623.05
+      },
+      {
+        "cpu": "cortex-a57",
+        "iterations": 100,
+        "instructions": 49900,
+        "total_cycles": 25114,
+        "uops": 50200,
+        "block_rthroughput": 249.0,
+        "skipped": [],
+        "cycles_per_iter": 251.14
+      }
+    ]
+  },
+  {
+    "platform": "armv7",
+    "kernel": "decode_4",
+    "fn_instructions": 536,
+    "mode": "outer",
+    "trace_instructions": 509,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a9",
+        "iterations": 100,
+        "instructions": 50900,
+        "total_cycles": 61704,
+        "uops": 50900,
+        "block_rthroughput": 500.0,
+        "skipped": [],
+        "cycles_per_iter": 617.04
+      },
+      {
+        "cpu": "cortex-a57",
+        "iterations": 100,
+        "instructions": 50900,
+        "total_cycles": 25317,
+        "uops": 51300,
+        "block_rthroughput": 252.0,
+        "skipped": [],
+        "cycles_per_iter": 253.17
+      }
+    ]
+  },
+  {
+    "platform": "armv7",
+    "kernel": "decode_8",
+    "fn_instructions": 547,
+    "mode": "outer",
+    "trace_instructions": 511,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a9",
+        "iterations": 100,
+        "instructions": 51100,
+        "total_cycles": 62404,
+        "uops": 51100,
+        "block_rthroughput": 500.0,
+        "skipped": [],
+        "cycles_per_iter": 624.04
+      },
+      {
+        "cpu": "cortex-a57",
+        "iterations": 100,
+        "instructions": 51100,
+        "total_cycles": 25518,
+        "uops": 51700,
+        "block_rthroughput": 255.0,
+        "skipped": [],
+        "cycles_per_iter": 255.18
+      }
+    ]
+  },
+  {
+    "platform": "armv7",
+    "kernel": "decode_16",
+    "fn_instructions": 54,
+    "mode": "outer",
+    "trace_instructions": 346,
+    "calls": 1,
+    "loop_tree": "?[16]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a9",
+        "iterations": 100,
+        "instructions": 34600,
+        "total_cycles": 36147,
+        "uops": 34600,
+        "block_rthroughput": 272.0,
+        "skipped": [],
+        "cycles_per_iter": 361.47
+      },
+      {
+        "cpu": "cortex-a57",
+        "iterations": 100,
+        "instructions": 34600,
+        "total_cycles": 17542,
+        "uops": 34700,
+        "block_rthroughput": 128.0,
+        "skipped": [],
+        "cycles_per_iter": 175.42
+      }
+    ]
+  },
+  {
+    "platform": "armv7",
+    "kernel": "encode_generic",
+    "fn_instructions": 30,
+    "mode": "inner",
+    "trace_instructions": 5,
+    "calls": 0,
+    "loop_tree": "?[?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a9",
+        "iterations": 100,
+        "instructions": 500,
+        "total_cycles": 703,
+        "uops": 500,
+        "block_rthroughput": 5.0,
+        "skipped": [],
+        "cycles_per_iter": 7.03
+      },
+      {
+        "cpu": "cortex-a57",
+        "iterations": 100,
+        "instructions": 500,
+        "total_cycles": 206,
+        "uops": 600,
+        "block_rthroughput": 2.0,
+        "skipped": [],
+        "cycles_per_iter": 2.06
+      }
+    ]
+  },
+  {
+    "platform": "armv7",
+    "kernel": "decode_generic",
+    "fn_instructions": 31,
+    "mode": "inner",
+    "trace_instructions": 6,
+    "calls": 0,
+    "loop_tree": "?[?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "cortex-a9",
+        "iterations": 100,
+        "instructions": 600,
+        "total_cycles": 707,
+        "uops": 600,
+        "block_rthroughput": 4.0,
+        "skipped": [],
+        "cycles_per_iter": 7.07
+      },
+      {
+        "cpu": "cortex-a57",
+        "iterations": 100,
+        "instructions": 600,
+        "total_cycles": 258,
+        "uops": 700,
+        "block_rthroughput": 2.3,
+        "skipped": [],
+        "cycles_per_iter": 2.58
+      }
+    ]
+  },
+  {
+    "platform": "ppc64le",
+    "kernel": "encode_2",
+    "fn_instructions": 284,
+    "mode": "outer",
+    "trace_instructions": 258,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "pwr8",
+        "iterations": 100,
+        "instructions": 25800,
+        "total_cycles": 11157,
+        "uops": 51600,
+        "block_rthroughput": 96.0,
+        "skipped": [],
+        "cycles_per_iter": 111.57
+      },
+      {
+        "cpu": "pwr9",
+        "iterations": 100,
+        "instructions": 25800,
+        "total_cycles": 9706,
+        "uops": 26100,
+        "block_rthroughput": 64.5,
+        "skipped": [],
+        "cycles_per_iter": 97.06
+      }
+    ]
+  },
+  {
+    "platform": "ppc64le",
+    "kernel": "encode_4",
+    "fn_instructions": 290,
+    "mode": "outer",
+    "trace_instructions": 260,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "pwr8",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 11133,
+        "uops": 52000,
+        "block_rthroughput": 96.0,
+        "skipped": [],
+        "cycles_per_iter": 111.33
+      },
+      {
+        "cpu": "pwr9",
+        "iterations": 100,
+        "instructions": 26000,
+        "total_cycles": 9574,
+        "uops": 26500,
+        "block_rthroughput": 64.5,
+        "skipped": [],
+        "cycles_per_iter": 95.74
+      }
+    ]
+  },
+  {
+    "platform": "ppc64le",
+    "kernel": "encode_8",
+    "fn_instructions": 307,
+    "mode": "outer",
+    "trace_instructions": 264,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "pwr8",
+        "iterations": 100,
+        "instructions": 26400,
+        "total_cycles": 11145,
+        "uops": 52800,
+        "block_rthroughput": 96.0,
+        "skipped": [],
+        "cycles_per_iter": 111.45
+      },
+      {
+        "cpu": "pwr9",
+        "iterations": 100,
+        "instructions": 26400,
+        "total_cycles": 9707,
+        "uops": 27300,
+        "block_rthroughput": 64.5,
+        "skipped": [],
+        "cycles_per_iter": 97.07
+      }
+    ]
+  },
+  {
+    "platform": "ppc64le",
+    "kernel": "encode_16",
+    "fn_instructions": 124,
+    "mode": "outer",
+    "trace_instructions": 297,
+    "calls": 0,
+    "loop_tree": "?[8]",
+    "warnings": [
+      "llvm-mca -mcpu=pwr8 skipped (no sched info): mtctr 25"
+    ],
+    "mca": [
+      {
+        "cpu": "pwr8",
+        "iterations": 100,
+        "instructions": 29600,
+        "total_cycles": 12609,
+        "uops": 59200,
+        "block_rthroughput": 122.0,
+        "skipped": [
+          "mtctr 25"
+        ],
+        "cycles_per_iter": 126.09
+      },
+      {
+        "cpu": "pwr9",
+        "iterations": 100,
+        "instructions": 29700,
+        "total_cycles": 10713,
+        "uops": 30500,
+        "block_rthroughput": 69.0,
+        "skipped": [],
+        "cycles_per_iter": 107.13
+      }
+    ]
+  },
+  {
+    "platform": "ppc64le",
+    "kernel": "decode_2",
+    "fn_instructions": 106,
+    "mode": "outer",
+    "trace_instructions": 45,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "pwr8",
+        "iterations": 100,
+        "instructions": 4500,
+        "total_cycles": 3206,
+        "uops": 9000,
+        "block_rthroughput": 11.3,
+        "skipped": [],
+        "cycles_per_iter": 32.06
+      },
+      {
+        "cpu": "pwr9",
+        "iterations": 100,
+        "instructions": 4500,
+        "total_cycles": 1507,
+        "uops": 4500,
+        "block_rthroughput": 13.0,
+        "skipped": [],
+        "cycles_per_iter": 15.07
+      }
+    ]
+  },
+  {
+    "platform": "ppc64le",
+    "kernel": "decode_4",
+    "fn_instructions": 182,
+    "mode": "outer",
+    "trace_instructions": 93,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "pwr8",
+        "iterations": 100,
+        "instructions": 9300,
+        "total_cycles": 4405,
+        "uops": 18600,
+        "block_rthroughput": 23.3,
+        "skipped": [],
+        "cycles_per_iter": 44.05
+      },
+      {
+        "cpu": "pwr9",
+        "iterations": 100,
+        "instructions": 9300,
+        "total_cycles": 3206,
+        "uops": 9600,
+        "block_rthroughput": 23.8,
+        "skipped": [],
+        "cycles_per_iter": 32.06
+      }
+    ]
+  },
+  {
+    "platform": "ppc64le",
+    "kernel": "decode_8",
+    "fn_instructions": 344,
+    "mode": "outer",
+    "trace_instructions": 228,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "pwr8",
+        "iterations": 100,
+        "instructions": 22800,
+        "total_cycles": 8708,
+        "uops": 45600,
+        "block_rthroughput": 74.5,
+        "skipped": [],
+        "cycles_per_iter": 87.08
+      },
+      {
+        "cpu": "pwr9",
+        "iterations": 100,
+        "instructions": 22800,
+        "total_cycles": 7903,
+        "uops": 23100,
+        "block_rthroughput": 50.5,
+        "skipped": [],
+        "cycles_per_iter": 79.03
+      }
+    ]
+  },
+  {
+    "platform": "ppc64le",
+    "kernel": "decode_16",
+    "fn_instructions": 371,
+    "mode": "outer",
+    "trace_instructions": 268,
+    "calls": 0,
+    "loop_tree": "?",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "pwr8",
+        "iterations": 100,
+        "instructions": 26800,
+        "total_cycles": 7805,
+        "uops": 53600,
+        "block_rthroughput": 69.5,
+        "skipped": [],
+        "cycles_per_iter": 78.05
+      },
+      {
+        "cpu": "pwr9",
+        "iterations": 100,
+        "instructions": 26800,
+        "total_cycles": 12705,
+        "uops": 26800,
+        "block_rthroughput": 120.5,
+        "skipped": [],
+        "cycles_per_iter": 127.05
+      }
+    ]
+  },
+  {
+    "platform": "ppc64le",
+    "kernel": "encode_generic",
+    "fn_instructions": 129,
+    "mode": "inner",
+    "trace_instructions": 21,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "pwr8",
+        "iterations": 100,
+        "instructions": 2100,
+        "total_cycles": 532,
+        "uops": 4200,
+        "block_rthroughput": 5.3,
+        "skipped": [],
+        "cycles_per_iter": 5.32
+      },
+      {
+        "cpu": "pwr9",
+        "iterations": 100,
+        "instructions": 2100,
+        "total_cycles": 510,
+        "uops": 2100,
+        "block_rthroughput": 5.0,
+        "skipped": [],
+        "cycles_per_iter": 5.1
+      }
+    ]
+  },
+  {
+    "platform": "ppc64le",
+    "kernel": "decode_generic",
+    "fn_instructions": 169,
+    "mode": "inner",
+    "trace_instructions": 34,
+    "calls": 0,
+    "loop_tree": "?[? ? ?]",
+    "warnings": [],
+    "mca": [
+      {
+        "cpu": "pwr8",
+        "iterations": 100,
+        "instructions": 3400,
+        "total_cycles": 1257,
+        "uops": 6800,
+        "block_rthroughput": 11.5,
+        "skipped": [],
+        "cycles_per_iter": 12.57
+      },
+      {
+        "cpu": "pwr9",
+        "iterations": 100,
+        "instructions": 3400,
+        "total_cycles": 1305,
+        "uops": 3400,
+        "block_rthroughput": 8.5,
+        "skipped": [],
+        "cycles_per_iter": 13.05
+      }
+    ]
+  }
+]
