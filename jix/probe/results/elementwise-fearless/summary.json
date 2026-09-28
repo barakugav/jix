@@ -1631,234 +1631,234 @@
   {
     "platform": "i686",
     "kernel": "neg_f32",
-    "fn_instructions": 160,
+    "fn_instructions": 146,
     "mode": "outer",
-    "trace_instructions": "30",
+    "trace_instructions": "15",
     "calls": [],
     "loop_tree": "? ? ?",
-    "bytes_per_iter": "128",
+    "bytes_per_iter": "64",
     "warnings": [],
     "costs": [
-      291.52
+      262.4
     ],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 3000,
-        "total_cycles": 911,
-        "uops": 3900,
-        "block_rthroughput": 9.0,
+        "instructions": 1500,
+        "total_cycles": 410,
+        "uops": 1900,
+        "block_rthroughput": 4.0,
         "skipped": [],
-        "cycles_per_iter": 9.11
+        "cycles_per_iter": 4.1
       }
     ]
   },
   {
     "platform": "i686",
     "kernel": "add_f32",
-    "fn_instructions": 176,
+    "fn_instructions": 159,
     "mode": "outer",
-    "trace_instructions": "36",
+    "trace_instructions": "19",
     "calls": [],
     "loop_tree": "? ? ?",
-    "bytes_per_iter": "128",
+    "bytes_per_iter": "64",
     "warnings": [],
     "costs": [
-      293.12
+      264.32
     ],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 3600,
-        "total_cycles": 916,
-        "uops": 4600,
-        "block_rthroughput": 9.0,
+        "instructions": 1900,
+        "total_cycles": 413,
+        "uops": 2300,
+        "block_rthroughput": 4.0,
         "skipped": [],
-        "cycles_per_iter": 9.16
+        "cycles_per_iter": 4.13
       }
     ]
   },
   {
     "platform": "i686",
     "kernel": "chain_f32",
-    "fn_instructions": 254,
+    "fn_instructions": 214,
     "mode": "outer",
-    "trace_instructions": "75",
+    "trace_instructions": "35",
     "calls": [],
     "loop_tree": "? ? ?",
-    "bytes_per_iter": "128",
+    "bytes_per_iter": "64",
     "warnings": [],
     "costs": [
-      597.44
+      524.16
     ],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 7500,
-        "total_cycles": 1867,
-        "uops": 9000,
-        "block_rthroughput": 18.5,
+        "instructions": 3500,
+        "total_cycles": 819,
+        "uops": 3900,
+        "block_rthroughput": 8.0,
         "skipped": [],
-        "cycles_per_iter": 18.67
+        "cycles_per_iter": 8.19
       }
     ]
   },
   {
     "platform": "i686",
     "kernel": "neg_f64",
-    "fn_instructions": 165,
+    "fn_instructions": 149,
     "mode": "outer",
-    "trace_instructions": "30",
+    "trace_instructions": "15",
     "calls": [],
     "loop_tree": "? ? ?",
-    "bytes_per_iter": "128",
+    "bytes_per_iter": "64",
     "warnings": [],
     "costs": [
-      291.52
+      262.4
     ],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 3000,
-        "total_cycles": 911,
-        "uops": 3900,
-        "block_rthroughput": 9.0,
+        "instructions": 1500,
+        "total_cycles": 410,
+        "uops": 1900,
+        "block_rthroughput": 4.0,
         "skipped": [],
-        "cycles_per_iter": 9.11
+        "cycles_per_iter": 4.1
       }
     ]
   },
   {
     "platform": "i686",
     "kernel": "add_f64",
-    "fn_instructions": 176,
+    "fn_instructions": 159,
     "mode": "outer",
-    "trace_instructions": "36",
+    "trace_instructions": "19",
     "calls": [],
     "loop_tree": "? ? ?",
-    "bytes_per_iter": "128",
+    "bytes_per_iter": "64",
     "warnings": [],
     "costs": [
-      293.12
+      264.32
     ],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 3600,
-        "total_cycles": 916,
-        "uops": 4600,
-        "block_rthroughput": 9.0,
+        "instructions": 1900,
+        "total_cycles": 413,
+        "uops": 2300,
+        "block_rthroughput": 4.0,
         "skipped": [],
-        "cycles_per_iter": 9.16
+        "cycles_per_iter": 4.13
       }
     ]
   },
   {
     "platform": "i686",
     "kernel": "chain_f64",
-    "fn_instructions": 254,
+    "fn_instructions": 214,
     "mode": "outer",
-    "trace_instructions": "75",
+    "trace_instructions": "35",
     "calls": [],
     "loop_tree": "? ? ?",
-    "bytes_per_iter": "128",
+    "bytes_per_iter": "64",
     "warnings": [],
     "costs": [
-      597.44
+      524.16
     ],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 7500,
-        "total_cycles": 1867,
-        "uops": 9000,
-        "block_rthroughput": 18.5,
+        "instructions": 3500,
+        "total_cycles": 819,
+        "uops": 3900,
+        "block_rthroughput": 8.0,
         "skipped": [],
-        "cycles_per_iter": 18.67
+        "cycles_per_iter": 8.19
       }
     ]
   },
   {
     "platform": "i686",
     "kernel": "neg_i32",
-    "fn_instructions": 165,
+    "fn_instructions": 148,
     "mode": "outer",
-    "trace_instructions": "36",
+    "trace_instructions": "19",
     "calls": [],
     "loop_tree": "? ? ?",
-    "bytes_per_iter": "128",
+    "bytes_per_iter": "64",
     "warnings": [],
     "costs": [
-      291.2
+      262.4
     ],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 3600,
-        "total_cycles": 910,
-        "uops": 4600,
-        "block_rthroughput": 9.0,
+        "instructions": 1900,
+        "total_cycles": 410,
+        "uops": 2300,
+        "block_rthroughput": 4.0,
         "skipped": [],
-        "cycles_per_iter": 9.1
+        "cycles_per_iter": 4.1
       }
     ]
   },
   {
     "platform": "i686",
     "kernel": "add_i32",
-    "fn_instructions": 176,
+    "fn_instructions": 159,
     "mode": "outer",
-    "trace_instructions": "36",
+    "trace_instructions": "19",
     "calls": [],
     "loop_tree": "? ? ?",
-    "bytes_per_iter": "128",
+    "bytes_per_iter": "64",
     "warnings": [],
     "costs": [
-      293.12
+      262.4
     ],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 3600,
-        "total_cycles": 916,
-        "uops": 4600,
-        "block_rthroughput": 9.0,
+        "instructions": 1900,
+        "total_cycles": 410,
+        "uops": 2300,
+        "block_rthroughput": 4.0,
         "skipped": [],
-        "cycles_per_iter": 9.16
+        "cycles_per_iter": 4.1
       }
     ]
   },
   {
     "platform": "i686",
     "kernel": "chain_i32",
-    "fn_instructions": 311,
+    "fn_instructions": 235,
     "mode": "outer",
-    "trace_instructions": "135",
+    "trace_instructions": "59",
     "calls": [],
     "loop_tree": "? ? ?",
-    "bytes_per_iter": "128",
+    "bytes_per_iter": "64",
     "warnings": [],
     "costs": [
-      1286.4
+      1288.96
     ],
     "mca": [
       {
         "cpu": "skylake",
         "iterations": 100,
-        "instructions": 13500,
-        "total_cycles": 4020,
-        "uops": 15100,
-        "block_rthroughput": 40.0,
+        "instructions": 5900,
+        "total_cycles": 2014,
+        "uops": 6300,
+        "block_rthroughput": 20.0,
         "skipped": [],
-        "cycles_per_iter": 40.2
+        "cycles_per_iter": 20.14
       }
     ]
   },

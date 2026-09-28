@@ -616,6 +616,12 @@ where
             STRIDED_LANES
         };
         if IN_CONTIGUOUS && OUT_CONTIGUOUS {
+            // 32-bit x86 has 8 vector registers: 128 bytes per operand would spill.
+            let lanes = if cfg!(target_arch = "x86") && lanes > 1 {
+                lanes / 2
+            } else {
+                lanes
+            };
             match lanes {
                 1 => inner_loop_contiguous::<_, 1>,
                 2 => inner_loop_contiguous::<_, 2>,

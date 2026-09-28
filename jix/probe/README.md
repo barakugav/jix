@@ -488,7 +488,7 @@ the SSE2 code of the baseline's `x86_64` row: e.g. Skylake 362 -> 166 (2.2x).
 | x86_64-v4 | icelake-server | **91** | 12.32x | 55 | 77 | 198 | 55 | 77 | 198 | 55 | 76 | 150 |
 | x86_64-v4 | sapphirerapids | **75** | 40.95x | 52 | 63 | 119 | 52 | 63 | 119 | 52 | 63 | 150 |
 | x86_64-v4 | znver4 | **102** | 2.22x | 66 | 97 | 164 | 66 | 97 | 164 | 66 | 97 | 164 |
-| i686 (Sse2 arm) | skylake | **404** | 0.90x | 292 | 293 | 597 | 292 | 293 | 597 | 291 | 293 | 1286 |
+| i686 (Sse2 arm) | skylake | **366** | 0.99x | 262 | 264 | 524 | 262 | 264 | 524 | 262 | 262 | 1289 |
 | aarch64 | cortex-a72 | **916** | 1.01x | 579 | 899 | 1667 | 579 | 899 | 1667 | 579 | 739 | 1411 |
 | aarch64 | neoverse-n1 | **878** | 1.00x | 610 | 834 | 1314 | 610 | 834 | 1314 | 642 | 770 | 1411 |
 | aarch64 | neoverse-v2 | **351** | 0.97x | 227 | 323 | 611 | 227 | 323 | 611 | 227 | 323 | 548 |
@@ -500,8 +500,10 @@ Findings:
   baseline's AVX-512 code, and now about 2x faster than AVX2 per byte, as expected.
 - SSE4.2, AVX2 and NEON: the same as the auto-vectorized code (0.97-1.05x), which was already
   clean. Small losses on Neoverse V2 (`add`, `chain`: 0.9-0.95x, a different instruction order).
-- i686 `Sse2` arm 0.90x: with 8 `xmm` registers, the SIMD body's order (all loads, then the ops)
-  spills one vector per iteration. Only i686 CPUs without SSE4.2 run it.
+- i686 has 8 `xmm` registers: with `LANES` = 128 bytes per operand, the SIMD body's order (all
+  loads, then the ops) spilled one vector per iteration (geomean 404, 0.90x). fearless_simd exposes
+  the vector widths (`S::f32s::LEN`, ...) but not the register count, so `pick_inner_loop` halves
+  `LANES` of the contiguous loop on 32-bit x86 (`cfg!(target_arch = "x86")`): 366, 0.99x.
 - The first version chained the per-type attempts with `Option::or_else`, which is not always
   inlined: on the `Sse2` arm, the emulated i32 multiply stayed behind a call in the hot loop
   (`chain_i32` 2-3x slower). Plain `if let ... return` fixed it.

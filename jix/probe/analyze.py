@@ -153,6 +153,14 @@ class Kernel:
     # output: its bytes are the "input bytes" of the cost model). None: not such a loop.
     elem_size: int | None = None
 
+    def symbol_for(self, platform: Platform) -> str:
+        """`symbol`, with an element-wise loop's `{lanes}`: `LanesInfo::LANES = 128 / size`,
+        halved on 32-bit x86 (see `pick_inner_loop`)."""
+        if self.elem_size is None:
+            return self.symbol
+        lanes = 128 // self.elem_size // (2 if platform.target.startswith("i686") else 1)
+        return self.symbol.replace("{lanes}", str(lanes))
+
     def scev_env(self, length: int) -> dict[str, int]:
         """Values of the function arguments, for an input of `length` bytes."""
         if self.elem_size is not None:
@@ -188,9 +196,8 @@ def _elementwise_kernel(name: str, ty: str, pipeline: str) -> Kernel:
     the higher levels are separate functions. (The baseline analyzed its predecessor,
     `inner_loop::<T, LANES, true, true, _>`.)"""
     size = {"f32": 4, "f64": 8, "i32": 4}[ty]
-    lanes = 128 // size  # `LanesInfo::LANES`
     ew = "jix::storage::elementwise_pipeline"
-    sym = f"{ew}::inner_loop_contiguous::<{ty}, {lanes}, {pipeline}>"
+    sym = f"{ew}::inner_loop_contiguous::<{ty}, {{lanes}}, {pipeline}>"
     return Kernel(f"{name}_{ty}", sym, None, crate="elementwise", elem_size=size)
 
 
@@ -998,7 +1005,8 @@ def describe_tree(loops: list[Loop]) -> str:
 def analyze_kernel(
     platform: Platform, kernel: Kernel, ll: Path, opt: str, mca: str, target_dir: Path, out_dir: Path
 ) -> KernelResult:
-    asm = cargo_asm(platform, kernel.symbol, target_dir, kernel.crate)
+    symbol = kernel.symbol_for(platform)
+    asm = cargo_asm(platform, symbol, target_dir, kernel.crate)
     asm_path = out_dir / "asm" / platform.name / f"{kernel.name}.s"
     asm_path.parent.mkdir(parents=True, exist_ok=True)
     asm_path.write_text(asm)
@@ -1011,7 +1019,7 @@ def analyze_kernel(
     except RuntimeError as e:  # a loop LLVM laid out in non-contiguous pieces
         roots = []
         warnings.append(str(e))
-    ir_hint = kernel.ir_hint or mangled_name(ll, kernel.symbol)
+    ir_hint = kernel.ir_hint or mangled_name(ll, symbol)
     if not attach_trip_counts(roots, ir_loops(ll, opt, ir_hint)):
         warnings.append("asm and IR loop trees differ, trip counts unknown")
 
@@ -1074,7 +1082,7 @@ def analyze_platform(
     crate = kernels[0].crate
     target_dir = PROBE_DIR / crate / "target" / "analyze" / f"{platform.name}-{flags}"
     # Emits the whole crate's final LLVM IR next to the build artifacts.
-    cargo_asm(platform, kernels[0].symbol, target_dir, crate, ["--llvm"])
+    cargo_asm(platform, kernels[0].symbol_for(platform), target_dir, crate, ["--llvm"])
     lib = "jix_probe" if crate == "." else f"jix_probe_{crate}"
     ll = max(target_dir.glob(f"{platform.target}/release/**/{lib}-*.ll"), key=lambda p: p.stat().st_mtime)
     return [analyze_kernel(platform, k, ll, opt, mca, target_dir, out_dir) for k in kernels]
