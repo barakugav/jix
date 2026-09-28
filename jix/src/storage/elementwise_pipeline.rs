@@ -517,8 +517,9 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
     );
 }
 
-/// Vectors of the SIMD level per iteration of [`inner_loop_contiguous`].
-const CONTIGUOUS_VECTORS: usize = 4;
+/// Vectors of the SIMD level per iteration of [`inner_loop_contiguous`]. 32-bit x86 has only 8
+/// vector registers: 8 vectors per operand would spill.
+const CONTIGUOUS_VECTORS: usize = if cfg!(target_arch = "x86") { 4 } else { 8 };
 
 /// [`inner_loop`] for all operands contiguous, compiled for each SIMD level and dispatched at
 /// runtime: the pipeline reads through [`read_bulk_simd`](ElementwisePipelineImpl::read_bulk_simd),
