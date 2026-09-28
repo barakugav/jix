@@ -134,6 +134,6 @@ Observations:
   `LANES = 128 / ITEMSIZE`. A one-off sweep of 256/512/1024-byte steps (not committed) confirmed
   the measured `B/iter` tracks `ITEMSIZE * LANES`. For most kernels it made the auto-vectorized
   code worse: LLVM starts calling `memcpy`/`memset` for the `elms` buffer, or it falls back to
-  scalar. x86-64-v4 `decode_2/8` gained 10-40%.
+  scalar. Only x86-64-v4 gained: `decode_2` by 30-40% and `decode_8` by 7-22%.
 - i686: the `i686-*` targets enable SSE2 (128-bit integer SIMD, but no SSSE3 `pshufb`). The
   `multiversion` targets are x86_64-only, so i686 never gets wider clones.
