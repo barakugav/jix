@@ -548,10 +548,7 @@ fn inner_loop_level<S: Simd, T: Dtyped>(
 ) {
     macro_rules! with_lanes {
         ($($lanes:literal)*) => {
-            match const {
-                let per_vector = S::u8s::LEN / size_of::<T>();
-                CONTIGUOUS_VECTORS * if per_vector > 0 { per_vector } else { 1 }
-            } {
+            match const { contiguous_lanes(S::u8s::LEN, size_of::<T>()) } {
                 $($lanes => inner_loop_impl::<T, $lanes, true, true>(
                     dst,
                     dst_stride,
@@ -563,7 +560,22 @@ fn inner_loop_level<S: Simd, T: Dtyped>(
             }
         };
     }
-    with_lanes!(1 2 3 4 6 8 12 16 24 32 48 64 96 128 192 256);
+    with_lanes!(1 2 4 8 16 32 64 128 256 512);
+}
+
+/// Lanes of [`inner_loop_contiguous`] for vectors of `vector_bytes` and elements of `size`:
+/// [`CONTIGUOUS_VECTORS`] vectors, the elements per vector rounded down to a power of two (at
+/// least 1), so that it is one of the arms of `inner_loop_level`: a power of two, at most 512.
+const fn contiguous_lanes(vector_bytes: usize, size: usize) -> usize {
+    let per_vector = vector_bytes / size;
+    let per_vector = if per_vector == 0 {
+        1
+    } else {
+        1 << per_vector.ilog2()
+    };
+    let lanes = CONTIGUOUS_VECTORS * per_vector;
+    assert!(lanes.is_power_of_two() && lanes <= 512);
+    lanes
 }
 
 /// Body of the inner loops: `read_lanes(i)` / `read_one(i)` read the elements at `i`.
@@ -896,6 +908,22 @@ pub(crate) const fn n_operands_mul(count: Option<usize>, n: usize) -> Option<usi
 
 #[cfg(test)]
 mod tests {
+    /// Every element size and SIMD vector width maps to one of `inner_loop_level`'s arms (odd
+    /// struct sizes and 1-byte elements on AVX-512 included).
+    #[test]
+    fn contiguous_lanes_all_sizes() {
+        for vector_bytes in [16, 32, 64] {
+            for size in 1..=256 {
+                let lanes = super::contiguous_lanes(vector_bytes, size);
+                assert!(
+                    lanes.is_power_of_two() && lanes <= 512,
+                    "{vector_bytes} {size}"
+                );
+                assert!(lanes * size <= super::CONTIGUOUS_VECTORS * vector_bytes.max(size));
+            }
+        }
+    }
+
     use super::*;
     use crate::{array_from_fn_inline, strided_span_bytes, Array, ArrayStorage, Ty};
 

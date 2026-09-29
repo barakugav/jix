@@ -386,7 +386,8 @@ The pipeline is not self-contained like the filter kernels, so it gets its own p
 |---|---|---|
 | `neg` | `-a` | f32, f64, i32 |
 | `add` | `a + b` | f32, f64, i32 |
-| `chain` | `(a + b) * c - d` (`Add`, `Mul`, `Sub`) | f32, f64, i32 |
+| `chain` | `(a + b) * (c - d)` (`Add`, `Mul`, `Sub`); `(a + b) * c - d` before `elementwise-longchain-*` | f32, f64, i32 |
+| `longchain` | `(a + b) * (c - d) + (e + f) * (g - h)`, more values live at once (from `elementwise-longchain-*`) | f32, f64, i32 |
 
 What is analyzed is the pipeline's inner loop that each probe instantiates,
 `elementwise_pipeline::inner_loop::<T, LANES, true, true, Pipeline>`: the variant for all operands
@@ -524,7 +525,12 @@ on AVX-512 (`results/elementwise-fearless`: 128 bytes on every level, 64 on i686
 depends on the level, so `inner_loop_level` matches on it as an inline `const` inside the
 dispatch arm: only the taken arm is codegened. The strided/staged loops keep their fixed lanes.
 
-**Committed: k = 8, and k = 4 on 32-bit x86** (8 `xmm` registers: k = 8 spills there).
+**Committed: k = 8, and k = 4 on 32-bit x86** (8 `xmm` registers: k = 8 spills there). The
+elements per vector are rounded down to a power of two, so every element size maps to an arm
+(before, 1-byte elements on AVX-512 with k = 8, or odd struct sizes, hit `unreachable!()`).
+
+Note: the CPU of the cloud sandbox has only the Skylake-X subset of AVX-512, so fearless_simd
+picks its AVX2 level there: the tests run the SSE2, SSE4.2 and AVX2 arms, not the AVX-512 one.
 
 llvm-mca cycles per 4096 output bytes; bold: best, or within 2% of it.
 
@@ -745,3 +751,257 @@ Findings:
 - Against the former 128 bytes on every level (`elementwise-fearless`): the same on SSE/NEON
   (k = 8 is 128 bytes there), better on AVX2 (Alder Lake f32 geomean 144 -> 130) and AVX-512
   (Ice Lake 94 -> 87, Sapphire Rapids 73 -> 65), which now run 256 / 512 bytes.
+
+### Register pressure: `chain` = `(a + b) * (c - d)` and `longchain` (`results/elementwise-longchain-*`)
+
+`chain` was changed from `(a + b) * c - d` to `(a + b) * (c - d)`, and `longchain`,
+`(a + b) * (c - d) + (e + f) * (g - h)` (8 inputs), added, to keep more vectors live. Compared:
+128 bytes per operand on every level (`LanesInfo::LANES`, the first fearless_simd version, i686
+included), and k = 4 / k = 8 vectors of the level on every platform (i686 included; committed:
+k = 4 there). On the 16-byte levels (SSE, NEON), k = 8 is 128 bytes: the same code.
+
+Cycles per 4096 output bytes, and speedup over 128 B; bold: >= 3% faster, italics: >= 3% slower.
+
+#### f32: geomean of the 4 ops
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 556 | 571 (0.97x) | 556 (1.00x) |
+| x86_64 | skylake | 444 | 441 (1.01x) | 444 (1.00x) |
+| x86_64 | znver3 | 541 | 528 (1.02x) | 541 (1.00x) |
+| x86_64-v2 | sandybridge | 556 | 571 (0.97x) | 556 (1.00x) |
+| x86_64-v2 | btver2 | 881 | _924 (0.95x)_ | 881 (1.00x) |
+| x86_64-v3 | skylake | 221 | 221 (1.00x) | 218 (1.01x) |
+| x86_64-v3 | alderlake | 186 | 186 (1.00x) | **170 (1.10x)** |
+| x86_64-v3 | znver3 | 264 | 264 (1.00x) | 262 (1.01x) |
+| x86_64-v4 | icelake-server | 139 | 139 (1.00x) | **132 (1.06x)** |
+| x86_64-v4 | sapphirerapids | 98 | **95 (1.03x)** | **89 (1.10x)** |
+| x86_64-v4 | znver4 | 136 | 135 (1.01x) | 134 (1.01x) |
+| i686 | skylake | 515 | **466 (1.11x)** | 515 (1.00x) |
+| aarch64 | cortex-a72 | 1291 | _1436 (0.90x)_ | 1291 (1.00x) |
+| aarch64 | neoverse-n1 | 1125 | 1117 (1.01x) | 1125 (1.00x) |
+| aarch64 | neoverse-v2 | 454 | _595 (0.76x)_ | 454 (1.00x) |
+| aarch64-apple | apple-m1 | 350 | _387 (0.90x)_ | 350 (1.00x) |
+
+#### f64: geomean of the 4 ops
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 556 | 571 (0.97x) | 556 (1.00x) |
+| x86_64 | skylake | 444 | 441 (1.01x) | 444 (1.00x) |
+| x86_64 | znver3 | 541 | 528 (1.02x) | 541 (1.00x) |
+| x86_64-v2 | sandybridge | 556 | 571 (0.97x) | 556 (1.00x) |
+| x86_64-v2 | btver2 | 885 | _925 (0.96x)_ | 885 (1.00x) |
+| x86_64-v3 | skylake | 221 | 221 (1.00x) | 218 (1.01x) |
+| x86_64-v3 | alderlake | 186 | 186 (1.00x) | **170 (1.10x)** |
+| x86_64-v3 | znver3 | 264 | 264 (1.00x) | 262 (1.01x) |
+| x86_64-v4 | icelake-server | 139 | 139 (1.00x) | **132 (1.06x)** |
+| x86_64-v4 | sapphirerapids | 98 | **95 (1.03x)** | **89 (1.10x)** |
+| x86_64-v4 | znver4 | 136 | 135 (1.01x) | 134 (1.01x) |
+| i686 | skylake | 515 | **466 (1.11x)** | 515 (1.00x) |
+| aarch64 | cortex-a72 | 1291 | _1436 (0.90x)_ | 1291 (1.00x) |
+| aarch64 | neoverse-n1 | 1125 | 1117 (1.01x) | 1125 (1.00x) |
+| aarch64 | neoverse-v2 | 454 | _595 (0.76x)_ | 454 (1.00x) |
+| aarch64-apple | apple-m1 | 350 | _387 (0.90x)_ | 350 (1.00x) |
+
+#### i32: geomean of the 4 ops
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 702 | 690 (1.02x) | 702 (1.00x) |
+| x86_64 | skylake | 687 | 692 (0.99x) | 687 (1.00x) |
+| x86_64 | znver3 | 595 | **558 (1.07x)** | 595 (1.00x) |
+| x86_64-v2 | sandybridge | 552 | 549 (1.00x) | 552 (1.00x) |
+| x86_64-v2 | btver2 | 1057 | _1120 (0.94x)_ | 1057 (1.00x) |
+| x86_64-v3 | skylake | 221 | 221 (1.00x) | 218 (1.01x) |
+| x86_64-v3 | alderlake | 191 | 191 (1.00x) | **181 (1.06x)** |
+| x86_64-v3 | znver3 | 263 | 263 (1.00x) | 261 (1.01x) |
+| x86_64-v4 | icelake-server | 123 | 120 (1.02x) | **117 (1.05x)** |
+| x86_64-v4 | sapphirerapids | 108 | 106 (1.01x) | **101 (1.07x)** |
+| x86_64-v4 | znver4 | 132 | 132 (1.00x) | 131 (1.01x) |
+| i686 | skylake | 732 | **692 (1.06x)** | 732 (1.00x) |
+| aarch64 | cortex-a72 | 1115 | _1240 (0.90x)_ | 1115 (1.00x) |
+| aarch64 | neoverse-n1 | 1155 | 1168 (0.99x) | 1155 (1.00x) |
+| aarch64 | neoverse-v2 | 457 | _588 (0.78x)_ | 457 (1.00x) |
+| aarch64-apple | apple-m1 | 345 | _379 (0.91x)_ | 345 (1.00x) |
+
+#### f32: `neg` (`-a`)
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 291 | _325 (0.89x)_ | 291 (1.00x) |
+| x86_64 | skylake | 259 | 262 (0.99x) | 259 (1.00x) |
+| x86_64 | znver3 | 260 | 264 (0.99x) | 260 (1.00x) |
+| x86_64-v2 | sandybridge | 291 | _325 (0.89x)_ | 291 (1.00x) |
+| x86_64-v2 | btver2 | 436 | _486 (0.90x)_ | 436 (1.00x) |
+| x86_64-v3 | skylake | 132 | 132 (1.00x) | 130 (1.01x) |
+| x86_64-v3 | alderlake | 103 | 103 (1.00x) | **94 (1.10x)** |
+| x86_64-v3 | znver3 | 132 | 132 (1.00x) | 130 (1.01x) |
+| x86_64-v4 | icelake-server | 55 | 55 (1.00x) | **49 (1.13x)** |
+| x86_64-v4 | sapphirerapids | 52 | 52 (1.00x) | **47 (1.10x)** |
+| x86_64-v4 | znver4 | 66 | 66 (1.00x) | 65 (1.01x) |
+| i686 | skylake | 292 | **262 (1.11x)** | 292 (1.00x) |
+| aarch64 | cortex-a72 | 579 | _646 (0.90x)_ | 579 (1.00x) |
+| aarch64 | neoverse-n1 | 610 | _645 (0.94x)_ | 610 (1.00x) |
+| aarch64 | neoverse-v2 | 227 | _262 (0.87x)_ | 227 (1.00x) |
+| aarch64-apple | apple-m1 | 196 | _203 (0.97x)_ | 196 (1.00x) |
+
+#### f32: `add` (`a + b`)
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 387 | 390 (0.99x) | 387 (1.00x) |
+| x86_64 | skylake | 261 | 266 (0.98x) | 261 (1.00x) |
+| x86_64 | znver3 | 387 | 390 (0.99x) | 387 (1.00x) |
+| x86_64-v2 | sandybridge | 387 | 390 (0.99x) | 387 (1.00x) |
+| x86_64-v2 | btver2 | 564 | _616 (0.92x)_ | 564 (1.00x) |
+| x86_64-v3 | skylake | 132 | 132 (1.00x) | 131 (1.01x) |
+| x86_64-v3 | alderlake | 136 | 136 (1.00x) | **116 (1.17x)** |
+| x86_64-v3 | znver3 | 195 | 195 (1.00x) | 193 (1.01x) |
+| x86_64-v4 | icelake-server | 77 | 77 (1.00x) | **71 (1.09x)** |
+| x86_64-v4 | sapphirerapids | 63 | 63 (1.00x) | **58 (1.08x)** |
+| x86_64-v4 | znver4 | 97 | 97 (1.00x) | 97 (1.01x) |
+| i686 | skylake | 293 | **264 (1.11x)** | 293 (1.00x) |
+| aarch64 | cortex-a72 | 899 | _966 (0.93x)_ | 899 (1.00x) |
+| aarch64 | neoverse-n1 | 834 | 837 (1.00x) | 834 (1.00x) |
+| aarch64 | neoverse-v2 | 323 | _454 (0.71x)_ | 323 (1.00x) |
+| aarch64-apple | apple-m1 | 260 | 266 (0.98x) | 260 (1.00x) |
+
+#### f32: `chain` (`(a + b) * (c - d)`)
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 644 | 650 (0.99x) | 644 (1.00x) |
+| x86_64 | skylake | 517 | 524 (0.99x) | 517 (1.00x) |
+| x86_64 | znver3 | 644 | 650 (0.99x) | 644 (1.00x) |
+| x86_64-v2 | sandybridge | 644 | 650 (0.99x) | 644 (1.00x) |
+| x86_64-v2 | btver2 | 1077 | _1130 (0.95x)_ | 1077 (1.00x) |
+| x86_64-v3 | skylake | 262 | 262 (1.00x) | 260 (1.01x) |
+| x86_64-v3 | alderlake | 218 | 218 (1.00x) | **205 (1.06x)** |
+| x86_64-v3 | znver3 | 324 | 324 (1.00x) | 322 (1.01x) |
+| x86_64-v4 | icelake-server | 197 | 195 (1.01x) | 193 (1.02x) |
+| x86_64-v4 | sapphirerapids | 122 | **109 (1.12x)** | **103 (1.19x)** |
+| x86_64-v4 | znver4 | 164 | 162 (1.01x) | 161 (1.02x) |
+| i686 | skylake | 582 | **524 (1.11x)** | 582 (1.00x) |
+| aarch64 | cortex-a72 | 1666 | _1862 (0.89x)_ | 1666 (1.00x) |
+| aarch64 | neoverse-n1 | 1281 | 1286 (1.00x) | 1281 (1.00x) |
+| aarch64 | neoverse-v2 | 548 | _776 (0.71x)_ | 548 (1.00x) |
+| aarch64-apple | apple-m1 | 390 | _458 (0.85x)_ | 390 (1.00x) |
+
+#### f32: `longchain` (`(a + b) * (c - d) + (e + f) * (g - h)`)
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 1319 | 1292 (1.02x) | 1319 (1.00x) |
+| x86_64 | skylake | 1111 | **1039 (1.07x)** | 1111 (1.00x) |
+| x86_64 | znver3 | 1318 | **1164 (1.13x)** | 1318 (1.00x) |
+| x86_64-v2 | sandybridge | 1319 | 1292 (1.02x) | 1319 (1.00x) |
+| x86_64-v2 | btver2 | 2278 | **2157 (1.06x)** | 2278 (1.00x) |
+| x86_64-v3 | skylake | 520 | 520 (1.00x) | 516 (1.01x) |
+| x86_64-v3 | alderlake | 395 | 395 (1.00x) | **373 (1.06x)** |
+| x86_64-v3 | znver3 | 581 | 581 (1.00x) | 578 (1.01x) |
+| x86_64-v4 | icelake-server | 453 | 451 (1.00x) | 449 (1.01x) |
+| x86_64-v4 | sapphirerapids | 235 | 229 (1.02x) | **227 (1.03x)** |
+| x86_64-v4 | znver4 | 325 | 323 (1.01x) | 321 (1.01x) |
+| i686 | skylake | 1416 | **1295 (1.09x)** | 1416 (1.00x) |
+| aarch64 | cortex-a72 | 3202 | _3654 (0.88x)_ | 3202 (1.00x) |
+| aarch64 | neoverse-n1 | 2465 | **2244 (1.10x)** | 2465 (1.00x) |
+| aarch64 | neoverse-v2 | 1060 | _1352 (0.78x)_ | 1060 (1.00x) |
+| aarch64-apple | apple-m1 | 753 | _908 (0.83x)_ | 753 (1.00x) |
+
+#### i32: `neg` (`-a`)
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 283 | _310 (0.91x)_ | 283 (1.00x) |
+| x86_64 | skylake | 259 | 262 (0.99x) | 259 (1.00x) |
+| x86_64 | znver3 | 260 | 264 (0.99x) | 260 (1.00x) |
+| x86_64-v2 | sandybridge | 283 | _310 (0.91x)_ | 283 (1.00x) |
+| x86_64-v2 | btver2 | 564 | _614 (0.92x)_ | 564 (1.00x) |
+| x86_64-v3 | skylake | 132 | 132 (1.00x) | 130 (1.01x) |
+| x86_64-v3 | alderlake | 103 | 103 (1.00x) | **94 (1.10x)** |
+| x86_64-v3 | znver3 | 132 | 132 (1.00x) | 130 (1.01x) |
+| x86_64-v4 | icelake-server | 55 | 55 (1.00x) | **49 (1.13x)** |
+| x86_64-v4 | sapphirerapids | 52 | 52 (1.00x) | **47 (1.10x)** |
+| x86_64-v4 | znver4 | 66 | 66 (1.00x) | 65 (1.01x) |
+| i686 | skylake | 291 | **262 (1.11x)** | 291 (1.00x) |
+| aarch64 | cortex-a72 | 579 | _646 (0.90x)_ | 579 (1.00x) |
+| aarch64 | neoverse-n1 | 642 | 645 (0.99x) | 642 (1.00x) |
+| aarch64 | neoverse-v2 | 227 | _262 (0.87x)_ | 227 (1.00x) |
+| aarch64-apple | apple-m1 | 196 | _203 (0.97x)_ | 196 (1.00x) |
+
+#### i32: `add` (`a + b`)
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 387 | 390 (0.99x) | 387 (1.00x) |
+| x86_64 | skylake | 260 | 264 (0.99x) | 260 (1.00x) |
+| x86_64 | znver3 | 387 | 390 (0.99x) | 387 (1.00x) |
+| x86_64-v2 | sandybridge | 387 | 390 (0.99x) | 387 (1.00x) |
+| x86_64-v2 | btver2 | 564 | _614 (0.92x)_ | 564 (1.00x) |
+| x86_64-v3 | skylake | 132 | 132 (1.00x) | 130 (1.01x) |
+| x86_64-v3 | alderlake | 125 | 125 (1.00x) | **116 (1.08x)** |
+| x86_64-v3 | znver3 | 195 | 195 (1.00x) | 193 (1.01x) |
+| x86_64-v4 | icelake-server | 76 | 76 (1.00x) | **70 (1.09x)** |
+| x86_64-v4 | sapphirerapids | 63 | 63 (1.00x) | **58 (1.08x)** |
+| x86_64-v4 | znver4 | 97 | 97 (1.00x) | 97 (1.01x) |
+| i686 | skylake | 293 | **262 (1.12x)** | 293 (1.00x) |
+| aarch64 | cortex-a72 | 739 | _901 (0.82x)_ | 739 (1.00x) |
+| aarch64 | neoverse-n1 | 770 | _837 (0.92x)_ | 770 (1.00x) |
+| aarch64 | neoverse-v2 | 323 | _454 (0.71x)_ | 323 (1.00x) |
+| aarch64-apple | apple-m1 | 260 | 264 (0.98x) | 260 (1.00x) |
+
+#### i32: `chain` (`(a + b) * (c - d)`)
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 1060 | **956 (1.11x)** | 1060 (1.00x) |
+| x86_64 | skylake | 1286 | 1292 (1.00x) | 1286 (1.00x) |
+| x86_64 | znver3 | 775 | **695 (1.11x)** | 775 (1.00x) |
+| x86_64-v2 | sandybridge | 644 | 649 (0.99x) | 644 (1.00x) |
+| x86_64-v2 | btver2 | 1347 | _1479 (0.91x)_ | 1347 (1.00x) |
+| x86_64-v3 | skylake | 263 | 263 (1.00x) | 260 (1.01x) |
+| x86_64-v3 | alderlake | 235 | 235 (1.00x) | **225 (1.05x)** |
+| x86_64-v3 | znver3 | 324 | 324 (1.00x) | 322 (1.00x) |
+| x86_64-v4 | icelake-server | 166 | **156 (1.07x)** | 162 (1.03x) |
+| x86_64-v4 | sapphirerapids | 139 | **134 (1.04x)** | **131 (1.06x)** |
+| x86_64-v4 | znver4 | 164 | 162 (1.01x) | 161 (1.02x) |
+| i686 | skylake | 1289 | 1290 (1.00x) | 1289 (1.00x) |
+| aarch64 | cortex-a72 | 1443 | _1544 (0.93x)_ | 1443 (1.00x) |
+| aarch64 | neoverse-n1 | 1442 | 1414 (1.02x) | 1442 (1.00x) |
+| aarch64 | neoverse-v2 | 580 | _776 (0.75x)_ | 580 (1.00x) |
+| aarch64-apple | apple-m1 | 391 | _458 (0.85x)_ | 391 (1.00x) |
+
+#### i32: `longchain` (`(a + b) * (c - d) + (e + f) * (g - h)`)
+
+| platform | cpu | 128 B | k=4 | k=8 |
+|---|---|---:|---:|---:|
+| x86_64 | sandybridge | 2088 | **1964 (1.06x)** | 2088 (1.00x) |
+| x86_64 | skylake | 2568 | 2572 (1.00x) | 2568 (1.00x) |
+| x86_64 | znver3 | 1613 | **1358 (1.19x)** | 1613 (1.00x) |
+| x86_64-v2 | sandybridge | 1316 | **1164 (1.13x)** | 1316 (1.00x) |
+| x86_64-v2 | btver2 | 2916 | **2824 (1.03x)** | 2916 (1.00x) |
+| x86_64-v3 | skylake | 520 | 520 (1.00x) | 516 (1.01x) |
+| x86_64-v3 | alderlake | 444 | 444 (1.00x) | 438 (1.01x) |
+| x86_64-v3 | znver3 | 581 | 581 (1.00x) | 578 (1.01x) |
+| x86_64-v4 | icelake-server | 326 | 323 (1.01x) | _338 (0.97x)_ |
+| x86_64-v4 | sapphirerapids | 299 | 293 (1.02x) | 291 (1.03x) |
+| x86_64-v4 | znver4 | 292 | 290 (1.01x) | 289 (1.01x) |
+| i686 | skylake | 2604 | 2577 (1.01x) | 2604 (1.00x) |
+| aarch64 | cortex-a72 | 2500 | _2632 (0.95x)_ | 2500 (1.00x) |
+| aarch64 | neoverse-n1 | 2498 | 2439 (1.02x) | 2498 (1.00x) |
+| aarch64 | neoverse-v2 | 1028 | _1289 (0.80x)_ | 1028 (1.00x) |
+| aarch64-apple | apple-m1 | 709 | _842 (0.84x)_ | 709 (1.00x) |
+
+
+Findings:
+- AVX2 and AVX-512 (k = 8 = 256 / 512 B): k = 8 is the best or equal nearly everywhere, up to 1.17x
+  over 128 B (Alder Lake `add`) and 1.19x (Sapphire Rapids f32 `chain`); the only loss is Ice Lake
+  i32 `longchain` (0.97x; k = 4 1.01x).
+- NEON (32 registers): k = 8 (= 128 B) is best, k = 4 loses up to 0.71x (Neoverse V2), except
+  Neoverse N1 `longchain`, where k = 4 is 1.10x (f32).
+- SSE on x86-64 (16 registers): `neg` / `add` / f32 `chain` prefer k = 8, but the register-heavy
+  ones prefer k = 4: `longchain` (Zen 3 SSE2 arm 1.13x f32, 1.19x i32; Sandy Bridge SSE4.2 1.13x
+  i32) and i32 `chain` on the SSE2 arm (emulated multiply, 1.11x). The best k depends on the op.
+- i686 (8 registers): k = 4 (committed there) is 1.06x (i32) and 1.11x (f32) over 128 B, geomean.
+

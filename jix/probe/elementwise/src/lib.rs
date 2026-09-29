@@ -25,7 +25,7 @@ fn write<S: ArrayStorage>(x: Array<S>, out: &mut [u8]) {
 }
 
 macro_rules! probe {
-    ($($t:ident: $neg:ident, $add:ident, $chain:ident;)*) => { $(
+    ($($t:ident: $neg:ident, $add:ident, $chain:ident, $longchain:ident;)*) => { $(
         #[unsafe(no_mangle)]
         pub fn $neg(a: &[$t], out: &mut [u8]) {
             write(-plain(a), out)
@@ -34,15 +34,21 @@ macro_rules! probe {
         pub fn $add(a: &[$t], b: &[$t], out: &mut [u8]) {
             write(plain(a) + plain(b), out)
         }
-        /// `(a + b) * c - d`.
+        /// `(a + b) * (c - d)`.
         #[unsafe(no_mangle)]
         pub fn $chain(a: &[$t], b: &[$t], c: &[$t], d: &[$t], out: &mut [u8]) {
-            write((plain(a) + plain(b)) * plain(c) - plain(d), out)
+            write((plain(a) + plain(b)) * (plain(c) - plain(d)), out)
+        }
+        /// `(a + b) * (c - d) + (e + f) * (g - h)`: more values live at once.
+        #[unsafe(no_mangle)]
+        pub fn $longchain(xs: [&[$t]; 8], out: &mut [u8]) {
+            let [a, b, c, d, e, f, g, h] = xs.map(plain);
+            write((a + b) * (c - d) + (e + f) * (g - h), out)
         }
     )* };
 }
 probe! {
-    f32: probe_ew_neg_f32, probe_ew_add_f32, probe_ew_chain_f32;
-    f64: probe_ew_neg_f64, probe_ew_add_f64, probe_ew_chain_f64;
-    i32: probe_ew_neg_i32, probe_ew_add_i32, probe_ew_chain_i32;
+    f32: probe_ew_neg_f32, probe_ew_add_f32, probe_ew_chain_f32, probe_ew_longchain_f32;
+    f64: probe_ew_neg_f64, probe_ew_add_f64, probe_ew_chain_f64, probe_ew_longchain_f64;
+    i32: probe_ew_neg_i32, probe_ew_add_i32, probe_ew_chain_i32, probe_ew_longchain_i32;
 }

@@ -218,8 +218,10 @@ def _pipeline(ty: str, expr) -> str:
 ELEMENTWISE_EXPRS = {
     "neg": ("neg", None),
     "add": ("add", None, None),
-    "chain": ("sub", ("mul", ("add", None, None), None), None),  # (a + b) * c - d
+    "chain": ("mul", ("add", None, None), ("sub", None, None)),  # (a + b) * (c - d)
 }
+# (a + b) * (c - d) + (e + f) * (g - h)
+ELEMENTWISE_EXPRS["longchain"] = ("add", ELEMENTWISE_EXPRS["chain"], ELEMENTWISE_EXPRS["chain"])
 KERNELS["elementwise"] = [
     _elementwise_kernel(name, ty, _pipeline(ty, expr))
     for ty in ("f32", "f64", "i32")
