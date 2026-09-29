@@ -2,3 +2,4 @@ target
 results/*/mca
 results/*/asm
 Cargo.lock
+results/*/summary.json

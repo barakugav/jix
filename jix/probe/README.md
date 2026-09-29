@@ -46,7 +46,8 @@ cd jix/probe && cargo asm --release --lib --target aarch64-unknown-linux-gnu   #
 ```
 
 A full run takes about 20 seconds. Outputs go to `results/<label>/`:
-- `summary.md` / `summary.json`: the tables.
+- `summary.md`: the tables; `summary.json`: the same, machine readable, read by `--compare`
+  (gitignored: `--compare` needs a local run of that label).
 - `asm/<platform>/<kernel>.s`: the full function asm (gitignored, like `mca/`).
 - `mca/...`: the raw llvm-mca reports, with resource pressure and bottleneck analysis
   (gitignored).
