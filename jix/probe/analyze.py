@@ -191,22 +191,23 @@ def _elementwise_kernel(name: str, ty: str, pipeline: str) -> Kernel:
     the platform's target features enable is inlined into it (the fallback arm without features),
     the higher levels are separate functions. (The baseline analyzed its predecessor,
     `inner_loop::<T, LANES, true, true, _>`.)"""
-    size = {"f32": 4, "f64": 8, "i32": 4}[ty]
+    size = {"f32": 4, "f64": 8, "i32": 4, "i64": 8}[ty]
     ew = "jix::storage::elementwise_pipeline"
     sym = f"{ew}::inner_loop_contiguous::<{ty}, {pipeline}>"
     return Kernel(f"{name}_{ty}", sym, None, crate="elementwise", elem_size=size)
 
 
 def _pipeline(ty: str, expr) -> str:
-    """Demangled type of the pipeline of `expr`: a leaf operand (None), ("neg", x) or (op2, x, y)."""
+    """Demangled type of the pipeline of `expr`, of element type `ty`: a leaf operand (None),
+    ("neg", x), ("cast", from_ty, x) or (op2, x, y)."""
     if expr is None:
         return f"jix::storage::elementwise_pipeline::OperandTyped<{ty}>"
+    op1 = "<jix::ops::op1::Op1<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
     if expr[0] == "neg":
-        a = _pipeline(ty, expr[1])
-        return (
-            "<jix::ops::op1::Op1<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
-            f"::Op1Pipeline<{a}, jix::ops::op1::NegKernel, {ty}>"
-        )
+        return f"{op1}::Op1Pipeline<{_pipeline(ty, expr[1])}, jix::ops::op1::NegKernel, {ty}>"
+    if expr[0] == "cast":
+        src = expr[1]
+        return f"{op1}::Op1Pipeline<{_pipeline(src, expr[2])}, jix::ops::cast::CastKernel<{ty}>, {src}>"
     a, b = _pipeline(ty, expr[1]), _pipeline(ty, expr[2])
     return (
         "<jix::ops::op2::Op2<_, _, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
@@ -226,6 +227,16 @@ KERNELS["elementwise"] = [
     _elementwise_kernel(name, ty, _pipeline(ty, expr))
     for ty in ("f32", "f64", "i32")
     for name, expr in ELEMENTWISE_EXPRS.items()
+]
+# Mixed dtypes: (name, output type, expr).
+KERNELS["elementwise"] += [
+    _elementwise_kernel(name, ty, _pipeline(ty, expr))
+    for name, ty, expr in [
+        ("narrow", "i32", ("cast", "i64", ("add", None, None))),  # (a + b).cast::<i32>(), over i64
+        ("widen", "i64", ("add", ("cast", "i32", None), None)),  # a.cast::<i64>() + b, a i32
+        ("narrow", "f32", ("cast", "f64", ("add", None, None))),
+        ("widen", "f64", ("add", ("cast", "f32", None), None)),
+    ]
 ]
 
 # x86 feature sets of the `multiversion` clones (x86-64-v2/v3/v4), used by the baselines, which

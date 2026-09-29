@@ -52,3 +52,25 @@ probe! {
     f64: probe_ew_neg_f64, probe_ew_add_f64, probe_ew_chain_f64, probe_ew_longchain_f64;
     i32: probe_ew_neg_i32, probe_ew_add_i32, probe_ew_chain_i32, probe_ew_longchain_i32;
 }
+
+// Mixed dtypes: the lanes follow the widest value, not the output.
+/// `(a + b).cast::<i32>()` over i64.
+#[unsafe(no_mangle)]
+pub fn probe_ew_narrow_i32(a: &[i64], b: &[i64], out: &mut [u8]) {
+    write((plain(a) + plain(b)).cast::<i32>(), out)
+}
+/// `a.cast::<i64>() + b`, `a` i32.
+#[unsafe(no_mangle)]
+pub fn probe_ew_widen_i64(a: &[i32], b: &[i64], out: &mut [u8]) {
+    write(plain(a).cast::<i64>() + plain(b), out)
+}
+/// `(a + b).cast::<f32>()` over f64.
+#[unsafe(no_mangle)]
+pub fn probe_ew_narrow_f32(a: &[f64], b: &[f64], out: &mut [u8]) {
+    write((plain(a) + plain(b)).cast::<f32>(), out)
+}
+/// `a.cast::<f64>() + b`, `a` f32.
+#[unsafe(no_mangle)]
+pub fn probe_ew_widen_f64(a: &[f32], b: &[f64], out: &mut [u8]) {
+    write(plain(a).cast::<f64>() + plain(b), out)
+}

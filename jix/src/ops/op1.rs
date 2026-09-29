@@ -87,6 +87,7 @@ where
             T: Dtyped,
         {
             const N_OPERANDS: Option<usize> = P::N_OPERANDS;
+            const MAX_ITEMSIZE: usize = max_itemsize(&[size_of::<T>(), P::MAX_ITEMSIZE]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {

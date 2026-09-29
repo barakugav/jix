@@ -1005,3 +1005,43 @@ Findings:
   i32) and i32 `chain` on the SSE2 arm (emulated multiply, 1.11x). The best k depends on the op.
 - i686 (8 registers): k = 4 (committed there) is 1.06x (i32) and 1.11x (f32) over 128 B, geomean.
 
+
+### Mixed dtypes: lanes from `MAX_ITEMSIZE` (`results/elementwise-mixed*`)
+
+The contiguous lanes are sized by the pipeline's widest value (`ElementwisePipelineImpl::MAX_ITEMSIZE`,
+the max over its leaves, nodes and output) instead of the output's itemsize. For same-dtype pipelines
+the two are equal, so all the probes above are unchanged (re-checked on i686 and x86_64-v3). New
+probes, the only kernels that change are the narrowing ones:
+
+- `narrow_i32`: `(a + b).cast::<i32>()`, `a`, `b` i64; `narrow_f32`: the same over f64 -> f32.
+- `widen_i64`: `a.cast::<i64>() + b`, `a` i32; `widen_f64`: the same over f32 -> f64 (the output is
+  already the widest: control).
+
+The casts use the default scalar `apply_bulk`, left to LLVM to vectorize. Cycles per 4096 output bytes,
+output itemsize (`elementwise-mixed-outsize`) -> `MAX_ITEMSIZE` (`elementwise-mixed`); bold: >= 3%
+faster, italics: >= 3% slower. The narrowing kernels halve their output bytes per iteration.
+
+| platform | cpu | `narrow_i32` | `narrow_f32` | `widen_i64` | `widen_f64` |
+|---|---|---:|---:|---:|---:|
+| x86_64 | sandybridge | 643 -> 646 (0.99x) | 1034 -> 1037 (1.00x) | 475 (same) | 389 (same) |
+| x86_64 | skylake | 516 -> 519 (0.99x) | 778 -> 781 (1.00x) | 365 (same) | 283 (same) |
+| x86_64 | znver3 | 643 -> 647 (0.99x) | **741 -> 650 (1.14x)** | 388 (same) | 388 (same) |
+| x86_64-v2 | sandybridge | 643 -> 646 (0.99x) | 1034 -> 1037 (1.00x) | 387 (same) | 389 (same) |
+| x86_64-v2 | btver2 | _1076 -> 1127 (0.95x)_ | 1383 -> 1385 (1.00x) | 564 (same) | 613 (same) |
+| x86_64-v3 | skylake | 260 -> 261 (0.99x) | _315 -> 328 (0.96x)_ | 141 (same) | 141 (same) |
+| x86_64-v3 | alderlake | **229 -> 169 (1.36x)** | _310 -> 320 (0.97x)_ | 138 (same) | 138 (same) |
+| x86_64-v3 | znver3 | **322 -> 196 (1.65x)** | **452 -> 419 (1.08x)** | 226 (same) | 226 (same) |
+| x86_64-v4 | icelake-server | 158 -> 163 (0.97x) | 257 -> 259 (0.99x) | 71 (same) | 71 (same) |
+| x86_64-v4 | sapphirerapids | _135 -> 140 (0.96x)_ | 195 -> 197 (0.99x) | 69 (same) | 122 (same) |
+| x86_64-v4 | znver4 | 195 -> 196 (1.00x) | 385 -> 386 (1.00x) | 129 (same) | 193 (same) |
+| i686 | skylake | 520 -> 526 (0.99x) | 781 -> 792 (0.99x) | 391 (same) | 308 (same) |
+| aarch64 | cortex-a72 | _1380 -> 1544 (0.89x)_ | _1893 -> 1995 (0.95x)_ | 675 (same) | 1058 (same) |
+| aarch64 | neoverse-n1 | 1314 -> 1349 (0.97x) | 1443 -> 1479 (0.98x) | 770 (same) | 898 (same) |
+| aarch64 | neoverse-v2 | _548 -> 648 (0.85x)_ | _580 -> 650 (0.89x)_ | 275 (same) | 323 (same) |
+| aarch64-apple | apple-m1 | _388 -> 414 (0.94x)_ | 453 -> 460 (0.99x) | 259 (same) | 261 (same) |
+
+With only two inputs, the output-sized lanes (16 vectors per i64 input on SSE) did not spill: LLVM
+streams load / add / narrow / store per vector, so nothing forces them all live, and the halved
+iteration mostly costs a little more loop overhead (NEON most, which LLVM does not unroll). The wins
+are on AVX2 integers (alderlake, znver3). The rule is meant for chains whose wide values must stay
+live at once (as in `longchain`, where the same-dtype k was tuned); these probes do not show that case.

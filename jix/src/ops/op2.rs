@@ -130,6 +130,8 @@ where
             T: Dtyped,
         {
             const N_OPERANDS: Option<usize> = n_operands_sum(&[P1::N_OPERANDS, P2::N_OPERANDS]);
+            const MAX_ITEMSIZE: usize =
+                max_itemsize(&[size_of::<T>(), P1::MAX_ITEMSIZE, P2::MAX_ITEMSIZE]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {

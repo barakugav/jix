@@ -28,6 +28,10 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// The number of leaf operands the pipeline reads from, if known at compile time.
     const N_OPERANDS: Option<usize>;
 
+    /// The largest element size, in bytes, of all the values the pipeline reads and computes: its
+    /// leaves, every intermediate node and its output. Sizes the lanes of [`inner_loop_contiguous`].
+    const MAX_ITEMSIZE: usize;
+
     /// The leaf operands the pipeline reads from.
     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's;
 
@@ -530,7 +534,9 @@ const CONTIGUOUS_VECTORS: usize = if cfg!(target_arch = "x86") { 4 } else { 8 };
 
 /// [`inner_loop`] for all operands contiguous, compiled for each SIMD level and dispatched at
 /// runtime: the pipeline reads through [`read_bulk_simd`](ElementwisePipelineImpl::read_bulk_simd),
-/// [`CONTIGUOUS_VECTORS`] vectors of the level per iteration.
+/// [`CONTIGUOUS_VECTORS`] vectors of the level per iteration, of the pipeline's widest element
+/// ([`MAX_ITEMSIZE`](ElementwisePipelineImpl::MAX_ITEMSIZE)): values wider than the output take
+/// more registers, so sizing by the output alone would spill in narrowing pipelines.
 #[inline(never)]
 fn inner_loop_contiguous<T>(
     pipeline: &impl ElementwisePipelineImpl<T>,
@@ -546,16 +552,16 @@ fn inner_loop_contiguous<T>(
 /// One arm of [`inner_loop_contiguous`]. The lanes depend on the level, so they are matched on as
 /// a constant: only the taken arm is codegened.
 #[inline(always)]
-fn inner_loop_level<S: Simd, T: Dtyped>(
+fn inner_loop_level<S: Simd, T: Dtyped, P: ElementwisePipelineImpl<T>>(
     simd: S,
-    pipeline: &impl ElementwisePipelineImpl<T>,
+    pipeline: &P,
     dst: PtrMutNoalias<T>,
     dst_stride: usize,
     len: usize,
 ) {
     macro_rules! with_lanes {
         ($($lanes:literal)*) => {
-            match const { contiguous_lanes(S::u8s::LEN, size_of::<T>()) } {
+            match const { contiguous_lanes(S::u8s::LEN, P::MAX_ITEMSIZE) } {
                 $($lanes => inner_loop_impl::<T, $lanes, true, true>(
                     dst,
                     dst_stride,
@@ -779,6 +785,7 @@ impl<'a, T> OperandTyped<'a, T> {
 
 impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     const N_OPERANDS: Option<usize> = Some(1);
+    const MAX_ITEMSIZE: usize = size_of::<T>();
 
     #[inline]
     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -904,6 +911,19 @@ pub(crate) const fn n_operands_sum(counts: &[Option<usize>]) -> Option<usize> {
         i += 1;
     }
     Some(total)
+}
+
+/// The largest of `sizes`, for [`MAX_ITEMSIZE`](ElementwisePipelineImpl::MAX_ITEMSIZE).
+pub(crate) const fn max_itemsize(sizes: &[usize]) -> usize {
+    let mut max = 0;
+    let mut i = 0;
+    while i < sizes.len() {
+        if sizes[i] > max {
+            max = sizes[i];
+        }
+        i += 1;
+    }
+    max
 }
 
 pub(crate) const fn n_operands_mul(count: Option<usize>, n: usize) -> Option<usize> {
@@ -1088,6 +1108,8 @@ mod tests {
             > ElementwisePipelineImpl<T> for AddNode<P1, P2>
         {
             const N_OPERANDS: Option<usize> = Some(2);
+            const MAX_ITEMSIZE: usize =
+                max_itemsize(&[size_of::<T>(), P1::MAX_ITEMSIZE, P2::MAX_ITEMSIZE]);
 
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
                 self.lhs.operands().chain(self.rhs.operands())
@@ -1917,6 +1939,62 @@ mod tests {
         T: Dtyped,
     {
         operand_counts::<S, T>(storage, index).0
+    }
+
+    /// The declared `MAX_ITEMSIZE` for a pipeline over `storage`.
+    fn declared_max_itemsize<S, T>(storage: &S, index: &[Range<u64>]) -> usize
+    where
+        S: crate::ArrayStorage,
+        T: Dtyped,
+    {
+        fn declared<T, P: ElementwisePipelineImpl<T>>(_pipeline: &P) -> usize {
+            P::MAX_ITEMSIZE
+        }
+        let context = ReadContext::default();
+        let pipeline = storage
+            .read_as_elementwise_pipeline::<T>(index, &context)
+            .unwrap();
+        declared::<T, _>(&pipeline)
+    }
+
+    #[test]
+    fn max_itemsize_is_the_widest_value_in_the_pipeline() {
+        use core::ops::Add;
+
+        let index = full_index(&[4u64, 5]);
+        let arr = || {
+            let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as i64);
+            crate::Array::compact_ndarray(&nd).unwrap()
+        };
+
+        let leaf = arr();
+        assert_eq!(declared_max_itemsize::<_, i64>(&leaf.storage, &index), 8);
+
+        // Narrowing: the i64 inputs and sum are wider than the output.
+        let narrowed = arr().add(arr()).cast::<i32>();
+        assert_eq!(
+            declared_max_itemsize::<_, i32>(&narrowed.storage, &index),
+            8
+        );
+
+        // Widening: the output is the widest.
+        let widened = arr().cast::<i8>().cast::<i16>();
+        assert_eq!(declared_max_itemsize::<_, i16>(&widened.storage, &index), 8);
+        let widened = scalar_4x5(1.0).cast::<f64>();
+        assert_eq!(declared_max_itemsize::<_, f64>(&widened.storage, &index), 8);
+
+        let mixed = crate::ops::where_condition(
+            crate::Array::compact_ndarray(&ndarray::Array2::from_elem((4, 5), true)).unwrap(),
+            arr().cast::<i16>(),
+            arr().cast::<i16>(),
+        );
+        assert_eq!(declared_max_itemsize::<_, i16>(&mixed.storage, &index), 8);
+
+        let mapped = crate::ops::map_multiple(
+            [arr().cast::<i16>(), arr().cast::<i16>()],
+            |xs: [i16; 2]| xs[0] as i8,
+        );
+        assert_eq!(declared_max_itemsize::<_, i8>(&mapped.storage, &index), 8);
     }
 
     #[test]
