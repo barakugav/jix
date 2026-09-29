@@ -46,7 +46,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     ///
     /// `simd` is the SIMD level the read runs at: nodes may compute with its vectors. Inside
     /// [`inner_loop_contiguous`]'s dispatch it is the dispatched level, elsewhere the level the
-    /// target enables statically ([`baseline_simd`]).
+    /// target enables statically (`Level::baseline()`).
     ///
     /// # Safety
     ///
@@ -504,40 +504,15 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
 ) where
     T: Dtyped,
 {
-    let simd = baseline_simd();
-    inner_loop_impl::<T, LANES, IN_CONTIGUOUS, OUT_CONTIGUOUS>(
+    // `Level::baseline()` is a const: the dispatch folds to the target's static level, with no
+    // runtime check and no copy of the loop for the other levels.
+    dispatch!(Level::baseline(), simd => inner_loop_impl::<T, LANES, IN_CONTIGUOUS, OUT_CONTIGUOUS>(
         dst,
         dst_stride,
         len,
         |i| unsafe { pipeline.read_bulk::<_, LANES, IN_CONTIGUOUS>(simd, i) },
         |i| unsafe { pipeline.read_bulk::<_, 1, IN_CONTIGUOUS>(simd, i) },
-    );
-}
-
-/// The SIMD level the target enables statically, for the loops that are not dispatched at runtime
-/// ([`inner_loop`]). The cfgs are those under which `fearless_simd` has the level.
-#[inline(always)]
-fn baseline_simd() -> impl Simd {
-    #[cfg(all(
-        any(target_arch = "x86", target_arch = "x86_64"),
-        target_feature = "sse2",
-        target_feature = "fxsr"
-    ))]
-    return Level::baseline().as_sse2().unwrap();
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    return Level::baseline().as_neon().unwrap();
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-    return Level::baseline().as_wasm_simd128().unwrap();
-    #[cfg(not(any(
-        all(
-            any(target_arch = "x86", target_arch = "x86_64"),
-            target_feature = "sse2",
-            target_feature = "fxsr"
-        ),
-        all(target_arch = "aarch64", target_feature = "neon"),
-        all(target_arch = "wasm32", target_feature = "simd128")
-    )))]
-    return fearless_simd::Fallback::new();
+    ));
 }
 
 /// Vectors of the SIMD level per iteration of [`inner_loop_contiguous`].
