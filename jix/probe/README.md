@@ -461,7 +461,10 @@ The design:
   `fearless_simd::dispatch!`, and reads through `ElementwisePipelineImpl::read_bulk_simd`, which
   takes the level's token. Its default forwards to `read_bulk`; only `Op1Pipeline` and
   `Op2Pipeline` override it, and pass the token to their kernel's new `apply_bulk(simd, xs)`. The
-  strided/staged variants are unchanged (no dispatch, `read_bulk`).
+  strided/staged variants are unchanged (no dispatch, `read_bulk`). Later merged into a single
+  `read_bulk(simd, offset)` implemented by every node, so the token also passes through `where`,
+  `map` and sequences; the strided variants pass the target's static baseline level. The
+  contiguous asm was unchanged by the merge.
 - `apply_bulk` defaults to the scalar `apply` per element. `Neg`, `Add`, `Sub` and `Mul` get SIMD
   bodies (`ops/simd_kernels.rs`) for f32, f64 and i32, selected by `TypeId` (resolved at compile
   time), so the ops' bounds are unchanged and every other type keeps the scalar kernel.

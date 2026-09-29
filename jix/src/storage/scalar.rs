@@ -166,8 +166,9 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk<S: fearless_simd::Simd, const N: usize, const CONTIGUOUS: bool>(
                 &self,
+                _simd: S,
                 _offset: usize,
             ) -> [T; N] {
                 [self.0; N]

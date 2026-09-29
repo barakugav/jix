@@ -44,28 +44,20 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// `CONTIGUOUS` promises `inner_stride == dtype.itemsize()` for every operand the pipeline
     /// reads, letting the step fold into a compile-time constant.
     ///
+    /// `simd` is the SIMD level the read runs at: nodes may compute with its vectors. Inside
+    /// [`inner_loop_contiguous`]'s dispatch it is the dispatched level, elsewhere the level the
+    /// target enables statically ([`baseline_simd`]).
+    ///
     /// # Safety
     ///
     /// Every operand's `current_ptr` must be aligned for its dtype when [`REQUIRE_ALIGNED`] is
     /// set, and elements `offset..offset + N` at `inner_stride` must be in bounds of its
     /// `original_data`.
-    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N];
-
-    /// [`read_bulk`](Self::read_bulk) inside a `fearless_simd` dispatch of `simd`'s level: nodes
-    /// may compute with `simd`'s vectors. By default, the same as `read_bulk`.
-    ///
-    /// # Safety
-    ///
-    /// Same as [`read_bulk`](Self::read_bulk).
-    #[inline(always)]
-    unsafe fn read_bulk_simd<S: Simd, const N: usize, const CONTIGUOUS: bool>(
+    unsafe fn read_bulk<S: Simd, const N: usize, const CONTIGUOUS: bool>(
         &self,
         simd: S,
         offset: usize,
-    ) -> [T; N] {
-        let _ = simd;
-        unsafe { self.read_bulk::<N, CONTIGUOUS>(offset) }
-    }
+    ) -> [T; N];
 
     fn to_buf<'b>(
         &mut self,
@@ -512,13 +504,40 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
 ) where
     T: Dtyped,
 {
+    let simd = baseline_simd();
     inner_loop_impl::<T, LANES, IN_CONTIGUOUS, OUT_CONTIGUOUS>(
         dst,
         dst_stride,
         len,
-        |i| unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS>(i) },
-        |i| unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS>(i) },
+        |i| unsafe { pipeline.read_bulk::<_, LANES, IN_CONTIGUOUS>(simd, i) },
+        |i| unsafe { pipeline.read_bulk::<_, 1, IN_CONTIGUOUS>(simd, i) },
     );
+}
+
+/// The SIMD level the target enables statically, for the loops that are not dispatched at runtime
+/// ([`inner_loop`]). The cfgs are those under which `fearless_simd` has the level.
+#[inline(always)]
+fn baseline_simd() -> impl Simd {
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "sse2",
+        target_feature = "fxsr"
+    ))]
+    return Level::baseline().as_sse2().unwrap();
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    return Level::baseline().as_neon().unwrap();
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    return Level::baseline().as_wasm_simd128().unwrap();
+    #[cfg(not(any(
+        all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            target_feature = "sse2",
+            target_feature = "fxsr"
+        ),
+        all(target_arch = "aarch64", target_feature = "neon"),
+        all(target_arch = "wasm32", target_feature = "simd128")
+    )))]
+    return fearless_simd::Fallback::new();
 }
 
 /// Vectors of the SIMD level per iteration of [`inner_loop_contiguous`].
@@ -533,7 +552,7 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
 const CONTIGUOUS_VECTORS: usize = if cfg!(target_arch = "x86") { 4 } else { 8 };
 
 /// [`inner_loop`] for all operands contiguous, compiled for each SIMD level and dispatched at
-/// runtime: the pipeline reads through [`read_bulk_simd`](ElementwisePipelineImpl::read_bulk_simd),
+/// runtime: the pipeline reads at the dispatched level,
 /// [`CONTIGUOUS_VECTORS`] vectors of the level per iteration, of the pipeline's widest element
 /// ([`MAX_ITEMSIZE`](ElementwisePipelineImpl::MAX_ITEMSIZE)): values wider than the output take
 /// more registers, so sizing by the output alone would spill in narrowing pipelines.
@@ -566,8 +585,8 @@ fn inner_loop_level<S: Simd, T: Dtyped, P: ElementwisePipelineImpl<T>>(
                     dst,
                     dst_stride,
                     len,
-                    |i| unsafe { pipeline.read_bulk_simd::<_, $lanes, true>(simd, i) },
-                    |i| unsafe { pipeline.read_bulk_simd::<_, 1, true>(simd, i) },
+                    |i| unsafe { pipeline.read_bulk::<_, $lanes, true>(simd, i) },
+                    |i| unsafe { pipeline.read_bulk::<_, 1, true>(simd, i) },
                 ),)*
                 _ => unreachable!(),
             }
@@ -793,7 +812,11 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     }
 
     #[inline(always)]
-    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N] {
+    unsafe fn read_bulk<S: fearless_simd::Simd, const N: usize, const CONTIGUOUS: bool>(
+        &self,
+        _simd: S,
+        offset: usize,
+    ) -> [T; N] {
         let base = self.operand.current_ptr.get().cast::<T>();
         debug_assert!(!base.is_null());
         if REQUIRE_ALIGNED {
@@ -1114,12 +1137,14 @@ mod tests {
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
                 self.lhs.operands().chain(self.rhs.operands())
             }
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+            #[inline(always)]
+            unsafe fn read_bulk<S: fearless_simd::Simd, const N: usize, const CONTIGUOUS: bool>(
                 &self,
+                simd: S,
                 offset: usize,
             ) -> [T; N] {
-                let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS>(offset) };
-                let rhs = unsafe { self.rhs.read_bulk::<N, CONTIGUOUS>(offset) };
+                let lhs = unsafe { self.lhs.read_bulk::<_, N, CONTIGUOUS>(simd, offset) };
+                let rhs = unsafe { self.rhs.read_bulk::<_, N, CONTIGUOUS>(simd, offset) };
                 array_from_fn_inline(|i| lhs[i] + rhs[i])
             }
         }

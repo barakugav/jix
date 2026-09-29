@@ -357,13 +357,17 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk<S: fearless_simd::Simd, const N: usize, const CONTIGUOUS: bool>(
                 &self,
+                simd: S,
                 offset: usize,
             ) -> [T; N] {
                 // The iterator is consumed here and dropped before the next call, as
                 // `read_bulk_as_iter` requires.
-                let mut items = unsafe { self.inner.read_bulk_as_iter::<N, CONTIGUOUS>(offset) };
+                let mut items = unsafe {
+                    self.inner
+                        .read_bulk_as_iter::<_, N, CONTIGUOUS>(simd, offset)
+                };
                 array_from_fn_inline(|_| {
                     let x = (self.f)(items.next().unwrap());
 
