@@ -517,8 +517,15 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
     );
 }
 
-/// Vectors of the SIMD level per iteration of [`inner_loop_contiguous`]. 32-bit x86 has only 8
-/// vector registers: 8 vectors per operand would spill.
+/// Vectors of the SIMD level per iteration of [`inner_loop_contiguous`].
+///
+/// Chosen by static analysis of the generated asm (cargo-asm + llvm-mca, steady-state cycles of the
+/// loop) over 1, 2, 4 and 8 vectors, and a fixed 128 bytes, for `-a`, `a + b`, `(a + b) * (c - d)`
+/// and a longer chain of those, in f32, f64 and i32, on SSE2 / SSE4.2 / AVX2 / AVX-512 x86-64
+/// CPUs, i686 and NEON. 8 is the best or close on almost all of them: fewer vectors leave loop
+/// overhead (NEON most, as LLVM does not unroll there). The exceptions are register-bound: 32-bit
+/// x86 has only 8 vector registers, where 8 vectors per operand spill and 4 is best; and on
+/// x86-64 SSE (16 registers), the longest chains prefer 4 too, a loss accepted for simplicity.
 const CONTIGUOUS_VECTORS: usize = if cfg!(target_arch = "x86") { 4 } else { 8 };
 
 /// [`inner_loop`] for all operands contiguous, compiled for each SIMD level and dispatched at
