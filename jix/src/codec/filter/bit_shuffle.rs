@@ -1,14 +1,14 @@
-use super::byte_shuffle::kernels as byte_shuffle;
+use super::byte_shuffle;
 use crate::buf_pool::BufferPool;
 use crate::codec::filter::FilterImpl;
 use crate::dtype::Dtype;
+use core::ops::{BitAnd, BitXor, Shl, Shr};
+use fearless_simd::{dispatch, Bytes, Level, Simd, SimdBase};
 
 // Bitshuffle filter, derived from Bitshuffle by Kiyoshi Masui (MIT,
 // https://github.com/kiyo-masui/bitshuffle) via its adaptation in
 // C-Blosc2 (BSD-3-Clause, https://github.com/Blosc/c-blosc2).
 // See the top-level NOTICE file for full attribution and license text.
-
-pub mod kernels;
 
 /// Bit-shuffle filter.
 ///
@@ -47,7 +47,7 @@ pub mod kernels;
 /// ```
 ///
 /// After the second byte shuffle, row `k` of byte-plane `b` holds byte `b` of
-/// the elements `8 * g + k`. [`kernels::transpose_bit_rows`] then transposes
+/// the elements `8 * g + k`. [`transpose_bit_rows`] then transposes
 /// every column of 8 bytes (one per row) as an 8x8 bit matrix, so row `i`
 /// packs bit `i` of those 8 bytes: bit-plane `(b, i)`.
 ///
@@ -76,7 +76,7 @@ impl FilterImpl for BitShuffleFilter {
         // `max(1)`: no byte-plane at all when there is no full group.
         for plane in dst[..full_bytes].chunks_exact_mut(n_full.max(1)) {
             byte_shuffle::encode(plane, tmp, 8);
-            kernels::transpose_bit_rows(tmp, plane);
+            transpose_bit_rows(tmp, plane);
         }
 
         // Tail: the final `N mod 8` elements are copied through verbatim.
@@ -98,13 +98,108 @@ impl FilterImpl for BitShuffleFilter {
             .zip(dst[..full_bytes].chunks_exact_mut(plane))
             .zip(tmp.chunks_exact_mut(plane))
         {
-            kernels::transpose_bit_rows(src, dst);
+            transpose_bit_rows(src, dst);
             byte_shuffle::decode(dst, tmp, 8);
         }
         byte_shuffle::decode(tmp, &mut dst[..full_bytes], typesize);
 
         dst[full_bytes..].copy_from_slice(&src[full_bytes..]);
     }
+}
+
+/// Bit-transpose the 8 rows of `src` into the 8 rows of `dst`, column by column: bit `i` of
+/// `src` row `k` goes to bit `k` of `dst` row `i`. Both are 8 rows of `src.len() / 8` bytes.
+///
+/// Self-inverse, so it serves both directions of the filter.
+fn transpose_bit_rows(src: &[u8], dst: &mut [u8]) {
+    let done = dispatch!(Level::new(), simd => transpose_bit_rows_simd(simd, src, dst));
+    // Tail of the remaining columns, one at a time.
+    let g = src.len() / 8;
+    for j in done..g {
+        let mut r = [0u64; 8];
+        for (k, x) in r.iter_mut().enumerate() {
+            *x = src[k * g + j].into();
+        }
+        transpose8x8_rows(&mut r);
+        for (k, x) in r.iter().enumerate() {
+            dst[k * g + j] = *x as u8;
+        }
+    }
+}
+
+/// Main loop of [`transpose_bit_rows`]: transposes whole vectors of columns, and returns the
+/// number of columns transposed.
+///
+/// Optimized by static analysis of the generated asm (cargo-asm + llvm-mca, steady-state cycles
+/// of the main loop), for x86-64 SSE4.2 (Sandy Bridge, Jaguar), AVX2 (Skylake, Alder Lake, Zen 3)
+/// and AVX-512 (Ice Lake, Sapphire Rapids, Zen 4), i686 SSE2 (Skylake), and aarch64 NEON
+/// (Cortex-A72, Neoverse N1 / V2, Apple M1).
+#[inline(always)]
+fn transpose_bit_rows_simd<S: Simd>(simd: S, src: &[u8], dst: &mut [u8]) -> usize {
+    let g = src.len() / 8;
+    assert!(dst.len() >= 8 * g);
+    let lanes = S::u8s::LEN;
+    let (src, dst) = (src.as_ptr(), dst.as_mut_ptr());
+    for c in 0..g / lanes {
+        let j = c * lanes;
+        // SAFETY (all pointer accesses below): `k < 8` and `j + lanes <= g`, so each vector is in
+        // row `k` of `src` / `dst`. `S::u8s::Array` is `[u8; lanes]`, with alignment 1.
+        // Loading through `load_array_ref` rather than `from_slice` avoids a length `unwrap`
+        // that LLVM does not always fold away.
+        let mut r = [S::u64s::splat(simd, 0); 8];
+        for (k, x) in r.iter_mut().enumerate() {
+            *x = S::u8s::load_array_ref(simd, unsafe { &*src.add(k * g + j).cast() }).bitcast();
+        }
+        transpose8x8_rows(&mut r);
+        for (k, x) in r.iter().enumerate() {
+            x.bitcast::<S::u8s>()
+                .store_array(unsafe { &mut *dst.add(k * g + j).cast() });
+        }
+    }
+    g / lanes * lanes
+}
+
+/// Bit-transpose 8 rows, byte-wise: in every byte position, bit `i` of row `k` goes to bit `k` of
+/// row `i`. A row is a `u64` or a vector of `u64`s, i.e. a run of bytes of one row.
+///
+/// The classic recursive transpose (Hacker's Delight 7-3), across rows: swap the off-diagonal
+/// 4x4 blocks of every 8x8 bit matrix, then the 2x2 blocks within the 4x4s, then single bits.
+/// Swapping blocks of size `s` exchanges the bits in the upper half (mask `!m`) of each `2s`-bit
+/// group of row `k` with the bits in the lower half (mask `m`) of row `k + s`. Self-inverse.
+#[inline(always)]
+fn transpose8x8_rows<T: Rows>(r: &mut [T; 8]) {
+    swap_blocks(r, 4, 0x0F0F_0F0F_0F0F_0F0F);
+    swap_blocks(r, 2, 0x3333_3333_3333_3333);
+    swap_blocks(r, 1, 0x5555_5555_5555_5555);
+}
+
+#[inline(always)]
+fn swap_blocks<T: Rows>(r: &mut [T; 8], s: usize, m: u64) {
+    for k in 0..8 {
+        if k & s == 0 {
+            let t = ((r[k] >> s as u32) ^ r[k + s]) & m;
+            r[k + s] = r[k + s] ^ t;
+            r[k] = r[k] ^ (t << s as u32);
+        }
+    }
+}
+
+/// The operations [`transpose8x8_rows`] needs: `u64` and fearless_simd's `u64` vectors.
+pub trait Rows:
+    Copy
+    + Shr<u32, Output = Self>
+    + Shl<u32, Output = Self>
+    + BitXor<Output = Self>
+    + BitAnd<u64, Output = Self>
+{
+}
+impl<T> Rows for T where
+    T: Copy
+        + Shr<u32, Output = T>
+        + Shl<u32, Output = T>
+        + BitXor<Output = T>
+        + BitAnd<u64, Output = T>
+{
 }
 
 #[cfg(test)]
@@ -160,12 +255,12 @@ mod tests {
         fn transpose8x8_rows(rows: [u64; 8]) {
             let src: Vec<u8> = rows.iter().flat_map(|r| r.to_le_bytes()).collect();
             let mut out = rows;
-            super::kernels::transpose8x8_rows(&mut out);
+            super::transpose8x8_rows(&mut out);
             let out: Vec<u8> = out.iter().flat_map(|r| r.to_le_bytes()).collect();
             proptest::prop_assert_eq!(out, transpose_bit_rows_reference(&src));
             let mut twice = rows;
-            super::kernels::transpose8x8_rows(&mut twice);
-            super::kernels::transpose8x8_rows(&mut twice);
+            super::transpose8x8_rows(&mut twice);
+            super::transpose8x8_rows(&mut twice);
             proptest::prop_assert_eq!(twice, rows);
         }
     }
@@ -174,7 +269,7 @@ mod tests {
     /// `dispatch!` picks) plus the dispatched function with its tail, against the reference.
     #[test]
     fn transpose_bit_rows_all_levels() {
-        use super::kernels::{transpose_bit_rows, transpose_bit_rows_simd};
+        use super::{transpose_bit_rows, transpose_bit_rows_simd};
         use fearless_simd::{Level, Simd};
 
         let lengths = [
@@ -202,13 +297,23 @@ mod tests {
         let level = Level::new();
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
-            level.as_sse2().map(|s| check(s, &lengths, &input));
-            level.as_sse4_2().map(|s| check(s, &lengths, &input));
-            level.as_avx2().map(|s| check(s, &lengths, &input));
-            level.as_avx512().map(|s| check(s, &lengths, &input));
+            if let Some(s) = level.as_sse2() {
+                check(s, &lengths, &input);
+            }
+            if let Some(s) = level.as_sse4_2() {
+                check(s, &lengths, &input);
+            }
+            if let Some(s) = level.as_avx2() {
+                check(s, &lengths, &input);
+            }
+            if let Some(s) = level.as_avx512() {
+                check(s, &lengths, &input);
+            }
         }
         #[cfg(target_arch = "aarch64")]
-        level.as_neon().map(|s| check(s, &lengths, &input));
+        if let Some(s) = level.as_neon() {
+            check(s, &lengths, &input);
+        }
     }
 
     /// Trivial reference implementation of bitshuffle, for tests.
