@@ -200,8 +200,9 @@ The design:
   `map` and sequences; the strided variants pass the target's static baseline level. The
   contiguous asm was unchanged by the merge.
 - `apply_bulk` defaults to the scalar `apply` per element. `Neg`, `Add`, `Sub` and `Mul` get SIMD
-  bodies (`ops/simd_kernels.rs`) for f32, f64 and i32, selected by `TypeId` (resolved at compile
-  time), so the ops' bounds are unchanged and every other type keeps the scalar kernel.
+  bodies (then in `ops/simd_kernels.rs`, since written in the `simd:` argument of `define_op1!` /
+  `define_op2!`) for f32, f64 and i32, selected by `TypeId` (resolved at compile time), so the ops'
+  bounds are unchanged and every other type keeps the scalar kernel.
 - Nodes still pass `[T; N]` arrays; the SIMD bodies load them into vectors and store the result
   into an array. **Verified in the asm: along `(a + b) * c - d` the values stay in vector
   registers**, e.g. AVX-512 `chain_f32`: per `zmm`, one `vmovups` load, `vaddps`, `vmulps`,

@@ -194,7 +194,7 @@ macro_rules! define_op1 {
                     simd: S,
                     xs: [T; N],
                 ) -> [Self::Output; N] {
-                    use crate::ops::simd_kernels::checked_transmute;
+                    use crate::util::checked_transmute;
                     use fearless_simd::SimdBase;
                     use std::any::{Any, TypeId};
                     $(

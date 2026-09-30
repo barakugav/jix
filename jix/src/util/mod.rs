@@ -541,6 +541,15 @@ impl<T> SendSyncPtr<T> {
     }
 }
 
+/// `x` as a `U`, if `T` is `U` (a [`TypeId`](std::any::TypeId) check, resolved at compile time).
+#[inline(always)]
+pub(crate) fn checked_transmute<T: 'static, U: 'static>(x: T) -> Option<U> {
+    use std::any::TypeId;
+    // SAFETY: `T` and `U` are the same type.
+    (TypeId::of::<T>() == TypeId::of::<U>())
+        .then(|| unsafe { std::mem::transmute_copy::<T, U>(&x) })
+}
+
 macro_rules! assert_unchecked_eq {
     ($a:expr, $b:expr) => {{
         debug_assert_eq!($a, $b);

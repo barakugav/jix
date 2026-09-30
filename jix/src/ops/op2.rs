@@ -220,7 +220,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
-        $(simd = $simd:path,)?
+        $(simd: |$sa:ident, $sb:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
     ) => {
         define_op2!(@kernel_dispatch
             $Kernel,
@@ -228,7 +228,7 @@ macro_rules! define_op2 {
             $kernel_fn,
             ($($call_args)*),
             type Output = <T1 as $($trait)::+<T2>>::Output,
-            $(simd = $simd,)?
+            $(simd: |$sa, $sb| { $($vec => $body),+ },)?
         );
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
@@ -347,13 +347,13 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         ($a:ident, $b:ident),
         type Output = $output_type:ty,
-        $(simd = $simd:path,)?
+        $(simd: |$sa:ident, $sb:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, ($a, $b),
             type Output = $output_type,
-            $(simd = $simd,)?
+            $(simd: |$sa, $sb| { $($vec => $body),+ },)?
         );
     };
     (
@@ -363,13 +363,13 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         (&$a:ident, &$b:ident),
         type Output = $output_type:ty,
-        $(simd = $simd:path,)?
+        $(simd: |$sa:ident, $sb:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, (&$a, &$b),
             type Output = $output_type,
-            $(simd = $simd,)?
+            $(simd: |$sa, $sb| { $($vec => $body),+ },)?
         );
     };
 
@@ -380,7 +380,7 @@ macro_rules! define_op2 {
         $Kernel:ident, $($trait:ident)::+, $kernel_fn:ident,
         $a:ident, $b:ident, ($($call_args:tt)*),
         type Output = $output_type:ty,
-        $(simd = $simd:path,)?
+        $(simd: |$sa:ident, $sb:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
     ) => {
         struct $Kernel;
         impl<T1, T2> crate::ops::op2::Op2Kernel<T1, T2> for $Kernel
@@ -402,7 +402,54 @@ macro_rules! define_op2 {
                     a: [T1; N],
                     b: [T2; N],
                 ) -> [Self::Output; N] {
-                    $simd(simd, a, b, |a, b| self.apply(a, b))
+                    use crate::util::checked_transmute;
+                    use fearless_simd::SimdBase;
+                    use std::any::{Any, TypeId};
+                    $(
+                        if TypeId::of::<T1>() == TypeId::of::<<S::$vec as SimdBase<S>>::Element>()
+                            && TypeId::of::<T2>() == TypeId::of::<<S::$vec as SimdBase<S>>::Element>()
+                            && const { N.is_multiple_of(<S::$vec as SimdBase<S>>::LEN) }
+                        {
+                            let a = checked_transmute::<
+                                [T1; N],
+                                [<S::$vec as SimdBase<S>>::Element; N],
+                            >(a)
+                            .unwrap();
+                            let b = checked_transmute::<
+                                [T2; N],
+                                [<S::$vec as SimdBase<S>>::Element; N],
+                            >(b)
+                            .unwrap();
+                            let lanes = <S::$vec as SimdBase<S>>::LEN;
+                            // Zeroed, not uninit: the loop stores through references into it.
+                            let mut ys = std::mem::MaybeUninit::<[Self::Output; N]>::zeroed();
+                            for c in 0..N / lanes {
+                                // SAFETY: vector `c` is in bounds, as `N` is a multiple of `lanes`.
+                                let $sa = <S::$vec as SimdBase<S>>::load_array_ref(simd, unsafe {
+                                    &*a.as_ptr().cast::<<S::$vec as SimdBase<S>>::Array>().add(c)
+                                });
+                                // SAFETY: as above.
+                                let $sb = <S::$vec as SimdBase<S>>::load_array_ref(simd, unsafe {
+                                    &*b.as_ptr().cast::<<S::$vec as SimdBase<S>>::Array>().add(c)
+                                });
+                                let y = $body;
+                                // The body must give `lanes` lanes of `Self::Output`.
+                                assert!(
+                                    y.as_slice().len() == lanes
+                                        && Any::type_id(&y.as_slice()[0])
+                                            == TypeId::of::<Self::Output>()
+                                );
+                                // SAFETY: vector `c` of `ys` is in bounds and of `y`'s array type,
+                                // per the assert, and initialized.
+                                y.store_array(unsafe {
+                                    &mut *ys.as_mut_ptr().cast::<Self::Output>().add(c * lanes).cast()
+                                });
+                            }
+                            // SAFETY: zeroed, then written by the loop.
+                            return unsafe { ys.assume_init() };
+                        }
+                    )+
+                    crate::array_from_fn_inline(|i| self.apply(a[i], b[i]))
                 }
             )?
         }
@@ -528,7 +575,11 @@ define_op2!(
     AddKernel,
     <core::ops::Add>::add(a, b),
     core_op = Add::add,
-    simd = crate::ops::simd_kernels::add,
+    simd: |a, b| {
+        f32s => a + b,
+        f64s => a + b,
+        i32s => a + b,
+    },
 );
 define_op2!(
     /// Element-wise subtraction of two arrays (`a - b`).
@@ -557,7 +608,11 @@ define_op2!(
     SubKernel,
     <core::ops::Sub>::sub(a, b),
     core_op = Sub::sub,
-    simd = crate::ops::simd_kernels::sub,
+    simd: |a, b| {
+        f32s => a - b,
+        f64s => a - b,
+        i32s => a - b,
+    },
 );
 define_op2!(
     /// Element-wise multiplication of two arrays.
@@ -586,7 +641,11 @@ define_op2!(
     MulKernel,
     <core::ops::Mul>::mul(a, b),
     core_op = Mul::mul,
-    simd = crate::ops::simd_kernels::mul,
+    simd: |a, b| {
+        f32s => a * b,
+        f64s => a * b,
+        i32s => a * b,
+    },
 );
 
 define_op2!(
@@ -659,6 +718,67 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
+    /// `apply_bulk` of `AddKernel`, `SubKernel` and `MulKernel` on every SIMD level of the CPU:
+    /// the `simd:` bodies of `define_op2!`, and the scalar fallback.
+    #[test]
+    fn apply_bulk_all_levels() {
+        use super::{AddKernel, MulKernel, Op2Kernel, SubKernel};
+        use fearless_simd::{Level, Simd};
+
+        const N: usize = 32;
+        fn check<S: Simd>(simd: S) {
+            fn inputs<T>(f: impl Fn(i32) -> T) -> [[T; N]; 2] {
+                [
+                    std::array::from_fn(|i| f(i as i32 * 7 - 100)),
+                    std::array::from_fn(|i| f(i as i32 * -3 + 5)),
+                ]
+            }
+            let [a, b] = inputs(|x| x as f32 * 0.37);
+            let [c, d] = inputs(|x| x as f64 * 0.37);
+            let [e, f] = inputs(|x| x.wrapping_mul(0x0123_4567));
+            simd.vectorize(|| {
+                macro_rules! check_op2 {
+                    ($kernel:ident, $f:expr, $wrapping:expr) => {
+                        let ab: [f32; N] = std::array::from_fn(|i| $f(a[i], b[i]));
+                        assert_eq!($kernel.apply_bulk(simd, a, b), ab);
+                        let cd: [f64; N] = std::array::from_fn(|i| $f(c[i], d[i]));
+                        assert_eq!($kernel.apply_bulk(simd, c, d), cd);
+                        // The vector ops wrap.
+                        let ef: [i32; N] = std::array::from_fn(|i| $wrapping(e[i], f[i]));
+                        assert_eq!($kernel.apply_bulk(simd, e, f), ef);
+                    };
+                }
+                check_op2!(AddKernel, |x, y| x + y, i32::wrapping_add);
+                check_op2!(SubKernel, |x, y| x - y, i32::wrapping_sub);
+                check_op2!(MulKernel, |x, y| x * y, i32::wrapping_mul);
+                // Not a multiple of the vector length, and a type without a SIMD body: scalar.
+                assert_eq!(AddKernel.apply_bulk(simd, [1.5f32], [2.0]), [3.5]);
+                assert_eq!(AddKernel.apply_bulk(simd, [1i8, 2], [3, 4]), [4, 6]);
+            });
+        }
+
+        let level = Level::new();
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            if let Some(simd) = level.as_sse2() {
+                check(simd);
+            }
+            if let Some(simd) = level.as_sse4_2() {
+                check(simd);
+            }
+            if let Some(simd) = level.as_avx2() {
+                check(simd);
+            }
+            if let Some(simd) = level.as_avx512() {
+                check(simd);
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        if let Some(simd) = level.as_neon() {
+            check(simd);
+        }
+    }
+
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
