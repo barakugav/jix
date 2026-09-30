@@ -3,18 +3,21 @@
 //! A kernel's `apply_bulk` passes its elements here, with the scalar kernel as the fallback. The
 //! element types with a SIMD body are selected by [`TypeId`], which is resolved at compile time,
 //! so the kernels keep their generic bounds and every other type runs the scalar kernel. Op1
-//! kernels write their SIMD bodies in `define_op1!`'s `simd:` argument, over [`try_map1`].
+//! kernels write their SIMD bodies in `define_op1!`'s `simd:` argument, over these helpers.
 //!
 //! Nodes of the pipeline pass `[T; N]` arrays to each other: a body loads its array into vectors
 //! and stores the results into a new array, and LLVM keeps these in registers along a chain.
 
 use std::any::TypeId;
+use std::mem::MaybeUninit;
 
 use fearless_simd::{Simd, SimdBase};
 
 /// `xs` as `[U; N]`, if `T` is `U`.
 #[inline(always)]
-fn checked_transmute<T: 'static, U: 'static, const N: usize>(xs: [T; N]) -> Option<[U; N]> {
+pub(crate) fn checked_transmute<T: 'static, U: 'static, const N: usize>(
+    xs: [T; N],
+) -> Option<[U; N]> {
     // SAFETY: `T` and `U` are the same type.
     (TypeId::of::<T>() == TypeId::of::<U>())
         .then(|| unsafe { std::mem::transmute_copy::<[T; N], [U; N]>(&xs) })
@@ -22,7 +25,11 @@ fn checked_transmute<T: 'static, U: 'static, const N: usize>(xs: [T; N]) -> Opti
 
 /// Vector `c` of `xs`. `(c + 1) * V::LEN <= N`.
 #[inline(always)]
-fn load<S: Simd, V: SimdBase<S>, const N: usize>(simd: S, xs: &[V::Element; N], c: usize) -> V {
+pub(crate) fn load<S: Simd, V: SimdBase<S>, const N: usize>(
+    simd: S,
+    xs: &[V::Element; N],
+    c: usize,
+) -> V {
     debug_assert!((c + 1) * V::LEN <= N);
     // SAFETY: in bounds per the caller, and `V::Array` is `[V::Element; V::LEN]`.
     V::load_array_ref(simd, unsafe { &*xs.as_ptr().add(c * V::LEN).cast() })
@@ -36,28 +43,34 @@ fn store<S: Simd, V: SimdBase<S>, const N: usize>(v: V, xs: &mut [V::Element; N]
     v.store_array(unsafe { &mut *xs.as_mut_ptr().add(c * V::LEN).cast() });
 }
 
-/// `f` on the vectors of `V` in `x`, if its elements are `V`'s and `N` a multiple of `V::LEN`.
+/// Write `v`, the result of an operation on vector `c` of `VIn` of an array, as vector `c` of
+/// `out`. `v` must have `VIn::LEN` elements (checked at compile time) of type `O` (checked, resolved
+/// at compile time).
 #[inline(always)]
-pub(crate) fn try_map1<S, V, T, O, const N: usize>(
-    simd: S,
-    x: [T; N],
-    f: impl Fn(V) -> V,
-) -> Option<[O; N]>
-where
+pub(crate) fn write_vector<S, VIn, V, O, const N: usize>(
+    v: V,
+    out: &mut MaybeUninit<[O; N]>,
+    c: usize,
+) where
     S: Simd,
+    VIn: SimdBase<S>,
     V: SimdBase<S, Element: 'static>,
-    T: 'static,
     O: 'static,
 {
-    let x = checked_transmute::<T, V::Element, N>(x).filter(|_| N.is_multiple_of(V::LEN))?;
-    let mut out = x;
-    for c in 0..N / V::LEN {
-        store(f(load::<S, V, N>(simd, &x, c)), &mut out, c);
-    }
-    checked_transmute(out)
+    const { assert!(V::LEN == VIn::LEN) };
+    assert!(TypeId::of::<V::Element>() == TypeId::of::<O>());
+    assert!((c + 1) * V::LEN <= N);
+    // SAFETY: in bounds, and `V::Array` is `[O; V::LEN]`.
+    unsafe {
+        out.as_mut_ptr()
+            .cast::<V::Array>()
+            .add(c)
+            .write(v.to_array())
+    };
 }
 
-/// `f` on the vectors of `V` in `a` and `b`, like [`try_map1`].
+/// `f` on the vectors of `V` in `a` and `b`, if their elements are `V`'s and `N` a multiple of
+/// `V::LEN`.
 #[inline(always)]
 fn try_map2<S, V, T1, T2, O, const N: usize>(
     simd: S,

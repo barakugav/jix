@@ -194,14 +194,23 @@ macro_rules! define_op1 {
                     simd: S,
                     xs: [T; N],
                 ) -> [Self::Output; N] {
-                    // Plain `if let`s: `Option::or_else` is not always inlined.
+                    use crate::ops::simd_kernels::{checked_transmute, load, write_vector};
+                    use fearless_simd::SimdBase;
                     $(
-                        if let Some(ys) = crate::ops::simd_kernels::try_map1::<S, S::$vec, _, _, N>(
-                            simd,
-                            xs,
-                            |$x| $body,
-                        ) {
-                            return ys;
+                        if N.is_multiple_of(<S::$vec as SimdBase<S>>::LEN)
+                            && let Some(xs) = checked_transmute::<
+                                T,
+                                <S::$vec as SimdBase<S>>::Element,
+                                N,
+                            >(xs)
+                        {
+                            let mut ys = std::mem::MaybeUninit::<[Self::Output; N]>::uninit();
+                            for c in 0..N / <S::$vec as SimdBase<S>>::LEN {
+                                let $x = load::<S, S::$vec, N>(simd, &xs, c);
+                                write_vector::<S, S::$vec, _, _, N>($body, &mut ys, c);
+                            }
+                            // SAFETY: the loop wrote all the vectors of `ys`.
+                            return unsafe { ys.assume_init() };
                         }
                     )+
                     crate::util::ArrayExt::map_inline(xs, |x| self.apply(x))
