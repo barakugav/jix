@@ -13,60 +13,74 @@ use std::mem::MaybeUninit;
 
 use fearless_simd::{Simd, SimdBase};
 
-/// `xs` as `[U; N]`, if `T` is `U`.
+use crate::dtype::{Dtype, Dtyped};
+
+/// Whether `T` and `U` are the same type, as a `const`: `TypeId`s can not be compared in a `const`
+/// on stable, so this compares dtypes. Two different types may share a dtype (a user type
+/// declaring an `f32` dtype), so pair it with [`checked_transmute`] before reinterpreting.
+pub(crate) const fn is_same_type<T: Dtyped, U: Dtyped>() -> bool {
+    let (t, u): (&Dtype, &Dtype) = (const { &T::DTYPE }, const { &U::DTYPE });
+    match (t.scalar_kind(), u.scalar_kind()) {
+        (Some(tk), Some(uk)) => tk as u8 == uk as u8 && t.itemsize() == u.itemsize(),
+        _ => false,
+    }
+}
+
+/// `x` as a `U`, if `T` is `U`.
 #[inline(always)]
-pub(crate) fn checked_transmute<T: 'static, U: 'static, const N: usize>(
-    xs: [T; N],
-) -> Option<[U; N]> {
+pub(crate) fn checked_transmute<T: 'static, U: 'static>(x: T) -> Option<U> {
     // SAFETY: `T` and `U` are the same type.
     (TypeId::of::<T>() == TypeId::of::<U>())
-        .then(|| unsafe { std::mem::transmute_copy::<[T; N], [U; N]>(&xs) })
+        .then(|| unsafe { std::mem::transmute_copy::<T, U>(&x) })
+}
+
+/// Vector `c` of `V` of `xs`, as the array [`SimdBase::load_array_ref`] takes.
+#[inline(always)]
+pub(crate) fn vector_ref<S: Simd, V: SimdBase<S>, const N: usize>(
+    xs: &[V::Element; N],
+    c: usize,
+) -> &V::Array {
+    assert!((c + 1) * V::LEN <= N);
+    // SAFETY: in bounds, and `V::Array` is `[V::Element; V::LEN]`.
+    unsafe { &*xs.as_ptr().cast::<V::Array>().add(c) }
+}
+
+/// Vector `c` of `ys`, as the array [`SimdBase::store_array`] of `v`, the result of an operation
+/// on vector `c` of `VIn`, takes. `v` must have `VIn::LEN` elements (checked at compile time) of
+/// type `O` (checked, resolved at compile time). `ys` must be initialized (e.g. zeroed): the
+/// elements of a SIMD vector are plain numbers, valid for any initialized bytes.
+#[inline(always)]
+pub(crate) fn vector_mut<'a, S, VIn, V, O, const N: usize>(
+    ys: &'a mut MaybeUninit<[O; N]>,
+    c: usize,
+    v: &V,
+) -> &'a mut V::Array
+where
+    S: Simd,
+    VIn: SimdBase<S>,
+    V: SimdBase<S, Element: 'static>,
+    O: 'static,
+{
+    let _ = v;
+    const { assert!(V::LEN == VIn::LEN) };
+    assert!(TypeId::of::<V::Element>() == TypeId::of::<O>());
+    assert!((c + 1) * V::LEN <= N);
+    // SAFETY: in bounds, `V::Array` is `[O; V::LEN]`, and the bytes are initialized.
+    unsafe { &mut *ys.as_mut_ptr().cast::<V::Array>().add(c) }
 }
 
 /// Vector `c` of `xs`. `(c + 1) * V::LEN <= N`.
 #[inline(always)]
-pub(crate) fn load<S: Simd, V: SimdBase<S>, const N: usize>(
-    simd: S,
-    xs: &[V::Element; N],
-    c: usize,
-) -> V {
-    debug_assert!((c + 1) * V::LEN <= N);
-    // SAFETY: in bounds per the caller, and `V::Array` is `[V::Element; V::LEN]`.
-    V::load_array_ref(simd, unsafe { &*xs.as_ptr().add(c * V::LEN).cast() })
+fn load<S: Simd, V: SimdBase<S>, const N: usize>(simd: S, xs: &[V::Element; N], c: usize) -> V {
+    V::load_array_ref(simd, vector_ref::<S, V, N>(xs, c))
 }
 
 /// Store `v` as vector `c` of `xs`. `(c + 1) * V::LEN <= N`.
 #[inline(always)]
 fn store<S: Simd, V: SimdBase<S>, const N: usize>(v: V, xs: &mut [V::Element; N], c: usize) {
     debug_assert!((c + 1) * V::LEN <= N);
-    // SAFETY: as in `load`.
+    // SAFETY: in bounds, and `V::Array` is `[V::Element; V::LEN]`.
     v.store_array(unsafe { &mut *xs.as_mut_ptr().add(c * V::LEN).cast() });
-}
-
-/// Write `v`, the result of an operation on vector `c` of `VIn` of an array, as vector `c` of
-/// `out`. `v` must have `VIn::LEN` elements (checked at compile time) of type `O` (checked, resolved
-/// at compile time).
-#[inline(always)]
-pub(crate) fn write_vector<S, VIn, V, O, const N: usize>(
-    v: V,
-    out: &mut MaybeUninit<[O; N]>,
-    c: usize,
-) where
-    S: Simd,
-    VIn: SimdBase<S>,
-    V: SimdBase<S, Element: 'static>,
-    O: 'static,
-{
-    const { assert!(V::LEN == VIn::LEN) };
-    assert!(TypeId::of::<V::Element>() == TypeId::of::<O>());
-    assert!((c + 1) * V::LEN <= N);
-    // SAFETY: in bounds, and `V::Array` is `[O; V::LEN]`.
-    unsafe {
-        out.as_mut_ptr()
-            .cast::<V::Array>()
-            .add(c)
-            .write(v.to_array())
-    };
 }
 
 /// `f` on the vectors of `V` in `a` and `b`, if their elements are `V`'s and `N` a multiple of
@@ -85,8 +99,9 @@ where
     T2: 'static,
     O: 'static,
 {
-    let a = checked_transmute::<T1, V::Element, N>(a).filter(|_| N.is_multiple_of(V::LEN))?;
-    let b = checked_transmute::<T2, V::Element, N>(b)?;
+    let a =
+        checked_transmute::<[T1; N], [V::Element; N]>(a).filter(|_| N.is_multiple_of(V::LEN))?;
+    let b = checked_transmute::<[T2; N], [V::Element; N]>(b)?;
     let mut out = a;
     for c in 0..N / V::LEN {
         store(
@@ -173,6 +188,19 @@ mod tests {
             // Not a multiple of the vector length: scalar.
             assert_eq!(super::add(simd, [1.5f32], [2.0], |x, y| x + y), [3.5]);
         });
+    }
+
+    #[test]
+    fn is_same_type() {
+        use super::is_same_type;
+        const {
+            assert!(is_same_type::<f32, f32>());
+            assert!(is_same_type::<[i32; 8], [i32; 8]>());
+            assert!(!is_same_type::<f32, i32>());
+            assert!(!is_same_type::<f32, u32>());
+            assert!(!is_same_type::<i32, i64>());
+            assert!(!is_same_type::<[f32; 4], [f32; 8]>());
+        }
     }
 
     #[test]

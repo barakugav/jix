@@ -176,7 +176,7 @@ macro_rules! define_op1 {
         struct $Kernel;
         impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
         where
-            T: $($trait)::+ + Copy + 'static,
+            T: $($trait)::+ + crate::dtype::Dtyped,
         {
             type Output = <T as $($trait)::+>::Output;
 
@@ -194,22 +194,30 @@ macro_rules! define_op1 {
                     simd: S,
                     xs: [T; N],
                 ) -> [Self::Output; N] {
-                    use crate::ops::simd_kernels::{checked_transmute, load, write_vector};
+                    use crate::ops::simd_kernels::{
+                        checked_transmute, is_same_type, vector_mut, vector_ref,
+                    };
                     use fearless_simd::SimdBase;
                     $(
-                        if N.is_multiple_of(<S::$vec as SimdBase<S>>::LEN)
-                            && let Some(xs) = checked_transmute::<
-                                T,
-                                <S::$vec as SimdBase<S>>::Element,
-                                N,
-                            >(xs)
-                        {
-                            let mut ys = std::mem::MaybeUninit::<[Self::Output; N]>::uninit();
+                        if const {
+                            is_same_type::<T, <S::$vec as SimdBase<S>>::Element>()
+                                && N.is_multiple_of(<S::$vec as SimdBase<S>>::LEN)
+                        } && let Some(xs) = checked_transmute::<
+                            [T; N],
+                            [<S::$vec as SimdBase<S>>::Element; N],
+                        >(xs) {
+                            // Zeroed, not uninit: `vector_mut` hands out references into it.
+                            let mut ys = std::mem::MaybeUninit::<[Self::Output; N]>::zeroed();
                             for c in 0..N / <S::$vec as SimdBase<S>>::LEN {
-                                let $x = load::<S, S::$vec, N>(simd, &xs, c);
-                                write_vector::<S, S::$vec, _, _, N>($body, &mut ys, c);
+                                let $x = <S::$vec as SimdBase<S>>::load_array_ref(
+                                    simd,
+                                    vector_ref::<S, S::$vec, N>(&xs, c),
+                                );
+                                let y = $body;
+                                let dst = vector_mut::<S, S::$vec, _, _, N>(&mut ys, c, &y);
+                                y.store_array(dst);
                             }
-                            // SAFETY: the loop wrote all the vectors of `ys`.
+                            // SAFETY: zeroed, then written by the loop.
                             return unsafe { ys.assume_init() };
                         }
                     )+
