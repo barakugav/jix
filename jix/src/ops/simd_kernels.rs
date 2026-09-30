@@ -2,7 +2,8 @@
 //!
 //! A kernel's `apply_bulk` passes its elements here, with the scalar kernel as the fallback. The
 //! element types with a SIMD body are selected by [`TypeId`], which is resolved at compile time,
-//! so the kernels keep their generic bounds and every other type runs the scalar kernel.
+//! so the kernels keep their generic bounds and every other type runs the scalar kernel. Op1
+//! kernels write their SIMD bodies in `define_op1!`'s `simd:` argument, over [`try_map1`].
 //!
 //! Nodes of the pipeline pass `[T; N]` arrays to each other: a body loads its array into vectors
 //! and stores the results into a new array, and LLVM keeps these in registers along a chain.
@@ -11,11 +12,9 @@ use std::any::TypeId;
 
 use fearless_simd::{Simd, SimdBase};
 
-use crate::util::ArrayExt;
-
 /// `xs` as `[U; N]`, if `T` is `U`.
 #[inline(always)]
-fn cast<T: 'static, U: 'static, const N: usize>(xs: [T; N]) -> Option<[U; N]> {
+fn checked_transmute<T: 'static, U: 'static, const N: usize>(xs: [T; N]) -> Option<[U; N]> {
     // SAFETY: `T` and `U` are the same type.
     (TypeId::of::<T>() == TypeId::of::<U>())
         .then(|| unsafe { std::mem::transmute_copy::<[T; N], [U; N]>(&xs) })
@@ -39,19 +38,23 @@ fn store<S: Simd, V: SimdBase<S>, const N: usize>(v: V, xs: &mut [V::Element; N]
 
 /// `f` on the vectors of `V` in `x`, if its elements are `V`'s and `N` a multiple of `V::LEN`.
 #[inline(always)]
-fn try_map1<S, V, T, O, const N: usize>(simd: S, x: [T; N], f: impl Fn(V) -> V) -> Option<[O; N]>
+pub(crate) fn try_map1<S, V, T, O, const N: usize>(
+    simd: S,
+    x: [T; N],
+    f: impl Fn(V) -> V,
+) -> Option<[O; N]>
 where
     S: Simd,
     V: SimdBase<S, Element: 'static>,
     T: 'static,
     O: 'static,
 {
-    let x = cast::<T, V::Element, N>(x).filter(|_| N.is_multiple_of(V::LEN))?;
+    let x = checked_transmute::<T, V::Element, N>(x).filter(|_| N.is_multiple_of(V::LEN))?;
     let mut out = x;
     for c in 0..N / V::LEN {
         store(f(load::<S, V, N>(simd, &x, c)), &mut out, c);
     }
-    cast(out)
+    checked_transmute(out)
 }
 
 /// `f` on the vectors of `V` in `a` and `b`, like [`try_map1`].
@@ -69,8 +72,8 @@ where
     T2: 'static,
     O: 'static,
 {
-    let a = cast::<T1, V::Element, N>(a).filter(|_| N.is_multiple_of(V::LEN))?;
-    let b = cast::<T2, V::Element, N>(b)?;
+    let a = checked_transmute::<T1, V::Element, N>(a).filter(|_| N.is_multiple_of(V::LEN))?;
+    let b = checked_transmute::<T2, V::Element, N>(b)?;
     let mut out = a;
     for c in 0..N / V::LEN {
         store(
@@ -79,27 +82,7 @@ where
             c,
         );
     }
-    cast(out)
-}
-
-/// `-x`. SIMD for f32, f64 and i32 (wrapping).
-#[inline(always)]
-pub(crate) fn neg<S: Simd, T: Copy + 'static, O: 'static, const N: usize>(
-    simd: S,
-    x: [T; N],
-    scalar: impl Fn(T) -> O,
-) -> [O; N] {
-    // Plain `if let`s: `Option::or_else` is not always inlined.
-    if let Some(r) = try_map1::<S, S::f32s, _, _, N>(simd, x, |x| -x) {
-        return r;
-    }
-    if let Some(r) = try_map1::<S, S::f64s, _, _, N>(simd, x, |x| -x) {
-        return r;
-    }
-    if let Some(r) = try_map1::<S, S::i32s, _, _, N>(simd, x, |x| -x) {
-        return r;
-    }
-    x.map_inline(scalar)
+    checked_transmute(out)
 }
 
 macro_rules! op2 {
@@ -161,16 +144,6 @@ mod tests {
         let [c, d] = inputs(|x| x as f64 * 0.37);
         let [e, f] = inputs(|x| x.wrapping_mul(0x0123_4567));
         simd.vectorize(|| {
-            assert_eq!(super::neg(simd, a, |x| -x), a.map(|x| -x));
-            assert_eq!(super::neg(simd, c, |x| -x), c.map(|x| -x));
-            assert_eq!(
-                super::neg(simd, e, i32::wrapping_neg),
-                e.map(i32::wrapping_neg)
-            );
-            assert_eq!(
-                super::neg(simd, [i32::MIN; N], i32::wrapping_neg),
-                [i32::MIN; N]
-            );
             macro_rules! check_op2 {
                 ($op:ident, $f:expr, $wrapping:expr) => {
                     let ab: [f32; N] = std::array::from_fn(|i| $f(a[i], b[i]));
@@ -184,8 +157,7 @@ mod tests {
             check_op2!(add, |x, y| x + y, i32::wrapping_add);
             check_op2!(sub, |x, y| x - y, i32::wrapping_sub);
             check_op2!(mul, |x, y| x * y, i32::wrapping_mul);
-            // Not a multiple of the vector length, and a type without a SIMD body: scalar.
-            assert_eq!(super::neg(simd, [1i8, -2, 3], |x: i8| -x), [-1, 2, -3]);
+            // Not a multiple of the vector length: scalar.
             assert_eq!(super::add(simd, [1.5f32], [2.0], |x, y| x + y), [3.5]);
         });
     }
@@ -195,12 +167,22 @@ mod tests {
         let level = Level::new();
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
-            level.as_sse2().map(check);
-            level.as_sse4_2().map(check);
-            level.as_avx2().map(check);
-            level.as_avx512().map(check);
+            if let Some(s) = level.as_sse2() {
+                check(s);
+            }
+            if let Some(s) = level.as_sse4_2() {
+                check(s);
+            }
+            if let Some(s) = level.as_avx2() {
+                check(s);
+            }
+            if let Some(s) = level.as_avx512() {
+                check(s);
+            }
         }
         #[cfg(target_arch = "aarch64")]
-        level.as_neon().map(check);
+        if let Some(s) = level.as_neon() {
+            check(s);
+        }
     }
 }

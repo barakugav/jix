@@ -171,7 +171,7 @@ macro_rules! define_op1 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident,
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
-        $(simd = $simd:path,)?
+        $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
     ) => {
         struct $Kernel;
         impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
@@ -186,13 +186,25 @@ macro_rules! define_op1 {
             }
 
             $(
+                /// The `simd:` bodies, on the vectors of the first type whose elements are `T`
+                /// (resolved at compile time); the scalar [`apply`](Self::apply) for any other `T`.
                 #[inline(always)]
                 fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
                     &self,
                     simd: S,
                     xs: [T; N],
                 ) -> [Self::Output; N] {
-                    $simd(simd, xs, |x| self.apply(x))
+                    // Plain `if let`s: `Option::or_else` is not always inlined.
+                    $(
+                        if let Some(ys) = crate::ops::simd_kernels::try_map1::<S, S::$vec, _, _, N>(
+                            simd,
+                            xs,
+                            |$x| $body,
+                        ) {
+                            return ys;
+                        }
+                    )+
+                    crate::util::ArrayExt::map_inline(xs, |x| self.apply(x))
                 }
             )?
         }
@@ -471,7 +483,11 @@ define_op1!(
     NegKernel,
     <core::ops::Neg>::neg,
     core_op = Neg::neg,
-    simd = crate::ops::simd_kernels::neg,
+    simd: |x| {
+        f32s => -x,
+        f64s => -x,
+        i32s => -x,
+    },
 );
 define_op1!(
     /// Rounds each element down to the nearest integer (towards -inf).
@@ -1055,6 +1071,53 @@ pub(crate) mod tests {
 
     use proptest::strategy::BoxedStrategy;
     use proptest::test_runner::{Config, TestRunner};
+
+    /// `NegKernel::apply_bulk` on every SIMD level of the CPU: the `simd:` bodies of
+    /// `define_op1!`, and the scalar fallback.
+    #[test]
+    fn neg_apply_bulk_all_levels() {
+        use super::{NegKernel, Op1Kernel};
+        use fearless_simd::{Level, Simd};
+
+        const N: usize = 32;
+        fn check<S: Simd>(simd: S) {
+            let a: [f32; N] = std::array::from_fn(|i| (i as f32 - 10.0) * 0.37);
+            let c: [f64; N] = std::array::from_fn(|i| (i as f64 - 10.0) * 0.37);
+            let mut e: [i32; N] =
+                std::array::from_fn(|i| (i as i32 * 7 - 100).wrapping_mul(0x0123_4567));
+            e[0] = i32::MIN;
+            simd.vectorize(|| {
+                assert_eq!(NegKernel.apply_bulk(simd, a), a.map(|x| -x));
+                assert_eq!(NegKernel.apply_bulk(simd, c), c.map(|x| -x));
+                // The vector negation wraps.
+                assert_eq!(NegKernel.apply_bulk(simd, e), e.map(i32::wrapping_neg));
+                // Not a multiple of the vector length, and a type without a SIMD body: scalar.
+                assert_eq!(NegKernel.apply_bulk(simd, [1.5f32]), [-1.5]);
+                assert_eq!(NegKernel.apply_bulk(simd, [1i8, -2, 3]), [-1, 2, -3]);
+            });
+        }
+
+        let level = Level::new();
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            if let Some(simd) = level.as_sse2() {
+                check(simd);
+            }
+            if let Some(simd) = level.as_sse4_2() {
+                check(simd);
+            }
+            if let Some(simd) = level.as_avx2() {
+                check(simd);
+            }
+            if let Some(simd) = level.as_avx512() {
+                check(simd);
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        if let Some(simd) = level.as_neon() {
+            check(simd);
+        }
+    }
 
     /// Shared proptest driver for unary-op tests.
     ///
