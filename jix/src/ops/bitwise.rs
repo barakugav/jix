@@ -207,24 +207,13 @@ define_op2!(
     BitwiseShiftLeft,
     BitwiseShiftLeftKernel,
     <core::ops::Shl>::shl(a, b),
-    // The amount modulo the bit width, as in release builds (debug builds panic).
+    // The amount modulo the bit width, as in release builds (debug builds panic). 32-bit only:
+    // the others are not faster than the auto-vectorized scalar kernel (static analysis).
     simd: |a, b| {
-        (i8s, i8s) => a << (b & 7),
-        (i8s, u8s) => a << (b & 7).bitcast::<S::i8s>(),
-        (u8s, i8s) => a << (b & 7).bitcast::<S::u8s>(),
-        (u8s, u8s) => a << (b & 7),
-        (i16s, i16s) => a << (b & 15),
-        (i16s, u16s) => a << (b & 15).bitcast::<S::i16s>(),
-        (u16s, i16s) => a << (b & 15).bitcast::<S::u16s>(),
-        (u16s, u16s) => a << (b & 15),
         (i32s, i32s) => a << (b & 31),
         (i32s, u32s) => a << (b & 31).bitcast::<S::i32s>(),
         (u32s, i32s) => a << (b & 31).bitcast::<S::u32s>(),
         (u32s, u32s) => a << (b & 31),
-        (i64s, i64s) => a << (b & 63),
-        (i64s, u64s) => a << (b & 63).bitcast::<S::i64s>(),
-        (u64s, i64s) => a << (b & 63).bitcast::<S::u64s>(),
-        (u64s, u64s) => a << (b & 63),
     },
 );
 
@@ -263,24 +252,13 @@ define_op2!(
     BitwiseShiftRight,
     BitwiseShiftRightKernel,
     <core::ops::Shr>::shr(a, b),
-    // The amount modulo the bit width, as in release builds (debug builds panic).
+    // The amount modulo the bit width, as in release builds (debug builds panic). 32-bit only:
+    // the others are not faster than the auto-vectorized scalar kernel (static analysis).
     simd: |a, b| {
-        (i8s, i8s) => a >> (b & 7),
-        (i8s, u8s) => a >> (b & 7).bitcast::<S::i8s>(),
-        (u8s, i8s) => a >> (b & 7).bitcast::<S::u8s>(),
-        (u8s, u8s) => a >> (b & 7),
-        (i16s, i16s) => a >> (b & 15),
-        (i16s, u16s) => a >> (b & 15).bitcast::<S::i16s>(),
-        (u16s, i16s) => a >> (b & 15).bitcast::<S::u16s>(),
-        (u16s, u16s) => a >> (b & 15),
         (i32s, i32s) => a >> (b & 31),
         (i32s, u32s) => a >> (b & 31).bitcast::<S::i32s>(),
         (u32s, i32s) => a >> (b & 31).bitcast::<S::u32s>(),
         (u32s, u32s) => a >> (b & 31),
-        (i64s, i64s) => a >> (b & 63),
-        (i64s, u64s) => a >> (b & 63).bitcast::<S::i64s>(),
-        (u64s, i64s) => a >> (b & 63).bitcast::<S::u64s>(),
-        (u64s, u64s) => a >> (b & 63),
     },
 );
 define_op2_rhs_fixed!(
@@ -319,14 +297,6 @@ define_op2_rhs_fixed!(
     rhs = u32,
     type Output<T1> = T1,
     type Output<S1> = S1::Item,
-    // `r = b % 32`, and the other shift by `(32 - r) % 32`, as `((r ^ 31) + 1) & 31`.
-    simd: |a, b| {
-        (u32s, u32s) => (a << (b & 31)) | (a >> ((((b & 31) ^ 31) + 1) & 31)),
-        (i32s, u32s) => {
-            let a = a.bitcast::<S::u32s>();
-            ((a << (b & 31)) | (a >> ((((b & 31) ^ 31) + 1) & 31))).bitcast::<S::i32s>()
-        }
-    },
 );
 
 define_op2_rhs_fixed!(
@@ -365,14 +335,6 @@ define_op2_rhs_fixed!(
     rhs = u32,
     type Output<T1> = T1,
     type Output<S1> = S1::Item,
-    // `r = b % 32`, and the other shift by `(32 - r) % 32`, as `((r ^ 31) + 1) & 31`.
-    simd: |a, b| {
-        (u32s, u32s) => (a >> (b & 31)) | (a << ((((b & 31) ^ 31) + 1) & 31)),
-        (i32s, u32s) => {
-            let a = a.bitcast::<S::u32s>();
-            ((a >> (b & 31)) | (a << ((((b & 31) ^ 31) + 1) & 31))).bitcast::<S::i32s>()
-        }
-    },
 );
 define_op1!(
     /// Counts the number of set bits (`1`s) in each element.
@@ -610,9 +572,8 @@ mod tests {
     #[test]
     fn simd_bodies_all_levels() {
         use super::{
-            AndKernel, BitwiseRotateLeftKernel, BitwiseRotateRightKernel, BitwiseShiftLeftKernel,
-            BitwiseShiftRightKernel, CountOnesKernel, CountZerosKernel, NotKernel, OrKernel,
-            XorKernel,
+            AndKernel, BitwiseShiftLeftKernel, BitwiseShiftRightKernel, CountOnesKernel,
+            CountZerosKernel, NotKernel, OrKernel, XorKernel,
         };
         use crate::ops::op1::Op1Kernel;
         use crate::ops::op2::Op2Kernel;
@@ -652,13 +613,10 @@ mod tests {
                     $m!($kernel, u64, u64, $f);
                 };
             }
-            // Every same-width (value, amount) pair of signedness.
+            // Every 32-bit (value, amount) pair of signedness.
             macro_rules! shifts {
                 ($kernel:ident, $f:ident) => {
-                    shifts!(@width $kernel, $f, i8, u8);
-                    shifts!(@width $kernel, $f, i16, u16);
                     shifts!(@width $kernel, $f, i32, u32);
-                    shifts!(@width $kernel, $f, i64, u64);
                 };
                 (@width $kernel:ident, $f:ident, $i:ty, $u:ty) => {
                     case!($kernel, $i, $i, |x: $i, y: $i| x.$f(y as u32));
@@ -679,10 +637,6 @@ mod tests {
                 ints!(not!(NotKernel, ()));
                 shifts!(BitwiseShiftLeftKernel, wrapping_shl);
                 shifts!(BitwiseShiftRightKernel, wrapping_shr);
-                case!(BitwiseRotateLeftKernel, i32, u32, i32::rotate_left);
-                case!(BitwiseRotateLeftKernel, u32, u32, u32::rotate_left);
-                case!(BitwiseRotateRightKernel, i32, u32, i32::rotate_right);
-                case!(BitwiseRotateRightKernel, u32, u32, u32::rotate_right);
                 case1!(CountOnesKernel, i32, i32::count_ones);
                 case1!(CountOnesKernel, u32, u32::count_ones);
                 case1!(CountZerosKernel, i32, i32::count_zeros);

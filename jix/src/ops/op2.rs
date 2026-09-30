@@ -694,7 +694,6 @@ define_op2!(
     simd: |a, b| {
         (f32s, f32s) => a * b,
         (f64s, f64s) => a * b,
-        (i8s, i8s) => a * b,
         (i16s, i16s) => a * b,
         (i32s, i32s) => a * b,
         (i64s, i64s) => a * b,
@@ -816,7 +815,13 @@ pub(crate) mod tests {
                 ints!(SubKernel, wrapping_sub);
                 case!(MulKernel, f32, |x, y| x * y);
                 case!(MulKernel, f64, |x, y| x * y);
-                ints!(MulKernel, wrapping_mul);
+                case!(MulKernel, i16, i16::wrapping_mul);
+                case!(MulKernel, i32, i32::wrapping_mul);
+                case!(MulKernel, i64, i64::wrapping_mul);
+                case!(MulKernel, u8, u8::wrapping_mul);
+                case!(MulKernel, u16, u16::wrapping_mul);
+                case!(MulKernel, u32, u32::wrapping_mul);
+                case!(MulKernel, u64, u64::wrapping_mul);
                 case!(DivKernel, f32, |x, y| x / y);
                 case!(DivKernel, f64, |x, y| x / y);
                 // Not a multiple of the vector length: scalar.

@@ -222,14 +222,17 @@ macro_rules! op1_simd_apply_bulk {
         // SAFETY: zeroed, then written by the loop.
         return unsafe { ys.assume_init() };
     }};
-    // Return the `N` `bool` outputs of the masks `$y(c)` of type `$Mask`.
+    // Return the `N` `bool` outputs of the masks `$y(c)` of type `$Mask`: each stored as its
+    // lanes (0 / -1), then compared to 0, which LLVM vectorizes (packs).
     (@mask $lanes:ident, |$c:ident| $y:block, $Mask:ty) => {{
         let mut ys = [false; N];
+        // The mask's lanes, at most 64 (8-bit lanes of 512-bit vectors).
+        let mut lanes_buf = [Default::default(); 64];
         for $c in 0..N / $lanes {
             let m: $Mask = $y;
-            let bits = fearless_simd::SimdMask::to_bitmask(m);
+            fearless_simd::SimdMask::store_slice(&m, &mut lanes_buf[..$lanes]);
             for k in 0..$lanes {
-                ys[$c * $lanes + k] = (bits >> k) & 1 != 0;
+                ys[$c * $lanes + k] = lanes_buf[k] != Default::default();
             }
         }
         return ys;
@@ -672,14 +675,10 @@ define_op1!(
     RoundKernel,
     <num_traits::Float>::round,
     type Output<T> = T,
-    // Halves away from zero: `t + trunc(2 * (x - t))` with `t = trunc(x)`, all exact. From `2^23`
-    // (`2^52` for f64) on every value is an integer; there, and for inf and NaN, `x` itself.
+    // Halves away from zero, as LLVM lowers `round`: `trunc(|x| + 0.5 - ulp)` with `x`'s sign.
     simd: |x| {
-        f32s => x.abs().simd_lt(8388608.0).select(x.trunc() + ((x - x.trunc()) * 2.0).trunc(), x),
-        f64s => x
-            .abs()
-            .simd_lt(4503599627370496.0)
-            .select(x.trunc() + ((x - x.trunc()) * 2.0).trunc(), x),
+        f32s => (x.abs() + 0.49999997).trunc().copysign(x),
+        f64s => (x.abs() + 0.49999999999999994).trunc().copysign(x),
     },
 );
 define_op1!(
@@ -1114,7 +1113,6 @@ where
     crate::ops::op1::op1_simd_apply_bulk!(vector: T, |x| {
         f32s => x * x,
         f64s => x * x,
-        i8s => x * x,
         i16s => x * x,
         i32s => x * x,
         i64s => x * x,
@@ -1239,7 +1237,6 @@ pub(crate) mod tests {
                 case!(AbsKernel, i64, i64::wrapping_abs);
                 case!(SquareKernel, f32, |x: f32| x * x);
                 case!(SquareKernel, f64, |x: f64| x * x);
-                case!(SquareKernel, i8, |x: i8| x.wrapping_mul(x));
                 case!(SquareKernel, i16, |x: i16| x.wrapping_mul(x));
                 case!(SquareKernel, i32, |x: i32| x.wrapping_mul(x));
                 case!(SquareKernel, i64, |x: i64| x.wrapping_mul(x));
