@@ -675,11 +675,6 @@ define_op1!(
     RoundKernel,
     <num_traits::Float>::round,
     type Output<T> = T,
-    // Halves away from zero, as LLVM lowers `round`: `trunc(|x| + 0.5 - ulp)` with `x`'s sign.
-    simd: |x| {
-        f32s => (x.abs() + 0.49999997).trunc().copysign(x),
-        f64s => (x.abs() + 0.49999999999999994).trunc().copysign(x),
-    },
 );
 define_op1!(
     /// Computes the square root of each element.

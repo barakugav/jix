@@ -257,18 +257,6 @@ define_op2!(
     EqualKernel,
     <PartialEq>::eq(&a, &b),
     type Output = bool,
-    simd: |a, b| {
-        (f32s, f32s) => a.simd_eq(b),
-        (f64s, f64s) => a.simd_eq(b),
-        (i8s, i8s) => a.simd_eq(b),
-        (i16s, i16s) => a.simd_eq(b),
-        (i32s, i32s) => a.simd_eq(b),
-        (i64s, i64s) => a.simd_eq(b),
-        (u8s, u8s) => a.simd_eq(b),
-        (u16s, u16s) => a.simd_eq(b),
-        (u32s, u32s) => a.simd_eq(b),
-        (u64s, u64s) => a.simd_eq(b),
-    },
 );
 define_op2!(
     /// Element-wise inequality test (`a != b`).
@@ -304,18 +292,6 @@ define_op2!(
     NotEqualKernel,
     <PartialEq>::ne(&a, &b),
     type Output = bool,
-    simd: |a, b| {
-        (f32s, f32s) => !a.simd_eq(b),
-        (f64s, f64s) => !a.simd_eq(b),
-        (i8s, i8s) => !a.simd_eq(b),
-        (i16s, i16s) => !a.simd_eq(b),
-        (i32s, i32s) => !a.simd_eq(b),
-        (i64s, i64s) => !a.simd_eq(b),
-        (u8s, u8s) => !a.simd_eq(b),
-        (u16s, u16s) => !a.simd_eq(b),
-        (u32s, u32s) => !a.simd_eq(b),
-        (u64s, u64s) => !a.simd_eq(b),
-    },
 );
 define_op2!(
     /// Element-wise greater-than test (`a > b`).
@@ -351,18 +327,6 @@ define_op2!(
     GreaterKernel,
     <PartialOrd>::gt(&a, &b),
     type Output = bool,
-    simd: |a, b| {
-        (f32s, f32s) => a.simd_gt(b),
-        (f64s, f64s) => a.simd_gt(b),
-        (i8s, i8s) => a.simd_gt(b),
-        (i16s, i16s) => a.simd_gt(b),
-        (i32s, i32s) => a.simd_gt(b),
-        (i64s, i64s) => a.simd_gt(b),
-        (u8s, u8s) => a.simd_gt(b),
-        (u16s, u16s) => a.simd_gt(b),
-        (u32s, u32s) => a.simd_gt(b),
-        (u64s, u64s) => a.simd_gt(b),
-    },
 );
 define_op2!(
     /// Element-wise greater-than-or-equal test (`a >= b`).
@@ -398,18 +362,6 @@ define_op2!(
     GreaterEqualKernel,
     <PartialOrd>::ge(&a, &b),
     type Output = bool,
-    simd: |a, b| {
-        (f32s, f32s) => a.simd_ge(b),
-        (f64s, f64s) => a.simd_ge(b),
-        (i8s, i8s) => a.simd_ge(b),
-        (i16s, i16s) => a.simd_ge(b),
-        (i32s, i32s) => a.simd_ge(b),
-        (i64s, i64s) => a.simd_ge(b),
-        (u8s, u8s) => a.simd_ge(b),
-        (u16s, u16s) => a.simd_ge(b),
-        (u32s, u32s) => a.simd_ge(b),
-        (u64s, u64s) => a.simd_ge(b),
-    },
 );
 define_op2!(
     /// Element-wise less-than test (`a < b`).
@@ -445,18 +397,6 @@ define_op2!(
     LessKernel,
     <PartialOrd>::lt(&a, &b),
     type Output = bool,
-    simd: |a, b| {
-        (f32s, f32s) => a.simd_lt(b),
-        (f64s, f64s) => a.simd_lt(b),
-        (i8s, i8s) => a.simd_lt(b),
-        (i16s, i16s) => a.simd_lt(b),
-        (i32s, i32s) => a.simd_lt(b),
-        (i64s, i64s) => a.simd_lt(b),
-        (u8s, u8s) => a.simd_lt(b),
-        (u16s, u16s) => a.simd_lt(b),
-        (u32s, u32s) => a.simd_lt(b),
-        (u64s, u64s) => a.simd_lt(b),
-    },
 );
 define_op2!(
     /// Element-wise less-than-or-equal test (`a <= b`).
@@ -492,18 +432,6 @@ define_op2!(
     LessEqualKernel,
     <PartialOrd>::le(&a, &b),
     type Output = bool,
-    simd: |a, b| {
-        (f32s, f32s) => a.simd_le(b),
-        (f64s, f64s) => a.simd_le(b),
-        (i8s, i8s) => a.simd_le(b),
-        (i16s, i16s) => a.simd_le(b),
-        (i32s, i32s) => a.simd_le(b),
-        (i64s, i64s) => a.simd_le(b),
-        (u8s, u8s) => a.simd_le(b),
-        (u16s, u16s) => a.simd_le(b),
-        (u32s, u32s) => a.simd_le(b),
-        (u64s, u64s) => a.simd_le(b),
-    },
 );
 
 define_op2!(

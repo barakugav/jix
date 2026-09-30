@@ -797,3 +797,45 @@ streams load / add / narrow / store per vector, so nothing forces them all live,
 iteration mostly costs a little more loop overhead (NEON most, which LLVM does not unroll). The wins
 are on AVX2 integers (alderlake, znver3). The rule is meant for chains whose wide values must stay
 live at once (as in `longchain`, where the same-dtype k was tuned); these probes do not show that case.
+
+## SIMD bodies of the ops (`results/py-*`)
+
+`--source py`, against `results/py-baseline` (the ops' auto-vectorized scalar kernels, before any
+`simd:` body but Neg / Add / Sub / Mul in f32 / f64 / i32). Speedup per platform: the geomean of
+baseline / new cycles over the platform's CPUs. Bold: >= 3% faster, italics: >= 3% slower.
+`results/py-tier0` is the first set of bodies, `results/py-tier0b` the retuned bool outputs and
+Round.
+
+Most bodies match the baseline exactly (Add, Sub, Neg, Abs, Square, And / Or / Xor / Not, integer
+Maximum / Minimum, Floor, Ceil): LLVM already vectorized the scalar kernel, and the explicit body
+gives the same code. They are kept, as the SIMD path of those ops. The notable ones:
+
+| kernel | SIMD body | x86_64 | x86_64-v2 | x86_64-v3 | x86_64-v4 | i686 | aarch64 | aarch64-apple |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `bitwise_shift_right_i32` | kept | 1.00x | **11.42x** | 1.00x | 1.00x | 1.00x | **1.05x** | 1.00x |
+| `bitwise_shift_left_i32` | kept | 1.02x | **5.98x** | 1.00x | 1.00x | **1.13x** | 1.01x | 1.00x |
+| `maximum_f32` | kept | **1.17x** | **2.59x** | **1.16x** | 1.00x | **3.59x** | **1.09x** | **1.17x** |
+| `maximum_f64` | kept | **1.17x** | **1.13x** | **3.30x** | 1.00x | **1.71x** | **1.09x** | **1.16x** |
+| `div_f32` | kept | **2.17x** | **1.31x** | 1.00x | 1.00x | **2.80x** | 1.00x | 1.00x |
+| `div_f64` | kept | 1.00x | **1.03x** | **2.53x** | 1.00x | 1.00x | 1.00x | 1.00x |
+| `sqrt_f64` | kept | 1.00x | 1.00x | **1.95x** | 1.00x | 1.00x | 1.00x | 1.00x |
+| `count_zeros_i32_u32` | kept | 1.00x | **1.31x** | **1.72x** | 1.00x | **1.34x** | 0.98x | 1.00x |
+| `count_ones_i32_u32` | removed | _0.82x_ | **1.18x** | **1.88x** | 1.00x | _0.92x_ | 1.00x | 1.00x |
+| `bitwise_rotate_right_i32_u32` | removed | _0.75x_ | _0.57x_ | **1.04x** | 1.00x | _0.69x_ | 1.01x | 1.00x |
+| `bitwise_shift_right_u8` | removed | 1.00x | 1.00x | 0.99x | _0.63x_ | 1.00x | _0.96x_ | _0.96x_ |
+| `mul_i8` | removed | **1.22x** | **1.05x** | 1.00x | 1.00x | **1.70x** | _0.94x_ | 1.00x |
+| `less_f32_bool` | removed | _0.40x_ | _0.37x_ | **1.33x** | 0.99x | _0.72x_ | _0.93x_ | _0.57x_ |
+| `less_i64_bool` | removed | 1.00x | 1.00x | 1.00x | 1.00x | 1.00x | _0.37x_ | _0.47x_ |
+| `is_nan_f64_bool` | removed | _0.48x_ | _0.70x_ | _0.43x_ | **1.07x** | _0.20x_ | _0.47x_ | _0.52x_ |
+| `round_f32` | removed | _0.10x_ | _0.69x_ | _0.71x_ | _0.91x_ | _0.24x_ | _0.59x_ | _0.38x_ |
+
+- Kept where faster without being slower anywhere: 32-bit shifts (no per-lane shift on SSE4.2,
+  which LLVM scalarizes), float Maximum / Minimum (NaN-propagating with a `select`), float Div,
+  f64 Sqrt, CountZeros. Removed where slower on some platform: rotates, 8/16/64-bit shifts,
+  CountOnes, i8 Mul / Square.
+- `bool` outputs (comparisons, IsNan / IsFinite / IsInfinite) are removed: LLVM packs the
+  comparison masks of the scalar kernel into bytes better than the `mask` mode (lanes stored and
+  compared to 0; `to_bitmask` then per lane, the first version, was 3-10x slower).
+- Round (halves away from zero) is removed: LLVM lowers the scalar `round` better (e.g. one
+  `frinta` on NEON) than the body (`trunc(|x| + 0.5 - ulp)` with `x`'s sign). Note that on SSE2 the
+  baseline calls `roundf` (free in llvm-mca), so its cost there is understated.

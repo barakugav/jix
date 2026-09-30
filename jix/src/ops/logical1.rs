@@ -36,10 +36,6 @@ define_op1!(
     IsNanKernel,
     <num_traits::Float>::is_nan,
     type Output = bool,
-    simd: |x| {
-        f32s => !x.simd_eq(x),
-        f64s => !x.simd_eq(x),
-    },
 );
 define_op1!(
     /// Tests whether each element is finite (not `+/-inf` and not `NaN`).
@@ -75,11 +71,6 @@ define_op1!(
     IsFiniteKernel,
     <num_traits::Float>::is_finite,
     type Output = bool,
-    // `x - x` is 0 for a finite `x`, NaN for inf and NaN.
-    simd: |x| {
-        f32s => (x - x).simd_eq(0.0),
-        f64s => (x - x).simd_eq(0.0),
-    },
 );
 define_op1!(
     /// Tests whether each element is infinite (`+inf` or `-inf`).
@@ -115,10 +106,6 @@ define_op1!(
     IsInfiniteKernel,
     <num_traits::Float>::is_infinite,
     type Output = bool,
-    simd: |x| {
-        f32s => x.abs().simd_eq(f32::INFINITY),
-        f64s => x.abs().simd_eq(f64::INFINITY),
-    },
 );
 
 impl<S> Array<S>

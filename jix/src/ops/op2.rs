@@ -778,6 +778,51 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
+    // A `bool` output kernel, for the `mask` mode of `define_op2!` (the comparisons keep their
+    // auto-vectorized scalar kernels, faster by static analysis).
+    mod mask_mode {
+        #![allow(dead_code)]
+        use crate::ops::prelude::*;
+        define_op2!(
+            /// `a < b`, for `mask_apply_bulk_all_levels`.
+            TestLess,
+            TestLessKernel,
+            <core::cmp::PartialOrd>::lt(&a, &b),
+            type Output = bool,
+            simd: |a, b| {
+                (f32s, f32s) => a.simd_lt(b),
+                (f64s, f64s) => a.simd_lt(b),
+                (i8s, i8s) => a.simd_lt(b),
+                (u64s, u64s) => a.simd_lt(b),
+            },
+        );
+
+        /// The `mask` mode of `define_op2!` on every SIMD level of the CPU.
+        #[test]
+        fn mask_apply_bulk_all_levels() {
+            use crate::ops::op2::Op2Kernel;
+            use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+            use fearless_simd::Simd;
+
+            fn check<S: Simd>(simd: S) {
+                macro_rules! case {
+                    ($t:ty) => {
+                        let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
+                        let lt = TestLessKernel.apply_bulk(simd, a, b);
+                        assert_same_elements(lt, |i| a[i] < b[i], stringify!($t));
+                    };
+                }
+                simd.vectorize(|| {
+                    case!(f32);
+                    case!(f64);
+                    case!(i8);
+                    case!(u64);
+                });
+            }
+            for_each_simd_level!(check);
+        }
+    }
+
     /// The `simd:` bodies of the kernels of this module against their scalar semantics (release
     /// builds: wrapping), on every SIMD level of the CPU, over edge cases.
     #[test]

@@ -368,11 +368,6 @@ define_op1!(
     CountOnesKernel,
     <num_traits::PrimInt>::count_ones,
     type Output = u32,
-    // 32-bit inputs: the only ones with as many lanes as the `u32` output.
-    simd: |x| {
-        u32s => x.count_ones(),
-        i32s => x.count_ones().bitcast::<S::u32s>(),
-    },
 );
 define_op1!(
     /// Counts the number of unset bits (`0`s) in each element.
