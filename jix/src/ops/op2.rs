@@ -216,9 +216,10 @@ where
 /// The `apply_bulk` of an [`Op2Kernel`] over `$T1` and `$T2` with SIMD bodies: `($va, $vb) =>
 /// $body` computes on vectors `$sa: S::$va` and `$sb: S::$vb` (of the same number of lanes, checked
 /// at compile time) when the operands are their elements (`TypeId`, resolved at compile time) and
-/// `N` a multiple of their length. The first such arm is taken, else the scalar `apply`.
+/// `N` a multiple of their length. The first such arm is taken, else the scalar `apply`. The body
+/// gives, per mode, a `vector` or a `mask`, as in `op1_simd_apply_bulk`.
 macro_rules! op2_simd_apply_bulk {
-    ($T1:ty, $T2:ty, |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ }) => {
+    ($mode:ident: $T1:ty, $T2:ty, |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ }) => {
         #[inline(always)]
         fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
             &self,
@@ -228,7 +229,7 @@ macro_rules! op2_simd_apply_bulk {
         ) -> [Self::Output; N] {
             use crate::util::checked_transmute;
             use fearless_simd::SimdBase;
-            use std::any::{Any, TypeId};
+            use std::any::TypeId;
             $(
                 if TypeId::of::<$T1>() == TypeId::of::<<S::$va as SimdBase<S>>::Element>()
                     && TypeId::of::<$T2>() == TypeId::of::<<S::$vb as SimdBase<S>>::Element>()
@@ -242,9 +243,7 @@ macro_rules! op2_simd_apply_bulk {
                         .unwrap();
                     let b = checked_transmute::<[$T2; N], [<S::$vb as SimdBase<S>>::Element; N]>(b)
                         .unwrap();
-                    // Zeroed, not uninit: the loop stores through references into it.
-                    let mut ys = std::mem::MaybeUninit::<[Self::Output; N]>::zeroed();
-                    for c in 0..N / lanes {
+                    crate::ops::op1::op1_simd_apply_bulk!(@$mode lanes, |c| {
                         // SAFETY: vector `c` is in bounds, as `N` is a multiple of `lanes`.
                         let $sa = <S::$va as SimdBase<S>>::load_array_ref(simd, unsafe {
                             &*a.as_ptr().cast::<<S::$va as SimdBase<S>>::Array>().add(c)
@@ -253,20 +252,8 @@ macro_rules! op2_simd_apply_bulk {
                         let $sb = <S::$vb as SimdBase<S>>::load_array_ref(simd, unsafe {
                             &*b.as_ptr().cast::<<S::$vb as SimdBase<S>>::Array>().add(c)
                         });
-                        let y = $body;
-                        // The body must give `lanes` lanes of `Self::Output`.
-                        assert!(
-                            y.as_slice().len() == lanes
-                                && Any::type_id(&y.as_slice()[0]) == TypeId::of::<Self::Output>()
-                        );
-                        // SAFETY: vector `c` of `ys` is in bounds and of `y`'s array type, per
-                        // the assert, and initialized.
-                        y.store_array(unsafe {
-                            &mut *ys.as_mut_ptr().cast::<Self::Output>().add(c * lanes).cast()
-                        });
-                    }
-                    // SAFETY: zeroed, then written by the loop.
-                    return unsafe { ys.assume_init() };
+                        $body
+                    }, <S::$va as SimdBase<S>>::Mask);
                 }
             )+
             crate::array_from_fn_inline(|i| self.apply(a[i], b[i]))
@@ -289,7 +276,7 @@ macro_rules! define_op2 {
             $kernel_fn,
             ($($call_args)*),
             type Output = <T1 as $($trait)::+<T2>>::Output,
-            $(simd: |$sa, $sb| { $(($va, $vb) => $body),+ },)?
+            $(simd(vector): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
         );
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
@@ -344,7 +331,41 @@ macro_rules! define_op2 {
         $Op:ident,
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
+        type Output = bool,
+        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+    ) => {
+        define_op2!(@typed
+            $(#[$meta])*
+            $Op,
+            $Kernel,
+            <$($trait)::+> :: $kernel_fn ($($call_args)*),
+            type Output = bool,
+            $(simd(mask): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
+        );
+    };
+    (
+        $(#[$meta:meta])*
+        $Op:ident,
+        $Kernel:ident,
+        <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
         type Output = $output_type:ty,
+    ) => {
+        define_op2!(@typed
+            $(#[$meta])*
+            $Op,
+            $Kernel,
+            <$($trait)::+> :: $kernel_fn ($($call_args)*),
+            type Output = $output_type,
+        );
+    };
+    (
+        @typed
+        $(#[$meta:meta])*
+        $Op:ident,
+        $Kernel:ident,
+        <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
+        type Output = $output_type:ty,
+        $(simd($mode:ident): |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
     ) => {
         define_op2!(@kernel_dispatch
             $Kernel,
@@ -352,6 +373,7 @@ macro_rules! define_op2 {
             $kernel_fn,
             ($($call_args)*),
             type Output = $output_type,
+            $(simd($mode): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
         );
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
@@ -408,13 +430,13 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         ($a:ident, $b:ident),
         type Output = $output_type:ty,
-        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd($mode:ident): |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, ($a, $b),
             type Output = $output_type,
-            $(simd: |$sa, $sb| { $(($va, $vb) => $body),+ },)?
+            $(simd($mode): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
         );
     };
     (
@@ -424,13 +446,13 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         (&$a:ident, &$b:ident),
         type Output = $output_type:ty,
-        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd($mode:ident): |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, (&$a, &$b),
             type Output = $output_type,
-            $(simd: |$sa, $sb| { $(($va, $vb) => $body),+ },)?
+            $(simd($mode): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
         );
     };
 
@@ -441,7 +463,7 @@ macro_rules! define_op2 {
         $Kernel:ident, $($trait:ident)::+, $kernel_fn:ident,
         $a:ident, $b:ident, ($($call_args:tt)*),
         type Output = $output_type:ty,
-        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd($mode:ident): |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
     ) => {
         struct $Kernel;
         impl<T1, T2> crate::ops::op2::Op2Kernel<T1, T2> for $Kernel
@@ -456,7 +478,7 @@ macro_rules! define_op2 {
             }
 
             $(
-                crate::ops::op2::op2_simd_apply_bulk!(T1, T2, |$sa, $sb| { $(($va, $vb) => $body),+ });
+                crate::ops::op2::op2_simd_apply_bulk!($mode: T1, T2, |$sa, $sb| { $(($va, $vb) => $body),+ });
             )?
         }
     };
@@ -509,7 +531,7 @@ macro_rules! define_op2_rhs_fixed {
             }
 
             $(
-                crate::ops::op2::op2_simd_apply_bulk!(T1, $rhs, |$sa, $sb| { $(($va, $vb) => $body),+ });
+                crate::ops::op2::op2_simd_apply_bulk!(vector: T1, $rhs, |$sa, $sb| { $(($va, $vb) => $body),+ });
             )?
         }
         $(#[$meta])*
@@ -729,6 +751,76 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
+    // A `bool` output kernel, for the `mask` mode of `define_op2!`.
+    mod mask_mode {
+        #![allow(dead_code)]
+        use crate::ops::prelude::*;
+        define_op2!(
+            /// `a < b`, for `mask_apply_bulk_all_levels`.
+            TestLess,
+            TestLessKernel,
+            <core::cmp::PartialOrd>::lt(&a, &b),
+            type Output = bool,
+            simd: |a, b| {
+                (f32s, f32s) => a.simd_lt(b),
+                (f64s, f64s) => a.simd_lt(b),
+                (i32s, i32s) => a.simd_lt(b),
+            },
+        );
+
+        /// The `mask` mode of `define_op2!` on every SIMD level of the CPU.
+        #[test]
+        fn mask_apply_bulk_all_levels() {
+            use crate::ops::op2::Op2Kernel;
+            use fearless_simd::{Level, Simd};
+
+            const N: usize = 32;
+            fn check<S: Simd>(simd: S) {
+                let a: [f32; N] = std::array::from_fn(|i| (i as f32 - 10.0) * 0.5);
+                let b: [f32; N] = std::array::from_fn(|i| (13.0 - i as f32) * 0.5);
+                let mut c = a.map(f64::from);
+                c[3] = f64::NAN;
+                let d = b.map(f64::from);
+                let e: [i32; N] = std::array::from_fn(|i| i as i32 * 7 - 100);
+                let f: [i32; N] = std::array::from_fn(|i| 50 - i as i32 * 3);
+                simd.vectorize(|| {
+                    let lt =
+                        |x: [f32; N], y: [f32; N]| std::array::from_fn::<_, N, _>(|i| x[i] < y[i]);
+                    assert_eq!(TestLessKernel.apply_bulk(simd, a, b), lt(a, b));
+                    let lt =
+                        |x: [f64; N], y: [f64; N]| std::array::from_fn::<_, N, _>(|i| x[i] < y[i]);
+                    assert_eq!(TestLessKernel.apply_bulk(simd, c, d), lt(c, d));
+                    let lt =
+                        |x: [i32; N], y: [i32; N]| std::array::from_fn::<_, N, _>(|i| x[i] < y[i]);
+                    assert_eq!(TestLessKernel.apply_bulk(simd, e, f), lt(e, f));
+                    // Not a multiple of the vector length: scalar.
+                    assert_eq!(TestLessKernel.apply_bulk(simd, [1.0f32], [2.0]), [true]);
+                });
+            }
+
+            let level = Level::new();
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            {
+                if let Some(simd) = level.as_sse2() {
+                    check(simd);
+                }
+                if let Some(simd) = level.as_sse4_2() {
+                    check(simd);
+                }
+                if let Some(simd) = level.as_avx2() {
+                    check(simd);
+                }
+                if let Some(simd) = level.as_avx512() {
+                    check(simd);
+                }
+            }
+            #[cfg(target_arch = "aarch64")]
+            if let Some(simd) = level.as_neon() {
+                check(simd);
+            }
+        }
+    }
+
     /// `apply_bulk` of `AddKernel`, `SubKernel` and `MulKernel` on every SIMD level of the CPU:
     /// the `simd:` bodies of `define_op2!`, and the scalar fallback.
     #[test]
