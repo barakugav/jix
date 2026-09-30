@@ -213,6 +213,67 @@ where
     }
 }
 
+/// The `apply_bulk` of an [`Op2Kernel`] over `$T1` and `$T2` with SIMD bodies: `($va, $vb) =>
+/// $body` computes on vectors `$sa: S::$va` and `$sb: S::$vb` (of the same number of lanes, checked
+/// at compile time) when the operands are their elements (`TypeId`, resolved at compile time) and
+/// `N` a multiple of their length. The first such arm is taken, else the scalar `apply`.
+macro_rules! op2_simd_apply_bulk {
+    ($T1:ty, $T2:ty, |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ }) => {
+        #[inline(always)]
+        fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+            &self,
+            simd: S,
+            a: [$T1; N],
+            b: [$T2; N],
+        ) -> [Self::Output; N] {
+            use crate::util::checked_transmute;
+            use fearless_simd::SimdBase;
+            use std::any::{Any, TypeId};
+            $(
+                if TypeId::of::<$T1>() == TypeId::of::<<S::$va as SimdBase<S>>::Element>()
+                    && TypeId::of::<$T2>() == TypeId::of::<<S::$vb as SimdBase<S>>::Element>()
+                    && const { N.is_multiple_of(<S::$va as SimdBase<S>>::LEN) }
+                {
+                    let lanes = const {
+                        assert!(<S::$va as SimdBase<S>>::LEN == <S::$vb as SimdBase<S>>::LEN);
+                        <S::$va as SimdBase<S>>::LEN
+                    };
+                    let a = checked_transmute::<[$T1; N], [<S::$va as SimdBase<S>>::Element; N]>(a)
+                        .unwrap();
+                    let b = checked_transmute::<[$T2; N], [<S::$vb as SimdBase<S>>::Element; N]>(b)
+                        .unwrap();
+                    // Zeroed, not uninit: the loop stores through references into it.
+                    let mut ys = std::mem::MaybeUninit::<[Self::Output; N]>::zeroed();
+                    for c in 0..N / lanes {
+                        // SAFETY: vector `c` is in bounds, as `N` is a multiple of `lanes`.
+                        let $sa = <S::$va as SimdBase<S>>::load_array_ref(simd, unsafe {
+                            &*a.as_ptr().cast::<<S::$va as SimdBase<S>>::Array>().add(c)
+                        });
+                        // SAFETY: as above, with as many lanes.
+                        let $sb = <S::$vb as SimdBase<S>>::load_array_ref(simd, unsafe {
+                            &*b.as_ptr().cast::<<S::$vb as SimdBase<S>>::Array>().add(c)
+                        });
+                        let y = $body;
+                        // The body must give `lanes` lanes of `Self::Output`.
+                        assert!(
+                            y.as_slice().len() == lanes
+                                && Any::type_id(&y.as_slice()[0]) == TypeId::of::<Self::Output>()
+                        );
+                        // SAFETY: vector `c` of `ys` is in bounds and of `y`'s array type, per
+                        // the assert, and initialized.
+                        y.store_array(unsafe {
+                            &mut *ys.as_mut_ptr().cast::<Self::Output>().add(c * lanes).cast()
+                        });
+                    }
+                    // SAFETY: zeroed, then written by the loop.
+                    return unsafe { ys.assume_init() };
+                }
+            )+
+            crate::array_from_fn_inline(|i| self.apply(a[i], b[i]))
+        }
+    };
+}
+
 macro_rules! define_op2 {
     (
         $(#[$meta:meta])*
@@ -220,7 +281,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
-        $(simd: |$sa:ident, $sb:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
+        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
     ) => {
         define_op2!(@kernel_dispatch
             $Kernel,
@@ -228,7 +289,7 @@ macro_rules! define_op2 {
             $kernel_fn,
             ($($call_args)*),
             type Output = <T1 as $($trait)::+<T2>>::Output,
-            $(simd: |$sa, $sb| { $($vec => $body),+ },)?
+            $(simd: |$sa, $sb| { $(($va, $vb) => $body),+ },)?
         );
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
@@ -347,13 +408,13 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         ($a:ident, $b:ident),
         type Output = $output_type:ty,
-        $(simd: |$sa:ident, $sb:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
+        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, ($a, $b),
             type Output = $output_type,
-            $(simd: |$sa, $sb| { $($vec => $body),+ },)?
+            $(simd: |$sa, $sb| { $(($va, $vb) => $body),+ },)?
         );
     };
     (
@@ -363,13 +424,13 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         (&$a:ident, &$b:ident),
         type Output = $output_type:ty,
-        $(simd: |$sa:ident, $sb:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
+        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, (&$a, &$b),
             type Output = $output_type,
-            $(simd: |$sa, $sb| { $($vec => $body),+ },)?
+            $(simd: |$sa, $sb| { $(($va, $vb) => $body),+ },)?
         );
     };
 
@@ -380,7 +441,7 @@ macro_rules! define_op2 {
         $Kernel:ident, $($trait:ident)::+, $kernel_fn:ident,
         $a:ident, $b:ident, ($($call_args:tt)*),
         type Output = $output_type:ty,
-        $(simd: |$sa:ident, $sb:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
+        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
     ) => {
         struct $Kernel;
         impl<T1, T2> crate::ops::op2::Op2Kernel<T1, T2> for $Kernel
@@ -395,62 +456,7 @@ macro_rules! define_op2 {
             }
 
             $(
-                #[inline(always)]
-                fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
-                    &self,
-                    simd: S,
-                    a: [T1; N],
-                    b: [T2; N],
-                ) -> [Self::Output; N] {
-                    use crate::util::checked_transmute;
-                    use fearless_simd::SimdBase;
-                    use std::any::{Any, TypeId};
-                    $(
-                        if TypeId::of::<T1>() == TypeId::of::<<S::$vec as SimdBase<S>>::Element>()
-                            && TypeId::of::<T2>() == TypeId::of::<<S::$vec as SimdBase<S>>::Element>()
-                            && const { N.is_multiple_of(<S::$vec as SimdBase<S>>::LEN) }
-                        {
-                            let a = checked_transmute::<
-                                [T1; N],
-                                [<S::$vec as SimdBase<S>>::Element; N],
-                            >(a)
-                            .unwrap();
-                            let b = checked_transmute::<
-                                [T2; N],
-                                [<S::$vec as SimdBase<S>>::Element; N],
-                            >(b)
-                            .unwrap();
-                            let lanes = <S::$vec as SimdBase<S>>::LEN;
-                            // Zeroed, not uninit: the loop stores through references into it.
-                            let mut ys = std::mem::MaybeUninit::<[Self::Output; N]>::zeroed();
-                            for c in 0..N / lanes {
-                                // SAFETY: vector `c` is in bounds, as `N` is a multiple of `lanes`.
-                                let $sa = <S::$vec as SimdBase<S>>::load_array_ref(simd, unsafe {
-                                    &*a.as_ptr().cast::<<S::$vec as SimdBase<S>>::Array>().add(c)
-                                });
-                                // SAFETY: as above.
-                                let $sb = <S::$vec as SimdBase<S>>::load_array_ref(simd, unsafe {
-                                    &*b.as_ptr().cast::<<S::$vec as SimdBase<S>>::Array>().add(c)
-                                });
-                                let y = $body;
-                                // The body must give `lanes` lanes of `Self::Output`.
-                                assert!(
-                                    y.as_slice().len() == lanes
-                                        && Any::type_id(&y.as_slice()[0])
-                                            == TypeId::of::<Self::Output>()
-                                );
-                                // SAFETY: vector `c` of `ys` is in bounds and of `y`'s array type,
-                                // per the assert, and initialized.
-                                y.store_array(unsafe {
-                                    &mut *ys.as_mut_ptr().cast::<Self::Output>().add(c * lanes).cast()
-                                });
-                            }
-                            // SAFETY: zeroed, then written by the loop.
-                            return unsafe { ys.assume_init() };
-                        }
-                    )+
-                    crate::array_from_fn_inline(|i| self.apply(a[i], b[i]))
-                }
+                crate::ops::op2::op2_simd_apply_bulk!(T1, T2, |$sa, $sb| { $(($va, $vb) => $body),+ });
             )?
         }
     };
@@ -489,17 +495,22 @@ macro_rules! define_op2_rhs_fixed {
         rhs = $rhs:ty,
         type Output<T1> = $output_type_t:ty,
         type Output<S1> = $output_type_s:ty,
+        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
     ) => {
         struct $Kernel;
         impl<T1> crate::ops::op2::Op2Kernel<T1, $rhs> for $Kernel
         where
-            T1: $($trait)::+,
+            T1: $($trait)::+ + Copy + 'static,
         {
             type Output = $output_type_t;
             #[inline(always)]
             fn apply(&self, $a: T1, $b: $rhs) -> Self::Output {
                 <T1 as $($trait)::+>::$kernel_fn($a, $b)
             }
+
+            $(
+                crate::ops::op2::op2_simd_apply_bulk!(T1, $rhs, |$sa, $sb| { $(($va, $vb) => $body),+ });
+            )?
         }
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
@@ -546,7 +557,7 @@ macro_rules! define_op2_rhs_fixed {
     };
 }
 
-pub(crate) use {define_op2, define_op2_rhs_fixed};
+pub(crate) use {define_op2, define_op2_rhs_fixed, op2_simd_apply_bulk};
 
 define_op2!(
     /// Element-wise addition of two arrays.
@@ -576,9 +587,9 @@ define_op2!(
     <core::ops::Add>::add(a, b),
     core_op = Add::add,
     simd: |a, b| {
-        f32s => a + b,
-        f64s => a + b,
-        i32s => a + b,
+        (f32s, f32s) => a + b,
+        (f64s, f64s) => a + b,
+        (i32s, i32s) => a + b,
     },
 );
 define_op2!(
@@ -609,9 +620,9 @@ define_op2!(
     <core::ops::Sub>::sub(a, b),
     core_op = Sub::sub,
     simd: |a, b| {
-        f32s => a - b,
-        f64s => a - b,
-        i32s => a - b,
+        (f32s, f32s) => a - b,
+        (f64s, f64s) => a - b,
+        (i32s, i32s) => a - b,
     },
 );
 define_op2!(
@@ -642,9 +653,9 @@ define_op2!(
     <core::ops::Mul>::mul(a, b),
     core_op = Mul::mul,
     simd: |a, b| {
-        f32s => a * b,
-        f64s => a * b,
-        i32s => a * b,
+        (f32s, f32s) => a * b,
+        (f64s, f64s) => a * b,
+        (i32s, i32s) => a * b,
     },
 );
 
