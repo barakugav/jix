@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Static performance analysis of the element-wise pipeline's inner loop: cargo-asm + llvm-mca, per
-platform.
+"""Static performance analysis of the element-wise pipeline's inner loop: llvm-mca, per platform.
 
-For every platform (target triple + ISA level) the probe crate is compiled in release mode, and for
-every kernel:
+Two sources of kernels (`--source`):
+- `py` (default): the `jix-py` extension crate, which instantiates every op for every dtype it
+  dispatches. Its kernels are found automatically: every `inner_loop_contiguous` over a single op
+  whose operands are leaves (`neg_f32`, `add_i32`, `equal_f64`, `cast_f32_i32`, ...).
+- `probe`: the probe crate (`src/lib.rs`), for op chains (`chain_f32`, `longchain_f32`, ...).
 
-1. `cargo asm` extracts the function's asm, and the asm loop tree is recovered from back-edges.
-2. `cargo asm --llvm` emits the final (post-optimization) LLVM IR, and LLVM's own `opt` reports the
-   IR loop tree (`print<loops>`) and each loop's exact trip count (`print<scalar-evolution>`).
+For every platform (target triple + ISA level) the crate is compiled once in release mode with
+`--emit=asm,llvm-ir`, and for every kernel:
+
+1. Its asm is taken from the crate's asm, and the asm loop tree is recovered from back-edges.
+2. LLVM's own `opt` reports the IR loop tree (`print<loops>`) and each loop's exact trip count
+   (`print<scalar-evolution>`) of the final (post-optimization) IR, reduced to the kernels.
 3. The two loop trees are matched by shape, which gives every asm loop its trip count.
 4. The hot loops are the loops whose total iteration count (their trip count times their
    ancestors', evaluated from SCEV for two concrete input lengths) is linear in the input length:
@@ -23,23 +28,24 @@ to hit L1, calls (e.g. to `memcpy`) are not followed - the `calls` column flags 
 loop still calls something - and the per-call prologue/epilogue and the tails are not included.
 
 Usage (from anywhere):
-    python jix/probe/analyze.py [--label baseline] [--platform x86_64-v3 ...] [--fn neg_f32 ...]
+    python jix/probe/analyze.py [--source py] [--label baseline] [--platform x86_64-v3 ...] [--fn 'add_*' ...]
 
 Outputs, under jix/probe/results/<label>/:
     summary.md                      the tables
-    summary.json                    same data, machine readable
-    asm/<platform>/<fn>.s           full function asm (cargo asm --simplify, gitignored)
+    summary.json                    same data, machine readable (gitignored)
+    asm/<platform>/<fn>.s           the function's asm (gitignored)
     mca/<platform>/<fn>.<cpu>.txt   full llvm-mca report (gitignored)
 
-Requirements: the pinned nightly (rust-toolchain.toml, with the llvm-tools component for `opt`),
-`cargo install cargo-show-asm`, and an llvm-mca whose LLVM major version matches rustc's (found via
-$LLVM_MCA, llvm-mca-<major>, or llvm-mca on PATH). See README.md.
+Requirements: the pinned nightly (rust-toolchain.toml, with the llvm-tools component for `opt`), and
+an llvm-mca whose LLVM major version matches rustc's (found via $LLVM_MCA, llvm-mca-<major>, or
+llvm-mca on PATH). See README.md.
 """
 
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import fnmatch
 import hashlib
 import json
 import math
@@ -48,10 +54,13 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
 PROBE_DIR = Path(__file__).resolve().parent
+REPO_DIR = PROBE_DIR.parent.parent
 MCA_ITERATIONS = 100
 # Reporting unit: cycles per this many bytes of input.
 BYTES_UNIT = 4096
@@ -131,7 +140,7 @@ LAST_ARG = "$last_arg"
 @dataclass
 class Kernel:
     name: str
-    symbol: str  # demangled, as `cargo asm` lists it
+    symbol: str  # demangled, without crate hashes
     # Element size of the inner loop, whose `len` argument counts elements (of the output: its
     # bytes are the "input bytes" of the cost model).
     elem_size: int
@@ -202,6 +211,81 @@ KERNELS += [
 ]
 
 
+@dataclass
+class Source:
+    """A crate whose kernels are analyzed."""
+
+    name: str
+    crate_dir: Path
+    lib: str  # the lib's name: the stem of the emitted `.s` / `.ll`
+    env: dict[str, str]
+
+
+SOURCES = {
+    # pyo3's build script needs the Python version when cross compiling; nothing is linked.
+    "py": Source("py", REPO_DIR / "jix-py", "jix", {"PYO3_CROSS_PYTHON_VERSION": "3.13"}),
+    "probe": Source("probe", PROBE_DIR, "jix_probe", {}),
+}
+
+EW = "jix::storage::elementwise_pipeline"
+OP_PIPELINE = re.compile(
+    r"<jix::ops::op[12]::Op[12]<[_, ]+> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
+    r"::Op([12])Pipeline<(.*)>"
+)
+# Short names of the element types, and their sizes.
+TYPES = {
+    "bool": ("bool", 1),
+    "i8": ("i8", 1),
+    "u8": ("u8", 1),
+    "i16": ("i16", 2),
+    "u16": ("u16", 2),
+    "half::binary16::f16": ("f16", 2),
+    "i32": ("i32", 4),
+    "u32": ("u32", 4),
+    "f32": ("f32", 4),
+    "i64": ("i64", 8),
+    "u64": ("u64", 8),
+    "f64": ("f64", 8),
+    "num_complex::Complex<f32>": ("complex64", 8),
+    "num_complex::Complex<f64>": ("complex128", 16),
+}
+
+
+def split_generic_args(s: str) -> list[str]:
+    """`a<b, c>, d` -> [`a<b, c>`, `d`]."""
+    out, depth, cur = [], 0, ""
+    for ch in s:
+        if ch == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+            continue
+        depth += {"<": 1, ">": -1}.get(ch, 0)
+        cur += ch
+    return [*out, cur.strip()] if cur.strip() else out
+
+
+def py_kernel(symbol: str) -> Kernel | None:
+    """The kernel of `symbol` if it is the contiguous inner loop of a single op over leaves."""
+    m = re.fullmatch(rf"{EW}::inner_loop_contiguous::<(.+?), (<.*)>", symbol)
+    if not m or m.group(1) not in TYPES:
+        return None
+    out, p = m.group(1), OP_PIPELINE.fullmatch(m.group(2))
+    if not p:
+        return None
+    arity, args = int(p.group(1)), split_generic_args(p.group(2))
+    leaves, kernel, inputs = args[:arity], args[arity], args[arity + 1 :]
+    if len(inputs) != arity or any(leaf != f"{EW}::OperandTyped<{t}>" for leaf, t in zip(leaves, inputs)):
+        return None
+    if any(t not in TYPES for t in inputs):
+        return None
+    op = re.sub(r"Kernel$", "", kernel.split("<")[0].rsplit("::", 1)[-1])
+    op = re.sub(r"(?<!^)(?=[A-Z])", "_", op).lower()
+    types = [TYPES[t][0] for t in dict.fromkeys(inputs)]
+    if out not in inputs:
+        types.append(TYPES[out][0])
+    return Kernel(f"{op}_{'_'.join(types)}", symbol, TYPES[out][1])
+
+
 # --------------------------------------------------------------------------------------------------
 # Tools
 
@@ -240,37 +324,140 @@ def find_opt() -> str:
     return str(opt)
 
 
-def cargo_env(platform: Platform, target_dir: Path) -> dict:
-    env = dict(os.environ)
+def cargo_env(platform: Platform, source: Source, target_dir: Path) -> dict:
+    env = dict(os.environ) | source.env
     env["RUSTFLAGS"] = " ".join(["-Csymbol-mangling-version=v0", *platform.rustflags])
     env["CARGO_TARGET_DIR"] = str(target_dir)
-    # C dependencies (zstd) are built with a stand-in toolchain: the probe is an rlib that is never
-    # linked, so no C cross compiler or sysroot is needed.
+    # C dependencies (zstd) are built with a stand-in toolchain: the crate is compiled to an rlib
+    # that is never linked, so no C cross compiler or sysroot is needed.
     fake = str(PROBE_DIR / "fake_cc.sh")
     t = platform.target.replace("-", "_")
     env |= {f"CC_{t}": fake, f"AR_{t}": fake}
     return env
 
 
-def cargo_asm(platform: Platform, symbol: str, target_dir: Path, mode: list[str] | None = None) -> str:
-    if mode is None:
-        # Intel syntax on x86: cargo-show-asm fails to parse some of `jix`'s i686 AT&T asm
-        # (`rep;movsl`).
-        mode = ["--simplify", *(["--intel"] if platform.isa == "x86" else [])]
-    cmd = ["cargo", "asm", "--release", "--lib", "--target", platform.target, *mode, symbol]
-    return run(cmd, env=cargo_env(platform, target_dir), cwd=PROBE_DIR)
+# Function labels (v0-mangled; Mach-O prefixes an underscore) in the emitted asm.
+FN_LABEL_RE = re.compile(r"^(_?_R[0-9A-Za-z_]+):")
 
 
-def mangled_name(ll: Path, symbol: str) -> str:
-    """The v0-mangled name, in the LLVM IR `ll`, of the function `cargo asm` lists as `symbol`."""
-    names = re.findall(r"^define [^@]*@(\S+?)\(", ll.read_text(), re.M)
-    names = [n.strip('"') for n in names]
+@dataclass
+class Build:
+    """A platform's build of a source: its functions' asm and IR, by mangled name."""
+
+    asm: dict[str, list[str]]  # the function's asm lines, its label first
+    names: dict[str, str]  # demangled name (without crate hashes) -> mangled name
+    ll: dict[str, list[str]] = field(default_factory=dict)  # the function's IR, for the kernels
+    opt: dict[str, list[str]] = field(default_factory=dict)  # its `opt` analyses, for the kernels
+
+
+# Builds run a whole-crate rustc each: a few at a time, as each uses all cores (and much memory).
+BUILD_SLOTS = threading.Semaphore(2)
+
+
+def compile_crate(platform: Platform, source: Source) -> tuple[Path, Path]:
+    """Compile `source` for `platform`, emitting its asm and final LLVM IR: the (`.s`, `.ll`)."""
+    # One target dir per feature set: builds with other RUSTFLAGS must not share the directory.
+    flags = hashlib.sha1(" ".join(platform.rustflags).encode()).hexdigest()[:8]
+    target_dir = PROBE_DIR / "target" / "analyze" / source.name / f"{platform.name}-{flags}"
+    out = target_dir / platform.target / "release"
+    for f in [*out.rglob(f"{source.lib}-*.s"), *out.rglob(f"{source.lib}-*.ll")]:
+        f.unlink()
+    # cargo does not re-emit them for an up-to-date crate: rebuild it (only it).
+    (source.crate_dir / "src" / "lib.rs").touch()
+    emit = ["--emit=asm,llvm-ir", *(["-Cllvm-args=-x86-asm-syntax=intel"] if platform.isa == "x86" else [])]
+    # rlib: nothing is linked, so any rustup target works without its linker.
+    cmd = ["cargo", "rustc", "--release", "--lib", "--crate-type", "rlib", "--target", platform.target, "--", *emit]
+    with BUILD_SLOTS:
+        run(cmd, env=cargo_env(platform, source, target_dir), cwd=source.crate_dir)
+    [asm] = out.rglob(f"{source.lib}-*.s")
+    [ll] = out.rglob(f"{source.lib}-*.ll")
+    return asm, ll
+
+
+def split_asm(text: str) -> dict[str, list[str]]:
+    """The functions of an asm file, by mangled name: their lines, from the label to the end."""
+    fns: dict[str, list[str]] = {}
+    cur: list[str] | None = None
+    for line in text.splitlines():
+        if m := FN_LABEL_RE.match(line):
+            cur = fns[m.group(1)] = [line]
+        elif cur is not None:
+            if re.match(r"^\.?Lfunc_end\d+:", line):
+                cur = None
+            else:
+                cur.append(line)
+    return fns
+
+
+def demangle(names: list[str]) -> dict[str, str]:
+    """Demangled name (without crate hashes and const generic types) -> mangled name."""
     # binutils demangles v0 with crate hashes and typed const generics: `jix[0123abcd]`, `32: usize`.
-    out = run(["c++filt"], input="\n".join(names)).splitlines()
-    for mangled, d in zip(names, out):
-        if re.sub(r": (?:usize|bool)\b", "", re.sub(r"\[[0-9a-f]+\]", "", d)) == symbol:
-            return mangled
-    raise RuntimeError(f"{symbol} not found in {ll}")
+    plain = [n[1:] if n.startswith("__R") else n for n in names]
+    out = run(["c++filt"], input="\n".join(plain)).splitlines()
+    return {re.sub(r": (?:usize|bool)\b", "", re.sub(r"\[[0-9a-f]+\]", "", d)): n for n, d in zip(names, out)}
+
+
+def reduce_ir(ll: Path, keep: list[str], opt: str) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """The IR of the functions `keep` (mangled, as in the IR) and their `opt` loop and SCEV
+    analyses, each by name. `opt` runs once, on the module reduced to those functions (and what they
+    call): the whole crate's module is too large to analyze."""
+    keep_set = set(keep)
+    text = []
+    for line in ll.read_text().splitlines():
+        # Internal functions to keep become external, so that `internalize` + `globaldce` keep them.
+        if line.startswith("define ") and (m := re.search(r"@(\"[^\"]+\"|[\w.$]+)\(", line)):
+            if m.group(1).strip('"') in keep_set:
+                line = re.sub(r"^define (?:internal |private )", "define ", line)
+        text.append(line)
+    with tempfile.TemporaryDirectory() as tmp:
+        full, api, small = Path(tmp) / "full.ll", Path(tmp) / "api.txt", Path(tmp) / "small.ll"
+        full.write_text("\n".join(text) + "\n")
+        api.write_text("\n".join(keep) + "\n")
+        passes = "internalize,globaldce"
+        run([opt, "-S", f"-passes={passes}", f"-internalize-public-api-file={api}", str(full), "-o", str(small)])
+        ir_text = small.read_text()
+        # opt prints analyses to stderr.
+        p = subprocess.run(
+            [opt, "-disable-output", "-passes=print<loops>,print<scalar-evolution>", str(small)],
+            capture_output=True,
+            text=True,
+        )
+        if p.returncode != 0:
+            raise RuntimeError(p.stderr)
+    fn_ir: dict[str, list[str]] = {}
+    cur: list[str] | None = None
+    for line in ir_text.splitlines():
+        if line.startswith("define ") and (m := re.search(r"@(\"[^\"]+\"|[\w.$]+)\(", line)):
+            name = m.group(1).strip('"')
+            cur = fn_ir[name] = [line] if name in keep_set else None
+        elif cur is not None:
+            cur.append(line)
+            if line.startswith("}"):
+                cur = None
+    fn_opt: dict[str, list[str]] = {}
+    cur = None
+    for line in p.stderr.splitlines():
+        m = re.match(r"Loop info for function '([^']+)'", line) or re.match(
+            r"Classifying expressions for: @(\S+)", line
+        )
+        if m:
+            name = m.group(1).strip('"')
+            cur = fn_opt.setdefault(name, []) if name in keep_set else None
+        if cur is not None:
+            cur.append(line)
+    return fn_ir, fn_opt
+
+
+def build(platform: Platform, source: Source, select, opt: str) -> tuple[Build, list[Kernel]]:
+    """Compile `source` for `platform` and extract the kernels `select(build)` returns."""
+    asm_path, ll = compile_crate(platform, source)
+    fns = split_asm(asm_path.read_text())
+    b = Build(fns, demangle(list(fns)))
+    kernels = select(b)
+    # The IR names functions as in the asm, less Mach-O's underscore.
+    keep = [b.names[k.symbol_for(platform)] for k in kernels]
+    b.ll, b.opt = reduce_ir(ll, [n[1:] if n.startswith("__R") else n for n in keep], opt)
+    return b, kernels
 
 
 # --------------------------------------------------------------------------------------------------
@@ -452,9 +639,9 @@ class IrValues:
         self.bounded: set[str] = set()
 
     @staticmethod
-    def parse(ll: Path, ir_hint: str) -> IrValues:
+    def parse(ll: list[str], ir_hint: str) -> IrValues:
         defs, stores, params, in_fn = {}, {}, [], False
-        for line in ll.read_text().splitlines():
+        for line in ll:
             if line.startswith("define "):
                 in_fn = ir_hint in line.split("(")[0]
                 if in_fn:
@@ -568,13 +755,13 @@ class IrValues:
         return None
 
 
-def ir_block_sizes(ll: Path, ir_hint: str) -> tuple[dict[str, int], dict[str, int]]:
+def ir_block_sizes(ll: list[str], ir_hint: str) -> tuple[dict[str, int], dict[str, int]]:
     """Instruction count, and count of instructions on vector types, of each basic block of the
     function whose name contains `ir_hint`."""
     sizes: dict[str, int] = {}
     vecs: dict[str, int] = {}
     in_fn, block = False, None
-    for line in ll.read_text().splitlines():
+    for line in ll:
         if line.startswith("define "):
             in_fn = ir_hint in line.split("(")[0]
             block = "start" if in_fn else None
@@ -589,17 +776,9 @@ def ir_block_sizes(ll: Path, ir_hint: str) -> tuple[dict[str, int], dict[str, in
     return sizes, vecs
 
 
-def ir_loops(ll: Path, opt: str, ir_hint: str) -> list[Loop]:
-    """IR loop tree of the function whose name contains `ir_hint`, with SCEV trip counts."""
-    # opt prints analyses to stderr.
-    p = subprocess.run(
-        [opt, "-disable-output", "-passes=print<loops>,print<scalar-evolution>", str(ll)],
-        capture_output=True,
-        text=True,
-    )
-    if p.returncode != 0:
-        raise RuntimeError(p.stderr)
-    text = p.stderr
+def ir_loops(ll: list[str], analyses: list[str], ir_hint: str) -> list[Loop]:
+    """IR loop tree of the function whose name contains `ir_hint`, with SCEV trip counts, from its
+    IR `ll` and its `opt` `analyses`."""
 
     block_sizes, block_vecs = ir_block_sizes(ll, ir_hint)
     bounded: set[str] = set()
@@ -607,7 +786,7 @@ def ir_loops(ll: Path, opt: str, ir_hint: str) -> list[Loop]:
     fn_loops: list[tuple[int, Loop]] = []
     trips: dict[str, tuple[str, int | None]] = {}
     in_fn = False
-    for line in text.splitlines():
+    for line in analyses:
         if m := re.match(r"Loop info for function '([^']+)'", line):
             in_fn = ir_hint in m.group(1)
         elif m := re.match(r"Classifying expressions for: @(\S+)", line):
@@ -951,11 +1130,10 @@ def describe_tree(loops: list[Loop]) -> str:
     return " ".join(one(lp) for lp in loops)
 
 
-def analyze_kernel(
-    platform: Platform, kernel: Kernel, ll: Path, opt: str, mca: str, target_dir: Path, out_dir: Path
-) -> KernelResult:
-    symbol = kernel.symbol_for(platform)
-    asm = cargo_asm(platform, symbol, target_dir)
+def analyze_kernel(platform: Platform, kernel: Kernel, b: Build, mca: str, out_dir: Path) -> KernelResult:
+    mangled = b.names[kernel.symbol_for(platform)]
+    asm = "\n".join(b.asm[mangled]) + "\n"
+    ir_name = mangled[1:] if mangled.startswith("__R") else mangled
     asm_path = out_dir / "asm" / platform.name / f"{kernel.name}.s"
     asm_path.parent.mkdir(parents=True, exist_ok=True)
     asm_path.write_text(asm)
@@ -968,7 +1146,7 @@ def analyze_kernel(
     except RuntimeError as e:  # a loop LLVM laid out in non-contiguous pieces
         roots = []
         warnings.append(str(e))
-    if not attach_trip_counts(roots, ir_loops(ll, opt, mangled_name(ll, symbol))):
+    if not attach_trip_counts(roots, ir_loops(b.ll.get(ir_name, []), b.opt.get(ir_name, []), ir_name)):
         warnings.append("asm and IR loop trees differ, trip counts unknown")
 
     hot = hot_loops(roots, kernel)
@@ -1013,16 +1191,11 @@ def analyze_kernel(
 
 
 def analyze_platform(
-    platform: Platform, kernels: list[Kernel], opt: str, mca: str, out_dir: Path
+    platform: Platform, source: Source, select, opt: str, mca: str, out_dir: Path
 ) -> list[KernelResult]:
-    # One target dir per feature set: the IR file is picked by mtime, and cargo does not rewrite
-    # an up-to-date one, so builds with other RUSTFLAGS must not share the directory.
-    flags = hashlib.sha1(" ".join(platform.rustflags).encode()).hexdigest()[:8]
-    target_dir = PROBE_DIR / "target" / "analyze" / f"{platform.name}-{flags}"
-    # Emits the whole crate's final LLVM IR next to the build artifacts.
-    cargo_asm(platform, kernels[0].symbol_for(platform), target_dir, ["--llvm"])
-    ll = max(target_dir.glob(f"{platform.target}/release/**/jix_probe-*.ll"), key=lambda p: p.stat().st_mtime)
-    return [analyze_kernel(platform, k, ll, opt, mca, target_dir, out_dir) for k in kernels]
+    b, kernels = build(platform, source, select, opt)
+    with concurrent.futures.ThreadPoolExecutor(4) as ex:
+        return list(ex.map(lambda k: analyze_kernel(platform, k, b, mca, out_dir), kernels))
 
 
 def load_costs(label: str) -> dict[tuple[str, str, str], float]:
@@ -1084,21 +1257,30 @@ def write_summary(
             return "-"
         return f"{geo(old) / geo([cost(r, i) for r in rs]):.2f}x"
 
-    fixed_names = list(dict.fromkeys(r.kernel for r in results if r.costs))
+    # Overview: a row per kernel, a column per (platform, cpu).
+    cols = [(p, i, cpu) for p in platforms if by_platform.get(p.name) for i, cpu in enumerate(p.mca_cpus)]
+    by_key = {(r.platform, r.kernel): r for r in results}
+    names = list(dict.fromkeys(r.kernel for r in results if r.costs))
     lines += [
         "## Overview",
         "",
-        "| platform | cpu | geomean | " + (f"vs {compare} | " if compare else "") + " | ".join(fixed_names) + " |",
-        "|---|---|---:|" + ("---:|" if compare else "") + "---:|" * len(fixed_names),
+        "| kernel | " + " | ".join(f"{p.name} {cpu}" for p, _, cpu in cols) + " |",
+        "|---|" + "---:|" * len(cols),
     ]
-    for platform in platforms:
-        fixed = [r for r in by_platform.get(platform.name, []) if r.costs]
-        if not fixed:
-            continue
-        for i, cpu in enumerate(platform.mca_cpus):
-            cells = [f"{cost(r, i):.0f}{star([r])}" for r in fixed]
-            vs = f"{speedup(platform.name, cpu, fixed, i)} | " if compare else ""
-            lines.append(f"| {platform.name} | {cpu} | **{geomean(fixed, i)}** | {vs}" + " | ".join(cells) + " |")
+    for name in names:
+        cells = []
+        for p, i, _ in cols:
+            r = by_key.get((p.name, name))
+            cells.append(f"{cost(r, i):.0f}{star([r])}" if r and r.costs else "-")
+        lines.append(f"| {name} | " + " | ".join(cells) + " |")
+
+    def fixed_of(p: Platform) -> list[KernelResult]:
+        return [r for r in by_platform.get(p.name, []) if r.costs]
+
+    lines.append("| **geomean** | " + " | ".join(f"**{geomean(fixed_of(p), i)}**" for p, i, _ in cols) + " |")
+    if compare:
+        vs = [speedup(p.name, cpu, fixed_of(p), i) for p, i, cpu in cols]
+        lines.append(f"| **vs {compare}** | " + " | ".join(vs) + " |")
     lines.append("")
 
     for platform in platforms:
@@ -1143,13 +1325,26 @@ def main() -> None:
     ap.add_argument("--label", default="baseline", help="results sub-directory name")
     ap.add_argument("--platform", action="append", help="restrict to these platforms (repeatable)")
     ap.add_argument("--compare", help="also report the geomean speedup over this results label")
-    ap.add_argument("--fn", action="append", dest="kernels", help="restrict to these kernels (repeatable)")
+    ap.add_argument(
+        "--fn", action="append", dest="kernels", help="restrict to these kernels, glob patterns (repeatable)"
+    )
+    ap.add_argument("--source", choices=sorted(SOURCES), default="py", help="the crate whose kernels to analyze")
     args = ap.parse_args()
 
     platforms = [p for p in PLATFORMS if not args.platform or p.name in args.platform]
-    kernels = [k for k in KERNELS if not args.kernels or k.name in args.kernels]
-    if not platforms or not kernels:
-        sys.exit("error: nothing selected")
+    if not platforms:
+        sys.exit("error: no platform selected")
+    source = SOURCES[args.source]
+
+    def selected(name: str) -> bool:
+        return not args.kernels or any(fnmatch.fnmatchcase(name, pat) for pat in args.kernels)
+
+    def select(b: Build) -> list[Kernel]:
+        """The kernels to analyze in the build `b`."""
+        if source.name == "probe":
+            return [k for k in KERNELS if selected(k.name)]
+        found = {k.name: k for k in map(py_kernel, b.names) if k and selected(k.name)}
+        return [found[n] for n in sorted(found)]
 
     mca = find_llvm_mca(llvm_major_of_rustc())
     opt = find_opt()
@@ -1157,6 +1352,7 @@ def main() -> None:
     header = [
         f"- rustc: `{run(['rustc', '--version'], cwd=PROBE_DIR).strip()}`",
         f"- llvm-mca: `{mca_version}`",
+        f"- source: `{source.name}` (`{source.crate_dir.relative_to(REPO_DIR)}`)",
         "- kernels: the pipeline's inner loop for contiguous operands (`inner_loop_contiguous`, the arm of the"
         " platform's SIMD level); the bytes are output bytes",
     ]
@@ -1167,8 +1363,10 @@ def main() -> None:
     out_dir.mkdir(parents=True)
 
     with concurrent.futures.ThreadPoolExecutor() as ex:
-        futures = [ex.submit(analyze_platform, p, kernels, opt, mca, out_dir) for p in platforms]
+        futures = [ex.submit(analyze_platform, p, source, select, opt, mca, out_dir) for p in platforms]
         results = [r for f in futures for r in f.result()]
+    if not results:
+        sys.exit("error: no kernel selected")
 
     print(write_summary(results, platforms, out_dir, header, args.compare))
 

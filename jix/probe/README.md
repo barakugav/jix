@@ -6,21 +6,29 @@ running benchmarks**. The objective is llvm-mca's steady-state throughput of the
 on the targeted platforms. Results are under `results/elementwise-*`, see the sections after
 Method.
 
-## Why a separate crate and not a `jix` example
+## Sources of kernels
 
-The probe crate depends on `jix` itself and exports a few `probe_*` functions, each of which
-instantiates the pipeline for one op chain. It is an rlib that is never linked, so `cargo asm`
-works for any rustup target without a linker. A `jix` example would have to be linked, and would
-build `jix`'s C dependency `zstd-sys` for real, which needs a C cross toolchain and sysroot for
-every target (and a macOS SDK for `aarch64-apple-darwin`). In the probe, the C code is "compiled"
-by a stand-in, `fake_cc.sh` (empty objects and archives, set by `analyze.py` as `CC_<target>` /
-`AR_<target>`), so no C toolchain is needed either.
+`analyze.py --source` picks the crate whose kernels are analyzed:
+
+- **`py` (default): the `jix-py` extension crate.** It dispatches every op over every dtype it
+  supports, so it instantiates the pipeline for each (op, dtype): nothing to add when an op or a
+  SIMD body changes. Its kernels are found in the build: every `inner_loop_contiguous` of a single
+  op over leaf operands, named `<op>_<input types>` (`neg_f32`, `add_i32`, `equal_f64`,
+  `bitwise_shift_left_i32_u32`), plus the output type when it is not an input's (`cast_f32_i32`).
+- **`probe`: this crate.** It depends on `jix` and exports a few `probe_*` functions, each of which
+  instantiates the pipeline for one op chain (`chain`, `longchain`, mixed dtypes). For what the
+  single ops of `py` do not show: several nodes, and values chained between them in registers.
+
+Either is compiled as an rlib that is never linked, so any rustup target works without a linker.
+`jix`'s C dependency `zstd-sys` would need a C cross toolchain and sysroot for every target (and a
+macOS SDK for `aarch64-apple-darwin`): it is "compiled" by a stand-in, `fake_cc.sh` (empty objects
+and archives, set by `analyze.py` as `CC_<target>` / `AR_<target>`). pyo3's build script only needs
+the Python version (`PYO3_CROSS_PYTHON_VERSION`).
 
 ## Setup
 
 - Toolchain: `rust-toolchain.toml` at the repo root pins `nightly-2026-09-27` (rustc 1.101,
   **LLVM 23.1.1**), with the `llvm-tools` component (provides `opt`) and all cross targets.
-- `cargo install cargo-show-asm` (provides `cargo asm`).
 - llvm-mca **23**, matching rustc's LLVM. rustup's llvm-tools does not ship llvm-mca. apt.llvm.org
   is blocked in the cloud sandbox, so take it from the official release tarball:
 
@@ -37,17 +45,20 @@ by a stand-in, `fake_cc.sh` (empty objects and archives, set by `analyze.py` as 
 ## Usage
 
 ```bash
-python jix/probe/analyze.py                         # all kernels and platforms, results/baseline/
+python jix/probe/analyze.py                         # jix-py: all ops, all platforms, results/baseline/
 python jix/probe/analyze.py --label my-variant      # results/my-variant/
-python jix/probe/analyze.py --label x --compare elementwise-fearless
-python jix/probe/analyze.py --platform x86_64-v3 --platform aarch64 --fn neg_f32
-cd jix/probe && cargo asm --release --lib --target x86_64-unknown-linux-gnu   # list symbols
+python jix/probe/analyze.py --label x --compare py-baseline
+python jix/probe/analyze.py --platform x86_64-v3 --platform aarch64 --fn 'add_*' --fn neg_f32
+python jix/probe/analyze.py --source probe          # the op chains of this crate
 ```
+
+A `jix-py` build takes about 8 minutes per platform (two platforms build at a time), the probe
+under a minute.
 
 Outputs go to `results/<label>/`:
 - `summary.md`: the tables; `summary.json`: the same, machine readable, read by `--compare`
   (gitignored: `--compare` needs a local run of that label).
-- `asm/<platform>/<kernel>.s`: the full function asm (gitignored, like `mca/`).
+- `asm/<platform>/<kernel>.s`: the function's asm (gitignored, like `mca/`).
 - `mca/...`: the raw llvm-mca reports, with resource pressure and bottleneck analysis
   (gitignored).
 
@@ -85,23 +96,25 @@ into a packed output through the public API, `to_ndarray_slice`):
 | `narrow` | `(a + b).cast()` from i64 / f64 (mixed dtypes, see the last section) | i32, f32 |
 | `widen` | `a.cast() + b`, `a` i32 / f32 (mixed dtypes, see the last section) | i64, f64 |
 
-What is analyzed is not the probe function itself but the pipeline's inner loop it instantiates,
+What is analyzed is the pipeline's inner loop an op (chain) instantiates,
 `elementwise_pipeline::inner_loop_contiguous::<T, Pipeline>` (the baseline analyzed its
 predecessor, `inner_loop::<T, LANES, true, true, Pipeline>`): the variant for all operands (inputs
-and output) contiguous in the inner dimension. `analyze.py` finds it by its demangled name, built
-from the op chain (`ELEMENTWISE_EXPRS`), and binds its `len` argument (elements). Its hot loop is
+and output) contiguous in the inner dimension. `analyze.py` finds it by its demangled name (for
+the probe, built from the op chain, `ELEMENTWISE_EXPRS`), and binds its `len` argument (elements). Its hot loop is
 the main loop over `LANES` elements. Not counted: the per-call setup in `to_buf_type_erased` (the
 pipeline calls the inner loop once per contiguous run of at most 8192 elements,
-`Staging::BUFFER_SIZE`) and the remainder of `len % LANES` elements. x86 asm is read in Intel
-syntax, as cargo-show-asm fails to parse some of `jix`'s i686 AT&T output (`rep;movsl`).
+`Staging::BUFFER_SIZE`) and the remainder of `len % LANES` elements. x86 asm is emitted in Intel
+syntax.
 
 Compare a run with a previous one with `--compare <label>`, which adds a geomean speedup column.
 
-For each (platform, kernel):
-1. `cargo asm --simplify` gives the asm, and the loop tree comes from its natural loops (back
-   edges to a dominating block).
-2. `cargo asm --llvm` gives the final LLVM IR. The toolchain's own `opt` prints the IR loop tree
-   (`print<loops>`) and exact trip counts (`print<scalar-evolution>`).
+For each platform, the crate is compiled once with `--emit=asm,llvm-ir`. Its functions' asm is
+split by label and their names demangled (`c++filt`, v0 mangling). The IR is reduced to the
+kernels (and what they call) by the toolchain's own `opt` (`internalize` + `globaldce`), and `opt`
+then prints the IR loop trees (`print<loops>`) and exact trip counts (`print<scalar-evolution>`)
+of all the kernels at once. Then for each kernel:
+1. The loop tree comes from the natural loops of its asm (back edges to a dominating block).
+2. Its IR loop tree and trip counts come from the `opt` output.
 3. The trees are matched by shape, which gives every asm loop its trip count. Sibling loops of
    the same shape are matched by vector share, then size: a vector loop can be smaller than its
    scalar remainder in IR (bounds checks) but larger in asm.
