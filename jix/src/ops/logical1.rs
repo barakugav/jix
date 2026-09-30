@@ -36,6 +36,10 @@ define_op1!(
     IsNanKernel,
     <num_traits::Float>::is_nan,
     type Output = bool,
+    simd: |x| {
+        f32s => !x.simd_eq(x),
+        f64s => !x.simd_eq(x),
+    },
 );
 define_op1!(
     /// Tests whether each element is finite (not `+/-inf` and not `NaN`).
@@ -71,6 +75,11 @@ define_op1!(
     IsFiniteKernel,
     <num_traits::Float>::is_finite,
     type Output = bool,
+    // `x - x` is 0 for a finite `x`, NaN for inf and NaN.
+    simd: |x| {
+        f32s => (x - x).simd_eq(0.0),
+        f64s => (x - x).simd_eq(0.0),
+    },
 );
 define_op1!(
     /// Tests whether each element is infinite (`+inf` or `-inf`).
@@ -106,6 +115,10 @@ define_op1!(
     IsInfiniteKernel,
     <num_traits::Float>::is_infinite,
     type Output = bool,
+    simd: |x| {
+        f32s => x.abs().simd_eq(f32::INFINITY),
+        f64s => x.abs().simd_eq(f64::INFINITY),
+    },
 );
 
 impl<S> Array<S>
@@ -120,6 +133,35 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ops::op1::tests::test_op1;
+
+    /// The `simd:` bodies of the kernels of this module against their scalar semantics, on every
+    /// SIMD level of the CPU, over edge cases.
+    #[test]
+    fn simd_bodies_all_levels() {
+        use super::{IsFiniteKernel, IsInfiniteKernel, IsNanKernel};
+        use crate::ops::op1::Op1Kernel;
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $t:ty, $f:expr) => {
+                    let xs = <$t>::simd_test_values(0);
+                    let what = concat!(stringify!($kernel), " ", stringify!($t));
+                    assert_same_elements($kernel.apply_bulk(simd, xs), |i| $f(xs[i]), what);
+                };
+            }
+            simd.vectorize(|| {
+                case!(IsNanKernel, f32, f32::is_nan);
+                case!(IsNanKernel, f64, f64::is_nan);
+                case!(IsFiniteKernel, f32, f32::is_finite);
+                case!(IsFiniteKernel, f64, f64::is_finite);
+                case!(IsInfiniteKernel, f32, f32::is_infinite);
+                case!(IsInfiniteKernel, f64, f64::is_infinite);
+            });
+        }
+        for_each_simd_level!(check);
+    }
     #[cfg(feature = "half")]
     use crate::scalar::f16;
 

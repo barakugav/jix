@@ -219,7 +219,7 @@ where
 /// `N` a multiple of their length. The first such arm is taken, else the scalar `apply`. The body
 /// gives, per mode, a `vector` or a `mask`, as in `op1_simd_apply_bulk`.
 macro_rules! op2_simd_apply_bulk {
-    ($mode:ident: $T1:ty, $T2:ty, |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ }) => {
+    ($mode:ident: $T1:ty, $T2:ty, |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? }) => {
         #[inline(always)]
         fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
             &self,
@@ -229,7 +229,7 @@ macro_rules! op2_simd_apply_bulk {
         ) -> [Self::Output; N] {
             use crate::util::checked_transmute;
             #[allow(unused_imports)]
-            use fearless_simd::{SimdBase, SimdFloat, SimdInt, SimdMask};
+            use fearless_simd::{Bytes, Select, SimdBase, SimdFloat, SimdInt, SimdMask};
             use std::any::TypeId;
             $(
                 if TypeId::of::<$T1>() == TypeId::of::<<S::$va as SimdBase<S>>::Element>()
@@ -614,7 +614,14 @@ define_op2!(
     simd: |a, b| {
         (f32s, f32s) => a + b,
         (f64s, f64s) => a + b,
+        (i8s, i8s) => a + b,
+        (i16s, i16s) => a + b,
         (i32s, i32s) => a + b,
+        (i64s, i64s) => a + b,
+        (u8s, u8s) => a + b,
+        (u16s, u16s) => a + b,
+        (u32s, u32s) => a + b,
+        (u64s, u64s) => a + b,
     },
 );
 define_op2!(
@@ -647,7 +654,14 @@ define_op2!(
     simd: |a, b| {
         (f32s, f32s) => a - b,
         (f64s, f64s) => a - b,
+        (i8s, i8s) => a - b,
+        (i16s, i16s) => a - b,
         (i32s, i32s) => a - b,
+        (i64s, i64s) => a - b,
+        (u8s, u8s) => a - b,
+        (u16s, u16s) => a - b,
+        (u32s, u32s) => a - b,
+        (u64s, u64s) => a - b,
     },
 );
 define_op2!(
@@ -680,7 +694,14 @@ define_op2!(
     simd: |a, b| {
         (f32s, f32s) => a * b,
         (f64s, f64s) => a * b,
+        (i8s, i8s) => a * b,
+        (i16s, i16s) => a * b,
         (i32s, i32s) => a * b,
+        (i64s, i64s) => a * b,
+        (u8s, u8s) => a * b,
+        (u16s, u16s) => a * b,
+        (u32s, u32s) => a * b,
+        (u64s, u64s) => a * b,
     },
 );
 
@@ -712,6 +733,10 @@ define_op2!(
     DivKernel,
     <core::ops::Div>::div(a, b),
     core_op = Div::div,
+    simd: |a, b| {
+        (f32s, f32s) => a / b,
+        (f64s, f64s) => a / b,
+    },
 );
 define_op2!(
     /// Element-wise exponentiation (`a` raised to the power `b`).
@@ -754,135 +779,51 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
-    // A `bool` output kernel, for the `mask` mode of `define_op2!`.
-    mod mask_mode {
-        #![allow(dead_code)]
-        use crate::ops::prelude::*;
-        define_op2!(
-            /// `a < b`, for `mask_apply_bulk_all_levels`.
-            TestLess,
-            TestLessKernel,
-            <core::cmp::PartialOrd>::lt(&a, &b),
-            type Output = bool,
-            simd: |a, b| {
-                (f32s, f32s) => a.simd_lt(b),
-                (f64s, f64s) => a.simd_lt(b),
-                (i32s, i32s) => a.simd_lt(b),
-            },
-        );
-
-        /// The `mask` mode of `define_op2!` on every SIMD level of the CPU.
-        #[test]
-        fn mask_apply_bulk_all_levels() {
-            use crate::ops::op2::Op2Kernel;
-            use fearless_simd::{Level, Simd};
-
-            const N: usize = 32;
-            fn check<S: Simd>(simd: S) {
-                let a: [f32; N] = std::array::from_fn(|i| (i as f32 - 10.0) * 0.5);
-                let b: [f32; N] = std::array::from_fn(|i| (13.0 - i as f32) * 0.5);
-                let mut c = a.map(f64::from);
-                c[3] = f64::NAN;
-                let d = b.map(f64::from);
-                let e: [i32; N] = std::array::from_fn(|i| i as i32 * 7 - 100);
-                let f: [i32; N] = std::array::from_fn(|i| 50 - i as i32 * 3);
-                simd.vectorize(|| {
-                    let lt =
-                        |x: [f32; N], y: [f32; N]| std::array::from_fn::<_, N, _>(|i| x[i] < y[i]);
-                    assert_eq!(TestLessKernel.apply_bulk(simd, a, b), lt(a, b));
-                    let lt =
-                        |x: [f64; N], y: [f64; N]| std::array::from_fn::<_, N, _>(|i| x[i] < y[i]);
-                    assert_eq!(TestLessKernel.apply_bulk(simd, c, d), lt(c, d));
-                    let lt =
-                        |x: [i32; N], y: [i32; N]| std::array::from_fn::<_, N, _>(|i| x[i] < y[i]);
-                    assert_eq!(TestLessKernel.apply_bulk(simd, e, f), lt(e, f));
-                    // Not a multiple of the vector length: scalar.
-                    assert_eq!(TestLessKernel.apply_bulk(simd, [1.0f32], [2.0]), [true]);
-                });
-            }
-
-            let level = Level::new();
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            {
-                if let Some(simd) = level.as_sse2() {
-                    check(simd);
-                }
-                if let Some(simd) = level.as_sse4_2() {
-                    check(simd);
-                }
-                if let Some(simd) = level.as_avx2() {
-                    check(simd);
-                }
-                if let Some(simd) = level.as_avx512() {
-                    check(simd);
-                }
-            }
-            #[cfg(target_arch = "aarch64")]
-            if let Some(simd) = level.as_neon() {
-                check(simd);
-            }
-        }
-    }
-
-    /// `apply_bulk` of `AddKernel`, `SubKernel` and `MulKernel` on every SIMD level of the CPU:
-    /// the `simd:` bodies of `define_op2!`, and the scalar fallback.
+    /// The `simd:` bodies of the kernels of this module against their scalar semantics (release
+    /// builds: wrapping), on every SIMD level of the CPU, over edge cases.
     #[test]
-    fn apply_bulk_all_levels() {
-        use super::{AddKernel, MulKernel, Op2Kernel, SubKernel};
-        use fearless_simd::{Level, Simd};
+    fn simd_bodies_all_levels() {
+        use super::{AddKernel, DivKernel, MulKernel, Op2Kernel, SubKernel};
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
 
-        const N: usize = 32;
         fn check<S: Simd>(simd: S) {
-            fn inputs<T>(f: impl Fn(i32) -> T) -> [[T; N]; 2] {
-                [
-                    std::array::from_fn(|i| f(i as i32 * 7 - 100)),
-                    std::array::from_fn(|i| f(i as i32 * -3 + 5)),
-                ]
+            macro_rules! case {
+                ($kernel:ident, $t:ty, $f:expr) => {
+                    let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
+                    let what = concat!(stringify!($kernel), " ", stringify!($t));
+                    assert_same_elements($kernel.apply_bulk(simd, a, b), |i| $f(a[i], b[i]), what);
+                };
             }
-            let [a, b] = inputs(|x| x as f32 * 0.37);
-            let [c, d] = inputs(|x| x as f64 * 0.37);
-            let [e, f] = inputs(|x| x.wrapping_mul(0x0123_4567));
+            macro_rules! ints {
+                ($kernel:ident, $f:ident) => {
+                    case!($kernel, i8, i8::$f);
+                    case!($kernel, i16, i16::$f);
+                    case!($kernel, i32, i32::$f);
+                    case!($kernel, i64, i64::$f);
+                    case!($kernel, u8, u8::$f);
+                    case!($kernel, u16, u16::$f);
+                    case!($kernel, u32, u32::$f);
+                    case!($kernel, u64, u64::$f);
+                };
+            }
             simd.vectorize(|| {
-                macro_rules! check_op2 {
-                    ($kernel:ident, $f:expr, $wrapping:expr) => {
-                        let ab: [f32; N] = std::array::from_fn(|i| $f(a[i], b[i]));
-                        assert_eq!($kernel.apply_bulk(simd, a, b), ab);
-                        let cd: [f64; N] = std::array::from_fn(|i| $f(c[i], d[i]));
-                        assert_eq!($kernel.apply_bulk(simd, c, d), cd);
-                        // The vector ops wrap.
-                        let ef: [i32; N] = std::array::from_fn(|i| $wrapping(e[i], f[i]));
-                        assert_eq!($kernel.apply_bulk(simd, e, f), ef);
-                    };
-                }
-                check_op2!(AddKernel, |x, y| x + y, i32::wrapping_add);
-                check_op2!(SubKernel, |x, y| x - y, i32::wrapping_sub);
-                check_op2!(MulKernel, |x, y| x * y, i32::wrapping_mul);
-                // Not a multiple of the vector length, and a type without a SIMD body: scalar.
+                case!(AddKernel, f32, |x, y| x + y);
+                case!(AddKernel, f64, |x, y| x + y);
+                ints!(AddKernel, wrapping_add);
+                case!(SubKernel, f32, |x, y| x - y);
+                case!(SubKernel, f64, |x, y| x - y);
+                ints!(SubKernel, wrapping_sub);
+                case!(MulKernel, f32, |x, y| x * y);
+                case!(MulKernel, f64, |x, y| x * y);
+                ints!(MulKernel, wrapping_mul);
+                case!(DivKernel, f32, |x, y| x / y);
+                case!(DivKernel, f64, |x, y| x / y);
+                // Not a multiple of the vector length: scalar.
                 assert_eq!(AddKernel.apply_bulk(simd, [1.5f32], [2.0]), [3.5]);
-                assert_eq!(AddKernel.apply_bulk(simd, [1i8, 2], [3, 4]), [4, 6]);
             });
         }
-
-        let level = Level::new();
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        {
-            if let Some(simd) = level.as_sse2() {
-                check(simd);
-            }
-            if let Some(simd) = level.as_sse4_2() {
-                check(simd);
-            }
-            if let Some(simd) = level.as_avx2() {
-                check(simd);
-            }
-            if let Some(simd) = level.as_avx512() {
-                check(simd);
-            }
-        }
-        #[cfg(target_arch = "aarch64")]
-        if let Some(simd) = level.as_neon() {
-            check(simd);
-        }
+        for_each_simd_level!(check);
     }
 
     #[cfg(feature = "half")]

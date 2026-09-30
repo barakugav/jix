@@ -170,7 +170,7 @@ where
 /// mode, a `vector` of `LEN` lanes of the kernel's output, or the `mask` of `S::$vec`, stored as
 /// the kernel's `bool` output.
 macro_rules! op1_simd_apply_bulk {
-    ($mode:ident: $T:ty, |$x:ident| { $($vec:ident => $body:expr),+ }) => {
+    ($mode:ident: $T:ty, |$x:ident| { $($vec:ident => $body:expr),+ $(,)? }) => {
         #[inline(always)]
         fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
             &self,
@@ -179,7 +179,7 @@ macro_rules! op1_simd_apply_bulk {
         ) -> [Self::Output; N] {
             use crate::util::checked_transmute;
             #[allow(unused_imports)]
-            use fearless_simd::{SimdBase, SimdFloat, SimdInt, SimdMask};
+            use fearless_simd::{Bytes, Select, SimdBase, SimdFloat, SimdInt, SimdMask};
             use std::any::TypeId;
             $(
                 if TypeId::of::<$T>() == TypeId::of::<<S::$vec as SimdBase<S>>::Element>()
@@ -566,7 +566,10 @@ define_op1!(
     simd: |x| {
         f32s => -x,
         f64s => -x,
+        i8s => -x,
+        i16s => -x,
         i32s => -x,
+        i64s => -x,
     },
 );
 define_op1!(
@@ -598,6 +601,10 @@ define_op1!(
     FloorKernel,
     <num_traits::Float>::floor,
     type Output<T> = T,
+    simd: |x| {
+        f32s => x.floor(),
+        f64s => x.floor(),
+    },
 );
 define_op1!(
     /// Rounds each element up to the nearest integer (towards +inf).
@@ -628,6 +635,10 @@ define_op1!(
     CeilKernel,
     <num_traits::Float>::ceil,
     type Output<T> = T,
+    simd: |x| {
+        f32s => x.ceil(),
+        f64s => x.ceil(),
+    },
 );
 define_op1!(
     /// Rounds each element to the nearest integer.
@@ -661,6 +672,15 @@ define_op1!(
     RoundKernel,
     <num_traits::Float>::round,
     type Output<T> = T,
+    // Halves away from zero: `t + trunc(2 * (x - t))` with `t = trunc(x)`, all exact. From `2^23`
+    // (`2^52` for f64) on every value is an integer; there, and for inf and NaN, `x` itself.
+    simd: |x| {
+        f32s => x.abs().simd_lt(8388608.0).select(x.trunc() + ((x - x.trunc()) * 2.0).trunc(), x),
+        f64s => x
+            .abs()
+            .simd_lt(4503599627370496.0)
+            .select(x.trunc() + ((x - x.trunc()) * 2.0).trunc(), x),
+    },
 );
 define_op1!(
     /// Computes the square root of each element.
@@ -691,6 +711,10 @@ define_op1!(
     SqrtKernel,
     <num_traits::Float>::sqrt,
     type Output<T> = T,
+    simd: |x| {
+        f32s => x.sqrt(),
+        f64s => x.sqrt(),
+    },
 );
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
@@ -1036,6 +1060,14 @@ define_op1!(
     Abs,
     AbsKernel,
     <crate::scalar::Abs>::abs,
+    simd: |x| {
+        f32s => x.abs(),
+        f64s => x.abs(),
+        i8s => x.abs(),
+        i16s => x.abs(),
+        i32s => x.abs(),
+        i64s => x.abs(),
+    },
 );
 
 /// Squares each element (`x * x`).
@@ -1070,7 +1102,7 @@ pub struct Square<S>(Op1<S, SquareKernel>);
 struct SquareKernel;
 impl<T> Op1Kernel<T> for SquareKernel
 where
-    T: core::ops::Mul + Copy,
+    T: core::ops::Mul + Copy + 'static,
 {
     type Output = <T as core::ops::Mul>::Output;
 
@@ -1078,6 +1110,19 @@ where
     fn apply(&self, x: T) -> Self::Output {
         x * x
     }
+
+    crate::ops::op1::op1_simd_apply_bulk!(vector: T, |x| {
+        f32s => x * x,
+        f64s => x * x,
+        i8s => x * x,
+        i16s => x * x,
+        i32s => x * x,
+        i64s => x * x,
+        u8s => x * x,
+        u16s => x * x,
+        u32s => x * x,
+        u64s => x * x,
+    });
 }
 impl<S> Square<S>
 where
@@ -1152,123 +1197,62 @@ pub(crate) mod tests {
     use proptest::strategy::BoxedStrategy;
     use proptest::test_runner::{Config, TestRunner};
 
-    // Kernels of the `type Output<T> = T` and `type Output = $ty` forms of `define_op1!`.
-    mod output_forms {
-        #![allow(dead_code)]
-        use crate::ops::prelude::*;
-        define_op1!(
-            /// `x.floor()`, for `output_forms_all_levels`.
-            TestFloor,
-            TestFloorKernel,
-            <num_traits::Float>::floor,
-            type Output<T> = T,
-            simd: |x| {
-                f32s => x.floor(),
-                f64s => x.floor(),
-            },
-        );
-        define_op1!(
-            /// `x.count_ones()`, for `output_forms_all_levels`.
-            TestCountOnes,
-            TestCountOnesKernel,
-            <num_traits::PrimInt>::count_ones,
-            type Output = u32,
-            simd: |x| {
-                u32s => x.count_ones(),
-            },
-        );
-
-        /// The SIMD bodies of both forms on every SIMD level of the CPU.
-        #[test]
-        fn output_forms_all_levels() {
-            use crate::ops::op1::Op1Kernel;
-            use fearless_simd::{Level, Simd};
-
-            const N: usize = 32;
-            fn check<S: Simd>(simd: S) {
-                let a: [f32; N] = std::array::from_fn(|i| (i as f32 - 10.3) * 0.7);
-                let b = a.map(f64::from);
-                let c: [u32; N] = std::array::from_fn(|i| (i as u32).wrapping_mul(0x9E37_79B9));
-                simd.vectorize(|| {
-                    assert_eq!(TestFloorKernel.apply_bulk(simd, a), a.map(f32::floor));
-                    assert_eq!(TestFloorKernel.apply_bulk(simd, b), b.map(f64::floor));
-                    assert_eq!(
-                        TestCountOnesKernel.apply_bulk(simd, c),
-                        c.map(u32::count_ones)
-                    );
-                    // A type without a SIMD body: scalar.
-                    assert_eq!(TestCountOnesKernel.apply_bulk(simd, [3u8, 255]), [2, 8]);
-                });
-            }
-
-            let level = Level::new();
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            {
-                if let Some(simd) = level.as_sse2() {
-                    check(simd);
-                }
-                if let Some(simd) = level.as_sse4_2() {
-                    check(simd);
-                }
-                if let Some(simd) = level.as_avx2() {
-                    check(simd);
-                }
-                if let Some(simd) = level.as_avx512() {
-                    check(simd);
-                }
-            }
-            #[cfg(target_arch = "aarch64")]
-            if let Some(simd) = level.as_neon() {
-                check(simd);
-            }
-        }
-    }
-
-    /// `NegKernel::apply_bulk` on every SIMD level of the CPU: the `simd:` bodies of
-    /// `define_op1!`, and the scalar fallback.
+    /// The `simd:` bodies of the kernels of this module against their scalar semantics (release
+    /// builds: wrapping), on every SIMD level of the CPU, over edge cases.
     #[test]
-    fn neg_apply_bulk_all_levels() {
-        use super::{NegKernel, Op1Kernel};
-        use fearless_simd::{Level, Simd};
+    fn simd_bodies_all_levels() {
+        use super::{
+            AbsKernel, CeilKernel, FloorKernel, NegKernel, Op1Kernel, RoundKernel, SqrtKernel,
+            SquareKernel,
+        };
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
 
-        const N: usize = 32;
         fn check<S: Simd>(simd: S) {
-            let a: [f32; N] = std::array::from_fn(|i| (i as f32 - 10.0) * 0.37);
-            let c: [f64; N] = std::array::from_fn(|i| (i as f64 - 10.0) * 0.37);
-            let mut e: [i32; N] =
-                std::array::from_fn(|i| (i as i32 * 7 - 100).wrapping_mul(0x0123_4567));
-            e[0] = i32::MIN;
+            macro_rules! case {
+                ($kernel:ident, $t:ty, $f:expr) => {
+                    let xs = <$t>::simd_test_values(0);
+                    let what = concat!(stringify!($kernel), " ", stringify!($t));
+                    assert_same_elements($kernel.apply_bulk(simd, xs), |i| $f(xs[i]), what);
+                };
+            }
             simd.vectorize(|| {
-                assert_eq!(NegKernel.apply_bulk(simd, a), a.map(|x| -x));
-                assert_eq!(NegKernel.apply_bulk(simd, c), c.map(|x| -x));
-                // The vector negation wraps.
-                assert_eq!(NegKernel.apply_bulk(simd, e), e.map(i32::wrapping_neg));
+                case!(NegKernel, f32, |x: f32| -x);
+                case!(NegKernel, f64, |x: f64| -x);
+                case!(NegKernel, i8, i8::wrapping_neg);
+                case!(NegKernel, i16, i16::wrapping_neg);
+                case!(NegKernel, i32, i32::wrapping_neg);
+                case!(NegKernel, i64, i64::wrapping_neg);
+                case!(FloorKernel, f32, f32::floor);
+                case!(FloorKernel, f64, f64::floor);
+                case!(CeilKernel, f32, f32::ceil);
+                case!(CeilKernel, f64, f64::ceil);
+                case!(RoundKernel, f32, f32::round);
+                case!(RoundKernel, f64, f64::round);
+                case!(SqrtKernel, f32, f32::sqrt);
+                case!(SqrtKernel, f64, f64::sqrt);
+                case!(AbsKernel, f32, f32::abs);
+                case!(AbsKernel, f64, f64::abs);
+                case!(AbsKernel, i8, i8::wrapping_abs);
+                case!(AbsKernel, i16, i16::wrapping_abs);
+                case!(AbsKernel, i32, i32::wrapping_abs);
+                case!(AbsKernel, i64, i64::wrapping_abs);
+                case!(SquareKernel, f32, |x: f32| x * x);
+                case!(SquareKernel, f64, |x: f64| x * x);
+                case!(SquareKernel, i8, |x: i8| x.wrapping_mul(x));
+                case!(SquareKernel, i16, |x: i16| x.wrapping_mul(x));
+                case!(SquareKernel, i32, |x: i32| x.wrapping_mul(x));
+                case!(SquareKernel, i64, |x: i64| x.wrapping_mul(x));
+                case!(SquareKernel, u8, |x: u8| x.wrapping_mul(x));
+                case!(SquareKernel, u16, |x: u16| x.wrapping_mul(x));
+                case!(SquareKernel, u32, |x: u32| x.wrapping_mul(x));
+                case!(SquareKernel, u64, |x: u64| x.wrapping_mul(x));
                 // Not a multiple of the vector length, and a type without a SIMD body: scalar.
                 assert_eq!(NegKernel.apply_bulk(simd, [1.5f32]), [-1.5]);
-                assert_eq!(NegKernel.apply_bulk(simd, [1i8, -2, 3]), [-1, 2, -3]);
+                assert_eq!(FloorKernel.apply_bulk(simd, [1.5f32, 2.5]), [1.0, 2.0]);
             });
         }
-
-        let level = Level::new();
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        {
-            if let Some(simd) = level.as_sse2() {
-                check(simd);
-            }
-            if let Some(simd) = level.as_sse4_2() {
-                check(simd);
-            }
-            if let Some(simd) = level.as_avx2() {
-                check(simd);
-            }
-            if let Some(simd) = level.as_avx512() {
-                check(simd);
-            }
-        }
-        #[cfg(target_arch = "aarch64")]
-        if let Some(simd) = level.as_neon() {
-            check(simd);
-        }
+        for_each_simd_level!(check);
     }
 
     /// Shared proptest driver for unary-op tests.

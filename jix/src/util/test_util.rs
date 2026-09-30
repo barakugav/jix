@@ -1251,3 +1251,116 @@ mod tests {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// SIMD bodies of the op kernels
+// ---------------------------------------------------------------------------
+
+/// Elements per `apply_bulk` call of the SIMD body tests: a multiple of every vector length.
+pub(crate) const SIMD_TEST_N: usize = 64;
+
+/// Run `$check(simd)` on every SIMD level of the CPU (`$check` generic over `S: Simd`), on a thread
+/// with a large stack: unoptimized, a test of many inlined kernels needs a huge frame.
+macro_rules! for_each_simd_level {
+    ($check:ident) => {{
+        std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(|| crate::util::for_each_simd_level!(@levels $check))
+            .unwrap()
+            .join()
+            .unwrap()
+    }};
+    (@levels $check:ident) => {{
+        let level = fearless_simd::Level::new();
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            if let Some(simd) = level.as_sse2() {
+                $check(simd);
+            }
+            if let Some(simd) = level.as_sse4_2() {
+                $check(simd);
+            }
+            if let Some(simd) = level.as_avx2() {
+                $check(simd);
+            }
+            if let Some(simd) = level.as_avx512() {
+                $check(simd);
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        if let Some(simd) = level.as_neon() {
+            $check(simd);
+        }
+    }};
+}
+pub(crate) use for_each_simd_level;
+
+/// Values for the SIMD body tests: the edge cases of the type, then a spread of ordinary values.
+pub(crate) trait SimdTestValues: Copy + Sized {
+    fn edge_cases() -> Vec<Self>;
+    fn ordinary(i: usize) -> Self;
+
+    /// `SIMD_TEST_N` values: the edge cases, rotated by `shift`, then ordinary ones.
+    fn simd_test_values(shift: usize) -> [Self; SIMD_TEST_N] {
+        let mut edge = Self::edge_cases();
+        let k = shift % edge.len();
+        edge.rotate_left(k);
+        std::array::from_fn(|i| {
+            edge.get(i)
+                .copied()
+                .unwrap_or_else(|| Self::ordinary(i + shift))
+        })
+    }
+}
+macro_rules! impl_simd_test_values_float {
+    ($($t:ident),*) => {$(
+        impl SimdTestValues for $t {
+            fn edge_cases() -> Vec<Self> {
+                // Around the last non-integers: 2^23 for f32, 2^52 for f64.
+                let big = (1u64 << ($t::MANTISSA_DIGITS - 1)) as $t;
+                vec![
+                    0.0, -0.0, 0.5, -0.5, 1.5, -1.5, 2.5, -2.5, 0.49999997, -0.49999997, 1.0, -1.0,
+                    big - 0.5, -(big - 0.5), big, big + 1.0, 1e30, -1e30, $t::MAX, $t::MIN,
+                    $t::MIN_POSITIVE, $t::MIN_POSITIVE / 4.0, $t::INFINITY, $t::NEG_INFINITY,
+                    $t::NAN, -$t::NAN,
+                ]
+            }
+            fn ordinary(i: usize) -> Self {
+                (i as $t - 20.3) * 0.37
+            }
+        }
+    )*};
+}
+impl_simd_test_values_float!(f32, f64);
+macro_rules! impl_simd_test_values_int {
+    ($($t:ident),*) => {$(
+        impl SimdTestValues for $t {
+            fn edge_cases() -> Vec<Self> {
+                vec![$t::MIN, $t::MAX, 0, 1, (0 as $t).wrapping_sub(1), $t::MIN + 1, $t::MAX - 1, 2, 7]
+            }
+            fn ordinary(i: usize) -> Self {
+                (i as i64 * 37 - 100) as $t
+            }
+        }
+    )*};
+}
+impl_simd_test_values_int!(i8, i16, i32, i64, u8, u16, u32, u64);
+
+/// Whether `a` and `b` are equal, NaNs included.
+#[allow(clippy::eq_op)]
+pub(crate) fn same_value<T: PartialEq>(a: &T, b: &T) -> bool {
+    a == b || (a != a && b != b)
+}
+
+/// Assert that `actual[i]` is `expected(i)` for every `i` (NaNs equal), naming `what` otherwise.
+#[track_caller]
+pub(crate) fn assert_same_elements<T: PartialEq + Debug, const N: usize>(
+    actual: [T; N],
+    expected: impl Fn(usize) -> T,
+    what: &str,
+) {
+    for (i, a) in actual.iter().enumerate() {
+        let e = expected(i);
+        assert!(same_value(a, &e), "{what}: element {i}: {a:?} != {e:?}");
+    }
+}

@@ -257,6 +257,18 @@ define_op2!(
     EqualKernel,
     <PartialEq>::eq(&a, &b),
     type Output = bool,
+    simd: |a, b| {
+        (f32s, f32s) => a.simd_eq(b),
+        (f64s, f64s) => a.simd_eq(b),
+        (i8s, i8s) => a.simd_eq(b),
+        (i16s, i16s) => a.simd_eq(b),
+        (i32s, i32s) => a.simd_eq(b),
+        (i64s, i64s) => a.simd_eq(b),
+        (u8s, u8s) => a.simd_eq(b),
+        (u16s, u16s) => a.simd_eq(b),
+        (u32s, u32s) => a.simd_eq(b),
+        (u64s, u64s) => a.simd_eq(b),
+    },
 );
 define_op2!(
     /// Element-wise inequality test (`a != b`).
@@ -292,6 +304,18 @@ define_op2!(
     NotEqualKernel,
     <PartialEq>::ne(&a, &b),
     type Output = bool,
+    simd: |a, b| {
+        (f32s, f32s) => !a.simd_eq(b),
+        (f64s, f64s) => !a.simd_eq(b),
+        (i8s, i8s) => !a.simd_eq(b),
+        (i16s, i16s) => !a.simd_eq(b),
+        (i32s, i32s) => !a.simd_eq(b),
+        (i64s, i64s) => !a.simd_eq(b),
+        (u8s, u8s) => !a.simd_eq(b),
+        (u16s, u16s) => !a.simd_eq(b),
+        (u32s, u32s) => !a.simd_eq(b),
+        (u64s, u64s) => !a.simd_eq(b),
+    },
 );
 define_op2!(
     /// Element-wise greater-than test (`a > b`).
@@ -327,6 +351,18 @@ define_op2!(
     GreaterKernel,
     <PartialOrd>::gt(&a, &b),
     type Output = bool,
+    simd: |a, b| {
+        (f32s, f32s) => a.simd_gt(b),
+        (f64s, f64s) => a.simd_gt(b),
+        (i8s, i8s) => a.simd_gt(b),
+        (i16s, i16s) => a.simd_gt(b),
+        (i32s, i32s) => a.simd_gt(b),
+        (i64s, i64s) => a.simd_gt(b),
+        (u8s, u8s) => a.simd_gt(b),
+        (u16s, u16s) => a.simd_gt(b),
+        (u32s, u32s) => a.simd_gt(b),
+        (u64s, u64s) => a.simd_gt(b),
+    },
 );
 define_op2!(
     /// Element-wise greater-than-or-equal test (`a >= b`).
@@ -362,6 +398,18 @@ define_op2!(
     GreaterEqualKernel,
     <PartialOrd>::ge(&a, &b),
     type Output = bool,
+    simd: |a, b| {
+        (f32s, f32s) => a.simd_ge(b),
+        (f64s, f64s) => a.simd_ge(b),
+        (i8s, i8s) => a.simd_ge(b),
+        (i16s, i16s) => a.simd_ge(b),
+        (i32s, i32s) => a.simd_ge(b),
+        (i64s, i64s) => a.simd_ge(b),
+        (u8s, u8s) => a.simd_ge(b),
+        (u16s, u16s) => a.simd_ge(b),
+        (u32s, u32s) => a.simd_ge(b),
+        (u64s, u64s) => a.simd_ge(b),
+    },
 );
 define_op2!(
     /// Element-wise less-than test (`a < b`).
@@ -397,6 +445,18 @@ define_op2!(
     LessKernel,
     <PartialOrd>::lt(&a, &b),
     type Output = bool,
+    simd: |a, b| {
+        (f32s, f32s) => a.simd_lt(b),
+        (f64s, f64s) => a.simd_lt(b),
+        (i8s, i8s) => a.simd_lt(b),
+        (i16s, i16s) => a.simd_lt(b),
+        (i32s, i32s) => a.simd_lt(b),
+        (i64s, i64s) => a.simd_lt(b),
+        (u8s, u8s) => a.simd_lt(b),
+        (u16s, u16s) => a.simd_lt(b),
+        (u32s, u32s) => a.simd_lt(b),
+        (u64s, u64s) => a.simd_lt(b),
+    },
 );
 define_op2!(
     /// Element-wise less-than-or-equal test (`a <= b`).
@@ -432,6 +492,18 @@ define_op2!(
     LessEqualKernel,
     <PartialOrd>::le(&a, &b),
     type Output = bool,
+    simd: |a, b| {
+        (f32s, f32s) => a.simd_le(b),
+        (f64s, f64s) => a.simd_le(b),
+        (i8s, i8s) => a.simd_le(b),
+        (i16s, i16s) => a.simd_le(b),
+        (i32s, i32s) => a.simd_le(b),
+        (i64s, i64s) => a.simd_le(b),
+        (u8s, u8s) => a.simd_le(b),
+        (u16s, u16s) => a.simd_le(b),
+        (u32s, u32s) => a.simd_le(b),
+        (u64s, u64s) => a.simd_le(b),
+    },
 );
 
 define_op2!(
@@ -468,6 +540,19 @@ define_op2!(
     Maximum,
     MaximumKernel,
     <crate::scalar::Maximum>::maximum(a, b),
+    // NaN-propagating: `a + b` is NaN where an operand is.
+    simd: |a, b| {
+        (f32s, f32s) => (a.simd_eq(a) & b.simd_eq(b)).select(a.max(b), a + b),
+        (f64s, f64s) => (a.simd_eq(a) & b.simd_eq(b)).select(a.max(b), a + b),
+        (i8s, i8s) => a.max(b),
+        (i16s, i16s) => a.max(b),
+        (i32s, i32s) => a.max(b),
+        (i64s, i64s) => a.max(b),
+        (u8s, u8s) => a.max(b),
+        (u16s, u16s) => a.max(b),
+        (u32s, u32s) => a.max(b),
+        (u64s, u64s) => a.max(b),
+    },
 );
 define_op2!(
     /// Element-wise minimum of two arrays.
@@ -503,6 +588,19 @@ define_op2!(
     Minimum,
     MinimumKernel,
     <crate::scalar::Minimum>::minimum(a, b),
+    // NaN-propagating: `a + b` is NaN where an operand is.
+    simd: |a, b| {
+        (f32s, f32s) => (a.simd_eq(a) & b.simd_eq(b)).select(a.min(b), a + b),
+        (f64s, f64s) => (a.simd_eq(a) & b.simd_eq(b)).select(a.min(b), a + b),
+        (i8s, i8s) => a.min(b),
+        (i16s, i16s) => a.min(b),
+        (i32s, i32s) => a.min(b),
+        (i64s, i64s) => a.min(b),
+        (u8s, u8s) => a.min(b),
+        (u16s, u16s) => a.min(b),
+        (u32s, u32s) => a.min(b),
+        (u64s, u64s) => a.min(b),
+    },
 );
 
 /// Element-wise approximate equality test.
@@ -665,6 +763,60 @@ mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::scalar::Complex<f64>;
     use crate::ops::op2::tests::test_op2;
+
+    /// The `simd:` bodies of the kernels of this module against their scalar semantics, on every
+    /// SIMD level of the CPU, over edge cases (NaN included).
+    #[test]
+    fn simd_bodies_all_levels() {
+        use super::{
+            EqualKernel, GreaterEqualKernel, GreaterKernel, LessEqualKernel, LessKernel,
+            MaximumKernel, MinimumKernel, NotEqualKernel,
+        };
+        use crate::ops::op2::Op2Kernel;
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $ta:ty, $tb:ty, $f:expr) => {
+                    let (a, b) = (<$ta>::simd_test_values(0), <$tb>::simd_test_values(5));
+                    let what = concat!(
+                        stringify!($kernel),
+                        " ",
+                        stringify!($ta),
+                        " ",
+                        stringify!($tb)
+                    );
+                    assert_same_elements($kernel.apply_bulk(simd, a, b), |i| $f(a[i], b[i]), what);
+                };
+            }
+            macro_rules! all {
+                ($kernel:ident, $f:expr) => {
+                    case!($kernel, f32, f32, $f);
+                    case!($kernel, f64, f64, $f);
+                    case!($kernel, i8, i8, $f);
+                    case!($kernel, i16, i16, $f);
+                    case!($kernel, i32, i32, $f);
+                    case!($kernel, i64, i64, $f);
+                    case!($kernel, u8, u8, $f);
+                    case!($kernel, u16, u16, $f);
+                    case!($kernel, u32, u32, $f);
+                    case!($kernel, u64, u64, $f);
+                };
+            }
+            simd.vectorize(|| {
+                all!(EqualKernel, |x, y| x == y);
+                all!(NotEqualKernel, |x, y| x != y);
+                all!(GreaterKernel, |x, y| x > y);
+                all!(GreaterEqualKernel, |x, y| x >= y);
+                all!(LessKernel, |x, y| x < y);
+                all!(LessEqualKernel, |x, y| x <= y);
+                all!(MaximumKernel, Maximum::maximum);
+                all!(MinimumKernel, Minimum::minimum);
+            });
+        }
+        for_each_simd_level!(check);
+    }
 
     // Shared by greater_equal_concrete and less_equal_concrete: NaN operands, inf/-inf
     // ordering, and an equal pair (1.0 == 1.0).

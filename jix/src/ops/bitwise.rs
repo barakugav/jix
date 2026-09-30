@@ -35,6 +35,16 @@ define_op2!(
     AndKernel,
     <core::ops::BitAnd>::bitand(a, b),
     core_op = BitAnd::bitand,
+    simd: |a, b| {
+        (i8s, i8s) => a & b,
+        (i16s, i16s) => a & b,
+        (i32s, i32s) => a & b,
+        (i64s, i64s) => a & b,
+        (u8s, u8s) => a & b,
+        (u16s, u16s) => a & b,
+        (u32s, u32s) => a & b,
+        (u64s, u64s) => a & b,
+    },
 );
 define_op2!(
     /// Element-wise bitwise OR of two arrays.
@@ -68,6 +78,16 @@ define_op2!(
     OrKernel,
     <core::ops::BitOr>::bitor(a, b),
     core_op = BitOr::bitor,
+    simd: |a, b| {
+        (i8s, i8s) => a | b,
+        (i16s, i16s) => a | b,
+        (i32s, i32s) => a | b,
+        (i64s, i64s) => a | b,
+        (u8s, u8s) => a | b,
+        (u16s, u16s) => a | b,
+        (u32s, u32s) => a | b,
+        (u64s, u64s) => a | b,
+    },
 );
 define_op2!(
     /// Element-wise bitwise XOR of two arrays.
@@ -101,6 +121,16 @@ define_op2!(
     XorKernel,
     <core::ops::BitXor>::bitxor(a, b),
     core_op = BitXor::bitxor,
+    simd: |a, b| {
+        (i8s, i8s) => a ^ b,
+        (i16s, i16s) => a ^ b,
+        (i32s, i32s) => a ^ b,
+        (i64s, i64s) => a ^ b,
+        (u8s, u8s) => a ^ b,
+        (u16s, u16s) => a ^ b,
+        (u32s, u32s) => a ^ b,
+        (u64s, u64s) => a ^ b,
+    },
 );
 
 define_op1!(
@@ -132,6 +162,16 @@ define_op1!(
     NotKernel,
     <core::ops::Not>::not,
     core_op = Not::not,
+    simd: |x| {
+        i8s => !x,
+        i16s => !x,
+        i32s => !x,
+        i64s => !x,
+        u8s => !x,
+        u16s => !x,
+        u32s => !x,
+        u64s => !x,
+    },
 );
 
 define_op2!(
@@ -167,6 +207,25 @@ define_op2!(
     BitwiseShiftLeft,
     BitwiseShiftLeftKernel,
     <core::ops::Shl>::shl(a, b),
+    // The amount modulo the bit width, as in release builds (debug builds panic).
+    simd: |a, b| {
+        (i8s, i8s) => a << (b & 7),
+        (i8s, u8s) => a << (b & 7).bitcast::<S::i8s>(),
+        (u8s, i8s) => a << (b & 7).bitcast::<S::u8s>(),
+        (u8s, u8s) => a << (b & 7),
+        (i16s, i16s) => a << (b & 15),
+        (i16s, u16s) => a << (b & 15).bitcast::<S::i16s>(),
+        (u16s, i16s) => a << (b & 15).bitcast::<S::u16s>(),
+        (u16s, u16s) => a << (b & 15),
+        (i32s, i32s) => a << (b & 31),
+        (i32s, u32s) => a << (b & 31).bitcast::<S::i32s>(),
+        (u32s, i32s) => a << (b & 31).bitcast::<S::u32s>(),
+        (u32s, u32s) => a << (b & 31),
+        (i64s, i64s) => a << (b & 63),
+        (i64s, u64s) => a << (b & 63).bitcast::<S::i64s>(),
+        (u64s, i64s) => a << (b & 63).bitcast::<S::u64s>(),
+        (u64s, u64s) => a << (b & 63),
+    },
 );
 
 define_op2!(
@@ -204,6 +263,25 @@ define_op2!(
     BitwiseShiftRight,
     BitwiseShiftRightKernel,
     <core::ops::Shr>::shr(a, b),
+    // The amount modulo the bit width, as in release builds (debug builds panic).
+    simd: |a, b| {
+        (i8s, i8s) => a >> (b & 7),
+        (i8s, u8s) => a >> (b & 7).bitcast::<S::i8s>(),
+        (u8s, i8s) => a >> (b & 7).bitcast::<S::u8s>(),
+        (u8s, u8s) => a >> (b & 7),
+        (i16s, i16s) => a >> (b & 15),
+        (i16s, u16s) => a >> (b & 15).bitcast::<S::i16s>(),
+        (u16s, i16s) => a >> (b & 15).bitcast::<S::u16s>(),
+        (u16s, u16s) => a >> (b & 15),
+        (i32s, i32s) => a >> (b & 31),
+        (i32s, u32s) => a >> (b & 31).bitcast::<S::i32s>(),
+        (u32s, i32s) => a >> (b & 31).bitcast::<S::u32s>(),
+        (u32s, u32s) => a >> (b & 31),
+        (i64s, i64s) => a >> (b & 63),
+        (i64s, u64s) => a >> (b & 63).bitcast::<S::i64s>(),
+        (u64s, i64s) => a >> (b & 63).bitcast::<S::u64s>(),
+        (u64s, u64s) => a >> (b & 63),
+    },
 );
 define_op2_rhs_fixed!(
     /// Element-wise bitwise left rotation (`a.rotate_left(b as u32)`).
@@ -241,6 +319,14 @@ define_op2_rhs_fixed!(
     rhs = u32,
     type Output<T1> = T1,
     type Output<S1> = S1::Item,
+    // `r = b % 32`, and the other shift by `(32 - r) % 32`, as `((r ^ 31) + 1) & 31`.
+    simd: |a, b| {
+        (u32s, u32s) => (a << (b & 31)) | (a >> ((((b & 31) ^ 31) + 1) & 31)),
+        (i32s, u32s) => {
+            let a = a.bitcast::<S::u32s>();
+            ((a << (b & 31)) | (a >> ((((b & 31) ^ 31) + 1) & 31))).bitcast::<S::i32s>()
+        }
+    },
 );
 
 define_op2_rhs_fixed!(
@@ -279,6 +365,14 @@ define_op2_rhs_fixed!(
     rhs = u32,
     type Output<T1> = T1,
     type Output<S1> = S1::Item,
+    // `r = b % 32`, and the other shift by `(32 - r) % 32`, as `((r ^ 31) + 1) & 31`.
+    simd: |a, b| {
+        (u32s, u32s) => (a >> (b & 31)) | (a << ((((b & 31) ^ 31) + 1) & 31)),
+        (i32s, u32s) => {
+            let a = a.bitcast::<S::u32s>();
+            ((a >> (b & 31)) | (a << ((((b & 31) ^ 31) + 1) & 31))).bitcast::<S::i32s>()
+        }
+    },
 );
 define_op1!(
     /// Counts the number of set bits (`1`s) in each element.
@@ -312,6 +406,11 @@ define_op1!(
     CountOnesKernel,
     <num_traits::PrimInt>::count_ones,
     type Output = u32,
+    // 32-bit inputs: the only ones with as many lanes as the `u32` output.
+    simd: |x| {
+        u32s => x.count_ones(),
+        i32s => x.count_ones().bitcast::<S::u32s>(),
+    },
 );
 define_op1!(
     /// Counts the number of unset bits (`0`s) in each element.
@@ -345,6 +444,11 @@ define_op1!(
     CountZerosKernel,
     <num_traits::PrimInt>::count_zeros,
     type Output = u32,
+    // 32-bit inputs: the only ones with as many lanes as the `u32` output.
+    simd: |x| {
+        u32s => (!x).count_ones(),
+        i32s => (!x).count_ones().bitcast::<S::u32s>(),
+    },
 );
 define_op1!(
     /// Counts the number of leading zero bits in each element.
@@ -499,6 +603,94 @@ mod tests {
 
     use crate::ops::op1::tests::test_op1;
     use crate::ops::op2::tests::test_op2;
+
+    /// The `simd:` bodies of the kernels of this module against their scalar semantics (release
+    /// builds: shift amounts modulo the bit width), on every SIMD level of the CPU, over edge
+    /// cases.
+    #[test]
+    fn simd_bodies_all_levels() {
+        use super::{
+            AndKernel, BitwiseRotateLeftKernel, BitwiseRotateRightKernel, BitwiseShiftLeftKernel,
+            BitwiseShiftRightKernel, CountOnesKernel, CountZerosKernel, NotKernel, OrKernel,
+            XorKernel,
+        };
+        use crate::ops::op1::Op1Kernel;
+        use crate::ops::op2::Op2Kernel;
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $ta:ty, $tb:ty, $f:expr) => {
+                    let (a, b) = (<$ta>::simd_test_values(0), <$tb>::simd_test_values(5));
+                    let what = concat!(
+                        stringify!($kernel),
+                        " ",
+                        stringify!($ta),
+                        " ",
+                        stringify!($tb)
+                    );
+                    assert_same_elements($kernel.apply_bulk(simd, a, b), |i| $f(a[i], b[i]), what);
+                };
+            }
+            macro_rules! case1 {
+                ($kernel:ident, $t:ty, $f:expr) => {
+                    let xs = <$t>::simd_test_values(0);
+                    let what = concat!(stringify!($kernel), " ", stringify!($t));
+                    assert_same_elements($kernel.apply_bulk(simd, xs), |i| $f(xs[i]), what);
+                };
+            }
+            macro_rules! ints {
+                ($m:ident!($kernel:ident, $f:expr)) => {
+                    $m!($kernel, i8, i8, $f);
+                    $m!($kernel, i16, i16, $f);
+                    $m!($kernel, i32, i32, $f);
+                    $m!($kernel, i64, i64, $f);
+                    $m!($kernel, u8, u8, $f);
+                    $m!($kernel, u16, u16, $f);
+                    $m!($kernel, u32, u32, $f);
+                    $m!($kernel, u64, u64, $f);
+                };
+            }
+            // Every same-width (value, amount) pair of signedness.
+            macro_rules! shifts {
+                ($kernel:ident, $f:ident) => {
+                    shifts!(@width $kernel, $f, i8, u8);
+                    shifts!(@width $kernel, $f, i16, u16);
+                    shifts!(@width $kernel, $f, i32, u32);
+                    shifts!(@width $kernel, $f, i64, u64);
+                };
+                (@width $kernel:ident, $f:ident, $i:ty, $u:ty) => {
+                    case!($kernel, $i, $i, |x: $i, y: $i| x.$f(y as u32));
+                    case!($kernel, $i, $u, |x: $i, y: $u| x.$f(y as u32));
+                    case!($kernel, $u, $u, |x: $u, y: $u| x.$f(y as u32));
+                    case!($kernel, $u, $i, |x: $u, y: $i| x.$f(y as u32));
+                };
+            }
+            simd.vectorize(|| {
+                ints!(case!(AndKernel, |x, y| x & y));
+                ints!(case!(OrKernel, |x, y| x | y));
+                ints!(case!(XorKernel, |x, y| x ^ y));
+                macro_rules! not {
+                    ($kernel:ident, $t:ty, $_t:ty, $f:expr) => {
+                        case1!($kernel, $t, |x: $t| !x)
+                    };
+                }
+                ints!(not!(NotKernel, ()));
+                shifts!(BitwiseShiftLeftKernel, wrapping_shl);
+                shifts!(BitwiseShiftRightKernel, wrapping_shr);
+                case!(BitwiseRotateLeftKernel, i32, u32, i32::rotate_left);
+                case!(BitwiseRotateLeftKernel, u32, u32, u32::rotate_left);
+                case!(BitwiseRotateRightKernel, i32, u32, i32::rotate_right);
+                case!(BitwiseRotateRightKernel, u32, u32, u32::rotate_right);
+                case1!(CountOnesKernel, i32, i32::count_ones);
+                case1!(CountOnesKernel, u32, u32::count_ones);
+                case1!(CountZerosKernel, i32, i32::count_zeros);
+                case1!(CountZerosKernel, u32, u32::count_zeros);
+            });
+        }
+        for_each_simd_level!(check);
+    }
 
     test_op1!(count_ones, |a| a.count_ones(), [u8, u32], any_strategy);
     test_op2!(bitand, |a, b| a & b, [u8, u32], any_strategy);
