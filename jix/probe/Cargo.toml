@@ -3,11 +3,12 @@ name = "jix-probe"
 version = "0.0.0"
 edition = "2024"
 publish = false
-description = "Asm probe for jix kernels: compiles them for any target, with no C deps, for cargo-asm + llvm-mca"
+description = "Asm probe for jix's element-wise pipeline, for cargo-asm + llvm-mca"
 
 [lib]
-# rlib only: `cargo asm` needs no linker, so any rustup target works out of the box.
+# rlib only: `cargo asm` needs no linker.
 crate-type = ["rlib"]
 
 [dependencies]
-fearless_simd = "1.0"
+jix = { path = ".." }
+ndarray = ">=0.16,<0.18"

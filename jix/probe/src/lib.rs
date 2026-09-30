@@ -1,61 +1,76 @@
-//! Asm probe for the byte-shuffle and bit-shuffle filter kernels.
+//! Asm probe for `jix`'s element-wise pipeline.
 //!
-//! The kernels are `#[path]`-included straight from the `jix` sources, so this crate compiles the
-//! exact code `jix` ships, without `jix`'s C dependencies (zstd), for any rustup target.
+//! Each `probe_*` function evaluates one op chain over `Plain` arrays into a packed output, through
+//! the public API. The loop of interest is not in the probe function itself but in the pipeline's
+//! inner loop it instantiates (`elementwise_pipeline::inner_loop`), which `analyze.py` locates by
+//! its op chain and element type.
 //!
-//! `jix` reaches `encode_simd` / `decode_simd` through `fearless_simd::dispatch!`, which runs it inside a
-//! `#[target_feature]` function of the detected level. Here the level is chosen statically instead:
-//! `analyze.py` compiles the whole crate with that level's target features, and `simd()` returns
-//! the matching token, so each `probe_*` function contains the same code as that dispatch arm.
-//!
-//! Driven by `analyze.py`, see `README.md`.
+//! Driven by `analyze.py`, see `../README.md`.
 
-#[path = "../../src/codec/filter/byte_shuffle/kernels.rs"]
-pub mod byte_shuffle;
-#[path = "../../src/codec/filter/bit_shuffle/kernels.rs"]
-pub mod bit_shuffle;
+use jix::dtype::Dtyped;
+use jix::storage::Plain;
+use jix::{Array, ArrayStorage, Dim, ReadContext, Ty};
+use ndarray::ArrayView1;
 
-/// The fearless_simd token of the level enabled at compile time.
-#[inline(always)]
-#[allow(unreachable_code)]
-fn simd() -> impl fearless_simd::Simd {
-    // SAFETY: the probe is only compiled, never run.
-    #[cfg(target_feature = "avx512vbmi")]
-    return unsafe { fearless_simd::Avx512::assume_supported() };
-    #[cfg(all(target_feature = "avx2", not(target_feature = "avx512vbmi")))]
-    return unsafe { fearless_simd::Avx2::assume_supported() };
-    #[cfg(all(target_feature = "sse4.2", not(target_feature = "avx2")))]
-    return unsafe { fearless_simd::Sse4_2::assume_supported() };
-    #[cfg(all(target_feature = "sse2", not(target_feature = "sse4.2")))]
-    return unsafe { fearless_simd::Sse2::assume_supported() };
-    #[cfg(target_arch = "aarch64")]
-    return unsafe { fearless_simd::Neon::assume_supported() };
+type P<'a, T> = Array<Plain<&'a (), Ty<T>, Dim<1>>>;
+
+fn plain<T: Dtyped>(x: &[T]) -> P<'_, T> {
+    Array::plain_ndarray_view(ArrayView1::from(x)).unwrap()
+}
+
+fn write<S: ArrayStorage>(x: Array<S>, out: &mut [u8]) {
+    let n = x.shape()[0];
+    x.to_ndarray_slice(&[0..n], out, &ReadContext::default())
+        .unwrap();
 }
 
 macro_rules! probe {
-    ($($name:ident => $f:ident::<$itemsize:literal>;)*) => {
-        $(
-            #[unsafe(no_mangle)]
-            pub fn $name(src: &[u8], dst: &mut [u8]) -> usize {
-                byte_shuffle::$f::<_, $itemsize>(simd(), src, dst)
-            }
-        )*
-    };
+    ($($t:ident: $neg:ident, $add:ident, $chain:ident, $longchain:ident;)*) => { $(
+        #[unsafe(no_mangle)]
+        pub fn $neg(a: &[$t], out: &mut [u8]) {
+            write(-plain(a), out)
+        }
+        #[unsafe(no_mangle)]
+        pub fn $add(a: &[$t], b: &[$t], out: &mut [u8]) {
+            write(plain(a) + plain(b), out)
+        }
+        /// `(a + b) * (c - d)`.
+        #[unsafe(no_mangle)]
+        pub fn $chain(a: &[$t], b: &[$t], c: &[$t], d: &[$t], out: &mut [u8]) {
+            write((plain(a) + plain(b)) * (plain(c) - plain(d)), out)
+        }
+        /// `(a + b) * (c - d) + (e + f) * (g - h)`: more values live at once.
+        #[unsafe(no_mangle)]
+        pub fn $longchain(xs: [&[$t]; 8], out: &mut [u8]) {
+            let [a, b, c, d, e, f, g, h] = xs.map(plain);
+            write((a + b) * (c - d) + (e + f) * (g - h), out)
+        }
+    )* };
 }
-
 probe! {
-    probe_byte_shuffle_decode_2 => decode_simd::<2>;
-    probe_byte_shuffle_decode_4 => decode_simd::<4>;
-    probe_byte_shuffle_decode_8 => decode_simd::<8>;
-    probe_byte_shuffle_decode_16 => decode_simd::<16>;
-    probe_byte_shuffle_encode_2 => encode_simd::<2>;
-    probe_byte_shuffle_encode_4 => encode_simd::<4>;
-    probe_byte_shuffle_encode_8 => encode_simd::<8>;
-    probe_byte_shuffle_encode_16 => encode_simd::<16>;
+    f32: probe_ew_neg_f32, probe_ew_add_f32, probe_ew_chain_f32, probe_ew_longchain_f32;
+    f64: probe_ew_neg_f64, probe_ew_add_f64, probe_ew_chain_f64, probe_ew_longchain_f64;
+    i32: probe_ew_neg_i32, probe_ew_add_i32, probe_ew_chain_i32, probe_ew_longchain_i32;
 }
 
-
+// Mixed dtypes: the lanes follow the widest value, not the output.
+/// `(a + b).cast::<i32>()` over i64.
 #[unsafe(no_mangle)]
-pub fn probe_bit_shuffle_transpose_bit_rows(src: &[u8], dst: &mut [u8]) -> usize {
-    bit_shuffle::transpose_bit_rows_simd(simd(), src, dst)
+pub fn probe_ew_narrow_i32(a: &[i64], b: &[i64], out: &mut [u8]) {
+    write((plain(a) + plain(b)).cast::<i32>(), out)
+}
+/// `a.cast::<i64>() + b`, `a` i32.
+#[unsafe(no_mangle)]
+pub fn probe_ew_widen_i64(a: &[i32], b: &[i64], out: &mut [u8]) {
+    write(plain(a).cast::<i64>() + plain(b), out)
+}
+/// `(a + b).cast::<f32>()` over f64.
+#[unsafe(no_mangle)]
+pub fn probe_ew_narrow_f32(a: &[f64], b: &[f64], out: &mut [u8]) {
+    write((plain(a) + plain(b)).cast::<f32>(), out)
+}
+/// `a.cast::<f64>() + b`, `a` f32.
+#[unsafe(no_mangle)]
+pub fn probe_ew_widen_f64(a: &[f32], b: &[f64], out: &mut [u8]) {
+    write(plain(a).cast::<f64>() + plain(b), out)
 }
