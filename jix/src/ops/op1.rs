@@ -178,7 +178,8 @@ macro_rules! op1_simd_apply_bulk {
             xs: [$T; N],
         ) -> [Self::Output; N] {
             use crate::util::checked_transmute;
-            use fearless_simd::SimdBase;
+            #[allow(unused_imports)]
+            use fearless_simd::{SimdBase, SimdFloat, SimdInt, SimdMask};
             use std::any::TypeId;
             $(
                 if TypeId::of::<$T>() == TypeId::of::<<S::$vec as SimdBase<S>>::Element>()
@@ -313,6 +314,7 @@ macro_rules! define_op1 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident,
         type Output<T> = T,
+        $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
     ) => {
         define_op1!(
             $(#[$meta])*
@@ -321,6 +323,7 @@ macro_rules! define_op1 {
             <$($trait)::+> :: $kernel_fn,
             type Output<T> = T,
             type Output<S> = S::Item,
+            $(simd(vector): |$x| { $($vec => $body),+ },)?
         );
     };
     (
@@ -347,6 +350,7 @@ macro_rules! define_op1 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident,
         type Output = $output_type:ty,
+        $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
     ) => {
         define_op1!(
             $(#[$meta])*
@@ -355,6 +359,7 @@ macro_rules! define_op1 {
             <$($trait)::+> :: $kernel_fn,
             type Output<T> = $output_type,
             type Output<S> = $output_type,
+            $(simd(vector): |$x| { $($vec => $body),+ },)?
         );
     };
     (
@@ -1146,6 +1151,78 @@ pub(crate) mod tests {
 
     use proptest::strategy::BoxedStrategy;
     use proptest::test_runner::{Config, TestRunner};
+
+    // Kernels of the `type Output<T> = T` and `type Output = $ty` forms of `define_op1!`.
+    mod output_forms {
+        #![allow(dead_code)]
+        use crate::ops::prelude::*;
+        define_op1!(
+            /// `x.floor()`, for `output_forms_all_levels`.
+            TestFloor,
+            TestFloorKernel,
+            <num_traits::Float>::floor,
+            type Output<T> = T,
+            simd: |x| {
+                f32s => x.floor(),
+                f64s => x.floor(),
+            },
+        );
+        define_op1!(
+            /// `x.count_ones()`, for `output_forms_all_levels`.
+            TestCountOnes,
+            TestCountOnesKernel,
+            <num_traits::PrimInt>::count_ones,
+            type Output = u32,
+            simd: |x| {
+                u32s => x.count_ones(),
+            },
+        );
+
+        /// The SIMD bodies of both forms on every SIMD level of the CPU.
+        #[test]
+        fn output_forms_all_levels() {
+            use crate::ops::op1::Op1Kernel;
+            use fearless_simd::{Level, Simd};
+
+            const N: usize = 32;
+            fn check<S: Simd>(simd: S) {
+                let a: [f32; N] = std::array::from_fn(|i| (i as f32 - 10.3) * 0.7);
+                let b = a.map(f64::from);
+                let c: [u32; N] = std::array::from_fn(|i| (i as u32).wrapping_mul(0x9E37_79B9));
+                simd.vectorize(|| {
+                    assert_eq!(TestFloorKernel.apply_bulk(simd, a), a.map(f32::floor));
+                    assert_eq!(TestFloorKernel.apply_bulk(simd, b), b.map(f64::floor));
+                    assert_eq!(
+                        TestCountOnesKernel.apply_bulk(simd, c),
+                        c.map(u32::count_ones)
+                    );
+                    // A type without a SIMD body: scalar.
+                    assert_eq!(TestCountOnesKernel.apply_bulk(simd, [3u8, 255]), [2, 8]);
+                });
+            }
+
+            let level = Level::new();
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            {
+                if let Some(simd) = level.as_sse2() {
+                    check(simd);
+                }
+                if let Some(simd) = level.as_sse4_2() {
+                    check(simd);
+                }
+                if let Some(simd) = level.as_avx2() {
+                    check(simd);
+                }
+                if let Some(simd) = level.as_avx512() {
+                    check(simd);
+                }
+            }
+            #[cfg(target_arch = "aarch64")]
+            if let Some(simd) = level.as_neon() {
+                check(simd);
+            }
+        }
+    }
 
     /// `NegKernel::apply_bulk` on every SIMD level of the CPU: the `simd:` bodies of
     /// `define_op1!`, and the scalar fallback.

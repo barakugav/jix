@@ -228,7 +228,8 @@ macro_rules! op2_simd_apply_bulk {
             b: [$T2; N],
         ) -> [Self::Output; N] {
             use crate::util::checked_transmute;
-            use fearless_simd::SimdBase;
+            #[allow(unused_imports)]
+            use fearless_simd::{SimdBase, SimdFloat, SimdInt, SimdMask};
             use std::any::TypeId;
             $(
                 if TypeId::of::<$T1>() == TypeId::of::<<S::$va as SimdBase<S>>::Element>()
@@ -349,6 +350,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
         type Output = $output_type:ty,
+        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
     ) => {
         define_op2!(@typed
             $(#[$meta])*
@@ -356,6 +358,7 @@ macro_rules! define_op2 {
             $Kernel,
             <$($trait)::+> :: $kernel_fn ($($call_args)*),
             type Output = $output_type,
+            $(simd(vector): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
         );
     };
     (
