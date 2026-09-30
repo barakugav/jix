@@ -176,7 +176,7 @@ macro_rules! define_op1 {
         struct $Kernel;
         impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
         where
-            T: $($trait)::+ + crate::dtype::Dtyped,
+            T: $($trait)::+ + Copy + 'static,
         {
             type Output = <T as $($trait)::+>::Output;
 
@@ -194,28 +194,38 @@ macro_rules! define_op1 {
                     simd: S,
                     xs: [T; N],
                 ) -> [Self::Output; N] {
-                    use crate::ops::simd_kernels::{
-                        checked_transmute, is_same_type, vector_mut, vector_ref,
-                    };
+                    use crate::ops::simd_kernels::checked_transmute;
                     use fearless_simd::SimdBase;
+                    use std::any::{Any, TypeId};
                     $(
-                        if const {
-                            is_same_type::<T, <S::$vec as SimdBase<S>>::Element>()
-                                && N.is_multiple_of(<S::$vec as SimdBase<S>>::LEN)
-                        } && let Some(xs) = checked_transmute::<
-                            [T; N],
-                            [<S::$vec as SimdBase<S>>::Element; N],
-                        >(xs) {
-                            // Zeroed, not uninit: `vector_mut` hands out references into it.
+                        if TypeId::of::<T>() == TypeId::of::<<S::$vec as SimdBase<S>>::Element>()
+                            && const { N.is_multiple_of(<S::$vec as SimdBase<S>>::LEN) }
+                        {
+                            let xs = checked_transmute::<
+                                [T; N],
+                                [<S::$vec as SimdBase<S>>::Element; N],
+                            >(xs)
+                            .unwrap();
+                            let lanes = <S::$vec as SimdBase<S>>::LEN;
+                            // Zeroed, not uninit: the loop stores through references into it.
                             let mut ys = std::mem::MaybeUninit::<[Self::Output; N]>::zeroed();
-                            for c in 0..N / <S::$vec as SimdBase<S>>::LEN {
-                                let $x = <S::$vec as SimdBase<S>>::load_array_ref(
-                                    simd,
-                                    vector_ref::<S, S::$vec, N>(&xs, c),
-                                );
+                            for c in 0..N / lanes {
+                                // SAFETY: vector `c` is in bounds, as `N` is a multiple of `lanes`.
+                                let $x = <S::$vec as SimdBase<S>>::load_array_ref(simd, unsafe {
+                                    &*xs.as_ptr().cast::<<S::$vec as SimdBase<S>>::Array>().add(c)
+                                });
                                 let y = $body;
-                                let dst = vector_mut::<S, S::$vec, _, _, N>(&mut ys, c, &y);
-                                y.store_array(dst);
+                                // The body must give `lanes` lanes of `Self::Output`.
+                                assert!(
+                                    y.as_slice().len() == lanes
+                                        && Any::type_id(&y.as_slice()[0])
+                                            == TypeId::of::<Self::Output>()
+                                );
+                                // SAFETY: vector `c` of `ys` is in bounds and of `y`'s array type,
+                                // per the assert, and initialized.
+                                y.store_array(unsafe {
+                                    &mut *ys.as_mut_ptr().cast::<Self::Output>().add(c * lanes).cast()
+                                });
                             }
                             // SAFETY: zeroed, then written by the loop.
                             return unsafe { ys.assume_init() };

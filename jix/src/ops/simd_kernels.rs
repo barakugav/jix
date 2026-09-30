@@ -3,28 +3,14 @@
 //! A kernel's `apply_bulk` passes its elements here, with the scalar kernel as the fallback. The
 //! element types with a SIMD body are selected by [`TypeId`], which is resolved at compile time,
 //! so the kernels keep their generic bounds and every other type runs the scalar kernel. Op1
-//! kernels write their SIMD bodies in `define_op1!`'s `simd:` argument, over these helpers.
+//! kernels write their SIMD bodies in `define_op1!`'s `simd:` argument.
 //!
 //! Nodes of the pipeline pass `[T; N]` arrays to each other: a body loads its array into vectors
 //! and stores the results into a new array, and LLVM keeps these in registers along a chain.
 
 use std::any::TypeId;
-use std::mem::MaybeUninit;
 
 use fearless_simd::{Simd, SimdBase};
-
-use crate::dtype::{Dtype, Dtyped};
-
-/// Whether `T` and `U` are the same type, as a `const`: `TypeId`s can not be compared in a `const`
-/// on stable, so this compares dtypes. Two different types may share a dtype (a user type
-/// declaring an `f32` dtype), so pair it with [`checked_transmute`] before reinterpreting.
-pub(crate) const fn is_same_type<T: Dtyped, U: Dtyped>() -> bool {
-    let (t, u): (&Dtype, &Dtype) = (const { &T::DTYPE }, const { &U::DTYPE });
-    match (t.scalar_kind(), u.scalar_kind()) {
-        (Some(tk), Some(uk)) => tk as u8 == uk as u8 && t.itemsize() == u.itemsize(),
-        _ => false,
-    }
-}
 
 /// `x` as a `U`, if `T` is `U`.
 #[inline(always)]
@@ -34,45 +20,12 @@ pub(crate) fn checked_transmute<T: 'static, U: 'static>(x: T) -> Option<U> {
         .then(|| unsafe { std::mem::transmute_copy::<T, U>(&x) })
 }
 
-/// Vector `c` of `V` of `xs`, as the array [`SimdBase::load_array_ref`] takes.
-#[inline(always)]
-pub(crate) fn vector_ref<S: Simd, V: SimdBase<S>, const N: usize>(
-    xs: &[V::Element; N],
-    c: usize,
-) -> &V::Array {
-    assert!((c + 1) * V::LEN <= N);
-    // SAFETY: in bounds, and `V::Array` is `[V::Element; V::LEN]`.
-    unsafe { &*xs.as_ptr().cast::<V::Array>().add(c) }
-}
-
-/// Vector `c` of `ys`, as the array [`SimdBase::store_array`] of `v`, the result of an operation
-/// on vector `c` of `VIn`, takes. `v` must have `VIn::LEN` elements (checked at compile time) of
-/// type `O` (checked, resolved at compile time). `ys` must be initialized (e.g. zeroed): the
-/// elements of a SIMD vector are plain numbers, valid for any initialized bytes.
-#[inline(always)]
-pub(crate) fn vector_mut<'a, S, VIn, V, O, const N: usize>(
-    ys: &'a mut MaybeUninit<[O; N]>,
-    c: usize,
-    v: &V,
-) -> &'a mut V::Array
-where
-    S: Simd,
-    VIn: SimdBase<S>,
-    V: SimdBase<S, Element: 'static>,
-    O: 'static,
-{
-    let _ = v;
-    const { assert!(V::LEN == VIn::LEN) };
-    assert!(TypeId::of::<V::Element>() == TypeId::of::<O>());
-    assert!((c + 1) * V::LEN <= N);
-    // SAFETY: in bounds, `V::Array` is `[O; V::LEN]`, and the bytes are initialized.
-    unsafe { &mut *ys.as_mut_ptr().cast::<V::Array>().add(c) }
-}
-
 /// Vector `c` of `xs`. `(c + 1) * V::LEN <= N`.
 #[inline(always)]
 fn load<S: Simd, V: SimdBase<S>, const N: usize>(simd: S, xs: &[V::Element; N], c: usize) -> V {
-    V::load_array_ref(simd, vector_ref::<S, V, N>(xs, c))
+    debug_assert!((c + 1) * V::LEN <= N);
+    // SAFETY: in bounds per the caller, and `V::Array` is `[V::Element; V::LEN]`.
+    V::load_array_ref(simd, unsafe { &*xs.as_ptr().cast::<V::Array>().add(c) })
 }
 
 /// Store `v` as vector `c` of `xs`. `(c + 1) * V::LEN <= N`.
@@ -188,19 +141,6 @@ mod tests {
             // Not a multiple of the vector length: scalar.
             assert_eq!(super::add(simd, [1.5f32], [2.0], |x, y| x + y), [3.5]);
         });
-    }
-
-    #[test]
-    fn is_same_type() {
-        use super::is_same_type;
-        const {
-            assert!(is_same_type::<f32, f32>());
-            assert!(is_same_type::<[i32; 8], [i32; 8]>());
-            assert!(!is_same_type::<f32, i32>());
-            assert!(!is_same_type::<f32, u32>());
-            assert!(!is_same_type::<i32, i64>());
-            assert!(!is_same_type::<[f32; 4], [f32; 8]>());
-        }
     }
 
     #[test]
