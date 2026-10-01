@@ -594,12 +594,18 @@ def asm_loops(lines: list[str], isa: str) -> list[Loop]:
                 bodies.setdefault(h, set()).update(body)
 
     vreg = re.compile(r"\b[xyz]mm\d+\b" if isa == "x86" else r"\b[vq]\d+\b")
+    # x86 scalar float instructions (`vaddsd`, `vcvtsd2ss`; not the packed integer `vpminsd`) and
+    # moves between general and xmm registers also use xmm registers.
+    x86_scalar = re.compile(r"^(?!v?p|vbroadcast).*((ss|sd)$|s[sd]2)|^v?mov[dq]$|^v?p(insr|extr)")
+
+    def is_vector(x: str) -> bool:
+        return bool(vreg.search(x)) and not (isa == "x86" and x86_scalar.search(mnemonic(x)))
 
     def make(h: int, body: set[int]) -> Loop:
         start, end = min(blocks[b][0] for b in body), max(blocks[b][1] for b in body) - 1
         instrs = [x for x in lines[start : end + 1] if not is_label(x)]
         header = LABEL_RE.match(lines[blocks[h][0]]).group(1)
-        return Loop(start, end, header, size=len(instrs), vec=sum(1 for x in instrs if vreg.search(x)) / len(instrs))
+        return Loop(start, end, header, size=len(instrs), vec=sum(1 for x in instrs if is_vector(x)) / len(instrs))
 
     loops = sorted((make(h, body) for h, body in bodies.items()), key=lambda lp: (lp.start, -lp.end))
     for a in loops:
