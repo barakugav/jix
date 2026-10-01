@@ -62,7 +62,6 @@ pub(crate) mod _traits {
         /// Narrow `2K` vectors to `K` vectors (in order) of lanes half as wide.
         pub(super) trait NarrowVectors<S> {
             type Narrowed;
-            fn narrow(self) -> Self::Narrowed;
             fn saturating_narrow(self) -> Self::Narrowed;
         }
         macro_rules! impl_vectors_steps {
@@ -77,10 +76,6 @@ pub(crate) mod _traits {
                 }
                 impl<S: Simd, V: SimdNarrow<S>> NarrowVectors<S> for [V; $k2] {
                     type Narrowed = [V::Narrowed; $k];
-                    #[inline(always)]
-                    fn narrow(self) -> Self::Narrowed {
-                        array_from_fn_inline(|i| self[2 * i].narrow(self[2 * i + 1]))
-                    }
                     #[inline(always)]
                     fn saturating_narrow(self) -> Self::Narrowed {
                         array_from_fn_inline(|i| self[2 * i].saturating_narrow(self[2 * i + 1]))
@@ -127,8 +122,7 @@ pub(crate) mod _traits {
 
     /// Implement `Cast<$dst>` for `$src`. `$bulk` is `scalar` for the default `cast_bulk`, or the
     /// steps of its SIMD body on arrays of vectors:
-    /// - `widen` / `narrow` / `saturating_narrow`: to lanes twice / half as wide.
-    /// - `bitcast`: same-width integers.
+    /// - `widen` / `saturating_narrow`: to lanes twice / half as wide.
     /// - `float`: integers to floats of the same width.
     /// - `truncate`, or `truncate(T)` for an intermediate `T`: floats to integers of the same
     ///   width, saturating, NaN to 0.
@@ -159,7 +153,7 @@ pub(crate) mod _traits {
                 #[allow(unused_imports)]
                 use {
                     crate::util::ArrayExt,
-                    fearless_simd::{Bytes, SimdCvtFloat, SimdCvtTruncate},
+                    fearless_simd::{SimdCvtFloat, SimdCvtTruncate},
                     simd::{NarrowVectors, SimdLane, WidenVectors},
                 };
                 simd::cast_bulk::<
@@ -176,15 +170,12 @@ pub(crate) mod _traits {
             }
         };
         // The vectors a step takes per vector it gives (`@vectors_in`), and vice versa.
-        (@vectors_in narrow) => { 2 };
         (@vectors_in saturating_narrow) => { 2 };
         (@vectors_in $step:ident) => { 1 };
         (@vectors_out widen) => { 2 };
         (@vectors_out $step:ident) => { 1 };
         (@step widen, $v:ident) => { WidenVectors::<S>::widen($v) };
-        (@step narrow, $v:ident) => { NarrowVectors::<S>::narrow($v) };
         (@step saturating_narrow, $v:ident) => { NarrowVectors::<S>::saturating_narrow($v) };
-        (@step bitcast, $v:ident) => { $v.map_inline(|x| x.bitcast()) };
         (@step float, $v:ident) => { $v.map_inline(SimdCvtFloat::float_from) };
         (@step truncate, $v:ident) => { $v.map_inline(SimdCvtTruncate::truncate_from_precise) };
         (@step truncate($T:ident), $v:ident) => {
@@ -214,9 +205,9 @@ pub(crate) mod _traits {
     /// Implement the casts of each `$src_type` to the integers and floats as `$bulk` of each group
     /// of them (see `impl_cast`), and to `f16`, `bool` and the complex types without SIMD.
     macro_rules! impl_cast_num {
-        ($src_type:ident, $($rest:ident),+ $groups:tt) => {
-            impl_cast_num!($src_type $groups);
-            impl_cast_num!($($rest),+ $groups);
+        ($src_type:ident, $($rest:ident),+ { $($groups:tt)* }) => {
+            impl_cast_num!($src_type { $($groups)* });
+            impl_cast_num!($($rest),+ { $($groups)* });
         };
         ($src_type:ident { $($($dst_type:ident),+: $bulk:tt;)* }) => {
             $($(impl_cast!($src_type => $dst_type, $bulk);)+)*
@@ -243,61 +234,28 @@ pub(crate) mod _traits {
             }
         };
     }
-    // Integer to integer casts change the width in the source's signedness, then bitcast. Float to
-    // narrower integer casts saturate at each step, as `as` saturates. `i64`/`u64` to `f32` are
-    // scalar: through `f64` they would round twice.
-    impl_cast_num!(i8, u8 {
-        i8, u8: [bitcast];
-        i16, u16: [widen, bitcast];
-        i32, u32: [widen, widen, bitcast];
-        i64, u64: [widen, widen, widen, bitcast];
-        f32: [widen, widen, float];
-        f64: [widen, widen, widen, float];
+    // SIMD bodies only where static analysis (cargo-asm + llvm-mca) shows them faster on every
+    // platform. LLVM already vectorizes the other casts as well or better: it widens integers in
+    // one instruction (e.g. `vpmovsxbd`) where fearless_simd widens one step at a time, and casts
+    // `f64` to narrower integers without the `f64` -> `i64` conversion that is emulated before
+    // AVX-512. Same-type casts are copies. Float to narrower integer casts saturate at each step,
+    // as `as` saturates.
+    impl_cast_num!(i8, u8, i16, u16, i32, u32, i64 {
+        i8, i16, i32, i64, u8, u16, u32, u64, f32, f64: scalar;
     });
-    impl_cast_num!(i16, u16 {
-        i8, u8: [narrow, bitcast];
-        i16, u16: [bitcast];
-        i32, u32: [widen, bitcast];
-        i64, u64: [widen, widen, bitcast];
-        f32: [widen, float];
-        f64: [widen, widen, float];
-    });
-    impl_cast_num!(i32, u32 {
-        i8, u8: [narrow, narrow, bitcast];
-        i16, u16: [narrow, bitcast];
-        i32, u32: [bitcast];
-        i64, u64: [widen, bitcast];
-        f32: [float];
-        f64: [widen, float];
-    });
-    impl_cast_num!(i64, u64 {
-        i8, u8: [narrow, narrow, narrow, bitcast];
-        i16, u16: [narrow, narrow, bitcast];
-        i32, u32: [narrow, bitcast];
-        i64, u64: [bitcast];
-        f32: scalar;
+    impl_cast_num!(u64 {
+        i8, i16, i32, i64, u8, u16, u32, u64, f32: scalar;
         f64: [float];
     });
     impl_cast_num!(f32 {
-        i8: [truncate(i32), saturating_narrow, saturating_narrow];
-        u8: [truncate(u32), saturating_narrow, saturating_narrow];
-        i16: [truncate(i32), saturating_narrow];
+        i8, i16, u8, f32, f64: scalar;
         u16: [truncate(u32), saturating_narrow];
         i32, u32: [truncate];
         i64, u64: [widen, truncate];
-        f32: [];
-        f64: [widen];
     });
     impl_cast_num!(f64 {
-        i8: [truncate(i64), saturating_narrow, saturating_narrow, saturating_narrow];
-        u8: [truncate(u64), saturating_narrow, saturating_narrow, saturating_narrow];
-        i16: [truncate(i64), saturating_narrow, saturating_narrow];
-        u16: [truncate(u64), saturating_narrow, saturating_narrow];
-        i32: [truncate(i64), saturating_narrow];
-        u32: [truncate(u64), saturating_narrow];
+        i8, i16, i32, u8, u16, u32, f32, f64: scalar;
         i64, u64: [truncate];
-        f32: [narrow];
-        f64: [];
     });
     #[cfg(feature = "half")]
     impl_cast_num!(f16 { i8, i16, i32, i64, u8, u16, u32, u64, f32, f64: scalar; });
