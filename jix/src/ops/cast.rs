@@ -34,7 +34,7 @@ pub(crate) mod _traits {
 
     /// Building blocks of the SIMD [`Cast::cast_bulk`] impls.
     mod simd {
-        use crate::util::ArrayExt;
+        use crate::util::{array_from_fn_inline, ArrayExt};
         use fearless_simd::{Simd, SimdBase, SimdElement, SimdNarrow, SimdWiden};
 
         /// An element type with a native SIMD vector type.
@@ -72,18 +72,18 @@ pub(crate) mod _traits {
                     #[inline(always)]
                     fn widen(self) -> Self::Widened {
                         let halves = self.map_inline(V::widen);
-                        std::array::from_fn(|i| if i % 2 == 0 { halves[i / 2].0 } else { halves[i / 2].1 })
+                        array_from_fn_inline(|i| if i % 2 == 0 { halves[i / 2].0 } else { halves[i / 2].1 })
                     }
                 }
                 impl<S: Simd, V: SimdNarrow<S>> NarrowVectors<S> for [V; $k2] {
                     type Narrowed = [V::Narrowed; $k];
                     #[inline(always)]
                     fn narrow(self) -> Self::Narrowed {
-                        std::array::from_fn(|i| self[2 * i].narrow(self[2 * i + 1]))
+                        array_from_fn_inline(|i| self[2 * i].narrow(self[2 * i + 1]))
                     }
                     #[inline(always)]
                     fn saturating_narrow(self) -> Self::Narrowed {
-                        std::array::from_fn(|i| self[2 * i].saturating_narrow(self[2 * i + 1]))
+                        array_from_fn_inline(|i| self[2 * i].saturating_narrow(self[2 * i + 1]))
                     }
                 }
             )*};
@@ -113,11 +113,12 @@ pub(crate) mod _traits {
             }
             let mut ys = [B::default(); N];
             for c in 0..N / chunk {
-                let x = std::array::from_fn(|k| {
+                let x = array_from_fn_inline(|k| {
                     <A::V<S> as SimdBase<S>>::from_slice(simd, &xs[c * chunk + k * la..][..la])
                 });
-                for (k, y) in f(x).into_iter().enumerate() {
-                    y.store_slice(&mut ys[c * chunk + k * lb..][..lb]);
+                let y = f(x);
+                for k in 0..KB {
+                    y[k].store_slice(&mut ys[c * chunk + k * lb..][..lb]);
                 }
             }
             ys
