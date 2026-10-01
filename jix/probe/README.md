@@ -800,11 +800,16 @@ live at once (as in `longchain`, where the same-dtype k was tuned); these probes
 
 ## SIMD bodies of the ops (`results/py-*`)
 
-`--source py`, against `results/py-baseline` (the ops' auto-vectorized scalar kernels, before any
-`simd:` body but Neg / Add / Sub / Mul in f32 / f64 / i32). Speedup per platform: the geomean of
-baseline / new cycles over the platform's CPUs. Bold: >= 3% faster, italics: >= 3% slower.
-`results/py-tier0` is the first set of bodies, `results/py-tier0b` the retuned bool outputs and
-Round.
+`--source py`. Speedup per platform: the geomean of baseline / new cycles over the platform's
+CPUs. Bold: >= 3% faster, italics: >= 3% slower.
+
+Asm loops are matched to IR loops by the IR block names of verbose asm. Before that (matching by
+shape, vector share and size), the hot loop measured was often a tail loop, mostly in the
+baseline: `results/py-baseline`, `py-tier0`, `py-tier0b`, `py-cast`, `py-cast2` and `py-cast3` are
+from that analysis and are not reliable. The current ones:
+- `results/py-baseline3`: the ops' auto-vectorized scalar kernels, before any `simd:` body.
+- `results/py-head3` / `py-head4`: the kept bodies (`py-head4`: Cast and the shifts revised).
+- `results/py-allsimd3`: a Cast body for every integer / float pair.
 
 Most bodies match the baseline exactly (Add, Sub, Neg, Abs, Square, And / Or / Xor / Not, integer
 Maximum / Minimum, Floor, Ceil): LLVM already vectorized the scalar kernel, and the explicit body
@@ -812,65 +817,62 @@ gives the same code. They are kept, as the SIMD path of those ops. The notable o
 
 | kernel | SIMD body | x86_64 | x86_64-v2 | x86_64-v3 | x86_64-v4 | i686 | aarch64 | aarch64-apple |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| `bitwise_shift_right_i32` | kept | 1.00x | **11.42x** | 1.00x | 1.00x | 1.00x | **1.05x** | 1.00x |
-| `bitwise_shift_left_i32` | kept | 1.02x | **5.98x** | 1.00x | 1.00x | **1.13x** | 1.01x | 1.00x |
+| `bitwise_shift_right_i32` | kept | 1.00x | **1.25x** | 1.00x | 1.00x | 1.00x | **1.05x** | 1.00x |
 | `maximum_f32` | kept | **1.17x** | **2.59x** | **1.16x** | 1.00x | **3.59x** | **1.09x** | **1.17x** |
 | `maximum_f64` | kept | **1.17x** | **1.13x** | **3.30x** | 1.00x | **1.71x** | **1.09x** | **1.16x** |
 | `div_f32` | kept | **2.17x** | **1.31x** | 1.00x | 1.00x | **2.80x** | 1.00x | 1.00x |
 | `div_f64` | kept | 1.00x | **1.03x** | **2.53x** | 1.00x | 1.00x | 1.00x | 1.00x |
+| `sqrt_f32` | kept | 1.00x | **1.14x** | 1.00x | 1.00x | 1.00x | 1.00x | 1.00x |
 | `sqrt_f64` | kept | 1.00x | 1.00x | **1.95x** | 1.00x | 1.00x | 1.00x | 1.00x |
 | `count_zeros_i32_u32` | kept | 1.00x | **1.31x** | **1.72x** | 1.00x | **1.34x** | 0.98x | 1.00x |
-| `count_ones_i32_u32` | removed | _0.82x_ | **1.18x** | **1.88x** | 1.00x | _0.92x_ | 1.00x | 1.00x |
-| `bitwise_rotate_right_i32_u32` | removed | _0.75x_ | _0.57x_ | **1.04x** | 1.00x | _0.69x_ | 1.01x | 1.00x |
-| `bitwise_shift_right_u8` | removed | 1.00x | 1.00x | 0.99x | _0.63x_ | 1.00x | _0.96x_ | _0.96x_ |
-| `mul_i8` | removed | **1.22x** | **1.05x** | 1.00x | 1.00x | **1.70x** | _0.94x_ | 1.00x |
-| `less_f32_bool` | removed | _0.40x_ | _0.37x_ | **1.33x** | 0.99x | _0.72x_ | _0.93x_ | _0.57x_ |
-| `less_i64_bool` | removed | 1.00x | 1.00x | 1.00x | 1.00x | 1.00x | _0.37x_ | _0.47x_ |
-| `is_nan_f64_bool` | removed | _0.48x_ | _0.70x_ | _0.43x_ | **1.07x** | _0.20x_ | _0.47x_ | _0.52x_ |
-| `round_f32` | removed | _0.10x_ | _0.69x_ | _0.71x_ | _0.91x_ | _0.24x_ | _0.59x_ | _0.38x_ |
+| `bitwise_shift_left_i32` | removed | 1.02x | _0.31x_ | 1.00x | 1.00x | **1.13x** | 1.01x | 1.00x |
 
-- Kept where faster without being slower anywhere: 32-bit shifts (no per-lane shift on SSE4.2,
-  which LLVM scalarizes), float Maximum / Minimum (NaN-propagating with a `select`), float Div,
-  f64 Sqrt, CountZeros. Removed where slower on some platform: rotates, 8/16/64-bit shifts,
-  CountOnes, i8 Mul / Square.
-- `bool` outputs (comparisons, IsNan / IsFinite / IsInfinite) are removed: LLVM packs the
-  comparison masks of the scalar kernel into bytes better than the `mask` mode (lanes stored and
-  compared to 0; `to_bitmask` then per lane, the first version, was 3-10x slower).
-- Round (halves away from zero) is removed: LLVM lowers the scalar `round` better (e.g. one
-  `frinta` on NEON) than the body (`trunc(|x| + 0.5 - ulp)` with `x`'s sign). Note that on SSE2 the
-  baseline calls `roundf` (free in llvm-mca), so its cost there is understated.
+- The 32-bit shift left body is removed: LLVM vectorizes the scalar kernel's `x << n` as a multiply
+  by `2^n` (`pslld 23` + `cvttps2dq` + `pmulld`) where fearless_simd's per-lane shift extracts the
+  lanes on SSE4.2. The bodies removed before (rotates, 8/16/64-bit shifts, CountOnes, i8 Mul /
+  Square, `bool` outputs, Round) were judged by the old analysis.
 
-### Cast (`results/py-cast*`)
+### Cast
 
 `Cast::cast_bulk` (the Cast kernel's `apply_bulk`) has SIMD bodies per pair of types, as steps on
-arrays of vectors (`widen`, `saturating_narrow`, `float`, `truncate`). `results/py-cast2` has a
-body for every integer / float pair, `results/py-cast3` only the kept ones (the other cast kernels
-match the baseline exactly there). Notable ones:
+arrays of vectors (`widen`, `narrow`, `bitcast`, `float`, `truncate`). Kept where faster or even
+(within 5%) on every platform, even ones too so that a fused chain of ops stays in vectors:
 
 | kernel | SIMD body | x86_64 | x86_64-v2 | x86_64-v3 | x86_64-v4 | i686 | aarch64 | aarch64-apple |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| `cast_f32_i32` | kept | 1.00x | **6.02x** | **1.95x** | **2.00x** | 1.00x | 0.99x | 1.00x |
-| `cast_f32_u32` | kept | 1.00x | **2.82x** | **1.94x** | **1.99x** | 1.00x | 0.99x | 1.00x |
-| `cast_f32_u16` | kept | **3.91x** | **2.10x** | **1.97x** | **2.00x** | 1.00x | 1.00x | 0.97x |
-| `cast_f32_i64` | kept | _0.96x_ | 0.98x | **1.58x** | **1.94x** | 1.00x | **1.03x** | **1.53x** |
-| `cast_f32_u64` | kept | _0.95x_ | 0.97x | **4.07x** | **1.97x** | 1.01x | **1.03x** | **1.53x** |
-| `cast_f64_i64` | kept | 1.00x | 1.00x | **2.14x** | **1.99x** | 1.00x | 1.00x | 1.00x |
-| `cast_f64_u64` | kept | 1.00x | 1.00x | **5.53x** | **1.99x** | 1.00x | 1.00x | 1.00x |
+| `cast_f32_i32` | kept | 1.00x | **6.02x** | **13.69x** | **19.57x** | 1.00x | 0.99x | 1.00x |
+| `cast_f32_u32` | kept | 1.00x | **2.82x** | **6.13x** | **43.69x** | 1.00x | 0.99x | 1.00x |
+| `cast_f32_i64` | kept | _0.96x_ | 0.98x | **1.58x** | **7.13x** | 1.00x | **1.03x** | **1.53x** |
+| `cast_f32_u64` | kept | _0.95x_ | 0.97x | **4.07x** | **10.63x** | 1.01x | **1.03x** | **1.53x** |
+| `cast_f64_i64` | kept | 1.00x | 1.00x | **2.14x** | **9.79x** | 1.00x | 1.00x | 1.00x |
+| `cast_f64_u64` | kept | 1.00x | 1.00x | **5.53x** | **15.43x** | 1.00x | 1.00x | 1.00x |
 | `cast_u64_f64` | kept | 1.00x | **1.13x** | **1.20x** | 1.00x | 1.00x | 1.00x | 1.00x |
-| `cast_i8_i32` | removed | **1.20x** | _0.72x_ | _0.55x_ | _0.58x_ | **1.31x** | **1.25x** | 1.00x |
-| `cast_i16_f64` | removed | _0.36x_ | _0.45x_ | _0.42x_ | _0.94x_ | _0.31x_ | **1.69x** | _0.51x_ |
-| `cast_i32_i8` | removed | _0.50x_ | _0.82x_ | _0.72x_ | _0.83x_ | _0.89x_ | _0.87x_ | _0.51x_ |
-| `cast_i32_f64` | removed | _0.28x_ | _0.43x_ | _0.38x_ | _0.85x_ | _0.17x_ | **1.13x** | **1.35x** |
-| `cast_i64_i16` | removed | _0.14x_ | _0.47x_ | **1.21x** | _0.42x_ | _0.31x_ | _0.95x_ | _0.67x_ |
-| `cast_f32_i8` | removed | _0.10x_ | **1.14x** | **2.00x** | **2.00x** | _0.19x_ | **1.28x** | **1.48x** |
+| `cast_i32_f32` | kept | 1.00x | 1.00x | 1.00x | 1.00x | 1.00x | 0.99x | 1.00x |
+| `cast_i16_i8` | kept | 1.00x | 1.00x | **1.73x** | 1.00x | 1.00x | _0.92x_ | 1.00x |
+| `cast_i32_i16` | kept | 1.00x | 1.00x | 1.00x | 1.00x | 1.00x | _0.92x_ | 1.00x |
+| `cast_i64_i32` | kept | 1.00x | 1.00x | 1.00x | 1.00x | 1.00x | _0.92x_ | 1.00x |
+| `cast_i16_i32` | removed | 0.97x | _0.84x_ | 1.00x | 1.00x | 0.99x | **1.10x** | **1.17x** |
+| `cast_i8_i32` | removed | **1.20x** | _0.72x_ | _0.55x_ | _0.58x_ | **1.31x** | **1.25x** | **1.13x** |
 | `cast_f32_f64` | removed | _0.74x_ | _0.97x_ | 1.00x | 1.00x | _0.67x_ | **1.06x** | **1.17x** |
-| `cast_f64_i32` | removed | **3.99x** | _0.72x_ | _0.75x_ | **2.00x** | **7.39x** | **1.43x** | _0.76x_ |
-| `cast_f64_u8` | removed | _0.24x_ | _0.34x_ | _0.22x_ | **2.00x** | 1.00x | _0.25x_ | _0.18x_ |
-| `cast_f64_f32` | removed | 1.00x | 1.00x | _0.51x_ | _0.77x_ | _0.43x_ | 1.02x | _0.93x_ |
+| `cast_f32_u16` | removed | _0.58x_ | **2.10x** | **3.71x** | **13.56x** | _0.48x_ | 1.00x | 0.97x |
+| `cast_f32_i8` | removed | _0.60x_ | **4.49x** | **8.17x** | **10.54x** | _0.58x_ | **1.28x** | **1.48x** |
+| `cast_i32_f64` | removed | _0.28x_ | _0.43x_ | _0.38x_ | _0.85x_ | _0.17x_ | **1.13x** | **1.35x** |
+| `cast_i64_f64` | removed | 1.00x | _0.95x_ | **3.52x** | 1.00x | 1.00x | 1.00x | 1.00x |
+| `cast_f64_i32` | removed | _0.54x_ | _0.72x_ | **1.49x** | **5.90x** | _0.26x_ | **1.72x** | **2.75x** |
+| `cast_f64_f32` | removed | 1.00x | 1.00x | 1.00x | _0.77x_ | 1.00x | 1.02x | 1.00x |
+| `cast_f32` | removed | 1.00x | 1.00x | 1.00x | 1.00x | _0.34x_ | 1.00x | 1.00x |
 
-- Kept where faster on some platform and at most 5% slower on any: float to 32 / 64-bit integers
-  (saturating, NaN to 0: LLVM scalarizes `as` on SSE2 / SSE4.2 / AVX2), f32 -> u16, u64 -> f64.
-- Removed: integer widening by more than one step (fearless_simd widens one step at a time, LLVM
-  in one instruction, e.g. `vpmovsxbd`), integer narrowing, integer to f64 (through the emulated
-  i64 -> f64 before AVX-512), f64 to narrower integers (through the emulated f64 -> i64), f32 <->
-  f64, and same-type casts (copies, slower on i686's fallback level).
+- The aarch64 0.92x of the narrowings is the same instructions as the baseline (`uzp1`).
+- Removed, as slower on some platform (often much faster on others; a body per SIMD level would
+  keep those):
+  - Integer widening and f32 -> f64: fearless_simd's `widen` loads a full vector and shifts out
+    its high half (`psrldq` / `movhlps`) before `pmovsx` / `cvtps2pd`, where LLVM folds two
+    half-width loads into them.
+  - Integer to f64 and f64 to narrower integers on SSE2 / SSE4.2: through i64 <-> f64, which
+    fearless_simd emulates (magic numbers) where LLVM converts the lanes with `cvtsi2sd` /
+    `cvttsd2si`; on AVX2 / AVX-512 the emulation wins.
+  - f32 to 8 / 16-bit integers on SSE2: fearless_simd's precise f32 -> u32 is scalarized with
+    branches, where LLVM clamps (`minss` / `maxss`) branch-free.
+  - f64 -> f32 on AVX-512: `narrow` joins the two halves (`vinsertf32x8`, port 5 like
+    `vcvtpd2ps`), where LLVM stores each half.
+  - Same-type casts: copies, slower on i686's fallback level.
