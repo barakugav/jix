@@ -364,7 +364,9 @@ def compile_crate(platform: Platform, source: Source) -> tuple[Path, Path]:
         f.unlink()
     # cargo does not re-emit them for an up-to-date crate: rebuild it (only it).
     (source.crate_dir / "src" / "lib.rs").touch()
-    emit = ["--emit=asm,llvm-ir", *(["-Cllvm-args=-x86-asm-syntax=intel"] if platform.isa == "x86" else [])]
+    # Verbose asm names each block's IR block (`.LBB0_5: # %vector.body`), to match the loops.
+    emit = ["--emit=asm,llvm-ir", "-Zverbose-asm"]
+    emit += ["-Cllvm-args=-x86-asm-syntax=intel"] if platform.isa == "x86" else []
     # rlib: nothing is linked, so any rustup target works without its linker.
     cmd = ["cargo", "rustc", "--release", "--lib", "--crate-type", "rlib", "--target", platform.target, "--", *emit]
     with BUILD_SLOTS:
@@ -477,6 +479,7 @@ class Loop:
     # loop and its scalar remainder, whose sizes can rank differently in IR and asm.
     vec: float = 0.0
     ir: IrValues | None = None  # IR only: the function's values, to resolve SCEV operands
+    blocks: set[str] = field(default_factory=set)  # asm only: the IR names of the loop's blocks
 
     def shape(self) -> tuple:
         return tuple(c.shape() for c in self.children)
@@ -522,15 +525,23 @@ def is_call(isa: str, mn: str) -> bool:
     return mn in ("bl", "bla", "bctrl", "blrl")  # ppc (`blr` is a return there)
 
 
-def clean_lines(asm: str, comment: str) -> list[str]:
-    """Strip comments, blank lines, directives and the function-name label."""
+def clean_lines(asm: str, comment: str, block_names: dict[int, str] | None = None) -> list[str]:
+    """Strip comments, blank lines, directives and the function-name label. `block_names` gets the
+    IR name of the block starting at each line, from the verbose asm comments: after a label, or on
+    a comment line of its own for a block without one (`# %bb.3: # %vector.ph`)."""
     out = []
+    pending = None
     for line in asm.splitlines()[1:]:
         if comment in line:
-            line = line[: line.index(comment)]
+            line, note = line[: line.index(comment)], line[line.index(comment) :]
+            if m := re.search(r"%([\w.\-$]+)\s*$", note):
+                pending = m.group(1)
         s = line.strip()
         if not s or (s.startswith(".") and not is_label(s)):
             continue
+        if pending is not None and block_names is not None:
+            block_names[len(out)] = pending
+        pending = None
         out.append(s)
     return out
 
@@ -542,7 +553,7 @@ def is_unconditional(isa: str, mn: str) -> bool:
     return mn in ("b", "br", "ret", "udf", "brk")
 
 
-def asm_loops(lines: list[str], isa: str) -> list[Loop]:
+def asm_loops(lines: list[str], isa: str, block_names: dict[int, str] | None = None) -> list[Loop]:
     """The natural loops of the asm: back edges (to a block that dominates the branch) and the
     blocks that reach them. A loop spans the lines from its first to its last block, so a rotated
     loop entered in the middle is found, and a backward jump that is not a back edge (e.g. to a
@@ -605,7 +616,9 @@ def asm_loops(lines: list[str], isa: str) -> list[Loop]:
         start, end = min(blocks[b][0] for b in body), max(blocks[b][1] for b in body) - 1
         instrs = [x for x in lines[start : end + 1] if not is_label(x)]
         header = LABEL_RE.match(lines[blocks[h][0]]).group(1)
-        return Loop(start, end, header, size=len(instrs), vec=sum(1 for x in instrs if is_vector(x)) / len(instrs))
+        names = {n for b in body for i in range(*blocks[b]) if (n := (block_names or {}).get(i)) is not None}
+        vec = sum(1 for x in instrs if is_vector(x)) / len(instrs)
+        return Loop(start, end, header, size=len(instrs), vec=vec, blocks=names)
 
     loops = sorted((make(h, body) for h, body in bodies.items()), key=lambda lp: (lp.start, -lp.end))
     for a in loops:
@@ -840,6 +853,14 @@ def attach_trip_counts(asm_roots: list[Loop], ir_roots: list[Loop]) -> bool:
     """
     if sorted(r.shape() for r in asm_roots) != sorted(r.shape() for r in ir_roots):
         return False
+    # By name: the asm loop holding the IR loop's header block (verbose asm), if one and only one.
+    by_name = [[a for a in asm_roots if i.header in a.blocks] for i in ir_roots]
+    if all(len(m) == 1 for m in by_name) and len({id(m[0]) for m in by_name}) == len(ir_roots):
+        for i, [a] in zip(ir_roots, by_name):
+            a.trip_count, a.trip_expr, a.ir = i.trip_count, i.trip_expr, i.ir
+            if a.shape() != i.shape() or not attach_trip_counts(a.children, i.children):
+                return False
+        return True
     for shape in {r.shape() for r in asm_roots}:
         a_group = sorted((r for r in asm_roots if r.shape() == shape), key=lambda r: (r.vec > 0.25, r.size))
         i_group = sorted((r for r in ir_roots if r.shape() == shape), key=lambda r: (r.vec > 0.25, r.size))
@@ -1144,11 +1165,12 @@ def analyze_kernel(platform: Platform, kernel: Kernel, b: Build, mca: str, out_d
     asm_path.parent.mkdir(parents=True, exist_ok=True)
     asm_path.write_text(asm)
 
-    lines = clean_lines(asm, platform.comment)
+    block_names: dict[int, str] = {}
+    lines = clean_lines(asm, platform.comment, block_names)
     fn_instrs = sum(1 for line in lines if not is_label(line))
     warnings = []
     try:
-        roots = asm_loops(lines, platform.isa)
+        roots = asm_loops(lines, platform.isa, block_names)
     except RuntimeError as e:  # a loop LLVM laid out in non-contiguous pieces
         roots = []
         warnings.append(str(e))
