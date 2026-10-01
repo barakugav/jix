@@ -168,8 +168,19 @@ where
 /// vector `$x: S::$vec` when `$T` is its element (`TypeId`, resolved at compile time) and `N` a
 /// multiple of its length. The first such arm is taken, else the scalar `apply`. The body gives, per
 /// mode, a `vector` of `LEN` lanes of the kernel's output, or the `mask` of `S::$vec`, stored as
-/// the kernel's `bool` output.
+/// the kernel's `bool` output. Or, for a kernel over our own trait, `bulk: $T, $bulk_fn`: the
+/// trait's own bulk function `$bulk_fn(xs, simd)`, with its SIMD bodies typed per impl.
 macro_rules! op1_simd_apply_bulk {
+    (bulk: $T:ty, $($bulk_fn:tt)+) => {
+        #[inline(always)]
+        fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+            &self,
+            simd: S,
+            xs: [$T; N],
+        ) -> [Self::Output; N] {
+            $($bulk_fn)+(xs, simd)
+        }
+    };
     ($mode:ident: $T:ty, |$x:ident| { $($vec:ident => $body:expr),+ $(,)? }) => {
         #[inline(always)]
         fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
@@ -247,6 +258,7 @@ macro_rules! define_op1 {
         <$($trait:ident)::+> :: $kernel_fn:ident,
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
         $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         struct $Kernel;
         impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
@@ -262,6 +274,9 @@ macro_rules! define_op1 {
 
             $(
                 crate::ops::op1::op1_simd_apply_bulk!(vector: T, |$x| { $($vec => $body),+ });
+            )?
+            $(
+                crate::ops::op1::op1_simd_apply_bulk!(bulk: T, T::$bulk_fn);
             )?
         }
         $(#[$meta])*
@@ -318,6 +333,7 @@ macro_rules! define_op1 {
         <$($trait:ident)::+> :: $kernel_fn:ident,
         type Output<T> = T,
         $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op1!(
             $(#[$meta])*
@@ -327,6 +343,7 @@ macro_rules! define_op1 {
             type Output<T> = T,
             type Output<S> = S::Item,
             $(simd(vector): |$x| { $($vec => $body),+ },)?
+            $(simd_bulk: $bulk_fn,)?
         );
     };
     (
@@ -336,6 +353,7 @@ macro_rules! define_op1 {
         <$($trait:ident)::+> :: $kernel_fn:ident,
         type Output = bool,
         $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op1!(
             $(#[$meta])*
@@ -345,6 +363,7 @@ macro_rules! define_op1 {
             type Output<T> = bool,
             type Output<S> = bool,
             $(simd(mask): |$x| { $($vec => $body),+ },)?
+            $(simd_bulk: $bulk_fn,)?
         );
     };
     (
@@ -354,6 +373,7 @@ macro_rules! define_op1 {
         <$($trait:ident)::+> :: $kernel_fn:ident,
         type Output = $output_type:ty,
         $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op1!(
             $(#[$meta])*
@@ -363,6 +383,7 @@ macro_rules! define_op1 {
             type Output<T> = $output_type,
             type Output<S> = $output_type,
             $(simd(vector): |$x| { $($vec => $body),+ },)?
+            $(simd_bulk: $bulk_fn,)?
         );
     };
     (
@@ -373,6 +394,7 @@ macro_rules! define_op1 {
         type Output<T> = $output_type_t:ty,
         type Output<S> = $output_type_s:ty,
         $(simd($mode:ident): |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         struct $Kernel;
         impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
@@ -388,6 +410,9 @@ macro_rules! define_op1 {
 
             $(
                 crate::ops::op1::op1_simd_apply_bulk!($mode: T, |$x| { $($vec => $body),+ });
+            )?
+            $(
+                crate::ops::op1::op1_simd_apply_bulk!(bulk: T, T::$bulk_fn);
             )?
         }
         $(#[$meta])*
@@ -1244,6 +1269,44 @@ pub(crate) mod tests {
                 assert_eq!(FloorKernel.apply_bulk(simd, [1.5f32, 2.5]), [1.0, 2.0]);
             });
         }
+        for_each_simd_level!(check);
+    }
+
+    /// A kernel with `simd_bulk:` calls its trait's bulk function.
+    #[test]
+    fn simd_bulk_calls_trait_fn() {
+        use crate::util::for_each_simd_level;
+
+        #[allow(dead_code)]
+        mod test_twice {
+            use crate::ops::prelude::*;
+            use fearless_simd::Simd;
+            pub trait TestTwice {
+                type Output;
+                fn twice(self) -> Self::Output;
+                fn twice_bulk<S: Simd, const N: usize>(xs: [Self; N], simd: S) -> [Self::Output; N]
+                where
+                    Self: Sized;
+            }
+            impl TestTwice for i32 {
+                type Output = i32;
+                fn twice(self) -> i32 {
+                    self * 2
+                }
+                fn twice_bulk<S: Simd, const N: usize>(xs: [i32; N], _simd: S) -> [i32; N] {
+                    // Not `twice`, so the test sees which is called.
+                    xs.map(|x| x * 2 + 1)
+                }
+            }
+            define_op1!(TestTwiceOp, TestTwiceKernel, <TestTwice>::twice, simd_bulk: twice_bulk,);
+
+            pub(super) fn check<S: Simd>(simd: S) {
+                use crate::ops::op1::Op1Kernel;
+                assert_eq!(TestTwiceKernel.apply(3), 6);
+                assert_eq!(TestTwiceKernel.apply_bulk(simd, [3, 4]), [7, 9]);
+            }
+        }
+        use test_twice::check;
         for_each_simd_level!(check);
     }
 

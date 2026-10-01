@@ -389,6 +389,8 @@ where
     fn apply(&self, x: T1) -> Self::Output {
         x.cast()
     }
+
+    crate::ops::op1::op1_simd_apply_bulk!(bulk: T1, <T1 as crate::scalar::Cast<T2>>::cast_bulk);
 }
 impl<S, T> Cast<S, T>
 where
