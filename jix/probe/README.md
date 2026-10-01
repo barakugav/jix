@@ -839,3 +839,38 @@ gives the same code. They are kept, as the SIMD path of those ops. The notable o
 - Round (halves away from zero) is removed: LLVM lowers the scalar `round` better (e.g. one
   `frinta` on NEON) than the body (`trunc(|x| + 0.5 - ulp)` with `x`'s sign). Note that on SSE2 the
   baseline calls `roundf` (free in llvm-mca), so its cost there is understated.
+
+### Cast (`results/py-cast*`)
+
+`Cast::cast_bulk` (the Cast kernel's `apply_bulk`) has SIMD bodies per pair of types, as steps on
+arrays of vectors (`widen`, `saturating_narrow`, `float`, `truncate`). `results/py-cast2` has a
+body for every integer / float pair, `results/py-cast3` only the kept ones (the other cast kernels
+match the baseline exactly there). Notable ones:
+
+| kernel | SIMD body | x86_64 | x86_64-v2 | x86_64-v3 | x86_64-v4 | i686 | aarch64 | aarch64-apple |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `cast_f32_i32` | kept | 1.00x | **6.02x** | **1.95x** | **2.00x** | 1.00x | 0.99x | 1.00x |
+| `cast_f32_u32` | kept | 1.00x | **2.82x** | **1.94x** | **1.99x** | 1.00x | 0.99x | 1.00x |
+| `cast_f32_u16` | kept | **3.91x** | **2.10x** | **1.97x** | **2.00x** | 1.00x | 1.00x | 0.97x |
+| `cast_f32_i64` | kept | _0.96x_ | 0.98x | **1.58x** | **1.94x** | 1.00x | **1.03x** | **1.53x** |
+| `cast_f32_u64` | kept | _0.95x_ | 0.97x | **4.07x** | **1.97x** | 1.01x | **1.03x** | **1.53x** |
+| `cast_f64_i64` | kept | 1.00x | 1.00x | **2.14x** | **1.99x** | 1.00x | 1.00x | 1.00x |
+| `cast_f64_u64` | kept | 1.00x | 1.00x | **5.53x** | **1.99x** | 1.00x | 1.00x | 1.00x |
+| `cast_u64_f64` | kept | 1.00x | **1.13x** | **1.20x** | 1.00x | 1.00x | 1.00x | 1.00x |
+| `cast_i8_i32` | removed | **1.20x** | _0.72x_ | _0.55x_ | _0.58x_ | **1.31x** | **1.25x** | 1.00x |
+| `cast_i16_f64` | removed | _0.36x_ | _0.45x_ | _0.42x_ | _0.94x_ | _0.31x_ | **1.69x** | _0.51x_ |
+| `cast_i32_i8` | removed | _0.50x_ | _0.82x_ | _0.72x_ | _0.83x_ | _0.89x_ | _0.87x_ | _0.51x_ |
+| `cast_i32_f64` | removed | _0.28x_ | _0.43x_ | _0.38x_ | _0.85x_ | _0.17x_ | **1.13x** | **1.35x** |
+| `cast_i64_i16` | removed | _0.14x_ | _0.47x_ | **1.21x** | _0.42x_ | _0.31x_ | _0.95x_ | _0.67x_ |
+| `cast_f32_i8` | removed | _0.10x_ | **1.14x** | **2.00x** | **2.00x** | _0.19x_ | **1.28x** | **1.48x** |
+| `cast_f32_f64` | removed | _0.74x_ | _0.97x_ | 1.00x | 1.00x | _0.67x_ | **1.06x** | **1.17x** |
+| `cast_f64_i32` | removed | **3.99x** | _0.72x_ | _0.75x_ | **2.00x** | **7.39x** | **1.43x** | _0.76x_ |
+| `cast_f64_u8` | removed | _0.24x_ | _0.34x_ | _0.22x_ | **2.00x** | 1.00x | _0.25x_ | _0.18x_ |
+| `cast_f64_f32` | removed | 1.00x | 1.00x | _0.51x_ | _0.77x_ | _0.43x_ | 1.02x | _0.93x_ |
+
+- Kept where faster on some platform and at most 5% slower on any: float to 32 / 64-bit integers
+  (saturating, NaN to 0: LLVM scalarizes `as` on SSE2 / SSE4.2 / AVX2), f32 -> u16, u64 -> f64.
+- Removed: integer widening by more than one step (fearless_simd widens one step at a time, LLVM
+  in one instruction, e.g. `vpmovsxbd`), integer narrowing, integer to f64 (through the emulated
+  i64 -> f64 before AVX-512), f64 to narrower integers (through the emulated f64 -> i64), f32 <->
+  f64, and same-type casts (copies, slower on i686's fallback level).

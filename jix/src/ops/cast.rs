@@ -23,12 +23,14 @@ pub(crate) mod _traits {
         /// Casts each of `xs` to `D`, the same as [`cast`](Self::cast), vectorized with `simd`
         /// where the pair of types has SIMD support (the default ignores `simd`).
         #[inline(always)]
+        #[allow(clippy::redundant_closure)]
         fn cast_bulk<S: fearless_simd::Simd, const N: usize>(xs: [Self; N], simd: S) -> [D; N]
         where
             Self: Sized,
         {
             let _ = simd;
-            crate::util::ArrayExt::map_inline(xs, Self::cast)
+            // A closure, not the fn item `Self::cast`: its `FnMut` shim is not always inlined.
+            crate::util::ArrayExt::map_inline(xs, |x| Self::cast(x))
         }
     }
 
@@ -163,7 +165,7 @@ pub(crate) mod _traits {
                     { 1 $(* impl_cast!(@vectors_in $step))* },
                     { 1 $(* impl_cast!(@vectors_out $step))* },
                     N,
-                >(simd, xs, <Self as Cast<$dst_type>>::cast, |v| {
+                >(simd, xs, |x| <Self as Cast<$dst_type>>::cast(x), |v| {
                     $(let v = impl_cast!(@step $step $(($T))?, v);)*
                     v
                 })
