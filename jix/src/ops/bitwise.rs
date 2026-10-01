@@ -207,14 +207,8 @@ define_op2!(
     BitwiseShiftLeft,
     BitwiseShiftLeftKernel,
     <core::ops::Shl>::shl(a, b),
-    // The amount modulo the bit width, as in release builds (debug builds panic). 32-bit only:
-    // the others are not faster than the auto-vectorized scalar kernel (static analysis).
-    simd: |a, b| {
-        (i32s, i32s) => a << (b & 31),
-        (i32s, u32s) => a << (b & 31).bitcast::<S::i32s>(),
-        (u32s, i32s) => a << (b & 31).bitcast::<S::u32s>(),
-        (u32s, u32s) => a << (b & 31),
-    },
+    // No SIMD body: LLVM vectorizes the scalar kernel's left shift (as a multiply by `2^b`) where
+    // fearless_simd extracts the lanes (SSE4.2), so no body is faster (static analysis).
 );
 
 define_op2!(
@@ -567,8 +561,8 @@ mod tests {
     #[test]
     fn simd_bodies_all_levels() {
         use super::{
-            AndKernel, BitwiseShiftLeftKernel, BitwiseShiftRightKernel, CountOnesKernel,
-            CountZerosKernel, NotKernel, OrKernel, XorKernel,
+            AndKernel, BitwiseShiftRightKernel, CountOnesKernel, CountZerosKernel, NotKernel,
+            OrKernel, XorKernel,
         };
         use crate::ops::op1::Op1Kernel;
         use crate::ops::op2::Op2Kernel;
@@ -630,7 +624,6 @@ mod tests {
                     };
                 }
                 ints!(not!(NotKernel, ()));
-                shifts!(BitwiseShiftLeftKernel, wrapping_shl);
                 shifts!(BitwiseShiftRightKernel, wrapping_shr);
                 case1!(CountOnesKernel, i32, i32::count_ones);
                 case1!(CountOnesKernel, u32, u32::count_ones);
