@@ -19,9 +19,120 @@ pub(crate) mod _traits {
     pub trait Cast<D> {
         /// Casts `self` to `D`.
         fn cast(self) -> D;
+
+        /// Casts each of `xs` to `D`, the same as [`cast`](Self::cast), vectorized with `simd`
+        /// where the pair of types has SIMD support (the default ignores `simd`).
+        #[inline(always)]
+        fn cast_bulk<S: fearless_simd::Simd, const N: usize>(xs: [Self; N], simd: S) -> [D; N]
+        where
+            Self: Sized,
+        {
+            let _ = simd;
+            crate::util::ArrayExt::map_inline(xs, Self::cast)
+        }
     }
+
+    /// Building blocks of the SIMD [`Cast::cast_bulk`] impls.
+    mod simd {
+        use crate::util::ArrayExt;
+        use fearless_simd::{Simd, SimdBase, SimdElement, SimdNarrow, SimdWiden};
+
+        /// An element type with a native SIMD vector type.
+        pub(super) trait SimdLane: SimdElement {
+            type V<S: Simd>: SimdBase<S, Element = Self>;
+        }
+        macro_rules! impl_simd_lane {
+            ($($t:ident => $v:ident),*) => {$(
+                impl SimdLane for $t {
+                    type V<S: Simd> = S::$v;
+                }
+            )*};
+        }
+        impl_simd_lane!(
+            i8 => i8s, i16 => i16s, i32 => i32s, i64 => i64s,
+            u8 => u8s, u16 => u16s, u32 => u32s, u64 => u64s,
+            f32 => f32s, f64 => f64s
+        );
+
+        /// Widen `K` vectors to `2K` vectors (in order) of lanes twice as wide.
+        pub(super) trait WidenVectors<S> {
+            type Widened;
+            fn widen(self) -> Self::Widened;
+        }
+        /// Narrow `2K` vectors to `K` vectors (in order) of lanes half as wide.
+        pub(super) trait NarrowVectors<S> {
+            type Narrowed;
+            fn narrow(self) -> Self::Narrowed;
+            fn saturating_narrow(self) -> Self::Narrowed;
+        }
+        macro_rules! impl_vectors_steps {
+            ($($k:literal => $k2:literal),*) => {$(
+                impl<S: Simd, V: SimdWiden<S>> WidenVectors<S> for [V; $k] {
+                    type Widened = [V::Widened; $k2];
+                    #[inline(always)]
+                    fn widen(self) -> Self::Widened {
+                        let halves = self.map_inline(V::widen);
+                        std::array::from_fn(|i| if i % 2 == 0 { halves[i / 2].0 } else { halves[i / 2].1 })
+                    }
+                }
+                impl<S: Simd, V: SimdNarrow<S>> NarrowVectors<S> for [V; $k2] {
+                    type Narrowed = [V::Narrowed; $k];
+                    #[inline(always)]
+                    fn narrow(self) -> Self::Narrowed {
+                        std::array::from_fn(|i| self[2 * i].narrow(self[2 * i + 1]))
+                    }
+                    #[inline(always)]
+                    fn saturating_narrow(self) -> Self::Narrowed {
+                        std::array::from_fn(|i| self[2 * i].saturating_narrow(self[2 * i + 1]))
+                    }
+                }
+            )*};
+        }
+        impl_vectors_steps!(1 => 2, 2 => 4, 4 => 8);
+
+        /// Cast `xs` by `f`, which takes `KA` vectors of `A` and gives `KB` vectors of `B`, the same
+        /// elements. If `N` is not a multiple of the elements `f` takes, cast by `scalar`.
+        #[inline(always)]
+        pub(super) fn cast_bulk<S, A, B, const KA: usize, const KB: usize, const N: usize>(
+            simd: S,
+            xs: [A; N],
+            scalar: impl Fn(A) -> B,
+            f: impl Fn([A::V<S>; KA]) -> [B::V<S>; KB],
+        ) -> [B; N]
+        where
+            S: Simd,
+            A: SimdLane,
+            B: SimdLane,
+        {
+            let la = <A::V<S> as SimdBase<S>>::LEN;
+            let lb = <B::V<S> as SimdBase<S>>::LEN;
+            const { assert!(KA * <A::V<S> as SimdBase<S>>::LEN == KB * <B::V<S> as SimdBase<S>>::LEN) };
+            let chunk = KA * la;
+            if !N.is_multiple_of(chunk) {
+                return xs.map_inline(scalar);
+            }
+            let mut ys = [B::default(); N];
+            for c in 0..N / chunk {
+                let x = std::array::from_fn(|k| {
+                    <A::V<S> as SimdBase<S>>::from_slice(simd, &xs[c * chunk + k * la..][..la])
+                });
+                for (k, y) in f(x).into_iter().enumerate() {
+                    y.store_slice(&mut ys[c * chunk + k * lb..][..lb]);
+                }
+            }
+            ys
+        }
+    }
+
+    /// Implement `Cast<$dst>` for `$src`. `$bulk` is `scalar` for the default `cast_bulk`, or the
+    /// steps of its SIMD body on arrays of vectors:
+    /// - `widen` / `narrow` / `saturating_narrow`: to lanes twice / half as wide.
+    /// - `bitcast`: same-width integers.
+    /// - `float`: integers to floats of the same width.
+    /// - `truncate`, or `truncate(T)` for an intermediate `T`: floats to integers of the same
+    ///   width, saturating, NaN to 0.
     macro_rules! impl_cast {
-        ($src_type:ident => $dst_type:ident) => {
+        ($src_type:ident => $dst_type:ident, $bulk:tt) => {
             impl Cast<$dst_type> for $src_type {
                 #[inline(always)]
                 fn cast(self) -> $dst_type {
@@ -31,7 +142,52 @@ pub(crate) mod _traits {
                     let value = impl_cast!(@to $dst_type, value);
                     value
                 }
+
+                impl_cast!(@bulk $src_type => $dst_type, $bulk);
             }
+        };
+
+        (@bulk $src_type:ident => $dst_type:ident, scalar) => {};
+        (@bulk $src_type:ident => $dst_type:ident, [$($step:ident $(($T:ident))?),*]) => {
+            #[inline(always)]
+            #[allow(clippy::identity_op, clippy::let_and_return)]
+            fn cast_bulk<S: fearless_simd::Simd, const N: usize>(
+                xs: [Self; N],
+                simd: S,
+            ) -> [$dst_type; N] {
+                #[allow(unused_imports)]
+                use {
+                    crate::util::ArrayExt,
+                    fearless_simd::{Bytes, SimdCvtFloat, SimdCvtTruncate},
+                    simd::{NarrowVectors, SimdLane, WidenVectors},
+                };
+                simd::cast_bulk::<
+                    S,
+                    $src_type,
+                    $dst_type,
+                    { 1 $(* impl_cast!(@vectors_in $step))* },
+                    { 1 $(* impl_cast!(@vectors_out $step))* },
+                    N,
+                >(simd, xs, <Self as Cast<$dst_type>>::cast, |v| {
+                    $(let v = impl_cast!(@step $step $(($T))?, v);)*
+                    v
+                })
+            }
+        };
+        // The vectors a step takes per vector it gives (`@vectors_in`), and vice versa.
+        (@vectors_in narrow) => { 2 };
+        (@vectors_in saturating_narrow) => { 2 };
+        (@vectors_in $step:ident) => { 1 };
+        (@vectors_out widen) => { 2 };
+        (@vectors_out $step:ident) => { 1 };
+        (@step widen, $v:ident) => { WidenVectors::<S>::widen($v) };
+        (@step narrow, $v:ident) => { NarrowVectors::<S>::narrow($v) };
+        (@step saturating_narrow, $v:ident) => { NarrowVectors::<S>::saturating_narrow($v) };
+        (@step bitcast, $v:ident) => { $v.map_inline(|x| x.bitcast()) };
+        (@step float, $v:ident) => { $v.map_inline(SimdCvtFloat::float_from) };
+        (@step truncate, $v:ident) => { $v.map_inline(SimdCvtTruncate::truncate_from_precise) };
+        (@step truncate($T:ident), $v:ident) => {
+            $v.map_inline(|x| -> <$T as SimdLane>::V<S> { SimdCvtTruncate::truncate_from_precise(x) })
         };
 
         (@from bool, $value:expr) => {
@@ -54,21 +210,18 @@ pub(crate) mod _traits {
             ($value) as $type
         };
     }
+    /// Implement the casts of each `$src_type` to the integers and floats as `$bulk` of each group
+    /// of them (see `impl_cast`), and to `f16`, `bool` and the complex types without SIMD.
     macro_rules! impl_cast_num {
-        ($src_type:ident) => {
-            impl_cast!($src_type => i8);
-            impl_cast!($src_type => i16);
-            impl_cast!($src_type => i32);
-            impl_cast!($src_type => i64);
-            impl_cast!($src_type => u8);
-            impl_cast!($src_type => u16);
-            impl_cast!($src_type => u32);
-            impl_cast!($src_type => u64);
+        ($src_type:ident, $($rest:ident),+ $groups:tt) => {
+            impl_cast_num!($src_type $groups);
+            impl_cast_num!($($rest),+ $groups);
+        };
+        ($src_type:ident { $($($dst_type:ident),+: $bulk:tt;)* }) => {
+            $($(impl_cast!($src_type => $dst_type, $bulk);)+)*
             #[cfg(feature = "half")]
-            impl_cast!($src_type => f16);
-            impl_cast!($src_type => f32);
-            impl_cast!($src_type => f64);
-            impl_cast!($src_type => bool);
+            impl_cast!($src_type => f16, scalar);
+            impl_cast!($src_type => bool, scalar);
             #[cfg(all(feature = "half", feature = "num-complex"))]
             impl_cast_num!(@impl_to_complex, $src_type, Complex<f16>);
             #[cfg(feature = "num-complex")]
@@ -89,19 +242,65 @@ pub(crate) mod _traits {
             }
         };
     }
-    impl_cast_num!(i8);
-    impl_cast_num!(i16);
-    impl_cast_num!(i32);
-    impl_cast_num!(i64);
-    impl_cast_num!(u8);
-    impl_cast_num!(u16);
-    impl_cast_num!(u32);
-    impl_cast_num!(u64);
+    // Integer to integer casts change the width in the source's signedness, then bitcast. Float to
+    // narrower integer casts saturate at each step, as `as` saturates. `i64`/`u64` to `f32` are
+    // scalar: through `f64` they would round twice.
+    impl_cast_num!(i8, u8 {
+        i8, u8: [bitcast];
+        i16, u16: [widen, bitcast];
+        i32, u32: [widen, widen, bitcast];
+        i64, u64: [widen, widen, widen, bitcast];
+        f32: [widen, widen, float];
+        f64: [widen, widen, widen, float];
+    });
+    impl_cast_num!(i16, u16 {
+        i8, u8: [narrow, bitcast];
+        i16, u16: [bitcast];
+        i32, u32: [widen, bitcast];
+        i64, u64: [widen, widen, bitcast];
+        f32: [widen, float];
+        f64: [widen, widen, float];
+    });
+    impl_cast_num!(i32, u32 {
+        i8, u8: [narrow, narrow, bitcast];
+        i16, u16: [narrow, bitcast];
+        i32, u32: [bitcast];
+        i64, u64: [widen, bitcast];
+        f32: [float];
+        f64: [widen, float];
+    });
+    impl_cast_num!(i64, u64 {
+        i8, u8: [narrow, narrow, narrow, bitcast];
+        i16, u16: [narrow, narrow, bitcast];
+        i32, u32: [narrow, bitcast];
+        i64, u64: [bitcast];
+        f32: scalar;
+        f64: [float];
+    });
+    impl_cast_num!(f32 {
+        i8: [truncate(i32), saturating_narrow, saturating_narrow];
+        u8: [truncate(u32), saturating_narrow, saturating_narrow];
+        i16: [truncate(i32), saturating_narrow];
+        u16: [truncate(u32), saturating_narrow];
+        i32, u32: [truncate];
+        i64, u64: [widen, truncate];
+        f32: [];
+        f64: [widen];
+    });
+    impl_cast_num!(f64 {
+        i8: [truncate(i64), saturating_narrow, saturating_narrow, saturating_narrow];
+        u8: [truncate(u64), saturating_narrow, saturating_narrow, saturating_narrow];
+        i16: [truncate(i64), saturating_narrow, saturating_narrow];
+        u16: [truncate(u64), saturating_narrow, saturating_narrow];
+        i32: [truncate(i64), saturating_narrow];
+        u32: [truncate(u64), saturating_narrow];
+        i64, u64: [truncate];
+        f32: [narrow];
+        f64: [];
+    });
     #[cfg(feature = "half")]
-    impl_cast_num!(f16);
-    impl_cast_num!(f32);
-    impl_cast_num!(f64);
-    impl_cast_num!(bool);
+    impl_cast_num!(f16 { i8, i16, i32, i64, u8, u16, u32, u64, f32, f64: scalar; });
+    impl_cast_num!(bool { i8, i16, i32, i64, u8, u16, u32, u64, f32, f64: scalar; });
 
     #[cfg(feature = "num-complex")]
     macro_rules! impl_cast_complex_to_complex {
@@ -698,5 +897,38 @@ mod tests {
                 .cast::<complex_f64>(),
             &expected_c64_c64,
         );
+    }
+
+    /// `cast_bulk` of every pair of integer and float types, at every SIMD level, matches `cast`.
+    #[test]
+    fn cast_bulk_all_levels() {
+        use crate::scalar::Cast;
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! cases {
+                ($($src:ident),* => $dsts:tt) => {
+                    $(cases!(@src $src => $dsts);)*
+                };
+                (@src $src:ident => [$($dst:ident),*]) => {$({
+                    for shift in [0, 5] {
+                        let xs = <$src>::simd_test_values(shift);
+                        assert_same_elements(
+                            <$src as Cast<$dst>>::cast_bulk(xs, simd),
+                            |i| <$src as Cast<$dst>>::cast(xs[i]),
+                            concat!(stringify!($src), " => ", stringify!($dst)),
+                        );
+                    }
+                })*};
+            }
+            simd.vectorize(|| {
+                cases!(
+                    i8, i16, i32, i64, u8, u16, u32, u64, f32, f64
+                        => [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]
+                );
+            });
+        }
+        for_each_simd_level!(check);
     }
 }
