@@ -169,3 +169,29 @@ Speedup = base cycles / new cycles (> 1: new is faster), per kernel, then geomea
 - **aarch64** (cortex-a72): slowest `leading_zeros_i32_u32` 0.95, `neg_complex128` 0.95, `neg_complex64` 0.95, `cast_f32_f64` 0.95, `cast_i16_f32` 0.96, `cast_i32_f64` 0.96, `cast_u16_f32` 0.96, `cast_u32_f64` 0.96; fastest `not_bool` 54.50, `clamp_op_descriptor_u8` 54.44, `clamp_op_descriptor_i8` 54.44, `neg_i8` 54.44, `abs_i8` 54.44
 - **i686** (skylake): slowest `clamp_op_descriptor_f64` 0.43, `div_complex64` 0.44, `div_complex128` 0.77, `bitwise_shift_left_i32` 0.82, `bitwise_rotate_left_i32_u32` 0.83, `bitwise_rotate_right_i32_u32` 0.83, `cast_bool_f64` 0.89, `square_complex64` 0.91; fastest `cast_f32` 3.77, `div_f32` 2.79, `cast_i32_i8` 2.65, `cast_u8_i64` 2.59, `cast_bool_i64` 2.50
 
+
+## SIMD bodies per op (`A` vs `B`)
+
+Geomean speedup of the SIMD bodies over the auto-vectorized scalar kernels (`B` cycles / `A` cycles), per op and platform (geomean over its CPUs per kernel, then over the kernels), over the dtypes that have a body; `max` / `min`: the extreme kernel; `[same/n]`: kernels within 1% (the same code). Casts: the int / float pairs, whose bodies exist on some levels only.
+
+| op (SIMD dtypes) | x86_64-v4 | x86_64-v3 | x86_64-v2 | x86_64 | aarch64-apple | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.00x [6/6 same] | 0.99x (min 0.95 `f32`) [1/6 same] | 1.00x [6/6 same] |
+| sub | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.00x [6/6 same] | 0.99x (min 0.95 `f32`) [1/6 same] | 1.00x [6/6 same] |
+| mul | 1.00x [5/5 same] | 1.00x [5/5 same] | 1.00x [3/5 same] | 1.00x [5/5 same] | 1.00x [5/5 same] | 0.96x (min 0.95 `f32`) [1/5 same] | 1.00x [5/5 same] |
+| square | 1.00x [5/5 same] | 1.00x [5/5 same] | 0.99x (min 0.96 `i32`) [4/5 same] | 1.00x [5/5 same] | 1.00x [5/5 same] | 1.00x [4/5 same] | 1.00x [5/5 same] |
+| div | 1.00x [2/2 same] | 1.59x (max 2.5 `f64`) [1/2 same] | 1.16x (max 1.3 `f32`) [0/2 same] | 1.47x (max 2.2 `f32`) [1/2 same] | 1.00x [2/2 same] | 1.00x [2/2 same] | 1.67x (max 2.8 `f32`) [1/2 same] |
+| neg | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.01x [4/6 same] | 1.00x [6/6 same] |
+| abs | 1.00x [6/6 same] | 1.00x [5/6 same] | 1.00x [5/6 same] | 1.00x [6/6 same] | 1.00x [6/6 same] | 1.01x [4/6 same] | 1.00x [6/6 same] |
+| floor | 1.00x [2/2 same] | 1.00x [2/2 same] | 1.00x [2/2 same] | - | 1.00x [2/2 same] | 0.99x [1/2 same] | - |
+| ceil | 1.00x [2/2 same] | 1.00x [2/2 same] | 1.00x [2/2 same] | - | 1.00x [2/2 same] | 0.99x [1/2 same] | - |
+| sqrt | 1.00x [2/2 same] | 1.40x (max 2.0 `f64`) [1/2 same] | 1.07x (max 1.1 `f32`) [1/2 same] | 1.00x [2/2 same] | 1.00x [2/2 same] | 1.00x [2/2 same] | 1.00x [2/2 same] |
+| maximum | 1.00x [10/10 same] | 1.14x (max 3.3 `f64`) [8/10 same] | 1.11x (max 2.6 `f32`) [8/10 same] | 1.03x (max 1.2 `f32`) [8/10 same] | 1.03x (max 1.2 `f32`) [8/10 same] | 1.02x [4/10 same] | 1.20x (max 3.6 `f32`) (min 0.97 `u16`) [6/10 same] |
+| minimum | 1.00x [10/10 same] | 1.14x (max 3.3 `f64`) [8/10 same] | 1.11x (max 2.6 `f32`) [8/10 same] | 1.03x (max 1.2 `f32`) [7/10 same] | 1.03x (max 1.2 `f32`) [8/10 same] | 1.02x [4/10 same] | 1.20x (max 3.6 `f32`) [8/10 same] |
+| and | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.01x [1/4 same] | 1.00x [4/4 same] |
+| or | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.01x [1/4 same] | 1.00x [4/4 same] |
+| xor | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.01x [1/4 same] | 1.00x [4/4 same] |
+| not | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] | 1.00x [4/4 same] |
+| bitwise_shift_right | 1.00x [2/2 same] | 1.00x [2/2 same] | 1.25x (max 1.3 `shift_right_u32`) [0/2 same] | 1.00x [2/2 same] | 1.00x [2/2 same] | 1.05x [0/2 same] | 1.00x [2/2 same] |
+| count_zeros | 1.00x [1/1 same] | 1.72x (max 1.7 `zeros_i32_u32`) [0/1 same] | 1.31x (max 1.3 `zeros_i32_u32`) [0/1 same] | 1.00x [1/1 same] | 1.00x [1/1 same] | 0.98x [0/1 same] | 1.34x (max 1.3 `zeros_i32_u32`) [0/1 same] |
+| cast | 1.73x (max 43.7 `f32_u32`) (min 0.83 `i64_i16`) [38/52 same] | 1.38x (max 13.7 `f32_i32`) [35/49 same] | 1.13x (max 6.0 `f32_i32`) (min 0.97 `f32_u64`) [39/50 same] | 1.06x (max 1.9 `u8_i64`) (min 0.94 `i16_f32`) [36/48 same] | 1.29x (max 5.1 `f64_i16`) [25/54 same] | 1.16x (max 3.8 `f64_i16`) (min 0.94 `i64_i32`) [15/54 same] | 1.01x (max 1.3 `u8_i32`) (min 0.31 `i64_i8`) [44/54 same] |
