@@ -5,7 +5,8 @@ Two sources of kernels (`--source`):
 - `py` (default): the `jix-py` extension crate, which instantiates every op for every dtype it
   dispatches. Its kernels are found automatically: every `inner_loop_contiguous` over a single op
   whose operands are leaves (`neg_f32`, `add_i32`, `equal_f64`, `cast_f32_i32`, ...).
-- `probe`: the probe crate (`src/lib.rs`), for op chains (`chain_f32`, `longchain_f32`, ...).
+- `probe`: the probe crate (`src/lib.rs`), for op chains: every `inner_loop_contiguous` over a
+  pipeline that is not a leaf, named by its expression (`mul(add(f32,f32),sub(f32,f32))`).
 
 For every platform (target triple + ISA level) the crate is compiled once in release mode with
 `--emit=asm,llvm-ir`, and for every kernel:
@@ -145,61 +146,6 @@ class Kernel:
         return {"%len": n, LAST_ARG: n}
 
 
-def _elementwise_kernel(name: str, ty: str, pipeline: str) -> Kernel:
-    """The inner loop of the element-wise pipeline for all operands contiguous,
-    `inner_loop_contiguous`. It dispatches on the SIMD level at runtime; the arm of the level that
-    the platform's target features enable is inlined into it (the fallback arm without features),
-    the higher levels are separate functions. (The baseline analyzed its predecessor,
-    `inner_loop::<T, LANES, true, true, _>`.)"""
-    size = {"f32": 4, "f64": 8, "i32": 4, "i64": 8}[ty]
-    ew = "jix::storage::elementwise_pipeline"
-    sym = f"{ew}::inner_loop_contiguous::<{ty}, {pipeline}>"
-    return Kernel(f"{name}_{ty}", sym, size)
-
-
-def _pipeline(ty: str, expr) -> str:
-    """Demangled type of the pipeline of `expr`, of element type `ty`: a leaf operand (None),
-    ("neg", x), ("cast", from_ty, x) or (op2, x, y)."""
-    if expr is None:
-        return f"jix::storage::elementwise_pipeline::OperandTyped<{ty}>"
-    op1 = "<jix::ops::op1::Op1<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
-    if expr[0] == "neg":
-        return f"{op1}::Op1Pipeline<{_pipeline(ty, expr[1])}, jix::ops::op1::NegKernel, {ty}>"
-    if expr[0] == "cast":
-        src = expr[1]
-        return f"{op1}::Op1Pipeline<{_pipeline(src, expr[2])}, jix::ops::cast::CastKernel<{ty}>, {src}>"
-    a, b = _pipeline(ty, expr[1]), _pipeline(ty, expr[2])
-    return (
-        "<jix::ops::op2::Op2<_, _, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
-        f"::Op2Pipeline<{a}, {b}, jix::ops::op2::{expr[0].capitalize()}Kernel, {ty}, {ty}>"
-    )
-
-
-# Kernels: each op chain's inner loop. Must match the `probe_*` exports in src/lib.rs.
-ELEMENTWISE_EXPRS = {
-    "neg": ("neg", None),
-    "add": ("add", None, None),
-    "chain": ("mul", ("add", None, None), ("sub", None, None)),  # (a + b) * (c - d)
-}
-# (a + b) * (c - d) + (e + f) * (g - h)
-ELEMENTWISE_EXPRS["longchain"] = ("add", ELEMENTWISE_EXPRS["chain"], ELEMENTWISE_EXPRS["chain"])
-KERNELS = [
-    _elementwise_kernel(name, ty, _pipeline(ty, expr))
-    for ty in ("f32", "f64", "i32")
-    for name, expr in ELEMENTWISE_EXPRS.items()
-]
-# Mixed dtypes: (name, output type, expr).
-KERNELS += [
-    _elementwise_kernel(name, ty, _pipeline(ty, expr))
-    for name, ty, expr in [
-        ("narrow", "i32", ("cast", "i64", ("add", None, None))),  # (a + b).cast::<i32>(), over i64
-        ("widen", "i64", ("add", ("cast", "i32", None), None)),  # a.cast::<i64>() + b, a i32
-        ("narrow", "f32", ("cast", "f64", ("add", None, None))),
-        ("widen", "f64", ("add", ("cast", "f32", None), None)),
-    ]
-]
-
-
 @dataclass
 class Source:
     """A crate whose kernels are analyzed."""
@@ -274,6 +220,37 @@ def py_kernel(symbol: str) -> Kernel | None:
     if out not in inputs:
         types.append(TYPES[out][0])
     return Kernel(f"{op}_{'_'.join(types)}", symbol, TYPES[out][1])
+
+
+# A pipeline node's type: `<jix::ops::where_op::Where<_, _, _> as ...>::read_as_elementwise_pipeline::WherePipeline<..>`.
+PIPELINE_NODE = re.compile(r"<[^<>]*(?:<[_, ]*>)?[^<>]* as [\w:]+>::read_as_elementwise_pipeline::(\w+)<(.*)>")
+
+
+def short_name(path: str) -> str:
+    """`jix::ops::op2::GreaterEqualKernel` -> `greater_equal`, `CastKernel<f32>` -> `cast_f32`."""
+    name, _, generics = path.partition("<")
+    name = re.sub(r"(?:Kernel|Pipeline)$", "", name.rsplit("::", 1)[-1])
+    name = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    return "_".join([name, *(TYPES[t][0] for t in split_generic_args(generics[:-1]))])
+
+
+def pipeline_expr(ty: str) -> str:
+    """The expression of the demangled pipeline type `ty`: `greater(mul(add(f64,f64),f64),f64)`."""
+    if m := re.fullmatch(rf"{EW}::OperandTyped<(.+)>", ty):
+        return TYPES[m.group(1)][0]
+    m = PIPELINE_NODE.fullmatch(ty)
+    node, args = m.group(1), split_generic_args(m.group(2))
+    if node in ("Op1Pipeline", "Op2Pipeline"):
+        arity = int(node[2])
+        return f"{short_name(args[arity])}({','.join(map(pipeline_expr, args[:arity]))})"
+    return f"{short_name(node)}({','.join(map(pipeline_expr, args))})"
+
+
+def probe_kernel(symbol: str) -> Kernel | None:
+    """The kernel of `symbol` if it is a contiguous inner loop over a pipeline that is not a leaf,
+    named by its expression."""
+    m = re.fullmatch(rf"{EW}::inner_loop_contiguous::<(.+?), (<.*)>", symbol)
+    return m and Kernel(pipeline_expr(m.group(2)), symbol, TYPES[m.group(1)][1])
 
 
 # --------------------------------------------------------------------------------------------------
@@ -1197,9 +1174,8 @@ def main() -> None:
 
     def select(b: Build) -> list[Kernel]:
         """The kernels to analyze in the build `b`."""
-        if source.name == "probe":
-            return [k for k in KERNELS if selected(k.name)]
-        found = {k.name: k for k in map(py_kernel, b.names) if k and selected(k.name)}
+        kernel = probe_kernel if source.name == "probe" else py_kernel
+        found = {k.name: k for k in map(kernel, b.names) if k and selected(k.name)}
         return [found[n] for n in sorted(found)]
 
     mca = find_llvm_mca(llvm_major_of_rustc())

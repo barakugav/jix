@@ -86,7 +86,11 @@ x86_64-v2/v3/v4 are the Sse4_2/Avx2/Avx512 arms, aarch64 the Neon arm, and x86_6
 features) the `Sse2` arm.
 
 Kernels (the `probe_*` functions of `src/lib.rs`, each evaluating an op chain over `Plain` arrays
-into a packed output through the public API, `to_ndarray_slice`):
+into a packed output through the public API, `to_ndarray_slice`): every `inner_loop_contiguous`
+of the build whose pipeline is not a leaf, named by its expression, with the leaves as their
+types: `mul(add(f32,f32),sub(f32,f32))`, `cast_u8(add(mul(cast_f32(u8),f32),cast_f32(u8)))`. A
+chain also instantiates loops for some of its sub-chains (`add(f32,f32)`), which are analyzed too.
+The sections up to "Mixed dtypes" name them `<chain>_<type>` instead:
 
 | kernel | expression | element types |
 |---|---|---|
@@ -100,8 +104,7 @@ into a packed output through the public API, `to_ndarray_slice`):
 What is analyzed is the pipeline's inner loop an op (chain) instantiates,
 `elementwise_pipeline::inner_loop_contiguous::<T, Pipeline>` (the baseline analyzed its
 predecessor, `inner_loop::<T, LANES, true, true, Pipeline>`): the variant for all operands (inputs
-and output) contiguous in the inner dimension. `analyze.py` finds it by its demangled name (for
-the probe, built from the op chain, `ELEMENTWISE_EXPRS`), and binds its `len` argument (elements). Its hot loop is
+and output) contiguous in the inner dimension. `analyze.py` finds it by its demangled name, and binds its `len` argument (elements). Its hot loop is
 the main loop over `LANES` elements. Not counted: the per-call setup in `to_buf_type_erased` (the
 pipeline calls the inner loop once per contiguous run of at most 8192 elements,
 `Staging::BUFFER_SIZE`) and the remainder of `len % LANES` elements. x86 asm is emitted in Intel
@@ -890,3 +893,94 @@ over `py-baseline3` across all cast kernels: x86_64 1.02x, x86_64-v2 1.07x, x86_
 x86_64-v4 1.35x, i686 1.01x, aarch64 1.08x, aarch64-apple 1.15x. No kernel slower than 0.97x except
 the aarch64 0.92x of the one-step narrowings (the same instructions, other registers) and i16 ->
 f32 on x86_64 (0.94x, the same instructions; 0.99x on i686).
+
+## Fused chains over several dtypes: `MAX_ITEMSIZE` and `WIDEST_VECTORS` (`results/mi-*`, `results/py-widest`)
+
+The probes of the previous section had two inputs, which never forced the wide values to stay live.
+New probes (`src/lib.rs`) chain several nodes whose values are wider than the output, and whose
+dtypes all differ from it:
+
+- `cast_u8(add(mul(cast_f32(u8),f32),cast_f32(u8)))`: an image blend, u8 -> f32 -> u8.
+- `greater(cast_f32(u8),f32)`: a threshold mask; `greater(mul(add(f64,f64),f64),f64)`: a compare of
+  an f64 chain; `and(greater(f32,f32),less(f32,f32))`: a range mask (all to bool).
+- `add(where(greater(f64,f64),f32,f32),f32)`: a select on an f64 compare (a top-level `where` does
+  not read through the pipeline, so it is nested in an add).
+- `cast_i16(mul(add(i64,i64),sub(i64,i64)))`, the f64 `longchain` to f32, an f32 chain computed in
+  f64 (`cast_f32(add(mul(cast_f64(f32),cast_f64(f32)),cast_f64(f32)))`) and widened i8 products to
+  i16 (`cast_i16(mul(cast_i32(i8),cast_i32(i8)))`).
+
+Same-dtype kernels are identical across all the variants below. Speedup = cycles of the base /
+cycles of the new, geomean over the platform's CPUs; bold / italics: > 3% faster / slower; `*`: a
+call in the hot loop on either side, always on the output-sized side here (`memcpy` / `memset` of
+lane arrays that no longer fit in registers, not counted by llvm-mca: those speedups are lower
+bounds).
+
+**`MAX_ITEMSIZE` (`mi-max`) vs lanes by the output (`mi-out`)**, 8 vectors (4 on i686) of the
+widest value vs of the output:
+
+| kernel | x86_64-v4 | x86_64-v3 | x86_64-v2 | x86_64 | aarch64-apple | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `add(where(greater(f64,f64),f32,f32),f32)` | **1.10** | **5.64** | 0.98 | 0.98 | _0.94_ | _0.88_ | **1.37** |
+| `and(greater(f32,f32),less(f32,f32))` | 1.00 | 0.99 | **1.44** | **1.38** | _0.89_ | _0.97_ | **2.21** |
+| `cast_f32(add(f64,f64))` | 0.99 | 0.98 | 1.00 | **1.04** | _0.92_ | _0.95_ | 0.98 |
+| `cast_f32(add(mul(add(f64,f64),sub(f64,f64)),mul(add(f64,f64),sub(f64,f64))))` | 1.00 | **1.11** | **1.04** | **1.12** | _0.95_ | _0.93_ | **1.12** |
+| `cast_f32(add(mul(cast_f64(f32),cast_f64(f32)),cast_f64(f32)))` | 1.01 | 1.01 | **1.03** | 1.02 | 0.99 | 1.01 | 0.99 |
+| `cast_i16(mul(add(i64,i64),sub(i64,i64)))` | 0.99 | **3.98\*** | **4.39\*** | **2.49\*** | **1.48** | **1.40** | 1.00 |
+| `cast_i16(mul(cast_i32(i8),cast_i32(i8)))` | 0.99 | 0.99 | 0.99 | **1.03** | _0.93_ | _0.86_ | 1.00 |
+| `cast_i32(add(i64,i64))` | 0.97 | 0.99 | 0.97 | 0.99 | _0.85_ | _0.97_ | 0.99 |
+| `cast_u8(add(mul(cast_f32(u8),f32),cast_f32(u8)))` | **1.04** | _0.93_ | **1.10** | **1.50\*** | 0.99 | **1.10** | _0.85_ |
+| `greater(cast_f32(u8),f32)` | **1.08** | 1.02 | **1.33** | **2.42\*** | 0.99 | _0.92_ | **1.53** |
+| `greater(f32,f32)` | **1.19** | **1.09** | **1.36** | **1.32** | _0.84_ | _0.93_ | **1.94** |
+| `greater(f64,f64)` | **1.14\*** | **2.16\*** | **3.03\*** | **3.18\*** | _0.83_ | 1.02 | **1.51** |
+| `greater(mul(add(f64,f64),f64),f64)` | **2.35\*** | **3.36\*** | **3.66\*** | **3.80\*** | **4.37\*** | **2.51\*** | **1.88** |
+| `less(f32,f32)` | **1.19** | **1.09** | **1.38** | **1.32** | _0.84_ | _0.93_ | **1.93** |
+
+On x86 the widest-value lanes win wherever the ratio of widest to output is large: compares to bool
+(1.1-3.8x), the i64 -> i16 chain (2.5-4.4x), the select on AVX2 (5.6x: with output lanes, LLVM
+gives up on vectorizing it). AVX-512 (32 registers) gains less, but still up to 2.35x. On aarch64,
+the rule is too strict: NEON has 32 registers and LLVM does not unroll its loops, so the halved
+iteration of `mi-max` costs 5-17% on most chains (except the ones that spill: 1.4-4.4x).
+
+**`WIDEST_VECTORS`**: the lanes are `CONTIGUOUS_VECTORS` vectors of the output, at most
+`WIDEST_VECTORS` vectors of the widest value. `WIDEST_VECTORS = 2 * CONTIGUOUS_VECTORS` (`mi-w2`)
+for all platforms is worse on x86 (0.71-0.76 on SSE compares to bool, 0.18-0.53 on AVX2 for the
+select and the f64 compares, 0.73 on i686), mixed on AVX-512 (0.90-1.07), better on aarch64:
+committed for aarch64 only (`mi-new`; x86 / i686 identical to `mi-max`, aarch64 identical to
+`mi-w2`). `mi-new` vs `mi-max` on aarch64:
+
+| kernel | aarch64-apple | aarch64 |
+|---|---:|---:|
+| `add(where(greater(f64,f64),f32,f32),f32)` | **1.06** | **1.14** |
+| `and(greater(f32,f32),less(f32,f32))` | **1.09** | **1.04** |
+| `cast_f32(add(f64,f64))` | **1.09** | **1.06** |
+| `cast_f32(add(mul(add(f64,f64),sub(f64,f64)),mul(add(f64,f64),sub(f64,f64))))` | **1.05** | **1.07** |
+| `cast_f32(add(mul(cast_f64(f32),cast_f64(f32)),cast_f64(f32)))` | 1.01 | 0.99 |
+| `cast_i16(mul(add(i64,i64),sub(i64,i64)))` | _0.89_ | _0.91_ |
+| `cast_i16(mul(cast_i32(i8),cast_i32(i8)))` | **1.08** | **1.16** |
+| `cast_i32(add(i64,i64))` | **1.17** | **1.04** |
+| `cast_u8(add(mul(cast_f32(u8),f32),cast_f32(u8)))` | 1.01 | **1.03** |
+| `greater(cast_f32(u8),f32)` | 1.01 | **1.04** |
+| `greater(f32,f32)` | **1.12** | **1.04** |
+| `greater(f64,f64)` | **1.13** | 0.97 |
+| `greater(mul(add(f64,f64),f64),f64)` | **1.07** | **1.04** |
+| `less(f32,f32)` | **1.12** | **1.04** |
+
+Net, `mi-new` vs output lanes (`mi-out`) on aarch64: the spilling chains keep their gains
+(`greater(mul(add(f64,f64),f64),f64)` 4.7x on M1, 2.6x on the others; the i64 -> i16 chain 1.3x;
+the blend 1.14x on the others), the simple compares are 4-7% behind.
+
+**On the single ops of `jix-py`** (`py-widest` vs `final`, aarch64 only, as nothing else changes):
+
+| platform | CPU | kernels | geomean | faster | slower | p10 | median | p90 | min | max |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| aarch64-apple | apple-m1 | 391 | **1.01x** | 15% | 2% | 1.00 | 1.00 | 1.09 | 0.52 | 2.56 |
+| aarch64 | cortex-a72 | 391 | **1.01x** | 17% | 2% | 1.00 | 1.00 | 1.06 | 0.74 | 1.15 |
+| aarch64 | neoverse-n1 | 391 | **1.01x** | 12% | 7% | 0.98 | 1.00 | 1.07 | 0.71 | 1.62 |
+| aarch64 | neoverse-v2 | 391 | **1.02x** | 15% | 5% | 1.00 | 1.00 | 1.10 | 0.78 | 2.27 |
+
+Faster: compares to bool (1.04-1.13x), narrowing casts (1.08-1.24x), complex128 compares and
+casts to bool (1.4-2.6x). Slower: only kernels without a SIMD body that, at 128 output bytes per
+iteration, are no longer fully unrolled by LLVM (an inner loop of 8-64 scalar trips remains in
+the hot loop): casts to f16 on M1 (`cast_i32_f16` / `cast_u32_f16` 0.52, `cast_f32_f16` 0.62,
+`cast_i64_f16` 0.80, `cast_f64_f16` 0.85), `less_f16_bool` / `greater_equal_f16_bool` (0.74-0.81)
+and `approx_eq_complex128_bool` (0.78-0.85). SIMD bodies for f16 would remove that cliff.

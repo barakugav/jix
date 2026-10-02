@@ -526,11 +526,25 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
 /// x86-64 SSE (16 registers), the longest chains prefer 4 too, a loss accepted for simplicity.
 const CONTIGUOUS_VECTORS: usize = if cfg!(target_arch = "x86") { 4 } else { 8 };
 
+/// Vectors the widest value of a pipeline (its
+/// [`MAX_ITEMSIZE`](ElementwisePipelineImpl::MAX_ITEMSIZE)) takes at most per iteration of
+/// [`inner_loop_contiguous`], when it is wider than the output: [`CONTIGUOUS_VECTORS`] would spill
+/// in fused chains that compute in a wider type than their output (`(a * b + c).cast::<u8>()`
+/// over f32, a compare to bool), as sizing by the output alone does.
+///
+/// Chosen like [`CONTIGUOUS_VECTORS`], over such chains (`probe/src/lib.rs`): on x86, more
+/// vectors of the widest value spill (up to 4x slower). NEON has 32 registers and its loops are
+/// not unrolled: twice as many are 5-15% faster on most of these chains.
+const WIDEST_VECTORS: usize = if cfg!(target_arch = "aarch64") {
+    2 * CONTIGUOUS_VECTORS
+} else {
+    CONTIGUOUS_VECTORS
+};
+
 /// [`inner_loop`] for all operands contiguous, compiled for each SIMD level and dispatched at
 /// runtime: the pipeline reads at the dispatched level,
-/// [`CONTIGUOUS_VECTORS`] vectors of the level per iteration, of the pipeline's widest element
-/// ([`MAX_ITEMSIZE`](ElementwisePipelineImpl::MAX_ITEMSIZE)): values wider than the output take
-/// more registers, so sizing by the output alone would spill in narrowing pipelines.
+/// [`CONTIGUOUS_VECTORS`] vectors of the level per iteration, fewer if the pipeline's widest
+/// value would take more than [`WIDEST_VECTORS`].
 #[inline(never)]
 fn inner_loop_contiguous<T>(
     pipeline: &impl ElementwisePipelineImpl<T>,
@@ -555,7 +569,7 @@ fn inner_loop_level<S: Simd, T: Dtyped, P: ElementwisePipelineImpl<T>>(
 ) {
     macro_rules! with_lanes {
         ($($lanes:literal)*) => {
-            match const { contiguous_lanes(S::u8s::LEN, P::MAX_ITEMSIZE) } {
+            match const { contiguous_lanes(S::u8s::LEN, size_of::<T>(), P::MAX_ITEMSIZE) } {
                 $($lanes => inner_loop_impl::<T, $lanes, true, true>(
                     dst,
                     dst_stride,
@@ -570,17 +584,27 @@ fn inner_loop_level<S: Simd, T: Dtyped, P: ElementwisePipelineImpl<T>>(
     with_lanes!(1 2 4 8 16 32 64 128 256 512);
 }
 
-/// Lanes of [`inner_loop_contiguous`] for vectors of `vector_bytes` and elements of `size`:
-/// [`CONTIGUOUS_VECTORS`] vectors, the elements per vector rounded down to a power of two (at
-/// least 1), so that it is one of the arms of `inner_loop_level`: a power of two, at most 512.
-const fn contiguous_lanes(vector_bytes: usize, size: usize) -> usize {
-    let per_vector = vector_bytes / size;
-    let per_vector = if per_vector == 0 {
-        1
+/// Lanes of [`inner_loop_contiguous`] for vectors of `vector_bytes`, an output of `size` and a
+/// widest value of `max_size`: [`CONTIGUOUS_VECTORS`] vectors of the output, at most
+/// [`WIDEST_VECTORS`] of the widest value. The elements per vector are rounded down to a power of
+/// two (at least 1), so that it is one of the arms of `inner_loop_level`: a power of two, at most
+/// 512.
+const fn contiguous_lanes(vector_bytes: usize, size: usize, max_size: usize) -> usize {
+    const fn per_vector(vector_bytes: usize, size: usize) -> usize {
+        let n = vector_bytes / size;
+        if n == 0 {
+            1
+        } else {
+            1 << n.ilog2()
+        }
+    }
+    let lanes = CONTIGUOUS_VECTORS * per_vector(vector_bytes, size);
+    let widest_lanes = WIDEST_VECTORS * per_vector(vector_bytes, max_size);
+    let lanes = if lanes < widest_lanes {
+        lanes
     } else {
-        1 << per_vector.ilog2()
+        widest_lanes
     };
-    let lanes = CONTIGUOUS_VECTORS * per_vector;
     assert!(lanes.is_power_of_two() && lanes <= 512);
     lanes
 }
@@ -939,12 +963,15 @@ mod tests {
     fn contiguous_lanes_all_sizes() {
         for vector_bytes in [16, 32, 64] {
             for size in 1..=256 {
-                let lanes = super::contiguous_lanes(vector_bytes, size);
-                assert!(
-                    lanes.is_power_of_two() && lanes <= 512,
-                    "{vector_bytes} {size}"
-                );
-                assert!(lanes * size <= super::CONTIGUOUS_VECTORS * vector_bytes.max(size));
+                for max_size in size..=256 {
+                    let lanes = super::contiguous_lanes(vector_bytes, size, max_size);
+                    assert!(
+                        lanes.is_power_of_two() && lanes <= 512,
+                        "{vector_bytes} {size} {max_size}"
+                    );
+                    assert!(lanes * size <= super::CONTIGUOUS_VECTORS * vector_bytes.max(size));
+                    assert!(lanes * max_size <= super::WIDEST_VECTORS * vector_bytes.max(max_size));
+                }
             }
         }
     }

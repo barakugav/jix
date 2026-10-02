@@ -81,6 +81,10 @@ def pct(xs: list[float], q: float) -> float:
     return xs[min(len(xs) - 1, int(q * len(xs)))]
 
 
+def fmt_kernel(kv: tuple[str, float]) -> str:
+    return f"`{kv[0]}` {kv[1]:.2f}"
+
+
 def compare(name: str, new: tuple, base_name: str, base: tuple) -> list[str]:
     (nc, ncalls, ndirs), (bc, bcalls, _) = new, base
     out = [f"## `{name}` vs `{base_name}`", ""]
@@ -113,9 +117,8 @@ def compare(name: str, new: tuple, base_name: str, base: tuple) -> list[str]:
             )
             if cpu == cpus[0]:
                 worst = sorted(s.items(), key=lambda kv: kv[1])
-                fmt = lambda kv: f"`{kv[0]}` {kv[1]:.2f}"
-                line = f"- **{p}** ({cpu}): slowest " + ", ".join(map(fmt, worst[:8]))
-                line += "; fastest " + ", ".join(map(fmt, worst[-5:][::-1]))
+                line = f"- **{p}** ({cpu}): slowest " + ", ".join(map(fmt_kernel, worst[:8]))
+                line += "; fastest " + ", ".join(map(fmt_kernel, worst[-5:][::-1]))
                 if p == "x86_64-v4":
                     g = [k for k in ks if gathers(ndirs[(p, k)])]
                     line += f"; hot loops with gathers: {len(g)}" + (f" ({', '.join(g[:10])})" if g else "")
