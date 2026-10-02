@@ -1,7 +1,7 @@
 use crate::ops::common::{define_array_op1_method, define_array_op2_method};
+use crate::ops::define_op1;
 use crate::ops::op2::define_op2;
 use crate::ops::prelude::*;
-use crate::ops::{define_op1, define_op2_rhs_fixed};
 
 pub(crate) mod _traits {
     use crate::scalar::traits_util::{
@@ -394,7 +394,7 @@ define_op2!(
     <crate::scalar::Shr>::shr(a, b),
     simd: shr_bulk,
 );
-define_op2_rhs_fixed!(
+define_op2!(
     /// Element-wise bitwise left rotation (`a.rotate_left(b as u32)`).
     ///
     /// Rotates the bits of each element of `a` left by the corresponding value in `b`
@@ -427,11 +427,10 @@ define_op2_rhs_fixed!(
     BitwiseRotateLeft,
     BitwiseRotateLeftKernel,
     <crate::scalar::RotateLeft>::rotate_left(a, b),
-    rhs = u32,
     simd: rotate_left_bulk,
 );
 
-define_op2_rhs_fixed!(
+define_op2!(
     /// Element-wise bitwise right rotation (`a.rotate_right(b as u32)`).
     ///
     /// Rotates the bits of each element of `a` right by the corresponding value in `b`
@@ -464,7 +463,6 @@ define_op2_rhs_fixed!(
     BitwiseRotateRight,
     BitwiseRotateRightKernel,
     <crate::scalar::RotateRight>::rotate_right(a, b),
-    rhs = u32,
     simd: rotate_right_bulk,
 );
 define_op1!(
