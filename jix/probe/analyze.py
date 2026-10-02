@@ -92,22 +92,15 @@ class Platform:
 
     @property
     def isa(self) -> str:
-        if self.target.startswith(("x86_64", "i686")):
-            return "x86"
-        if self.target.startswith("aarch64"):
-            return "aarch64"
-        if self.target.startswith(("arm", "thumb")):
-            return "arm"
-        if self.target.startswith("powerpc"):
-            return "ppc"
-        raise ValueError(self.target)
+        """`x86` or `aarch64`."""
+        return "aarch64" if self.target.startswith("aarch64") else "x86"
 
     @property
     def comment(self) -> str:
         """Line comment marker of the target's asm dialect."""
         if self.isa == "aarch64":
             return ";" if "apple" in self.target else "//"
-        return {"x86": "#", "arm": "@", "ppc": "#"}[self.isa]
+        return "#"
 
 
 # The element-wise pipeline dispatches on the SIMD level at runtime (fearless_simd): plain x86_64 is
@@ -144,10 +137,6 @@ class Kernel:
     # Element size of the inner loop, whose `len` argument counts elements (of the output: its
     # bytes are the "input bytes" of the cost model).
     elem_size: int
-
-    def symbol_for(self, platform: Platform) -> str:
-        """`symbol` on `platform` (the same on all platforms, for now)."""
-        return self.symbol
 
     def scev_env(self, length: int) -> dict[str, int]:
         """Values of the function arguments, for an input of `length` bytes."""
@@ -340,6 +329,11 @@ def cargo_env(platform: Platform, source: Source, target_dir: Path) -> dict:
 FN_LABEL_RE = re.compile(r"^(_?_R[0-9A-Za-z_]+):")
 
 
+def ir_name(mangled: str) -> str:
+    """The IR name of an asm function label: without Mach-O's underscore."""
+    return mangled[1:] if mangled.startswith("__R") else mangled
+
+
 @dataclass
 class Build:
     """A platform's build of a source: its functions' asm and IR, by mangled name."""
@@ -354,12 +348,17 @@ class Build:
 BUILD_SLOTS = threading.Semaphore(2)
 
 
-def compile_crate(platform: Platform, source: Source) -> tuple[Path, Path]:
-    """Compile `source` for `platform`, emitting its asm and final LLVM IR: the (`.s`, `.ll`)."""
+def compile_crate(platform: Platform, source: Source, reuse: bool) -> tuple[Path, Path]:
+    """Compile `source` for `platform`, emitting its asm and final LLVM IR: the (`.s`, `.ll`).
+    `reuse`: the previous build's instead."""
     # One target dir per feature set: builds with other RUSTFLAGS must not share the directory.
     flags = hashlib.sha1(" ".join(platform.rustflags).encode()).hexdigest()[:8]
     target_dir = PROBE_DIR / "target" / "analyze" / source.name / f"{platform.name}-{flags}"
     out = target_dir / platform.target / "release"
+    if reuse:
+        [asm] = out.rglob(f"{source.lib}-*.s")
+        [ll] = out.rglob(f"{source.lib}-*.ll")
+        return asm, ll
     for f in [*out.rglob(f"{source.lib}-*.s"), *out.rglob(f"{source.lib}-*.ll")]:
         f.unlink()
     # cargo does not re-emit them for an up-to-date crate: rebuild it (only it).
@@ -394,8 +393,7 @@ def split_asm(text: str) -> dict[str, list[str]]:
 def demangle(names: list[str]) -> dict[str, str]:
     """Demangled name (without crate hashes and const generic types) -> mangled name."""
     # binutils demangles v0 with crate hashes and typed const generics: `jix[0123abcd]`, `32: usize`.
-    plain = [n[1:] if n.startswith("__R") else n for n in names]
-    out = run(["c++filt"], input="\n".join(plain)).splitlines()
+    out = run(["c++filt"], input="\n".join(map(ir_name, names))).splitlines()
     return {re.sub(r": (?:usize|bool)\b", "", re.sub(r"\[[0-9a-f]+\]", "", d)): n for n, d in zip(names, out)}
 
 
@@ -450,15 +448,14 @@ def reduce_ir(ll: Path, keep: list[str], opt: str) -> tuple[dict[str, list[str]]
     return fn_ir, fn_opt
 
 
-def build(platform: Platform, source: Source, select, opt: str) -> tuple[Build, list[Kernel]]:
+def build(platform: Platform, source: Source, select, opt: str, reuse: bool) -> tuple[Build, list[Kernel]]:
     """Compile `source` for `platform` and extract the kernels `select(build)` returns."""
-    asm_path, ll = compile_crate(platform, source)
+    asm_path, ll = compile_crate(platform, source, reuse)
     fns = split_asm(asm_path.read_text())
     b = Build(fns, demangle(list(fns)))
     kernels = select(b)
     # The IR names functions as in the asm, less Mach-O's underscore.
-    keep = [b.names[k.symbol_for(platform)] for k in kernels]
-    b.ll, b.opt = reduce_ir(ll, [n[1:] if n.startswith("__R") else n for n in keep], opt)
+    b.ll, b.opt = reduce_ir(ll, [ir_name(b.names[k.symbol]) for k in kernels], opt)
     return b, kernels
 
 
@@ -511,25 +508,22 @@ def mnemonic(line: str) -> str:
 
 def is_branch(isa: str, mn: str) -> bool:
     if isa == "x86":
-        return mn.startswith("j") or mn.startswith("loop")
-    return mn.startswith(("b", "cb", "tb"))  # aarch64 / arm / ppc
+        return mn.startswith(("j", "loop"))
+    return mn.startswith(("b", "cb", "tb"))
 
 
 def is_call(isa: str, mn: str) -> bool:
     if isa == "x86":
         return mn.startswith("call")
-    if isa == "aarch64":
-        return mn in ("bl", "blr")
-    if isa == "arm":
-        return mn in ("bl", "blx")
-    return mn in ("bl", "bla", "bctrl", "blrl")  # ppc (`blr` is a return there)
+    return mn in ("bl", "blr")
 
 
-def clean_lines(asm: str, comment: str, block_names: dict[int, str] | None = None) -> list[str]:
-    """Strip comments, blank lines, directives and the function-name label. `block_names` gets the
-    IR name of the block starting at each line, from the verbose asm comments: after a label, or on
-    a comment line of its own for a block without one (`# %bb.3: # %vector.ph`)."""
-    out = []
+def clean_lines(asm: str, comment: str) -> tuple[list[str], dict[int, str]]:
+    """Strip comments, blank lines, directives and the function-name label. Also returns the IR
+    name of the block starting at each line, from the verbose asm comments: after a label, or on a
+    comment line of its own for a block without one (`# %bb.3: # %vector.ph`)."""
+    out: list[str] = []
+    block_names: dict[int, str] = {}
     pending = None
     for line in asm.splitlines()[1:]:
         if comment in line:
@@ -539,11 +533,11 @@ def clean_lines(asm: str, comment: str, block_names: dict[int, str] | None = Non
         s = line.strip()
         if not s or (s.startswith(".") and not is_label(s)):
             continue
-        if pending is not None and block_names is not None:
+        if pending is not None:
             block_names[len(out)] = pending
         pending = None
         out.append(s)
-    return out
+    return out, block_names
 
 
 def is_unconditional(isa: str, mn: str) -> bool:
@@ -553,7 +547,7 @@ def is_unconditional(isa: str, mn: str) -> bool:
     return mn in ("b", "br", "ret", "udf", "brk")
 
 
-def asm_loops(lines: list[str], isa: str, block_names: dict[int, str] | None = None) -> list[Loop]:
+def asm_loops(lines: list[str], isa: str, block_names: dict[int, str]) -> list[Loop]:
     """The natural loops of the asm: back edges (to a block that dominates the branch) and the
     blocks that reach them. A loop spans the lines from its first to its last block, so a rotated
     loop entered in the middle is found, and a backward jump that is not a back edge (e.g. to a
@@ -616,7 +610,7 @@ def asm_loops(lines: list[str], isa: str, block_names: dict[int, str] | None = N
         start, end = min(blocks[b][0] for b in body), max(blocks[b][1] for b in body) - 1
         instrs = [x for x in lines[start : end + 1] if not is_label(x)]
         header = LABEL_RE.match(lines[blocks[h][0]]).group(1)
-        names = {n for b in body for i in range(*blocks[b]) if (n := (block_names or {}).get(i)) is not None}
+        names = {block_names[i] for b in body for i in range(*blocks[b]) if i in block_names}
         vec = sum(1 for x in instrs if is_vector(x)) / len(instrs)
         return Loop(start, end, header, size=len(instrs), vec=vec, blocks=names)
 
@@ -658,18 +652,15 @@ class IrValues:
         self.bounded: set[str] = set()
 
     @staticmethod
-    def parse(ll: list[str], ir_hint: str) -> IrValues:
-        defs, stores, params, in_fn = {}, {}, [], False
+    def parse(ll: list[str]) -> IrValues:
+        """The values of the function of IR `ll`."""
+        defs, stores, params = {}, {}, []
         for line in ll:
             if line.startswith("define "):
-                in_fn = ir_hint in line.split("(")[0]
-                if in_fn:
-                    params = re.findall(r"(%[\w.]+)[,)]", line)
-            elif in_fn and line.startswith("}"):
-                in_fn = False
-            elif in_fn and (m := re.match(r"^\s+(%[\w.]+) = (.*?)(?:, !.*)?$", line)):
+                params = re.findall(r"(%[\w.]+)[,)]", line)
+            elif m := re.match(r"^\s+(%[\w.]+) = (.*?)(?:, !.*)?$", line):
                 defs[m.group(1)] = m.group(2)
-            elif in_fn and (m := re.match(r"^\s+store (i\d+ [^,]+), ptr (%[\w.]+)", line)):
+            elif m := re.match(r"^\s+store (i\d+ [^,]+), ptr (%[\w.]+)", line):
                 stores[m.group(2)] = None if m.group(2) in stores else m.group(1)
         return IrValues(defs, stores, params)
 
@@ -774,45 +765,32 @@ class IrValues:
         return None
 
 
-def ir_block_sizes(ll: list[str], ir_hint: str) -> tuple[dict[str, int], dict[str, int]]:
+def ir_block_sizes(ll: list[str]) -> tuple[dict[str, int], dict[str, int]]:
     """Instruction count, and count of instructions on vector types, of each basic block of the
-    function whose name contains `ir_hint`."""
+    function of IR `ll`."""
     sizes: dict[str, int] = {}
     vecs: dict[str, int] = {}
-    in_fn, block = False, None
+    block = "start"
     for line in ll:
-        if line.startswith("define "):
-            in_fn = ir_hint in line.split("(")[0]
-            block = "start" if in_fn else None
-        elif in_fn and line.startswith("}"):
-            in_fn = False
-        elif in_fn:
-            if m := re.match(r"^([\w.$\-]+):", line):
-                block = m.group(1)
-            elif line.startswith("  ") and block is not None:
-                sizes[block] = sizes.get(block, 0) + 1
-                vecs[block] = vecs.get(block, 0) + bool(re.search(r"<\d+ x ", line))
+        if m := re.match(r"^([\w.$\-]+):", line):
+            block = m.group(1)
+        elif line.startswith("  "):
+            sizes[block] = sizes.get(block, 0) + 1
+            vecs[block] = vecs.get(block, 0) + bool(re.search(r"<\d+ x ", line))
     return sizes, vecs
 
 
-def ir_loops(ll: list[str], analyses: list[str], ir_hint: str) -> list[Loop]:
-    """IR loop tree of the function whose name contains `ir_hint`, with SCEV trip counts, from its
-    IR `ll` and its `opt` `analyses`."""
+def ir_loops(ll: list[str], analyses: list[str]) -> list[Loop]:
+    """IR loop tree of a function, with SCEV trip counts, from its IR `ll` and its `opt`
+    `analyses`."""
 
-    block_sizes, block_vecs = ir_block_sizes(ll, ir_hint)
+    block_sizes, block_vecs = ir_block_sizes(ll)
     bounded: set[str] = set()
     cur_value = None
     fn_loops: list[tuple[int, Loop]] = []
     trips: dict[str, tuple[str, int | None]] = {}
-    in_fn = False
     for line in analyses:
-        if m := re.match(r"Loop info for function '([^']+)'", line):
-            in_fn = ir_hint in m.group(1)
-        elif m := re.match(r"Classifying expressions for: @(\S+)", line):
-            in_fn = ir_hint in m.group(1).strip('"')
-        elif not in_fn:
-            continue
-        elif m := re.match(r"\s+(%[\w.]+) = ", line):
+        if m := re.match(r"\s+(%[\w.]+) = ", line):
             cur_value = m.group(1)
         elif (m := re.match(r"\s+-->  (%[\w.]+) U: \[(-?\d+),(-?\d+)\)", line)) and m.group(1) == cur_value:
             lo, hi = int(m.group(2)), int(m.group(3))
@@ -834,7 +812,7 @@ def ir_loops(ll: list[str], analyses: list[str], ir_hint: str) -> list[Loop]:
             c = re.fullmatch(r"i\d+ (\d+)", expr)
             trips[name] = (expr, int(c.group(1)) + 1 if c else None)
 
-    values = IrValues.parse(ll, ir_hint)
+    values = IrValues.parse(ll)
     values.bounded = bounded
     for _, lp in fn_loops:
         lp.trip_expr, lp.trip_count = trips.get(lp.header, ("", None))
@@ -1158,15 +1136,13 @@ def describe_tree(loops: list[Loop]) -> str:
 
 
 def analyze_kernel(platform: Platform, kernel: Kernel, b: Build, mca: str, out_dir: Path) -> KernelResult:
-    mangled = b.names[kernel.symbol_for(platform)]
+    mangled = b.names[kernel.symbol]
     asm = "\n".join(b.asm[mangled]) + "\n"
-    ir_name = mangled[1:] if mangled.startswith("__R") else mangled
     asm_path = out_dir / "asm" / platform.name / f"{kernel.name}.s"
     asm_path.parent.mkdir(parents=True, exist_ok=True)
     asm_path.write_text(asm)
 
-    block_names: dict[int, str] = {}
-    lines = clean_lines(asm, platform.comment, block_names)
+    lines, block_names = clean_lines(asm, platform.comment)
     fn_instrs = sum(1 for line in lines if not is_label(line))
     warnings = []
     try:
@@ -1174,7 +1150,8 @@ def analyze_kernel(platform: Platform, kernel: Kernel, b: Build, mca: str, out_d
     except RuntimeError as e:  # a loop LLVM laid out in non-contiguous pieces
         roots = []
         warnings.append(str(e))
-    if not attach_trip_counts(roots, ir_loops(b.ll.get(ir_name, []), b.opt.get(ir_name, []), ir_name)):
+    name = ir_name(mangled)
+    if not attach_trip_counts(roots, ir_loops(b.ll.get(name, []), b.opt.get(name, []))):
         warnings.append("asm and IR loop trees differ, trip counts unknown")
 
     hot = hot_loops(roots, kernel)
@@ -1219,9 +1196,9 @@ def analyze_kernel(platform: Platform, kernel: Kernel, b: Build, mca: str, out_d
 
 
 def analyze_platform(
-    platform: Platform, source: Source, select, opt: str, mca: str, out_dir: Path
+    platform: Platform, source: Source, select, opt: str, mca: str, out_dir: Path, reuse: bool
 ) -> list[KernelResult]:
-    b, kernels = build(platform, source, select, opt)
+    b, kernels = build(platform, source, select, opt, reuse)
     with concurrent.futures.ThreadPoolExecutor(4) as ex:
         return list(ex.map(lambda k: analyze_kernel(platform, k, b, mca, out_dir), kernels))
 
@@ -1265,9 +1242,6 @@ def write_summary(
     for r in results:
         by_platform.setdefault(r.platform, []).append(r)
 
-    def cost(r: KernelResult, i: int) -> float:
-        return r.costs[i]
-
     def star(rs: list[KernelResult]) -> str:
         return "*" if any(r.calls for r in rs) else ""
 
@@ -1275,7 +1249,7 @@ def write_summary(
         return math.exp(sum(math.log(x) for x in xs) / len(xs))
 
     def geomean(rs: list[KernelResult], i: int) -> str:
-        return f"{geo([cost(r, i) for r in rs]):.0f}{star(rs)}"
+        return f"{geo([r.costs[i] for r in rs]):.0f}{star(rs)}"
 
     base = load_costs(compare) if compare else {}
 
@@ -1283,7 +1257,7 @@ def write_summary(
         old = [base.get((platform, cpu, r.kernel)) for r in rs]
         if None in old:
             return "-"
-        return f"{geo(old) / geo([cost(r, i) for r in rs]):.2f}x"
+        return f"{geo(old) / geo([r.costs[i] for r in rs]):.2f}x"
 
     # Overview: a row per kernel, a column per (platform, cpu).
     cols = [(p, i, cpu) for p in platforms if by_platform.get(p.name) for i, cpu in enumerate(p.mca_cpus)]
@@ -1299,22 +1273,20 @@ def write_summary(
         cells = []
         for p, i, _ in cols:
             r = by_key.get((p.name, name))
-            cells.append(f"{cost(r, i):.0f}{star([r])}" if r and r.costs else "-")
+            cells.append(f"{r.costs[i]:.0f}{star([r])}" if r and r.costs else "-")
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
 
-    def fixed_of(p: Platform) -> list[KernelResult]:
-        return [r for r in by_platform.get(p.name, []) if r.costs]
-
-    lines.append("| **geomean** | " + " | ".join(f"**{geomean(fixed_of(p), i)}**" for p, i, _ in cols) + " |")
+    measured = {p: [r for r in by_platform.get(p, []) if r.costs] for p in by_platform}
+    lines.append("| **geomean** | " + " | ".join(f"**{geomean(measured[p.name], i)}**" for p, i, _ in cols) + " |")
     if compare:
-        vs = [speedup(p.name, cpu, fixed_of(p), i) for p, i, cpu in cols]
+        vs = [speedup(p.name, cpu, measured[p.name], i) for p, i, cpu in cols]
         lines.append(f"| **vs {compare}** | " + " | ".join(vs) + " |")
     lines.append("")
 
     for platform in platforms:
         rs = by_platform.get(platform.name, [])
         cpus = platform.mca_cpus
-        fixed = [r for r in rs if r.costs]
+        fixed = measured.get(platform.name, [])
         lines += [f"## {platform.name} (`{platform.target}`)", ""]
         if platform.rustflags:
             lines += [f"`RUSTFLAGS={' '.join(platform.rustflags)}`", ""]
@@ -1322,7 +1294,7 @@ def write_summary(
             lines.append("| kernel | B/iter | instrs | loops | calls | " + " | ".join(cpus) + " |")
             lines.append("|---|---:|---:|---|---|" + "---:|" * len(cpus))
             for r in fixed:
-                cells = [f"{cost(r, i):.0f}{star([r])}" for i in range(len(cpus))]
+                cells = [f"{r.costs[i]:.0f}{star([r])}" for i in range(len(cpus))]
                 calls = ", ".join(f"`{c}`" for c in r.calls) or "-"
                 lines.append(
                     f"| {r.kernel} | {r.bytes_per_iter} | {r.trace_instructions} | {r.loop_tree} | {calls} | "
@@ -1357,6 +1329,7 @@ def main() -> None:
         "--fn", action="append", dest="kernels", help="restrict to these kernels, glob patterns (repeatable)"
     )
     ap.add_argument("--source", choices=sorted(SOURCES), default="py", help="the crate whose kernels to analyze")
+    ap.add_argument("--no-build", action="store_true", help="reuse the previous build's asm and IR")
     args = ap.parse_args()
 
     platforms = [p for p in PLATFORMS if not args.platform or p.name in args.platform]
@@ -1391,7 +1364,7 @@ def main() -> None:
     out_dir.mkdir(parents=True)
 
     with concurrent.futures.ThreadPoolExecutor() as ex:
-        futures = [ex.submit(analyze_platform, p, source, select, opt, mca, out_dir) for p in platforms]
+        futures = [ex.submit(analyze_platform, p, source, select, opt, mca, out_dir, args.no_build) for p in platforms]
         results = [r for f in futures for r in f.result()]
     if not results:
         sys.exit("error: no kernel selected")
