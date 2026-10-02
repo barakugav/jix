@@ -106,8 +106,7 @@ pub(crate) mod _traits {
             $(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident, $op:tt,
             bool: |$a:ident, $b:ident| $bool:expr
         ) => {
-            // `bool`s by their logical form: `a < b` can compile to `xor` + `and`, not `andn`
-            // (static analysis).
+            // `bool`s by their logical form (`a < b` is `!a & b`), as clippy prefers.
             define_scalar_op2_trait!($(#[$meta])* $Trait, $f, $f_bulk);
             impl_scalar_op2!(
                 $Trait::$f, |a, b| a $op b,
