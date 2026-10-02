@@ -73,11 +73,10 @@ SCEV_EVAL_LEN = 1 << 20
 X86_V2 = "+fxsr,+sse4.2,+cmpxchg16b,+popcnt"
 X86_V3 = "+avx2,+bmi1,+bmi2,+cmpxchg16b,+f16c,+fma,+fxsr,+lzcnt,+movbe,+popcnt,+xsave"
 # fearless_simd's AVX-512 level is Ice Lake (includes VBMI), not x86-64-v4.
-X86_V4 = ",".join(
-    "+" + f
-    for f in "adx,aes,avx512bitalg,avx512bw,avx512cd,avx512dq,avx512f,avx512ifma,avx512vbmi,avx512vbmi2,"
-    "avx512vl,avx512vnni,avx512vpopcntdq,bmi1,bmi2,cmpxchg16b,fma,fxsr,gfni,lzcnt,movbe,pclmulqdq,popcnt,"
-    "rdrand,rdseed,sha,vaes,vpclmulqdq,xsave,xsavec,xsaveopt,xsaves".split(",")
+X86_V4 = (
+    "+adx,+aes,+avx512bitalg,+avx512bw,+avx512cd,+avx512dq,+avx512f,+avx512ifma,+avx512vbmi,+avx512vbmi2,"
+    "+avx512vl,+avx512vnni,+avx512vpopcntdq,+bmi1,+bmi2,+cmpxchg16b,+fma,+fxsr,+gfni,+lzcnt,+movbe,+pclmulqdq,"
+    "+popcnt,+rdrand,+rdseed,+sha,+vaes,+vpclmulqdq,+xsave,+xsavec,+xsaveopt,+xsaves"
 )
 
 
@@ -279,11 +278,18 @@ def py_kernel(symbol: str) -> Kernel | None:
 # Tools
 
 
-def run(cmd: list[str], env: dict | None = None, cwd: Path | None = None, input: str | None = None) -> str:
-    p = subprocess.run(cmd, env=env, cwd=cwd, input=input, capture_output=True, text=True)
+def run_process(
+    cmd: list[str], env: dict | None = None, cwd: Path | None = None, input: str | None = None
+) -> subprocess.CompletedProcess:
+    p = subprocess.run(cmd, env=env, cwd=cwd, input=input, capture_output=True, text=True, check=False)
     if p.returncode != 0:
         raise RuntimeError(f"command failed: {' '.join(cmd)}\n{p.stderr}")
-    return p.stdout
+    return p
+
+
+def run(cmd: list[str], env: dict | None = None, cwd: Path | None = None, input: str | None = None) -> str:
+    """The stdout of `cmd`."""
+    return run_process(cmd, env, cwd, input).stdout
 
 
 def llvm_major_of_rustc() -> int:
@@ -405,9 +411,9 @@ def reduce_ir(ll: Path, keep: list[str], opt: str) -> tuple[dict[str, list[str]]
     text = []
     for line in ll.read_text().splitlines():
         # Internal functions to keep become external, so that `internalize` + `globaldce` keep them.
-        if line.startswith("define ") and (m := re.search(r"@(\"[^\"]+\"|[\w.$]+)\(", line)):
-            if m.group(1).strip('"') in keep_set:
-                line = re.sub(r"^define (?:internal |private )", "define ", line)
+        m = line.startswith("define ") and re.search(r"@(\"[^\"]+\"|[\w.$]+)\(", line)
+        if m and m.group(1).strip('"') in keep_set:
+            line = re.sub(r"^define (?:internal |private )", "define ", line)
         text.append(line)
     with tempfile.TemporaryDirectory() as tmp:
         full, api, small = Path(tmp) / "full.ll", Path(tmp) / "api.txt", Path(tmp) / "small.ll"
@@ -417,13 +423,7 @@ def reduce_ir(ll: Path, keep: list[str], opt: str) -> tuple[dict[str, list[str]]
         run([opt, "-S", f"-passes={passes}", f"-internalize-public-api-file={api}", str(full), "-o", str(small)])
         ir_text = small.read_text()
         # opt prints analyses to stderr.
-        p = subprocess.run(
-            [opt, "-disable-output", "-passes=print<loops>,print<scalar-evolution>", str(small)],
-            capture_output=True,
-            text=True,
-        )
-        if p.returncode != 0:
-            raise RuntimeError(p.stderr)
+        p = run_process([opt, "-disable-output", "-passes=print<loops>,print<scalar-evolution>", str(small)])
     fn_ir: dict[str, list[str]] = {}
     cur: list[str] | None = None
     for line in ir_text.splitlines():
@@ -500,6 +500,30 @@ def is_label(line: str) -> bool:
 
 def mnemonic(line: str) -> str:
     return line.split()[0]
+
+
+# x86-64 loads the GOT entry of a function a loop calls into a register before the loop.
+GOT_LOAD_RE = re.compile(r"^mov\s+(\w+), qword ptr \[rip \+ (\S+)@GOTPCREL\]$")
+
+
+def callees(isa: str, lines: list[str], loops: list[Loop]) -> list[str]:
+    """The functions called in `loops` (spans of the function's `lines`): a register-indirect call
+    calls the function whose GOT entry was last loaded into the register before it."""
+    in_loops = {i for lp in loops for i in range(lp.start, lp.end + 1)}
+    got: dict[str, str] = {}
+    out = set()
+    for i, x in enumerate(lines):
+        if m := GOT_LOAD_RE.match(x):
+            got[m.group(1)] = m.group(2)
+        elif i in in_loops and not is_label(x) and is_call(isa, mnemonic(x)):
+            target = x.split(None, 1)[1].strip()
+            out.add(got.get(target, target))
+    return sorted(out)
+
+
+def is_rust_symbol(name: str) -> bool:
+    """A Rust function (v0 or legacy mangling; Mach-O prefixes an underscore), not a C one (libm)."""
+    return re.match(r"_?(_R|_ZN)", name) is not None
 
 
 def is_branch(isa: str, mn: str) -> bool:
@@ -608,25 +632,27 @@ def asm_loops(lines: list[str], isa: str, block_names: dict[int, str]) -> list[L
     return build_tree(loops, lambda outer, inner: inner.end <= outer.end)
 
 
+# The integer instructions `IrValues` folds, and the flags it ignores.
+IR_BINOPS = {
+    "add": lambda a, b: a + b,
+    "sub": lambda a, b: a - b,
+    "mul": lambda a, b: a * b,
+    "udiv": lambda a, b: a // b,
+    "sdiv": lambda a, b: int(a / b),
+    "lshr": lambda a, b: a >> b,
+    "ashr": lambda a, b: a >> b,
+    "shl": lambda a, b: a << b,
+    "and": lambda a, b: a & b,
+    "or": lambda a, b: a | b,
+    "xor": lambda a, b: a ^ b,
+}
+IR_FLAGS = {"nuw", "nsw", "exact", "disjoint"}
+
+
 class IrValues:
     """Constant folding of a function's straight-line integer instructions, for given argument
     values: resolves SCEV operands SCEV cannot see through, such as the length after the SIMD
     level dispatch (`%_4.i.i`)."""
-
-    BINOPS = {
-        "add": lambda a, b: a + b,
-        "sub": lambda a, b: a - b,
-        "mul": lambda a, b: a * b,
-        "udiv": lambda a, b: a // b,
-        "sdiv": lambda a, b: int(a / b),
-        "lshr": lambda a, b: a >> b,
-        "ashr": lambda a, b: a >> b,
-        "shl": lambda a, b: a << b,
-        "and": lambda a, b: a & b,
-        "or": lambda a, b: a | b,
-        "xor": lambda a, b: a ^ b,
-    }
-    FLAGS = {"nuw", "nsw", "exact", "disjoint"}
 
     def __init__(self, ll: list[str]):
         """The values of the function of IR `ll`."""
@@ -647,12 +673,12 @@ class IrValues:
         rhs = self.defs.get(name)
         if rhs is None or depth > 64:
             return None
-        words = [w for w in rhs.split() if w not in self.FLAGS]
+        words = [w for w in rhs.split() if w not in IR_FLAGS]
         op, rest = words[0], " ".join(words[1:])
-        if op in self.BINOPS and (m := re.fullmatch(r"i\d+ (\S+), (\S+)", rest)):
+        if op in IR_BINOPS and (m := re.fullmatch(r"i\d+ (\S+), (\S+)", rest)):
             a, b = (self.operand(x, env, depth + 1) for x in m.groups())
             try:
-                return None if a is None or b is None else self.BINOPS[op](a, b)
+                return None if a is None or b is None else IR_BINOPS[op](a, b)
             except ZeroDivisionError:
                 return None
         if op in ("zext", "sext", "trunc", "freeze") and (m := re.match(r"i\d+ (\S+)", rest)):
@@ -901,14 +927,12 @@ def run_mca(mca: str, platform: Platform, cpu: str, trace: list[str], all_lines:
         "-bottleneck-analysis",
         "-skip-unsupported-instructions=lack-sched",
     ]
-    p = subprocess.run(cmd, input=src, capture_output=True, text=True)
-    if p.returncode != 0:
-        raise RuntimeError(f"command failed: {' '.join(cmd)}\n{p.stderr}")
+    p = run_process(cmd, input=src)
     out = p.stdout
     skipped = sorted({" ".join(m.split()) for m in re.findall(r"note: instruction:\s*(.*)", p.stderr)})
 
     def num(key: str) -> str:
-        return re.search(rf"^{key}:\s*([\d.]+)", out, re.M).group(1)
+        return re.search(rf"^{key}:\s*([\d.]+)", out, re.MULTILINE).group(1)
 
     res = McaResult(
         cpu=cpu,
@@ -936,6 +960,7 @@ class KernelResult:
     loop_tree: str
     bytes_per_iter: str  # per hot loop, `+`-joined
     warnings: list[str] = field(default_factory=list)
+    rust_calls: list[str] = field(default_factory=list)  # Rust functions called in a loop
     mca: list[McaResult] = field(default_factory=list)  # per (hot loop, cpu)
     # Per cpu, cycles per BYTES_UNIT: sum over the hot loops of cycles per iteration / bytes per
     # iteration. Empty: no flattenable hot loop.
@@ -979,16 +1004,21 @@ def analyze_kernel(platform: Platform, kernel: Kernel, b: Build, mca: str, out_d
         hot, traces = [], []
     fmt = [f"{h.bytes_per_iter:g}" for h in hot]
 
-    all_instrs = [x for t in traces for x in t]
+    # Rust functions called in any loop, the hot ones or not: they should all be inlined.
+    rust_calls = [c for c in callees(platform.isa, lines, roots) if is_rust_symbol(c)]
+    if rust_calls:
+        names = run(["c++filt"], input="\n".join(map(ir_name, rust_calls))).split("\n")[:-1]
+        warnings += [f"out-of-line call to a Rust function in a loop: `{n}`" for n in names]
     r = KernelResult(
         platform.name,
         kernel.name,
         fn_instrs,
         "+".join(str(len(t)) for t in traces),
-        sorted({x.split(None, 1)[-1] for x in all_instrs if is_call(platform.isa, mnemonic(x))}),
+        callees(platform.isa, lines, [h.loop for h in hot]),
         describe_tree(roots),
         "+".join(fmt),
         warnings,
+        rust_calls,
     )
     for w in warnings:
         print(f"warning: {platform.name}/{kernel.name}: {w}", file=sys.stderr)
@@ -1052,6 +1082,10 @@ def write_summary(
         "  kernels (and geomeans including them) are flagged `*`: the real cost is higher.",
         "",
     ]
+    rust = [r for r in results if r.rust_calls]
+    lines += ["## Out-of-line Rust calls", ""]
+    lines += [f"- {r.platform}/{r.kernel}: " + ", ".join(f"`{c}`" for c in r.rust_calls) for r in rust] or ["None."]
+    lines.append("")
     by_platform: dict[str, list[KernelResult]] = {}
     for r in results:
         by_platform.setdefault(r.platform, []).append(r)
@@ -1168,8 +1202,10 @@ def main() -> None:
         f"- rustc: `{run(['rustc', '--version'], cwd=PROBE_DIR).strip()}`",
         f"- llvm-mca: `{mca_version}`",
         f"- source: `{source.name}` (`{source.crate_dir.relative_to(REPO_DIR)}`)",
-        "- kernels: the pipeline's inner loop for contiguous operands (`inner_loop_contiguous`, the arm of the"
-        " platform's SIMD level); the bytes are output bytes",
+        (
+            "- kernels: the pipeline's inner loop for contiguous operands (`inner_loop_contiguous`, the arm of"
+            " the platform's SIMD level); the bytes are output bytes"
+        ),
     ]
 
     out_dir = PROBE_DIR / "results" / args.label
@@ -1184,6 +1220,9 @@ def main() -> None:
         sys.exit("error: no kernel selected")
 
     print(write_summary(results, platforms, out_dir, header, args.compare))
+    if rust := [r for r in results if r.rust_calls]:
+        # Kernels must inline their whole op chain: a call in a loop blocks vectorization.
+        sys.exit(f"error: {len(rust)} kernels call a Rust function in a loop (see summary.md)")
 
 
 if __name__ == "__main__":
