@@ -57,22 +57,13 @@ pub(crate) mod _traits {
         shr,
         shr_bulk
     );
-    /// Implement `Shr` for each integer `$t` by each integer amount but the 32-bit ones.
-    macro_rules! impl_shr {
-        ($($t:ty),*) => {$(
-            impl_scalar_op2!(
-                Shr::shr, |a, b| a >> b,
-                pairs [($t, i8), ($t, i16), ($t, i64), ($t, u8), ($t, u16), ($t, u64)]
-            );
-        )*};
-    }
-    impl_shr!(i8, i16, i32, i64, u8, u16, u32, u64);
     impl_scalar_op2!(
         Shr::shr, |a, b| a >> b,
-        pairs [
-            (i8, i32), (i16, i32), (i64, i32), (u8, i32), (u16, i32), (u64, i32),
-            (i8, u32), (i16, u32), (i64, u32), (u8, u32), (u16, u32), (u64, u32),
-        ]
+        cross [i8, i16, i32, i64, u8, u16, u32, u64] x [i8, i16, i64, u8, u16, u64]
+    );
+    impl_scalar_op2!(
+        Shr::shr, |a, b| a >> b,
+        cross [i8, i16, i64, u8, u16, u64] x [i32, u32]
     );
     // SIMD for 32-bit values only: the others are not faster than the auto-vectorized scalar
     // kernel (static analysis). The amount modulo the bit width, as in release builds (debug
@@ -112,15 +103,15 @@ pub(crate) mod _traits {
 
     /// Define the integer scalar trait `$Trait` as `u32`'s `$f`, of output `$Out`.
     macro_rules! int_op1 {
-        ($(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident, $Out:ident) => {
+        ($(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident, $Out:ty) => {
             define_scalar_op1_trait!($(#[$meta])* $Trait, $f, $f_bulk);
-            int_op1!(@impl $Trait, $f, $Out, [i8, i16, i32, i64, u8, u16, u32, u64]);
-        };
-        (@impl $Trait:ident, $f:ident, u32, [$($t:ty),*]) => {
-            impl_scalar_op1!($Trait::$f, |x| x.$f(), [$($t => u32),*]);
-        };
-        (@impl $Trait:ident, $f:ident, Self, [$($t:ty),*]) => {
-            impl_scalar_op1!($Trait::$f, |x| x.$f(), [$($t),*]);
+            impl_scalar_op1!(
+                $Trait::$f, |x| x.$f(),
+                [
+                    i8 => $Out, i16 => $Out, i32 => $Out, i64 => $Out,
+                    u8 => $Out, u16 => $Out, u32 => $Out, u64 => $Out,
+                ]
+            );
         };
     }
     int_op1!(
@@ -171,33 +162,13 @@ pub(crate) mod _traits {
         /// [`u32::rotate_right`].
         RotateRight<Rhs = u32>, rotate_right, rotate_right_bulk
     );
-    /// Implement the rotation `$Trait` for each integer `$t` by a `u32` amount.
-    macro_rules! impl_rotate {
-        ($Trait:ident::$f:ident, $($t:ty),*) => {
-            impl_scalar_op2!($Trait::$f, |a, b| a.$f(b), pairs [$(($t, u32)),*]);
-        };
-    }
-    impl_rotate!(
-        RotateLeft::rotate_left,
-        i8,
-        i16,
-        i32,
-        i64,
-        u8,
-        u16,
-        u32,
-        u64
+    impl_scalar_op2!(
+        RotateLeft::rotate_left, |a, b| a.rotate_left(b),
+        cross [i8, i16, i32, i64, u8, u16, u32, u64] x [u32]
     );
-    impl_rotate!(
-        RotateRight::rotate_right,
-        i8,
-        i16,
-        i32,
-        i64,
-        u8,
-        u16,
-        u32,
-        u64
+    impl_scalar_op2!(
+        RotateRight::rotate_right, |a, b| a.rotate_right(b),
+        cross [i8, i16, i32, i64, u8, u16, u32, u64] x [u32]
     );
 
     define_scalar_op2_trait!(
@@ -207,21 +178,12 @@ pub(crate) mod _traits {
         shl,
         shl_bulk
     );
-    /// Implement `$Trait` (`$op`) for each integer `$t` by each integer amount.
-    macro_rules! impl_shift_all {
-        ($Trait:ident::$f:ident, $op:tt, $($t:ty),*) => {$(
-            impl_scalar_op2!(
-                $Trait::$f, |a, b| a $op b,
-                pairs [
-                    ($t, i8), ($t, i16), ($t, i32), ($t, i64),
-                    ($t, u8), ($t, u16), ($t, u32), ($t, u64),
-                ]
-            );
-        )*};
-    }
     // No SIMD: LLVM vectorizes the scalar kernel's 32-bit shift as a multiply by `2^b` where
     // fearless_simd extracts the lanes (SSE4.2), so no body is faster (static analysis).
-    impl_shift_all!(Shl::shl, <<, i8, i16, i32, i64, u8, u16, u32, u64);
+    impl_scalar_op2!(
+        Shl::shl, |a, b| a << b,
+        cross [i8, i16, i32, i64, u8, u16, u32, u64] x [i8, i16, i32, i64, u8, u16, u32, u64]
+    );
 }
 
 define_op2!(

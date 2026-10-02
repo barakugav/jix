@@ -10,47 +10,28 @@ pub(crate) mod _traits {
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
 
-    /// Element-wise maximum with NaN-propagating semantics for floating-point types.
-    ///
-    /// This trait exists because neither of the standard alternatives covers all supported dtypes:
-    ///
-    /// - [`std::cmp::max`] requires [`Ord`], which floating-point types do not implement due to
-    ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
-    /// - [`f32::max`] / [`f64::max`] use **NaN-ignoring** semantics: when exactly one operand is
-    ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmax` / `numpy.nanmax`, not
-    ///   `numpy.maximum`.
-    ///
-    /// `Maximum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
-    /// the result is `NaN`. This matches `numpy.maximum` and makes NaN visible rather than
-    /// silently discarding it.
-    ///
-    /// For integer and `bool` types the implementation delegates to [`std::cmp::max`], which is
-    /// equivalent. The trait therefore provides a single uniform interface usable across all
-    /// supported numeric dtypes.
-    pub trait Maximum<Rhs = Self> {
-        /// The output element type of this maximum operation.
-        type Output;
-        /// Return the element-wise maximum of `self` and `other`, propagating `NaN` for floats.
-        fn maximum(self, other: Rhs) -> Self::Output;
-        /// [`maximum`](Self::maximum) on each pair of `xs` and `ys`, vectorized with `simd` where the
-        /// types have SIMD support.
-        #[inline(always)]
-        fn maximum_bulk<S: fearless_simd::Simd, const N: usize>(
-            xs: [Self; N],
-            ys: [Rhs; N],
-            simd: S,
-        ) -> [Self::Output; N]
-        where
-            Self: Sized + Copy,
-            Rhs: Copy,
-        {
-            let _ = simd;
-            crate::util::array_from_fn_inline(
-                #[inline(always)]
-                |i| Self::maximum(xs[i], ys[i]),
-            )
-        }
-    }
+    define_scalar_op2_trait!(
+        /// Element-wise maximum with NaN-propagating semantics for floating-point types.
+        ///
+        /// This trait exists because neither of the standard alternatives covers all supported dtypes:
+        ///
+        /// - [`std::cmp::max`] requires [`Ord`], which floating-point types do not implement due to
+        ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
+        /// - [`f32::max`] / [`f64::max`] use **NaN-ignoring** semantics: when exactly one operand is
+        ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmax` / `numpy.nanmax`, not
+        ///   `numpy.maximum`.
+        ///
+        /// `Maximum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
+        /// the result is `NaN`. This matches `numpy.maximum` and makes NaN visible rather than
+        /// silently discarding it.
+        ///
+        /// For integer and `bool` types the implementation delegates to [`std::cmp::max`], which is
+        /// equivalent. The trait therefore provides a single uniform interface usable across all
+        /// supported numeric dtypes.
+        Maximum,
+        maximum,
+        maximum_bulk
+    );
     impl_scalar_op2!(
         Maximum::maximum / maximum_bulk, |a, b| std::cmp::max(a, b), simd: |a, b| a.max(b),
         [i8, i16, i32, i64, u8, u16, u32, u64]
@@ -74,47 +55,28 @@ pub(crate) mod _traits {
         [f16]
     );
 
-    /// Element-wise minimum with NaN-propagating semantics for floating-point types.
-    ///
-    /// This trait exists because neither of the standard alternatives covers all supported dtypes:
-    ///
-    /// - [`std::cmp::min`] requires [`Ord`], which floating-point types do not implement due to
-    ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
-    /// - [`f32::min`] / [`f64::min`] use **NaN-ignoring** semantics: when exactly one operand is
-    ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmin` / `numpy.nanmin`, not
-    ///   `numpy.minimum`.
-    ///
-    /// `Minimum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
-    /// the result is `NaN`. This matches `numpy.minimum` and makes NaN visible rather than
-    /// silently discarding it.
-    ///
-    /// For integer and `bool` types the implementation delegates to [`std::cmp::min`], which is
-    /// equivalent. The trait therefore provides a single uniform interface usable across all
-    /// supported numeric dtypes.
-    pub trait Minimum<Rhs = Self> {
-        /// The output element type of this minimum operation.
-        type Output;
-        /// Return the element-wise minimum of `self` and `other`, propagating `NaN` for floats.
-        fn minimum(self, other: Rhs) -> Self::Output;
-        /// [`minimum`](Self::minimum) on each pair of `xs` and `ys`, vectorized with `simd` where the
-        /// types have SIMD support.
-        #[inline(always)]
-        fn minimum_bulk<S: fearless_simd::Simd, const N: usize>(
-            xs: [Self; N],
-            ys: [Rhs; N],
-            simd: S,
-        ) -> [Self::Output; N]
-        where
-            Self: Sized + Copy,
-            Rhs: Copy,
-        {
-            let _ = simd;
-            crate::util::array_from_fn_inline(
-                #[inline(always)]
-                |i| Self::minimum(xs[i], ys[i]),
-            )
-        }
-    }
+    define_scalar_op2_trait!(
+        /// Element-wise minimum with NaN-propagating semantics for floating-point types.
+        ///
+        /// This trait exists because neither of the standard alternatives covers all supported dtypes:
+        ///
+        /// - [`std::cmp::min`] requires [`Ord`], which floating-point types do not implement due to
+        ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
+        /// - [`f32::min`] / [`f64::min`] use **NaN-ignoring** semantics: when exactly one operand is
+        ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmin` / `numpy.nanmin`, not
+        ///   `numpy.minimum`.
+        ///
+        /// `Minimum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
+        /// the result is `NaN`. This matches `numpy.minimum` and makes NaN visible rather than
+        /// silently discarding it.
+        ///
+        /// For integer and `bool` types the implementation delegates to [`std::cmp::min`], which is
+        /// equivalent. The trait therefore provides a single uniform interface usable across all
+        /// supported numeric dtypes.
+        Minimum,
+        minimum,
+        minimum_bulk
+    );
     impl_scalar_op2!(
         Minimum::minimum / minimum_bulk, |a, b| std::cmp::min(a, b), simd: |a, b| a.min(b),
         [i8, i16, i32, i64, u8, u16, u32, u64]

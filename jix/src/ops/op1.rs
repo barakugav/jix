@@ -164,21 +164,6 @@ where
     }
 }
 
-/// The `apply_bulk` of an [`Op1Kernel`] over `$T` by the scalar trait's bulk function
-/// `$bulk_fn(xs, simd)`, with its SIMD bodies typed per impl.
-macro_rules! op1_simd_apply_bulk {
-    (bulk: $T:ty, $($bulk_fn:tt)+) => {
-        #[inline(always)]
-        fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
-            &self,
-            simd: S,
-            xs: [$T; N],
-        ) -> [Self::Output; N] {
-            $($bulk_fn)+(xs, simd)
-        }
-    };
-}
-
 macro_rules! define_op1 {
     (
         $(#[$meta:meta])*
@@ -200,7 +185,14 @@ macro_rules! define_op1 {
                 <T as $($trait)::+>::$kernel_fn(x)
             }
 
-            crate::ops::op1::op1_simd_apply_bulk!(bulk: T, T::$bulk_fn);
+            #[inline(always)]
+            fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+                &self,
+                simd: S,
+                xs: [T; N],
+            ) -> [Self::Output; N] {
+                T::$bulk_fn(xs, simd)
+            }
         }
         $(#[$meta])*
         pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
@@ -273,7 +265,7 @@ macro_rules! define_op1 {
     };
 }
 
-pub(crate) use {define_op1, op1_simd_apply_bulk};
+pub(crate) use define_op1;
 
 pub(crate) mod _traits {
     #[cfg(feature = "half")]

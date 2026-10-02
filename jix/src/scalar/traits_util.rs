@@ -122,7 +122,8 @@ macro_rules! impl_scalar_op1 {
 }
 
 /// Implement the binary scalar trait `$Trait` for each `$t` with itself (or each pair `($t,
-/// $rhs)`), with output `$Out` (default `Self`), as `$scalar` of `$a` and `$b`. With `simd`,
+/// $rhs)`, or each `$t` with each `$rhs` of `cross [$t, ..] x [$rhs, ..]`), with output `$Out`
+/// (default `Self`), as `$scalar` of `$a` and `$b`. With `simd`,
 /// `$f_bulk` too: `$vector` of the vectors `$va` and `$vb`, giving a vector of `$Out`.
 macro_rules! impl_scalar_op2 {
     (
@@ -190,6 +191,23 @@ macro_rules! impl_scalar_op2 {
                 }
             )?
         }
+    };
+    // Each `$t` with each of the `$rhs`.
+    (
+        $Trait:ident::$f:ident, |$a:ident, $b:ident| $scalar:expr,
+        cross [$($t:ty),* $(,)?] x $rhs:tt => $Out:ty
+    ) => {
+        $(crate::scalar::traits_util::impl_scalar_op2!(
+            @cross $Trait::$f, |$a, $b| $scalar, $t, $rhs, $Out
+        );)*
+    };
+    (
+        @cross $Trait:ident::$f:ident, |$a:ident, $b:ident| $scalar:expr, $t:ty,
+        [$($rhs:ty),* $(,)?], $Out:ty
+    ) => {
+        $(crate::scalar::traits_util::impl_scalar_op2!(
+            @one $Trait::$f, |$a, $b| $scalar, $t, $rhs, $Out
+        );)*
     };
     // Without `=> $Out`: the output is `Self`.
     ($($args:tt)*) => {

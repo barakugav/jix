@@ -218,18 +218,32 @@ macro_rules! define_op2 {
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
+        <$($trait:ident)::+> :: $kernel_fn:ident ($a:ident, $b:ident),
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
         simd: $bulk_fn:ident,
     ) => {
-        define_op2!(@kernel_dispatch
-            $Kernel,
-            $($trait)::+,
-            $kernel_fn,
-            ($($call_args)*),
-            type Output = <T1 as $($trait)::+<T2>>::Output,
-            simd: $bulk_fn,
-        );
+        struct $Kernel;
+        impl<T1, T2> crate::ops::op2::Op2Kernel<T1, T2> for $Kernel
+        where
+            T1: $($trait)::+<T2> + Copy + 'static,
+            T2: Copy + 'static,
+        {
+            type Output = <T1 as $($trait)::+<T2>>::Output;
+            #[inline(always)]
+            fn apply(&self, $a: T1, $b: T2) -> Self::Output {
+                <T1 as $($trait)::+<T2>>::$kernel_fn($a, $b)
+            }
+
+            #[inline(always)]
+            fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+                &self,
+                simd: S,
+                a: [T1; N],
+                b: [T2; N],
+            ) -> [Self::Output; N] {
+                T1::$bulk_fn(a, b, simd)
+            }
+        }
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
         impl<S1, S2> $Op<S1, S2>
@@ -276,57 +290,6 @@ macro_rules! define_op2 {
             impl $Op, $($trait)::+,
             $(core_op = $core_op_trait::$core_op_fn,)?
         );
-    };
-
-    // @kernel_dispatch: extract the ident names of the `(a, b)` args, so @kernel can use them as
-    // both parameter names and call args (ensuring macro hygiene is consistent).
-    (
-        @kernel_dispatch
-        $Kernel:ident,
-        $($trait:ident)::+,
-        $kernel_fn:ident,
-        ($a:ident, $b:ident),
-        type Output = $output_type:ty,
-        simd: $bulk_fn:ident,
-    ) => {
-        define_op2!(@kernel
-            $Kernel, $($trait)::+, $kernel_fn,
-            $a, $b, ($a, $b),
-            type Output = $output_type,
-            simd: $bulk_fn,
-        );
-    };
-    // @kernel: generates the kernel struct + Op2Kernel impl.
-    // $a and $b are the parameter ident names (same hygiene context as $($call_args)*).
-    (
-        @kernel
-        $Kernel:ident, $($trait:ident)::+, $kernel_fn:ident,
-        $a:ident, $b:ident, ($($call_args:tt)*),
-        type Output = $output_type:ty,
-        simd: $bulk_fn:ident,
-    ) => {
-        struct $Kernel;
-        impl<T1, T2> crate::ops::op2::Op2Kernel<T1, T2> for $Kernel
-        where
-            T1: $($trait)::+<T2> + Copy + 'static,
-            T2: Copy + 'static,
-        {
-            type Output = $output_type;
-            #[inline(always)]
-            fn apply(&self, $a: T1, $b: T2) -> Self::Output {
-                <T1 as $($trait)::+<T2>>::$kernel_fn($($call_args)*)
-            }
-
-            #[inline(always)]
-            fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
-                &self,
-                simd: S,
-                a: [T1; N],
-                b: [T2; N],
-            ) -> [Self::Output; N] {
-                T1::$bulk_fn(a, b, simd)
-            }
-        }
     };
 
     (
@@ -509,28 +472,21 @@ pub(crate) mod _traits {
         pow,
         pow_bulk
     );
-    /// Implement `Pow` for each integer `$t` by the unsigned exponents of up to 32 bits.
-    macro_rules! impl_pow_int {
-        ($($t:ty),*) => {$(
-            impl_scalar_op2!(
-                Pow::pow, |a, b| a.pow(u32::from(b)), pairs [($t, u8), ($t, u16), ($t, u32)]
-            );
-        )*};
-    }
-    impl_pow_int!(i8, i16, i32, i64, u8, u16, u32, u64);
-    /// Implement `Pow` for each float `$t` by the integer exponents of up to 32 bits (`powi`)
-    /// and the floats `$f` (`powf`).
-    macro_rules! impl_pow_float {
-        ($t:ty, [$($f:ty),*]) => {
-            impl_scalar_op2!(
-                Pow::pow, |a, b| a.powi(i32::from(b)),
-                pairs [($t, i8), ($t, u8), ($t, i16), ($t, u16), ($t, i32)]
-            );
-            impl_scalar_op2!(Pow::pow, |a, b| a.powf(<$t>::from(b)), pairs [$(($t, $f)),*]);
-        };
-    }
-    impl_pow_float!(f32, [f32]);
-    impl_pow_float!(f64, [f32, f64]);
+    impl_scalar_op2!(
+        Pow::pow, |a, b| a.pow(u32::from(b)),
+        cross [i8, i16, i32, i64, u8, u16, u32, u64] x [u8, u16]
+    );
+    impl_scalar_op2!(
+        Pow::pow, |a, b| a.pow(b),
+        cross [i8, i16, i32, i64, u8, u16, u32, u64] x [u32]
+    );
+    impl_scalar_op2!(
+        Pow::pow, |a, b| a.powi(i32::from(b)),
+        cross [f32, f64] x [i8, u8, i16, u16]
+    );
+    impl_scalar_op2!(Pow::pow, |a, b| a.powi(b), cross [f32, f64] x [i32]);
+    impl_scalar_op2!(Pow::pow, |a, b| a.powf(b), [f32, f64]);
+    impl_scalar_op2!(Pow::pow, |a, b| a.powf(f64::from(b)), pairs[(f64, f32)]);
 }
 
 define_op2!(

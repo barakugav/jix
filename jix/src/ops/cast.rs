@@ -404,7 +404,14 @@ where
         x.cast()
     }
 
-    crate::ops::op1::op1_simd_apply_bulk!(bulk: T1, <T1 as crate::scalar::Cast<T2>>::cast_bulk);
+    #[inline(always)]
+    fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+        &self,
+        simd: S,
+        xs: [T1; N],
+    ) -> [Self::Output; N] {
+        T1::cast_bulk(xs, simd)
+    }
 }
 impl<S, T> Cast<S, T>
 where
