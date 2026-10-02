@@ -876,3 +876,13 @@ arrays of vectors (`widen`, `narrow`, `bitcast`, `float`, `truncate`). Kept wher
   - f64 -> f32 on AVX-512: `narrow` joins the two halves (`vinsertf32x8`, port 5 like
     `vcvtpd2ps`), where LLVM stores each half.
   - Same-type casts: copies, slower on i686's fallback level.
+
+### Cast bodies per SIMD level (`results/py-levels`)
+
+A Cast body can be limited to fearless_simd levels (`on Sse2 | Neon`; a match on
+`Simd::level()` that folds away per `S`). A body is on a level when it is faster or even (within
+3%, or the same instructions) on every platform of the level in `py-allsimd3`. Geomean speedup
+over `py-baseline3` across all cast kernels: x86_64 1.02x, x86_64-v2 1.07x, x86_64-v3 1.19x,
+x86_64-v4 1.35x, i686 1.01x, aarch64 1.08x, aarch64-apple 1.15x. No kernel slower than 0.97x except
+the aarch64 0.92x of the one-step narrowings (the same instructions, other registers) and i16 ->
+f32 on x86_64 (0.94x, the same instructions; 0.99x on i686).
