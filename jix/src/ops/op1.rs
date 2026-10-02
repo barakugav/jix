@@ -11,7 +11,7 @@ pub(crate) trait Op1Kernel<T> {
     fn apply(&self, x: T) -> Self::Output;
 
     /// [`apply`](Self::apply) on `N` elements, computing with `simd`'s vectors where the kernel
-    /// has a SIMD body for `T`.
+    /// has a SIMD path for `T` (its scalar trait's `*_bulk`).
     #[inline(always)]
     fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
         &self,
@@ -164,12 +164,8 @@ where
     }
 }
 
-/// The `apply_bulk` of an [`Op1Kernel`] over `$T` with SIMD bodies: `$vec => $body` computes on a
-/// vector `$x: S::$vec` when `$T` is its element (`TypeId`, resolved at compile time) and `N` a
-/// multiple of its length. The first such arm is taken, else the scalar `apply`. The body gives, per
-/// mode, a `vector` of `LEN` lanes of the kernel's output, or the `mask` of `S::$vec`, stored as
-/// the kernel's `bool` output. Or, for a kernel over our own trait, `bulk: $T, $bulk_fn`: the
-/// trait's own bulk function `$bulk_fn(xs, simd)`, with its SIMD bodies typed per impl.
+/// The `apply_bulk` of an [`Op1Kernel`] over `$T` by the scalar trait's bulk function
+/// `$bulk_fn(xs, simd)`, with its SIMD bodies typed per impl.
 macro_rules! op1_simd_apply_bulk {
     (bulk: $T:ty, $($bulk_fn:tt)+) => {
         #[inline(always)]
@@ -181,73 +177,6 @@ macro_rules! op1_simd_apply_bulk {
             $($bulk_fn)+(xs, simd)
         }
     };
-    ($mode:ident: $T:ty, |$x:ident| { $($vec:ident => $body:expr),+ $(,)? }) => {
-        #[inline(always)]
-        fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
-            &self,
-            simd: S,
-            xs: [$T; N],
-        ) -> [Self::Output; N] {
-            use crate::util::checked_transmute;
-            #[allow(unused_imports)]
-            use fearless_simd::{Bytes, Select, SimdBase, SimdFloat, SimdInt, SimdMask};
-            use std::any::TypeId;
-            $(
-                if TypeId::of::<$T>() == TypeId::of::<<S::$vec as SimdBase<S>>::Element>()
-                    && const { N.is_multiple_of(<S::$vec as SimdBase<S>>::LEN) }
-                {
-                    let xs = checked_transmute::<[$T; N], [<S::$vec as SimdBase<S>>::Element; N]>(xs)
-                        .unwrap();
-                    let lanes = <S::$vec as SimdBase<S>>::LEN;
-                    crate::ops::op1::op1_simd_apply_bulk!(@$mode lanes, |c| {
-                        // SAFETY: vector `c` is in bounds, as `N` is a multiple of `lanes`.
-                        let $x = <S::$vec as SimdBase<S>>::load_array_ref(simd, unsafe {
-                            &*xs.as_ptr().cast::<<S::$vec as SimdBase<S>>::Array>().add(c)
-                        });
-                        $body
-                    }, <S::$vec as SimdBase<S>>::Mask);
-                }
-            )+
-            crate::util::ArrayExt::map_inline(xs, |x| self.apply(x))
-        }
-    };
-    // Return the `N` outputs of the vectors `$y(c)` for `c` in `0..N / $lanes`, each of `$lanes`
-    // lanes of `Self::Output`.
-    (@vector $lanes:ident, |$c:ident| $y:block, $Mask:ty) => {{
-        use std::any::{Any, TypeId};
-        // Zeroed, not uninit: the loop stores through references into it.
-        let mut ys = std::mem::MaybeUninit::<[Self::Output; N]>::zeroed();
-        for $c in 0..N / $lanes {
-            let y = $y;
-            // The body must give `lanes` lanes of `Self::Output`.
-            assert!(
-                y.as_slice().len() == $lanes
-                    && Any::type_id(&y.as_slice()[0]) == TypeId::of::<Self::Output>()
-            );
-            // SAFETY: vector `c` of `ys` is in bounds and of `y`'s array type, per the assert,
-            // and initialized.
-            y.store_array(unsafe {
-                &mut *ys.as_mut_ptr().cast::<Self::Output>().add($c * $lanes).cast()
-            });
-        }
-        // SAFETY: zeroed, then written by the loop.
-        return unsafe { ys.assume_init() };
-    }};
-    // Return the `N` `bool` outputs of the masks `$y(c)` of type `$Mask`: each stored as its
-    // lanes (0 / -1), then compared to 0, which LLVM vectorizes (packs).
-    (@mask $lanes:ident, |$c:ident| $y:block, $Mask:ty) => {{
-        let mut ys = [false; N];
-        // The mask's lanes, at most 64 (8-bit lanes of 512-bit vectors).
-        let mut lanes_buf = [Default::default(); 64];
-        for $c in 0..N / $lanes {
-            let m: $Mask = $y;
-            fearless_simd::SimdMask::store_slice(&m, &mut lanes_buf[..$lanes]);
-            for k in 0..$lanes {
-                ys[$c * $lanes + k] = lanes_buf[k] != Default::default();
-            }
-        }
-        return ys;
-    }};
 }
 
 macro_rules! define_op1 {
@@ -257,7 +186,6 @@ macro_rules! define_op1 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident,
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
-        $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
         $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -272,9 +200,6 @@ macro_rules! define_op1 {
                 <T as $($trait)::+>::$kernel_fn(x)
             }
 
-            $(
-                crate::ops::op1::op1_simd_apply_bulk!(vector: T, |$x| { $($vec => $body),+ });
-            )?
             $(
                 crate::ops::op1::op1_simd_apply_bulk!(bulk: T, T::$bulk_fn);
             )?
@@ -321,7 +246,7 @@ macro_rules! define_op1 {
         }
 
         define_op1!(@define_core
-            impl $Op
+            impl $Op, $($trait)::+,
             $(core_op = $core_op_trait::$core_op_fn,)?
         );
     };
@@ -332,7 +257,6 @@ macro_rules! define_op1 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident,
         type Output<T> = T,
-        $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
         $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op1!(
@@ -342,7 +266,6 @@ macro_rules! define_op1 {
             <$($trait)::+> :: $kernel_fn,
             type Output<T> = T,
             type Output<S> = S::Item,
-            $(simd(vector): |$x| { $($vec => $body),+ },)?
             $(simd_bulk: $bulk_fn,)?
         );
     };
@@ -352,7 +275,6 @@ macro_rules! define_op1 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident,
         type Output = bool,
-        $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
         $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op1!(
@@ -362,7 +284,6 @@ macro_rules! define_op1 {
             <$($trait)::+> :: $kernel_fn,
             type Output<T> = bool,
             type Output<S> = bool,
-            $(simd(mask): |$x| { $($vec => $body),+ },)?
             $(simd_bulk: $bulk_fn,)?
         );
     };
@@ -372,7 +293,6 @@ macro_rules! define_op1 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident,
         type Output = $output_type:ty,
-        $(simd: |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
         $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op1!(
@@ -382,7 +302,6 @@ macro_rules! define_op1 {
             <$($trait)::+> :: $kernel_fn,
             type Output<T> = $output_type,
             type Output<S> = $output_type,
-            $(simd(vector): |$x| { $($vec => $body),+ },)?
             $(simd_bulk: $bulk_fn,)?
         );
     };
@@ -393,7 +312,6 @@ macro_rules! define_op1 {
         <$($trait:ident)::+> :: $kernel_fn:ident,
         type Output<T> = $output_type_t:ty,
         type Output<S> = $output_type_s:ty,
-        $(simd($mode:ident): |$x:ident| { $($vec:ident => $body:expr),+ $(,)? },)?
         $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -408,9 +326,6 @@ macro_rules! define_op1 {
                 <T as $($trait)::+>::$kernel_fn(x)
             }
 
-            $(
-                crate::ops::op1::op1_simd_apply_bulk!($mode: T, |$x| { $($vec => $body),+ });
-            )?
             $(
                 crate::ops::op1::op1_simd_apply_bulk!(bulk: T, T::$bulk_fn);
             )?
@@ -459,17 +374,17 @@ macro_rules! define_op1 {
 
     (
         @define_core
-        impl $Op:ident
+        impl $Op:ident, $($trait:ident)::+,
     ) => {};
     (
         @define_core
-        impl $Op:ident
+        impl $Op:ident, $($trait:ident)::+,
         core_op = $core_op_trait:ident::$core_op_fn:ident,
     ) => {
         impl<S> core::ops::$core_op_trait for Array<S>
         where
             S: crate::storage::ArrayStorageTyped,
-            S::Item: core::ops::$core_op_trait<Output: crate::dtype::Dtyped>,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S>>;
             #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
@@ -486,16 +401,10 @@ pub(crate) use {define_op1, op1_simd_apply_bulk};
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::scalar::traits_util::define_op1_trait;
+    use crate::scalar::traits_util::{define_op1_trait, define_scalar_op1_trait, impl_scalar_op1};
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
 
-    define_op1_trait!(
-        Abs,
-        abs,
-        |a| a.abs(),
-        [i8, i16, i32, i64, f32, f64] => "same"
-    );
     define_op1_trait!(
         Sign,
         sign,
@@ -525,33 +434,65 @@ pub(crate) mod _traits {
         };
     }
     impl_sign_uint!(u8, u16, u32, u64);
+    define_scalar_op1_trait!(
+        /// Scalar kernel of [`Abs`](crate::ops::Abs): the absolute value, the magnitude for
+        /// complex types.
+        Abs,
+        abs,
+        abs_bulk
+    );
+    impl_scalar_op1!(
+        Abs::abs / abs_bulk, |x| x.abs(), simd: |x| x.abs(), [i8, i16, i32, i64, f32, f64]
+    );
     #[cfg(feature = "half")]
-    impl Abs for f16 {
-        type Output = f16;
-
-        #[inline(always)]
-        fn abs(self) -> Self::Output {
-            <Self as num_traits::Float>::abs(self)
-        }
-    }
+    impl_scalar_op1!(Abs::abs, |x| num_traits::Float::abs(x), [f16]);
     #[cfg(feature = "num-complex")]
-    impl Abs for Complex<f32> {
-        type Output = f32;
+    impl_scalar_op1!(
+        Abs::abs, |x| x.re.hypot(x.im), [Complex<f32> => f32, Complex<f64> => f64]
+    );
 
-        #[inline(always)]
-        fn abs(self) -> Self::Output {
-            self.re.hypot(self.im)
-        }
-    }
+    define_scalar_op1_trait!(
+        /// Scalar kernel of [`Neg`](crate::ops::Neg), as [`core::ops::Neg`].
+        Neg,
+        neg,
+        neg_bulk
+    );
+    impl_scalar_op1!(Neg::neg / neg_bulk, |x| -x, simd: |x| -x, [f32, f64, i8, i16, i32, i64]);
+    #[cfg(feature = "half")]
+    impl_scalar_op1!(Neg::neg, |x| -x, [f16]);
     #[cfg(feature = "num-complex")]
-    impl Abs for Complex<f64> {
-        type Output = f64;
+    impl_scalar_op1!(Neg::neg, |x| -x, [Complex<f32>, Complex<f64>]);
+    #[cfg(all(feature = "half", feature = "num-complex"))]
+    impl_scalar_op1!(Neg::neg, |x| -x, [Complex<f16>]);
 
-        #[inline(always)]
-        fn abs(self) -> Self::Output {
-            self.re.hypot(self.im)
-        }
+    /// Define the scalar trait `$Trait` of a float rounding / root op, as `num_traits::Float`'s
+    /// `$f`, with SIMD for `f32` and `f64`.
+    macro_rules! float_op1 {
+        ($(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident) => {
+            define_scalar_op1_trait!($(#[$meta])* $Trait, $f, $f_bulk);
+            impl_scalar_op1!($Trait::$f / $f_bulk, |x| x.$f(), simd: |x| x.$f(), [f32, f64]);
+            #[cfg(feature = "half")]
+            impl_scalar_op1!($Trait::$f, |x| num_traits::Float::$f(x), [f16]);
+        };
     }
+    float_op1!(
+        /// Scalar kernel of [`Floor`](crate::ops::Floor), as [`f32::floor`].
+        Floor,
+        floor,
+        floor_bulk
+    );
+    float_op1!(
+        /// Scalar kernel of [`Ceil`](crate::ops::Ceil), as [`f32::ceil`].
+        Ceil,
+        ceil,
+        ceil_bulk
+    );
+    float_op1!(
+        /// Scalar kernel of [`Sqrt`](crate::ops::Sqrt), as [`f32::sqrt`].
+        Sqrt,
+        sqrt,
+        sqrt_bulk
+    );
 }
 
 define_op1!(
@@ -589,16 +530,9 @@ define_op1!(
     /// ```
     Neg,
     NegKernel,
-    <core::ops::Neg>::neg,
+    <crate::scalar::Neg>::neg,
     core_op = Neg::neg,
-    simd: |x| {
-        f32s => -x,
-        f64s => -x,
-        i8s => -x,
-        i16s => -x,
-        i32s => -x,
-        i64s => -x,
-    },
+    simd_bulk: neg_bulk,
 );
 define_op1!(
     /// Rounds each element down to the nearest integer (towards -inf).
@@ -627,12 +561,8 @@ define_op1!(
     /// ```
     Floor,
     FloorKernel,
-    <num_traits::Float>::floor,
-    type Output<T> = T,
-    simd: |x| {
-        f32s => x.floor(),
-        f64s => x.floor(),
-    },
+    <crate::scalar::Floor>::floor,
+    simd_bulk: floor_bulk,
 );
 define_op1!(
     /// Rounds each element up to the nearest integer (towards +inf).
@@ -661,12 +591,8 @@ define_op1!(
     /// ```
     Ceil,
     CeilKernel,
-    <num_traits::Float>::ceil,
-    type Output<T> = T,
-    simd: |x| {
-        f32s => x.ceil(),
-        f64s => x.ceil(),
-    },
+    <crate::scalar::Ceil>::ceil,
+    simd_bulk: ceil_bulk,
 );
 define_op1!(
     /// Rounds each element to the nearest integer.
@@ -728,12 +654,8 @@ define_op1!(
     /// ```
     Sqrt,
     SqrtKernel,
-    <num_traits::Float>::sqrt,
-    type Output<T> = T,
-    simd: |x| {
-        f32s => x.sqrt(),
-        f64s => x.sqrt(),
-    },
+    <crate::scalar::Sqrt>::sqrt,
+    simd_bulk: sqrt_bulk,
 );
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
@@ -1079,14 +1001,7 @@ define_op1!(
     Abs,
     AbsKernel,
     <crate::scalar::Abs>::abs,
-    simd: |x| {
-        f32s => x.abs(),
-        f64s => x.abs(),
-        i8s => x.abs(),
-        i16s => x.abs(),
-        i32s => x.abs(),
-        i64s => x.abs(),
-    },
+    simd_bulk: abs_bulk,
 );
 
 /// Squares each element (`x * x`).
@@ -1121,31 +1036,28 @@ pub struct Square<S>(Op1<S, SquareKernel>);
 struct SquareKernel;
 impl<T> Op1Kernel<T> for SquareKernel
 where
-    T: core::ops::Mul + Copy + 'static,
+    T: crate::scalar::Mul + Copy + 'static,
 {
-    type Output = <T as core::ops::Mul>::Output;
+    type Output = <T as crate::scalar::Mul>::Output;
 
     #[inline(always)]
     fn apply(&self, x: T) -> Self::Output {
-        x * x
+        x.mul(x)
     }
 
-    crate::ops::op1::op1_simd_apply_bulk!(vector: T, |x| {
-        f32s => x * x,
-        f64s => x * x,
-        i16s => x * x,
-        i32s => x * x,
-        i64s => x * x,
-        u8s => x * x,
-        u16s => x * x,
-        u32s => x * x,
-        u64s => x * x,
-    });
+    #[inline(always)]
+    fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+        &self,
+        simd: S,
+        xs: [T; N],
+    ) -> [Self::Output; N] {
+        T::mul_bulk(xs, xs, simd)
+    }
 }
 impl<S> Square<S>
 where
     S: ArrayStorageTyped,
-    S::Item: core::ops::Mul<Output: Dtyped>,
+    S::Item: crate::scalar::Mul<Output: Dtyped>,
 {
     /// Constructs a [`Square`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S) -> Result<Self> {
@@ -1161,9 +1073,9 @@ where
 impl<S> ArrayStorage for Square<S>
 where
     S: ArrayStorageTyped,
-    S::Item: core::ops::Mul<Output: Dtyped>,
+    S::Item: crate::scalar::Mul<Output: Dtyped>,
 {
-    type ElementType = Ty<<S::Item as core::ops::Mul>::Output>;
+    type ElementType = Ty<<S::Item as crate::scalar::Mul>::Output>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!(<S>);
 
@@ -1184,11 +1096,11 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op1_method!(floor: Floor, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(ceil: Ceil, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(floor: Floor, crate::scalar::Floor);
+    define_array_op1_method!(ceil: Ceil, crate::scalar::Ceil);
     define_array_op1_method!(round: Round, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(sqrt: Sqrt, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(square: Square, core::ops::Mul);
+    define_array_op1_method!(sqrt: Sqrt, crate::scalar::Sqrt);
+    define_array_op1_method!(square: Square, crate::scalar::Mul);
     define_array_op1_method!(exp: Exp, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(ln: Ln, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(sin: Sin, num_traits::Float, fixed_output_type = true);
@@ -1215,8 +1127,9 @@ pub(crate) mod tests {
     use proptest::strategy::BoxedStrategy;
     use proptest::test_runner::{Config, TestRunner};
 
-    /// The `simd:` bodies of the kernels of this module against their scalar semantics (release
-    /// builds: wrapping), on every SIMD level of the CPU, over edge cases.
+    /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
+    /// their scalar semantics (release builds: wrapping), on every SIMD level of the CPU, over edge
+    /// cases.
     #[test]
     fn simd_bodies_all_levels() {
         use super::{

@@ -121,7 +121,7 @@ where
 mod tests {
     use crate::ops::op1::tests::test_op1;
 
-    /// The `simd:` bodies of the kernels of this module against their scalar semantics, on every
+    /// The `apply_bulk` of the kernels of this module against their scalar semantics, on every
     /// SIMD level of the CPU, over edge cases.
     #[test]
     fn simd_bodies_all_levels() {

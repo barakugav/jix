@@ -13,7 +13,7 @@ pub(crate) trait Op2Kernel<T1, T2> {
     fn apply(&self, a: T1, b: T2) -> Self::Output;
 
     /// [`apply`](Self::apply) on `N` element pairs, computing with `simd`'s vectors where the
-    /// kernel has a SIMD body for `T1` and `T2`.
+    /// kernel has a SIMD path for `T1` and `T2` (its scalar trait's `*_bulk`).
     #[inline(always)]
     fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
         &self,
@@ -213,55 +213,6 @@ where
     }
 }
 
-/// The `apply_bulk` of an [`Op2Kernel`] over `$T1` and `$T2` with SIMD bodies: `($va, $vb) =>
-/// $body` computes on vectors `$sa: S::$va` and `$sb: S::$vb` (of the same number of lanes, checked
-/// at compile time) when the operands are their elements (`TypeId`, resolved at compile time) and
-/// `N` a multiple of their length. The first such arm is taken, else the scalar `apply`. The body
-/// gives, per mode, a `vector` or a `mask`, as in `op1_simd_apply_bulk`.
-macro_rules! op2_simd_apply_bulk {
-    ($mode:ident: $T1:ty, $T2:ty, |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? }) => {
-        #[inline(always)]
-        fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
-            &self,
-            simd: S,
-            a: [$T1; N],
-            b: [$T2; N],
-        ) -> [Self::Output; N] {
-            use crate::util::checked_transmute;
-            #[allow(unused_imports)]
-            use fearless_simd::{Bytes, Select, SimdBase, SimdFloat, SimdInt, SimdMask};
-            use std::any::TypeId;
-            $(
-                if TypeId::of::<$T1>() == TypeId::of::<<S::$va as SimdBase<S>>::Element>()
-                    && TypeId::of::<$T2>() == TypeId::of::<<S::$vb as SimdBase<S>>::Element>()
-                    && const { N.is_multiple_of(<S::$va as SimdBase<S>>::LEN) }
-                {
-                    let lanes = const {
-                        assert!(<S::$va as SimdBase<S>>::LEN == <S::$vb as SimdBase<S>>::LEN);
-                        <S::$va as SimdBase<S>>::LEN
-                    };
-                    let a = checked_transmute::<[$T1; N], [<S::$va as SimdBase<S>>::Element; N]>(a)
-                        .unwrap();
-                    let b = checked_transmute::<[$T2; N], [<S::$vb as SimdBase<S>>::Element; N]>(b)
-                        .unwrap();
-                    crate::ops::op1::op1_simd_apply_bulk!(@$mode lanes, |c| {
-                        // SAFETY: vector `c` is in bounds, as `N` is a multiple of `lanes`.
-                        let $sa = <S::$va as SimdBase<S>>::load_array_ref(simd, unsafe {
-                            &*a.as_ptr().cast::<<S::$va as SimdBase<S>>::Array>().add(c)
-                        });
-                        // SAFETY: as above, with as many lanes.
-                        let $sb = <S::$vb as SimdBase<S>>::load_array_ref(simd, unsafe {
-                            &*b.as_ptr().cast::<<S::$vb as SimdBase<S>>::Array>().add(c)
-                        });
-                        $body
-                    }, <S::$va as SimdBase<S>>::Mask);
-                }
-            )+
-            crate::array_from_fn_inline(|i| self.apply(a[i], b[i]))
-        }
-    };
-}
-
 macro_rules! define_op2 {
     (
         $(#[$meta:meta])*
@@ -269,7 +220,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
-        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op2!(@kernel_dispatch
             $Kernel,
@@ -277,7 +228,7 @@ macro_rules! define_op2 {
             $kernel_fn,
             ($($call_args)*),
             type Output = <T1 as $($trait)::+<T2>>::Output,
-            $(simd(vector): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
+            $(simd_bulk: $bulk_fn,)?
         );
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
@@ -322,7 +273,7 @@ macro_rules! define_op2 {
             crate::ops::impl_element_type_change_default!();
         }
         define_op2!(@define_core
-            impl $Op
+            impl $Op, $($trait)::+,
             $(core_op = $core_op_trait::$core_op_fn,)?
         );
     };
@@ -333,7 +284,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
         type Output = bool,
-        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op2!(@typed
             $(#[$meta])*
@@ -341,7 +292,7 @@ macro_rules! define_op2 {
             $Kernel,
             <$($trait)::+> :: $kernel_fn ($($call_args)*),
             type Output = bool,
-            $(simd(mask): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
+            $(simd_bulk: $bulk_fn,)?
         );
     };
     (
@@ -350,7 +301,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
         type Output = $output_type:ty,
-        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op2!(@typed
             $(#[$meta])*
@@ -358,7 +309,7 @@ macro_rules! define_op2 {
             $Kernel,
             <$($trait)::+> :: $kernel_fn ($($call_args)*),
             type Output = $output_type,
-            $(simd(vector): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
+            $(simd_bulk: $bulk_fn,)?
         );
     };
     (
@@ -368,7 +319,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
         type Output = $output_type:ty,
-        $(simd($mode:ident): |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op2!(@kernel_dispatch
             $Kernel,
@@ -376,7 +327,7 @@ macro_rules! define_op2 {
             $kernel_fn,
             ($($call_args)*),
             type Output = $output_type,
-            $(simd($mode): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
+            $(simd_bulk: $bulk_fn,)?
         );
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
@@ -433,13 +384,13 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         ($a:ident, $b:ident),
         type Output = $output_type:ty,
-        $(simd($mode:ident): |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, ($a, $b),
             type Output = $output_type,
-            $(simd($mode): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
+            $(simd_bulk: $bulk_fn,)?
         );
     };
     (
@@ -449,13 +400,13 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         (&$a:ident, &$b:ident),
         type Output = $output_type:ty,
-        $(simd($mode:ident): |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, (&$a, &$b),
             type Output = $output_type,
-            $(simd($mode): |$sa, $sb| { $(($va, $vb) => $body),+ },)?
+            $(simd_bulk: $bulk_fn,)?
         );
     };
 
@@ -466,7 +417,7 @@ macro_rules! define_op2 {
         $Kernel:ident, $($trait:ident)::+, $kernel_fn:ident,
         $a:ident, $b:ident, ($($call_args:tt)*),
         type Output = $output_type:ty,
-        $(simd($mode:ident): |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         struct $Kernel;
         impl<T1, T2> crate::ops::op2::Op2Kernel<T1, T2> for $Kernel
@@ -481,25 +432,33 @@ macro_rules! define_op2 {
             }
 
             $(
-                crate::ops::op2::op2_simd_apply_bulk!($mode: T1, T2, |$sa, $sb| { $(($va, $vb) => $body),+ });
+                #[inline(always)]
+                fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+                    &self,
+                    simd: S,
+                    a: [T1; N],
+                    b: [T2; N],
+                ) -> [Self::Output; N] {
+                    T1::$bulk_fn(a, b, simd)
+                }
             )?
         }
     };
 
     (
         @define_core
-        impl $Op:ident
+        impl $Op:ident, $($trait:ident)::+,
     ) => {};
     (
         @define_core
-        impl $Op:ident
+        impl $Op:ident, $($trait:ident)::+,
         core_op = $core_op_trait:ident::$core_op_fn:ident,
     ) => {
         impl<S1, S2> core::ops::$core_op_trait<Array<S2>> for Array<S1>
         where
             S1: crate::storage::ArrayStorageTyped,
             S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
-            S1::Item: core::ops::$core_op_trait<S2::Item, Output: crate::dtype::Dtyped>,
+            S1::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S1, S2>>;
             #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
@@ -520,7 +479,7 @@ macro_rules! define_op2_rhs_fixed {
         rhs = $rhs:ty,
         type Output<T1> = $output_type_t:ty,
         type Output<S1> = $output_type_s:ty,
-        $(simd: |$sa:ident, $sb:ident| { $(($va:ident, $vb:ident) => $body:expr),+ $(,)? },)?
+        $(simd_bulk: $bulk_fn:ident,)?
     ) => {
         struct $Kernel;
         impl<T1> crate::ops::op2::Op2Kernel<T1, $rhs> for $Kernel
@@ -534,7 +493,15 @@ macro_rules! define_op2_rhs_fixed {
             }
 
             $(
-                crate::ops::op2::op2_simd_apply_bulk!(vector: T1, $rhs, |$sa, $sb| { $(($va, $vb) => $body),+ });
+                #[inline(always)]
+                fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+                    &self,
+                    simd: S,
+                    a: [T1; N],
+                    b: [$rhs; N],
+                ) -> [Self::Output; N] {
+                    T1::$bulk_fn(a, b, simd)
+                }
             )?
         }
         $(#[$meta])*
@@ -582,7 +549,75 @@ macro_rules! define_op2_rhs_fixed {
     };
 }
 
-pub(crate) use {define_op2, define_op2_rhs_fixed, op2_simd_apply_bulk};
+pub(crate) use {define_op2, define_op2_rhs_fixed};
+
+pub(crate) mod _traits {
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
+    use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
+
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`Add`](crate::ops::Add), as [`core::ops::Add`].
+        Add,
+        add,
+        add_bulk
+    );
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`Sub`](crate::ops::Sub), as [`core::ops::Sub`].
+        Sub,
+        sub,
+        sub_bulk
+    );
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`Mul`](crate::ops::Mul), as [`core::ops::Mul`].
+        Mul,
+        mul,
+        mul_bulk
+    );
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`Div`](crate::ops::Div), as [`core::ops::Div`].
+        Div,
+        div,
+        div_bulk
+    );
+
+    /// Implement `$Trait` by the `core::ops` operator `$op` for the numeric types: with SIMD for
+    /// `[$($simd),*]`, without for the others.
+    macro_rules! impl_arith {
+        ($Trait:ident::$f:ident / $f_bulk:ident, $op:tt, [$($simd:ty),*], [$($scalar:ty),*]) => {
+            impl_scalar_op2!(
+                $Trait::$f / $f_bulk, |a, b| a $op b, simd: |a, b| a $op b, [$($simd),*]
+            );
+            impl_scalar_op2!($Trait::$f, |a, b| a $op b, [$($scalar),*]);
+            #[cfg(feature = "half")]
+            impl_scalar_op2!($Trait::$f, |a, b| a $op b, [f16]);
+            #[cfg(feature = "num-complex")]
+            impl_scalar_op2!($Trait::$f, |a, b| a $op b, [Complex<f32>, Complex<f64>]);
+            #[cfg(all(feature = "half", feature = "num-complex"))]
+            impl_scalar_op2!($Trait::$f, |a, b| a $op b, [Complex<f16>]);
+        };
+    }
+    impl_arith!(
+        Add::add / add_bulk, +,
+        [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64], []
+    );
+    impl_arith!(
+        Sub::sub / sub_bulk, -,
+        [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64], []
+    );
+    // i8: the auto-vectorized scalar kernel is as fast (static analysis).
+    impl_arith!(
+        Mul::mul / mul_bulk, *,
+        [f32, f64, i16, i32, i64, u8, u16, u32, u64], [i8]
+    );
+    // Integers: no SIMD division.
+    impl_arith!(
+        Div::div / div_bulk, /,
+        [f32, f64], [i8, i16, i32, i64, u8, u16, u32, u64]
+    );
+}
 
 define_op2!(
     /// Element-wise addition of two arrays.
@@ -609,20 +644,9 @@ define_op2!(
     /// ```
     Add,
     AddKernel,
-    <core::ops::Add>::add(a, b),
+    <crate::scalar::Add>::add(a, b),
     core_op = Add::add,
-    simd: |a, b| {
-        (f32s, f32s) => a + b,
-        (f64s, f64s) => a + b,
-        (i8s, i8s) => a + b,
-        (i16s, i16s) => a + b,
-        (i32s, i32s) => a + b,
-        (i64s, i64s) => a + b,
-        (u8s, u8s) => a + b,
-        (u16s, u16s) => a + b,
-        (u32s, u32s) => a + b,
-        (u64s, u64s) => a + b,
-    },
+    simd_bulk: add_bulk,
 );
 define_op2!(
     /// Element-wise subtraction of two arrays (`a - b`).
@@ -649,20 +673,9 @@ define_op2!(
     /// ```
     Sub,
     SubKernel,
-    <core::ops::Sub>::sub(a, b),
+    <crate::scalar::Sub>::sub(a, b),
     core_op = Sub::sub,
-    simd: |a, b| {
-        (f32s, f32s) => a - b,
-        (f64s, f64s) => a - b,
-        (i8s, i8s) => a - b,
-        (i16s, i16s) => a - b,
-        (i32s, i32s) => a - b,
-        (i64s, i64s) => a - b,
-        (u8s, u8s) => a - b,
-        (u16s, u16s) => a - b,
-        (u32s, u32s) => a - b,
-        (u64s, u64s) => a - b,
-    },
+    simd_bulk: sub_bulk,
 );
 define_op2!(
     /// Element-wise multiplication of two arrays.
@@ -689,19 +702,9 @@ define_op2!(
     /// ```
     Mul,
     MulKernel,
-    <core::ops::Mul>::mul(a, b),
+    <crate::scalar::Mul>::mul(a, b),
     core_op = Mul::mul,
-    simd: |a, b| {
-        (f32s, f32s) => a * b,
-        (f64s, f64s) => a * b,
-        (i16s, i16s) => a * b,
-        (i32s, i32s) => a * b,
-        (i64s, i64s) => a * b,
-        (u8s, u8s) => a * b,
-        (u16s, u16s) => a * b,
-        (u32s, u32s) => a * b,
-        (u64s, u64s) => a * b,
-    },
+    simd_bulk: mul_bulk,
 );
 
 define_op2!(
@@ -730,12 +733,9 @@ define_op2!(
     /// ```
     Div,
     DivKernel,
-    <core::ops::Div>::div(a, b),
+    <crate::scalar::Div>::div(a, b),
     core_op = Div::div,
-    simd: |a, b| {
-        (f32s, f32s) => a / b,
-        (f64s, f64s) => a / b,
-    },
+    simd_bulk: div_bulk,
 );
 define_op2!(
     /// Element-wise exponentiation (`a` raised to the power `b`).
@@ -778,53 +778,9 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
-    // A `bool` output kernel, for the `mask` mode of `define_op2!` (the comparisons keep their
-    // auto-vectorized scalar kernels, faster by static analysis).
-    mod mask_mode {
-        #![allow(dead_code)]
-        use crate::ops::prelude::*;
-        define_op2!(
-            /// `a < b`, for `mask_apply_bulk_all_levels`.
-            TestLess,
-            TestLessKernel,
-            <core::cmp::PartialOrd>::lt(&a, &b),
-            type Output = bool,
-            simd: |a, b| {
-                (f32s, f32s) => a.simd_lt(b),
-                (f64s, f64s) => a.simd_lt(b),
-                (i8s, i8s) => a.simd_lt(b),
-                (u64s, u64s) => a.simd_lt(b),
-            },
-        );
-
-        /// The `mask` mode of `define_op2!` on every SIMD level of the CPU.
-        #[test]
-        fn mask_apply_bulk_all_levels() {
-            use crate::ops::op2::Op2Kernel;
-            use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
-            use fearless_simd::Simd;
-
-            fn check<S: Simd>(simd: S) {
-                macro_rules! case {
-                    ($t:ty) => {
-                        let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
-                        let lt = TestLessKernel.apply_bulk(simd, a, b);
-                        assert_same_elements(lt, |i| a[i] < b[i], stringify!($t));
-                    };
-                }
-                simd.vectorize(|| {
-                    case!(f32);
-                    case!(f64);
-                    case!(i8);
-                    case!(u64);
-                });
-            }
-            for_each_simd_level!(check);
-        }
-    }
-
-    /// The `simd:` bodies of the kernels of this module against their scalar semantics (release
-    /// builds: wrapping), on every SIMD level of the CPU, over edge cases.
+    /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
+    /// their scalar semantics (release builds: wrapping), on every SIMD level of the CPU, over edge
+    /// cases.
     #[test]
     fn simd_bodies_all_levels() {
         use super::{AddKernel, DivKernel, MulKernel, Op2Kernel, SubKernel};

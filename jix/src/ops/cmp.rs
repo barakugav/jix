@@ -6,6 +6,7 @@ use crate::ops::{Op2, Op2Kernel};
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
+    use crate::scalar::traits_util::impl_scalar_op2;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
 
@@ -31,39 +32,44 @@ pub(crate) mod _traits {
         type Output;
         /// Return the element-wise maximum of `self` and `other`, propagating `NaN` for floats.
         fn maximum(self, other: Rhs) -> Self::Output;
+        /// [`maximum`](Self::maximum) on each pair of `xs` and `ys`, vectorized with `simd` where the
+        /// types have SIMD support.
+        #[inline(always)]
+        fn maximum_bulk<S: fearless_simd::Simd, const N: usize>(
+            xs: [Self; N],
+            ys: [Rhs; N],
+            simd: S,
+        ) -> [Self::Output; N]
+        where
+            Self: Sized + Copy,
+            Rhs: Copy,
+        {
+            let _ = simd;
+            crate::util::array_from_fn_inline(|i| Self::maximum(xs[i], ys[i]))
+        }
     }
-    macro_rules! impl_integer_maximum {
-        ($($t:ty),* $(,)?) => {
-            $(impl Maximum for $t {
-                type Output = Self;
-
-                #[inline(always)]
-                fn maximum(self, other: Self) -> Self {
-                    std::cmp::max(self, other)
-                }
-            })*
-        };
-    }
-    macro_rules! impl_float_maximum {
-        ($($t:ty),* $(,)?) => {
-            $(impl Maximum for $t {
-                type Output = Self;
-
-                #[inline(always)]
-                fn maximum(self, other: Self) -> Self {
-                    if self.is_nan() | other.is_nan() {
-                        Self::NAN
-                    } else {
-                        self.max(other)
-                    }
-                }
-            })*
-        };
-    }
-    impl_integer_maximum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
-    impl_float_maximum!(f32, f64);
+    impl_scalar_op2!(
+        Maximum::maximum / maximum_bulk, |a, b| std::cmp::max(a, b), simd: |a, b| a.max(b),
+        [i8, i16, i32, i64, u8, u16, u32, u64]
+    );
+    impl_scalar_op2!(Maximum::maximum, |a, b| std::cmp::max(a, b), [bool]);
+    // NaN-propagating: `a + b` is NaN where an operand is.
+    impl_scalar_op2!(
+        Maximum::maximum / maximum_bulk,
+        |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.max(b) },
+        simd: |a, b| (a.simd_eq(a) & b.simd_eq(b)).select(a.max(b), a + b),
+        [f32, f64]
+    );
     #[cfg(feature = "half")]
-    impl_float_maximum!(f16);
+    impl_scalar_op2!(
+        Maximum::maximum,
+        |a, b| if a.is_nan() | b.is_nan() {
+            Self::NAN
+        } else {
+            a.max(b)
+        },
+        [f16]
+    );
 
     /// Element-wise minimum with NaN-propagating semantics for floating-point types.
     ///
@@ -87,39 +93,44 @@ pub(crate) mod _traits {
         type Output;
         /// Return the element-wise minimum of `self` and `other`, propagating `NaN` for floats.
         fn minimum(self, other: Rhs) -> Self::Output;
+        /// [`minimum`](Self::minimum) on each pair of `xs` and `ys`, vectorized with `simd` where the
+        /// types have SIMD support.
+        #[inline(always)]
+        fn minimum_bulk<S: fearless_simd::Simd, const N: usize>(
+            xs: [Self; N],
+            ys: [Rhs; N],
+            simd: S,
+        ) -> [Self::Output; N]
+        where
+            Self: Sized + Copy,
+            Rhs: Copy,
+        {
+            let _ = simd;
+            crate::util::array_from_fn_inline(|i| Self::minimum(xs[i], ys[i]))
+        }
     }
-    macro_rules! impl_integer_minimum {
-        ($($t:ty),* $(,)?) => {
-            $(impl Minimum for $t {
-                type Output = Self;
-
-                #[inline(always)]
-                fn minimum(self, other: Self) -> Self {
-                    std::cmp::min(self, other)
-                }
-            })*
-        };
-    }
-    macro_rules! impl_float_minimum {
-    ($($t:ty),* $(,)?) => {
-        $(impl Minimum for $t {
-            type Output = Self;
-
-            #[inline(always)]
-            fn minimum(self, other: Self) -> Self {
-                if self.is_nan() | other.is_nan() {
-                    Self::NAN
-                } else {
-                    self.min(other)
-                }
-            }
-        })*
-    };
-}
-    impl_integer_minimum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
-    impl_float_minimum!(f32, f64);
+    impl_scalar_op2!(
+        Minimum::minimum / minimum_bulk, |a, b| std::cmp::min(a, b), simd: |a, b| a.min(b),
+        [i8, i16, i32, i64, u8, u16, u32, u64]
+    );
+    impl_scalar_op2!(Minimum::minimum, |a, b| std::cmp::min(a, b), [bool]);
+    // NaN-propagating: `a + b` is NaN where an operand is.
+    impl_scalar_op2!(
+        Minimum::minimum / minimum_bulk,
+        |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.min(b) },
+        simd: |a, b| (a.simd_eq(a) & b.simd_eq(b)).select(a.min(b), a + b),
+        [f32, f64]
+    );
     #[cfg(feature = "half")]
-    impl_float_minimum!(f16);
+    impl_scalar_op2!(
+        Minimum::minimum,
+        |a, b| if a.is_nan() | b.is_nan() {
+            Self::NAN
+        } else {
+            a.min(b)
+        },
+        [f16]
+    );
 
     /// Approximate equality check of two scalar values.
     ///
@@ -468,19 +479,7 @@ define_op2!(
     Maximum,
     MaximumKernel,
     <crate::scalar::Maximum>::maximum(a, b),
-    // NaN-propagating: `a + b` is NaN where an operand is.
-    simd: |a, b| {
-        (f32s, f32s) => (a.simd_eq(a) & b.simd_eq(b)).select(a.max(b), a + b),
-        (f64s, f64s) => (a.simd_eq(a) & b.simd_eq(b)).select(a.max(b), a + b),
-        (i8s, i8s) => a.max(b),
-        (i16s, i16s) => a.max(b),
-        (i32s, i32s) => a.max(b),
-        (i64s, i64s) => a.max(b),
-        (u8s, u8s) => a.max(b),
-        (u16s, u16s) => a.max(b),
-        (u32s, u32s) => a.max(b),
-        (u64s, u64s) => a.max(b),
-    },
+    simd_bulk: maximum_bulk,
 );
 define_op2!(
     /// Element-wise minimum of two arrays.
@@ -516,19 +515,7 @@ define_op2!(
     Minimum,
     MinimumKernel,
     <crate::scalar::Minimum>::minimum(a, b),
-    // NaN-propagating: `a + b` is NaN where an operand is.
-    simd: |a, b| {
-        (f32s, f32s) => (a.simd_eq(a) & b.simd_eq(b)).select(a.min(b), a + b),
-        (f64s, f64s) => (a.simd_eq(a) & b.simd_eq(b)).select(a.min(b), a + b),
-        (i8s, i8s) => a.min(b),
-        (i16s, i16s) => a.min(b),
-        (i32s, i32s) => a.min(b),
-        (i64s, i64s) => a.min(b),
-        (u8s, u8s) => a.min(b),
-        (u16s, u16s) => a.min(b),
-        (u32s, u32s) => a.min(b),
-        (u64s, u64s) => a.min(b),
-    },
+    simd_bulk: minimum_bulk,
 );
 
 /// Element-wise approximate equality test.
@@ -692,8 +679,8 @@ mod tests {
     type complex_f64 = crate::scalar::Complex<f64>;
     use crate::ops::op2::tests::test_op2;
 
-    /// The `simd:` bodies of the kernels of this module against their scalar semantics, on every
-    /// SIMD level of the CPU, over edge cases (NaN included).
+    /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
+    /// their scalar semantics, on every SIMD level of the CPU, over edge cases (NaN included).
     #[test]
     fn simd_bodies_all_levels() {
         use super::{

@@ -37,55 +37,9 @@ pub(crate) mod _traits {
     /// Building blocks of the SIMD [`Cast::cast_bulk`] impls.
     mod simd {
         use crate::util::{array_from_fn_inline, ArrayExt};
-        use fearless_simd::{Simd, SimdBase, SimdElement, SimdNarrow, SimdWiden};
+        use fearless_simd::{Simd, SimdNarrow, SimdWiden};
 
-        /// The fearless_simd levels a SIMD body of `cast_bulk` can be limited to.
-        #[derive(Clone, Copy, PartialEq, Eq)]
-        #[allow(dead_code)] // Each target constructs only the variants of its arch.
-        pub(super) enum Level {
-            Sse2,
-            Sse4_2,
-            Avx2,
-            Avx512,
-            Neon,
-            /// The others (fallback, WASM).
-            Other,
-        }
-
-        /// The level of `simd`. A constant for each `S`, so a check of it folds away.
-        #[inline(always)]
-        pub(super) fn level<S: Simd>(simd: S) -> Level {
-            match simd.level() {
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-                fearless_simd::Level::Sse2(_) => Level::Sse2,
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-                fearless_simd::Level::Sse4_2(_) => Level::Sse4_2,
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-                fearless_simd::Level::Avx2(_) => Level::Avx2,
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-                fearless_simd::Level::Avx512(_) => Level::Avx512,
-                #[cfg(target_arch = "aarch64")]
-                fearless_simd::Level::Neon(_) => Level::Neon,
-                _ => Level::Other,
-            }
-        }
-
-        /// An element type with a native SIMD vector type.
-        pub(super) trait SimdLane: SimdElement {
-            type V<S: Simd>: SimdBase<S, Element = Self>;
-        }
-        macro_rules! impl_simd_lane {
-            ($($t:ident => $v:ident),*) => {$(
-                impl SimdLane for $t {
-                    type V<S: Simd> = S::$v;
-                }
-            )*};
-        }
-        impl_simd_lane!(
-            i8 => i8s, i16 => i16s, i32 => i32s, i64 => i64s,
-            u8 => u8s, u16 => u16s, u32 => u32s, u64 => u64s,
-            f32 => f32s, f64 => f64s
-        );
+        pub(super) use crate::scalar::simd::{level, map_vectors, Level, SimdLane};
 
         /// Widen `K` vectors to `2K` vectors (in order) of lanes twice as wide.
         pub(super) trait WidenVectors<S> {
@@ -122,40 +76,6 @@ pub(crate) mod _traits {
             )*};
         }
         impl_vectors_steps!(1 => 2, 2 => 4, 4 => 8);
-
-        /// Cast `xs` by `f`, which takes `KA` vectors of `A` and gives `KB` vectors of `B`, the same
-        /// elements. If `N` is not a multiple of the elements `f` takes, cast by `scalar`.
-        #[inline(always)]
-        pub(super) fn cast_bulk<S, A, B, const KA: usize, const KB: usize, const N: usize>(
-            simd: S,
-            xs: [A; N],
-            scalar: impl Fn(A) -> B,
-            f: impl Fn([A::V<S>; KA]) -> [B::V<S>; KB],
-        ) -> [B; N]
-        where
-            S: Simd,
-            A: SimdLane,
-            B: SimdLane,
-        {
-            let la = <A::V<S> as SimdBase<S>>::LEN;
-            let lb = <B::V<S> as SimdBase<S>>::LEN;
-            const { assert!(KA * <A::V<S> as SimdBase<S>>::LEN == KB * <B::V<S> as SimdBase<S>>::LEN) };
-            let chunk = KA * la;
-            if !N.is_multiple_of(chunk) {
-                return xs.map_inline(scalar);
-            }
-            let mut ys = [B::default(); N];
-            for c in 0..N / chunk {
-                let x = array_from_fn_inline(|k| {
-                    <A::V<S> as SimdBase<S>>::from_slice(simd, &xs[c * chunk + k * la..][..la])
-                });
-                let y = f(x);
-                for k in 0..KB {
-                    y[k].store_slice(&mut ys[c * chunk + k * lb..][..lb]);
-                }
-            }
-            ys
-        }
     }
 
     /// Implement `Cast<$dst>` for `$src`. `$bulk` is `(scalar)` for the default `cast_bulk`, or
@@ -203,7 +123,7 @@ pub(crate) mod _traits {
                         return xs.map_inline(|x| <Self as Cast<$dst_type>>::cast(x));
                     }
                 )?
-                simd::cast_bulk::<
+                simd::map_vectors::<
                     S,
                     $src_type,
                     $dst_type,

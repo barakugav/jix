@@ -3,6 +3,114 @@ use crate::ops::op2::define_op2;
 use crate::ops::prelude::*;
 use crate::ops::{define_op1, define_op2_rhs_fixed};
 
+pub(crate) mod _traits {
+    use crate::scalar::traits_util::{
+        define_scalar_op1_trait, define_scalar_op2_trait, impl_scalar_op1, impl_scalar_op2,
+    };
+
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`And`](crate::ops::And), as [`core::ops::BitAnd`].
+        BitAnd,
+        bitand,
+        bitand_bulk
+    );
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`Or`](crate::ops::Or), as [`core::ops::BitOr`].
+        BitOr,
+        bitor,
+        bitor_bulk
+    );
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`Xor`](crate::ops::Xor), as [`core::ops::BitXor`].
+        BitXor,
+        bitxor,
+        bitxor_bulk
+    );
+    define_scalar_op1_trait!(
+        /// Scalar kernel of [`Not`](crate::ops::Not), as [`core::ops::Not`].
+        Not,
+        not,
+        not_bulk
+    );
+    /// Implement the bitwise `$Trait` by the operator `$op`: with SIMD for the integers.
+    macro_rules! impl_bitwise2 {
+        ($Trait:ident::$f:ident / $f_bulk:ident, $op:tt) => {
+            impl_scalar_op2!(
+                $Trait::$f / $f_bulk, |a, b| a $op b, simd: |a, b| a $op b,
+                [i8, i16, i32, i64, u8, u16, u32, u64]
+            );
+            impl_scalar_op2!($Trait::$f, |a, b| a $op b, [bool]);
+        };
+    }
+    impl_bitwise2!(BitAnd::bitand / bitand_bulk, &);
+    impl_bitwise2!(BitOr::bitor / bitor_bulk, |);
+    impl_bitwise2!(BitXor::bitxor / bitxor_bulk, ^);
+    impl_scalar_op1!(
+        Not::not / not_bulk, |x| !x, simd: |x| !x, [i8, i16, i32, i64, u8, u16, u32, u64]
+    );
+    impl_scalar_op1!(Not::not, |x| !x, [bool]);
+
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`BitwiseShiftRight`](crate::ops::BitwiseShiftRight), as
+        /// [`core::ops::Shr`].
+        Shr,
+        shr,
+        shr_bulk
+    );
+    /// Implement `Shr` for each integer `$t` by each integer amount but the 32-bit ones.
+    macro_rules! impl_shr {
+        ($($t:ty),*) => {$(
+            impl_scalar_op2!(
+                Shr::shr, |a, b| a >> b,
+                pairs [($t, i8), ($t, i16), ($t, i64), ($t, u8), ($t, u16), ($t, u64)]
+            );
+        )*};
+    }
+    impl_shr!(i8, i16, i32, i64, u8, u16, u32, u64);
+    impl_scalar_op2!(
+        Shr::shr, |a, b| a >> b,
+        pairs [
+            (i8, i32), (i16, i32), (i64, i32), (u8, i32), (u16, i32), (u64, i32),
+            (i8, u32), (i16, u32), (i64, u32), (u8, u32), (u16, u32), (u64, u32),
+        ]
+    );
+    // SIMD for 32-bit values only: the others are not faster than the auto-vectorized scalar
+    // kernel (static analysis). The amount modulo the bit width, as in release builds (debug
+    // builds panic).
+    impl_scalar_op2!(
+        Shr::shr / shr_bulk, |a, b| a >> b, simd: |a, b| a >> (b & 31),
+        pairs [(i32, i32), (u32, u32)]
+    );
+    impl_scalar_op2!(
+        Shr::shr / shr_bulk, |a, b| a >> b, simd: |a, b| a >> (b & 31).bitcast::<S::i32s>(),
+        pairs [(i32, u32)]
+    );
+    impl_scalar_op2!(
+        Shr::shr / shr_bulk, |a, b| a >> b, simd: |a, b| a >> (b & 31).bitcast::<S::u32s>(),
+        pairs [(u32, i32)]
+    );
+
+    define_scalar_op1_trait!(
+        /// Scalar kernel of [`CountZeros`](crate::ops::CountZeros), as [`u32::count_zeros`].
+        CountZeros,
+        count_zeros,
+        count_zeros_bulk
+    );
+    // SIMD for 32-bit inputs: the only ones with as many lanes as the `u32` output.
+    impl_scalar_op1!(
+        CountZeros::count_zeros / count_zeros_bulk, |x| x.count_zeros(),
+        simd: |x| (!x).count_ones(), [u32 => u32]
+    );
+    impl_scalar_op1!(
+        CountZeros::count_zeros / count_zeros_bulk, |x| x.count_zeros(),
+        simd: |x| (!x).count_ones().bitcast::<S::u32s>(), [i32 => u32]
+    );
+    impl_scalar_op1!(
+        CountZeros::count_zeros, |x| x.count_zeros(),
+        [i8 => u32, i16 => u32, i64 => u32, u8 => u32, u16 => u32, u64 => u32]
+    );
+}
+
 define_op2!(
     /// Element-wise bitwise AND of two arrays.
     ///
@@ -33,18 +141,9 @@ define_op2!(
     /// ```
     And,
     AndKernel,
-    <core::ops::BitAnd>::bitand(a, b),
+    <crate::scalar::BitAnd>::bitand(a, b),
     core_op = BitAnd::bitand,
-    simd: |a, b| {
-        (i8s, i8s) => a & b,
-        (i16s, i16s) => a & b,
-        (i32s, i32s) => a & b,
-        (i64s, i64s) => a & b,
-        (u8s, u8s) => a & b,
-        (u16s, u16s) => a & b,
-        (u32s, u32s) => a & b,
-        (u64s, u64s) => a & b,
-    },
+    simd_bulk: bitand_bulk,
 );
 define_op2!(
     /// Element-wise bitwise OR of two arrays.
@@ -76,18 +175,9 @@ define_op2!(
     /// ```
     Or,
     OrKernel,
-    <core::ops::BitOr>::bitor(a, b),
+    <crate::scalar::BitOr>::bitor(a, b),
     core_op = BitOr::bitor,
-    simd: |a, b| {
-        (i8s, i8s) => a | b,
-        (i16s, i16s) => a | b,
-        (i32s, i32s) => a | b,
-        (i64s, i64s) => a | b,
-        (u8s, u8s) => a | b,
-        (u16s, u16s) => a | b,
-        (u32s, u32s) => a | b,
-        (u64s, u64s) => a | b,
-    },
+    simd_bulk: bitor_bulk,
 );
 define_op2!(
     /// Element-wise bitwise XOR of two arrays.
@@ -119,18 +209,9 @@ define_op2!(
     /// ```
     Xor,
     XorKernel,
-    <core::ops::BitXor>::bitxor(a, b),
+    <crate::scalar::BitXor>::bitxor(a, b),
     core_op = BitXor::bitxor,
-    simd: |a, b| {
-        (i8s, i8s) => a ^ b,
-        (i16s, i16s) => a ^ b,
-        (i32s, i32s) => a ^ b,
-        (i64s, i64s) => a ^ b,
-        (u8s, u8s) => a ^ b,
-        (u16s, u16s) => a ^ b,
-        (u32s, u32s) => a ^ b,
-        (u64s, u64s) => a ^ b,
-    },
+    simd_bulk: bitxor_bulk,
 );
 
 define_op1!(
@@ -160,18 +241,9 @@ define_op1!(
     /// ```
     Not,
     NotKernel,
-    <core::ops::Not>::not,
+    <crate::scalar::Not>::not,
     core_op = Not::not,
-    simd: |x| {
-        i8s => !x,
-        i16s => !x,
-        i32s => !x,
-        i64s => !x,
-        u8s => !x,
-        u16s => !x,
-        u32s => !x,
-        u64s => !x,
-    },
+    simd_bulk: not_bulk,
 );
 
 define_op2!(
@@ -245,15 +317,8 @@ define_op2!(
     /// ```
     BitwiseShiftRight,
     BitwiseShiftRightKernel,
-    <core::ops::Shr>::shr(a, b),
-    // The amount modulo the bit width, as in release builds (debug builds panic). 32-bit only:
-    // the others are not faster than the auto-vectorized scalar kernel (static analysis).
-    simd: |a, b| {
-        (i32s, i32s) => a >> (b & 31),
-        (i32s, u32s) => a >> (b & 31).bitcast::<S::i32s>(),
-        (u32s, i32s) => a >> (b & 31).bitcast::<S::u32s>(),
-        (u32s, u32s) => a >> (b & 31),
-    },
+    <crate::scalar::Shr>::shr(a, b),
+    simd_bulk: shr_bulk,
 );
 define_op2_rhs_fixed!(
     /// Element-wise bitwise left rotation (`a.rotate_left(b as u32)`).
@@ -393,13 +458,8 @@ define_op1!(
     /// ```
     CountZeros,
     CountZerosKernel,
-    <num_traits::PrimInt>::count_zeros,
-    type Output = u32,
-    // 32-bit inputs: the only ones with as many lanes as the `u32` output.
-    simd: |x| {
-        u32s => (!x).count_ones(),
-        i32s => (!x).count_ones().bitcast::<S::u32s>(),
-    },
+    <crate::scalar::CountZeros>::count_zeros,
+    simd_bulk: count_zeros_bulk,
 );
 define_op1!(
     /// Counts the number of leading zero bits in each element.
@@ -537,11 +597,11 @@ where
     S: ArrayStorage,
 {
     define_array_op2_method!(bitwise_shift_left: BitwiseShiftLeft, core::ops::Shl);
-    define_array_op2_method!(bitwise_shift_right: BitwiseShiftRight, core::ops::Shr);
+    define_array_op2_method!(bitwise_shift_right: BitwiseShiftRight, crate::scalar::Shr);
     define_array_op2_method!(bitwise_rotate_left: BitwiseRotateLeft, num_traits::PrimInt, fixed_lhs_type = u32);
     define_array_op2_method!(bitwise_rotate_right: BitwiseRotateRight, num_traits::PrimInt, fixed_lhs_type = u32);
     define_array_op1_method!(count_ones: CountOnes, num_traits::PrimInt, fixed_output_type = true);
-    define_array_op1_method!(count_zeros: CountZeros, num_traits::PrimInt, fixed_output_type = true);
+    define_array_op1_method!(count_zeros: CountZeros, crate::scalar::CountZeros);
     define_array_op1_method!(leading_zeros: LeadingZeros, num_traits::PrimInt, fixed_output_type = true);
     define_array_op1_method!(trailing_zeros: TrailingZeros, num_traits::PrimInt, fixed_output_type = true);
     define_array_op1_method!(swap_bytes: SwapBytes, num_traits::PrimInt, fixed_output_type = true);
@@ -555,9 +615,9 @@ mod tests {
     use crate::ops::op1::tests::test_op1;
     use crate::ops::op2::tests::test_op2;
 
-    /// The `simd:` bodies of the kernels of this module against their scalar semantics (release
-    /// builds: shift amounts modulo the bit width), on every SIMD level of the CPU, over edge
-    /// cases.
+    /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
+    /// their scalar semantics (release builds: shift amounts modulo the bit width), on every SIMD
+    /// level of the CPU, over edge cases.
     #[test]
     fn simd_bodies_all_levels() {
         use super::{
