@@ -322,12 +322,18 @@ pub(crate) mod _traits {
         [f32, f64, i16, i32, i64, u8, u16, u32, u64]
     );
     impl_scalar_op1!(Square::square, |x| x * x, [i8]);
-    #[cfg(feature = "half")]
+    // In f32 without FP16, as `Mul`.
+    #[cfg(all(
+        feature = "half",
+        not(all(target_arch = "aarch64", target_feature = "fp16"))
+    ))]
     impl_scalar_op1!(
         Square::square,
         |x| f16::from_f32(x.to_f32() * x.to_f32()),
         [f16]
     );
+    #[cfg(all(feature = "half", target_arch = "aarch64", target_feature = "fp16"))]
+    impl_scalar_op1!(Square::square, |x| x * x, [f16]);
     #[cfg(feature = "num-complex")]
     impl_scalar_op1!(Square::square, |x| x * x, [Complex<f32>, Complex<f64>]);
     #[cfg(all(feature = "half", feature = "num-complex"))]

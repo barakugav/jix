@@ -30,11 +30,7 @@ pub(crate) mod _traits {
         {
             let _ = simd;
             // A closure, not the fn item `Self::cast`: its `FnMut` shim is not always inlined.
-            crate::util::ArrayExt::map_inline(
-                xs,
-                #[inline(always)]
-                |x| Self::cast(x),
-            )
+            crate::util::ArrayExt::map_inline(xs, |x| Self::cast(x))
         }
     }
 
@@ -124,7 +120,7 @@ pub(crate) mod _traits {
                 };
                 $(
                     if !matches!(simd::level(simd), $(simd::Level::$level)|+) {
-                        return xs.map_inline(#[inline(always)] |x| <Self as Cast<$dst_type>>::cast(x));
+                        return xs.map_inline(|x| <Self as Cast<$dst_type>>::cast(x));
                     }
                 )?
                 simd::map_vectors::<
@@ -134,7 +130,7 @@ pub(crate) mod _traits {
                     { 1 $(* impl_cast!(@vectors_in $step))* },
                     { 1 $(* impl_cast!(@vectors_out $step))* },
                     N,
-                >(simd, xs, #[inline(always)] |x| <Self as Cast<$dst_type>>::cast(x), |v| {
+                >(simd, xs, |x| <Self as Cast<$dst_type>>::cast(x), |v| {
                     $(let v = impl_cast!(@step $step $(($T))?, v);)*
                     v
                 })
