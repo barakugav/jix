@@ -13,17 +13,6 @@ macro_rules! define_array_op1_method {
             $Op::new_array(self).unwrap()
         }
     };
-    ($method:ident : $Op:ident, $($trait:ident)::+, fixed_output_type = true) => {
-        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
-        #[track_caller]
-        pub fn $method(self) -> crate::Array<$Op<S>>
-        where
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+,
-        {
-            $Op::new_array(self).unwrap()
-        }
-    };
 }
 macro_rules! define_array_op2_method {
     ($method:ident : $Op:ident, $($trait:ident)::+) => {
@@ -38,18 +27,6 @@ macro_rules! define_array_op2_method {
             $Op::new_array(self, other).unwrap()
         }
     };
-    ($method:ident : $Op:ident, $($trait:ident)::+, fixed_output_type = true) => {
-        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
-        #[track_caller]
-        pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
-        where
-            S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Dimension = S::Dimension>,
-            S::Item: $($trait)::+<S2::Item>,
-        {
-            $Op::new_array(self, other).unwrap()
-        }
-    };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_lhs_type = $lhs_type:ty) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
@@ -57,7 +34,7 @@ macro_rules! define_array_op2_method {
         where
             S: crate::storage::ArrayStorageTyped,
             S2: crate::storage::ArrayStorageTyped<Item = $lhs_type, Dimension = S::Dimension>,
-            S::Item: $($trait)::+,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, other).unwrap()
         }

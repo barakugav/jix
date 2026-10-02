@@ -109,6 +109,119 @@ pub(crate) mod _traits {
         CountZeros::count_zeros, |x| x.count_zeros(),
         [i8 => u32, i16 => u32, i64 => u32, u8 => u32, u16 => u32, u64 => u32]
     );
+
+    /// Define the integer scalar trait `$Trait` as `u32`'s `$f`, of output `$Out`.
+    macro_rules! int_op1 {
+        ($(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident, $Out:ident) => {
+            define_scalar_op1_trait!($(#[$meta])* $Trait, $f, $f_bulk);
+            int_op1!(@impl $Trait, $f, $Out, [i8, i16, i32, i64, u8, u16, u32, u64]);
+        };
+        (@impl $Trait:ident, $f:ident, u32, [$($t:ty),*]) => {
+            impl_scalar_op1!($Trait::$f, |x| x.$f(), [$($t => u32),*]);
+        };
+        (@impl $Trait:ident, $f:ident, Self, [$($t:ty),*]) => {
+            impl_scalar_op1!($Trait::$f, |x| x.$f(), [$($t),*]);
+        };
+    }
+    int_op1!(
+        /// Scalar kernel of [`CountOnes`](crate::ops::CountOnes), as [`u32::count_ones`].
+        CountOnes,
+        count_ones,
+        count_ones_bulk,
+        u32
+    );
+    int_op1!(
+        /// Scalar kernel of [`LeadingZeros`](crate::ops::LeadingZeros), as
+        /// [`u32::leading_zeros`].
+        LeadingZeros,
+        leading_zeros,
+        leading_zeros_bulk,
+        u32
+    );
+    int_op1!(
+        /// Scalar kernel of [`TrailingZeros`](crate::ops::TrailingZeros), as
+        /// [`u32::trailing_zeros`].
+        TrailingZeros,
+        trailing_zeros,
+        trailing_zeros_bulk,
+        u32
+    );
+    int_op1!(
+        /// Scalar kernel of [`SwapBytes`](crate::ops::SwapBytes), as [`u32::swap_bytes`].
+        SwapBytes,
+        swap_bytes,
+        swap_bytes_bulk,
+        Self
+    );
+    int_op1!(
+        /// Scalar kernel of [`ReverseBits`](crate::ops::ReverseBits), as [`u32::reverse_bits`].
+        ReverseBits,
+        reverse_bits,
+        reverse_bits_bulk,
+        Self
+    );
+
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`BitwiseRotateLeft`](crate::ops::BitwiseRotateLeft), as
+        /// [`u32::rotate_left`].
+        RotateLeft<Rhs = u32>, rotate_left, rotate_left_bulk
+    );
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`BitwiseRotateRight`](crate::ops::BitwiseRotateRight), as
+        /// [`u32::rotate_right`].
+        RotateRight<Rhs = u32>, rotate_right, rotate_right_bulk
+    );
+    /// Implement the rotation `$Trait` for each integer `$t` by a `u32` amount.
+    macro_rules! impl_rotate {
+        ($Trait:ident::$f:ident, $($t:ty),*) => {
+            impl_scalar_op2!($Trait::$f, |a, b| a.$f(b), pairs [$(($t, u32)),*]);
+        };
+    }
+    impl_rotate!(
+        RotateLeft::rotate_left,
+        i8,
+        i16,
+        i32,
+        i64,
+        u8,
+        u16,
+        u32,
+        u64
+    );
+    impl_rotate!(
+        RotateRight::rotate_right,
+        i8,
+        i16,
+        i32,
+        i64,
+        u8,
+        u16,
+        u32,
+        u64
+    );
+
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`BitwiseShiftLeft`](crate::ops::BitwiseShiftLeft), as
+        /// [`core::ops::Shl`].
+        Shl,
+        shl,
+        shl_bulk
+    );
+    /// Implement `$Trait` (`$op`) for each integer `$t` by each integer amount.
+    macro_rules! impl_shift_all {
+        ($Trait:ident::$f:ident, $op:tt, $($t:ty),*) => {$(
+            impl_scalar_op2!(
+                $Trait::$f, |a, b| a $op b,
+                pairs [
+                    ($t, i8), ($t, i16), ($t, i32), ($t, i64),
+                    ($t, u8), ($t, u16), ($t, u32), ($t, u64),
+                ]
+            );
+        )*};
+    }
+    // No SIMD: LLVM vectorizes the scalar kernel's 32-bit shift as a multiply by `2^b` where
+    // fearless_simd extracts the lanes (SSE4.2), so no body is faster (static analysis).
+    impl_shift_all!(Shl::shl, <<, i8, i16, i32, i64, u8, u16, u32, u64);
 }
 
 define_op2!(
@@ -143,7 +256,7 @@ define_op2!(
     AndKernel,
     <crate::scalar::BitAnd>::bitand(a, b),
     core_op = BitAnd::bitand,
-    simd_bulk: bitand_bulk,
+    simd: bitand_bulk,
 );
 define_op2!(
     /// Element-wise bitwise OR of two arrays.
@@ -177,7 +290,7 @@ define_op2!(
     OrKernel,
     <crate::scalar::BitOr>::bitor(a, b),
     core_op = BitOr::bitor,
-    simd_bulk: bitor_bulk,
+    simd: bitor_bulk,
 );
 define_op2!(
     /// Element-wise bitwise XOR of two arrays.
@@ -211,7 +324,7 @@ define_op2!(
     XorKernel,
     <crate::scalar::BitXor>::bitxor(a, b),
     core_op = BitXor::bitxor,
-    simd_bulk: bitxor_bulk,
+    simd: bitxor_bulk,
 );
 
 define_op1!(
@@ -243,7 +356,7 @@ define_op1!(
     NotKernel,
     <crate::scalar::Not>::not,
     core_op = Not::not,
-    simd_bulk: not_bulk,
+    simd: not_bulk,
 );
 
 define_op2!(
@@ -278,9 +391,8 @@ define_op2!(
     /// ```
     BitwiseShiftLeft,
     BitwiseShiftLeftKernel,
-    <core::ops::Shl>::shl(a, b),
-    // No SIMD body: LLVM vectorizes the scalar kernel's left shift (as a multiply by `2^b`) where
-    // fearless_simd extracts the lanes (SSE4.2), so no body is faster (static analysis).
+    <crate::scalar::Shl>::shl(a, b),
+    simd: shl_bulk,
 );
 
 define_op2!(
@@ -318,7 +430,7 @@ define_op2!(
     BitwiseShiftRight,
     BitwiseShiftRightKernel,
     <crate::scalar::Shr>::shr(a, b),
-    simd_bulk: shr_bulk,
+    simd: shr_bulk,
 );
 define_op2_rhs_fixed!(
     /// Element-wise bitwise left rotation (`a.rotate_left(b as u32)`).
@@ -352,10 +464,9 @@ define_op2_rhs_fixed!(
     /// ```
     BitwiseRotateLeft,
     BitwiseRotateLeftKernel,
-    <num_traits::PrimInt>::rotate_left(a, b),
+    <crate::scalar::RotateLeft>::rotate_left(a, b),
     rhs = u32,
-    type Output<T1> = T1,
-    type Output<S1> = S1::Item,
+    simd: rotate_left_bulk,
 );
 
 define_op2_rhs_fixed!(
@@ -390,10 +501,9 @@ define_op2_rhs_fixed!(
     /// ```
     BitwiseRotateRight,
     BitwiseRotateRightKernel,
-    <num_traits::PrimInt>::rotate_right(a, b),
+    <crate::scalar::RotateRight>::rotate_right(a, b),
     rhs = u32,
-    type Output<T1> = T1,
-    type Output<S1> = S1::Item,
+    simd: rotate_right_bulk,
 );
 define_op1!(
     /// Counts the number of set bits (`1`s) in each element.
@@ -425,8 +535,8 @@ define_op1!(
     /// ```
     CountOnes,
     CountOnesKernel,
-    <num_traits::PrimInt>::count_ones,
-    type Output = u32,
+    <crate::scalar::CountOnes>::count_ones,
+    simd: count_ones_bulk,
 );
 define_op1!(
     /// Counts the number of unset bits (`0`s) in each element.
@@ -459,7 +569,7 @@ define_op1!(
     CountZeros,
     CountZerosKernel,
     <crate::scalar::CountZeros>::count_zeros,
-    simd_bulk: count_zeros_bulk,
+    simd: count_zeros_bulk,
 );
 define_op1!(
     /// Counts the number of leading zero bits in each element.
@@ -492,8 +602,8 @@ define_op1!(
     /// ```
     LeadingZeros,
     LeadingZerosKernel,
-    <num_traits::PrimInt>::leading_zeros,
-    type Output = u32,
+    <crate::scalar::LeadingZeros>::leading_zeros,
+    simd: leading_zeros_bulk,
 );
 define_op1!(
     /// Counts the number of trailing zero bits in each element.
@@ -526,8 +636,8 @@ define_op1!(
     /// ```
     TrailingZeros,
     TrailingZerosKernel,
-    <num_traits::PrimInt>::trailing_zeros,
-    type Output = u32,
+    <crate::scalar::TrailingZeros>::trailing_zeros,
+    simd: trailing_zeros_bulk,
 );
 define_op1!(
     /// Reverses the byte order of each element.
@@ -558,8 +668,8 @@ define_op1!(
     /// ```
     SwapBytes,
     SwapBytesKernel,
-    <num_traits::PrimInt>::swap_bytes,
-    type Output<T> = T,
+    <crate::scalar::SwapBytes>::swap_bytes,
+    simd: swap_bytes_bulk,
 );
 define_op1!(
     /// Reverses the bit order of each element.
@@ -588,24 +698,24 @@ define_op1!(
     /// ```
     ReverseBits,
     ReverseBitsKernel,
-    <num_traits::PrimInt>::reverse_bits,
-    type Output<T> = T,
+    <crate::scalar::ReverseBits>::reverse_bits,
+    simd: reverse_bits_bulk,
 );
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op2_method!(bitwise_shift_left: BitwiseShiftLeft, core::ops::Shl);
+    define_array_op2_method!(bitwise_shift_left: BitwiseShiftLeft, crate::scalar::Shl);
     define_array_op2_method!(bitwise_shift_right: BitwiseShiftRight, crate::scalar::Shr);
-    define_array_op2_method!(bitwise_rotate_left: BitwiseRotateLeft, num_traits::PrimInt, fixed_lhs_type = u32);
-    define_array_op2_method!(bitwise_rotate_right: BitwiseRotateRight, num_traits::PrimInt, fixed_lhs_type = u32);
-    define_array_op1_method!(count_ones: CountOnes, num_traits::PrimInt, fixed_output_type = true);
+    define_array_op2_method!(bitwise_rotate_left: BitwiseRotateLeft, crate::scalar::RotateLeft, fixed_lhs_type = u32);
+    define_array_op2_method!(bitwise_rotate_right: BitwiseRotateRight, crate::scalar::RotateRight, fixed_lhs_type = u32);
+    define_array_op1_method!(count_ones: CountOnes, crate::scalar::CountOnes);
     define_array_op1_method!(count_zeros: CountZeros, crate::scalar::CountZeros);
-    define_array_op1_method!(leading_zeros: LeadingZeros, num_traits::PrimInt, fixed_output_type = true);
-    define_array_op1_method!(trailing_zeros: TrailingZeros, num_traits::PrimInt, fixed_output_type = true);
-    define_array_op1_method!(swap_bytes: SwapBytes, num_traits::PrimInt, fixed_output_type = true);
-    define_array_op1_method!(reverse_bits: ReverseBits, num_traits::PrimInt, fixed_output_type = true);
+    define_array_op1_method!(leading_zeros: LeadingZeros, crate::scalar::LeadingZeros);
+    define_array_op1_method!(trailing_zeros: TrailingZeros, crate::scalar::TrailingZeros);
+    define_array_op1_method!(swap_bytes: SwapBytes, crate::scalar::SwapBytes);
+    define_array_op1_method!(reverse_bits: ReverseBits, crate::scalar::ReverseBits);
 }
 
 #[cfg(test)]

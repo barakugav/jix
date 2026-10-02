@@ -2,6 +2,40 @@ use crate::ops::common::define_array_op1_method;
 use crate::ops::define_op1;
 use crate::ops::prelude::*;
 
+pub(crate) mod _traits {
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
+    use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
+
+    /// Define the float classification scalar trait `$Trait` as `f32`'s `$f`.
+    macro_rules! classify_op1 {
+        ($(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident) => {
+            define_scalar_op1_trait!($(#[$meta])* $Trait, $f, $f_bulk);
+            impl_scalar_op1!($Trait::$f, |x| x.$f(), [f32 => bool, f64 => bool]);
+            #[cfg(feature = "half")]
+            impl_scalar_op1!($Trait::$f, |x| x.$f(), [f16 => bool]);
+        };
+    }
+    classify_op1!(
+        /// Scalar kernel of [`IsNan`](crate::ops::IsNan), as [`f32::is_nan`].
+        IsNan,
+        is_nan,
+        is_nan_bulk
+    );
+    classify_op1!(
+        /// Scalar kernel of [`IsFinite`](crate::ops::IsFinite), as [`f32::is_finite`].
+        IsFinite,
+        is_finite,
+        is_finite_bulk
+    );
+    classify_op1!(
+        /// Scalar kernel of [`IsInfinite`](crate::ops::IsInfinite), as [`f32::is_infinite`].
+        IsInfinite,
+        is_infinite,
+        is_infinite_bulk
+    );
+}
+
 define_op1!(
     /// Tests whether each element is `NaN` (not a number).
     ///
@@ -34,8 +68,8 @@ define_op1!(
     /// ```
     IsNan,
     IsNanKernel,
-    <num_traits::Float>::is_nan,
-    type Output = bool,
+    <crate::scalar::IsNan>::is_nan,
+    simd: is_nan_bulk,
 );
 define_op1!(
     /// Tests whether each element is finite (not `+/-inf` and not `NaN`).
@@ -69,8 +103,8 @@ define_op1!(
     /// ```
     IsFinite,
     IsFiniteKernel,
-    <num_traits::Float>::is_finite,
-    type Output = bool,
+    <crate::scalar::IsFinite>::is_finite,
+    simd: is_finite_bulk,
 );
 define_op1!(
     /// Tests whether each element is infinite (`+inf` or `-inf`).
@@ -104,17 +138,17 @@ define_op1!(
     /// ```
     IsInfinite,
     IsInfiniteKernel,
-    <num_traits::Float>::is_infinite,
-    type Output = bool,
+    <crate::scalar::IsInfinite>::is_infinite,
+    simd: is_infinite_bulk,
 );
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op1_method!(is_nan: IsNan, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(is_finite: IsFinite, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(is_infinite: IsInfinite, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(is_nan: IsNan, crate::scalar::IsNan);
+    define_array_op1_method!(is_finite: IsFinite, crate::scalar::IsFinite);
+    define_array_op1_method!(is_infinite: IsInfinite, crate::scalar::IsInfinite);
 }
 
 #[cfg(test)]

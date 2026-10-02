@@ -220,7 +220,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
-        $(simd_bulk: $bulk_fn:ident,)?
+        simd: $bulk_fn:ident,
     ) => {
         define_op2!(@kernel_dispatch
             $Kernel,
@@ -228,7 +228,7 @@ macro_rules! define_op2 {
             $kernel_fn,
             ($($call_args)*),
             type Output = <T1 as $($trait)::+<T2>>::Output,
-            $(simd_bulk: $bulk_fn,)?
+            simd: $bulk_fn,
         );
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
@@ -278,105 +278,8 @@ macro_rules! define_op2 {
         );
     };
 
-    (
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
-        type Output = bool,
-        $(simd_bulk: $bulk_fn:ident,)?
-    ) => {
-        define_op2!(@typed
-            $(#[$meta])*
-            $Op,
-            $Kernel,
-            <$($trait)::+> :: $kernel_fn ($($call_args)*),
-            type Output = bool,
-            $(simd_bulk: $bulk_fn,)?
-        );
-    };
-    (
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
-        type Output = $output_type:ty,
-        $(simd_bulk: $bulk_fn:ident,)?
-    ) => {
-        define_op2!(@typed
-            $(#[$meta])*
-            $Op,
-            $Kernel,
-            <$($trait)::+> :: $kernel_fn ($($call_args)*),
-            type Output = $output_type,
-            $(simd_bulk: $bulk_fn,)?
-        );
-    };
-    (
-        @typed
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
-        type Output = $output_type:ty,
-        $(simd_bulk: $bulk_fn:ident,)?
-    ) => {
-        define_op2!(@kernel_dispatch
-            $Kernel,
-            $($trait)::+,
-            $kernel_fn,
-            ($($call_args)*),
-            type Output = $output_type,
-            $(simd_bulk: $bulk_fn,)?
-        );
-        $(#[$meta])*
-        pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
-        impl<S1, S2> $Op<S1, S2>
-        where
-            S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
-            S1::Item: $($trait)::+<S2::Item>,
-        {
-            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new(a: S1, b: S2) -> crate::error::Result<Self> {
-                Ok(Self(crate::ops::op2::Op2::new(a, b, $Kernel)?))
-            }
-
-            #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
-            pub fn new_array(a: crate::Array<S1>, b: crate::Array<S2>) -> crate::error::Result<crate::Array<Self>> {
-                Self::new(a.into_storage(), b.into_storage()).map(crate::Array::from_storage)
-            }
-        }
-        impl<S1, S2> ArrayStorage for $Op<S1, S2>
-        where
-            S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
-            S1::Item: $($trait)::+<S2::Item>,
-        {
-            type ElementType = crate::Ty<$output_type>;
-            type Dimension = S1::Dimension;
-            crate::storage::impl_array_storage_forward!(<S1, S2>);
-
-            fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
-                crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.a, &self.0.b])
-            }
-
-            type DimensionChange<NewD: crate::Dimension> = $Op<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
-            #[inline]
-            fn dimension_change<NewD: crate::Dimension>(
-                self,
-            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-                Ok($Op(self.0.dimension_change()?))
-            }
-
-            crate::ops::impl_element_type_change_default!();
-        }
-    };
-
-    // @kernel_dispatch: parse the call convention from the args and forward to @kernel.
-    // Handles `(a, b)` (value) and `(&a, &b)` (ref-to-value) calling conventions,
-    // extracting the ident names so @kernel can use them as both parameter names and
-    // call args (ensuring macro hygiene is consistent).
+    // @kernel_dispatch: extract the ident names of the `(a, b)` args, so @kernel can use them as
+    // both parameter names and call args (ensuring macro hygiene is consistent).
     (
         @kernel_dispatch
         $Kernel:ident,
@@ -384,32 +287,15 @@ macro_rules! define_op2 {
         $kernel_fn:ident,
         ($a:ident, $b:ident),
         type Output = $output_type:ty,
-        $(simd_bulk: $bulk_fn:ident,)?
+        simd: $bulk_fn:ident,
     ) => {
         define_op2!(@kernel
             $Kernel, $($trait)::+, $kernel_fn,
             $a, $b, ($a, $b),
             type Output = $output_type,
-            $(simd_bulk: $bulk_fn,)?
+            simd: $bulk_fn,
         );
     };
-    (
-        @kernel_dispatch
-        $Kernel:ident,
-        $($trait:ident)::+,
-        $kernel_fn:ident,
-        (&$a:ident, &$b:ident),
-        type Output = $output_type:ty,
-        $(simd_bulk: $bulk_fn:ident,)?
-    ) => {
-        define_op2!(@kernel
-            $Kernel, $($trait)::+, $kernel_fn,
-            $a, $b, (&$a, &$b),
-            type Output = $output_type,
-            $(simd_bulk: $bulk_fn,)?
-        );
-    };
-
     // @kernel: generates the kernel struct + Op2Kernel impl.
     // $a and $b are the parameter ident names (same hygiene context as $($call_args)*).
     (
@@ -417,7 +303,7 @@ macro_rules! define_op2 {
         $Kernel:ident, $($trait:ident)::+, $kernel_fn:ident,
         $a:ident, $b:ident, ($($call_args:tt)*),
         type Output = $output_type:ty,
-        $(simd_bulk: $bulk_fn:ident,)?
+        simd: $bulk_fn:ident,
     ) => {
         struct $Kernel;
         impl<T1, T2> crate::ops::op2::Op2Kernel<T1, T2> for $Kernel
@@ -431,17 +317,15 @@ macro_rules! define_op2 {
                 <T1 as $($trait)::+<T2>>::$kernel_fn($($call_args)*)
             }
 
-            $(
-                #[inline(always)]
-                fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
-                    &self,
-                    simd: S,
-                    a: [T1; N],
-                    b: [T2; N],
-                ) -> [Self::Output; N] {
-                    T1::$bulk_fn(a, b, simd)
-                }
-            )?
+            #[inline(always)]
+            fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+                &self,
+                simd: S,
+                a: [T1; N],
+                b: [T2; N],
+            ) -> [Self::Output; N] {
+                T1::$bulk_fn(a, b, simd)
+            }
         }
     };
 
@@ -477,32 +361,28 @@ macro_rules! define_op2_rhs_fixed {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident ($a:ident, $b:ident),
         rhs = $rhs:ty,
-        type Output<T1> = $output_type_t:ty,
-        type Output<S1> = $output_type_s:ty,
-        $(simd_bulk: $bulk_fn:ident,)?
+        simd: $bulk_fn:ident,
     ) => {
         struct $Kernel;
         impl<T1> crate::ops::op2::Op2Kernel<T1, $rhs> for $Kernel
         where
             T1: $($trait)::+ + Copy + 'static,
         {
-            type Output = $output_type_t;
+            type Output = <T1 as $($trait)::+>::Output;
             #[inline(always)]
             fn apply(&self, $a: T1, $b: $rhs) -> Self::Output {
                 <T1 as $($trait)::+>::$kernel_fn($a, $b)
             }
 
-            $(
-                #[inline(always)]
-                fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
-                    &self,
-                    simd: S,
-                    a: [T1; N],
-                    b: [$rhs; N],
-                ) -> [Self::Output; N] {
-                    T1::$bulk_fn(a, b, simd)
-                }
-            )?
+            #[inline(always)]
+            fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+                &self,
+                simd: S,
+                a: [T1; N],
+                b: [$rhs; N],
+            ) -> [Self::Output; N] {
+                T1::$bulk_fn(a, b, simd)
+            }
         }
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
@@ -510,7 +390,7 @@ macro_rules! define_op2_rhs_fixed {
         where
             S1: crate::storage::ArrayStorageTyped,
             S2: crate::storage::ArrayStorageTyped<Item = $rhs, Dimension = S1::Dimension>,
-            S1::Item: $($trait)::+
+            S1::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(a: S1, b: S2) -> crate::error::Result<Self> {
@@ -526,9 +406,9 @@ macro_rules! define_op2_rhs_fixed {
         where
             S1: crate::storage::ArrayStorageTyped,
             S2: crate::storage::ArrayStorageTyped<Item = $rhs, Dimension = S1::Dimension>,
-            S1::Item: $($trait)::+
+            S1::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
-            type ElementType = crate::Ty<$output_type_s>;
+            type ElementType = crate::Ty<<S1::Item as $($trait)::+>::Output>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
 
@@ -617,6 +497,36 @@ pub(crate) mod _traits {
         Div::div / div_bulk, /,
         [f32, f64], [i8, i16, i32, i64, u8, u16, u32, u64]
     );
+
+    define_scalar_op2_trait!(
+        /// Scalar kernel of [`Pow`](crate::ops::Pow): as [`i32::pow`] for integers (unsigned
+        /// exponents), [`f32::powi`] and [`f32::powf`] for floats.
+        Pow,
+        pow,
+        pow_bulk
+    );
+    /// Implement `Pow` for each integer `$t` by the unsigned exponents of up to 32 bits.
+    macro_rules! impl_pow_int {
+        ($($t:ty),*) => {$(
+            impl_scalar_op2!(
+                Pow::pow, |a, b| a.pow(u32::from(b)), pairs [($t, u8), ($t, u16), ($t, u32)]
+            );
+        )*};
+    }
+    impl_pow_int!(i8, i16, i32, i64, u8, u16, u32, u64);
+    /// Implement `Pow` for each float `$t` by the integer exponents of up to 32 bits (`powi`)
+    /// and the floats `$f` (`powf`).
+    macro_rules! impl_pow_float {
+        ($t:ty, [$($f:ty),*]) => {
+            impl_scalar_op2!(
+                Pow::pow, |a, b| a.powi(i32::from(b)),
+                pairs [($t, i8), ($t, u8), ($t, i16), ($t, u16), ($t, i32)]
+            );
+            impl_scalar_op2!(Pow::pow, |a, b| a.powf(<$t>::from(b)), pairs [$(($t, $f)),*]);
+        };
+    }
+    impl_pow_float!(f32, [f32]);
+    impl_pow_float!(f64, [f32, f64]);
 }
 
 define_op2!(
@@ -646,7 +556,7 @@ define_op2!(
     AddKernel,
     <crate::scalar::Add>::add(a, b),
     core_op = Add::add,
-    simd_bulk: add_bulk,
+    simd: add_bulk,
 );
 define_op2!(
     /// Element-wise subtraction of two arrays (`a - b`).
@@ -675,7 +585,7 @@ define_op2!(
     SubKernel,
     <crate::scalar::Sub>::sub(a, b),
     core_op = Sub::sub,
-    simd_bulk: sub_bulk,
+    simd: sub_bulk,
 );
 define_op2!(
     /// Element-wise multiplication of two arrays.
@@ -704,7 +614,7 @@ define_op2!(
     MulKernel,
     <crate::scalar::Mul>::mul(a, b),
     core_op = Mul::mul,
-    simd_bulk: mul_bulk,
+    simd: mul_bulk,
 );
 
 define_op2!(
@@ -735,7 +645,7 @@ define_op2!(
     DivKernel,
     <crate::scalar::Div>::div(a, b),
     core_op = Div::div,
-    simd_bulk: div_bulk,
+    simd: div_bulk,
 );
 define_op2!(
     /// Element-wise exponentiation (`a` raised to the power `b`).
@@ -766,14 +676,15 @@ define_op2!(
     /// ```
     Pow,
     PowKernel,
-    <num_traits::Pow>::pow(a, b),
+    <crate::scalar::Pow>::pow(a, b),
+    simd: pow_bulk,
 );
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op2_method!(pow: Pow, num_traits::Pow);
+    define_array_op2_method!(pow: Pow, crate::scalar::Pow);
 }
 
 #[cfg(test)]

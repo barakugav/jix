@@ -2185,13 +2185,15 @@ define_reduction_op!(
     StandardDeviationKernel { ddof: f64 },
     where {
         S: ArrayStorageTyped,
-        S::Item: crate::scalar::Variance<Output: num_traits::Float + Dtyped>,
+        S::Item: crate::scalar::Variance<Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped>,
     }
     output = <S::Item as crate::scalar::Variance>::Output,
 );
 impl<T> ReductionOpKernel<T> for StandardDeviationKernel
 where
-    T: crate::scalar::Variance<Output: num_traits::Float>,
+    T: crate::scalar::Variance<
+        Output: crate::scalar::Sqrt<Output = <T as crate::scalar::Variance>::Output>,
+    >,
 {
     type Output = <T as crate::scalar::Variance>::Output;
     type State = <T as crate::scalar::Variance>::State;
@@ -2215,7 +2217,7 @@ where
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
         let var = <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems);
-        <_ as num_traits::Float>::sqrt(var)
+        crate::scalar::Sqrt::sqrt(var)
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;
@@ -2771,7 +2773,7 @@ where
         std: StandardDeviation,
         where {
             S: ArrayStorageTyped,
-            S::Item: crate::scalar::Variance<Output: num_traits::Float + Dtyped>,
+            S::Item: crate::scalar::Variance<Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped>,
         },
         extra_args = (ddof: f64)
     );

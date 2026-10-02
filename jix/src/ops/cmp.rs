@@ -6,7 +6,7 @@ use crate::ops::{Op2, Op2Kernel};
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::scalar::traits_util::impl_scalar_op2;
+    use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
 
@@ -132,6 +132,51 @@ pub(crate) mod _traits {
         [f16]
     );
 
+    /// Define the comparison scalar trait `$Trait` as the operator `$op`, for `[$($t),*]`.
+    macro_rules! cmp_op2 {
+        ($(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident, $op:tt) => {
+            define_scalar_op2_trait!($(#[$meta])* $Trait, $f, $f_bulk);
+            impl_scalar_op2!(
+                $Trait::$f, |a, b| a $op b,
+                [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool] => bool
+            );
+            #[cfg(feature = "half")]
+            impl_scalar_op2!($Trait::$f, |a, b| a $op b, [f16] => bool);
+        };
+        (@complex $Trait:ident, $f:ident, $op:tt) => {
+            #[cfg(feature = "num-complex")]
+            impl_scalar_op2!($Trait::$f, |a, b| a $op b, [Complex<f32>, Complex<f64>] => bool);
+            #[cfg(all(feature = "half", feature = "num-complex"))]
+            impl_scalar_op2!($Trait::$f, |a, b| a $op b, [Complex<f16>] => bool);
+        };
+    }
+    cmp_op2!(
+        /// Scalar kernel of [`Equal`](crate::ops::Equal), as [`PartialEq::eq`].
+        Equal, equal, equal_bulk, ==
+    );
+    cmp_op2!(@complex Equal, equal, ==);
+    cmp_op2!(
+        /// Scalar kernel of [`NotEqual`](crate::ops::NotEqual), as [`PartialEq::ne`].
+        NotEqual, not_equal, not_equal_bulk, !=
+    );
+    cmp_op2!(@complex NotEqual, not_equal, !=);
+    cmp_op2!(
+        /// Scalar kernel of [`Greater`](crate::ops::Greater), as [`PartialOrd::gt`].
+        Greater, greater, greater_bulk, >
+    );
+    cmp_op2!(
+        /// Scalar kernel of [`GreaterEqual`](crate::ops::GreaterEqual), as [`PartialOrd::ge`].
+        GreaterEqual, greater_equal, greater_equal_bulk, >=
+    );
+    cmp_op2!(
+        /// Scalar kernel of [`Less`](crate::ops::Less), as [`PartialOrd::lt`].
+        Less, less, less_bulk, <
+    );
+    cmp_op2!(
+        /// Scalar kernel of [`LessEqual`](crate::ops::LessEqual), as [`PartialOrd::le`].
+        LessEqual, less_equal, less_equal_bulk, <=
+    );
+
     /// Approximate equality check of two scalar values.
     ///
     /// Returns `true` when two values are *close enough* under absolute and/or relative
@@ -159,6 +204,23 @@ pub(crate) mod _traits {
             rtol: &Self::RelativeTolerance,
             atol: &Self::AbsoluteTolerance,
         ) -> bool;
+
+        /// [`approx_eq`](Self::approx_eq) on each pair of `xs` and `ys`, vectorized with `simd`
+        /// where the type has SIMD support.
+        #[inline(always)]
+        fn approx_eq_bulk<S: fearless_simd::Simd, const N: usize>(
+            xs: [Self; N],
+            ys: [Self; N],
+            rtol: &Self::RelativeTolerance,
+            atol: &Self::AbsoluteTolerance,
+            simd: S,
+        ) -> [bool; N]
+        where
+            Self: Sized + Copy,
+        {
+            let _ = simd;
+            crate::util::array_from_fn_inline(|i| xs[i].approx_eq(&ys[i], rtol, atol))
+        }
     }
     macro_rules! impl_approx_eq {
         ($T:ty) => {
@@ -185,15 +247,15 @@ pub(crate) mod _traits {
                         return false;
                     }
 
-                    let abs_diff = <$T as num_traits::Float>::abs(self - other);
+                    let abs_diff = crate::scalar::Abs::abs(*self - *other);
 
                     // For when the numbers are really close together
                     if abs_diff <= *atol {
                         return true;
                     }
 
-                    let abs_self = <$T as num_traits::Float>::abs(*self);
-                    let abs_other = <$T as num_traits::Float>::abs(*other);
+                    let abs_self = crate::scalar::Abs::abs(*self);
+                    let abs_other = crate::scalar::Abs::abs(*other);
 
                     let largest = if abs_other > abs_self {
                         abs_other
@@ -266,8 +328,8 @@ define_op2!(
     /// ```
     Equal,
     EqualKernel,
-    <PartialEq>::eq(&a, &b),
-    type Output = bool,
+    <crate::scalar::Equal>::equal(a, b),
+    simd: equal_bulk,
 );
 define_op2!(
     /// Element-wise inequality test (`a != b`).
@@ -301,8 +363,8 @@ define_op2!(
     /// ```
     NotEqual,
     NotEqualKernel,
-    <PartialEq>::ne(&a, &b),
-    type Output = bool,
+    <crate::scalar::NotEqual>::not_equal(a, b),
+    simd: not_equal_bulk,
 );
 define_op2!(
     /// Element-wise greater-than test (`a > b`).
@@ -336,8 +398,8 @@ define_op2!(
     /// ```
     Greater,
     GreaterKernel,
-    <PartialOrd>::gt(&a, &b),
-    type Output = bool,
+    <crate::scalar::Greater>::greater(a, b),
+    simd: greater_bulk,
 );
 define_op2!(
     /// Element-wise greater-than-or-equal test (`a >= b`).
@@ -371,8 +433,8 @@ define_op2!(
     /// ```
     GreaterEqual,
     GreaterEqualKernel,
-    <PartialOrd>::ge(&a, &b),
-    type Output = bool,
+    <crate::scalar::GreaterEqual>::greater_equal(a, b),
+    simd: greater_equal_bulk,
 );
 define_op2!(
     /// Element-wise less-than test (`a < b`).
@@ -406,8 +468,8 @@ define_op2!(
     /// ```
     Less,
     LessKernel,
-    <PartialOrd>::lt(&a, &b),
-    type Output = bool,
+    <crate::scalar::Less>::less(a, b),
+    simd: less_bulk,
 );
 define_op2!(
     /// Element-wise less-than-or-equal test (`a <= b`).
@@ -441,8 +503,8 @@ define_op2!(
     /// ```
     LessEqual,
     LessEqualKernel,
-    <PartialOrd>::le(&a, &b),
-    type Output = bool,
+    <crate::scalar::LessEqual>::less_equal(a, b),
+    simd: less_equal_bulk,
 );
 
 define_op2!(
@@ -479,7 +541,7 @@ define_op2!(
     Maximum,
     MaximumKernel,
     <crate::scalar::Maximum>::maximum(a, b),
-    simd_bulk: maximum_bulk,
+    simd: maximum_bulk,
 );
 define_op2!(
     /// Element-wise minimum of two arrays.
@@ -515,7 +577,7 @@ define_op2!(
     Minimum,
     MinimumKernel,
     <crate::scalar::Minimum>::minimum(a, b),
-    simd_bulk: minimum_bulk,
+    simd: minimum_bulk,
 );
 
 /// Element-wise approximate equality test.
@@ -579,6 +641,19 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
     fn apply(&self, a: T, b: T) -> Self::Output {
         a.approx_eq(&b, &self.rtol, &self.atol)
     }
+
+    #[inline(always)]
+    fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
+        &self,
+        simd: S,
+        a: [T; N],
+        b: [T; N],
+    ) -> [Self::Output; N]
+    where
+        T: Copy,
+    {
+        T::approx_eq_bulk(a, b, &self.rtol, &self.atol, simd)
+    }
 }
 impl<S1, S2> ApproxEq<S1, S2>
 where
@@ -641,12 +716,12 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op2_method!(equal: Equal, PartialEq, fixed_output_type = true);
-    define_array_op2_method!(not_equal: NotEqual, PartialEq, fixed_output_type = true);
-    define_array_op2_method!(greater: Greater, PartialOrd, fixed_output_type = true);
-    define_array_op2_method!(greater_equal: GreaterEqual, PartialOrd, fixed_output_type = true);
-    define_array_op2_method!(less: Less, PartialOrd, fixed_output_type = true);
-    define_array_op2_method!(less_equal: LessEqual, PartialOrd, fixed_output_type = true);
+    define_array_op2_method!(equal: Equal, crate::scalar::Equal);
+    define_array_op2_method!(not_equal: NotEqual, crate::scalar::NotEqual);
+    define_array_op2_method!(greater: Greater, crate::scalar::Greater);
+    define_array_op2_method!(greater_equal: GreaterEqual, crate::scalar::GreaterEqual);
+    define_array_op2_method!(less: Less, crate::scalar::Less);
+    define_array_op2_method!(less_equal: LessEqual, crate::scalar::LessEqual);
     define_array_op2_method!(maximum: Maximum, crate::scalar::Maximum);
     define_array_op2_method!(minimum: Minimum, crate::scalar::Minimum);
 
@@ -894,7 +969,15 @@ mod tests {
 
     // approx_equal: output is bool so NaN inputs are safe; use dedicated proptest tests because
     // the method takes extra rtol/atol parameters that test_op2! cannot supply.
-    fn ref_approx_eq<T: num_traits::Float>(a: T, b: T, rtol: T, atol: T) -> bool {
+    fn ref_approx_eq<T>(a: T, b: T, rtol: T, atol: T) -> bool
+    where
+        T: Copy
+            + PartialOrd
+            + core::ops::Sub<Output = T>
+            + core::ops::Mul<Output = T>
+            + crate::scalar::Abs<Output = T>
+            + crate::scalar::IsInfinite<Output = bool>,
+    {
         if a == b {
             return true;
         }

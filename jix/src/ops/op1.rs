@@ -186,7 +186,7 @@ macro_rules! define_op1 {
         $Kernel:ident,
         <$($trait:ident)::+> :: $kernel_fn:ident,
         $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
-        $(simd_bulk: $bulk_fn:ident,)?
+        simd: $bulk_fn:ident,
     ) => {
         struct $Kernel;
         impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
@@ -200,9 +200,7 @@ macro_rules! define_op1 {
                 <T as $($trait)::+>::$kernel_fn(x)
             }
 
-            $(
-                crate::ops::op1::op1_simd_apply_bulk!(bulk: T, T::$bulk_fn);
-            )?
+            crate::ops::op1::op1_simd_apply_bulk!(bulk: T, T::$bulk_fn);
         }
         $(#[$meta])*
         pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
@@ -252,127 +250,6 @@ macro_rules! define_op1 {
     };
 
     (
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident,
-        type Output<T> = T,
-        $(simd_bulk: $bulk_fn:ident,)?
-    ) => {
-        define_op1!(
-            $(#[$meta])*
-            $Op,
-            $Kernel,
-            <$($trait)::+> :: $kernel_fn,
-            type Output<T> = T,
-            type Output<S> = S::Item,
-            $(simd_bulk: $bulk_fn,)?
-        );
-    };
-    (
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident,
-        type Output = bool,
-        $(simd_bulk: $bulk_fn:ident,)?
-    ) => {
-        define_op1!(
-            $(#[$meta])*
-            $Op,
-            $Kernel,
-            <$($trait)::+> :: $kernel_fn,
-            type Output<T> = bool,
-            type Output<S> = bool,
-            $(simd_bulk: $bulk_fn,)?
-        );
-    };
-    (
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident,
-        type Output = $output_type:ty,
-        $(simd_bulk: $bulk_fn:ident,)?
-    ) => {
-        define_op1!(
-            $(#[$meta])*
-            $Op,
-            $Kernel,
-            <$($trait)::+> :: $kernel_fn,
-            type Output<T> = $output_type,
-            type Output<S> = $output_type,
-            $(simd_bulk: $bulk_fn,)?
-        );
-    };
-    (
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident,
-        type Output<T> = $output_type_t:ty,
-        type Output<S> = $output_type_s:ty,
-        $(simd_bulk: $bulk_fn:ident,)?
-    ) => {
-        struct $Kernel;
-        impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
-        where
-            T: $($trait)::+ + Copy + 'static,
-        {
-            type Output = $output_type_t;
-
-            #[inline(always)]
-            fn apply(&self, x: T) -> Self::Output {
-                <T as $($trait)::+>::$kernel_fn(x)
-            }
-
-            $(
-                crate::ops::op1::op1_simd_apply_bulk!(bulk: T, T::$bulk_fn);
-            )?
-        }
-        $(#[$meta])*
-        pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
-        impl<S> $Op<S>
-        where
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+,
-        {
-            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new(array: S) -> crate::error::Result<Self> {
-                Ok(Self(crate::ops::op1::Op1::new(array, $Kernel)?))
-            }
-
-            #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
-            pub fn new_array(array: crate::Array<S>) -> crate::error::Result<crate::Array<Self>> {
-                Self::new(array.into_storage()).map(crate::Array::from_storage)
-            }
-        }
-        impl<S> ArrayStorage for $Op<S>
-        where
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+,
-        {
-            type ElementType = crate::Ty<$output_type_s>;
-            type Dimension = S::Dimension;
-            crate::storage::impl_array_storage_forward!(<S>);
-
-            fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
-                crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
-            }
-
-            type DimensionChange<NewD: crate::Dimension> = $Op<S::DimensionChange<NewD>>;
-            #[inline]
-            fn dimension_change<NewD: crate::Dimension>(
-                self,
-            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-                Ok($Op(self.0.dimension_change()?))
-            }
-
-            crate::ops::impl_element_type_change_default!();
-        }
-    };
-
-    (
         @define_core
         impl $Op:ident, $($trait:ident)::+,
     ) => {};
@@ -401,39 +278,21 @@ pub(crate) use {define_op1, op1_simd_apply_bulk};
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::scalar::traits_util::{define_op1_trait, define_scalar_op1_trait, impl_scalar_op1};
+    use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
 
-    define_op1_trait!(
+    define_scalar_op1_trait!(
+        /// Scalar kernel of [`Sign`](crate::ops::Sign): as [`f32::signum`] and [`i32::signum`],
+        /// `0` or `1` for unsigned integers.
         Sign,
         sign,
-        |a| a.signum(),
-        [i8, i16, i32, i64, f32, f64] => "same"
+        sign_bulk
     );
+    impl_scalar_op1!(Sign::sign, |x| x.signum(), [i8, i16, i32, i64, f32, f64]);
+    impl_scalar_op1!(Sign::sign, |x| (x != 0) as Self, [u8, u16, u32, u64]);
     #[cfg(feature = "half")]
-    impl Sign for f16 {
-        type Output = f16;
-
-        #[inline(always)]
-        fn sign(self) -> Self::Output {
-            <Self as num_traits::Float>::signum(self)
-        }
-    }
-    macro_rules! impl_sign_uint {
-        ($($t:ty),*) => {
-            $(
-                impl Sign for $t {
-                    type Output = $t;
-                    #[inline(always)]
-                    fn sign(self) -> Self::Output {
-                        if self == 0 { 0 } else { 1 }
-                    }
-                }
-            )*
-        };
-    }
-    impl_sign_uint!(u8, u16, u32, u64);
+    impl_scalar_op1!(Sign::sign, |x| f16::from_f32(x.to_f32().signum()), [f16]);
     define_scalar_op1_trait!(
         /// Scalar kernel of [`Abs`](crate::ops::Abs): the absolute value, the magnitude for
         /// complex types.
@@ -445,7 +304,7 @@ pub(crate) mod _traits {
         Abs::abs / abs_bulk, |x| x.abs(), simd: |x| x.abs(), [i8, i16, i32, i64, f32, f64]
     );
     #[cfg(feature = "half")]
-    impl_scalar_op1!(Abs::abs, |x| num_traits::Float::abs(x), [f16]);
+    impl_scalar_op1!(Abs::abs, |x| f16::from_f32(x.to_f32().abs()), [f16]);
     #[cfg(feature = "num-complex")]
     impl_scalar_op1!(
         Abs::abs, |x| x.re.hypot(x.im), [Complex<f32> => f32, Complex<f64> => f64]
@@ -484,33 +343,96 @@ pub(crate) mod _traits {
     #[cfg(all(feature = "half", feature = "num-complex"))]
     impl_scalar_op1!(Neg::neg, |x| -x, [Complex<f16>]);
 
-    /// Define the scalar trait `$Trait` of a float rounding / root op, as `num_traits::Float`'s
-    /// `$f`, with SIMD for `f32` and `f64`.
+    /// Define the scalar trait `$Trait` of a float op as `f32`'s `$f`, with SIMD for `f32` and
+    /// `f64` if `simd`. `f16` computes in `f32`.
     macro_rules! float_op1 {
-        ($(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident) => {
+        ($(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident $(, $simd:ident)?) => {
             define_scalar_op1_trait!($(#[$meta])* $Trait, $f, $f_bulk);
-            impl_scalar_op1!($Trait::$f / $f_bulk, |x| x.$f(), simd: |x| x.$f(), [f32, f64]);
+            float_op1!(@impl $Trait, $f, $f_bulk $(, $simd)?);
             #[cfg(feature = "half")]
-            impl_scalar_op1!($Trait::$f, |x| num_traits::Float::$f(x), [f16]);
+            impl_scalar_op1!($Trait::$f, |x| f16::from_f32(x.to_f32().$f()), [f16]);
+        };
+        (@impl $Trait:ident, $f:ident, $f_bulk:ident, simd) => {
+            impl_scalar_op1!($Trait::$f / $f_bulk, |x| x.$f(), simd: |x| x.$f(), [f32, f64]);
+        };
+        (@impl $Trait:ident, $f:ident, $f_bulk:ident) => {
+            impl_scalar_op1!($Trait::$f, |x| x.$f(), [f32, f64]);
         };
     }
     float_op1!(
         /// Scalar kernel of [`Floor`](crate::ops::Floor), as [`f32::floor`].
         Floor,
         floor,
-        floor_bulk
+        floor_bulk,
+        simd
     );
     float_op1!(
         /// Scalar kernel of [`Ceil`](crate::ops::Ceil), as [`f32::ceil`].
         Ceil,
         ceil,
-        ceil_bulk
+        ceil_bulk,
+        simd
     );
     float_op1!(
         /// Scalar kernel of [`Sqrt`](crate::ops::Sqrt), as [`f32::sqrt`].
         Sqrt,
         sqrt,
-        sqrt_bulk
+        sqrt_bulk,
+        simd
+    );
+    float_op1!(
+        /// Scalar kernel of [`Round`](crate::ops::Round), as [`f32::round`].
+        Round,
+        round,
+        round_bulk
+    );
+    float_op1!(
+        /// Scalar kernel of [`Exp`](crate::ops::Exp), as [`f32::exp`].
+        Exp,
+        exp,
+        exp_bulk
+    );
+    float_op1!(
+        /// Scalar kernel of [`Ln`](crate::ops::Ln), as [`f32::ln`].
+        Ln,
+        ln,
+        ln_bulk
+    );
+    float_op1!(
+        /// Scalar kernel of [`Sin`](crate::ops::Sin), as [`f32::sin`].
+        Sin,
+        sin,
+        sin_bulk
+    );
+    float_op1!(
+        /// Scalar kernel of [`Cos`](crate::ops::Cos), as [`f32::cos`].
+        Cos,
+        cos,
+        cos_bulk
+    );
+    float_op1!(
+        /// Scalar kernel of [`Tan`](crate::ops::Tan), as [`f32::tan`].
+        Tan,
+        tan,
+        tan_bulk
+    );
+    float_op1!(
+        /// Scalar kernel of [`Asin`](crate::ops::Asin), as [`f32::asin`].
+        Asin,
+        asin,
+        asin_bulk
+    );
+    float_op1!(
+        /// Scalar kernel of [`Acos`](crate::ops::Acos), as [`f32::acos`].
+        Acos,
+        acos,
+        acos_bulk
+    );
+    float_op1!(
+        /// Scalar kernel of [`Atan`](crate::ops::Atan), as [`f32::atan`].
+        Atan,
+        atan,
+        atan_bulk
     );
 }
 
@@ -551,7 +473,7 @@ define_op1!(
     NegKernel,
     <crate::scalar::Neg>::neg,
     core_op = Neg::neg,
-    simd_bulk: neg_bulk,
+    simd: neg_bulk,
 );
 define_op1!(
     /// Rounds each element down to the nearest integer (towards -inf).
@@ -581,7 +503,7 @@ define_op1!(
     Floor,
     FloorKernel,
     <crate::scalar::Floor>::floor,
-    simd_bulk: floor_bulk,
+    simd: floor_bulk,
 );
 define_op1!(
     /// Rounds each element up to the nearest integer (towards +inf).
@@ -611,7 +533,7 @@ define_op1!(
     Ceil,
     CeilKernel,
     <crate::scalar::Ceil>::ceil,
-    simd_bulk: ceil_bulk,
+    simd: ceil_bulk,
 );
 define_op1!(
     /// Rounds each element to the nearest integer.
@@ -643,8 +565,8 @@ define_op1!(
     /// ```
     Round,
     RoundKernel,
-    <num_traits::Float>::round,
-    type Output<T> = T,
+    <crate::scalar::Round>::round,
+    simd: round_bulk,
 );
 define_op1!(
     /// Computes the square root of each element.
@@ -674,7 +596,7 @@ define_op1!(
     Sqrt,
     SqrtKernel,
     <crate::scalar::Sqrt>::sqrt,
-    simd_bulk: sqrt_bulk,
+    simd: sqrt_bulk,
 );
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
@@ -704,8 +626,8 @@ define_op1!(
     /// ```
     Exp,
     ExpKernel,
-    <num_traits::Float>::exp,
-    type Output<T> = T,
+    <crate::scalar::Exp>::exp,
+    simd: exp_bulk,
 );
 define_op1!(
     /// Computes the natural logarithm (`ln x`) of each element.
@@ -737,8 +659,8 @@ define_op1!(
     /// ```
     Ln,
     LnKernel,
-    <num_traits::Float>::ln,
-    type Output<T> = T,
+    <crate::scalar::Ln>::ln,
+    simd: ln_bulk,
 );
 define_op1!(
     /// Computes the sine of each element (input in radians).
@@ -767,8 +689,8 @@ define_op1!(
     /// ```
     Sin,
     SinKernel,
-    <num_traits::Float>::sin,
-    type Output<T> = T,
+    <crate::scalar::Sin>::sin,
+    simd: sin_bulk,
 );
 define_op1!(
     /// Computes the cosine of each element (input in radians).
@@ -798,8 +720,8 @@ define_op1!(
     /// ```
     Cos,
     CosKernel,
-    <num_traits::Float>::cos,
-    type Output<T> = T,
+    <crate::scalar::Cos>::cos,
+    simd: cos_bulk,
 );
 define_op1!(
     /// Computes the tangent of each element (input in radians).
@@ -828,8 +750,8 @@ define_op1!(
     /// ```
     Tan,
     TanKernel,
-    <num_traits::Float>::tan,
-    type Output<T> = T,
+    <crate::scalar::Tan>::tan,
+    simd: tan_bulk,
 );
 define_op1!(
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
@@ -859,8 +781,8 @@ define_op1!(
     /// ```
     Asin,
     AsinKernel,
-    <num_traits::Float>::asin,
-    type Output<T> = T,
+    <crate::scalar::Asin>::asin,
+    simd: asin_bulk,
 );
 define_op1!(
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
@@ -890,8 +812,8 @@ define_op1!(
     /// ```
     Acos,
     AcosKernel,
-    <num_traits::Float>::acos,
-    type Output<T> = T,
+    <crate::scalar::Acos>::acos,
+    simd: acos_bulk,
 );
 define_op1!(
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
@@ -920,8 +842,8 @@ define_op1!(
     /// ```
     Atan,
     AtanKernel,
-    <num_traits::Float>::atan,
-    type Output<T> = T,
+    <crate::scalar::Atan>::atan,
+    simd: atan_bulk,
 );
 define_op1!(
     /// Returns the sign of each element.
@@ -965,6 +887,7 @@ define_op1!(
     Sign,
     SignKernel,
     <crate::scalar::Sign>::sign,
+    simd: sign_bulk,
 );
 define_op1!(
     /// Computes the absolute value of each element.
@@ -1020,7 +943,7 @@ define_op1!(
     Abs,
     AbsKernel,
     <crate::scalar::Abs>::abs,
-    simd_bulk: abs_bulk,
+    simd: abs_bulk,
 );
 
 define_op1!(
@@ -1054,7 +977,7 @@ define_op1!(
     Square,
     SquareKernel,
     <crate::scalar::Square>::square,
-    simd_bulk: square_bulk,
+    simd: square_bulk,
 );
 
 impl<S> Array<S>
@@ -1063,17 +986,17 @@ where
 {
     define_array_op1_method!(floor: Floor, crate::scalar::Floor);
     define_array_op1_method!(ceil: Ceil, crate::scalar::Ceil);
-    define_array_op1_method!(round: Round, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(round: Round, crate::scalar::Round);
     define_array_op1_method!(sqrt: Sqrt, crate::scalar::Sqrt);
     define_array_op1_method!(square: Square, crate::scalar::Square);
-    define_array_op1_method!(exp: Exp, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(ln: Ln, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(sin: Sin, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(cos: Cos, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(tan: Tan, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(asin: Asin, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(acos: Acos, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(atan: Atan, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(exp: Exp, crate::scalar::Exp);
+    define_array_op1_method!(ln: Ln, crate::scalar::Ln);
+    define_array_op1_method!(sin: Sin, crate::scalar::Sin);
+    define_array_op1_method!(cos: Cos, crate::scalar::Cos);
+    define_array_op1_method!(tan: Tan, crate::scalar::Tan);
+    define_array_op1_method!(asin: Asin, crate::scalar::Asin);
+    define_array_op1_method!(acos: Acos, crate::scalar::Acos);
+    define_array_op1_method!(atan: Atan, crate::scalar::Atan);
     define_array_op1_method!(sign: Sign, crate::scalar::Sign);
     define_array_op1_method!(abs: Abs, crate::scalar::Abs);
 }
@@ -1150,9 +1073,9 @@ pub(crate) mod tests {
         for_each_simd_level!(check);
     }
 
-    /// A kernel with `simd_bulk:` calls its trait's bulk function.
+    /// A kernel calls its trait's bulk function (`simd:`).
     #[test]
-    fn simd_bulk_calls_trait_fn() {
+    fn simd_calls_trait_bulk_fn() {
         use crate::util::for_each_simd_level;
 
         #[allow(dead_code)]
@@ -1176,7 +1099,7 @@ pub(crate) mod tests {
                     xs.map(|x| x * 2 + 1)
                 }
             }
-            define_op1!(TestTwiceOp, TestTwiceKernel, <TestTwice>::twice, simd_bulk: twice_bulk,);
+            define_op1!(TestTwiceOp, TestTwiceKernel, <TestTwice>::twice, simd: twice_bulk,);
 
             pub(super) fn check<S: Simd>(simd: S) {
                 use crate::ops::op1::Op1Kernel;
