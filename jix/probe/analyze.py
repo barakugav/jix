@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import dataclasses
 import fnmatch
 import hashlib
 import json
@@ -254,7 +255,8 @@ def split_generic_args(s: str) -> list[str]:
 
 def py_kernel(symbol: str) -> Kernel | None:
     """The kernel of `symbol` if it is the contiguous inner loop of a single op over leaves."""
-    m = re.fullmatch(rf"{EW}::inner_loop_contiguous::<(.+?), (<.*)>", symbol)
+    # `inner_loop::<T, LANES, true, true, _>`: the loop before the SIMD level dispatch (`main`).
+    m = re.fullmatch(rf"{EW}::(?:inner_loop_contiguous|inner_loop)::<(.+?), (?:\d+, true, true, )?(<.*)>", symbol)
     if not m or m.group(1) not in TYPES:
         return None
     out, p = m.group(1), OP_PIPELINE.fullmatch(m.group(2))
@@ -1178,9 +1180,14 @@ def main() -> None:
     )
     ap.add_argument("--source", choices=sorted(SOURCES), default="py", help="the crate whose kernels to analyze")
     ap.add_argument("--no-build", action="store_true", help="reuse the previous build's asm and IR")
+    ap.add_argument(
+        "--cpus", help="comma-separated llvm-mca CPUs instead of the platforms' (e.g. a baseline build on newer CPUs)"
+    )
     args = ap.parse_args()
 
     platforms = [p for p in PLATFORMS if not args.platform or p.name in args.platform]
+    if args.cpus:
+        platforms = [dataclasses.replace(p, mca_cpus=args.cpus.split(",")) for p in platforms]
     if not platforms:
         sys.exit("error: no platform selected")
     source = SOURCES[args.source]
