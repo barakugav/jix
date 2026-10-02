@@ -471,8 +471,10 @@ pub(crate) mod _traits {
                 $Trait::$f / $f_bulk, |a, b| a $op b, simd: |a, b| a $op b, [$($simd),*]
             );
             impl_scalar_op2!($Trait::$f, |a, b| a $op b, [$($scalar),*]);
+            // In f32, as half's operators do without F16C / FP16, but inlined: theirs call a
+            // software fallback function.
             #[cfg(feature = "half")]
-            impl_scalar_op2!($Trait::$f, |a, b| a $op b, [f16]);
+            impl_scalar_op2!($Trait::$f, |a, b| f16::from_f32(a.to_f32() $op b.to_f32()), [f16]);
             #[cfg(feature = "num-complex")]
             impl_scalar_op2!($Trait::$f, |a, b| a $op b, [Complex<f32>, Complex<f64>]);
             #[cfg(all(feature = "half", feature = "num-complex"))]

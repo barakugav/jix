@@ -3,7 +3,10 @@ use std::mem::{ManuallyDrop, MaybeUninit};
 
 #[inline(always)]
 pub(crate) fn array_from_fn_inline<T, const N: usize>(mut f: impl FnMut(usize) -> T) -> [T; N] {
-    match array_try_from_fn_inline(|i| Result::<_, Infallible>::Ok(f(i))) {
+    match array_try_from_fn_inline(
+        #[inline(always)]
+        |i| Result::<_, Infallible>::Ok(f(i)),
+    ) {
         Ok(arr) => arr,
         Err(never) => match never {},
     }
@@ -98,7 +101,10 @@ fn array_try_map_by_index<T, U, E, const N: usize>(
     if const { !std::mem::needs_drop::<T>() } {
         // SAFETY: every index is read at most once, and `src` is never dropped. `T` has no drop
         // glue, so the items left unread on an early return need no cleanup.
-        return array_try_from_fn_inline(|i| f(i, unsafe { std::ptr::read(&src[i]) }));
+        return array_try_from_fn_inline(
+            #[inline(always)]
+            |i| f(i, unsafe { std::ptr::read(&src[i]) }),
+        );
     }
 
     /// Drops the items `src[next..]` that were not handed to `f` yet.
@@ -117,13 +123,16 @@ fn array_try_map_by_index<T, U, E, const N: usize>(
         src: &mut src,
         next: 0,
     };
-    array_try_from_fn_inline(|i| {
-        // SAFETY: indices arrive in order `0..N`, each once, and `next` moves past `i` before
-        // `f` runs, so the guard never drops an item that was read out.
-        let item = unsafe { std::ptr::read(&unconsumed.src[i]) };
-        unconsumed.next = i + 1;
-        f(i, item)
-    })
+    array_try_from_fn_inline(
+        #[inline(always)]
+        |i| {
+            // SAFETY: indices arrive in order `0..N`, each once, and `next` moves past `i` before
+            // `f` runs, so the guard never drops an item that was read out.
+            let item = unsafe { std::ptr::read(&unconsumed.src[i]) };
+            unconsumed.next = i + 1;
+            f(i, item)
+        },
+    )
 }
 
 impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
@@ -132,7 +141,11 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        match array_try_map_by_index(self, |_, x| Result::<_, Infallible>::Ok(f(x))) {
+        match array_try_map_by_index(
+            self,
+            #[inline(always)]
+            |_, x| Result::<_, Infallible>::Ok(f(x)),
+        ) {
             Ok(arr) => arr,
             Err(never) => match never {},
         }
@@ -143,7 +156,11 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        array_try_map_by_index(self, |_, x| f(x))
+        array_try_map_by_index(
+            self,
+            #[inline(always)]
+            |_, x| f(x),
+        )
     }
 
     #[inline(always)]
@@ -151,7 +168,10 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        array_from_fn_inline(|i| f(&self[i]))
+        array_from_fn_inline(
+            #[inline(always)]
+            |i| f(&self[i]),
+        )
     }
 
     #[inline(always)]
@@ -159,7 +179,10 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        array_try_from_fn_inline(|i| f(&self[i]))
+        array_try_from_fn_inline(
+            #[inline(always)]
+            |i| f(&self[i]),
+        )
     }
 
     #[inline(always)]
@@ -167,7 +190,11 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        match array_try_map_by_index(self, |i, x| Result::<_, Infallible>::Ok(f(i, x))) {
+        match array_try_map_by_index(
+            self,
+            #[inline(always)]
+            |i, x| Result::<_, Infallible>::Ok(f(i, x)),
+        ) {
             Ok(arr) => arr,
             Err(never) => match never {},
         }

@@ -23,7 +23,7 @@ macro_rules! define_scalar_op1_trait {
             {
                 let _ = simd;
                 // A closure, not the fn item: its `FnMut` shim is not always inlined.
-                crate::util::ArrayExt::map_inline(xs, |x| Self::$f(x))
+                crate::util::ArrayExt::map_inline(xs, #[inline(always)] |x| Self::$f(x))
             }
         }
     };
@@ -59,7 +59,7 @@ macro_rules! define_scalar_op2_trait {
                 Rhs: Copy,
             {
                 let _ = simd;
-                crate::util::array_from_fn_inline(|i| Self::$f(xs[i], ys[i]))
+                crate::util::array_from_fn_inline(#[inline(always)] |i| Self::$f(xs[i], ys[i]))
             }
         }
     };
@@ -109,8 +109,8 @@ macro_rules! impl_scalar_op1 {
                     crate::scalar::simd::map_vectors::<S, Self, Self::Output, 1, 1, N>(
                         simd,
                         xs,
-                        |x| <Self as $Trait>::$f(x),
-                        |[$v]| [$vector],
+                        #[inline(always)] |x| <Self as $Trait>::$f(x),
+                        #[inline(always)] |[$v]| [$vector],
                     )
                 }
             )?
@@ -183,8 +183,8 @@ macro_rules! impl_scalar_op2 {
                         simd,
                         xs,
                         ys,
-                        |a, b| <Self as $Trait<$rhs>>::$f(a, b),
-                        |$va, $vb| $vector,
+                        #[inline(always)] |a, b| <Self as $Trait<$rhs>>::$f(a, b),
+                        #[inline(always)] |$va, $vb| $vector,
                     )
                 }
             )?

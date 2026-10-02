@@ -45,7 +45,10 @@ pub(crate) mod _traits {
             Rhs: Copy,
         {
             let _ = simd;
-            crate::util::array_from_fn_inline(|i| Self::maximum(xs[i], ys[i]))
+            crate::util::array_from_fn_inline(
+                #[inline(always)]
+                |i| Self::maximum(xs[i], ys[i]),
+            )
         }
     }
     impl_scalar_op2!(
@@ -106,7 +109,10 @@ pub(crate) mod _traits {
             Rhs: Copy,
         {
             let _ = simd;
-            crate::util::array_from_fn_inline(|i| Self::minimum(xs[i], ys[i]))
+            crate::util::array_from_fn_inline(
+                #[inline(always)]
+                |i| Self::minimum(xs[i], ys[i]),
+            )
         }
     }
     impl_scalar_op2!(
@@ -219,11 +225,14 @@ pub(crate) mod _traits {
             Self: Sized + Copy,
         {
             let _ = simd;
-            crate::util::array_from_fn_inline(|i| {
-                // Copies, not references into the arrays: LLVM vectorizes the loop then.
-                let (x, y) = (xs[i], ys[i]);
-                x.approx_eq(&y, rtol, atol)
-            })
+            crate::util::array_from_fn_inline(
+                #[inline(always)]
+                |i| {
+                    // Copies, not references into the arrays: LLVM vectorizes the loop then.
+                    let (x, y) = (xs[i], ys[i]);
+                    x.approx_eq(&y, rtol, atol)
+                },
+            )
         }
     }
     macro_rules! impl_approx_eq {

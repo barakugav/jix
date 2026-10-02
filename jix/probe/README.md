@@ -50,6 +50,7 @@ python jix/probe/analyze.py --label my-variant      # results/my-variant/
 python jix/probe/analyze.py --label x --compare py-baseline
 python jix/probe/analyze.py --platform x86_64-v3 --platform aarch64 --fn 'add_*' --fn neg_f32
 python jix/probe/analyze.py --source probe          # the op chains of this crate
+python jix/probe/analyze.py --label y --no-build     # re-analyze the previous build (minutes)
 ```
 
 A `jix-py` build takes about 8 minutes per platform (two platforms build at a time), the probe
@@ -115,9 +116,9 @@ then prints the IR loop trees (`print<loops>`) and exact trip counts (`print<sca
 of all the kernels at once. Then for each kernel:
 1. The loop tree comes from the natural loops of its asm (back edges to a dominating block).
 2. Its IR loop tree and trip counts come from the `opt` output.
-3. The trees are matched by shape, which gives every asm loop its trip count. Sibling loops of
-   the same shape are matched by vector share, then size: a vector loop can be smaller than its
-   scalar remainder in IR (bounds checks) but larger in asm.
+3. Each IR loop is matched to the asm loop holding its header block, named by the verbose asm
+   (`.LBB0_5: # %vector.body`), which gives every asm loop its trip count. A kernel whose loops
+   do not all match one to one is reported, without a cost.
 4. The hot loops are the loops whose total iteration count (their trip count times their
    ancestors', from SCEV evaluated at two concrete input lengths) is linear in the input length:
    the vector main loop. Tails do not scale and are ignored. The slope gives the bytes per
@@ -130,18 +131,21 @@ of all the kernels at once. Then for each kernel:
 per-(platform, CPU) geomean over the kernels is the headline number. The unit is only a scale.
 What makes kernels with different steps comparable is that `B/iter` is measured.
 
-SCEV trip counts are evaluated with the `len` argument bound (whatever its IR name: it can be
-unnamed, or reach the loop through a stack slot). Values SCEV cannot see through (e.g. a scalar
-extracted from SLP-vectorized setup code, or a load from a slot stored once) are constant-folded
-from the IR. Trip counts that also depend on non-argument values are approximated, and their
-`B/iter` is marked `~`: bounds-check limits in a `umin` are dropped (they do not bind in the
-steady state), a remainder size SCEV proves small is taken as 0, and an enclosing loop's add
-recurrence is evaluated at its first iteration.
+SCEV trip counts are evaluated exactly, with the `len` argument bound (whatever its IR name: it
+can be unnamed, or reach the loop through a stack slot named `%len`). Integer values SCEV cannot
+see through (e.g. the length after the SIMD level dispatch) are constant-folded from the IR. A
+trip count with any other unknown operand is unknown. A loop with panic exits (bounds checks,
+division by zero) has no exact count: its symbolic max count is used, which it runs in the steady
+state.
 
 Caveats:
 - llvm-mca assumes every load hits L1 and ignores the front end. Branches are not followed.
-- **Calls are free in llvm-mca.** Kernels that call something (e.g. `memcpy`) inside the hot loop
-  are flagged `*`, and their real cost is higher.
+- **Calls are free in llvm-mca.** Kernels that call something (e.g. libm's `expf`) inside the hot
+  loop are flagged `*`, and their real cost is higher. x86-64's register-indirect calls are named
+  by the GOT entry last loaded into the register.
+- **A kernel must not call a Rust function in any loop** (a closure or helper LLVM did not
+  inline, e.g. `half`'s software f16 arithmetic): such calls are listed under "Out-of-line Rust
+  calls" in `summary.md`, and `analyze.py` exits with an error.
 - Steady state of the hot loops only, by design. The per-call prologue and epilogue and the
   tails (vector-loop remainders) are neither counted nor analyzed.
 - aarch64 stores with base-register writeback (`str q0, [x0], #16`) are split into a plain store
@@ -264,7 +268,7 @@ Findings:
 
 Analyzer changes: `len` reaches the loop through a stack slot (the dispatch closure captures it by
 reference and is passed to the non-inlined higher-level arms), and its IR argument can be
-unnamed (`%1`). `IrValues` resolves a `load` from `%len` (or from a slot stored once), and the
+unnamed (`%1`). `IrValues` resolves a `load` from `%len`, and the
 kernel's last argument is bound whatever its name.
 
 

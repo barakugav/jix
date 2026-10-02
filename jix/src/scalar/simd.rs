@@ -107,7 +107,10 @@ where
         lanes
     };
     if !N.is_multiple_of(lanes) {
-        return array_from_fn_inline(|i| scalar(xs[i], ys[i]));
+        return array_from_fn_inline(
+            #[inline(always)]
+            |i| scalar(xs[i], ys[i]),
+        );
     }
     let mut zs = [C::default(); N];
     for c in 0..N / lanes {

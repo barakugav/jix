@@ -323,7 +323,11 @@ pub(crate) mod _traits {
     );
     impl_scalar_op1!(Square::square, |x| x * x, [i8]);
     #[cfg(feature = "half")]
-    impl_scalar_op1!(Square::square, |x| x * x, [f16]);
+    impl_scalar_op1!(
+        Square::square,
+        |x| f16::from_f32(x.to_f32() * x.to_f32()),
+        [f16]
+    );
     #[cfg(feature = "num-complex")]
     impl_scalar_op1!(Square::square, |x| x * x, [Complex<f32>, Complex<f64>]);
     #[cfg(all(feature = "half", feature = "num-complex"))]
