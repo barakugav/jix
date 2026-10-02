@@ -45,7 +45,10 @@ pub(crate) mod _traits {
             Rhs: Copy,
         {
             let _ = simd;
-            crate::util::array_from_fn_inline(|i| Self::maximum(xs[i], ys[i]))
+            crate::util::array_from_fn_inline(
+                #[inline(always)]
+                |i| Self::maximum(xs[i], ys[i]),
+            )
         }
     }
     impl_scalar_op2!(
@@ -106,7 +109,10 @@ pub(crate) mod _traits {
             Rhs: Copy,
         {
             let _ = simd;
-            crate::util::array_from_fn_inline(|i| Self::minimum(xs[i], ys[i]))
+            crate::util::array_from_fn_inline(
+                #[inline(always)]
+                |i| Self::minimum(xs[i], ys[i]),
+            )
         }
     }
     impl_scalar_op2!(
@@ -134,12 +140,18 @@ pub(crate) mod _traits {
 
     /// Define the comparison scalar trait `$Trait` as the operator `$op`, for `[$($t),*]`.
     macro_rules! cmp_op2 {
-        ($(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident, $op:tt) => {
+        (
+            $(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident, $op:tt,
+            bool: |$a:ident, $b:ident| $bool:expr
+        ) => {
+            // `bool`s by their logical form: `a < b` can compile to `xor` + `and`, not `andn`
+            // (static analysis).
             define_scalar_op2_trait!($(#[$meta])* $Trait, $f, $f_bulk);
             impl_scalar_op2!(
                 $Trait::$f, |a, b| a $op b,
-                [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool] => bool
+                [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64] => bool
             );
+            impl_scalar_op2!($Trait::$f, |$a, $b| $bool, [bool] => bool);
             #[cfg(feature = "half")]
             impl_scalar_op2!($Trait::$f, |a, b| a $op b, [f16] => bool);
         };
@@ -152,29 +164,35 @@ pub(crate) mod _traits {
     }
     cmp_op2!(
         /// Scalar kernel of [`Equal`](crate::ops::Equal), as [`PartialEq::eq`].
-        Equal, equal, equal_bulk, ==
+        Equal, equal, equal_bulk, ==,
+        bool: |a, b| a == b
     );
     cmp_op2!(@complex Equal, equal, ==);
     cmp_op2!(
         /// Scalar kernel of [`NotEqual`](crate::ops::NotEqual), as [`PartialEq::ne`].
-        NotEqual, not_equal, not_equal_bulk, !=
+        NotEqual, not_equal, not_equal_bulk, !=,
+        bool: |a, b| a != b
     );
     cmp_op2!(@complex NotEqual, not_equal, !=);
     cmp_op2!(
         /// Scalar kernel of [`Greater`](crate::ops::Greater), as [`PartialOrd::gt`].
-        Greater, greater, greater_bulk, >
+        Greater, greater, greater_bulk, >,
+        bool: |a, b| a & !b
     );
     cmp_op2!(
         /// Scalar kernel of [`GreaterEqual`](crate::ops::GreaterEqual), as [`PartialOrd::ge`].
-        GreaterEqual, greater_equal, greater_equal_bulk, >=
+        GreaterEqual, greater_equal, greater_equal_bulk, >=,
+        bool: |a, b| a | !b
     );
     cmp_op2!(
         /// Scalar kernel of [`Less`](crate::ops::Less), as [`PartialOrd::lt`].
-        Less, less, less_bulk, <
+        Less, less, less_bulk, <,
+        bool: |a, b| !a & b
     );
     cmp_op2!(
         /// Scalar kernel of [`LessEqual`](crate::ops::LessEqual), as [`PartialOrd::le`].
-        LessEqual, less_equal, less_equal_bulk, <=
+        LessEqual, less_equal, less_equal_bulk, <=,
+        bool: |a, b| !a | b
     );
 
     /// Approximate equality check of two scalar values.
@@ -219,11 +237,14 @@ pub(crate) mod _traits {
             Self: Sized + Copy,
         {
             let _ = simd;
-            crate::util::array_from_fn_inline(|i| {
-                // Copies, not references into the arrays: LLVM vectorizes the loop then.
-                let (x, y) = (xs[i], ys[i]);
-                x.approx_eq(&y, rtol, atol)
-            })
+            crate::util::array_from_fn_inline(
+                #[inline(always)]
+                |i| {
+                    // Copies, not references into the arrays: LLVM vectorizes the loop then.
+                    let (x, y) = (xs[i], ys[i]);
+                    x.approx_eq(&y, rtol, atol)
+                },
+            )
         }
     }
     macro_rules! impl_approx_eq {

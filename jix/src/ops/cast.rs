@@ -30,7 +30,11 @@ pub(crate) mod _traits {
         {
             let _ = simd;
             // A closure, not the fn item `Self::cast`: its `FnMut` shim is not always inlined.
-            crate::util::ArrayExt::map_inline(xs, |x| Self::cast(x))
+            crate::util::ArrayExt::map_inline(
+                xs,
+                #[inline(always)]
+                |x| Self::cast(x),
+            )
         }
     }
 
@@ -87,6 +91,16 @@ pub(crate) mod _traits {
     /// - `truncate`, or `truncate(T)` for an intermediate `T`: floats to integers of the same
     ///   width, saturating, NaN to 0.
     macro_rules! impl_cast {
+        // `!= 0` (NaN true, +-0 false) as an integer test of the bits: through `f32`, LLVM may
+        // convert and compare as floats.
+        (f16 => bool, (scalar)) => {
+            impl Cast<bool> for f16 {
+                #[inline(always)]
+                fn cast(self) -> bool {
+                    self.to_bits() & 0x7fff != 0
+                }
+            }
+        };
         ($src_type:ident => $dst_type:ident, $bulk:tt) => {
             impl Cast<$dst_type> for $src_type {
                 #[inline(always)]
@@ -120,7 +134,7 @@ pub(crate) mod _traits {
                 };
                 $(
                     if !matches!(simd::level(simd), $(simd::Level::$level)|+) {
-                        return xs.map_inline(|x| <Self as Cast<$dst_type>>::cast(x));
+                        return xs.map_inline(#[inline(always)] |x| <Self as Cast<$dst_type>>::cast(x));
                     }
                 )?
                 simd::map_vectors::<
@@ -130,7 +144,7 @@ pub(crate) mod _traits {
                     { 1 $(* impl_cast!(@vectors_in $step))* },
                     { 1 $(* impl_cast!(@vectors_out $step))* },
                     N,
-                >(simd, xs, |x| <Self as Cast<$dst_type>>::cast(x), |v| {
+                >(simd, xs, #[inline(always)] |x| <Self as Cast<$dst_type>>::cast(x), |v| {
                     $(let v = impl_cast!(@step $step $(($T))?, v);)*
                     v
                 })
