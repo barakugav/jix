@@ -452,6 +452,25 @@ pub(crate) mod _traits {
     );
 
     define_scalar_op1_trait!(
+        /// Scalar kernel of [`Square`](crate::ops::Square): `x * x`.
+        Square,
+        square,
+        square_bulk
+    );
+    // SIMD for the types with SIMD `Mul` (`crate::scalar::Mul`).
+    impl_scalar_op1!(
+        Square::square / square_bulk, |x| x * x, simd: |x| x * x,
+        [f32, f64, i16, i32, i64, u8, u16, u32, u64]
+    );
+    impl_scalar_op1!(Square::square, |x| x * x, [i8]);
+    #[cfg(feature = "half")]
+    impl_scalar_op1!(Square::square, |x| x * x, [f16]);
+    #[cfg(feature = "num-complex")]
+    impl_scalar_op1!(Square::square, |x| x * x, [Complex<f32>, Complex<f64>]);
+    #[cfg(all(feature = "half", feature = "num-complex"))]
+    impl_scalar_op1!(Square::square, |x| x * x, [Complex<f16>]);
+
+    define_scalar_op1_trait!(
         /// Scalar kernel of [`Neg`](crate::ops::Neg), as [`core::ops::Neg`].
         Neg,
         neg,
@@ -1004,93 +1023,39 @@ define_op1!(
     simd_bulk: abs_bulk,
 );
 
-/// Squares each element (`x * x`).
-///
-/// The output dtype is `<T as Mul>::Output`, which is the same as the input dtype
-/// for all built-in scalar and complex types.
-///
-/// For **integer** types squaring can overflow, following the semantics of the `*`
-/// operator: it wraps in release builds and panics in debug builds.
-///
-/// The result is a lazy view; no computation occurs until the array is read.
-///
-/// This struct is the bare storage implementation, the operation is also available as
-/// [`Array::square()`](crate::Array::square).
-///
-/// # Examples
-/// ```
-/// use jix::Array;
-/// use ndarray::array;
-///
-/// let a = Array::compact_ndarray(&array![1.0f32, -2.0, 3.0])?;
-/// let result = a.square().to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[1.0, 4.0, 9.0]);
-///
-/// // Works on integer types too.
-/// let b = Array::compact_ndarray(&array![2i32, -3, 4])?;
-/// let result = b.square().to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[4, 9, 16]);
-/// # Ok::<(), jix::Error>(())
-/// ```
-pub struct Square<S>(Op1<S, SquareKernel>);
-struct SquareKernel;
-impl<T> Op1Kernel<T> for SquareKernel
-where
-    T: crate::scalar::Mul + Copy + 'static,
-{
-    type Output = <T as crate::scalar::Mul>::Output;
-
-    #[inline(always)]
-    fn apply(&self, x: T) -> Self::Output {
-        x.mul(x)
-    }
-
-    #[inline(always)]
-    fn apply_bulk<S: fearless_simd::Simd, const N: usize>(
-        &self,
-        simd: S,
-        xs: [T; N],
-    ) -> [Self::Output; N] {
-        T::mul_bulk(xs, xs, simd)
-    }
-}
-impl<S> Square<S>
-where
-    S: ArrayStorageTyped,
-    S::Item: crate::scalar::Mul<Output: Dtyped>,
-{
-    /// Constructs a [`Square`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: S) -> Result<Self> {
-        Ok(Self(Op1::new(array, SquareKernel)?))
-    }
-
-    /// Constructs an array with [`Square`] storage. See the storage struct docs for semantics
-    /// and examples.
-    pub fn new_array(array: Array<S>) -> Result<Array<Self>> {
-        Self::new(array.into_storage()).map(Array::from_storage)
-    }
-}
-impl<S> ArrayStorage for Square<S>
-where
-    S: ArrayStorageTyped,
-    S::Item: crate::scalar::Mul<Output: Dtyped>,
-{
-    type ElementType = Ty<<S::Item as crate::scalar::Mul>::Output>;
-    type Dimension = S::Dimension;
-    crate::storage::impl_array_storage_forward!(<S>);
-
-    fn info(&self) -> ArrayStorageInfo<'_> {
-        ArrayStorageInfo::new_deps("Square", [&self.0.array])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = Square<S::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        Ok(Square(self.0.dimension_change()?))
-    }
-
-    crate::ops::impl_element_type_change_default!();
-}
+define_op1!(
+    /// Squares each element (`x * x`).
+    ///
+    /// The output dtype is the input dtype.
+    ///
+    /// For **integer** types squaring can overflow, following the semantics of the `*`
+    /// operator: it wraps in release builds and panics in debug builds.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, the operation is also available as
+    /// [`Array::square()`](crate::Array::square).
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![1.0f32, -2.0, 3.0])?;
+    /// let result = a.square().to_ndarray()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[1.0, 4.0, 9.0]);
+    ///
+    /// // Works on integer types too.
+    /// let b = Array::compact_ndarray(&array![2i32, -3, 4])?;
+    /// let result = b.square().to_ndarray()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[4, 9, 16]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    Square,
+    SquareKernel,
+    <crate::scalar::Square>::square,
+    simd_bulk: square_bulk,
+);
 
 impl<S> Array<S>
 where
@@ -1100,7 +1065,7 @@ where
     define_array_op1_method!(ceil: Ceil, crate::scalar::Ceil);
     define_array_op1_method!(round: Round, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(sqrt: Sqrt, crate::scalar::Sqrt);
-    define_array_op1_method!(square: Square, crate::scalar::Mul);
+    define_array_op1_method!(square: Square, crate::scalar::Square);
     define_array_op1_method!(exp: Exp, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(ln: Ln, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(sin: Sin, num_traits::Float, fixed_output_type = true);
