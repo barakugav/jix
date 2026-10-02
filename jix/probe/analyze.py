@@ -471,10 +471,6 @@ class Loop:
     children: list[Loop] = field(default_factory=list)
     trip_count: int | None = None  # constant trip count, if any
     trip_expr: str = ""  # IR only: SCEV backedge-taken count expression
-    size: int = 0  # instructions in the loop (IR or asm), to match sibling loops of the same shape
-    # Share of the loop's instructions on vector types (IR) / registers (asm), to match a vector
-    # loop and its scalar remainder, whose sizes can rank differently in IR and asm.
-    vec: float = 0.0
     ir: IrValues | None = None  # IR only: the function's values, to resolve SCEV operands
     blocks: set[str] = field(default_factory=set)  # asm only: the IR names of the loop's blocks
 
@@ -598,21 +594,11 @@ def asm_loops(lines: list[str], isa: str, block_names: dict[int, str]) -> list[L
                             stack.append(p)
                 bodies.setdefault(h, set()).update(body)
 
-    vreg = re.compile(r"\b[xyz]mm\d+\b" if isa == "x86" else r"\b[vq]\d+\b")
-    # x86 scalar float instructions (`vaddsd`, `vcvtsd2ss`; not the packed integer `vpminsd`) and
-    # moves between general and xmm registers also use xmm registers.
-    x86_scalar = re.compile(r"^(?!v?p|vbroadcast).*((ss|sd)$|s[sd]2)|^v?mov[dq]$|^v?p(insr|extr)")
-
-    def is_vector(x: str) -> bool:
-        return bool(vreg.search(x)) and not (isa == "x86" and x86_scalar.search(mnemonic(x)))
-
     def make(h: int, body: set[int]) -> Loop:
         start, end = min(blocks[b][0] for b in body), max(blocks[b][1] for b in body) - 1
-        instrs = [x for x in lines[start : end + 1] if not is_label(x)]
         header = LABEL_RE.match(lines[blocks[h][0]]).group(1)
         names = {block_names[i] for b in body for i in range(*blocks[b]) if i in block_names}
-        vec = sum(1 for x in instrs if is_vector(x)) / len(instrs)
-        return Loop(start, end, header, size=len(instrs), vec=vec, blocks=names)
+        return Loop(start, end, header, blocks=names)
 
     loops = sorted((make(h, body) for h, body in bodies.items()), key=lambda lp: (lp.start, -lp.end))
     for a in loops:
@@ -623,9 +609,9 @@ def asm_loops(lines: list[str], isa: str, block_names: dict[int, str]) -> list[L
 
 
 class IrValues:
-    """Constant folding of a function's straight-line integer (and integer vector) instructions,
-    for given argument values: resolves SCEV operands SCEV cannot see through, such as a scalar
-    extracted from SLP-vectorized setup code."""
+    """Constant folding of a function's straight-line integer instructions, for given argument
+    values: resolves SCEV operands SCEV cannot see through, such as the length after the SIMD
+    level dispatch (`%_4.i.i`)."""
 
     BINOPS = {
         "add": lambda a, b: a + b,
@@ -642,30 +628,18 @@ class IrValues:
     }
     FLAGS = {"nuw", "nsw", "exact", "disjoint"}
 
-    def __init__(self, defs: dict[str, str], stores: dict[str, str | None], params: list[str]):
-        self.defs = defs  # `%name` -> the instruction's right-hand side
-        self.params = params  # the function's parameters
-        # `%ptr` -> the value stored to it, if stored once (e.g. an argument spilled to a stack
-        # slot, as when a closure capturing it by reference is passed to another function).
-        self.stores = stores
-        # Values SCEV cannot analyze but proves a small range of (`print<scalar-evolution>`).
-        self.bounded: set[str] = set()
-
-    @staticmethod
-    def parse(ll: list[str]) -> IrValues:
+    def __init__(self, ll: list[str]):
         """The values of the function of IR `ll`."""
-        defs, stores, params = {}, {}, []
+        self.defs: dict[str, str] = {}  # `%name` -> the instruction's right-hand side
+        self.params: list[str] = []  # the function's parameters
         for line in ll:
             if line.startswith("define "):
-                params = re.findall(r"(%[\w.]+)[,)]", line)
+                self.params = re.findall(r"(%[\w.]+)[,)]", line)
             elif m := re.match(r"^\s+(%[\w.]+) = (.*?)(?:, !.*)?$", line):
-                defs[m.group(1)] = m.group(2)
-            elif m := re.match(r"^\s+store (i\d+ [^,]+), ptr (%[\w.]+)", line):
-                stores[m.group(2)] = None if m.group(2) in stores else m.group(1)
-        return IrValues(defs, stores, params)
+                self.defs[m.group(1)] = m.group(2)
 
-    def value(self, name: str, env: dict[str, int], depth: int = 0):
-        """Value of `%name` (int, or list of ints for a vector), or None."""
+    def value(self, name: str, env: dict[str, int], depth: int = 0) -> int | None:
+        """Value of `%name`, or None."""
         if name in env:
             return env[name]
         if self.params and name == self.params[-1] and LAST_ARG in env:
@@ -673,147 +647,46 @@ class IrValues:
         rhs = self.defs.get(name)
         if rhs is None or depth > 64:
             return None
-        try:
-            return self._eval(rhs, env, depth + 1)
-        except (ValueError, IndexError, ZeroDivisionError, TypeError):
-            return None
-
-    def _operand(self, t: str, env: dict[str, int], depth: int):
-        t = t.strip()
-        t = re.sub(r"^(<\d+ x i\d+>|i\d+)\s+", "", t)  # the operand's type
-        if t.startswith("%"):
-            return self.value(t, env, depth)
-        if re.fullmatch(r"-?\d+", t):
-            return int(t)
-        if t in ("poison", "undef"):
-            return 0
-        if m := re.fullmatch(r"splat \(i\d+ (-?\d+)\)", t):
-            return ("splat", int(m.group(1)))
-        if m := re.fullmatch(r"<(.*)>", t):
-            return [0 if x.strip().endswith("poison") else int(x.split()[-1]) for x in m.group(1).split(",")]
-        raise ValueError(t)
-
-    @staticmethod
-    def _split(args: str) -> list[str]:
-        """Split top-level commas (not inside `<...>` or `(...)`)."""
-        out, depth, cur = [], 0, ""
-        for ch in args:
-            if ch in "<(":
-                depth += 1
-            elif ch in ">)":
-                depth -= 1
-            if ch == "," and depth == 0:
-                out.append(cur)
-                cur = ""
-            else:
-                cur += ch
-        return out + [cur]
-
-    def _eval(self, rhs: str, env: dict[str, int], depth: int):
-        words = rhs.split()
-        op = words[0]
-        rest = " ".join(w for w in words[1:] if w not in self.FLAGS)
-        if op in self.BINOPS:
-            m = re.match(r"(<(\d+) x i\d+>|i\d+) (.*)$", rest)
-            n = int(m.group(2)) if m.group(2) else None
-            a, b = (self._operand(x, env, depth) for x in self._split(m.group(3)))
-
-            def vec(v):
-                if isinstance(v, tuple):  # splat
-                    return [v[1]] * n
-                return v if isinstance(v, list) else [v] * n
-
-            f = self.BINOPS[op]
-            if n is None:
-                return None if a is None or b is None else f(a, b)
-            a, b = vec(a), vec(b)
-            return None if a is None or b is None else [f(x, y) for x, y in zip(a, b)]
-        if op == "load":
-            # A stack slot named after an argument (`%len`) holds that argument.
-            m = re.match(r"i\d+, ptr (%[\w.]+)", rest)
-            if m.group(1) in env:
-                return env[m.group(1)]
-            stored = self.stores.get(m.group(1))
-            return None if stored is None else self._operand(stored, env, depth)
-        if op in ("zext", "sext", "trunc", "freeze"):
-            m = re.match(r"(?:<\d+ x )?i\d+>? (\S+)", rest)
-            return self._operand(m.group(1), env, depth)
-        if op == "extractelement":
-            v, i = self._split(re.sub(r"^<\d+ x i\d+> ", "", rest))
-            v, i = self._operand(v, env, depth), self._operand(i, env, depth)
-            return None if v is None or i is None else v[i]
-        if op == "insertelement":
-            m = re.match(r"<(\d+) x i\d+> (.*)$", rest)
-            v, x, i = (self._operand(t, env, depth) for t in self._split(m.group(2)))
-            v = [0] * int(m.group(1)) if not isinstance(v, list) else list(v)
-            if x is None or i is None:
+        words = [w for w in rhs.split() if w not in self.FLAGS]
+        op, rest = words[0], " ".join(words[1:])
+        if op in self.BINOPS and (m := re.fullmatch(r"i\d+ (\S+), (\S+)", rest)):
+            a, b = (self.operand(x, env, depth + 1) for x in m.groups())
+            try:
+                return None if a is None or b is None else self.BINOPS[op](a, b)
+            except ZeroDivisionError:
                 return None
-            v[i] = x
-            return v
-        if op == "shufflevector":
-            m = re.match(r"<(\d+) x i\d+> (.*)$", rest)
-            a, b, mask = self._split(m.group(2))
-            a, b = self._operand(a, env, depth), self._operand(b, env, depth)
-            n = int(m.group(1))
-            a = a if isinstance(a, list) else [0] * n
-            b = b if isinstance(b, list) else [0] * n
-            mask = mask.strip()
-            mask_len = int(re.match(r"<(\d+) x", mask).group(1))
-            idx = [0] * mask_len if mask.endswith("zeroinitializer") else self._operand(mask, env, depth)
-            ab = a + b
-            return [ab[i] for i in idx]
+        if op in ("zext", "sext", "trunc", "freeze") and (m := re.match(r"i\d+ (\S+)", rest)):
+            return self.operand(m.group(1), env, depth + 1)
+        if op == "load" and (m := re.fullmatch(r"i\d+, ptr (%[\w.]+)(?:, align \d+)?", rest)):
+            # A stack slot named after an argument (`%len`) holds that argument.
+            return env.get(m.group(1))
         return None
 
-
-def ir_block_sizes(ll: list[str]) -> tuple[dict[str, int], dict[str, int]]:
-    """Instruction count, and count of instructions on vector types, of each basic block of the
-    function of IR `ll`."""
-    sizes: dict[str, int] = {}
-    vecs: dict[str, int] = {}
-    block = "start"
-    for line in ll:
-        if m := re.match(r"^([\w.$\-]+):", line):
-            block = m.group(1)
-        elif line.startswith("  "):
-            sizes[block] = sizes.get(block, 0) + 1
-            vecs[block] = vecs.get(block, 0) + bool(re.search(r"<\d+ x ", line))
-    return sizes, vecs
+    def operand(self, t: str, env: dict[str, int], depth: int) -> int | None:
+        if t.startswith("%"):
+            return self.value(t, env, depth)
+        return int(t) if re.fullmatch(r"-?\d+", t) else None
 
 
 def ir_loops(ll: list[str], analyses: list[str]) -> list[Loop]:
     """IR loop tree of a function, with SCEV trip counts, from its IR `ll` and its `opt`
     `analyses`."""
-
-    block_sizes, block_vecs = ir_block_sizes(ll)
-    bounded: set[str] = set()
-    cur_value = None
     fn_loops: list[tuple[int, Loop]] = []
     trips: dict[str, tuple[str, int | None]] = {}
     for line in analyses:
-        if m := re.match(r"\s+(%[\w.]+) = ", line):
-            cur_value = m.group(1)
-        elif (m := re.match(r"\s+-->  (%[\w.]+) U: \[(-?\d+),(-?\d+)\)", line)) and m.group(1) == cur_value:
-            lo, hi = int(m.group(2)), int(m.group(3))
-            if 0 <= lo < hi <= lo + BOUNDED_RANGE:
-                bounded.add(cur_value)
-        elif m := re.match(r"( *)Loop at depth (\d+) containing: (.*)$", line):
-            blocks = [re.sub(r"<[a-z]+>", "", b).lstrip("%") for b in m.group(3).split(",")]
+        if m := re.match(r"( *)Loop at depth (\d+) containing: (.*)$", line):
             header = next(re.sub(r"<[a-z]+>", "", b).lstrip("%") for b in m.group(3).split(",") if "<header>" in b)
-            size = sum(block_sizes.get(b, 0) for b in blocks)
-            vec = sum(block_vecs.get(b, 0) for b in blocks) / max(size, 1)
-            lp = Loop(0, 0, header, size=size, vec=vec)
-            fn_loops.append((int(m.group(2)), lp))
+            fn_loops.append((int(m.group(2)), Loop(0, 0, header)))
         elif m := re.match(r"Loop %(\S+): (?:<multiple exits> )?(symbolic max )?backedge-taken count is (.*)$", line):
             # The exact count, else the symbolic max: loops whose other exits are panics (bounds
-            # checks) have an unpredictable exact count, but run their max in the steady state.
+            # checks, division by zero) have no exact count, but run their max in the steady state.
             name, expr = m.group(1).strip('"'), m.group(3).strip()
             if m.group(2) and name in trips:
                 continue
             c = re.fullmatch(r"i\d+ (\d+)", expr)
             trips[name] = (expr, int(c.group(1)) + 1 if c else None)
 
-    values = IrValues.parse(ll)
-    values.bounded = bounded
+    values = IrValues(ll)
     for _, lp in fn_loops:
         lp.trip_expr, lp.trip_count = trips.get(lp.header, ("", None))
         lp.ir = values
@@ -822,30 +695,21 @@ def ir_loops(ll: list[str], analyses: list[str]) -> list[Loop]:
 
 
 def attach_trip_counts(asm_roots: list[Loop], ir_roots: list[Loop]) -> bool:
-    """Copy trip counts from the IR loop tree onto the asm one; False if their shapes differ.
-
-    Sibling loops are matched by shape, and siblings of the same shape by rank of vector share,
-    then size: `opt` does not list loops in asm layout order (e.g. a main loop between an inlined
-    tail and its vectorized version), and a vector loop can be smaller than its scalar remainder in
-    IR (bounds checks) but larger in asm.
-    """
-    if sorted(r.shape() for r in asm_roots) != sorted(r.shape() for r in ir_roots):
+    """Copy trip counts from the IR loop tree onto the asm one, matching each IR loop to the asm
+    loop holding its header block (named by the verbose asm). False if a loop has no match, or not
+    a single one, or the trees differ."""
+    if len(asm_roots) != len(ir_roots):
         return False
-    # By name: the asm loop holding the IR loop's header block (verbose asm), if one and only one.
-    by_name = [[a for a in asm_roots if i.header in a.blocks] for i in ir_roots]
-    if all(len(m) == 1 for m in by_name) and len({id(m[0]) for m in by_name}) == len(ir_roots):
-        for i, [a] in zip(ir_roots, by_name):
-            a.trip_count, a.trip_expr, a.ir = i.trip_count, i.trip_expr, i.ir
-            if a.shape() != i.shape() or not attach_trip_counts(a.children, i.children):
-                return False
-        return True
-    for shape in {r.shape() for r in asm_roots}:
-        a_group = sorted((r for r in asm_roots if r.shape() == shape), key=lambda r: (r.vec > 0.25, r.size))
-        i_group = sorted((r for r in ir_roots if r.shape() == shape), key=lambda r: (r.vec > 0.25, r.size))
-        for a, i in zip(a_group, i_group):
-            a.trip_count, a.trip_expr, a.ir = i.trip_count, i.trip_expr, i.ir
-            if not attach_trip_counts(a.children, i.children):
-                return False
+    matched = set()
+    for i in ir_roots:
+        [*ms] = (a for a in asm_roots if i.header in a.blocks)
+        if len(ms) != 1 or id(ms[0]) in matched:
+            return False
+        a = ms[0]
+        matched.add(id(a))
+        a.trip_count, a.trip_expr, a.ir = i.trip_count, i.trip_expr, i.ir
+        if not attach_trip_counts(a.children, i.children):
+            return False
     return True
 
 
@@ -871,120 +735,72 @@ def flatten(lines: list[str], loop: Loop) -> list[str] | None:
     return out
 
 
-# Placeholders for SCEV operands that are neither arguments nor resolvable by `IrValues` (e.g. a
-# bound derived from the bounds checks of an outer iteration, the size of a vector loop's scalar
-# remainder, or the index a remainder loop starts at).
-BOUNDED = "B"  # SCEV proves a small range: e.g. a remainder size, `U: [0,16)`
-UNBOUNDED = "X"
-BOUNDED_RANGE = 1 << 12
+def eval_scev(expr: str, env: dict[str, int], ir: IrValues | None = None) -> int | None:
+    """Evaluate a SCEV backedge-taken count expression, with the arguments bound by `env` (and the
+    other values resolved by `ir`); None if an operand is unknown.
 
-
-def eval_scev(expr: str, env: dict[str, int], ir: IrValues | None = None) -> tuple[int | None, bool]:
-    """Evaluate a SCEV backedge-taken count expression, with the arguments bound by `env`.
-
-    Supports `+ - * /u` and the n-ary `umax umin smax smin`, which SCEV always parenthesizes, so
-    innermost parenthesized groups are evaluated first.
-
-    Unknown operands are approximated where that is exact up to a bounded term: dropped from a
-    min/max (bounds-check limits, which do not bind in the steady state), and taken as 0 in a sum
-    when SCEV bounds their range (a vector loop's `(n - remainder) /u VF`). Otherwise the count is
-    unknown (None): e.g. a remainder loop, whose count is `n - (unknown start)`. Returns
-    (value, approximated).
+    Supports `+ * /u` and the n-ary `umax umin smax smin`, which SCEV always parenthesizes, so
+    innermost parenthesized groups are evaluated first. SCEV integers are 64-bit, and umin, umax
+    and /u unsigned: computed modulo 2^64.
     """
-    e = re.sub(r"<[a-z]+>", "", expr)  # wrap flags: <nuw>, <nsw>, <nw>
-    e = e.replace("/u", "//")
-    # An add recurrence of an enclosing loop, `{start,+,step}<%loop>`: its value at the first
-    # iteration (the loops this is meant for run the same count at every outer iteration).
-    approx = False
-    while (m := re.search(r"\{([^{}]*),\+,[^{}]*\}<%[\w.]+>", e)) is not None:
-        e = e[: m.start()] + f"({m.group(1)})" + e[m.end() :]
-        approx = True
-
-    def value(m: re.Match) -> str:
-        nonlocal approx
-        v = env.get(m.group(0))
-        if v is None and ir is not None:
-            v = ir.value(m.group(0), env)
-        if isinstance(v, int):
-            return str(v)
-        approx = True
-        return BOUNDED if ir is not None and m.group(0) in ir.bounded else UNBOUNDED
-
-    e = re.sub(r"%[\w.]+", value, e)
-    # SCEV integers are 64-bit, and umin/umax//u are unsigned: compute modulo 2^64 (the
-    # placeholders stay symbolic).
     mask = (1 << 64) - 1
 
     def signed(v: int) -> int:
         return v - (1 << 64) if v >> 63 else v
 
-    minmax = {
-        "umax": lambda vs: max(vs),
-        "umin": lambda vs: min(vs),
-        "smax": lambda vs: max(vs, key=signed),
-        "smin": lambda vs: min(vs, key=signed),
-    }
-    placeholders = (BOUNDED, UNBOUNDED)
+    def value(m: re.Match) -> str:
+        v = env.get(m.group(0))
+        if v is None and ir is not None:
+            v = ir.value(m.group(0), env)
+        if v is None:
+            raise LookupError(m.group(0))
+        return str(v)
 
-    def arith(t: str):
+    ops = {
+        " umax ": max,
+        " umin ": min,
+        " smax ": lambda vs: max(vs, key=signed),
+        " smin ": lambda vs: min(vs, key=signed),
+        " + ": lambda vs: sum(vs) & mask,
+        " * ": lambda vs: math.prod(vs) & mask,
+        " /u ": lambda vs: vs[0] // vs[1] if len(vs) == 2 and vs[1] else None,
+    }
+
+    def arith(t: str) -> int | None:
         t = t.strip()
-        if t in placeholders:
-            return t
         if re.fullmatch(r"-?\d+", t):
             return int(t) & mask
-        for op, f in minmax.items():
-            if f" {op} " in t:
-                vals = [arith(x) for x in t.split(f" {op} ")]
-                if None in vals:
-                    return None
-                known = [v for v in vals if v not in placeholders]
-                return f(known) if known else UNBOUNDED
-        if " + " in t:
-            vals = [arith(x) for x in t.split(" + ")]
-            if None in vals or UNBOUNDED in vals:
-                return None
-            return sum(v for v in vals if v != BOUNDED) & mask
-        for op in (" * ", " // "):
+        for op, f in ops.items():
             if op in t:
                 vals = [arith(x) for x in t.split(op)]
-                if None in vals:
-                    return None
-                if any(v in placeholders for v in vals):
-                    # A product or quotient of an unknown, e.g. `-1 * %rem`: as bounded as it.
-                    return UNBOUNDED if UNBOUNDED in vals else BOUNDED
-                acc = vals[0]
-                for v in vals[1:]:
-                    if op == " * ":
-                        acc = (acc * v) & mask
-                    elif v == 0:
-                        return None
-                    else:
-                        acc //= v
-                return acc
+                return None if None in vals else f(vals)
         return None
 
+    try:
+        e = re.sub(r"%[\w.]+", value, re.sub(r"<[a-z]+>", "", expr))  # without wrap flags (<nuw>)
+    except LookupError:
+        return None
     while (m := re.search(r"\(([^()]*)\)", e)) is not None:
         v = arith(m.group(1))
         if v is None:
-            return None, approx
+            return None
         e = e[: m.start()] + str(v) + e[m.end() :]
     v = arith(e)
-    return (signed(v) if isinstance(v, int) else None), approx
+    return None if v is None else signed(v)
 
 
-def trips(lp: Loop, env: dict[str, int]) -> tuple[int | None, bool]:
+def trips(lp: Loop, env: dict[str, int]) -> int | None:
     """Trip count of `lp` (per entry), with the arguments bound by `env`."""
     if lp.trip_count is not None:
-        return lp.trip_count, False
-    b, approx = eval_scev(lp.trip_expr, env, lp.ir)
-    return (None if b is None or b < 0 else b + 1), approx
+        return lp.trip_count
+    b = eval_scev(lp.trip_expr, env, lp.ir)
+    return None if b is None or b < 0 else b + 1
 
 
 @dataclass
 class HotLoop:
     loop: Loop
     bytes_per_iter: float  # input bytes per iteration, over the whole kernel
-    approx: bool  # trip count approximated (see `eval_scev`)
 
 
 def hot_loops(roots: list[Loop], kernel: Kernel) -> list[HotLoop]:
@@ -997,22 +813,21 @@ def hot_loops(roots: list[Loop], kernel: Kernel) -> list[HotLoop]:
     env1, env2 = kernel.scev_env(SCEV_EVAL_LEN), kernel.scev_env(2 * SCEV_EVAL_LEN)
     out: list[HotLoop] = []
 
-    def walk(lp: Loop, mult1: int, mult2: int, approx: bool) -> None:
-        t1, a1 = trips(lp, env1)
-        t2, a2 = trips(lp, env2)
+    def walk(lp: Loop, mult1: int, mult2: int) -> None:
+        t1, t2 = trips(lp, env1), trips(lp, env2)
         if t1 is None or t2 is None:
             return
-        n1, n2, a = mult1 * t1, mult2 * t2, approx or a1 or a2
+        n1, n2 = mult1 * t1, mult2 * t2
         # Linear up to a constant (e.g. a vector loop's `(n - remainder) / VF`): the bytes per
         # iteration are the slope between the two lengths.
         if n2 > n1 > 0 and abs(2 * n1 - n2) * 64 <= n1:
-            out.append(HotLoop(lp, SCEV_EVAL_LEN / (n2 - n1), a))
+            out.append(HotLoop(lp, SCEV_EVAL_LEN / (n2 - n1)))
             return
         for c in lp.children:
-            walk(c, n1, n2, a)
+            walk(c, n1, n2)
 
     for r in roots:
-        walk(r, 1, 1, False)
+        walk(r, 1, 1)
     return out
 
 
@@ -1119,7 +934,7 @@ class KernelResult:
     trace_instructions: str  # per hot loop, `+`-joined
     calls: list[str]  # callees inside the hot loops
     loop_tree: str
-    bytes_per_iter: str  # per hot loop, `+`-joined; `~`: approximated trip count
+    bytes_per_iter: str  # per hot loop, `+`-joined
     warnings: list[str] = field(default_factory=list)
     mca: list[McaResult] = field(default_factory=list)  # per (hot loop, cpu)
     # Per cpu, cycles per BYTES_UNIT: sum over the hot loops of cycles per iteration / bytes per
@@ -1152,7 +967,7 @@ def analyze_kernel(platform: Platform, kernel: Kernel, b: Build, mca: str, out_d
         warnings.append(str(e))
     name = ir_name(mangled)
     if not attach_trip_counts(roots, ir_loops(b.ll.get(name, []), b.opt.get(name, []))):
-        warnings.append("asm and IR loop trees differ, trip counts unknown")
+        warnings.append("asm loops not matched to IR loops by block name, trip counts unknown")
 
     hot = hot_loops(roots, kernel)
     traces = [flatten(lines, h.loop) for h in hot]
@@ -1162,7 +977,7 @@ def analyze_kernel(platform: Platform, kernel: Kernel, b: Build, mca: str, out_d
         warnings.append("hot loop with an inner loop of unknown trip count")
     if not hot or None in traces:
         hot, traces = [], []
-    fmt = [("~" if h.approx else "") + f"{h.bytes_per_iter:g}" for h in hot]
+    fmt = [f"{h.bytes_per_iter:g}" for h in hot]
 
     all_instrs = [x for t in traces for x in t]
     r = KernelResult(
@@ -1230,8 +1045,7 @@ def write_summary(
         "by their trip counts, weighted by their iterations per byte. Lower is better. `geomean` is the",
         "per-CPU geometric mean over the kernels, the single number to optimize.",
         "",
-        "- `B/iter`: input bytes per hot-loop iteration (from the SCEV trip counts); `~`: the trip count",
-        "  depends on non-argument values (e.g. bounds-check limits), approximated up to a bounded term.",
+        "- `B/iter`: input bytes per hot-loop iteration (from the SCEV trip counts).",
         "- `instrs`: instructions per hot-loop iteration (flattened trace).",
         "- `loops`: asm loop tree with trip counts; `?` = runtime trip count.",
         "- `calls`: calls inside the hot loop, whose cost llvm-mca does NOT include. Values of such",
@@ -1249,13 +1063,13 @@ def write_summary(
         return math.exp(sum(math.log(x) for x in xs) / len(xs))
 
     def geomean(rs: list[KernelResult], i: int) -> str:
-        return f"{geo([r.costs[i] for r in rs]):.0f}{star(rs)}"
+        return f"{geo([r.costs[i] for r in rs]):.0f}{star(rs)}" if rs else "-"
 
     base = load_costs(compare) if compare else {}
 
     def speedup(platform: str, cpu: str, rs: list[KernelResult], i: int) -> str:
         old = [base.get((platform, cpu, r.kernel)) for r in rs]
-        if None in old:
+        if not rs or None in old:
             return "-"
         return f"{geo(old) / geo([r.costs[i] for r in rs]):.2f}x"
 
