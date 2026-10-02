@@ -219,7 +219,11 @@ pub(crate) mod _traits {
             Self: Sized + Copy,
         {
             let _ = simd;
-            crate::util::array_from_fn_inline(|i| xs[i].approx_eq(&ys[i], rtol, atol))
+            crate::util::array_from_fn_inline(|i| {
+                // Copies, not references into the arrays: LLVM vectorizes the loop then.
+                let (x, y) = (xs[i], ys[i]);
+                x.approx_eq(&y, rtol, atol)
+            })
         }
     }
     macro_rules! impl_approx_eq {
