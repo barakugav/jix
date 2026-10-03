@@ -2802,30 +2802,8 @@ impl ReductionOpKernel<bool> for AllKernel {
     }
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: bool, _idx: Option<u64>) -> Self::State {
-        state && item
-    }
-    #[inline(always)]
-    fn update_state_bulk<S: Simd, const N: usize>(
-        &self,
-        states: [bool; N],
-        items: [bool; N],
-        _indices: Option<[u64; N]>,
-        simd: S,
-    ) -> [bool; N] {
-        // As bytes: `bool` has no SIMD vectors.
-        crate::scalar::simd::map_vectors2(
-            simd,
-            states.map_inline(u8::from),
-            items.map_inline(u8::from),
-            #[inline(always)]
-            |a, b| a & b,
-            #[inline(always)]
-            |a, b| a & b,
-        )
-        .map_inline(
-            #[inline(always)]
-            |x| x != 0,
-        )
+        // Not `&&`: the non-short-circuit form vectorizes in the default `update_state_bulk`.
+        state & item
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -2891,30 +2869,8 @@ impl ReductionOpKernel<bool> for AnyKernel {
     }
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: bool, _idx: Option<u64>) -> Self::State {
-        state || item
-    }
-    #[inline(always)]
-    fn update_state_bulk<S: Simd, const N: usize>(
-        &self,
-        states: [bool; N],
-        items: [bool; N],
-        _indices: Option<[u64; N]>,
-        simd: S,
-    ) -> [bool; N] {
-        // As bytes: `bool` has no SIMD vectors.
-        crate::scalar::simd::map_vectors2(
-            simd,
-            states.map_inline(u8::from),
-            items.map_inline(u8::from),
-            #[inline(always)]
-            |a, b| a | b,
-            #[inline(always)]
-            |a, b| a | b,
-        )
-        .map_inline(
-            #[inline(always)]
-            |x| x != 0,
-        )
+        // Not `||`: the non-short-circuit form vectorizes in the default `update_state_bulk`.
+        state | item
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
