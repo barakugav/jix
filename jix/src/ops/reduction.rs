@@ -92,6 +92,10 @@ pub(crate) trait ReductionOpKernel<T> {
     /// stream is grouped - exact integer or comparison folds - so the whole run is folded in one
     /// pass and the tree is skipped entirely.
     const PREFER_TREE_MERGE: bool;
+
+    /// The most lane accumulators of the one-cell fold over contiguous items, which are otherwise
+    /// sized by the SIMD level's vectors.
+    const ONE_CELL_MAX_LANES: usize = usize::MAX;
 }
 
 impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
@@ -709,17 +713,19 @@ fn reduce_tile_impl(
 const ONE_CELL_LANES: usize = 16;
 
 /// Runs longer than this are split in halves recursively and the halves' states merged, for the
-/// kernels that [`PREFER_TREE_MERGE`](ReductionOpKernel::PREFER_TREE_MERGE).
-const SPLIT_THRESHOLD: usize = 512;
+/// kernels that [`PREFER_TREE_MERGE`](ReductionOpKernel::PREFER_TREE_MERGE). Each lane of a leaf
+/// folds at most `SPLIT_THRESHOLD / 16` items in sequence (NumPy's pairwise sum: 128); a leaf
+/// pays a dispatch and the merge of its lanes, which smaller leaves pay too often.
+const SPLIT_THRESHOLD: usize = 2048;
 
 /// Vectors of lane accumulators of the one-cell fold over contiguous items, at the dispatched
 /// SIMD level.
-const ONE_CELL_VECTORS: usize = 4;
+const ONE_CELL_VECTORS: usize = 8;
 
 /// Lanes of the one-cell fold over contiguous items, for vectors of `vector_bytes` and states of
 /// `size` bytes: [`ONE_CELL_VECTORS`] vectors of states, a power of two in
-/// `8..=SPLIT_THRESHOLD`, so that it is one of the arms of `fold_run_leaf_level`.
-const fn one_cell_lanes(vector_bytes: usize, size: usize) -> usize {
+/// `8..=min(SPLIT_THRESHOLD, max_lanes)`, so that it is one of the arms of `fold_run_leaf_level`.
+const fn one_cell_lanes(vector_bytes: usize, size: usize, max_lanes: usize) -> usize {
     let per_vector = vector_bytes / size;
     let per_vector = if per_vector == 0 {
         1
@@ -727,13 +733,13 @@ const fn one_cell_lanes(vector_bytes: usize, size: usize) -> usize {
         1 << per_vector.ilog2()
     };
     let lanes = ONE_CELL_VECTORS * per_vector;
-    let lanes = if lanes < 8 {
-        8
-    } else if lanes > SPLIT_THRESHOLD {
-        SPLIT_THRESHOLD
+    let max = if max_lanes < SPLIT_THRESHOLD {
+        max_lanes
     } else {
-        lanes
+        SPLIT_THRESHOLD
     };
+    let lanes = if lanes > max { max } else { lanes };
+    let lanes = if lanes < 8 { 8 } else { lanes };
     assert!(lanes.is_power_of_two() && lanes <= 512);
     lanes
 }
@@ -886,7 +892,7 @@ where
 {
     macro_rules! with_lanes {
         ($($lanes:literal)*) => {
-            match const { one_cell_lanes(S::u8s::LEN, size_of::<K::State>()) } {
+            match const { one_cell_lanes(S::u8s::LEN, size_of::<K::State>(), K::ONE_CELL_MAX_LANES) } {
                 $($lanes => fold_run_leaf_impl::<S, T, K, $lanes, true>(simd, ctx, begin, len),)*
                 _ => unreachable!(),
             }
@@ -2049,6 +2055,9 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    // LLVM vectorizes the `(index, value)` lanes of the default `update_state_bulk` up to 16
+    // lanes; past that it no longer unrolls them (32 lanes with AVX-512: ~20x slower).
+    const ONE_CELL_MAX_LANES: usize = 16;
 }
 
 define_reduction_op!(
@@ -2151,6 +2160,9 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    // LLVM vectorizes the `(index, value)` lanes of the default `update_state_bulk` up to 16
+    // lanes; past that it no longer unrolls them (32 lanes with AVX-512: ~20x slower).
+    const ONE_CELL_MAX_LANES: usize = 16;
 }
 
 define_reduction_op!(
