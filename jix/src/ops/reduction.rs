@@ -3198,15 +3198,15 @@ where
     type State = B;
 
     #[inline(always)]
-    fn init_state(&self, first: Option<T>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = self.init;
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+        if let Some((item, idx)) = init_item {
+            state = self.update_state(state, item, idx);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         (self.f)(state, item)
     }
     #[inline(always)]
@@ -3216,6 +3216,7 @@ where
     const SUPPORTS_EMPTY: bool = true;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = true;
+    const NEEDS_INDICES: bool = false;
 }
 impl<S, D, B, F> ArrayStorage for Fold<S, D, B, F>
 where
