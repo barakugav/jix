@@ -26,12 +26,13 @@ pub(crate) trait ReductionOpKernel<T> {
     ///
     /// The bundled index is not always `0`: a lane accumulator is seeded from an interior
     /// item, and a cell can be re-seeded partway through the stream when the reduced axis
-    /// spans several bulks. Kernels whose result depends on element position (argmax/argmin)
-    /// record it; the others ignore it.
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State;
+    /// spans several bulks. It is `Some` exactly for the kernels that
+    /// [`NEEDS_INDICES`](Self::NEEDS_INDICES) (argmax/argmin), which record it.
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State;
 
-    /// Fold `item` (at true global stream position `idx`) into `state`.
-    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State;
+    /// Fold `item` (at true global stream position `idx`, `Some` exactly for the kernels that
+    /// [`NEEDS_INDICES`](Self::NEEDS_INDICES)) into `state`.
+    fn update_state(&self, state: Self::State, item: T, idx: Option<u64>) -> Self::State;
 
     /// [`update_state`](Self::update_state) on each lane: `items[i]` (at `indices[i]`) folded
     /// into `states[i]`, vectorized with `simd` where the kernel has SIMD support.
@@ -40,7 +41,7 @@ pub(crate) trait ReductionOpKernel<T> {
         &self,
         states: [Self::State; N],
         items: [T; N],
-        indices: [u64; N],
+        indices: Option<[u64; N]>,
         simd: S,
     ) -> [Self::State; N]
     where
@@ -49,7 +50,7 @@ pub(crate) trait ReductionOpKernel<T> {
         let _ = simd;
         states.map_enumerate(
             #[inline(always)]
-            |i, state| self.update_state(state, items[i], indices[i]),
+            |i, state| self.update_state(state, items[i], indices.map(|idx| idx[i])),
         )
     }
 
@@ -97,8 +98,8 @@ pub(crate) trait ReductionOpKernel<T> {
     /// they are sized by the SIMD level's vectors.
     const ONE_CELL_LANES: Option<usize> = None;
 
-    /// Whether [`update_state_bulk`](Self::update_state_bulk) uses the items' indices. `false`
-    /// promises it ignores them: the caller may pass stale ones.
+    /// Whether the kernel reads the items' stream positions: the indices passed to it are `Some`
+    /// exactly then, and the caller does not compute them otherwise.
     const NEEDS_INDICES: bool = true;
 }
 
@@ -930,24 +931,29 @@ where
         // body in LANES-sized chunks. The items' indices advance by a constant step, an add per
         // lane, not a multiply; only for the kernels that need them: LLVM does not drop an
         // unused index array carried across iterations once it is too large for registers.
-        let mut indices = array_from_fn_inline(
+        let mut indices = K::NEEDS_INDICES.then(
             #[inline(always)]
-            |b| ctx.item_idx(begin + b),
+            || {
+                array_from_fn_inline(
+                    #[inline(always)]
+                    |b| ctx.item_idx(begin + b),
+                )
+            },
         );
         let step = (LANES * ctx.idx_stride) as u64;
         let mut states = ctx
             .read_items_bulk::<LANES, CONTIGUOUS>(begin)
             .map_enumerate(
                 #[inline(always)]
-                |b, item| kernel.init_state(Some((item, indices[b]))),
+                |b, item| kernel.init_state(Some((item, indices.map(|idx| idx[b])))),
             );
         // A counted loop: SCEV knows its trip count, which `i < end` with `i += LANES` hides.
         let mut i = begin;
         for _ in 1..body_len / LANES {
             i += LANES;
             let items = ctx.read_items_bulk::<LANES, CONTIGUOUS>(i);
-            if K::NEEDS_INDICES {
-                indices = indices.map_inline(
+            if let Some(indices) = &mut indices {
+                *indices = indices.map_inline(
                     #[inline(always)]
                     |idx| idx + step,
                 );
@@ -959,7 +965,8 @@ where
 
     // The rest, one by one: later items, folded after the body's (as argmax's ties need).
     for i in begin + body_len..begin + len {
-        let (item, idx) = (ctx.read_item::<CONTIGUOUS>(i), ctx.item_idx(i));
+        let item = ctx.read_item::<CONTIGUOUS>(i);
+        let idx = K::NEEDS_INDICES.then(|| ctx.item_idx(i));
         state = Some(match state {
             Some(state) => kernel.update_state(state, item, idx),
             None => kernel.init_state(Some((item, idx))),
@@ -1081,6 +1088,7 @@ fn fold_across_cells<T, K, const CONTIGUOUS: bool, const INIT: bool>(
 {
     let items = items.as_ptr();
     let states = states.as_mut_ptr();
+    let idx = K::NEEDS_INDICES.then_some(base_item_idx);
     for i in 0..len {
         let item = if CONTIGUOUS {
             unsafe { items.add(i).read_maybe_aligned::<REQUIRE_ALIGNED>() }
@@ -1093,10 +1101,10 @@ fn fold_across_cells<T, K, const CONTIGUOUS: bool, const INIT: bool>(
             unsafe { &mut *states.byte_add(i * state_stride) }
         };
         if INIT {
-            state.write(kernel.init_state(Some((item, base_item_idx))));
+            state.write(kernel.init_state(Some((item, idx))));
         } else {
             let prev = unsafe { state.assume_init_read() };
-            state.write(kernel.update_state(prev, item, base_item_idx));
+            state.write(kernel.update_state(prev, item, idx));
         }
     }
 }
@@ -1387,8 +1395,8 @@ macro_rules! define_reduction_op {
 /// expose a richer state machine (`type State`, `init`, `update`, `finalize`) because the
 /// final result is not just the accumulator.
 ///
-/// Max/Min/argmax/argmin do **not** appear here - those ops are bounded directly by
-/// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`] / [`PartialOrd`].
+/// Max/Min do **not** appear here - those ops are bounded directly by the element-wise
+/// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`].
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
@@ -1594,6 +1602,75 @@ pub(crate) mod _traits {
     #[cfg(feature = "num-complex")]
     impl_product!(Complex<f64>, Complex<f64>);
 
+    macro_rules! define_arg_trait {
+        ($Trait:ident, $what:literal) => {
+            #[doc = concat!("Scalar kernel trait for the `arg", $what, "` reduction: the position of the ", $what, "imum.")]
+            ///
+            /// The state is `(index, value)` of the running best. `NaN` propagates: a `NaN` item
+            /// becomes the best, and sticks (no later item beats it). On ties the earlier index
+            /// wins, as in NumPy.
+            pub trait $Trait: Copy {
+                /// Fold `item`, at stream position `idx`, into `state`.
+                fn update(state: (u64, Self), item: Self, idx: u64) -> (u64, Self);
+                /// [`update`](Self::update) on each lane, vectorized with `simd` where the types
+                /// have SIMD support.
+                #[inline(always)]
+                fn update_bulk<S: fearless_simd::Simd, const N: usize>(
+                    states: [(u64, Self); N],
+                    items: [Self; N],
+                    indices: [u64; N],
+                    simd: S,
+                ) -> [(u64, Self); N] {
+                    let _ = simd;
+                    states.map_enumerate(
+                        #[inline(always)]
+                        |i, state| Self::update(state, items[i], indices[i]),
+                    )
+                }
+                /// Combine two states folded over disjoint subsets of the stream.
+                fn merge_states(a: (u64, Self), b: (u64, Self)) -> (u64, Self);
+            }
+        };
+    }
+    define_arg_trait!(ArgMax, "max");
+    define_arg_trait!(ArgMin, "min");
+
+    macro_rules! impl_arg {
+        ($Trait:ident, $op:tt, [$($t:ty),*]) => {$(
+            // `x != x` is a deliberate `NaN` test, folded away for the types without `NaN`.
+            #[allow(clippy::eq_op)]
+            impl $Trait for $t {
+                #[inline(always)]
+                fn update(state: (u64, Self), item: Self, idx: u64) -> (u64, Self) {
+                    if item $op state.1 || item != item {
+                        (idx, item)
+                    } else {
+                        state
+                    }
+                }
+                #[inline(always)]
+                fn merge_states(a: (u64, Self), b: (u64, Self)) -> (u64, Self) {
+                    // The subsets folded into `a` and `b` need not be contiguous ranges (lanes,
+                    // tree merge): on a tie compare the indices.
+                    let ((ai, av), (bi, bv)) = (a, b);
+                    if bv $op av || bv != bv {
+                        b
+                    } else if av $op bv || av != av || ai <= bi {
+                        a
+                    } else {
+                        b
+                    }
+                }
+            }
+        )*};
+    }
+    impl_arg!(ArgMax, >, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
+    impl_arg!(ArgMin, <, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
+    #[cfg(feature = "half")]
+    impl_arg!(ArgMax, >, [f16]);
+    #[cfg(feature = "half")]
+    impl_arg!(ArgMin, <, [f16]);
+
     /// Scalar kernel trait for the element-wise `mean` reduction.
     ///
     /// The mean is computed as the sum divided by the count. Integer and `bool` inputs promote
@@ -1719,9 +1796,25 @@ pub(crate) mod _traits {
         type State;
         /// Return the initial (empty) accumulator.
         fn init() -> Self::State;
-        /// Fold `item` into the running Welford accumulator. `idx` is ignored: the count is
-        /// tracked inside the state so interleaved lanes stay correct.
-        fn update(state: Self::State, item: Self, idx: u64) -> Self::State;
+        /// Fold `item` into the running Welford accumulator.
+        fn update(state: Self::State, item: Self) -> Self::State;
+        /// [`update`](Self::update) on each lane, vectorized with `simd` where the types have
+        /// SIMD support.
+        #[inline(always)]
+        fn update_bulk<S: fearless_simd::Simd, const N: usize>(
+            states: [Self::State; N],
+            items: [Self; N],
+            simd: S,
+        ) -> [Self::State; N]
+        where
+            Self: Sized + Copy,
+        {
+            let _ = simd;
+            states.map_enumerate(
+                #[inline(always)]
+                |i, state| Self::update(state, items[i]),
+            )
+        }
         /// Combine two Welford accumulators computed over disjoint subsets (Chan's parallel
         /// algorithm). Associative + commutative up to float error.
         fn merge_states(a: Self::State, b: Self::State) -> Self::State;
@@ -1746,7 +1839,7 @@ pub(crate) mod _traits {
                     }
                 }
                 #[inline(always)]
-                fn update(mut state: Self::State, item: Self, _idx: u64) -> Self::State {
+                fn update(mut state: Self::State, item: Self) -> Self::State {
                     state.count += 1;
                     let x = <_ as crate::scalar::Cast<$mean_ty>>::cast(item);
                     let $delta = x - state.mean;
@@ -1754,6 +1847,48 @@ pub(crate) mod _traits {
                     let $delta2 = x - state.mean;
                     state.m2 += $m2_expr;
                     state
+                }
+                #[inline(always)]
+                fn update_bulk<S: fearless_simd::Simd, const N: usize>(
+                    states: [Self::State; N],
+                    items: [Self; N],
+                    simd: S,
+                ) -> [Self::State; N] {
+                    // `update`, a field at a time: the states interleave their fields, which
+                    // the compiler does not vectorize across.
+                    use crate::util::array_from_fn_inline;
+                    let _ = simd;
+                    let x = items.map_inline(
+                        #[inline(always)]
+                        |x| <_ as crate::scalar::Cast<$mean_ty>>::cast(x),
+                    );
+                    let count = states.map_inline(
+                        #[inline(always)]
+                        |s| s.count + 1,
+                    );
+                    let old_mean = states.map_inline(
+                        #[inline(always)]
+                        |s| s.mean,
+                    );
+                    let mean: [$mean_ty; N] = array_from_fn_inline(
+                        #[inline(always)]
+                        |i| old_mean[i] + (x[i] - old_mean[i]) / count[i] as f64,
+                    );
+                    let m2: [f64; N] = array_from_fn_inline(
+                        #[inline(always)]
+                        |i| {
+                            let ($delta, $delta2) = (x[i] - old_mean[i], x[i] - mean[i]);
+                            states[i].m2 + $m2_expr
+                        },
+                    );
+                    array_from_fn_inline(
+                        #[inline(always)]
+                        |i| VarianceState {
+                            mean: mean[i],
+                            m2: m2[i],
+                            count: count[i],
+                        },
+                    )
                 }
                 #[inline(always)]
                 fn merge_states(a: Self::State, b: Self::State) -> Self::State {
@@ -1863,11 +1998,11 @@ where
     type State = T;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         init_item.unwrap().0
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         state.maximum(item)
     }
     #[inline(always)]
@@ -1875,7 +2010,7 @@ where
         &self,
         states: [Self::State; N],
         items: [T; N],
-        _indices: [u64; N],
+        _indices: Option<[u64; N]>,
         simd: S,
     ) -> [Self::State; N]
     where
@@ -1943,11 +2078,11 @@ where
     type State = T;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         init_item.unwrap().0
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         state.minimum(item)
     }
     #[inline(always)]
@@ -1955,7 +2090,7 @@ where
         &self,
         states: [Self::State; N],
         items: [T; N],
-        _indices: [u64; N],
+        _indices: Option<[u64; N]>,
         simd: S,
     ) -> [Self::State; N]
     where
@@ -2015,66 +2150,48 @@ define_reduction_op!(
     ArgMaxKernel,
     where {
         S: ArrayStorageTyped,
-        S::Item: PartialOrd,
+        S::Item: crate::scalar::ArgMax,
     }
     output = u64,
     single_axis,
 );
-// `item != item` / `bv != bv` are deliberate `NaN` tests (a value is `NaN` iff it is not
-// equal to itself), so the `eq_op` lint does not apply.
-#[allow(clippy::eq_op)]
 impl<T> ReductionOpKernel<T> for ArgMaxKernel
 where
-    T: PartialOrd,
+    T: crate::scalar::ArgMax,
 {
     type Output = u64;
     /// `(best_idx, best_val)`.
     type State = (u64, T);
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let (item, idx) = init_item.unwrap();
-        (idx, item)
+        (idx.unwrap(), item)
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
-        // `NaN` propagates: `item != item` holds only for `NaN`, so a `NaN` becomes - and,
-        // being neither `>` nor `!=`-equal to a later value, sticks as - the running best.
-        // For integer types the `NaN` term folds away, leaving the plain `item > best_val`.
-        let (best_idx, best_val) = state;
-        if item > best_val || item != item {
-            (idx, item)
-        } else {
-            (best_idx, best_val)
-        }
+    fn update_state(&self, state: Self::State, item: T, idx: Option<u64>) -> Self::State {
+        <T as crate::scalar::ArgMax>::update(state, item, idx.unwrap())
+    }
+    #[inline(always)]
+    fn update_state_bulk<S: Simd, const N: usize>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N]
+    where
+        T: Copy,
+    {
+        <T as crate::scalar::ArgMax>::update_bulk(states, items, indices.unwrap(), simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
-        // The larger value wins, and any `NaN` wins (propagating as in `update_state`). On an
-        // exact value tie the *smaller* index wins - together with `update_state` keeping the
-        // earlier index on ties, this makes argmax report the first occurrence of the maximum,
-        // matching `numpy.argmax`. The two subsets folded into `a`/`b` need not be contiguous
-        // index ranges (lane interleaving, tree merge), so the tie-break must compare indices
-        // rather than assume one side is "earlier". A `NaN` tie's index is still unspecified.
-        let (ai, av) = a;
-        let (bi, bv) = b;
-        if bv > av || bv != bv {
-            (bi, bv)
-        } else if av > bv || av != av {
-            (ai, av)
-        } else {
-            // av == bv and neither is `NaN`: keep the earlier index.
-            if bi < ai {
-                (bi, bv)
-            } else {
-                (ai, av)
-            }
-        }
+        <T as crate::scalar::ArgMax>::merge_states(a, b)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
-        let (best_idx, _best_val) = state;
-        best_idx
+        state.0
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = false;
@@ -2123,65 +2240,48 @@ define_reduction_op!(
     ArgMinKernel,
     where {
         S: ArrayStorageTyped,
-        S::Item: PartialOrd,
+        S::Item: crate::scalar::ArgMin,
     }
     output = u64,
     single_axis,
 );
-// `item != item` / `bv != bv` are deliberate `NaN` tests, so `eq_op` does not apply.
-#[allow(clippy::eq_op)]
 impl<T> ReductionOpKernel<T> for ArgMinKernel
 where
-    T: PartialOrd,
+    T: crate::scalar::ArgMin,
 {
     type Output = u64;
     /// `(best_idx, best_val)`.
     type State = (u64, T);
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let (item, idx) = init_item.unwrap();
-        (idx, item)
+        (idx.unwrap(), item)
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
-        // `NaN` propagates (see [`ArgMaxKernel::update_state`]): `item != item` holds only
-        // for `NaN`, so a `NaN` becomes and sticks as the running best. For integer types the
-        // `NaN` term folds away, leaving the plain `item < best_val`.
-        let (best_idx, best_val) = state;
-        if item < best_val || item != item {
-            (idx, item)
-        } else {
-            (best_idx, best_val)
-        }
+    fn update_state(&self, state: Self::State, item: T, idx: Option<u64>) -> Self::State {
+        <T as crate::scalar::ArgMin>::update(state, item, idx.unwrap())
+    }
+    #[inline(always)]
+    fn update_state_bulk<S: Simd, const N: usize>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N]
+    where
+        T: Copy,
+    {
+        <T as crate::scalar::ArgMin>::update_bulk(states, items, indices.unwrap(), simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
-        // The smaller value wins, and any `NaN` wins (propagating as in `update_state`). On an
-        // exact value tie the *smaller* index wins - together with `update_state` keeping the
-        // earlier index on ties, this makes argmin report the first occurrence of the minimum,
-        // matching `numpy.argmin`. The two subsets folded into `a`/`b` need not be contiguous
-        // index ranges (lane interleaving, tree merge), so the tie-break must compare indices
-        // rather than assume one side is "earlier". A `NaN` tie's index is still unspecified.
-        let (ai, av) = a;
-        let (bi, bv) = b;
-        if bv < av || bv != bv {
-            (bi, bv)
-        } else if av < bv || av != av {
-            (ai, av)
-        } else {
-            // av == bv and neither is `NaN`: keep the earlier index.
-            if bi < ai {
-                (bi, bv)
-            } else {
-                (ai, av)
-            }
-        }
+        <T as crate::scalar::ArgMin>::merge_states(a, b)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
-        let (best_idx, _best_val) = state;
-        best_idx
+        state.0
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = false;
@@ -2251,15 +2351,15 @@ where
     type State = <T as crate::scalar::Sum>::Output;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = <T as crate::scalar::Sum>::init();
         if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         <T as crate::scalar::Sum>::update(state, item)
     }
     #[inline(always)]
@@ -2267,7 +2367,7 @@ where
         &self,
         states: [Self::State; N],
         items: [T; N],
-        _indices: [u64; N],
+        _indices: Option<[u64; N]>,
         simd: S,
     ) -> [Self::State; N]
     where
@@ -2348,15 +2448,15 @@ where
     type State = <T as crate::scalar::Product>::Output;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = <T as crate::scalar::Product>::init();
         if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         <T as crate::scalar::Product>::update(state, item)
     }
     #[inline(always)]
@@ -2364,7 +2464,7 @@ where
         &self,
         states: [Self::State; N],
         items: [T; N],
-        _indices: [u64; N],
+        _indices: Option<[u64; N]>,
         simd: S,
     ) -> [Self::State; N]
     where
@@ -2434,15 +2534,15 @@ where
     type State = <T as crate::scalar::Mean>::State;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = <T as crate::scalar::Mean>::init();
         if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         <T as crate::scalar::Mean>::update(state, item)
     }
     #[inline(always)]
@@ -2450,7 +2550,7 @@ where
         &self,
         states: [Self::State; N],
         items: [T; N],
-        _indices: [u64; N],
+        _indices: Option<[u64; N]>,
         simd: S,
     ) -> [Self::State; N]
     where
@@ -2525,16 +2625,29 @@ where
     type State = <T as crate::scalar::Variance>::State;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = <T as crate::scalar::Variance>::init();
         if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
-        <T as crate::scalar::Variance>::update(state, item, idx)
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
+        <T as crate::scalar::Variance>::update(state, item)
+    }
+    #[inline(always)]
+    fn update_state_bulk<S: Simd, const N: usize>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N]
+    where
+        T: Copy,
+    {
+        <T as crate::scalar::Variance>::update_bulk(states, items, simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -2601,16 +2714,29 @@ where
     type State = <T as crate::scalar::Variance>::State;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = <T as crate::scalar::Variance>::init();
         if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
-        <T as crate::scalar::Variance>::update(state, item, idx)
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
+        <T as crate::scalar::Variance>::update(state, item)
+    }
+    #[inline(always)]
+    fn update_state_bulk<S: Simd, const N: usize>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N]
+    where
+        T: Copy,
+    {
+        <T as crate::scalar::Variance>::update_bulk(states, items, simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -2667,28 +2793,26 @@ impl ReductionOpKernel<bool> for AllKernel {
     type State = bool;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(bool, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(bool, Option<u64>)>) -> Self::State {
         let mut state = true;
         if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: bool, _idx: Option<u64>) -> Self::State {
         state && item
     }
-    // `x != 0` costs a compare per vector, see below.
-    #[allow(clippy::transmute_int_to_bool)]
     #[inline(always)]
     fn update_state_bulk<S: Simd, const N: usize>(
         &self,
         states: [bool; N],
         items: [bool; N],
-        _indices: [u64; N],
+        _indices: Option<[u64; N]>,
         simd: S,
     ) -> [bool; N] {
-        // As bytes: `bool` has no SIMD vectors. Back without a `!= 0`, a compare per vector.
+        // As bytes: `bool` has no SIMD vectors.
         crate::scalar::simd::map_vectors2(
             simd,
             states.map_inline(u8::from),
@@ -2698,10 +2822,9 @@ impl ReductionOpKernel<bool> for AllKernel {
             #[inline(always)]
             |a, b| a & b,
         )
-        // SAFETY: the bytes are 0 or 1, as the operands were.
         .map_inline(
             #[inline(always)]
-            |x| unsafe { core::mem::transmute::<u8, bool>(x) },
+            |x| x != 0,
         )
     }
     #[inline(always)]
@@ -2759,28 +2882,26 @@ impl ReductionOpKernel<bool> for AnyKernel {
     type State = bool;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(bool, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(bool, Option<u64>)>) -> Self::State {
         let mut state = false;
         if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: bool, _idx: Option<u64>) -> Self::State {
         state || item
     }
-    // `x != 0` costs a compare per vector, see below.
-    #[allow(clippy::transmute_int_to_bool)]
     #[inline(always)]
     fn update_state_bulk<S: Simd, const N: usize>(
         &self,
         states: [bool; N],
         items: [bool; N],
-        _indices: [u64; N],
+        _indices: Option<[u64; N]>,
         simd: S,
     ) -> [bool; N] {
-        // As bytes: `bool` has no SIMD vectors. Back without a `!= 0`, a compare per vector.
+        // As bytes: `bool` has no SIMD vectors.
         crate::scalar::simd::map_vectors2(
             simd,
             states.map_inline(u8::from),
@@ -2790,10 +2911,9 @@ impl ReductionOpKernel<bool> for AnyKernel {
             #[inline(always)]
             |a, b| a | b,
         )
-        // SAFETY: the bytes are 0 or 1, as the operands were.
         .map_inline(
             #[inline(always)]
-            |x| unsafe { core::mem::transmute::<u8, bool>(x) },
+            |x| x != 0,
         )
     }
     #[inline(always)]
@@ -2910,11 +3030,11 @@ where
     type State = T;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         init_item.unwrap().0
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         (self.0)(state, item)
     }
     #[inline(always)]
@@ -3126,7 +3246,7 @@ where
 
 /// Emits an `Array::$method(...)` helper that forwards to `$Op::new_array(...)`. The full
 /// where-clause on `S` (and its `Item`) is supplied verbatim by the caller so each op can
-/// pick its own bound (`PartialOrd`, `Maximum`, `Sum`, `Item = bool`, ...).
+/// pick its own bound (`ArgMax`, `Maximum`, `Sum`, `Item = bool`, ...).
 macro_rules! define_array_reduction_method {
     // single-axis variant
     (
@@ -3185,7 +3305,7 @@ where
         argmax: ArgMax,
         where {
             S: ArrayStorageTyped,
-            S::Item: PartialOrd,
+            S::Item: crate::scalar::ArgMax,
         },
         single_axis
     );
@@ -3193,7 +3313,7 @@ where
         argmin: ArgMin,
         where {
             S: ArrayStorageTyped,
-            S::Item: PartialOrd,
+            S::Item: crate::scalar::ArgMin,
         },
         single_axis
     );
@@ -4757,8 +4877,14 @@ pub(crate) mod tests {
         impl super::ReductionOpKernel<i32> for ZeroSizedOutputKernel {
             type Output = [i32; 0];
             type State = ();
-            fn init_state(&self, _init_item: Option<(i32, u64)>) -> Self::State {}
-            fn update_state(&self, _state: Self::State, _item: i32, _idx: u64) -> Self::State {}
+            fn init_state(&self, _init_item: Option<(i32, Option<u64>)>) -> Self::State {}
+            fn update_state(
+                &self,
+                _state: Self::State,
+                _item: i32,
+                _idx: Option<u64>,
+            ) -> Self::State {
+            }
             fn merge_states(&self, _a: Self::State, _b: Self::State) -> Self::State {}
             fn finalize_state(&self, _state: Self::State, _nitems: u64) -> Self::Output {
                 []
