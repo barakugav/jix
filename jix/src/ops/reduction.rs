@@ -866,14 +866,19 @@ where
     // LANES-sized chunks - exactly `len / LANES - 1` of them, with nothing left over.
     let mut states = ctx
         .read_items_bulk::<LANES, CONTIGUOUS>(begin)
-        .map_enumerate(|b, item| kernel.init_state(Some((item, ctx.item_idx(begin + b)))));
+        .map_enumerate(
+            #[inline(always)]
+            |b, item| kernel.init_state(Some((item, ctx.item_idx(begin + b)))),
+        );
     // A counted loop: SCEV knows its trip count, which `i < end` with `i += LANES` hides.
     let mut i = begin;
     for _ in 1..len / LANES {
         i += LANES;
         let bulk = ctx.read_items_bulk::<LANES, CONTIGUOUS>(i);
-        states = states
-            .map_enumerate(|b, state| kernel.update_state(state, bulk[b], ctx.item_idx(i + b)));
+        states = states.map_enumerate(
+            #[inline(always)]
+            |b, state| kernel.update_state(state, bulk[b], ctx.item_idx(i + b)),
+        );
     }
 
     // merge the LANES states to a single one
@@ -965,12 +970,13 @@ fn fold_across_cells_contiguous<T, K, const INIT: bool>(
     T: Dtyped,
     K: ReductionOpKernel<T>,
 {
-    let strides = (size_of::<T>(), size_of::<K::State>());
+    // Constants are not captured: the dispatch captures by reference, and a capture reloaded in
+    // the dispatched arm is no longer a constant to LLVM.
     dispatch!(Level::new(), _simd => fold_across_cells::<T, K, true, INIT>(
         kernel,
         items,
         states,
-        strides,
+        (size_of::<T>(), size_of::<K::State>()),
         base_item_idx,
         len,
     ))
@@ -1120,11 +1126,11 @@ fn finalize_states_contiguous<T, K>(
 ) where
     K: ReductionOpKernel<T>,
 {
-    let (state_stride, out_stride) = (size_of::<K::State>(), size_of::<K::Output>());
+    // Constants are not captured, see `fold_across_cells_contiguous`.
     dispatch!(Level::new(), _simd => finalize_states_run::<T, K>(
         kernel,
-        (state, state_stride),
-        (out, out_stride),
+        (state, size_of::<K::State>()),
+        (out, size_of::<K::Output>()),
         full_reduction_size,
         len,
     ))
