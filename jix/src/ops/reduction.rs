@@ -96,6 +96,10 @@ pub(crate) trait ReductionOpKernel<T> {
     /// The most lane accumulators of the one-cell fold over contiguous items, which are otherwise
     /// sized by the SIMD level's vectors.
     const ONE_CELL_MAX_LANES: usize = usize::MAX;
+
+    /// Whether [`update_state_bulk`](Self::update_state_bulk) uses the items' indices. `false`
+    /// promises it ignores them: the caller may pass stale ones.
+    const NEEDS_INDICES: bool = true;
 }
 
 impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
@@ -920,8 +924,9 @@ where
     let mut state = None;
     if body_len > 0 {
         // Seed one accumulator per lane from the first LANES items, then walk the rest of the
-        // body in LANES-sized chunks. The items' indices advance by a constant step: an add per
-        // lane, not a multiply (unused, they fold away for the kernels that ignore them).
+        // body in LANES-sized chunks. The items' indices advance by a constant step, an add per
+        // lane, not a multiply; only for the kernels that need them: LLVM does not drop an
+        // unused index array carried across iterations once it is too large for registers.
         let mut indices = array_from_fn_inline(
             #[inline(always)]
             |b| ctx.item_idx(begin + b),
@@ -938,10 +943,12 @@ where
         for _ in 1..body_len / LANES {
             i += LANES;
             let items = ctx.read_items_bulk::<LANES, CONTIGUOUS>(i);
-            indices = indices.map_inline(
-                #[inline(always)]
-                |idx| idx + step,
-            );
+            if K::NEEDS_INDICES {
+                indices = indices.map_inline(
+                    #[inline(always)]
+                    |idx| idx + step,
+                );
+            }
             states = kernel.update_state_bulk(states, items, indices, simd);
         }
         state = Some(merge_states::<T, K, LANES>(kernel, states));
@@ -1873,6 +1880,7 @@ where
     const SUPPORTS_EMPTY: bool = false;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -1952,6 +1960,7 @@ where
     const SUPPORTS_EMPTY: bool = false;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2259,6 +2268,7 @@ where
     const SUPPORTS_EMPTY: bool = true;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = !<T as crate::scalar::Sum>::IS_PRECISE;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2355,6 +2365,7 @@ where
     const SUPPORTS_EMPTY: bool = true;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2439,6 +2450,7 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = !<T as crate::scalar::Mean>::IS_PRECISE_SUM;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2516,6 +2528,7 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2592,6 +2605,7 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2680,6 +2694,7 @@ impl ReductionOpKernel<bool> for AllKernel {
     const SUPPORTS_EMPTY: bool = true;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2768,6 +2783,7 @@ impl ReductionOpKernel<bool> for AnyKernel {
     const SUPPORTS_EMPTY: bool = true;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const NEEDS_INDICES: bool = false;
 }
 
 /// Reduces one or more axes by combining the elements along those axes with a user-supplied
