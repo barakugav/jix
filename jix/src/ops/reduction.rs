@@ -914,21 +914,27 @@ where
     let mut state = None;
     if body_len > 0 {
         // Seed one accumulator per lane from the first LANES items, then walk the rest of the
-        // body in LANES-sized chunks.
+        // body in LANES-sized chunks. The items' indices advance by a constant step: an add per
+        // lane, not a multiply (unused, they fold away for the kernels that ignore them).
+        let mut indices = array_from_fn_inline(
+            #[inline(always)]
+            |b| ctx.item_idx(begin + b),
+        );
+        let step = (LANES * ctx.idx_stride) as u64;
         let mut states = ctx
             .read_items_bulk::<LANES, CONTIGUOUS>(begin)
             .map_enumerate(
                 #[inline(always)]
-                |b, item| kernel.init_state(Some((item, ctx.item_idx(begin + b)))),
+                |b, item| kernel.init_state(Some((item, indices[b]))),
             );
         // A counted loop: SCEV knows its trip count, which `i < end` with `i += LANES` hides.
         let mut i = begin;
         for _ in 1..body_len / LANES {
             i += LANES;
             let items = ctx.read_items_bulk::<LANES, CONTIGUOUS>(i);
-            let indices = array_from_fn_inline(
+            indices = indices.map_inline(
                 #[inline(always)]
-                |b| ctx.item_idx(i + b),
+                |idx| idx + step,
             );
             states = kernel.update_state_bulk(states, items, indices, simd);
         }

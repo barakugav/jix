@@ -586,6 +586,15 @@ def is_unconditional(isa: str, mn: str) -> bool:
     return mn in ("b", "br", "ret", "udf", "brk")
 
 
+# Rust's functions that never return (panics, aborts), in mangled or demangled symbols.
+NORETURN_RE = re.compile(r"panic|unwrap_failed|expect_failed|assert_failed|_Unwind_Resume|abort|handle_alloc_error")
+
+
+def never_returns(isa: str, line: str) -> bool:
+    """A call that does not fall through: the next line is reached by other edges only."""
+    return is_call(isa, mnemonic(line)) and bool(NORETURN_RE.search(line))
+
+
 def asm_loops(lines: list[str], isa: str, block_names: dict[int, str]) -> list[Loop]:
     """The natural loops of the asm: back edges (to a block that dominates the branch) and the
     blocks that reach them, plus the irreducible cycles outside them. A loop spans the lines from
@@ -593,9 +602,8 @@ def asm_loops(lines: list[str], isa: str, block_names: dict[int, str]) -> list[L
     jump that is not a back edge (e.g. to a vector epilogue laid out before the main vector loop)
     is not a loop."""
     labels = {m.group(1): i for i, line in enumerate(lines) if (m := LABEL_RE.match(line))}
-    ends_block = [
-        not is_label(x) and (is_branch(isa, mnemonic(x)) or is_unconditional(isa, mnemonic(x))) for x in lines
-    ]
+    stops = [not is_label(x) and (is_unconditional(isa, mnemonic(x)) or never_returns(isa, x)) for x in lines]
+    ends_block = [s or (not is_label(x) and is_branch(isa, mnemonic(x))) for s, x in zip(stops, lines)]
     starts = sorted({0, *labels.values(), *(i + 1 for i, e in enumerate(ends_block) if e)} - {len(lines)})
     blocks = list(zip(starts, [*starts[1:], len(lines)]))  # [start, end)
     block_at = {s: b for b, (s, _) in enumerate(blocks)}
@@ -605,7 +613,7 @@ def asm_loops(lines: list[str], isa: str, block_names: dict[int, str]) -> list[L
         out = set()
         if not is_label(last) and is_branch(isa, mnemonic(last)):
             out |= {block_at[labels[t]] for t in TOKEN_RE.findall(last)[1:] if t in labels}
-        if not (not is_label(last) and is_unconditional(isa, mnemonic(last))) and b + 1 < len(blocks):
+        if not stops[e - 1] and b + 1 < len(blocks):
             out.add(b + 1)
         succs.append(out)
     preds: list[set[int]] = [set() for _ in blocks]
