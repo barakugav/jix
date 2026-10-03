@@ -1472,3 +1472,32 @@ any, under 0.02 ns per element) are within the VM's noise:
 The fixed ~23 us per call: `ReadContext::default()` (created by `to_ndarray()`) builds a zstd
 decompression context eagerly, 13 us here, even for a `Plain` input that decompresses nothing;
 the reduction itself, with a reused context, takes 0.34 us for 1024 items.
+
+### all / any without `!= 0` (`results/aa-B`, `results/aa-E`)
+
+The `u8` SIMD bulk of `rb-final2` (`and` / `or` on bytes, then `!= 0` back to `bool`) costs a
+compare and an and-not per vector on top of the `and` (M1: `and` + `cmeq` + `bic`). Variants of the
+all / any kernels (no `unsafe`):
+
+- A (`rb-final2`): `u8` vectors via `map_vectors2`, then `!= 0`.
+- B: `array_from_fn_inline(|i| states[i] & items[i])` on plain `bool` arrays.
+- C / D: a `u8` state (0 / 1) with `u8` vectors / plain arrays, `!= 0` once in finalize. Not
+  finished: B is already one load and one `and` / `or` per vector, so C / D can only add the
+  finalize pass.
+- E (committed): B without the override: `update_state` uses non-short-circuit `state & item`
+  (`|` for any), and the default `update_state_bulk` maps it. Same asm as B.
+
+`cell` speedup over the code without multiversioning (all and any are identical):
+
+| config | AVX-512 | AVX2 | SSE4.2 | SSE2 | M1 | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| A (`rb-final2`), all | 2.69 | 0.94 | 0.65 | 0.80 | 0.49 | 1.99 | 0.79 |
+| A (`rb-final2`), any | 1.67 | 0.94 | 0.65 | 0.80 | 0.49 | 1.99 | 0.79 |
+| B / E | 6.06 | 3.32 | 1.22 | 1.43 | 1.22 | 3.21 | 1.43 |
+
+`update` / `finalize` are unchanged (4.06 / 2.19 on AVX-512 / AVX2, 1.00 elsewhere).
+
+Real timing (this machine, AVX2 level, marginal ns per item with a reused `ReadContext`, 2^14 to
+2^17 items): the one-cell loop is L2-bound for every variant (all / any 0.015, shipped all 0.016,
+shipped any 0.065); across cells ([n / 1024, 1024] along axis 0) E is 0.028 / 0.029 against
+shipped 0.038 / 0.049.
