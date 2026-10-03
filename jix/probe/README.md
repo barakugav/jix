@@ -1407,3 +1407,68 @@ Final code against the shipped one (`16670ab`), ns per element (the min of two r
 | min_i8 | 0.068 | 0.008 | 8.12x |
 | argmax_u8 | 0.768 | 0.153 | 5.03x |
 | any_bool | 0.028 | 0.013 | 2.18x |
+
+### Option indices, ArgMax / ArgMin traits, Variance bulk (`results/rb-final2`)
+
+- The stream positions are `Option`s (`init_state` / `update_state`: `Option<u64>`,
+  `update_state_bulk`: `Option<[u64; N]>`), `Some` exactly for the kernels that `NEEDS_INDICES`,
+  which unwrap them. In the asm, argmax / argmin have the same single `unwrap_failed` call as
+  the kernels without indices (the leaf's final `state.unwrap()`, outside the loops): the
+  index unwraps are gone.
+- `ArgMax` / `ArgMin`: jix scalar traits (`update`, `update_bulk`, `merge_states`) instead of
+  `PartialOrd`, for bool, the integers, f16, f32, f64. Unchanged codegen except bool on M1 /
+  aarch64 / i686 (0.42-0.65x of the shipped code: LLVM keeps its lanes scalar, `csel` per lane;
+  comparing as `u8` does not change it) and f16 (0.85-0.93).
+- `Variance::update_bulk`: `update` a field at a time (the states interleave mean, m2, count).
+  The `cell` loop: AVX-512 1.46 -> 2.94x the shipped code, the other levels unchanged (it was
+  already vectorized there).
+- all / any are back to `!= 0`: a compare and an `andn` per vector, 2.3-3.6x slower than the
+  transmute, 0.49-0.94x the shipped code on AVX2 / SSE / M1 / i686.
+
+| config | AVX-512 | AVX2 | SSE4.2 | SSE2 | M1 | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `red-mv` | 2.04 | 1.27 | 1.00 | 0.99 | 1.04 | 1.03 | 1.07 |
+| `rb-final` | 4.40 | 2.75 | 1.38 | 1.23 | 1.87 | 1.48 | 1.08 |
+| `rb-final2` | 4.85 | 2.64 | 1.36 | 1.20 | 1.77 | 1.46 | 1.50 |
+
+| op | AVX-512 | AVX2 | SSE4.2 | SSE2 | M1 | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| all | 2.69 | 0.94 | 0.65 | 0.80 | 0.49 | 1.99 | 0.79 |
+| any | 1.67 | 0.94 | 0.65 | 0.80 | 0.49 | 1.99 | 0.79 |
+| arg_max | 6.97 (0.93 f16 - 13.93 f32) | 2.74 (0.91 f16 - 8.44 f32) | 1.35 (0.91 f16 - 3.23 f32) | 1.21 (0.85 f16 - 3.69 f32) | 1.77 (0.42 bool - 4.37 i8) | 1.47 (0.65 bool - 2.68 i16) | 1.80 (0.42 bool - 5.26 f32) |
+| arg_min | 6.75 (1.00 f16 - 13.93 f32) | 2.67 (0.98 f16 - 8.46 f32) | 1.32 (0.97 i64 - 3.23 f32) | 1.16 (0.77 bool - 3.66 f32) | 1.77 (0.45 bool - 4.37 i8) | 1.48 (0.65 bool - 2.68 i16) | 1.76 (0.42 bool - 5.38 f32) |
+| max | 6.06 (2.54 i16 - 18.25 i8) | 3.58 (1.66 f16 - 14.36 i8) | 1.71 (0.96 f16 - 4.75 i8) | 1.18 (0.99 f16 - 2.44 i8) | 2.54 (1.00 u64 - 18.89 u8) | 1.93 (1.00 u64 - 17.28 i8) | 1.22 (0.80 i16 - 2.33 f32) |
+| mean | 4.42 (2.40 u32 - 16.67 f16) | 2.59 (1.27 u32 - 14.87 f16) | 1.45 (0.99 f16 - 2.12 complex64) | 1.18 (1.00 u32 - 2.16 complex64) | 1.04 (0.60 complex128 - 2.00 f32) | 0.99 (0.89 i32 - 1.15 f32) | 1.46 (0.94 f64 - 6.05 f32) |
+| min | 6.12 (2.54 i16 - 15.13 i8) | 3.59 (1.50 f16 - 11.91 i8) | 1.75 (0.91 f16 - 4.94 u32) | 1.16 (0.97 f16 - 1.73 i8) | 2.54 (1.00 i64 - 18.89 i8) | 1.93 (1.00 u64 - 17.28 u8) | 1.32 (0.80 i16 - 2.33 f32) |
+| product | 3.61 (2.23 complex128 - 17.37 f16) | 1.81 (0.67 complex64 - 15.39 f16) | 0.97 (0.37 complex64 - 1.47 complex128) | 0.97 (0.26 complex64 - 1.65 f32) | 0.90 (0.29 complex64 - 1.22 f32) | 0.98 (0.33 complex64 - 1.86 complex128) | 1.10 (0.38 complex64 - 6.05 f32) |
+| variance | 2.94 (0.90 complex128 - 8.05 i64) | 2.55 (1.30 u8 - 6.51 i64) | 1.34 (1.04 u8 - 2.47 i64) | 1.70 (1.10 f16 - 3.21 i64) | 3.41 (1.59 complex64 - 6.05 u16) | 1.71 (1.23 u64 - 2.16 u16) | 2.29 (1.67 f16 - 2.85 bool) |
+
+Timed on this machine as above (AVX2 level), against the shipped code; the cheapest ops (all /
+any, under 0.02 ns per element) are within the VM's noise:
+
+| op | shipped ns/elem | new ns/elem | speedup |
+|---|---:|---:|---:|
+| sum_f32 | 0.064 | 0.060 | 1.06x |
+| sum_f64 | 0.133 | 0.088 | 1.52x |
+| sum_i32 | 0.214 | 0.076 | 2.83x |
+| mean_f32 | 0.069 | 0.047 | 1.49x |
+| product_f64 | 0.133 | 0.117 | 1.14x |
+| max_f32 | 0.363 | 0.075 | 4.84x |
+| max_i32 | 0.142 | 0.057 | 2.47x |
+| max_u8 | 0.026 | 0.005 | 5.27x |
+| all_bool | 0.017 | 0.007 | 2.43x |
+| argmax_f32 | 1.500 | 0.144 | 10.44x |
+| argmax_i32 | 0.480 | 0.098 | 4.89x |
+| sum_i8 | 0.168 | 0.045 | 3.70x |
+| max_f64 | 0.538 | 0.146 | 3.70x |
+| min_i8 | 0.061 | 0.008 | 7.67x |
+| argmax_u8 | 0.683 | 0.075 | 9.06x |
+| any_bool | 0.009 | 0.012 | 0.70x |
+| var_f32 | 1.705 | 0.693 | 2.46x |
+| var_f64 | 1.721 | 0.687 | 2.50x |
+| var_i32 | 1.814 | 0.710 | 2.56x |
+| argmax_bool | 0.659 | 0.108 | 6.12x |
+
+The fixed ~23 us per call: `ReadContext::default()` (created by `to_ndarray()`) builds a zstd
+decompression context eagerly, 13 us here, even for a `Plain` input that decompresses nothing;
+the reduction itself, with a reused context, takes 0.34 us for 1024 items.
