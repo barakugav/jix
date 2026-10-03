@@ -1119,3 +1119,192 @@ Observations:
 - **General-register stack accesses** (leaf pointers) are a constant per iteration (about the
   leaves beyond ~12 on x86-64, more on i686), so they shrink per byte as `v` grows, and do not
   explain the slowdowns at high `v`.
+
+## Reductions: the contiguous inner loops, and multiversioning them (`results/red-*`)
+
+The inner loops of a reduction (`jix/src/ops/reduction.rs`), for contiguous operands:
+
+- `cell`: a run of items folded into one cell (the reduced axis is the innermost):
+  `fold_run_leaf`, `ONE_CELL_LANES` = 16 lane accumulators, merged at the end.
+- `init` / `update`: the innermost axis is not reduced: item `i` folded into cell `i` (the first
+  item of the cells, or a following one): `fold_across_cells_contiguous`.
+- `finalize`: the states turned into the outputs: `finalize_states_contiguous`.
+
+Kernels: `reduce_<op>_<type>_<loop>`, found in `jix-py` (`--fn 'reduce_*'`), cost in cycles per 4096
+bytes of items (of cells for `finalize`), counted at the item type's size. LLVM merges identical
+functions, so some kernels show under one name only (sum is mean's `cell`, argmin's `init` is
+argmax's...). `init` / `finalize` loops that LLVM turned into a `memcpy` (sum, mean, product
+`init`) are not measured. Variance / standard deviation `finalize` have two alternative hot loops
+(the computing one and a NaN fill for `ddof >= n`, unswitched by LLVM) which are summed: both
+sides overstated.
+
+Changes for the analysis (`ddcd150`): the across-cells and finalize loops were inlined into the
+dyn-called tile closure, which holds all four loop shapes; they became `#[inline(never)]` functions
+with scalar arguments, `len` last. The `cell` loop `while i < end { ...; i += LANES }` has no
+SCEV trip count (wraparound) and became a counted loop: per item within -5% / +11% of the original
+on AVX2 (LLVM now unrolls the simple ones by 2). The analyzer also finds irreducible loops (a
+remainder loop entered at its body and at its exit test), which no elementwise kernel had (their
+loop trees are unchanged).
+
+Configurations:
+
+- `red-base`: the shipped code (no multiversioning). The x86_64-v2/v3/v4 platforms compile the
+  whole crate with the level's features, which is what the compiler can do at that level, not
+  what users run: they run the x86_64 (SSE2) build, `red-base-x86` (the x86_64 build simulated on
+  every x86 CPU) is the baseline of the x86 platforms below.
+- `red-mv` (`17329f3`, `90313c3`): the three contiguous entry points dispatch on the runtime level
+  (`dispatch!(Level::new(), ...)`), the loops left to auto-vectorize. Two traps on the way: the
+  dispatch captures by reference, and a captured constant (a stride) is reloaded in the
+  dispatched arm after the level detection's possible call, no longer a constant (finalize on AVX2
+  was 20-30x slower until the strides were computed inside the dispatched expression); and the
+  per-lane closures of `cell` need `#[inline(always)]` (f16 called them out of line).
+
+`red-mv` against a build with the level's features for the whole crate (`red-base` x86_64-v2/v3/v4):
+geomean 0.99-1.00 (AVX-512), 0.98 (AVX2), 0.99 (SSE4.2): the dispatch reaches what the compiler
+does at the level, except a few complex `cell` loops (0.38-0.6: 16 lanes of complex128 fill all
+16 xmm registers, the dispatched arm needs one more and spills).
+
+### Speedups
+
+Speedup = shipped cycles / multiversioned cycles, geomean over the platform's CPUs and over the
+op's types (range when they differ by more than 15%).
+
+#### `cell`: speedup of multiversioned (`red-mv`) over the shipped code
+
+| op | AVX-512 | AVX2 | SSE4.2 | SSE2 | M1 | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| all | 1.15 | 0.05 | 0.08 | 1.00 | 0.99 | 1.00 | 1.00 |
+| any | 1.15 | 0.05 | 0.08 | 1.00 | 0.99 | 1.00 | 1.00 |
+| arg_max | 3.78 (1.00 f16 - 10.95 f32) | 1.38 (0.82 u8 - 3.93 f32) | 1.10 (0.52 u8 - 3.28 f32) | 1.07 (0.98 f64 - 1.20 bool) | 0.99 (0.87 i16 - 1.03 u16) | 1.00 | 0.99 (0.94 i16 - 1.10 f16) |
+| arg_min | 3.77 (1.00 f16 - 10.95 f32) | 1.34 (0.80 bool - 3.94 f32) | 1.00 (0.47 bool - 3.28 f32) | 1.04 (0.98 bool - 1.17 i8) | 1.01 (0.87 i16 - 1.30 bool) | 1.00 | 0.96 (0.81 f16 - 1.01 f32) |
+| max | 1.38 (0.60 u8 - 4.26 f64) | 1.14 (0.05 u8 - 5.66 u32) | 0.99 (0.08 u8 - 3.77 u32) | 0.99 | 1.00 | 1.00 | 1.00 |
+| mean | 2.00 (0.38 i64 - 16.72 f16) | 1.82 (0.71 complex128 - 16.78 f16) | 1.28 (0.74 complex128 - 1.79 bool) | 0.98 (0.72 complex128 - 1.11 u16) | 0.95 (0.74 i32 - 1.00 bool) | 1.00 | 1.26 (0.84 i32 - 3.23 f32) |
+| min | 1.41 (0.60 u8 - 4.26 f64) | 1.16 (0.05 u8 - 6.08 u32) | 1.02 (0.08 u8 - 4.08 u32) | 1.01 (0.90 f64 - 1.14 i32) | 1.00 | 1.00 | 1.05 (0.98 i64 - 1.32 i8) |
+| product | 2.02 (0.95 f32 - 17.54 f16) | 1.47 (0.39 complex64 - 17.60 f16) | 0.91 (0.33 complex64 - 1.00 f16) | 0.88 (0.25 complex64 - 1.01 f16) | 1.00 | 1.00 | 1.19 (0.87 f64 - 3.23 f32) |
+| variance | 1.42 (0.94 u16 - 3.31 i64) | 1.34 (0.89 u8 - 2.96 i64) | 1.16 (0.93 u8 - 2.08 i64) | 0.97 (0.86 bool - 1.11 f64) | 1.32 (0.81 i16 - 3.38 u16) | 1.17 (0.98 complex64 - 1.61 u16) | 1.02 (0.89 bool - 1.13 i16) |
+| **geomean** | **2.04** | **1.27** | **1.00** | **0.99** | **1.04** | **1.03** | **1.06** |
+
+#### `update`: speedup of multiversioned (`red-mv`) over the shipped code
+
+| op | AVX-512 | AVX2 | SSE4.2 | SSE2 | M1 | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| all | 4.06 | 2.19 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| any | 4.06 | 2.19 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| arg_max | 1.35 (1.00 bool - 3.64 f64) | 1.03 (1.00 u64 - 1.24 f32) | 1.03 (1.00 bool - 1.20 f64) | 1.00 | 0.76 (0.39 i64 - 2.22 f64) | 0.77 (0.54 f64 - 1.00 f16) | 0.99 (0.88 f16 - 1.02 bool) |
+| arg_min | 1.35 (1.00 bool - 3.60 f64) | 1.03 (1.00 u64 - 1.24 f32) | 1.03 (1.00 bool - 1.20 f64) | 1.00 | 0.75 (0.39 i64 - 2.22 f64) | 0.78 (0.54 f64 - 0.91 f16) | 1.00 |
+| max | 5.89 (4.05 i16 - 13.10 i64) | 2.61 (1.67 f16 - 4.02 u32) | 1.39 (0.97 f16 - 2.33 u32) | 1.00 | 1.00 | 1.00 | 0.99 |
+| mean | 5.34 (3.77 complex128 - 15.37 f16) | 3.01 (1.97 complex128 - 13.70 f16) | 1.27 (1.00 complex128 - 2.23 i8) | 1.00 | 1.00 | 1.00 | 1.00 |
+| min | 5.92 (4.05 i16 - 13.09 i64) | 2.61 (1.69 f16 - 4.02 u32) | 1.42 (0.96 f16 - 2.38 i64) | 1.00 | 1.00 | 1.00 | 0.99 |
+| product | 4.19 (2.69 complex64 - 16.08 f16) | 1.97 (0.94 complex128 - 14.32 f16) | 0.94 (0.74 i16 - 1.06 u16) | 1.00 | 1.00 | 1.00 | 1.00 |
+| variance | 3.01 (1.64 complex128 - 8.69 i8) | 1.62 (0.69 complex128 - 4.76 i8) | 1.20 (0.97 f32 - 1.87 bool) | 1.00 | 1.00 | 1.00 | 1.00 |
+| **geomean** | **3.28** | **1.83** | **1.16** | **1.00** | **0.93** | **0.93** | **1.00** |
+
+#### `finalize`: speedup of multiversioned (`red-mv`) over the shipped code
+
+| op | AVX-512 | AVX2 | SSE4.2 | SSE2 | M1 | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| all | 4.02 | 2.16 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| arg_max | - | - | - | - | - | - | 1.00 |
+| max | 4.11 | 2.16 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| mean | 2.78 (1.57 complex128 - 20.48 f16) | 2.31 (1.07 complex128 - 19.06 f16) | 1.00 | 1.00 | 1.00 | 1.00 | 0.99 |
+| product | 4.18 | 2.16 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| standard_deviation | 41.40 (8.72 f16 - 75.52 complex64) | 20.08 (8.87 f16 - 30.40 complex64) | 1.00 | 1.00 | 1.00 | 1.02 | 1.00 |
+| variance | 25.13 (5.75 f16 - 51.12 complex64) | 12.20 (5.70 f16 - 20.65 complex64) | 1.00 | 1.00 | 1.00 | 1.01 | 1.00 |
+| **geomean** | **8.20** | **4.71** | **1.00** | **1.00** | **1.00** | **1.01** | **1.00** |
+
+#### `init`: speedup of multiversioned (`red-mv`) over the shipped code
+
+| op | AVX-512 | AVX2 | SSE4.2 | SSE2 | M1 | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| all | - | - | - | - | - | - | - |
+| arg_max | 1.51 (1.00 bool - 5.05 i64) | 1.24 (1.00 bool - 2.77 i64) | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| max | - | - | - | - | - | - | - |
+| mean | 5.04 (2.93 complex128 - 17.64 f16) | 2.82 (0.92 complex128 - 16.14 f16) | 1.36 (1.00 complex64 - 2.01 i16) | 1.00 | 1.00 | 1.00 | 1.00 |
+| product | 2.13 (1.00 f16 - 3.25 complex128) | 1.04 (0.96 complex128 - 1.18 complex64) | 0.81 (0.65 complex64 - 1.00 complex128) | 1.00 | 1.00 | 1.00 | 1.00 |
+| variance | 4.33 (1.80 complex64 - 10.38 f16) | 2.95 (1.35 complex64 - 6.68 f16) | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| **geomean** | **3.42** | **2.22** | **1.08** | **1.00** | **1.00** | **1.00** | **1.00** |
+
+### Throughput of the `cell` loops
+
+Items per cycle, shipped -> multiversioned, on the newest CPU of each platform. For scale: two
+loads per cycle of L1 feed 16 f32 per cycle with AVX2 (32 with AVX-512, 8 with SSE / NEON).
+
+| op | type | AVX-512 (sapphirerapids) | AVX2 (alderlake) | SSE4.2 (sandybridge) | SSE2 (skylake) | M1 (apple-m1) | aarch64 (neoverse-v2) | i686 (skylake) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| all | bool | 20.6 -> 15.4 | 20.6 -> 1.9 | 20.6 -> 1.8 | 20.6 -> 20.6 | 30.8 -> 30.5 | 7.7 -> 7.7 | 14.7 -> 14.7 |
+| any | bool | 20.6 -> 15.4 | 20.6 -> 1.9 | 20.6 -> 1.8 | 20.6 -> 20.6 | 30.8 -> 30.5 | 7.7 -> 7.7 | 14.7 -> 14.7 |
+| arg_max | bool | 1.1 -> 2.4 | 1.1 -> 0.7 | 0.4 -> 0.5 | 0.6 -> 0.9 | 0.7 -> 0.7 | 1.0 -> 1.0 | 0.2 -> 0.2 |
+| arg_max | f32 | 0.2 -> 2.0 | 0.2 -> 0.7 | 0.1 -> 0.3 | 0.2 -> 0.2 | 0.5 -> 0.5 | 0.5 -> 0.5 | 0.1 -> 0.1 |
+| arg_max | f64 | 0.2 -> 1.5 | 0.2 -> 0.6 | 0.2 -> 0.2 | 0.2 -> 0.2 | 0.5 -> 0.5 | 0.5 -> 0.5 | 0.1 -> 0.1 |
+| arg_max | i16 | 1.1 -> 2.4 | 1.1 -> 0.8 | 0.5 -> 0.3 | 0.7 -> 0.9 | 0.4 -> 0.3 | 0.7 -> 0.7 | 0.3 -> 0.2 |
+| arg_max | i32 | 0.5 -> 2.2 | 0.5 -> 0.8 | 0.3 -> 0.5 | 0.6 -> 0.6 | 0.5 -> 0.5 | 0.7 -> 0.7 | 0.2 -> 0.2 |
+| arg_max | i64 | 0.6 -> 2.0 | 0.6 -> 0.7 | 0.3 -> 0.4 | 0.6 -> 0.6 | 0.5 -> 0.5 | 0.7 -> 0.7 | 0.2 -> 0.2 |
+| arg_max | u8 | 1.1 -> 2.4 | 1.1 -> 0.7 | 0.5 -> 0.3 | 0.9 -> 1.0 | 0.4 -> 0.4 | 0.7 -> 0.7 | 0.2 -> 0.2 |
+| arg_min | bool | 0.9 -> 2.4 | 0.9 -> 0.7 | 0.5 -> 0.3 | 1.0 -> 1.0 | 0.7 -> 0.9 | 1.0 -> 1.0 | 0.2 -> 0.2 |
+| arg_min | f32 | 0.2 -> 2.0 | 0.2 -> 0.7 | 0.1 -> 0.3 | 0.2 -> 0.2 | 0.5 -> 0.5 | 0.5 -> 0.5 | 0.1 -> 0.1 |
+| arg_min | f64 | 0.2 -> 1.5 | 0.2 -> 0.6 | 0.2 -> 0.2 | 0.2 -> 0.2 | 0.5 -> 0.5 | 0.5 -> 0.5 | 0.2 -> 0.1 |
+| arg_min | i16 | 1.1 -> 2.4 | 1.1 -> 0.8 | 0.5 -> 0.3 | 0.7 -> 0.9 | 0.4 -> 0.3 | 0.7 -> 0.7 | 0.3 -> 0.2 |
+| arg_min | i32 | 0.5 -> 2.2 | 0.5 -> 0.8 | 0.3 -> 0.5 | 0.6 -> 0.6 | 0.5 -> 0.5 | 0.7 -> 0.7 | 0.2 -> 0.2 |
+| arg_min | i64 | 0.6 -> 2.0 | 0.6 -> 0.7 | 0.3 -> 0.4 | 0.6 -> 0.6 | 0.5 -> 0.5 | 0.7 -> 0.7 | 0.2 -> 0.2 |
+| arg_min | u8 | 1.1 -> 2.4 | 1.1 -> 0.7 | 0.5 -> 0.3 | 0.9 -> 1.0 | 0.4 -> 0.4 | 0.7 -> 0.7 | 0.2 -> 0.2 |
+| max | f32 | 1.2 -> 2.6 | 1.2 -> 1.5 | 0.4 -> 1.1 | 1.0 -> 1.0 | 1.6 -> 1.6 | 2.2 -> 2.2 | 0.5 -> 0.5 |
+| max | f64 | 0.6 -> 2.3 | 0.6 -> 1.1 | 0.2 -> 0.5 | 0.5 -> 0.4 | 0.9 -> 0.9 | 1.1 -> 1.1 | 0.4 -> 0.4 |
+| max | i16 | 15.6 -> 5.3 | 15.6 -> 5.3 | 13.2 -> 13.2 | 15.6 -> 15.6 | 5.2 -> 5.2 | 7.7 -> 7.7 | 11.3 -> 11.3 |
+| max | i32 | 2.9 -> 0.5 | 2.9 -> 5.3 | 2.1 -> 5.5 | 2.4 -> 2.4 | 5.2 -> 5.2 | 6.2 -> 6.2 | 2.4 -> 2.4 |
+| max | i64 | 1.4 -> 0.3 | 1.4 -> 2.0 | 0.7 -> 0.7 | 1.3 -> 1.3 | 2.8 -> 2.8 | 2.9 -> 2.9 | 0.5 -> 0.5 |
+| max | u8 | 20.6 -> 7.9 | 20.6 -> 1.9 | 20.6 -> 1.7 | 20.6 -> 20.6 | 2.0 -> 2.0 | 1.5 -> 1.5 | 14.7 -> 14.7 |
+| mean | bool | 2.0 -> 7.0 | 2.0 -> 3.9 | 1.2 -> 1.9 | 1.6 -> 1.6 | 3.9 -> 3.9 | 3.9 -> 3.9 | 0.5 -> 1.1 |
+| mean | f32 | 4.5 -> 3.2 | 4.5 -> 3.2 | 3.9 -> 3.9 | 3.5 -> 3.5 | 3.9 -> 3.9 | 6.2 -> 6.2 | 0.7 -> 2.2 |
+| mean | f64 | 3.9 -> 3.2 | 3.9 -> 3.2 | 2.0 -> 2.0 | 3.2 -> 3.2 | 3.1 -> 3.1 | 3.9 -> 3.9 | 2.2 -> 2.0 |
+| mean | i16 | 2.0 -> 7.0 | 2.0 -> 3.9 | 1.2 -> 1.9 | 1.6 -> 1.6 | 3.9 -> 3.9 | 3.9 -> 3.9 | 0.9 -> 1.3 |
+| mean | i32 | 2.0 -> 0.2 | 2.0 -> 3.9 | 1.2 -> 1.9 | 1.6 -> 1.3 | 3.5 -> 2.6 | 5.2 -> 5.2 | 1.6 -> 1.3 |
+| mean | i64 | 5.7 -> 0.3 | 5.7 -> 5.2 | 3.0 -> 3.0 | 4.0 -> 4.0 | 4.7 -> 4.7 | 3.9 -> 3.9 | 3.0 -> 3.0 |
+| mean | u8 | - | - | - | 1.6 -> 1.6 | - | - | 1.1 |
+| min | f32 | 1.2 -> 2.6 | 1.2 -> 1.5 | 0.4 -> 1.1 | 1.0 -> 1.0 | 1.6 -> 1.6 | 2.2 -> 2.2 | 0.5 -> 0.5 |
+| min | f64 | 0.6 -> 2.3 | 0.6 -> 1.1 | 0.2 -> 0.5 | 0.5 -> 0.4 | 0.9 -> 0.9 | 1.1 -> 1.1 | 0.4 -> 0.4 |
+| min | i16 | 15.6 -> 5.3 | 15.6 -> 5.3 | 13.2 -> 13.2 | 15.6 -> 15.6 | 5.2 -> 5.2 | 7.7 -> 7.7 | 11.3 -> 11.3 |
+| min | i32 | 2.9 -> 0.5 | 2.9 -> 5.3 | 1.7 -> 5.5 | 2.0 -> 2.4 | 5.2 -> 5.2 | 6.2 -> 6.2 | 2.0 -> 2.4 |
+| min | i64 | 1.4 -> 0.3 | 1.4 -> 2.0 | 0.7 -> 0.7 | 1.3 -> 1.3 | 2.8 -> 2.8 | 2.9 -> 2.9 | 0.5 -> 0.5 |
+| min | u8 | 20.6 -> 7.9 | 20.6 -> 1.9 | 20.6 -> 1.7 | 20.6 -> 20.6 | 2.0 -> 2.0 | 1.5 -> 1.5 | 14.7 -> 14.7 |
+| product | f32 | 3.5 -> 2.7 | 3.5 -> 2.7 | 2.9 -> 2.9 | 3.5 -> 3.5 | 7.7 -> 7.7 | 5.2 -> 5.2 | 0.7 -> 2.2 |
+| product | f64 | 3.5 -> 2.7 | 3.5 -> 2.6 | 2.0 -> 2.0 | 3.2 -> 3.2 | 3.1 -> 3.1 | 3.9 -> 3.9 | 2.2 -> 2.0 |
+| product | i16 | 1.0 -> 1.4 | 1.0 -> 1.3 | 1.0 -> 1.0 | 1.0 -> 1.0 | 1.0 -> 1.0 | 2.0 -> 2.0 | 0.3 -> 0.3 |
+| product | i32 | 1.0 -> 0.2 | 1.0 -> 1.3 | 1.0 -> 1.0 | 1.0 -> 1.0 | 1.0 -> 1.0 | 1.3 -> 1.3 | 0.3 -> 0.3 |
+| product | i64 | 1.0 -> 0.3 | 1.0 -> 1.3 | 1.0 -> 1.0 | 1.0 -> 1.0 | 1.0 -> 1.0 | 2.0 -> 2.0 | 0.3 -> 0.3 |
+| product | u8 | 1.0 -> 1.4 | 1.0 -> 1.7 | 1.0 -> 1.0 | 1.0 -> 1.0 | 1.0 -> 1.0 | 2.0 -> 2.0 | 0.3 -> 0.5 |
+| variance | bool | 0.0 -> 0.2 | 0.0 -> 0.2 | 0.0 -> 0.1 | 0.1 -> 0.1 | 0.1 -> 0.3 | 0.1 -> 0.2 | 0.1 -> 0.1 |
+| variance | f32 | 0.2 -> 0.2 | 0.2 -> 0.2 | 0.1 -> 0.1 | 0.2 -> 0.2 | 0.1 -> 0.1 | 0.1 -> 0.2 | 0.1 -> 0.1 |
+| variance | f64 | 0.2 -> 0.2 | 0.2 -> 0.2 | 0.1 -> 0.1 | 0.1 -> 0.2 | 0.4 -> 0.4 | 0.2 -> 0.2 | 0.1 -> 0.1 |
+| variance | i16 | 0.2 -> 0.2 | 0.2 -> 0.2 | 0.1 -> 0.1 | 0.2 -> 0.2 | 0.1 -> 0.1 | 0.1 -> 0.1 | 0.1 -> 0.1 |
+| variance | i32 | 0.2 -> 0.2 | 0.2 -> 0.2 | 0.1 -> 0.1 | 0.2 -> 0.2 | 0.1 -> 0.1 | 0.1 -> 0.1 | 0.1 -> 0.1 |
+| variance | i64 | 0.0 -> 0.2 | 0.0 -> 0.2 | 0.0 -> 0.1 | 0.1 -> 0.1 | 0.3 -> 0.3 | 0.2 -> 0.2 | 0.1 -> 0.1 |
+| variance | u8 | 0.2 -> 0.2 | 0.2 -> 0.2 | 0.1 -> 0.1 | 0.2 -> 0.1 | 0.1 -> 0.3 | 0.1 -> 0.2 | 0.1 -> 0.1 |
+
+### What the asm shows
+
+The cell loop keeps `ONE_CELL_LANES` = 16 accumulators (an array of states), updated per chunk of
+16 items; the compiler is left to vectorize it, across the lanes (SLP) or across the chunks (the
+loop vectorizer). It does not do so reliably:
+
+- **Too few accumulators for wide vectors**: sum f32 is 16 lanes = 4 xmm, 2 ymm or 1 zmm
+  accumulators, a chain of dependent adds (4 cycles each): 3.2 items per cycle with AVX2 / AVX-512
+  (vs 4.5 for the SSE2 code, 16-32 available). The lane count fixes the summation order (results
+  identical on every machine), so more accumulators per level would change float results across
+  machines.
+- **The chunk loop vectorized with gathers**: on AVX-512, integer sum / max / product
+  (`vpgatherqd`, a stride-16 gather per accumulator: 0.2-0.5 items per cycle, 5-20x slower than the
+  SSE2 code); with AVX2 / SSE4.2, all / any / max over u8 and bool (`vpinsrb` byte by byte, 1.9 vs
+  20.6 items per cycle). The same in the whole-crate builds: a cost-model failure on this loop
+  shape, not the dispatch.
+- **Argmax** keeps an index per lane, computed as `base + i * idx_stride` with a runtime stride:
+  64-bit multiplies emulated per lane and iteration (`vpmuludq` x3). Its `update` (an array of
+  `(u64, T)` states) is scalar and branchy on x86 at every level.
+- **Variance** (Welford: a division per item, and a 24-byte state per lane) is shuffled through
+  the stack; 0.1-0.2 items per cycle everywhere.
+- **The dispatch changes codegen on single-level targets too** (NEON, and the SSE2 arm): the extra
+  closure changes the inlining order, and LLVM's decisions with it: argmax `update` on aarch64 is
+  no longer if-converted and vectorized (0.39-0.54 for i64 / f64), product complex64 `cell` on
+  SSE2 0.25.
+- What multiversioning does deliver: the element-wise-like loops, `update` (min / max / sum 2-6x
+  on AVX2 / AVX-512), `finalize` (4.7-8.2x geomean, variance / std 12-41x with AVX's packed division),
+  and argmax / NaN-propagating min / max `cell` on AVX-512 (masked compares: 4-11x).
