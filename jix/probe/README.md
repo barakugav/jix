@@ -88,9 +88,12 @@ features) the `Sse2` arm.
 Kernels (the `probe_*` functions of `src/lib.rs`, each evaluating an op chain over `Plain` arrays
 into a packed output through the public API, `to_ndarray_slice`): every `inner_loop_contiguous`
 of the build whose pipeline is not a leaf, named by its expression, with the leaves as their
-types: `mul(add(f32,f32),sub(f32,f32))`, `cast_u8(add(mul(cast_f32(u8),f32),cast_f32(u8)))`. A
-chain also instantiates loops for some of its sub-chains (`add(f32,f32)`), which are analyzed too.
-The sections up to "Mixed dtypes" name them `<chain>_<type>` instead:
+types: `mul(add(f32,f32),add(f32,f32))`. Expressions longer than 80 characters are named by their
+root op, depth, leaves and a hash instead: `mul_d5_32xf32_<hash>`. A chain also instantiates loops
+for some of its sub-chains, which are analyzed too.
+
+The probes change with the question studied; the earlier ones are in git history. The sections up
+to "Mixed dtypes" name them `<chain>_<type>`:
 
 | kernel | expression | element types |
 |---|---|---|

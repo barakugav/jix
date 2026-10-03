@@ -250,7 +250,21 @@ def probe_kernel(symbol: str) -> Kernel | None:
     """The kernel of `symbol` if it is a contiguous inner loop over a pipeline that is not a leaf,
     named by its expression."""
     m = re.fullmatch(rf"{EW}::inner_loop_contiguous::<(.+?), (<.*)>", symbol)
-    return m and Kernel(pipeline_expr(m.group(2)), symbol, TYPES[m.group(1)][1])
+    return m and Kernel(short_expr(pipeline_expr(m.group(2))), symbol, TYPES[m.group(1)][1])
+
+
+def short_expr(expr: str) -> str:
+    """`expr`, or if long, its root op, depth, leaves and a hash: `mul_d5_32xf32_1a2b3c`."""
+    if len(expr) <= 80:
+        return expr
+    depth, d = 0, 0
+    for ch in expr:
+        d += {"(": 1, ")": -1}.get(ch, 0)
+        depth = max(depth, d)
+    leaves = re.findall(r"[(,](\w+)(?=[,)])", expr)
+    types = "-".join(sorted(set(leaves)))
+    digest = hashlib.sha1(expr.encode()).hexdigest()[:6]
+    return f"{expr.split('(')[0]}_d{depth}_{len(leaves)}x{types}_{digest}"
 
 
 # --------------------------------------------------------------------------------------------------
@@ -935,6 +949,7 @@ class KernelResult:
     kernel: str
     fn_instructions: int
     trace_instructions: str  # per hot loop, `+`-joined
+    stack: str  # per hot loop, `+`-joined: `stack_ops`
     calls: list[str]  # callees inside the hot loops
     loop_tree: str
     bytes_per_iter: str  # per hot loop, `+`-joined
@@ -944,6 +959,19 @@ class KernelResult:
     # Per cpu, cycles per BYTES_UNIT: sum over the hot loops of cycles per iteration / bytes per
     # iteration. Empty: no flattenable hot loop.
     costs: list[float] = field(default_factory=list)
+
+
+# A stack memory operand: a spill or reload (frame pointers are not used on x86; Apple's aarch64 has one).
+STACK_OPERAND = {"x86": re.compile(r"\[(?:rsp|esp)\b"), "aarch64": re.compile(r"\[(?:sp|x29)\b")}
+VECTOR_REGISTER = {"x86": re.compile(r"\b[xyz]mm\d+\b"), "aarch64": re.compile(r"\b(?:[qdsbh]\d+|v\d+\.)")}
+
+
+def stack_ops(isa: str, trace: list[str]) -> str:
+    """`<vector>/<general>`: the instructions of `trace` that access the stack, by the kind of their
+    register operand (vector: a vector spill or reload; general: e.g. a reloaded operand pointer)."""
+    ops = [x for x in trace if STACK_OPERAND[isa].search(x)]
+    vec = sum(1 for x in ops if VECTOR_REGISTER[isa].search(x))
+    return f"{vec}/{len(ops) - vec}"
 
 
 def describe_tree(loops: list[Loop]) -> str:
@@ -993,6 +1021,7 @@ def analyze_kernel(platform: Platform, kernel: Kernel, b: Build, mca: str, out_d
         kernel.name,
         fn_instrs,
         "+".join(str(len(t)) for t in traces),
+        "+".join(stack_ops(platform.isa, t) for t in traces),
         callees(platform.isa, lines, [h.loop for h in hot]),
         describe_tree(roots),
         "+".join(fmt),
@@ -1056,6 +1085,7 @@ def write_summary(
         "",
         "- `B/iter`: input bytes per hot-loop iteration (from the SCEV trip counts).",
         "- `instrs`: instructions per hot-loop iteration (flattened trace).",
+        "- `stack`: of those, the ones accessing the stack (spills / reloads), `vector/general` registers.",
         "- `loops`: asm loop tree with trip counts; `?` = runtime trip count.",
         "- `calls`: calls inside the hot loop, whose cost llvm-mca does NOT include. Values of such",
         "  kernels (and geomeans including them) are flagged `*`: the real cost is higher.",
@@ -1118,18 +1148,18 @@ def write_summary(
         if platform.rustflags:
             lines += [f"`RUSTFLAGS={' '.join(platform.rustflags)}`", ""]
         if fixed:
-            lines.append("| kernel | B/iter | instrs | loops | calls | " + " | ".join(cpus) + " |")
-            lines.append("|---|---:|---:|---|---|" + "---:|" * len(cpus))
+            lines.append("| kernel | B/iter | instrs | stack | loops | calls | " + " | ".join(cpus) + " |")
+            lines.append("|---|---:|---:|---:|---|---|" + "---:|" * len(cpus))
             for r in fixed:
                 cells = [f"{r.costs[i]:.0f}{star([r])}" for i in range(len(cpus))]
                 calls = ", ".join(f"`{c}`" for c in r.calls) or "-"
                 lines.append(
-                    f"| {r.kernel} | {r.bytes_per_iter} | {r.trace_instructions} | {r.loop_tree} | {calls} | "
+                    f"| {r.kernel} | {r.bytes_per_iter} | {r.trace_instructions} | {r.stack} | {r.loop_tree} | {calls} | "
                     + " | ".join(cells)
                     + " |"
                 )
             geos = [geomean(fixed, i) for i in range(len(cpus))]
-            lines.append("| **geomean** | | | | | " + " | ".join(f"**{g}**" for g in geos) + " |")
+            lines.append("| **geomean** | | | | | | " + " | ".join(f"**{g}**" for g in geos) + " |")
             lines.append("")
         warns = [f"- {r.kernel}: {w}" for r in rs for w in r.warnings]
         if warns:
