@@ -93,9 +93,9 @@ pub(crate) trait ReductionOpKernel<T> {
     /// pass and the tree is skipped entirely.
     const PREFER_TREE_MERGE: bool;
 
-    /// The most lane accumulators of the one-cell fold over contiguous items, which are otherwise
-    /// sized by the SIMD level's vectors.
-    const ONE_CELL_MAX_LANES: usize = usize::MAX;
+    /// The lane accumulators of the one-cell fold over contiguous items, if fixed: by default
+    /// they are sized by the SIMD level's vectors.
+    const ONE_CELL_LANES: Option<usize> = None;
 
     /// Whether [`update_state_bulk`](Self::update_state_bulk) uses the items' indices. `false`
     /// promises it ignores them: the caller may pass stale ones.
@@ -727,9 +727,13 @@ const SPLIT_THRESHOLD: usize = 2048;
 const ONE_CELL_VECTORS: usize = 8;
 
 /// Lanes of the one-cell fold over contiguous items, for vectors of `vector_bytes` and states of
-/// `size` bytes: [`ONE_CELL_VECTORS`] vectors of states, a power of two in
-/// `8..=min(SPLIT_THRESHOLD, max_lanes)`, so that it is one of the arms of `fold_run_leaf_level`.
-const fn one_cell_lanes(vector_bytes: usize, size: usize, max_lanes: usize) -> usize {
+/// `size` bytes: `fixed`, else [`ONE_CELL_VECTORS`] vectors of states, a power of two in
+/// `8..=SPLIT_THRESHOLD`, so that it is one of the arms of `fold_run_leaf_level`.
+const fn one_cell_lanes(vector_bytes: usize, size: usize, fixed: Option<usize>) -> usize {
+    if let Some(lanes) = fixed {
+        assert!(lanes.is_power_of_two() && lanes <= 512);
+        return lanes;
+    }
     let per_vector = vector_bytes / size;
     let per_vector = if per_vector == 0 {
         1
@@ -737,12 +741,11 @@ const fn one_cell_lanes(vector_bytes: usize, size: usize, max_lanes: usize) -> u
         1 << per_vector.ilog2()
     };
     let lanes = ONE_CELL_VECTORS * per_vector;
-    let max = if max_lanes < SPLIT_THRESHOLD {
-        max_lanes
-    } else {
+    let lanes = if lanes > SPLIT_THRESHOLD {
         SPLIT_THRESHOLD
+    } else {
+        lanes
     };
-    let lanes = if lanes > max { max } else { lanes };
     let lanes = if lanes < 8 { 8 } else { lanes };
     assert!(lanes.is_power_of_two() && lanes <= 512);
     lanes
@@ -896,7 +899,7 @@ where
 {
     macro_rules! with_lanes {
         ($($lanes:literal)*) => {
-            match const { one_cell_lanes(S::u8s::LEN, size_of::<K::State>(), K::ONE_CELL_MAX_LANES) } {
+            match const { one_cell_lanes(S::u8s::LEN, size_of::<K::State>(), K::ONE_CELL_LANES) } {
                 $($lanes => fold_run_leaf_impl::<S, T, K, $lanes, true>(simd, ctx, begin, len),)*
                 _ => unreachable!(),
             }
@@ -1431,15 +1434,26 @@ pub(crate) mod _traits {
     }
 
     /// `update_bulk` of a primitive `Self`: the items cast to the output type, then combined
-    /// with the states by `$op` on vectors.
+    /// with the states by `$op` on vectors. Except items widened 4x or more on SSE2 and NEON,
+    /// which have no single widening load (`pmovsx`): their shuffle chains are slower than the
+    /// scalar loop (up to 2x).
     macro_rules! update_bulk_simd {
-        ($op:tt) => {
+        ($Trait:ident, $op:tt) => {
             #[inline(always)]
             fn update_bulk<S: fearless_simd::Simd, const N: usize>(
                 states: [Self::Output; N],
                 items: [Self; N],
                 simd: S,
             ) -> [Self::Output; N] {
+                use crate::scalar::simd::{level, Level};
+                if size_of::<Self::Output>() >= 4 * size_of::<Self>()
+                    && matches!(level(simd), Level::Sse2 | Level::Neon)
+                {
+                    return states.map_enumerate(
+                        #[inline(always)]
+                        |i, state| <Self as $Trait>::update(state, items[i]),
+                    );
+                }
                 let items = items.map_inline(
                     #[inline(always)]
                     |x| <_ as crate::scalar::Cast<Self::Output>>::cast(x),
@@ -1459,7 +1473,7 @@ pub(crate) mod _traits {
 
     macro_rules! impl_sum {
         ($item_ty:ty, $output_ty:ty, is_precise = $is_precise:expr, simd) => {
-            impl_sum!($item_ty, $output_ty, is_precise = $is_precise, { update_bulk_simd!(+); });
+            impl_sum!($item_ty, $output_ty, is_precise = $is_precise, { update_bulk_simd!(Sum, +); });
         };
         ($item_ty:ty, $output_ty:ty, is_precise = $is_precise:expr) => {
             impl_sum!($item_ty, $output_ty, is_precise = $is_precise, {});
@@ -1538,7 +1552,7 @@ pub(crate) mod _traits {
     }
     macro_rules! impl_product {
         ($item_ty:ty, $output_ty:ty, simd) => {
-            impl_product!($item_ty, $output_ty, { update_bulk_simd!(*); });
+            impl_product!($item_ty, $output_ty, { update_bulk_simd!(Product, *); });
         };
         ($item_ty:ty, $output_ty:ty) => {
             impl_product!($item_ty, $output_ty, {});
@@ -2064,9 +2078,10 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = false;
-    // LLVM vectorizes the `(index, value)` lanes of the default `update_state_bulk` up to 16
-    // lanes; past that it no longer unrolls them (32 lanes with AVX-512: ~20x slower).
-    const ONE_CELL_MAX_LANES: usize = 16;
+    // LLVM vectorizes the `(index, value)` lanes of the default `update_state_bulk` well at 16
+    // lanes: past that it no longer unrolls them (32 lanes with AVX-512: ~20x slower), fewer (8
+    // with 16-byte vectors) are 1.5-2.5x slower for narrow items.
+    const ONE_CELL_LANES: Option<usize> = Some(16);
 }
 
 define_reduction_op!(
@@ -2169,9 +2184,10 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = false;
-    // LLVM vectorizes the `(index, value)` lanes of the default `update_state_bulk` up to 16
-    // lanes; past that it no longer unrolls them (32 lanes with AVX-512: ~20x slower).
-    const ONE_CELL_MAX_LANES: usize = 16;
+    // LLVM vectorizes the `(index, value)` lanes of the default `update_state_bulk` well at 16
+    // lanes: past that it no longer unrolls them (32 lanes with AVX-512: ~20x slower), fewer (8
+    // with 16-byte vectors) are 1.5-2.5x slower for narrow items.
+    const ONE_CELL_LANES: Option<usize> = Some(16);
 }
 
 define_reduction_op!(
@@ -2660,6 +2676,8 @@ impl ReductionOpKernel<bool> for AllKernel {
     fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
         state && item
     }
+    // `x != 0` costs a compare per vector, see below.
+    #[allow(clippy::transmute_int_to_bool)]
     #[inline(always)]
     fn update_state_bulk<S: Simd, const N: usize>(
         &self,
@@ -2668,7 +2686,7 @@ impl ReductionOpKernel<bool> for AllKernel {
         _indices: [u64; N],
         simd: S,
     ) -> [bool; N] {
-        // As bytes: `bool` has no SIMD vectors.
+        // As bytes: `bool` has no SIMD vectors. Back without a `!= 0`, a compare per vector.
         crate::scalar::simd::map_vectors2(
             simd,
             states.map_inline(u8::from),
@@ -2678,9 +2696,10 @@ impl ReductionOpKernel<bool> for AllKernel {
             #[inline(always)]
             |a, b| a & b,
         )
+        // SAFETY: the bytes are 0 or 1, as the operands were.
         .map_inline(
             #[inline(always)]
-            |x| x != 0,
+            |x| unsafe { core::mem::transmute::<u8, bool>(x) },
         )
     }
     #[inline(always)]
@@ -2749,6 +2768,8 @@ impl ReductionOpKernel<bool> for AnyKernel {
     fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
         state || item
     }
+    // `x != 0` costs a compare per vector, see below.
+    #[allow(clippy::transmute_int_to_bool)]
     #[inline(always)]
     fn update_state_bulk<S: Simd, const N: usize>(
         &self,
@@ -2757,7 +2778,7 @@ impl ReductionOpKernel<bool> for AnyKernel {
         _indices: [u64; N],
         simd: S,
     ) -> [bool; N] {
-        // As bytes: `bool` has no SIMD vectors.
+        // As bytes: `bool` has no SIMD vectors. Back without a `!= 0`, a compare per vector.
         crate::scalar::simd::map_vectors2(
             simd,
             states.map_inline(u8::from),
@@ -2767,9 +2788,10 @@ impl ReductionOpKernel<bool> for AnyKernel {
             #[inline(always)]
             |a, b| a | b,
         )
+        // SAFETY: the bytes are 0 or 1, as the operands were.
         .map_inline(
             #[inline(always)]
-            |x| x != 0,
+            |x| unsafe { core::mem::transmute::<u8, bool>(x) },
         )
     }
     #[inline(always)]
