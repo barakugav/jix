@@ -1,6 +1,8 @@
 use std::mem::MaybeUninit;
 use std::ops::Not;
 
+use fearless_simd::{dispatch, Level};
+
 use crate::ops::prelude::*;
 
 pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
@@ -826,8 +828,28 @@ where
     ctx.kernel.merge_states(left, right)
 }
 
+/// Fold `len` items from `begin`, a multiple of [`ONE_CELL_LANES`], into one state. Contiguous
+/// items are folded at the SIMD level detected at runtime (`dispatch!`), for the compiler to
+/// vectorize with.
 #[inline(never)]
 fn fold_run_leaf<T, K, const CONTIGUOUS: bool>(
+    ctx: &FoldRunCtx<'_, T, K>,
+    begin: usize,
+    len: usize,
+) -> K::State
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    if CONTIGUOUS {
+        dispatch!(Level::new(), _simd => fold_run_leaf_impl::<T, K, CONTIGUOUS>(ctx, begin, len))
+    } else {
+        fold_run_leaf_impl::<T, K, CONTIGUOUS>(ctx, begin, len)
+    }
+}
+
+#[inline(always)]
+fn fold_run_leaf_impl<T, K, const CONTIGUOUS: bool>(
     ctx: &FoldRunCtx<'_, T, K>,
     begin: usize,
     len: usize,
@@ -931,7 +953,7 @@ fn fold_run_across_cells_inner_loop<T, K, const CONTIGUOUS: bool>(
     }
 }
 
-/// [`fold_across_cells`] over contiguous items and states.
+/// [`fold_across_cells`] over contiguous items and states, at the SIMD level detected at runtime.
 #[inline(never)]
 fn fold_across_cells_contiguous<T, K, const INIT: bool>(
     kernel: &K,
@@ -944,7 +966,14 @@ fn fold_across_cells_contiguous<T, K, const INIT: bool>(
     K: ReductionOpKernel<T>,
 {
     let strides = (size_of::<T>(), size_of::<K::State>());
-    fold_across_cells::<T, K, true, INIT>(kernel, items, states, strides, base_item_idx, len)
+    dispatch!(Level::new(), _simd => fold_across_cells::<T, K, true, INIT>(
+        kernel,
+        items,
+        states,
+        strides,
+        base_item_idx,
+        len,
+    ))
 }
 
 /// Fold item `i` into cell `i`, for `i < len`: the cells' first item if `INIT`, otherwise the
@@ -1079,7 +1108,8 @@ where
     }
 }
 
-/// [`finalize_states_run`] over contiguous states and outputs.
+/// [`finalize_states_run`] over contiguous states and outputs, at the SIMD level detected at
+/// runtime.
 #[inline(never)]
 fn finalize_states_contiguous<T, K>(
     kernel: &K,
@@ -1091,13 +1121,13 @@ fn finalize_states_contiguous<T, K>(
     K: ReductionOpKernel<T>,
 {
     let (state_stride, out_stride) = (size_of::<K::State>(), size_of::<K::Output>());
-    finalize_states_run::<T, K>(
+    dispatch!(Level::new(), _simd => finalize_states_run::<T, K>(
         kernel,
         (state, state_stride),
         (out, out_stride),
         full_reduction_size,
         len,
-    )
+    ))
 }
 
 /// Finalize the `len` states at `state` into the outputs at `out`, each with its stride in bytes.
