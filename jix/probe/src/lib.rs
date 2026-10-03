@@ -24,70 +24,8 @@ fn write<S: ArrayStorage>(x: Array<S>, out: &mut [u8]) {
         .unwrap();
 }
 
-// Deep fused trees: a balanced tree keeps a value per level live while it evaluates the other
-// branch of the level, and each value is `LANES` elements (several vectors). `x()` is the next leaf:
-// operands are evaluated left to right. Levels from the leaves: `+ * - + *`.
-macro_rules! level1 {
-    ($x:ident) => {
-        ($x() + $x())
-    };
-}
-macro_rules! level2 {
-    ($x:ident) => {
-        (level1!($x) * level1!($x))
-    };
-}
-macro_rules! level3 {
-    ($x:ident) => {
-        (level2!($x) - level2!($x))
-    };
-}
-macro_rules! level4 {
-    ($x:ident) => {
-        (level3!($x) + level3!($x))
-    };
-}
-macro_rules! level5 {
-    ($x:ident) => {
-        (level4!($x) * level4!($x))
-    };
-}
-
-macro_rules! tree {
-    ($($name:ident: $t:ident, $level:ident, $n:literal;)*) => { $(
-        /// A balanced tree over `$n` leaves.
-        #[unsafe(no_mangle)]
-        pub fn $name(xs: [&[$t]; $n], out: &mut [u8]) {
-            let mut leaves = xs.into_iter().map(plain);
-            let mut x = || leaves.next().unwrap();
-            write($level!(x), out)
-        }
-    )* };
-}
-tree! {
-    probe_tree_d2_f32: f32, level2, 4;
-    probe_tree_d3_f32: f32, level3, 8;
-    probe_tree_d4_f32: f32, level4, 16;
-    probe_tree_d5_f32: f32, level5, 32;
-    probe_tree_d2_f64: f64, level2, 4;
-    probe_tree_d3_f64: f64, level3, 8;
-    probe_tree_d4_f64: f64, level4, 16;
-    probe_tree_d5_f64: f64, level5, 32;
-    probe_tree_d4_i32: i32, level4, 16;
-}
-
-/// A left-deep chain over 16 f32 leaves, `((x0 + x1) * x2 + x3) * ...`: two values live at once.
+/// `(a + b) * (c - d)`: an example; add the chains to study here.
 #[unsafe(no_mangle)]
-pub fn probe_leftchain_f32(xs: [&[f32]; 16], out: &mut [u8]) {
-    let mut leaves = xs.into_iter().map(plain);
-    let mut x = || leaves.next().unwrap();
-    write(
-        ((((((((((((((x() + x()) * x()) + x()) * x()) + x()) * x()) + x()) * x()) + x()) * x())
-            + x())
-            * x())
-            + x())
-            * x())
-            + x(),
-        out,
-    )
+pub fn probe_chain_f32(a: &[f32], b: &[f32], c: &[f32], d: &[f32], out: &mut [u8]) {
+    write((plain(a) + plain(b)) * (plain(c) - plain(d)), out)
 }

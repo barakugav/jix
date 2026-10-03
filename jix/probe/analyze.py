@@ -4,7 +4,8 @@
 Two sources of kernels (`--source`):
 - `py` (default): the `jix-py` extension crate, which instantiates every op for every dtype it
   dispatches. Its kernels are found automatically: every `inner_loop_contiguous` over a single op
-  whose operands are leaves (`neg_f32`, `add_i32`, `equal_f64`, `cast_f32_i32`, ...).
+  whose operands are leaves (`neg_f32`, `add_i32`, `equal_f64`, `cast_f32_i32`, ...), and the
+  contiguous inner loops of the reductions (`reduce_sum_f32_cell`, see `reduction_kernel`).
 - `probe`: the probe crate (`src/lib.rs`), for op chains: every `inner_loop_contiguous` over a
   pipeline that is not a leaf, named by its expression (`mul(add(f32,f32),sub(f32,f32))`).
 
@@ -199,8 +200,33 @@ def split_generic_args(s: str) -> list[str]:
     return [*out, cur.strip()] if cur.strip() else out
 
 
+# The contiguous inner loops of a reduction `<op>Kernel` over items of type `T`, by name suffix.
+REDUCTION_LOOPS = {
+    r"fold_run_leaf::<(.+), jix::ops::reduction::(\w+)Kernel, true>": "cell",
+    r"fold_across_cells_contiguous::<(.+), jix::ops::reduction::(\w+)Kernel, true>": "init",
+    r"fold_across_cells_contiguous::<(.+), jix::ops::reduction::(\w+)Kernel, false>": "update",
+    r"finalize_states_contiguous::<(.+), jix::ops::reduction::(\w+)Kernel>": "finalize",
+}
+
+
+def reduction_kernel(symbol: str) -> Kernel | None:
+    """The kernel of `symbol` if it is a contiguous inner loop of a reduction:
+    `reduce_<op>_<type>_<loop>` (`reduce_sum_f32_cell`), see `REDUCTION_LOOPS`. Its `len` counts
+    items (cells for `finalize`), whose bytes are counted at the item type's size."""
+    for pattern, loop in REDUCTION_LOOPS.items():
+        m = re.fullmatch(rf"jix::ops::reduction::{pattern}", symbol)
+        if m and m.group(1) in TYPES:
+            op = re.sub(r"(?<!^)(?=[A-Z])", "_", m.group(2)).lower()
+            ty, size = TYPES[m.group(1)]
+            return Kernel(f"reduce_{op}_{ty}_{loop}", symbol, size)
+    return None
+
+
 def py_kernel(symbol: str) -> Kernel | None:
-    """The kernel of `symbol` if it is the contiguous inner loop of a single op over leaves."""
+    """The kernel of `symbol` if it is the contiguous inner loop of a single op over leaves, or of
+    a reduction (`reduction_kernel`)."""
+    if symbol.startswith("jix::ops::reduction::"):
+        return reduction_kernel(symbol)
     # `inner_loop::<T, LANES, true, true, _>`: the loop before the SIMD level dispatch (`main`).
     m = re.fullmatch(rf"{EW}::(?:inner_loop_contiguous|inner_loop)::<(.+?), (?:\d+, true, true, )?(<.*)>", symbol)
     if not m or m.group(1) not in TYPES:
@@ -562,9 +588,10 @@ def is_unconditional(isa: str, mn: str) -> bool:
 
 def asm_loops(lines: list[str], isa: str, block_names: dict[int, str]) -> list[Loop]:
     """The natural loops of the asm: back edges (to a block that dominates the branch) and the
-    blocks that reach them. A loop spans the lines from its first to its last block, so a rotated
-    loop entered in the middle is found, and a backward jump that is not a back edge (e.g. to a
-    vector epilogue laid out before the main vector loop) is not a loop."""
+    blocks that reach them, plus the irreducible cycles outside them. A loop spans the lines from
+    its first to its last block, so a rotated loop entered in the middle is found, and a backward
+    jump that is not a back edge (e.g. to a vector epilogue laid out before the main vector loop)
+    is not a loop."""
     labels = {m.group(1): i for i, line in enumerate(lines) if (m := LABEL_RE.match(line))}
     ends_block = [
         not is_label(x) and (is_branch(isa, mnemonic(x)) or is_unconditional(isa, mnemonic(x))) for x in lines
@@ -610,6 +637,25 @@ def asm_loops(lines: list[str], isa: str, block_names: dict[int, str]) -> list[L
                             body.add(p)
                             stack.append(p)
                 bodies.setdefault(h, set()).update(body)
+
+    # Irreducible cycles: entered at more than one block, so no block dominates the others (e.g. a
+    # rotated remainder loop entered at its body from before the vector loops and at its exit test
+    # from them). Each is a strongly connected component outside the natural loops, headed by its
+    # first block.
+    in_natural = set().union(*bodies.values())
+    reach = []
+    for b in range(len(blocks)):
+        seen, stack = set(), [*succs[b]]
+        while stack:
+            if (x := stack.pop()) not in seen:
+                seen.add(x)
+                stack += succs[x]
+        reach.append(seen)
+    for b in range(len(blocks)):
+        if b in reach[b] and b not in in_natural:
+            scc = {c for c in reach[b] if b in reach[c]}
+            bodies[min(scc)] = scc
+            in_natural |= scc
 
     def make(h: int, body: set[int]) -> Loop:
         start, end = min(blocks[b][0] for b in body), max(blocks[b][1] for b in body) - 1

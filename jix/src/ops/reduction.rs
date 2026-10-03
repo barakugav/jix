@@ -845,13 +845,13 @@ where
     let mut states = ctx
         .read_items_bulk::<LANES, CONTIGUOUS>(begin)
         .map_enumerate(|b, item| kernel.init_state(Some((item, ctx.item_idx(begin + b)))));
-    let end = begin + len;
-    let mut i = begin + LANES;
-    while i < end {
+    // A counted loop: SCEV knows its trip count, which `i < end` with `i += LANES` hides.
+    let mut i = begin;
+    for _ in 1..len / LANES {
+        i += LANES;
         let bulk = ctx.read_items_bulk::<LANES, CONTIGUOUS>(i);
         states = states
             .map_enumerate(|b, state| kernel.update_state(state, bulk[b], ctx.item_idx(i + b)));
-        i += LANES;
     }
 
     // merge the LANES states to a single one
@@ -898,32 +898,85 @@ fn fold_run_across_cells_inner_loop<T, K, const CONTIGUOUS: bool>(
         base_item_idx,
     } = args;
 
-    let items = items.as_ptr().cast::<T>();
-    let read_item = |i: usize| {
-        if CONTIGUOUS {
+    let items = items.cast::<T>();
+    let states = states.cast::<MaybeUninit<K::State>>();
+    let init = base_item_idx == 0;
+    if CONTIGUOUS {
+        if init {
+            fold_across_cells_contiguous::<T, K, true>(kernel, items, states, base_item_idx, len)
+        } else {
+            fold_across_cells_contiguous::<T, K, false>(kernel, items, states, base_item_idx, len)
+        }
+    } else {
+        let strides = (items_stride, state_stride);
+        if init {
+            fold_across_cells::<T, K, false, true>(
+                kernel,
+                items,
+                states,
+                strides,
+                base_item_idx,
+                len,
+            )
+        } else {
+            fold_across_cells::<T, K, false, false>(
+                kernel,
+                items,
+                states,
+                strides,
+                base_item_idx,
+                len,
+            )
+        }
+    }
+}
+
+/// [`fold_across_cells`] over contiguous items and states.
+#[inline(never)]
+fn fold_across_cells_contiguous<T, K, const INIT: bool>(
+    kernel: &K,
+    items: PtrNoalias<'_, T>,
+    states: PtrMutNoalias<'_, MaybeUninit<K::State>>,
+    base_item_idx: u64,
+    len: usize,
+) where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    let strides = (size_of::<T>(), size_of::<K::State>());
+    fold_across_cells::<T, K, true, INIT>(kernel, items, states, strides, base_item_idx, len)
+}
+
+/// Fold item `i` into cell `i`, for `i < len`: the cells' first item if `INIT`, otherwise the
+/// cells hold a state to update. `strides`: of the items and the states, in bytes.
+#[inline(always)]
+fn fold_across_cells<T, K, const CONTIGUOUS: bool, const INIT: bool>(
+    kernel: &K,
+    items: PtrNoalias<'_, T>,
+    states: PtrMutNoalias<'_, MaybeUninit<K::State>>,
+    (items_stride, state_stride): (usize, usize),
+    base_item_idx: u64,
+    len: usize,
+) where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    let items = items.as_ptr();
+    let states = states.as_mut_ptr();
+    for i in 0..len {
+        let item = if CONTIGUOUS {
             unsafe { items.add(i).read_maybe_aligned::<REQUIRE_ALIGNED>() }
         } else {
             unsafe { items.byte_add(i * items_stride).read_unaligned() }
-        }
-    };
-    let states = states.as_mut_ptr().cast::<MaybeUninit<K::State>>();
-    let state_ref = |i: usize| {
-        if CONTIGUOUS {
+        };
+        let state = if CONTIGUOUS {
             unsafe { &mut *states.add(i) }
         } else {
             unsafe { &mut *states.byte_add(i * state_stride) }
-        }
-    };
-    if base_item_idx == 0 {
-        for i in 0..len {
-            let item = read_item(i);
-            let state = state_ref(i);
+        };
+        if INIT {
             state.write(kernel.init_state(Some((item, base_item_idx))));
-        }
-    } else {
-        for i in 0..len {
-            let item = read_item(i);
-            let state = state_ref(i);
+        } else {
             let prev = unsafe { state.assume_init_read() };
             state.write(kernel.update_state(prev, item, base_item_idx));
         }
@@ -1013,6 +1066,51 @@ where
         len,
         full_reduction_size,
     } = args;
+    if state_stride == size_of::<K::State>() && out_stride == size_of::<K::Output>() {
+        finalize_states_contiguous::<T, K>(kernel, state, out, full_reduction_size, len)
+    } else {
+        finalize_states_run::<T, K>(
+            kernel,
+            (state, state_stride),
+            (out, out_stride),
+            full_reduction_size,
+            len,
+        )
+    }
+}
+
+/// [`finalize_states_run`] over contiguous states and outputs.
+#[inline(never)]
+fn finalize_states_contiguous<T, K>(
+    kernel: &K,
+    state: *mut u8,
+    out: *mut u8,
+    full_reduction_size: u64,
+    len: usize,
+) where
+    K: ReductionOpKernel<T>,
+{
+    let (state_stride, out_stride) = (size_of::<K::State>(), size_of::<K::Output>());
+    finalize_states_run::<T, K>(
+        kernel,
+        (state, state_stride),
+        (out, out_stride),
+        full_reduction_size,
+        len,
+    )
+}
+
+/// Finalize the `len` states at `state` into the outputs at `out`, each with its stride in bytes.
+#[inline(always)]
+fn finalize_states_run<T, K>(
+    kernel: &K,
+    (state, state_stride): (*mut u8, usize),
+    (out, out_stride): (*mut u8, usize),
+    full_reduction_size: u64,
+    len: usize,
+) where
+    K: ReductionOpKernel<T>,
+{
     for i in 0..len {
         // CAREFUL: state and out may alias
         let state = unsafe { state.add(i * state_stride).cast::<K::State>() };
