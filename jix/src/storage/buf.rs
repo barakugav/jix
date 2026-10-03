@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::buf_pool::PoolBuf;
+use crate::buf_pool::{PoolBuf, PoolBufShared};
 use crate::dtype::Dtype;
 use crate::error::{ensure, Result};
 use crate::util::{
@@ -50,7 +50,14 @@ pub struct StridedBuf<'a> {
 enum StridedBufData<'a> {
     Slice(&'a [u8]),
     SliceMut(&'a mut [u8]),
-    PoolBuf { buf: PoolBuf<'a>, offset: usize },
+    PoolBuf {
+        buf: PoolBuf<'a>,
+        offset: usize,
+    },
+    Shared {
+        buf: PoolBufShared<'a>,
+        offset: usize,
+    },
 }
 
 impl<'a> StridedBuf<'a> {
@@ -135,9 +142,25 @@ impl<'a> StridedBuf<'a> {
         }
     }
 
+    /// Create a read-only view into a shared pooled buffer with the given (byte) `strides`.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`from_slice`](Self::from_slice).
+    #[inline]
+    pub(crate) unsafe fn from_shared(buf: PoolBufShared<'a>, strides: &[usize]) -> Self {
+        Self {
+            data: StridedBufData::Shared { buf, offset: 0 },
+            strides: strides.to_dim_vec::<DimDyn>(),
+        }
+    }
+
     #[inline]
     pub(crate) fn is_writable(&self) -> bool {
-        !matches!(self.data, StridedBufData::Slice(_))
+        !matches!(
+            self.data,
+            StridedBufData::Slice(_) | StridedBufData::Shared { .. }
+        )
     }
 
     /// The byte stride of each dimension.
@@ -168,6 +191,7 @@ impl<'a> StridedBuf<'a> {
             StridedBufData::Slice(s) => *s,
             StridedBufData::SliceMut(s) => &**s,
             StridedBufData::PoolBuf { buf, offset } => &buf.as_slice()[*offset..],
+            StridedBufData::Shared { buf, offset } => &buf.as_slice()[*offset..],
         };
         (data, self.strides.as_ref())
     }
@@ -178,7 +202,9 @@ impl<'a> StridedBuf<'a> {
         let data = match &mut self.data {
             StridedBufData::SliceMut(s) => &mut **s,
             StridedBufData::PoolBuf { buf, offset } => &mut buf.as_mut_slice()[*offset..],
-            StridedBufData::Slice(_) => panic!("data_mut on a read-only StridedBuf view"),
+            StridedBufData::Slice(_) | StridedBufData::Shared { .. } => {
+                panic!("data_mut on a read-only StridedBuf view")
+            }
         };
         (data, strides)
     }
@@ -251,6 +277,10 @@ impl<'a> StridedBuf<'a> {
             StridedBufData::Slice(s) => StridedBufData::Slice(&s[n..]),
             StridedBufData::SliceMut(s) => StridedBufData::SliceMut(&mut s[n..]),
             StridedBufData::PoolBuf { buf, offset } => StridedBufData::PoolBuf {
+                buf,
+                offset: offset + n,
+            },
+            StridedBufData::Shared { buf, offset } => StridedBufData::Shared {
                 buf,
                 offset: offset + n,
             },

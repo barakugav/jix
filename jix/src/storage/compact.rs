@@ -16,6 +16,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
+use crate::storage::id::ArrayId;
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ElementType, StridedBuf};
 use crate::util::iter::NdIter;
@@ -154,6 +155,7 @@ macro_rules! impl_array_storage {
 
             fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
                 Some(CompactBorrowed(ArrayBlockTableStorageBase {
+                    id: self.0.id,
                     blocks: self.0.blocks.as_ref(),
                     shape: self.0.shape.clone(),
                     spec: self.0.spec.clone(),
@@ -196,6 +198,8 @@ pub(crate) struct ArrayBlockTableStorageBase<S, ET, D>
 where
     S: BlockTableStorage,
 {
+    /// Identifies the array data in the [`ReadContext`] read cache.
+    id: ArrayId,
     pub(crate) blocks: BlockTable<S, ET>,
     shape: D,
 
@@ -223,6 +227,7 @@ where
         // Reading a compact element is more expensive than reading a plain element (1).
         spec.dynamic_mut().element_cost = 8.0;
         Ok(Self {
+            id: ArrayId::new(),
             blocks,
             shape,
             spec,
@@ -241,6 +246,31 @@ where
         D: Dimension,
     {
         self.shape.as_slice()
+    }
+
+    /// Read a rectangular sub-region of the nd-array.
+    ///
+    /// In pull mode (`out` is `None`) the read goes through the context's read cache, so reading the
+    /// same region again (e.g. both operands of `x + x`) decodes the blocks only once.
+    #[inline]
+    fn read_data<'rd>(
+        &'rd self,
+        index: &[Range<u64>],
+        context: &'rd ReadContext,
+        out: Option<&'rd mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'rd>>
+    where
+        ET: ElementType,
+        D: Dimension,
+    {
+        if out.is_some() {
+            return self.read_data_uncached(index, context, out);
+        }
+        check_get_range(self.shape(), index)?;
+        let layout_order = self.spec.as_ref().read_layout_order();
+        context.read_cached(self.id, index, self.blocks.dtype(), layout_order, |dst| {
+            self.read_data_uncached(index, context, Some(dst)).map(drop)
+        })
     }
 
     /// Read a rectangular sub-region of the nd-array into `buf`.
@@ -286,7 +316,7 @@ where
     ///    - Call `nd_copy` to scatter the active sub-region from `tmp_buf` into `buf`,
     ///      respecting both strides.
     #[inline]
-    fn read_data<'rd>(
+    fn read_data_uncached<'rd>(
         &'rd self,
         index: &[Range<u64>],
         context: &'rd ReadContext,
@@ -384,6 +414,7 @@ where
         ET: ElementType,
     {
         Ok(ArrayBlockTableStorageBase {
+            id: self.id,
             blocks: self.blocks.element_type_change()?,
             shape: self.shape,
             spec: self.spec,
@@ -400,6 +431,7 @@ where
         check_ndim::<NewD>(self.shape().len())?;
         let shape = NewD::from_slice(self.shape());
         Ok(ArrayBlockTableStorageBase {
+            id: self.id,
             blocks: self.blocks,
             shape,
             spec: self.spec,
@@ -858,5 +890,55 @@ mod tests {
         }
         assert_eq!(&backing[..6], &[1, 2, 3, 4, 5, 6]);
         assert_eq!(&backing[6..], &[SENTINEL, SENTINEL], "wrote past the block");
+    }
+
+    fn read_i32s(buf: &StridedBuf<'_>, len: usize) -> Vec<i32> {
+        let stride = buf.strides()[0];
+        (0..len)
+            .map(|i| unsafe {
+                buf.data_ptr()
+                    .add(i * stride)
+                    .cast::<i32>()
+                    .read_unaligned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn read_cache_reuses_repeated_pull_reads() {
+        let nd = ndarray::Array1::from_iter(0..64i32);
+        let mut params = ArrayParams::new();
+        params.block_shape(&[8]);
+        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let ctx = za.read_ctx();
+        let storage = za.into_storage();
+
+        let a = storage.read_data(&[4..20], &ctx, None).unwrap();
+        let b = storage.read_data(&[4..20], &ctx, None).unwrap();
+        assert_eq!(
+            a.data_ptr(),
+            b.data_ptr(),
+            "the second read should hit the cache"
+        );
+
+        // Reading another region evicts the entry, but must leave the live views intact.
+        let c = storage.read_data(&[20..36], &ctx, None).unwrap();
+        assert_eq!(read_i32s(&a, 16), (4..20).collect::<Vec<_>>());
+        assert_eq!(read_i32s(&b, 16), (4..20).collect::<Vec<_>>());
+        assert_eq!(read_i32s(&c, 16), (20..36).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn read_cache_different_regions_of_same_array() {
+        let nd = ndarray::Array1::from_iter(0..64i32);
+        let mut params = ArrayParams::new();
+        params.block_shape(&[8]);
+        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+
+        let sum = (za.view().slice((0..32,)) + za.view().slice((32..64,)))
+            .to_ndarray()
+            .unwrap();
+        let expected = ndarray::Array1::from_iter((0..32).map(|i| i + (i + 32)));
+        assert_eq!(sum.as_slice().unwrap(), expected.as_slice().unwrap());
     }
 }

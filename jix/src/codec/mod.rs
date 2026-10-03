@@ -6,16 +6,25 @@
 mod filter;
 pub use filter::*;
 
-use std::cell::UnsafeCell;
+use std::cell::{RefCell, UnsafeCell};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::ops::Range;
+use std::sync::Arc;
 
-use crate::buf_pool::{BufferPool, PoolBuf};
+use crate::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
 use crate::dtype::{Alignment, Dtype};
 #[allow(unused_imports)]
 use crate::error::{ensure, error, Result};
+use crate::storage::id::ArrayId;
+use crate::storage::StridedBuf;
 use crate::util::arrayvec::ArrayVec;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
-use crate::util::{AlignedBytes, AlternatingBuffers};
+use crate::util::{
+    dim_arr, strides_for_layout_order, AlignedBytes, AlternatingBuffers, DimArray, DimIdx, SliceExt,
+};
+use crate::DimDyn;
 
 /// The compression algorithm applied to each block.
 #[derive(Clone, Debug)]
@@ -367,6 +376,16 @@ pub struct ReadContext {
     #[cfg(not(miri))]
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     buffer_pool: BufferPool,
+    /// The last pull-mode read of each compact array, so a repeated read (e.g. `x + x`) decodes
+    /// only once. See [`read_cached`](Self::read_cached).
+    read_cache: RefCell<HashMap<ArrayId, CacheEntry>>,
+}
+
+/// A cached read of the region `index` of an array, laid out at `strides` in `data`.
+struct CacheEntry {
+    index: DimArray<Range<u64>>,
+    strides: DimArray<usize>,
+    data: Arc<AlignedBytes>,
 }
 impl ReadContext {
     /// Creates a new `ReadContext` configured with the given decoder parameters.
@@ -378,6 +397,7 @@ impl ReadContext {
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
             buffer_pool: BufferPool::new(),
+            read_cache: RefCell::new(HashMap::new()),
         })
     }
 
@@ -389,6 +409,54 @@ impl ReadContext {
     #[inline]
     pub(crate) fn allocate_buf(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
         self.buffer_pool.get(size, alignment)
+    }
+
+    /// Read the region `index` of the array `id` through the read cache.
+    ///
+    /// On a hit, returns a read-only view of the cached buffer. On a miss, evicts the cached read
+    /// of another region of `id` (if any), lets `read` fill a new buffer laid out by
+    /// `layout_order`, caches it and returns a read-only view of it.
+    ///
+    /// The cached buffers are reference counted, so evicting an entry never invalidates views
+    /// handed out earlier; an allocation returns to the pool when its last reference is dropped.
+    pub(crate) fn read_cached(
+        &self,
+        id: ArrayId,
+        index: &[Range<u64>],
+        dtype: &Dtype,
+        layout_order: &[DimIdx],
+        read: impl FnOnce(&mut StridedBuf<'_>) -> Result<()>,
+    ) -> Result<StridedBuf<'_>> {
+        if let Entry::Occupied(entry) = self.read_cache.borrow_mut().entry(id) {
+            if entry.get().index.as_slice() == index {
+                let CacheEntry { strides, data, .. } = entry.get();
+                let buf = PoolBufShared::new(data.clone(), &self.buffer_pool);
+                return Ok(unsafe { StridedBuf::from_shared(buf, strides) });
+            }
+            // Evict before allocating, so the read below can reuse the buffer.
+            self.buffer_pool.return_shared(entry.remove().data);
+        }
+
+        let itemsize = dtype.itemsize() as usize;
+        let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let strides = strides_for_layout_order(shape.as_slice(), itemsize, layout_order);
+        let nbytes = shape.iter().product::<usize>() * itemsize;
+        let mut data = self.buffer_pool.get_raw(nbytes, dtype.alignment());
+        let mut dst = unsafe { StridedBuf::from_slice_mut(data.as_mut_slice(), &strides) };
+        read(&mut dst)?;
+        drop(dst);
+
+        let data = Arc::new(data);
+        let buf = PoolBufShared::new(data.clone(), &self.buffer_pool);
+        let buf = unsafe { StridedBuf::from_shared(buf, &strides) };
+        let index = index.to_dim_vec::<DimDyn>();
+        let entry = CacheEntry {
+            index,
+            strides,
+            data,
+        };
+        self.read_cache.borrow_mut().insert(id, entry);
+        Ok(buf)
     }
 }
 impl Default for ReadContext {

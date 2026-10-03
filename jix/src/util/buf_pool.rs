@@ -1,4 +1,6 @@
 use std::cell::UnsafeCell;
+use std::mem::ManuallyDrop;
+use std::sync::Arc;
 
 use crate::cpu_cache::CACHE_LINE_SIZE;
 use crate::dtype::Alignment;
@@ -35,16 +37,22 @@ impl BufferPool {
     /// The buffer is popped from the free list when one is available; otherwise a fresh allocation
     /// is made. The allocation is returned to the pool when the `PoolBuf` is dropped.
     pub(crate) fn get(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
+        PoolBuf {
+            buf: self.get_raw(size, alignment),
+            buffers: self,
+        }
+    }
+
+    /// Like [`get`](Self::get), but returns the bare allocation instead of a guard. Hand it back
+    /// with [`return_shared`](Self::return_shared) (or let it free normally).
+    pub(crate) fn get_raw(&self, size: usize, alignment: Alignment) -> AlignedBytes {
         let (pool, pool_align) = self.get_pool(alignment);
         let pool = unsafe { &mut *pool };
-        let tmp_buf = pool
+        let mut buf = pool
             .pop()
             .unwrap_or_else(|| AlignedBytes::with_capacity_exact(pool_align.as_usize(), size));
-        let mut buf = PoolBuf {
-            buf: tmp_buf,
-            buffers: self,
-        };
-        buf.set_len(size);
+        buf.reserve(size);
+        unsafe { buf.set_len(size) };
         buf
     }
 
@@ -54,6 +62,14 @@ impl BufferPool {
         let (pool, _) = self.get_pool(buf.alignment().try_into().unwrap());
         let pool = unsafe { &mut *pool };
         pool.push(buf);
+    }
+
+    /// Drops one reference to a shared buffer, returning the allocation to the pool if it was the
+    /// last one.
+    pub(crate) fn return_shared(&self, buf: Arc<AlignedBytes>) {
+        if let Some(buf) = Arc::into_inner(buf) {
+            self.return_buf(buf);
+        }
     }
 
     /// Returns a raw pointer to the free list for `alignment` together with the actual alignment
@@ -102,14 +118,6 @@ pub(crate) struct PoolBuf<'a> {
     buffers: &'a BufferPool,
 }
 impl PoolBuf<'_> {
-    /// Resizes the buffer to `new_len` bytes. The new contents are uninitialized.
-    #[inline]
-    pub(crate) fn set_len(&mut self, new_len: usize) {
-        self.buf.clear();
-        self.buf.reserve(new_len);
-        unsafe { self.buf.set_len(new_len) };
-    }
-
     #[inline(always)]
     pub(crate) fn as_slice(&self) -> &[u8] {
         self.buf.as_slice()
@@ -127,6 +135,34 @@ impl Drop for PoolBuf<'_> {
         std::mem::swap(&mut self.buf, &mut buf);
 
         self.buffers.return_buf(buf);
+    }
+}
+
+/// A read-only, reference-counted buffer whose allocation returns to its [`BufferPool`] when the
+/// last reference is dropped.
+pub(crate) struct PoolBufShared<'a> {
+    buf: ManuallyDrop<Arc<AlignedBytes>>,
+    buffers: &'a BufferPool,
+}
+impl<'a> PoolBufShared<'a> {
+    #[inline]
+    pub(crate) fn new(buf: Arc<AlignedBytes>, buffers: &'a BufferPool) -> Self {
+        Self {
+            buf: ManuallyDrop::new(buf),
+            buffers,
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        self.buf.as_slice()
+    }
+}
+impl Drop for PoolBufShared<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.buf` is never used again.
+        let buf = unsafe { ManuallyDrop::take(&mut self.buf) };
+        self.buffers.return_shared(buf);
     }
 }
 
