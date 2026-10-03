@@ -1368,11 +1368,11 @@ macro_rules! define_reduction_op {
 /// Max/Min/argmax/argmin do **not** appear here - those ops are bounded directly by
 /// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`] / [`PartialOrd`].
 pub(crate) mod _traits {
-    use crate::util::ArrayExt;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    use crate::util::ArrayExt;
 
     /// Scalar kernel trait for the element-wise `sum` reduction.
     ///
