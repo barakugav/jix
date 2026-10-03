@@ -1308,3 +1308,102 @@ loop vectorizer). It does not do so reliably:
 - What multiversioning does deliver: the element-wise-like loops, `update` (min / max / sum 2-6x
   on AVX2 / AVX-512), `finalize` (4.7-8.2x geomean, variance / std 12-41x with AVX's packed division),
   and argmax / NaN-propagating min / max `cell` on AVX-512 (masked compares: 4-11x).
+
+## Reductions: `update_state_bulk` and lanes sized by the SIMD level (`results/rb-*`)
+
+The one-cell fold (`fold_run_leaf`) no longer leaves its lanes to auto-vectorization:
+
+- `ReductionOpKernel::update_state_bulk(states, items, indices, simd)` folds a chunk of `N` items
+  into the `N` lane accumulators. The default maps `update_state`; SIMD bodies: sum / mean /
+  product (the scalar traits' `update_bulk`: the items cast to the state type, then a vector add /
+  mul; scalar for items widened 4x or more on SSE2 / NEON, which have no widening load), min / max
+  (the element-wise `maximum_bulk` / `minimum_bulk`), all / any (as `u8` vectors). Argmax / argmin
+  and variance keep the default.
+- The lanes are `ONE_CELL_VECTORS` vectors of the dispatched level's states (a power of two in
+  `8..=SPLIT_THRESHOLD`), except `ReductionOpKernel::ONE_CELL_LANES` fixed ones (argmax / argmin:
+  16, 8 on 32-bit x86). A leaf takes any length (the remainder folded one by one), so the
+  pairwise split does not align to the lanes.
+- The lane indices are an array advanced by `LANES * idx_stride` per chunk (an add, not
+  `vpmullq`), only for the kernels that read them (`NEEDS_INDICES`).
+- Floats sum differently on different levels (different lanes): accepted.
+
+Variants (`cell` loops only, speedup over the shipped code, as in the previous section; `red-mv`:
+dispatch only; `rb-v*`: 2, 4, 8 vectors, before the index / argmax / narrow-sum / all-any
+fixes):
+
+| config | AVX-512 | AVX2 | SSE4.2 | SSE2 | M1 | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `red-mv` | 2.04 | 1.27 | 1.01 | 0.99 | 1.04 | 1.03 | 1.07 |
+| `rb-v4` | 3.70 | 1.97 | 1.16 | 1.12 | 1.23 | 1.26 | 1.42 |
+| `rb-v8` | 2.09 | 2.19 | 1.25 | 1.15 | 1.44 | 1.33 | 1.40 |
+| `rb-final` | 4.40 | 2.75 | 1.39 | 1.22 | 1.87 | 1.48 | 1.07 |
+
+`rb-v8` -> `rb-final`: the fixes found in the asm along the way:
+
+- **8 vectors is the best on every level** but argmax with AVX-512: 32 `(index, value)` lanes are
+  no longer unrolled by LLVM (a 32-trip scalar loop through the stack, 0.03-0.1x): argmax fixed at
+  16 lanes. 8 lanes (16-byte vectors with 8 vectors of 16-byte states) are 1.5-2.5x slower for
+  narrow items, and 16 spill on i686 (8 registers): 8 there (`rb-i686`: argmax 1.76x geomean on
+  i686; `rb-final`'s i686 argmax column predates it, 0.5x).
+- **Lane indices** as `base + (i + b) * idx_stride` cost two `vpmullq` per vector: advanced by a
+  step instead, argmax 1.3-2.4x. Carried across iterations, an unused index array is not dropped
+  by LLVM once too large for registers (all over bool, 256 lanes: 64 `vpaddq` and spills per
+  iteration), hence `NEEDS_INDICES`; recomputed per chunk from invariant offsets instead, LLVM
+  strength-reduces them into a scalar chain and argmax selects each index with a `cmov` (2-5x
+  slower).
+- **all / any** converted their bytes back with `!= 0`, a compare and an `andn` per vector: a
+  transmute (the bytes are 0 / 1) leaves one `vpand` / `and` per vector (2.5-3.3x).
+- **Narrow integer sums** (i8 / u8 / bool / i16 into 64 bits) on SSE2 and NEON: the widening
+  shuffle chains are up to 2x slower than the scalar loop: scalar there.
+
+`rb-final`, per op (speedup over the shipped code, geomean over the types, range when they differ
+by more than 15%):
+
+| op | AVX-512 | AVX2 | SSE4.2 | SSE2 | M1 | aarch64 | i686 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| all | 6.06 | 3.32 | 1.22 | - | 1.22 | 3.21 | - |
+| any | 6.06 | 3.32 | 1.22 | - | 1.22 | 3.21 | - |
+| arg_max | 6.50 (1.06 f16 - 13.93 f32) | 2.81 (1.06 f16 - 8.44 f32) | 1.39 (0.99 f16 - 3.21 f32) | 1.27 (0.94 f16 - 3.70 f32) | 1.92 (1.00 f32 - 4.37 i8) | 1.50 (0.94 u64 - 2.68 i16) | 0.51 (0.38 u32 - 1.11 f16) |
+| arg_min | 6.82 (1.01 f16 - 13.93 f32) | 2.73 (1.01 f16 - 8.46 f32) | 1.36 (0.96 f16 - 3.21 f32) | 1.21 (0.91 f16 - 3.70 f32) | 2.04 (1.00 f64 - 4.37 i8) | 1.57 (0.94 i64 - 2.68 i16) | 0.51 (0.38 u32 - 1.06 f32) |
+| max | 6.06 (2.54 i16 - 18.25 i8) | 3.58 (1.66 f16 - 14.36 i8) | 1.71 (0.96 f16 - 4.75 i8) | 1.18 (0.99 f16 - 2.44 i8) | 2.54 (1.00 u64 - 18.89 i8) | 1.93 (1.00 i64 - 17.28 u8) | 1.22 (0.80 i16 - 2.33 f32) |
+| mean | 4.42 (2.40 u32 - 16.67 f16) | 2.59 (1.27 u32 - 14.87 f16) | 1.45 (0.99 f16 - 2.12 complex64) | 1.18 (1.00 u32 - 2.16 complex64) | 1.04 (0.60 complex128 - 2.00 f32) | 0.99 (0.89 u32 - 1.15 f32) | 1.46 (0.94 f64 - 6.05 f32) |
+| min | 6.12 (2.54 i16 - 15.13 i8) | 3.59 (1.50 f16 - 11.91 i8) | 1.75 (0.91 f16 - 4.94 u32) | 1.16 (0.97 f16 - 1.73 i8) | 2.54 (1.00 u64 - 18.89 u8) | 1.93 (1.00 i64 - 17.28 u8) | 1.32 (0.80 i16 - 2.33 f32) |
+| product | 3.61 (2.23 complex128 - 17.37 f16) | 1.81 (0.67 complex64 - 15.39 f16) | 0.97 (0.37 complex64 - 1.47 complex128) | 0.97 (0.26 complex64 - 1.65 f32) | 0.90 (0.29 complex64 - 1.22 f32) | 0.97 (0.31 complex64 - 1.86 complex128) | 1.10 (0.38 complex64 - 6.05 f32) |
+| variance | 1.46 (1.00 i16 - 3.40 i64) | 2.60 (1.65 u8 - 6.51 i64) | 1.32 (0.89 f16 - 2.50 i64) | 1.66 (0.85 f16 - 3.21 i64) | 3.41 (1.59 complex64 - 6.07 f16) | 1.68 (1.02 f16 - 2.16 u16) | 2.26 (1.46 f16 - 2.83 i16) |
+
+Below 0.9x remain, all without a SIMD body, whose auto-vectorization changed with the new fold:
+complex64 product (0.26-0.67, LLVM's shuffles of the complex multiply), f16 sum / product on M1
+(0.7), complex128 sum on M1 (0.6), f16 variance on SSE (0.85-0.89), i16 / i32 max on i686 (0.8).
+
+### `SPLIT_THRESHOLD`, and timings
+
+The static metric cannot see `SPLIT_THRESHOLD`: it costs per leaf (a dispatch, merging the
+lanes, the remainder), outside the hot loop, and the analyzer evaluates a leaf as long as the
+input. So it was timed on this machine (a Xeon with AVX-512 but not VBMI: fearless_simd's AVX2
+level), whole 1-d reductions through the public API, in a throwaway crate: the slope between
+2^14 and 2^16 elements (L2), which cancels a fixed ~23 us per call (the reduction's setup,
+independent of the op and the length: a separate issue, it dominates reductions of up to ~100K
+elements). Float sums with 8 vectors: 512 -> 2048 is 1.3-1.65x, 8192 1.5-2.1x (the vector count
+within the VM's noise). 2048 keeps each lane's sequential chain at most 128 items, as NumPy's
+pairwise sum.
+
+Final code against the shipped one (`16670ab`), ns per element (the min of two runs):
+
+| op | shipped ns/elem | new ns/elem | speedup |
+|---|---:|---:|---:|
+| sum_f32 | 0.092 | 0.053 | 1.73x |
+| sum_f64 | 0.159 | 0.104 | 1.53x |
+| sum_i32 | 0.200 | 0.088 | 2.28x |
+| mean_f32 | 0.093 | 0.035 | 2.63x |
+| product_f64 | 0.141 | 0.091 | 1.55x |
+| max_f32 | 0.324 | 0.098 | 3.30x |
+| max_i32 | 0.141 | 0.044 | 3.24x |
+| max_u8 | 0.030 | 0.008 | 3.64x |
+| all_bool | 0.029 | 0.003 | 9.67x |
+| argmax_f32 | 1.625 | 0.224 | 7.26x |
+| argmax_i32 | 0.546 | 0.187 | 2.92x |
+| sum_i8 | 0.210 | 0.071 | 2.97x |
+| max_f64 | 0.547 | 0.204 | 2.68x |
+| min_i8 | 0.068 | 0.008 | 8.12x |
+| argmax_u8 | 0.768 | 0.153 | 5.03x |
+| any_bool | 0.028 | 0.013 | 2.18x |

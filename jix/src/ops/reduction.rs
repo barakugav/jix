@@ -2080,8 +2080,9 @@ where
     const PREFER_TREE_MERGE: bool = false;
     // LLVM vectorizes the `(index, value)` lanes of the default `update_state_bulk` well at 16
     // lanes: past that it no longer unrolls them (32 lanes with AVX-512: ~20x slower), fewer (8
-    // with 16-byte vectors) are 1.5-2.5x slower for narrow items.
-    const ONE_CELL_LANES: Option<usize> = Some(16);
+    // with 16-byte vectors) are 1.5-2.5x slower for narrow items. 32-bit x86 has 8 vector
+    // registers: 16 lanes of 64-bit indices spill (2-2.5x slower than 8).
+    const ONE_CELL_LANES: Option<usize> = Some(if cfg!(target_arch = "x86") { 8 } else { 16 });
 }
 
 define_reduction_op!(
@@ -2186,8 +2187,9 @@ where
     const PREFER_TREE_MERGE: bool = false;
     // LLVM vectorizes the `(index, value)` lanes of the default `update_state_bulk` well at 16
     // lanes: past that it no longer unrolls them (32 lanes with AVX-512: ~20x slower), fewer (8
-    // with 16-byte vectors) are 1.5-2.5x slower for narrow items.
-    const ONE_CELL_LANES: Option<usize> = Some(16);
+    // with 16-byte vectors) are 1.5-2.5x slower for narrow items. 32-bit x86 has 8 vector
+    // registers: 16 lanes of 64-bit indices spill (2-2.5x slower than 8).
+    const ONE_CELL_LANES: Option<usize> = Some(if cfg!(target_arch = "x86") { 8 } else { 16 });
 }
 
 define_reduction_op!(
