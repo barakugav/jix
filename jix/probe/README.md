@@ -987,3 +987,135 @@ iteration, are no longer fully unrolled by LLVM (an inner loop of 8-64 scalar tr
 the hot loop): casts to f16 on M1 (`cast_i32_f16` / `cast_u32_f16` 0.52, `cast_f32_f16` 0.62,
 `cast_i64_f16` 0.80, `cast_f64_f16` 0.85), `less_f16_bool` / `greater_equal_f16_bool` (0.74-0.81)
 and `approx_eq_complex128_bool` (0.78-0.85). SIMD bodies for f16 would remove that cliff.
+
+## Deep fused trees: register spills vs `CONTIGUOUS_VECTORS` (`results/tree-v*`)
+
+Does a deep fused pipeline spill? `read_bulk` evaluates a node's left child to a `[T; LANES]`
+value, then its right one: a balanced tree keeps one such value live per level, each
+`CONTIGUOUS_VECTORS` vectors. Probes (`src/lib.rs`): balanced trees of depth 2-5 (4-32 leaves,
+levels `+ * - + *` from the leaves) in f32, f64 and i32 (depth 4), and as a control a left-deep
+chain over 16 f32 leaves (`((x0 + x1) * x2 + x3) * ...`, two values live at once). Swept:
+`CONTIGUOUS_VECTORS` (`v`) = 1, 2, 4, 8, 16 on every platform (committed: 8, 4 on i686), lanes from
+`MAX_ITEMSIZE` (the same as the output's here). The hot loop's stack accesses are counted by
+`analyze.py` (`stack` column): an instruction with an `[rsp` / `[esp` (x86) or `[sp` / `[x29`
+(aarch64) operand, split by whether its register operand is a vector one (a spill or a reload,
+often folded into the arithmetic: `vmulps ymm1, ymm4, ymmword ptr [rsp + N]`) or a general one
+(on x86-64, mostly the leaves' data pointers reloaded once per iteration: 16 or more leaves do not
+fit in the general registers).
+
+f64 is within 3% of f32 everywhere (the same instructions per byte), so its rows are left out.
+
+**Summary**: the best `v` per kernel and platform, with the speedup of the best over the committed
+`v` (8, i686 4); `S`: the committed `v` spills vector registers.
+
+| kernel | x86_64-v4 | x86_64-v3 | x86_64-v2 | x86_64 | i686 | aarch64 | aarch64-apple |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| tree d2 f32 | 16 (1.00x) | 8 (1.00x) | 8 (1.00x) | 8 (1.00x) | 4 (1.00x) | 16 (1.04x) | 8 (1.00x) |
+| tree d3 f32 | 16 (1.00x) | 8 (1.00x) | 4 (1.03x) S | 4 (1.05x) S | 4 (1.00x) S | 8 (1.00x) | 8 (1.00x) |
+| tree d4 f32 | 8 (1.00x) | 4 (1.11x) S | 4 (1.05x) S | 4 (1.11x) S | 4 (1.00x) S | 1 (1.02x) S | 8 (1.00x) S |
+| tree d5 f32 | 8 (1.00x) | 4 (1.26x) S | 4 (1.07x) S | 4 (1.11x) S | 8 (1.00x) S | 1 (1.03x) S | 8 (1.00x) S |
+| tree d4 i32 | 4 (1.01x) | 4 (1.10x) S | 4 (1.09x) S | 1 (1.09x) S | 4 (1.00x) S | 1 (1.00x) S | 16 (1.10x) S |
+| leftchain f32 | 16 (1.07x) | 16 (1.07x) | 8 (1.00x) | 8 (1.00x) | 4 (1.00x) | 4 (1.02x) | 16 (1.02x) |
+
+**Full tables**: cycles per 4096 output bytes (geomean over the platform's CPUs), in parentheses
+relative to the best `v` (bold), then the stack accesses per 4096 output bytes, `vector/general`.
+
+#### x86_64-v4 (64-byte vectors, 32 vector registers; cycles: geomean over icelake-server, sapphirerapids, znver4)
+
+| kernel | v=1 | v=2 | v=4 | v=8 | v=16 |
+|---|---:|---:|---:|---:|---:|
+| tree d2 f32 | 158 (1.08) 0/0 | 158 (1.08) 0/0 | 151 (1.03) 0/0 | 147 (1.00) 0/0 | **147 (1.00) 0/0** |
+| tree d3 f32 | 335 (1.05) 0/0 | 326 (1.02) 0/0 | 322 (1.01) 0/0 | 320 (1.00) 0/0 | **319 (1.00) 0/0** |
+| tree d4 f32 | 707 (1.02) 0/320 | 697 (1.01) 0/160 | 692 (1.00) 0/80 | **690 (1.00) 0/40** | 690 (1.00) 168/20 |
+| tree d5 f32 | 1535 (1.09) 0/1344 | 1417 (1.01) 0/672 | 1410 (1.00) 0/336 | **1409 (1.00) 0/176** | 1461 (1.04) 744/88 |
+| tree d4 i32 | 628 (1.03) 0/320 | 619 (1.01) 0/160 | **612 (1.00) 0/80** | 618 (1.01) 0/40 | 621 (1.01) 160/20 |
+| leftchain f32 | 857 (1.35) 0/320 | 777 (1.22) 0/160 | 708 (1.11) 0/80 | 679 (1.07) 0/40 | **637 (1.00) 0/20** |
+
+#### x86_64-v3 (32-byte vectors, 16 vector registers; cycles: geomean over skylake, alderlake, znver3)
+
+| kernel | v=1 | v=2 | v=4 | v=8 | v=16 |
+|---|---:|---:|---:|---:|---:|
+| tree d2 f32 | 277 (1.08) 0/0 | 278 (1.08) 0/0 | 265 (1.03) 0/0 | **258 (1.00) 0/0** | 297 (1.15) 128/0 |
+| tree d3 f32 | 534 (1.11) 0/0 | 501 (1.04) 0/0 | 492 (1.02) 0/0 | **481 (1.00) 0/0** | 538 (1.12) 176/0 |
+| tree d4 f32 | 1134 (1.15) 0/640 | 1030 (1.05) 0/320 | **984 (1.00) 0/160** | 1092 (1.11) 384/80 | 1299 (1.32) 1024/48 |
+| tree d5 f32 | 2726 (1.35) 0/2688 | 2236 (1.10) 0/1344 | **2026 (1.00) 0/672** | 2544 (1.26) 1760/352 | 3024 (1.49) 3312/176 |
+| tree d4 i32 | 1177 (1.16) 0/640 | 1068 (1.05) 0/320 | **1017 (1.00) 0/160** | 1122 (1.10) 320/80 | 1312 (1.29) 896/48 |
+| leftchain f32 | 1558 (1.63) 0/640 | 1333 (1.39) 0/320 | 1130 (1.18) 0/160 | 1024 (1.07) 0/80 | **956 (1.00) 0/40** |
+
+#### x86_64-v2 (16-byte vectors, 16 vector registers; cycles: geomean over sandybridge, btver2)
+
+| kernel | v=1 | v=2 | v=4 | v=8 | v=16 |
+|---|---:|---:|---:|---:|---:|
+| tree d2 f32 | 902 (1.08) 0/0 | 902 (1.08) 0/0 | 857 (1.03) 0/0 | **833 (1.00) 0/0** | 978 (1.17) 224/0 |
+| tree d3 f32 | 1814 (1.09) 0/0 | 1718 (1.03) 0/0 | **1669 (1.00) 0/0** | 1724 (1.03) 256/0 | 2018 (1.21) 832/0 |
+| tree d4 f32 | 3953 (1.08) 0/1280 | 3685 (1.01) 0/640 | **3643 (1.00) 0/320** | 3813 (1.05) 896/192 | 4247 (1.17) 1952/96 |
+| tree d5 f32 | 9937 (1.31) 0/5632 | 7916 (1.04) 0/2688 | **7615 (1.00) 256/1344** | 8169 (1.07) 2176/704 | 8766 (1.15) 4288/352 |
+| tree d4 i32 | 4286 (1.16) 0/1280 | 3940 (1.06) 0/640 | **3705 (1.00) 0/320** | 4054 (1.09) 960/192 | 4522 (1.22) 1952/96 |
+| leftchain f32 | 4565 (1.42) 0/1280 | 3841 (1.20) 0/640 | 3407 (1.06) 0/320 | **3204 (1.00) 0/160** | 3809 (1.19) 1312/96 |
+
+#### x86_64 (16-byte vectors, 16 vector registers; cycles: geomean over sandybridge, skylake, znver3)
+
+| kernel | v=1 | v=2 | v=4 | v=8 | v=16 |
+|---|---:|---:|---:|---:|---:|
+| tree d2 f32 | 614 (1.03) 0/0 | 615 (1.03) 0/0 | 605 (1.01) 0/0 | **599 (1.00) 0/0** | 688 (1.15) 224/0 |
+| tree d3 f32 | 1198 (1.03) 0/0 | 1174 (1.01) 0/0 | **1160 (1.00) 0/0** | 1220 (1.05) 256/0 | 1450 (1.25) 832/0 |
+| tree d4 f32 | 2607 (1.09) 0/1280 | 2472 (1.03) 0/640 | **2400 (1.00) 0/320** | 2660 (1.11) 896/192 | 3028 (1.26) 1952/96 |
+| tree d5 f32 | 6491 (1.29) 0/5632 | 5217 (1.03) 0/2688 | **5047 (1.00) 256/1344** | 5618 (1.11) 2176/704 | 6290 (1.25) 4288/352 |
+| tree d4 i32 | **3914 (1.00) 0/1280** | 3962 (1.01) 0/640 | 3932 (1.00) 128/320 | 4277 (1.09) 1920/192 | 4941 (1.26) 3520/96 |
+| leftchain f32 | 3485 (1.55) 0/1280 | 2874 (1.27) 0/640 | 2387 (1.06) 0/320 | **2255 (1.00) 0/160** | 2738 (1.21) 1312/96 |
+
+#### i686 (16-byte vectors, 8 vector registers; cycles: geomean over skylake)
+
+| kernel | v=1 | v=2 | v=4 | v=8 | v=16 |
+|---|---:|---:|---:|---:|---:|
+| tree d2 f32 | 556 (1.06) 0/0 | 534 (1.02) 0/0 | **524 (1.00) 0/0** | 582 (1.11) 256/0 | 668 (1.28) 608/0 |
+| tree d3 f32 | 1723 (1.30) 0/1280 | 1371 (1.03) 0/640 | **1329 (1.00) 512/320** | 1432 (1.08) 1024/192 | 1501 (1.13) 1472/96 |
+| tree d4 f32 | 3781 (1.31) 0/3328 | 2915 (1.01) 0/1664 | **2897 (1.00) 1024/960** | 2920 (1.01) 2304/480 | 3044 (1.05) 3136/224 |
+| tree d5 f32 | 7885 (1.34) 0/7424 | 6184 (1.05) 512/3840 | 5907 (1.00) 2560/1920 | **5896 (1.00) 4864/960** | 6100 (1.03) 6528/480 |
+| tree d4 i32 | 5176 (1.01) 0/3328 | 5157 (1.00) 512/1664 | **5139 (1.00) 2048/896** | 5259 (1.02) 4224/448 | 5590 (1.09) 4352/224 |
+| leftchain f32 | 3863 (1.42) 0/3328 | 3139 (1.16) 0/1664 | **2712 (1.00) 0/832** | 2855 (1.05) 1792/416 | 3372 (1.24) 4640/208 |
+
+#### aarch64 (16-byte vectors, 32 vector registers; cycles: geomean over cortex-a72, neoverse-n1, neoverse-v2)
+
+| kernel | v=1 | v=2 | v=4 | v=8 | v=16 |
+|---|---:|---:|---:|---:|---:|
+| tree d2 f32 | 1651 (1.63) 0/0 | 1424 (1.40) 0/0 | 1229 (1.21) 0/0 | 1053 (1.04) 0/0 | **1015 (1.00) 0/0** |
+| tree d3 f32 | 3051 (1.50) 0/0 | 2598 (1.28) 0/0 | 2230 (1.10) 0/0 | **2030 (1.00) 0/0** | 2345 (1.16) 416/0 |
+| tree d4 f32 | **4285 (1.00) 0/0** | 4768 (1.11) 0/0 | 4389 (1.02) 192/0 | 4351 (1.02) 544/0 | 4968 (1.16) 1424/0 |
+| tree d5 f32 | **8692 (1.00) 0/2048** | 9918 (1.14) 384/896 | 9295 (1.07) 1280/512 | 8960 (1.03) 1504/256 | 10092 (1.16) 3248/160 |
+| tree d4 i32 | **3637 (1.00) 0/0** | 4243 (1.17) 0/0 | 3804 (1.05) 0/0 | 3653 (1.00) 64/64 | 3850 (1.06) 368/48 |
+| leftchain f32 | 4158 (1.06) 0/0 | 4109 (1.05) 0/0 | **3910 (1.00) 0/0** | 4001 (1.02) 0/0 | 4121 (1.05) 0/0 |
+
+#### aarch64-apple (16-byte vectors, 32 vector registers; cycles: geomean over apple-m1)
+
+| kernel | v=1 | v=2 | v=4 | v=8 | v=16 |
+|---|---:|---:|---:|---:|---:|
+| tree d2 f32 | 724 (1.86) 0/0 | 531 (1.36) 0/0 | 458 (1.18) 0/0 | **390 (1.00) 0/0** | 419 (1.07) 64/0 |
+| tree d3 f32 | 1247 (1.66) 0/0 | 961 (1.28) 0/0 | 908 (1.21) 0/0 | **753 (1.00) 0/0** | 891 (1.18) 352/0 |
+| tree d4 f32 | 2496 (1.57) 0/0 | 2335 (1.47) 0/0 | 1679 (1.06) 0/0 | **1591 (1.00) 96/0** | 1923 (1.21) 1104/0 |
+| tree d5 f32 | 5445 (1.65) 0/2304 | 4388 (1.33) 0/1152 | 3408 (1.03) 0/576 | **3302 (1.00) 448/352** | 4163 (1.26) 2592/112 |
+| tree d4 i32 | 2486 (1.84) 0/0 | 2327 (1.73) 0/0 | 1548 (1.15) 0/0 | 1479 (1.10) 128/32 | **1348 (1.00) 112/48** |
+| leftchain f32 | 3546 (2.31) 0/0 | 2413 (1.57) 0/0 | 1753 (1.14) 0/0 | 1576 (1.02) 0/0 | **1538 (1.00) 0/0** |
+
+Observations:
+
+- **Spills do happen, at the committed `v`, from depth 3-4**: on AVX2 and SSE (16 vector registers)
+  from depth 4 (SSE: 3), 4.5-25% slower than the best `v` (AVX2 depth 5: 1.26x, 1760 vector stack
+  accesses per 4096 B); on i686 (8 registers) from depth 3 already, though there `v` = 4 is still
+  about the best. AVX-512 (32 registers) does not spill up to depth 5 at `v` = 8. NEON (32 registers)
+  spills at depth 4-5 (M1: 96-448 accesses per 4096 B, generic aarch64: 544-1504), but that costs
+  little: `v` = 8 is still the best on M1, within 1.03x of the best on the others.
+- **Fewer vectors trade spills for loop overhead**: halving `v` stops the spills on AVX2 / SSE
+  (`v` = 4 is the best there for depth 3-5 trees), but costs 3-10% on the shallow trees and 6-18%
+  on the left-deep chain, which never spills up to `v` = 8 and prefers 8-16. No single `v` is best
+  for all shapes: the best follows the number of live values (tree depth), not the dtype.
+- **The cost of a spill is moderate**: the folded reloads are cheap loads from L1, the stores
+  compete for the store port; the worst measured case is 1.26x (AVX2, depth 5) at `v` = 8 and 1.49x
+  at `v` = 16. Up to `v` = 8 nothing falls off a cliff.
+- **`v` = 16 spills on every platform** but AVX-512 (and NEON for depth 2) and is never much better
+  (AVX2/AVX-512 left chain 1.07x, M1 i32 1.10x).
+- **aarch64 (generic)**: depth 4-5 prefer `v` = 1 (1.02-1.03x over 8), but the shape is irregular
+  (`v` = 2 is the worst there); LLVM does not unroll NEON loops, so `v` sets the unroll.
+- **General-register stack accesses** (leaf pointers) are a constant per iteration (about the
+  leaves beyond ~12 on x86-64, more on i686), so they shrink per byte as `v` grows, and do not
+  explain the slowdowns at high `v`.
