@@ -9,7 +9,7 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
-use crate::util::{PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
+use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
 use crate::{
     array_from_fn_inline, dim_arr, strided_span_bytes, ArrayExt, DimArray, DimBitmap, DimDyn,
     DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
@@ -449,12 +449,12 @@ fn stage_strided_inputs(is_contiguous: &[bool]) -> bool {
 
 /// The shortest inner run, in elements, worth filling a broadcast input's scratch buffer for.
 ///
-/// Filling costs a fixed amount per run (the copier call) plus a store per element; the contiguous
-/// loop saves about the same time per element whatever its size. So the break-even is a number of
-/// elements, not bytes: measured around 32 for `u8`/`i16` and 48 for `f32` when the element changes
-/// every run. 8-byte and wider elements gain little from the contiguous loop and come out 10-30%
-/// slower at any length, accepted to keep one rule for every dtype.
-const STAGE_BROADCAST_MIN_LEN: usize = 64;
+/// Filling costs a fixed amount per run plus a store per element; the contiguous loop saves about
+/// the same time per element whatever its size. So the break-even is a number of elements, not
+/// bytes: measured around 16-24 for `u8`, `i16` and `f32` when the element changes every run.
+/// 8-byte and wider elements gain little from the contiguous loop and come out 5-20% slower at any
+/// length, accepted to keep one rule for every dtype.
+const STAGE_BROADCAST_MIN_LEN: usize = 32;
 
 /// Mark the broadcast inputs for staging when that lets the pipeline run its contiguous loop.
 ///
@@ -521,6 +521,13 @@ impl<'a> Staging<'a> {
     unsafe fn gather(&mut self, src: *const u8, n: usize, stride: usize, dtype: &Dtype) {
         self.filled = true;
         let itemsize = dtype.itemsize() as usize;
+        if stride == 0 {
+            // A broadcast input: fill the buffer straight away, without the copier's dispatch,
+            // whose fixed cost would be paid on every run.
+            // SAFETY: the caller vouches for the element at `src`, and the buffer holds `n` of them.
+            unsafe { fill_contiguous(src, self.buf.as_mut_slice().as_mut_ptr(), n, itemsize) };
+            return;
+        }
         let src_span = n.saturating_sub(1) * stride + itemsize;
         // SAFETY: the caller vouches for `n` elements at `stride` behind `src`.
         let src = unsafe { PtrNoalias::new(src, src_span) };
