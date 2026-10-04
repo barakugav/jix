@@ -193,22 +193,26 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
     let iter = NdIterUnordered::new(shape, strides, layouts);
     let chunk_len_max = iter.inner_len().min(Staging::BUFFER_SIZE);
 
+    let inner_strides = iter.inner_strides();
     let stage_strided = stage_strided_inputs(&iter.is_contiguous());
-    let mut staging = array_from_fn_inline::<_, N_OPERANDS>(|i| {
-        let operand = operands[i];
+    let mut need_staging = array_from_fn_inline::<_, N_OPERANDS>(|i| {
         let need_staging_unaligned = REQUIRE_ALIGNED
             && !(iter.is_aligned()[i]
-                && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
+                && (operands[i].base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
         let need_staging_strided =
             stage_strided && !is_output_operand(i) && !iter.is_contiguous()[i];
-        let need_staging = need_staging_unaligned || need_staging_strided;
-        need_staging.then(|| Staging {
-            buf: context.allocate_buf(
-                chunk_len_max * layouts[i].0 as usize,
-                operand.dtype.alignment(),
-            ),
-            copier: NdCopier::new(operand.dtype),
-        })
+        need_staging_unaligned || need_staging_strided
+    });
+    stage_broadcast_inputs(
+        &mut need_staging,
+        &iter.is_contiguous(),
+        &inner_strides,
+        iter.inner_len(),
+    );
+    // An operand with a zero stride along every axis reads a single element over the whole region.
+    let reads_one_element = strides.map_inline_ref(|s| s.iter().all(|&s| s == 0));
+    let mut staging = array_from_fn_inline::<_, N_OPERANDS>(|i| {
+        need_staging[i].then(|| Staging::new(context, operands[i].dtype, chunk_len_max))
     });
 
     // A staged operand is read (or written) straight out of its scratch buffer, so it is
@@ -233,7 +237,13 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
                 match &mut staging[op_i] {
                     None => operand.set_cursor(chunk_src, inner_strides[op_i]),
                     Some(staging) => {
-                        if !is_output_operand(op_i) {
+                        if !is_output_operand(op_i)
+                            && !staging.holds_chunk(
+                                inner_strides[op_i],
+                                pos,
+                                reads_one_element[op_i],
+                            )
+                        {
                             unsafe {
                                 staging.gather(
                                     chunk_src,
@@ -315,8 +325,9 @@ fn to_buf_type_erased_dyn(
     let iter = NdIterUnorderedDyn::new(shape, &strides, &layouts);
     let chunk_len_max = iter.inner_len().min(Staging::BUFFER_SIZE);
 
+    let inner_strides = iter.inner_strides();
     let stage_strided = stage_strided_inputs(iter.is_contiguous());
-    let mut staging = operands
+    let mut need_staging = operands
         .iter()
         .enumerate()
         .map(|(i, operand)| {
@@ -325,14 +336,25 @@ fn to_buf_type_erased_dyn(
                     && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
             let need_staging_strided =
                 stage_strided && !is_output_operand(i) && !iter.is_contiguous()[i];
-            let need_staging = need_staging_unaligned || need_staging_strided;
-            need_staging.then(|| Staging {
-                buf: context.allocate_buf(
-                    chunk_len_max * layouts[i].0 as usize,
-                    operand.dtype.alignment(),
-                ),
-                copier: NdCopier::new(operand.dtype),
-            })
+            need_staging_unaligned || need_staging_strided
+        })
+        .collect::<Vec<_>>();
+    stage_broadcast_inputs(
+        &mut need_staging,
+        iter.is_contiguous(),
+        &inner_strides,
+        iter.inner_len(),
+    );
+    // An operand with a zero stride along every axis reads a single element over the whole region.
+    let reads_one_element = strides
+        .iter()
+        .map(|s| s.iter().all(|&s| s == 0))
+        .collect::<Vec<_>>();
+    let mut staging = operands
+        .iter()
+        .zip(&need_staging)
+        .map(|(operand, &need_staging)| {
+            need_staging.then(|| Staging::new(context, operand.dtype, chunk_len_max))
         })
         .collect::<Vec<_>>();
 
@@ -358,7 +380,13 @@ fn to_buf_type_erased_dyn(
                 match &mut staging[op_i] {
                     None => operand.set_cursor(chunk_src, inner_strides[op_i]),
                     Some(staging) => {
-                        if !is_output_operand(op_i) {
+                        if !is_output_operand(op_i)
+                            && !staging.holds_chunk(
+                                inner_strides[op_i],
+                                pos,
+                                reads_one_element[op_i],
+                            )
+                        {
                             unsafe {
                                 staging.gather(
                                     chunk_src,
@@ -419,14 +447,68 @@ fn stage_strided_inputs(is_contiguous: &[bool]) -> bool {
     n_contiguous >= STAGE_MIN_CONTIGUOUS_INPUTS && n_contiguous >= n_inputs / 2
 }
 
+/// The shortest inner run, in elements, worth filling a broadcast input's scratch buffer for.
+///
+/// Filling costs a fixed amount per run (the copier call) plus a store per element; the contiguous
+/// loop saves about the same time per element whatever its size. So the break-even is a number of
+/// elements, not bytes: measured around 32 for `u8`/`i16` and 48 for `f32` when the element changes
+/// every run. 8-byte and wider elements gain little from the contiguous loop and come out 10-30%
+/// slower at any length, accepted to keep one rule for every dtype.
+const STAGE_BROADCAST_MIN_LEN: usize = 64;
+
+/// Mark the broadcast inputs for staging when that lets the pipeline run its contiguous loop.
+///
+/// A broadcast input has a zero inner stride: it repeats one element along the run, which no
+/// contiguous loop can read, so a single one sends the whole pipeline down the strided loop. Filling
+/// a scratch buffer with that element makes it contiguous again. That only buys the contiguous loop
+/// if every other operand is contiguous or staged already, and only pays for the fill if the run
+/// is long enough.
+fn stage_broadcast_inputs(
+    need_staging: &mut [bool],
+    is_contiguous: &[bool],
+    inner_strides: &[usize],
+    inner_len: usize,
+) {
+    let is_broadcast = |i: usize| i != 0 && inner_strides[i] == 0; // index 0 - output operand
+    let n_operands = need_staging.len();
+    let stage = inner_len >= STAGE_BROADCAST_MIN_LEN
+        && (0..n_operands).any(is_broadcast)
+        && (0..n_operands).all(|i| is_broadcast(i) || is_contiguous[i] || need_staging[i]);
+    if stage {
+        for (i, need_staging) in need_staging.iter_mut().enumerate() {
+            *need_staging |= is_broadcast(i);
+        }
+    }
+}
+
 /// A temporary buffer used to stage a chunk of an operand data during a pipeline run.
 struct Staging<'a> {
     buf: PoolBuf<'a>,
     copier: NdCopier<'a>,
+    /// Whether an input's buffer has been gathered into at least once.
+    filled: bool,
 }
 
-impl Staging<'_> {
+impl<'a> Staging<'a> {
     const BUFFER_SIZE: usize = 8192;
+
+    fn new(context: &'a ReadContext, dtype: &'a Dtype, chunk_len_max: usize) -> Self {
+        Self {
+            buf: context.allocate_buf(chunk_len_max * dtype.itemsize() as usize, dtype.alignment()),
+            copier: NdCopier::new(dtype),
+            filled: false,
+        }
+    }
+
+    /// Whether an input's buffer already holds the chunk at `pos` of the current run, so the gather
+    /// can be skipped.
+    ///
+    /// A zero inner stride reads the same element over the whole run: the buffer filled for the
+    /// run's first chunk (the longest, as every run has the same length) holds every later one. An
+    /// operand that reads a single element over the whole region needs a single fill altogether.
+    fn holds_chunk(&self, inner_stride: usize, pos: usize, reads_one_element: bool) -> bool {
+        inner_stride == 0 && (pos > 0 || (reads_one_element && self.filled))
+    }
 
     /// Copy `n` elements from `src` into the scratch buffer, stepping `stride` bytes per element.
     ///
@@ -437,6 +519,7 @@ impl Staging<'_> {
     /// of `dtype`.
     #[inline]
     unsafe fn gather(&mut self, src: *const u8, n: usize, stride: usize, dtype: &Dtype) {
+        self.filled = true;
         let itemsize = dtype.itemsize() as usize;
         let src_span = n.saturating_sub(1) * stride + itemsize;
         // SAFETY: the caller vouches for `n` elements at `stride` behind `src`.
@@ -1041,6 +1124,99 @@ mod tests {
             check_add(&[3, 4], [&[1, 1], &[0, 1], &[1, 0]], [0; 3], push);
             check_add(&[3, 4], [&[1, 1], &[0, 1], &[1, 0]], [0, 1, 1], push);
         }
+    }
+
+    #[test]
+    fn broadcast_input_filled_into_scratch() {
+        // A run of at least `STAGE_BROADCAST_MIN_LEN` with every other operand contiguous: the
+        // broadcast input is filled into scratch. A run longer than one chunk reuses the first fill.
+        let long = if cfg!(miri) { 8200 } else { 20000 };
+        for push in [false, true] {
+            for n in [STAGE_BROADCAST_MIN_LEN, 100, long] {
+                check_add(&[3, n], [&[1, 1], &[1, 0], &[1, 1]], [0; 3], push);
+                check_add(&[3, n], [&[1, 1], &[1, 1], &[1, 0]], [0; 3], push);
+                check_add(&[3, n], [&[1, 1], &[1, 1], &[1, 0]], [1, 1, 1], push);
+                // Both inputs broadcast: in push mode the destination still walks the axis.
+                check_add(&[3, n], [&[1, 1], &[1, 0], &[1, 0]], [0; 3], push);
+            }
+            // Just short of the threshold, and next to a strided input: no fill, same result.
+            check_add(
+                &[3, STAGE_BROADCAST_MIN_LEN - 1],
+                [&[1, 1], &[1, 1], &[1, 0]],
+                [0; 3],
+                push,
+            );
+            check_add(&[3, 100], [&[1, 1], &[1, 2], &[1, 0]], [0; 3], push);
+        }
+    }
+
+    #[test]
+    fn single_element_input_filled_once() {
+        // A zero stride along every axis, over rows that do not coalesce (the other operands skip
+        // every second row): a single fill serves every run.
+        for push in [false, true] {
+            check_add(&[4, 100], [&[2, 1], &[0, 0], &[2, 1]], [0; 3], push);
+            check_add(&[4, 100], [&[2, 1], &[2, 1], &[0, 0]], [0, 1, 1], push);
+        }
+    }
+
+    #[test]
+    fn broadcast_input_among_several() {
+        // One broadcast input among three, for an operand count known at compile time (a tuple)
+        // and one only known at runtime (a `Vec`).
+        use crate::ops::map_multiple;
+        use crate::util::assert_array_matches;
+
+        let (rows, cols) = (3usize, 100usize);
+        let a = ndarray::Array2::from_shape_fn((rows, cols), |(i, j)| (i * cols + j) as i32);
+        let b = ndarray::Array2::from_shape_fn((rows, cols), |(i, j)| (i * 7 + j * 3) as i32);
+        let col = ndarray::Array2::from_shape_fn((rows, 1), |(i, _)| 1000 * (i as i32 + 1));
+        let expected = ndarray::Array2::from_shape_fn((rows, cols), |(i, j)| {
+            a[[i, j]] + col[[i, 0]] * b[[i, j]]
+        });
+        let shape = [rows as u64, cols as u64];
+        let plain = |x| Array::plain_ndarray_ref(x).unwrap().broadcast(&shape);
+
+        let tuple = (plain(&a), plain(&col), plain(&b));
+        let got = map_multiple(tuple, |(x, c, y): (i32, i32, i32)| x + c * y);
+        assert_array_matches(&got, &expected);
+
+        let vec = vec![plain(&a), plain(&col), plain(&b)];
+        let got = map_multiple(vec, |xs: &[i32]| xs[0] + xs[1] * xs[2]);
+        assert_array_matches(&got, &expected);
+    }
+
+    #[test]
+    fn stage_broadcast_inputs_needs_every_other_operand_contiguous() {
+        // Operands are `[out, a, b]`, 4-byte elements.
+        let run = |staged: [bool; 3], contiguous: [bool; 3], inner_strides: [usize; 3], len| {
+            let mut need_staging = staged;
+            stage_broadcast_inputs(&mut need_staging, &contiguous, &inner_strides, len);
+            need_staging
+        };
+        let long = STAGE_BROADCAST_MIN_LEN;
+        let none = [false; 3];
+        // `b` broadcast, the rest contiguous: `b` gets filled.
+        let all = [true, true, false];
+        assert_eq!(run(none, all, [4, 4, 0], long), [false, false, true]);
+        // A run too short to pay for the fill.
+        assert_eq!(run(none, all, [4, 4, 0], long - 1), none);
+        // A strided input keeps the strided loop anyway...
+        assert_eq!(run(none, [true, false, false], [4, 8, 0], long), none);
+        // ...unless it is staged already.
+        assert_eq!(
+            run([false, true, false], [true, false, false], [4, 8, 0], long),
+            [false, true, true]
+        );
+        // A strided output keeps the strided loop too.
+        assert_eq!(run(none, [false, true, false], [8, 4, 0], long), none);
+        // Every input broadcast.
+        assert_eq!(
+            run(none, [true, false, false], [4, 0, 0], long),
+            [false, true, true]
+        );
+        // Nothing broadcast, nothing to do.
+        assert_eq!(run(none, [true; 3], [4; 3], long), none);
     }
 
     #[test]

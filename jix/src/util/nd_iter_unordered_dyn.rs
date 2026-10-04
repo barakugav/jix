@@ -169,6 +169,13 @@ impl NdIterUnorderedDyn {
         &self.is_contiguous
     }
 
+    /// Each operand's stride along the innermost run, in its own stride unit.
+    #[inline]
+    pub(crate) fn inner_strides(&self) -> Vec<usize> {
+        let inner = self.shape.len() - 1;
+        self.strides.iter().map(|s| s[inner]).collect()
+    }
+
     #[inline]
     pub(crate) fn foreach_inner_1d(&self, mut inner_loop: impl FnMut(&[usize], usize, &[usize])) {
         let ndim = self.shape.len();
