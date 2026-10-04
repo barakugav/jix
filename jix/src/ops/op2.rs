@@ -19,42 +19,77 @@ impl<S1, S2, K> Op2<S1, S2, K> {
         S2: ArrayStorageTyped<Dimension = S1::Dimension>,
         K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
     {
+        let spec = op2_spec(&a, &b)?;
+        Self::new_with_spec(a, b, kernel, spec)
+    }
+
+    /// Like [`new`](Self::new), with the spec computed by the caller through [`op2_spec`].
+    ///
+    /// Lets a wrapper store its operands in another order than the one it reports them in, while
+    /// combining their hints in the reported order.
+    pub(crate) fn new_with_spec(a: S1, b: S2, kernel: K, spec: ArraySpecDynamic) -> Result<Self>
+    where
+        S1: ArrayStorageTyped,
+        S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+        K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
+    {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
-        ensure!(
-            a.shape() == b.shape(),
-            InvalidArgument,
-            "Op2 shape mismatch between `a` {:?} and `b` {:?}",
-            a.shape(),
-            b.shape()
-        );
-        let a_spec = a.spec();
-        let b_spec = b.spec();
-        let (element_cost, read_shape_scale_weight, read_layout_order) =
-            combine_elementwise_hints(&[
-                (
-                    a_spec.element_cost(),
-                    a_spec.read_shape_scale_weight(),
-                    a_spec.read_layout_order(),
-                ),
-                (
-                    b_spec.element_cost(),
-                    b_spec.read_shape_scale_weight(),
-                    b_spec.read_layout_order(),
-                ),
-            ]);
-        let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
-            (a_spec.block_shape(), a_spec.block_shape_fixed_dims()),
-            (b_spec.block_shape(), b_spec.block_shape_fixed_dims()),
-        ]);
-        let spec = ArraySpecDynamic::new(
-            block_shape,
-            block_shape_fixed_dims,
-            element_cost,
-            read_shape_scale_weight,
-            read_layout_order,
-        );
+        check_op2_shapes(a.shape(), b.shape())?;
         Ok(Self { a, b, kernel, spec })
     }
+
+    /// The hints combined from both operands, see [`op2_spec`].
+    #[inline(always)]
+    pub(crate) fn dynamic_spec(&self) -> &ArraySpecDynamic {
+        &self.spec
+    }
+}
+
+/// Check the operands of a binary element-wise op and combine their hints, `a` first.
+///
+/// The order matters: a tie in the read layout order goes to `a`.
+pub(crate) fn op2_spec<S1, S2>(a: &S1, b: &S2) -> Result<ArraySpecDynamic>
+where
+    S1: ArrayStorage,
+    S2: ArrayStorage,
+{
+    check_op2_shapes(a.shape(), b.shape())?;
+    let a_spec = a.spec();
+    let b_spec = b.spec();
+    let (element_cost, read_shape_scale_weight, read_layout_order) = combine_elementwise_hints(&[
+        (
+            a_spec.element_cost(),
+            a_spec.read_shape_scale_weight(),
+            a_spec.read_layout_order(),
+        ),
+        (
+            b_spec.element_cost(),
+            b_spec.read_shape_scale_weight(),
+            b_spec.read_layout_order(),
+        ),
+    ]);
+    let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
+        (a_spec.block_shape(), a_spec.block_shape_fixed_dims()),
+        (b_spec.block_shape(), b_spec.block_shape_fixed_dims()),
+    ]);
+    Ok(ArraySpecDynamic::new(
+        block_shape,
+        block_shape_fixed_dims,
+        element_cost,
+        read_shape_scale_weight,
+        read_layout_order,
+    ))
+}
+
+fn check_op2_shapes(a: &[u64], b: &[u64]) -> Result<()> {
+    ensure!(
+        a == b,
+        InvalidArgument,
+        "Op2 shape mismatch between `a` {:?} and `b` {:?}",
+        a,
+        b
+    );
+    Ok(())
 }
 
 impl<S1, S2, K> ArrayStorage for Op2<S1, S2, K>
