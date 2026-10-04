@@ -14,11 +14,21 @@ use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 /// driving an [`NdIterUnordered`] over `shape` (which sorts, coalesces and walks the axes) and
 /// copying one contiguous-or-strided inner loop at each visited position.
 pub(crate) struct NdCopier<'a>(NdCopierInner<'a>);
+
+/// A 16-byte value held in a single register: an SSE register on x86_64, so it is stored with one
+/// instruction, where a `u128` would take two general-purpose stores. Elsewhere `u128` does fine
+/// (e.g. a single store-pair on aarch64).
+#[cfg(target_arch = "x86_64")]
+type Reg16 = std::arch::x86_64::__m128i;
+#[cfg(not(target_arch = "x86_64"))]
+type Reg16 = u128;
 enum NdCopierInner<'a> {
     Simple(NdCopyFn),
     Struct(NdCopierStruct<'a>),
 }
 type NdCopyFn = fn(NdCopyArgs);
+/// One inner run: `(src, dst, len, src_stride, dst_stride)`, strides in bytes.
+type InnerLoopFn<T> = unsafe fn(PtrNoalias<'_, T>, PtrMutNoalias<'_, T>, usize, usize, usize);
 struct NdCopierStruct<'a> {
     scalar_fns: ArrayVec<NdCopyFn, 4>,
     offsets: ArrayVec<Itemsize, 4>,
@@ -159,6 +169,36 @@ impl<'a> NdCopier<'a> {
         } = args;
         debug_assert_eq!(size_of::<T>(), dtype.itemsize() as usize);
         debug_assert_eq!(align_of::<T>(), dtype.alignment().as_usize());
+        // The strides' alignment is checked below; the aligned `read`/`write` path also needs the
+        // base pointers to be.
+        let bases_aligned =
+            dst.as_ptr().cast::<T>().is_aligned() && src.as_ptr().cast::<T>().is_aligned();
+        // Apply the element type now that the byte-level alignment check above is done.
+        let (src, mut dst) = (src.cast::<T>(), dst.cast::<T>());
+
+        if let (&[len], &[src_stride], &[dst_stride]) = (shape, src_strides, dst_strides) {
+            // A single axis has nothing to sort or coalesce: skip the iterator, whose setup costs
+            // more than a short run itself. Like the iterator, take a lone element as contiguous.
+            let size = size_of::<T>();
+            let (src_stride, dst_stride) = if len == 1 {
+                (size, size)
+            } else {
+                (src_stride, dst_stride)
+            };
+            let align = align_of::<T>();
+            let aligned = bases_aligned
+                && src_stride.is_multiple_of(align)
+                && dst_stride.is_multiple_of(align);
+            let inner_loop_fn = Self::pick_inner_loop::<T>(
+                len,
+                aligned,
+                src_stride == size,
+                dst_stride == size,
+                src_stride == 0,
+            );
+            unsafe { inner_loop_fn(src, dst, len, src_stride, dst_stride) };
+            return;
+        }
 
         // Operand 0 is the destination (write; sort-primary), operand 1 the source (read). Both are
         // byte-addressed with element layout `(size_of::<T>(), align_of::<T>())`.
@@ -167,19 +207,47 @@ impl<'a> NdCopier<'a> {
             [dst_strides, src_strides],
             [(size_of::<T>() as Itemsize, Alignment::of::<T>()); 2],
         );
-        // The iterator's aligned flags only cover the strides; AND-in the base pointers so the
-        // aligned `read`/`write` path runs only when the data really is.
         let [dst_aligned, src_aligned] = iter.is_aligned();
-        let aligned = (dst_aligned && dst.as_ptr().cast::<T>().is_aligned())
-            && (src_aligned && src.as_ptr().cast::<T>().is_aligned());
-        // Apply the element type now that the byte-level alignment check above is done.
-        let (src, mut dst) = (src.cast::<T>(), dst.cast::<T>());
         let [dst_contiguous, src_contiguous] = iter.is_contiguous();
+        let inner_loop_fn = Self::pick_inner_loop::<T>(
+            iter.inner_len(),
+            dst_aligned && src_aligned && bases_aligned,
+            src_contiguous,
+            dst_contiguous,
+            iter.inner_strides()[1] == 0,
+        );
 
-        // For the both-contiguous run, peel a small fixed length into a single `[T; N]` move
-        // (branchless); longer runs fall through to `copy_nonoverlapping`.
-        let inner_loop_fn = if src_contiguous && dst_contiguous {
-            match (iter.inner_len(), aligned) {
+        // `move` so the closure owns the two wrappers. Borrowing them instead would make it
+        // capture `&PtrNoalias` / `&mut PtrMutNoalias`, i.e. read the operands through an extra
+        // pointer on every inner run.
+        iter.foreach_inner_1d_impl::<true>(
+            move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
+                inner_loop_fn(
+                    src.bytes_offset(src_offset),
+                    dst.bytes_offset(dst_offset),
+                    len,
+                    src_stride,
+                    dst_stride,
+                )
+            },
+        );
+    }
+
+    /// Picks the loop for inner runs of `inner_len` elements, given what holds for every run.
+    ///
+    /// `src_broadcast` means a zero source stride along the run: one element, repeated.
+    #[inline(always)]
+    fn pick_inner_loop<T: Copy>(
+        inner_len: usize,
+        aligned: bool,
+        src_contiguous: bool,
+        dst_contiguous: bool,
+        src_broadcast: bool,
+    ) -> InnerLoopFn<T> {
+        if src_contiguous && dst_contiguous {
+            // For the both-contiguous run, peel a small fixed length into a single `[T; N]` move
+            // (branchless); longer runs fall through to `copy_nonoverlapping`.
+            match (inner_len, aligned) {
                 (1, true) => Self::inner_loop_contiguous_const_len::<T, 1, true>,
                 (1, false) => Self::inner_loop_contiguous_const_len::<T, 1, false>,
                 (2, true) => Self::inner_loop_contiguous_const_len::<T, 2, true>,
@@ -205,6 +273,13 @@ impl<'a> NdCopier<'a> {
                 (_, true) => Self::inner_loop::<T, true, true, true>,
                 (_, false) => Self::inner_loop::<T, false, true, true>,
             }
+        } else if src_broadcast {
+            match (aligned, dst_contiguous) {
+                (true, true) => Self::inner_loop_broadcast::<T, true, true>,
+                (true, false) => Self::inner_loop_broadcast::<T, true, false>,
+                (false, true) => Self::inner_loop_broadcast::<T, false, true>,
+                (false, false) => Self::inner_loop_broadcast::<T, false, false>,
+            }
         } else {
             match (aligned, [src_contiguous, dst_contiguous]) {
                 (_, [true, true]) => unreachable!(),
@@ -215,22 +290,7 @@ impl<'a> NdCopier<'a> {
                 (true, [false, false]) => Self::inner_loop::<T, true, false, false>,
                 (false, [false, false]) => Self::inner_loop::<T, false, false, false>,
             }
-        };
-
-        // `move` so the closure owns the two wrappers. Borrowing them instead would make it
-        // capture `&PtrNoalias` / `&mut PtrMutNoalias`, i.e. read the operands through an extra
-        // pointer on every inner run.
-        iter.foreach_inner_1d_impl::<true>(
-            move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
-                inner_loop_fn(
-                    src.bytes_offset(src_offset),
-                    dst.bytes_offset(dst_offset),
-                    len,
-                    src_stride,
-                    dst_stride,
-                )
-            },
-        );
+        }
     }
 
     unsafe fn inner_loop<
@@ -283,6 +343,59 @@ impl<'a> NdCopier<'a> {
         }
     }
 
+    /// One inner run whose source stride is zero: the single source element is loaded once and
+    /// stored `len` times.
+    unsafe fn inner_loop_broadcast<T: Copy, const ALIGNED: bool, const DST_CONTIGUOUS: bool>(
+        src: PtrNoalias<T>,
+        dst: PtrMutNoalias<T>,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+    ) {
+        debug_assert_eq!(src_stride, 0);
+        if DST_CONTIGUOUS {
+            debug_assert_eq!(dst_stride, size_of::<T>());
+        } else {
+            // Spares LLVM a vectorized version for a contiguous `dst` that can never run.
+            unsafe { std::hint::assert_unchecked(dst_stride != size_of::<T>()) };
+        }
+        unsafe {
+            if size_of::<T>() == 16 {
+                // LLVM copies a 16-byte aggregate memory to memory, forwarding the source to every
+                // store and reloading it per element; as a `Reg16` the value stays in a register.
+                Self::broadcast_run::<Reg16, false, DST_CONTIGUOUS>(
+                    src.cast(),
+                    dst.cast(),
+                    len,
+                    dst_stride,
+                )
+            } else {
+                Self::broadcast_run::<T, ALIGNED, DST_CONTIGUOUS>(src, dst, len, dst_stride)
+            }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn broadcast_run<T: Copy, const ALIGNED: bool, const DST_CONTIGUOUS: bool>(
+        src: PtrNoalias<T>,
+        dst: PtrMutNoalias<T>,
+        len: usize,
+        dst_stride: usize,
+    ) {
+        let dst = dst.as_mut_ptr();
+        unsafe {
+            let val = src.as_ptr().read_maybe_aligned::<ALIGNED>();
+            for i in 0..len {
+                let d = if DST_CONTIGUOUS {
+                    dst.add(i)
+                } else {
+                    dst.byte_add(i * dst_stride)
+                };
+                d.write_maybe_aligned::<ALIGNED>(val);
+            }
+        }
+    }
+
     /// One inner run where both operands are contiguous and its length is the compile-time `N`:
     /// a single `[T; N]` load/store (branchless), the common small-run fast path.
     unsafe fn inner_loop_contiguous_const_len<T: Copy, const LEN: usize, const ALIGNED: bool>(
@@ -328,6 +441,35 @@ impl<'a> NdCopier<'a> {
         }
     }
 
+    /// Like [`inner_loop_broadcast`](Self::inner_loop_broadcast) into a contiguous `dst`, for an
+    /// element of `itemsize` opaque bytes.
+    ///
+    /// A strided `dst` has nothing to gain over [`inner_loop_untyped`](Self::inner_loop_untyped),
+    /// which copies one element at a time either way.
+    unsafe fn inner_loop_untyped_broadcast(
+        src: PtrNoalias<u8>,
+        dst: PtrMutNoalias<u8>,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+        itemsize: usize,
+    ) {
+        debug_assert_eq!(src_stride, 0);
+        debug_assert_eq!(dst_stride, itemsize);
+        let src = src.as_ptr();
+        let dst = dst.as_mut_ptr();
+        // Write the element once, then keep doubling the filled prefix, so the run takes
+        // `log2(len)` copies rather than `len` of them.
+        let total = len * itemsize;
+        unsafe { ptr::copy_nonoverlapping(src, dst, itemsize.min(total)) };
+        let mut filled = itemsize;
+        while filled < total {
+            let n = filled.min(total - filled);
+            unsafe { ptr::copy_nonoverlapping(dst, dst.add(filled), n) };
+            filled += n;
+        }
+    }
+
     #[inline(never)]
     fn copy_struct(struct_copier: &NdCopierStruct, args: NdCopyArgs) {
         let NdCopyArgs {
@@ -366,6 +508,28 @@ impl<'a> NdCopier<'a> {
             dtype,
         } = args;
         let itemsize = dtype.itemsize() as usize;
+        let pick_inner_loop = |src_stride: usize, dst_stride: usize| {
+            let dst_contiguous = dst_stride == itemsize;
+            if dst_contiguous && src_stride == itemsize {
+                Self::inner_loop_untyped::<true>
+            } else if dst_contiguous && src_stride == 0 {
+                Self::inner_loop_untyped_broadcast
+            } else {
+                Self::inner_loop_untyped::<false>
+            }
+        };
+
+        if let (&[len], &[src_stride], &[dst_stride]) = (shape, src_strides, dst_strides) {
+            // A single axis: skip the iterator, as in `scalar_fn`.
+            let (src_stride, dst_stride) = if len == 1 {
+                (itemsize, itemsize)
+            } else {
+                (src_stride, dst_stride)
+            };
+            let inner_loop_fn = pick_inner_loop(src_stride, dst_stride);
+            unsafe { inner_loop_fn(src, dst, len, src_stride, dst_stride, itemsize) };
+            return;
+        }
 
         // Byte-wise fallback: each element is `itemsize` opaque bytes copied via `copy_nonoverlapping`
         // (always the unaligned `u8` path). Operand 0 is the destination, operand 1 the source.
@@ -374,11 +538,8 @@ impl<'a> NdCopier<'a> {
             [dst_strides, src_strides],
             [(dtype.itemsize(), Alignment::of::<u8>()); 2],
         );
-        let [dst_contiguous, src_contiguous] = iter.is_contiguous();
-        let inner_loop_fn = match dst_contiguous && src_contiguous {
-            true => Self::inner_loop_untyped::<true>,
-            false => Self::inner_loop_untyped::<false>,
-        };
+        let [dst_inner_stride, src_inner_stride] = iter.inner_strides();
+        let inner_loop_fn = pick_inner_loop(src_inner_stride, dst_inner_stride);
         // `move` for the same reason as in `scalar_fn`.
         iter.foreach_inner_1d_impl::<true>(
             move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
@@ -762,6 +923,41 @@ mod tests {
     #[test]
     fn copy_dynamic_odd_itemsize() {
         check_all_dims::<[u8; 3]>();
+    }
+
+    // A zero source stride repeats one element. Along the innermost axis that is the broadcast loop;
+    // along an outer axis it only re-reads whole runs. Each layout runs aligned and misaligned, into
+    // a contiguous and a strided destination, in 1-D (the iterator-free path) and in 2-D.
+    fn check_broadcast_src<T: Dtyped>() {
+        let is = T::DTYPE.itemsize() as usize;
+        for misalign in [0, 1] {
+            for n in [1, 3, 64, 100] {
+                check::<T>(&[n], &[0], &[is], misalign);
+                check::<T>(&[n], &[0], &[2 * is], misalign);
+            }
+            // broadcast along the inner axis
+            check::<T>(&[3, 17], &[is, 0], &[17 * is, is], misalign);
+            check::<T>(&[3, 17], &[is, 0], &[34 * is, 2 * is], misalign);
+            // broadcast along every axis: one element spread over the whole region
+            check::<T>(&[3, 17], &[0, 0], &[17 * is, is], misalign);
+            check::<T>(&[3, 17], &[0, 0], &[34 * is, 2 * is], misalign);
+            // broadcast along the outer axis only: the same contiguous run, repeated
+            check::<T>(&[3, 17], &[0, is], &[17 * is, is], misalign);
+        }
+    }
+    #[test]
+    fn copy_broadcast_src() {
+        check_broadcast_src::<u8>();
+        check_broadcast_src::<u16>();
+        check_broadcast_src::<u32>();
+        check_broadcast_src::<u64>();
+        #[cfg(feature = "num-complex")]
+        check_broadcast_src::<crate::scalar::Complex<f32>>(); // (8, 4) -> [u32; 2]
+        #[cfg(feature = "num-complex")]
+        check_broadcast_src::<crate::scalar::Complex<f64>>(); // (16, 8) -> [u64; 2], via `Reg16`
+        check_broadcast_src::<StructNoPad>();
+        check_broadcast_src::<[i32; 3]>();
+        check_broadcast_src::<[u8; 3]>();
     }
 
     // Zero-length dimensions across the scalar, struct and dynamic dispatch routes.
