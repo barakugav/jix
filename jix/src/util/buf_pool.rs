@@ -45,6 +45,7 @@ impl BufferPool {
 
     /// Like [`get`](Self::get), but returns the bare allocation instead of a guard. Hand it back
     /// with [`return_shared`](Self::return_shared) (or let it free normally).
+    #[inline(always)]
     pub(crate) fn get_raw(&self, size: usize, alignment: Alignment) -> AlignedBytes {
         let (pool, pool_align) = self.get_pool(alignment);
         let pool = unsafe { &mut *pool };
@@ -57,6 +58,7 @@ impl BufferPool {
     }
 
     /// Returns `buf` to the appropriate free list after clearing its length.
+    #[inline(always)]
     fn return_buf(&self, mut buf: AlignedBytes) {
         buf.clear();
         let (pool, _) = self.get_pool(buf.alignment().try_into().unwrap());

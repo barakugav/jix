@@ -251,7 +251,9 @@ where
     /// Read a rectangular sub-region of the nd-array.
     ///
     /// In pull mode (`out` is `None`) the read goes through the context's read cache, so reading the
-    /// same region again (e.g. both operands of `x + x`) decodes the blocks only once.
+    /// same region again (e.g. both operands of `x + x`) decodes the blocks only once. Reads of
+    /// small blocks and small regions skip the cache, see
+    /// [`ArrayParams::read_cache_threshold`].
     #[inline]
     fn read_data<'rd>(
         &'rd self,
@@ -267,6 +269,16 @@ where
             return self.read_data_uncached(index, context, out);
         }
         check_get_range(self.shape(), index)?;
+        let threshold = self.spec.as_ref().read_cache_threshold();
+        let block_nitems = self
+            .block_shape()
+            .iter()
+            .map(|&b| b as u64)
+            .product::<u64>();
+        let read_nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
+        if block_nitems <= threshold.block_nitems && read_nitems <= threshold.read_nitems {
+            return self.read_data_uncached(index, context, None);
+        }
         let layout_order = self.spec.as_ref().read_layout_order();
         context.read_cached(self.id, index, self.blocks.dtype(), layout_order, |dst| {
             self.read_data_uncached(index, context, Some(dst)).map(drop)
@@ -904,12 +916,17 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn read_cache_reuses_repeated_pull_reads() {
+    /// A compact `0..64` i32 array with blocks of 8 and the given read cache threshold.
+    fn arange64(threshold: (u64, u64)) -> Array<super::Compact<crate::Ty<i32>, crate::Dim<1>>> {
         let nd = ndarray::Array1::from_iter(0..64i32);
         let mut params = ArrayParams::new();
-        params.block_shape(&[8]);
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        params.block_shape(&[8]).read_cache_threshold(threshold);
+        Array::compact_ndarray_with(&nd, params).unwrap()
+    }
+
+    #[test]
+    fn read_cache_reuses_repeated_pull_reads() {
+        let za = arange64((0, 0));
         let ctx = za.read_ctx();
         let storage = za.into_storage();
 
@@ -930,15 +947,33 @@ mod tests {
 
     #[test]
     fn read_cache_different_regions_of_same_array() {
-        let nd = ndarray::Array1::from_iter(0..64i32);
-        let mut params = ArrayParams::new();
-        params.block_shape(&[8]);
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
-
+        let za = arange64((0, 0));
         let sum = (za.view().slice((0..32,)) + za.view().slice((32..64,)))
             .to_ndarray()
             .unwrap();
         let expected = ndarray::Array1::from_iter((0..32).map(|i| i + (i + 32)));
         assert_eq!(sum.as_slice().unwrap(), expected.as_slice().unwrap());
+    }
+
+    #[test]
+    fn read_cache_threshold() {
+        let is_cached = |threshold: (u64, u64), index: Range<u64>| {
+            let za = arange64(threshold);
+            let ctx = za.read_ctx();
+            let storage = za.into_storage();
+            let a = storage.read_data(&[index.clone()], &ctx, None).unwrap();
+            let b = storage.read_data(&[index.clone()], &ctx, None).unwrap();
+            let len = (index.end - index.start) as usize;
+            assert_eq!(
+                read_i32s(&b, len),
+                index.map(|i| i as i32).collect::<Vec<_>>()
+            );
+            a.data_ptr() == b.data_ptr()
+        };
+        // Blocks of 8 items, reads of 16 items: cached only if either one is above its threshold.
+        assert!(!is_cached((8, 16), 0..16));
+        assert!(is_cached((7, 16), 0..16));
+        assert!(is_cached((8, 15), 0..16));
+        assert!(!is_cached((u64::MAX, u64::MAX), 0..64));
     }
 }
