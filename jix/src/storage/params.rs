@@ -35,23 +35,6 @@ impl ReadSize {
     }
 }
 
-/// When a pull-mode read of a compact array goes through the [`ReadContext`](crate::ReadContext)
-/// read cache: only if the block holds more than `block_nitems` items, or the read region more
-/// than `read_nitems` items. See [`ArrayParams::read_cache_threshold`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ReadCacheThreshold {
-    pub(crate) block_nitems: u64,
-    pub(crate) read_nitems: u64,
-}
-impl Default for ReadCacheThreshold {
-    fn default() -> Self {
-        Self {
-            block_nitems: 4096,
-            read_nitems: 4096,
-        }
-    }
-}
-
 /// Parameters controlling the encoding/decoding configs of an [`Array`], and its block layout.
 ///
 /// `ArrayParams` groups two independent sets of configuration:
@@ -114,7 +97,6 @@ pub struct ArrayParams {
     pub(crate) block_shape_fixed_dims: Option<DimBitmap>,
     pub(crate) block_size: Option<u64>,
     pub(crate) read_size: Option<ReadSize>,
-    pub(crate) read_cache_threshold: Option<ReadCacheThreshold>,
     pub(crate) encoder_params: Option<EncoderParams>,
     pub(crate) decoder_params: Option<DecoderParams>,
 }
@@ -197,24 +179,6 @@ impl ArrayParams {
     /// When unset, the range is chosen automatically according to the CPU cache sizes.
     pub fn read_size(&mut self, size_hint: (u64, u64)) -> &mut Self {
         self.read_size = Some(ReadSize::new(size_hint.0, size_hint.1));
-        self
-    }
-
-    /// Sets when a read of a compact array uses the [`ReadContext`](crate::ReadContext) read
-    /// cache, as `(block_nitems, read_nitems)`.
-    ///
-    /// The cache lets repeated reads of the same region (e.g. both operands of `x + x`) decompress
-    /// the blocks only once, but adds a small fixed cost to every read. A read uses the cache only
-    /// if the array's block holds more than `block_nitems` items, or the read region more than
-    /// `read_nitems` items, so small reads of small blocks skip that cost.
-    ///
-    /// `(0, 0)` caches every read and `(u64::MAX, u64::MAX)` none. When unset, defaults to
-    /// `(4096, 4096)`.
-    pub fn read_cache_threshold(&mut self, threshold: (u64, u64)) -> &mut Self {
-        self.read_cache_threshold = Some(ReadCacheThreshold {
-            block_nitems: threshold.0,
-            read_nitems: threshold.1,
-        });
         self
     }
 
@@ -302,8 +266,6 @@ impl ArrayParams {
         }
         self.block_size.get_or_insert(spec.block_size());
         self.read_size.get_or_insert(spec.read_size());
-        self.read_cache_threshold
-            .get_or_insert(spec.read_cache_threshold());
     }
 
     /// Compute and validate the block geometry for an array.
@@ -506,7 +468,6 @@ impl ArrayParams {
             params.block_shape_fixed_dims.unwrap(),
             params.block_size.unwrap(),
             params.read_size.unwrap(),
-            params.read_cache_threshold.unwrap_or_default(),
             params.encoder_params.unwrap_or_default(),
             params.decoder_params.unwrap_or_default(),
             flags,
@@ -561,7 +522,6 @@ pub(crate) struct ArraySpecOwned {
 pub(crate) struct ArraySpecShared {
     block_size: u64,
     read_size: ReadSize,
-    read_cache_threshold: ReadCacheThreshold,
     encoder_params: EncoderParams,
     decoder_params: DecoderParams,
 }
@@ -633,13 +593,11 @@ pub(crate) struct ArraySpecDynamic {
     pub(crate) read_layout_order: DimArray<DimIdx>,
 }
 impl ArraySpecOwned {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         block_shape: DimArray<BlockSize>,
         block_shape_fixed_dims: DimBitmap,
         block_size: u64,
         read_size: ReadSize,
-        read_cache_threshold: ReadCacheThreshold,
         encoder_params: EncoderParams,
         decoder_params: DecoderParams,
         flags: ArraySpecFlags,
@@ -647,7 +605,6 @@ impl ArraySpecOwned {
         let shared = ArraySpecShared {
             block_size,
             read_size,
-            read_cache_threshold,
             encoder_params,
             decoder_params,
         };
@@ -720,10 +677,6 @@ impl<'a> ArraySpec<'a> {
     #[inline(always)]
     pub(crate) fn read_size(&self) -> ReadSize {
         self.shared().read_size
-    }
-    #[inline(always)]
-    pub(crate) fn read_cache_threshold(&self) -> ReadCacheThreshold {
-        self.shared().read_cache_threshold
     }
     #[inline(always)]
     pub(crate) fn encoder_params(&self) -> &'a EncoderParams {

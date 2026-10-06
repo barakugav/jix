@@ -14,7 +14,6 @@ use crate::ops::common::{Precision, Rank};
 use crate::util::{check_ndim, DimArray, IntoPyResult};
 use crate::Array;
 
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum Operand {
     PyArray(Py<Array>),
     Array(ArrayAny),
