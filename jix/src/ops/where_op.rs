@@ -127,7 +127,8 @@ where
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
-        );
+        )
+        .with_array_ids([c_spec.dynamic(), x_spec.dynamic(), y_spec.dynamic()]);
         Ok(Self {
             condition,
             x,

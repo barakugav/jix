@@ -10,7 +10,9 @@
 //! All three are thin wrappers around [`ArrayBlockTableStorageBase`], which contains the
 //! actual nd-array logic and delegates 1D block I/O to [`BlockTable`](crate::storage::block::BlockTable).
 
+use std::collections::HashSet;
 use std::ops::Range;
+use std::sync::Arc;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
@@ -226,8 +228,10 @@ where
         )?;
         // Reading a compact element is more expensive than reading a plain element (1).
         spec.dynamic_mut().element_cost = 8.0;
+        let id = ArrayId::new();
+        spec.dynamic_mut().array_ids = Some(Arc::new(HashSet::from([id])));
         Ok(Self {
-            id: ArrayId::new(),
+            id,
             blocks,
             shape,
             spec,
@@ -250,8 +254,9 @@ where
 
     /// Read a rectangular sub-region of the nd-array.
     ///
-    /// In pull mode (`out` is `None`) the read goes through the context's read cache, so reading the
-    /// same region again (e.g. both operands of `x + x`) decodes the blocks only once.
+    /// In pull mode (`out` is `None`), if this array is reachable more than once from the array
+    /// being read (e.g. `x` in `x + x`), the read goes through the context's read cache, so reading
+    /// the same region again decodes the blocks only once.
     #[inline]
     fn read_data<'rd>(
         &'rd self,
@@ -263,7 +268,7 @@ where
         ET: ElementType,
         D: Dimension,
     {
-        if out.is_some() {
+        if out.is_some() || !context.is_cached(self.id) {
             return self.read_data_uncached(index, context, out);
         }
         check_get_range(self.shape(), index)?;
@@ -569,7 +574,11 @@ fn read_data_slow<ActualD: Dimension>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::ops::Range;
+    use std::sync::Arc;
+
+    use crate::storage::id::ArrayIdSet;
 
     use crate::storage::StridedBuf;
     use crate::{Array, ArrayParams, ArrayStorage};
@@ -904,41 +913,92 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn read_cache_reuses_repeated_pull_reads() {
+    /// A compact `0..64` i32 array with blocks of 8.
+    fn arange64() -> Array<super::Compact<crate::Ty<i32>, crate::Dim<1>>> {
         let nd = ndarray::Array1::from_iter(0..64i32);
         let mut params = ArrayParams::new();
         params.block_shape(&[8]);
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        Array::compact_ndarray_with(&nd, params).unwrap()
+    }
+
+    #[test]
+    fn read_cache_reuses_repeated_pull_reads() {
+        let za = arange64();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
+        let to_cache = Some(Arc::new(HashSet::from([storage.0.id])));
 
+        ctx.with_arrays_to_cache(to_cache, || {
+            let a = storage.read_data(&[4..20], &ctx, None).unwrap();
+            let b = storage.read_data(&[4..20], &ctx, None).unwrap();
+            assert_eq!(
+                a.data_ptr(),
+                b.data_ptr(),
+                "the second read should hit the cache"
+            );
+
+            // Reading another region evicts the entry, but must leave the live views intact.
+            let c = storage.read_data(&[20..36], &ctx, None).unwrap();
+            assert_eq!(read_i32s(&a, 16), (4..20).collect::<Vec<_>>());
+            assert_eq!(read_i32s(&b, 16), (4..20).collect::<Vec<_>>());
+            assert_eq!(read_i32s(&c, 16), (20..36).collect::<Vec<_>>());
+        });
+
+        // Outside of a top level read nothing is cached.
         let a = storage.read_data(&[4..20], &ctx, None).unwrap();
         let b = storage.read_data(&[4..20], &ctx, None).unwrap();
-        assert_eq!(
-            a.data_ptr(),
-            b.data_ptr(),
-            "the second read should hit the cache"
-        );
-
-        // Reading another region evicts the entry, but must leave the live views intact.
-        let c = storage.read_data(&[20..36], &ctx, None).unwrap();
-        assert_eq!(read_i32s(&a, 16), (4..20).collect::<Vec<_>>());
-        assert_eq!(read_i32s(&b, 16), (4..20).collect::<Vec<_>>());
-        assert_eq!(read_i32s(&c, 16), (20..36).collect::<Vec<_>>());
+        assert_ne!(a.data_ptr(), b.data_ptr());
     }
 
     #[test]
     fn read_cache_different_regions_of_same_array() {
-        let nd = ndarray::Array1::from_iter(0..64i32);
-        let mut params = ArrayParams::new();
-        params.block_shape(&[8]);
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
-
+        let za = arange64();
         let sum = (za.view().slice((0..32,)) + za.view().slice((32..64,)))
             .to_ndarray()
             .unwrap();
         let expected = ndarray::Array1::from_iter((0..32).map(|i| i + (i + 32)));
         assert_eq!(sum.as_slice().unwrap(), expected.as_slice().unwrap());
+    }
+
+    #[test]
+    fn arrays_to_cache_are_reachable_more_than_once() {
+        use crate::storage::ArraySpec;
+
+        let ids = |spec: ArraySpec<'_>| {
+            let dynamic = spec.dynamic();
+            let set = |s: &Option<ArrayIdSet>| s.as_deref().cloned().unwrap_or_default();
+            (set(&dynamic.array_ids), set(&dynamic.arrays_to_cache))
+        };
+        let (x, y) = (arange64(), arange64());
+        let (x_id, y_id) = (x.storage().0.id, y.storage().0.id);
+        let none = HashSet::new();
+
+        assert_eq!(
+            ids(x.storage().spec()),
+            (HashSet::from([x_id]), none.clone())
+        );
+        let xy = x.view() + y.view();
+        let both = HashSet::from([x_id, y_id]);
+        assert_eq!(ids(xy.storage().spec()), (both.clone(), none.clone()));
+        let xx = x.view() + x.view();
+        assert_eq!(
+            ids(xx.storage().spec()),
+            (HashSet::from([x_id]), HashSet::from([x_id]))
+        );
+        // Through unary ops, shape ops and nested binary ops.
+        let nested = (-(x.view() + y.view())).slice((0..8,)) * x.view().slice((8..16,));
+        assert_eq!(
+            ids(nested.storage().spec()),
+            (both.clone(), HashSet::from([x_id]))
+        );
+        // A repeated array stays marked through further ops.
+        let marked = (x.view() + x.view()) * y.view();
+        assert_eq!(
+            ids(marked.storage().spec()),
+            (both.clone(), HashSet::from([x_id]))
+        );
+        // More than two inputs.
+        let cat = crate::ops::concatenate([x.view(), y.view(), x.view()], 0);
+        assert_eq!(ids(cat.storage().spec()), (both, HashSet::from([x_id])));
     }
 }

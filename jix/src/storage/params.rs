@@ -1,10 +1,12 @@
 use std::marker::PhantomPinned;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
 use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
+use crate::storage::id::ArrayIdSet;
 use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight, SendSyncPtr};
 use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt};
 
@@ -591,6 +593,15 @@ pub(crate) struct ArraySpecDynamic {
     /// order so the copy runs straight through instead of transposing. It is a pure hint: it never
     /// changes which values a read produces, only the strides of a freshly allocated destination.
     pub(crate) read_layout_order: DimArray<DimIdx>,
+
+    /// The compact arrays reachable from this array, through any of its inner storages. `None` if
+    /// there are none.
+    pub(crate) array_ids: Option<ArrayIdSet>,
+
+    /// The compact arrays reachable from this array more than once, e.g. `x` in `x + x`. Reads of
+    /// these arrays go through the [`ReadContext`](crate::ReadContext) read cache, so repeated
+    /// reads of the same region decode it only once. `None` if there are none.
+    pub(crate) arrays_to_cache: Option<ArrayIdSet>,
 }
 impl ArraySpecOwned {
     pub(crate) fn new(
@@ -765,7 +776,37 @@ impl ArraySpecDynamic {
             read_shape_scale_weight,
             read_shape_scale_order,
             read_layout_order,
+            array_ids: None,
+            arrays_to_cache: None,
         }
+    }
+
+    /// Set [`array_ids`](Self::array_ids) and [`arrays_to_cache`](Self::arrays_to_cache) from the
+    /// specs of the inner storages: the union of their ids, where an id reachable from more than
+    /// one inner is also marked to be cached.
+    pub(crate) fn with_array_ids<'s>(
+        mut self,
+        inners: impl IntoIterator<Item = &'s ArraySpecDynamic>,
+    ) -> Self {
+        let mut inners = inners.into_iter().filter(|inner| inner.array_ids.is_some());
+        let Some(first) = inners.next() else {
+            return self;
+        };
+        self.array_ids = first.array_ids.clone();
+        self.arrays_to_cache = first.arrays_to_cache.clone();
+        // Copy on write: the sets are only cloned if a second inner reaches compact arrays.
+        for inner in inners {
+            let ids = Arc::make_mut(self.array_ids.as_mut().unwrap());
+            for &id in inner.array_ids.as_deref().unwrap() {
+                if !ids.insert(id) {
+                    Arc::make_mut(self.arrays_to_cache.get_or_insert_default()).insert(id);
+                }
+            }
+            if let Some(to_cache) = &inner.arrays_to_cache {
+                Arc::make_mut(self.arrays_to_cache.get_or_insert_default()).extend(to_cache.iter());
+            }
+        }
+        self
     }
 
     pub(crate) fn add_elementwise_cost(&mut self, extra: f32) {

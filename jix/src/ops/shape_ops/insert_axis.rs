@@ -148,7 +148,8 @@ where
             orig_spec.element_cost(),
             read_shape_scale_weight,
             read_layout_order,
-        );
+        )
+        .with_array_ids([orig_spec.dynamic()]);
 
         Ok(Self {
             array,

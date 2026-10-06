@@ -52,7 +52,8 @@ impl<S1, S2, K> Op2<S1, S2, K> {
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
-        );
+        )
+        .with_array_ids([a_spec.dynamic(), b_spec.dynamic()]);
         Ok(Self { a, b, kernel, spec })
     }
 }

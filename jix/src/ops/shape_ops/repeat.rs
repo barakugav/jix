@@ -78,7 +78,8 @@ impl<S: ArrayStorage> Repeat<S> {
             inner_spec.element_cost(),
             inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>(),
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
-        );
+        )
+        .with_array_ids([inner_spec.dynamic()]);
 
         Ok(Self {
             array,

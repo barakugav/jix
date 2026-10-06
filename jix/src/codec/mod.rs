@@ -17,7 +17,7 @@ use crate::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
 use crate::dtype::{Alignment, Dtype};
 #[allow(unused_imports)]
 use crate::error::{ensure, error, Result};
-use crate::storage::id::ArrayId;
+use crate::storage::id::{ArrayId, ArrayIdSet};
 use crate::storage::StridedBuf;
 use crate::util::arrayvec::ArrayVec;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
@@ -379,6 +379,9 @@ pub struct ReadContext {
     /// The last pull-mode read of each compact array, so a repeated read (e.g. `x + x`) decodes
     /// only once. See [`read_cached`](Self::read_cached).
     read_cache: RefCell<HashMap<ArrayId, CacheEntry>>,
+    /// The arrays whose reads go through `read_cache`, set for the duration of a top level read.
+    /// See [`with_arrays_to_cache`](Self::with_arrays_to_cache).
+    arrays_to_cache: RefCell<Option<ArrayIdSet>>,
 }
 
 /// A cached read of the region `index` of an array, laid out at `strides` in `data`.
@@ -398,6 +401,7 @@ impl ReadContext {
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
             buffer_pool: BufferPool::new(),
             read_cache: RefCell::new(HashMap::new()),
+            arrays_to_cache: RefCell::new(None),
         })
     }
 
@@ -409,6 +413,40 @@ impl ReadContext {
     #[inline]
     pub(crate) fn allocate_buf(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
         self.buffer_pool.get(size, alignment)
+    }
+
+    /// Run `read`, a top level read of an array, caching the reads of `arrays_to_cache` (the
+    /// arrays reachable more than once from the read array).
+    ///
+    /// The read cache is cleared before and after, so cached buffers do not outlive the read. The
+    /// previous set is restored afterwards, so a nested top level read does not disturb the outer
+    /// one.
+    pub(crate) fn with_arrays_to_cache<R>(
+        &self,
+        arrays_to_cache: Option<ArrayIdSet>,
+        read: impl FnOnce() -> R,
+    ) -> R {
+        let prev = self.arrays_to_cache.replace(arrays_to_cache);
+        self.clear_read_cache();
+        let res = read();
+        self.clear_read_cache();
+        self.arrays_to_cache.replace(prev);
+        res
+    }
+
+    /// Whether reads of the array `id` go through the read cache.
+    #[inline]
+    pub(crate) fn is_cached(&self, id: ArrayId) -> bool {
+        self.arrays_to_cache
+            .borrow()
+            .as_ref()
+            .is_some_and(|ids| ids.contains(&id))
+    }
+
+    fn clear_read_cache(&self) {
+        for (_, entry) in self.read_cache.borrow_mut().drain() {
+            self.buffer_pool.return_shared(entry.data);
+        }
     }
 
     /// Read the region `index` of the array `id` through the read cache.

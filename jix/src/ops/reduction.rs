@@ -152,7 +152,8 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
-        );
+        )
+        .with_array_ids([spec.dynamic()]);
 
         Ok(Self {
             kernel,

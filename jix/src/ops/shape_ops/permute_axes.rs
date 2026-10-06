@@ -94,7 +94,8 @@ impl<S: ArrayStorage> PermuteAxes<S> {
                 .iter()
                 .map(|&old| inv_axes[old as usize])
                 .collect(),
-        );
+        )
+        .with_array_ids([inner_spec.dynamic()]);
         let axes = S::Dimension::vec(ndim, |i| axes[i] as DimIdx);
         Ok(Self {
             shape,
