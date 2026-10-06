@@ -26,6 +26,7 @@ memmap2 = "0.9"
 num-traits = "0.2" # TODO make it optional
 zstd = { version = "0.14", default-features = false }
 prost = "0.14"
+rustc-hash = "2"
 half = { version = "2", default-features = false, features = [
     "num-traits",
 ], optional = true }

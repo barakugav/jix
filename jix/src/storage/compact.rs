@@ -228,8 +228,9 @@ where
         // Reading a compact element is more expensive than reading a plain element (1).
         spec.dynamic_mut().element_cost = 8.0;
         let id = ArrayId::new();
-        spec.dynamic_mut().array_ids =
-            Some(Arc::new(ArrayIdSet::Inline([Some(id), None, None, None])));
+        let mut ids = ArrayIdSet::default();
+        ids.insert(id);
+        spec.dynamic_mut().array_ids = Some(Arc::new(ids));
         Ok(Self {
             id,
             blocks,

@@ -7,8 +7,6 @@ mod filter;
 pub use filter::*;
 
 use std::cell::{RefCell, UnsafeCell};
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Range;
 use std::sync::Arc;
@@ -17,7 +15,7 @@ use crate::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
 use crate::dtype::{Alignment, Dtype};
 #[allow(unused_imports)]
 use crate::error::{ensure, error, Result};
-use crate::storage::id::{ArrayId, ArrayIdSet};
+use crate::storage::id::{ArrayId, ArrayIdMap, ArrayIdSet};
 use crate::storage::StridedBuf;
 use crate::util::arrayvec::ArrayVec;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
@@ -378,7 +376,7 @@ pub struct ReadContext {
     buffer_pool: BufferPool,
     /// The last pull-mode read of each compact array, so a repeated read (e.g. `x + x`) decodes
     /// only once. See [`read_cached`](Self::read_cached).
-    read_cache: RefCell<HashMap<ArrayId, CacheEntry>>,
+    read_cache: RefCell<ArrayIdMap<CacheEntry>>,
     /// The arrays whose reads go through `read_cache`, set for the duration of a top level read.
     /// See [`top_level_read`](Self::top_level_read).
     arrays_to_cache: RefCell<Option<Arc<ArrayIdSet>>>,
@@ -400,7 +398,7 @@ impl ReadContext {
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
             buffer_pool: BufferPool::new(),
-            read_cache: RefCell::new(HashMap::new()),
+            read_cache: RefCell::new(ArrayIdMap::default()),
             arrays_to_cache: RefCell::new(None),
         })
     }
@@ -449,7 +447,8 @@ impl ReadContext {
     }
 
     fn clear_read_cache(&self) {
-        for (_, entry) in self.read_cache.borrow_mut().drain() {
+        let cache = std::mem::take(&mut *self.read_cache.borrow_mut());
+        for entry in cache.into_values() {
             self.buffer_pool.return_shared(entry.data);
         }
     }
@@ -470,14 +469,18 @@ impl ReadContext {
         layout_order: &[DimIdx],
         read: impl FnOnce(&mut StridedBuf<'_>) -> Result<()>,
     ) -> Result<StridedBuf<'_>> {
-        if let Entry::Occupied(entry) = self.read_cache.borrow_mut().entry(id) {
-            if entry.get().index.as_slice() == index {
-                let CacheEntry { strides, data, .. } = entry.get();
-                let buf = PoolBufShared::new(data.clone(), &self.buffer_pool);
-                return Ok(unsafe { StridedBuf::from_shared(buf, strides) });
+        {
+            let mut cache = self.read_cache.borrow_mut();
+            if let Some(entry) = cache.get(id)
+                && entry.index.as_slice() == index
+            {
+                let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
+                return Ok(unsafe { StridedBuf::from_shared(buf, &entry.strides) });
             }
             // Evict before allocating, so the read below can reuse the buffer.
-            self.buffer_pool.return_shared(entry.remove().data);
+            if let Some(stale) = cache.remove(id) {
+                self.buffer_pool.return_shared(stale.data);
+            }
         }
 
         let itemsize = dtype.itemsize() as usize;
