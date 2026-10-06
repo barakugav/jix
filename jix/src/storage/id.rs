@@ -38,30 +38,34 @@ impl ArrayIdSet {
     #[inline]
     pub(crate) fn contains(&self, id: ArrayId) -> bool {
         match self {
-            // Compare all the slots without short-circuiting, so the comparisons are branchless
-            // (and a single vector compare on targets with 64-bit lane compares).
-            Self::Inline(ids) => ids
-                .iter()
-                .fold(false, |found, &slot| found | (slot == Some(id))),
+            Self::Inline(ids) => Self::inline_contains(ids, id),
             Self::Heap(ids) => ids.contains(&id),
         }
     }
 
+    /// Compare all the slots without short-circuiting, so the comparisons are branchless (and a
+    /// single vector compare on targets with 64-bit lane compares).
+    #[inline(always)]
+    fn inline_contains(ids: &[Option<ArrayId>; 4], id: ArrayId) -> bool {
+        ids.iter()
+            .fold(false, |found, &slot| found | (slot == Some(id)))
+    }
+
     /// Adds `id`, returning whether it was not in the set yet.
     pub(crate) fn insert(&mut self, id: ArrayId) -> bool {
-        if self.contains(id) {
-            return false;
-        }
         match self {
-            Self::Inline(ids) => match ids.iter_mut().find(|slot| slot.is_none()) {
-                Some(slot) => *slot = Some(id),
-                None => *self = Self::Heap(ids.iter().flatten().copied().chain([id]).collect()),
-            },
-            Self::Heap(ids) => {
-                ids.insert(id);
+            Self::Inline(ids) => {
+                if Self::inline_contains(ids, id) {
+                    return false;
+                }
+                match ids.iter_mut().find(|slot| slot.is_none()) {
+                    Some(slot) => *slot = Some(id),
+                    None => *self = Self::Heap(ids.iter().flatten().copied().chain([id]).collect()),
+                }
+                true
             }
+            Self::Heap(ids) => ids.insert(id),
         }
-        true
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = ArrayId> + '_ {
