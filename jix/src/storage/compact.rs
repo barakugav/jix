@@ -271,6 +271,20 @@ where
         if out.is_some() || !context.is_cached(self.id) {
             return self.read_data_uncached(index, context, out);
         }
+        self.read_data_cached(index, context)
+    }
+
+    /// Pull-mode read of a sub-region through the context's read cache.
+    #[inline(never)]
+    fn read_data_cached<'rd>(
+        &'rd self,
+        index: &[Range<u64>],
+        context: &'rd ReadContext,
+    ) -> Result<StridedBuf<'rd>>
+    where
+        ET: ElementType,
+        D: Dimension,
+    {
         check_get_range(self.shape(), index)?;
         let layout_order = self.spec.as_ref().read_layout_order();
         context.read_cached(self.id, index, self.blocks.dtype(), layout_order, |dst| {
@@ -320,7 +334,7 @@ where
     ///      position of the active region relative to `index`.
     ///    - Call `nd_copy` to scatter the active sub-region from `tmp_buf` into `buf`,
     ///      respecting both strides.
-    #[inline]
+    #[inline(always)]
     fn read_data_uncached<'rd>(
         &'rd self,
         index: &[Range<u64>],
@@ -928,7 +942,8 @@ mod tests {
         let storage = za.into_storage();
         let to_cache = Some(Arc::new(HashSet::from([storage.0.id])));
 
-        ctx.with_arrays_to_cache(to_cache, || {
+        {
+            let _read = ctx.top_level_read(to_cache);
             let a = storage.read_data(&[4..20], &ctx, None).unwrap();
             let b = storage.read_data(&[4..20], &ctx, None).unwrap();
             assert_eq!(
@@ -942,7 +957,7 @@ mod tests {
             assert_eq!(read_i32s(&a, 16), (4..20).collect::<Vec<_>>());
             assert_eq!(read_i32s(&b, 16), (4..20).collect::<Vec<_>>());
             assert_eq!(read_i32s(&c, 16), (20..36).collect::<Vec<_>>());
-        });
+        }
 
         // Outside of a top level read nothing is cached.
         let a = storage.read_data(&[4..20], &ctx, None).unwrap();

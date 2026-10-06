@@ -380,7 +380,7 @@ pub struct ReadContext {
     /// only once. See [`read_cached`](Self::read_cached).
     read_cache: RefCell<HashMap<ArrayId, CacheEntry>>,
     /// The arrays whose reads go through `read_cache`, set for the duration of a top level read.
-    /// See [`with_arrays_to_cache`](Self::with_arrays_to_cache).
+    /// See [`top_level_read`](Self::top_level_read).
     arrays_to_cache: RefCell<Option<ArrayIdSet>>,
 }
 
@@ -415,23 +415,25 @@ impl ReadContext {
         self.buffer_pool.get(size, alignment)
     }
 
-    /// Run `read`, a top level read of an array, caching the reads of `arrays_to_cache` (the
-    /// arrays reachable more than once from the read array).
+    /// Start a top level read of an array: until the returned guard is dropped, reads of
+    /// `arrays_to_cache` (the arrays reachable more than once from the read array) go through the
+    /// read cache.
     ///
-    /// The read cache is cleared before and after, so cached buffers do not outlive the read. The
-    /// previous set is restored afterwards, so a nested top level read does not disturb the outer
-    /// one.
-    pub(crate) fn with_arrays_to_cache<R>(
-        &self,
-        arrays_to_cache: Option<ArrayIdSet>,
-        read: impl FnOnce() -> R,
-    ) -> R {
-        let prev = self.arrays_to_cache.replace(arrays_to_cache);
-        self.clear_read_cache();
-        let res = read();
-        self.clear_read_cache();
-        self.arrays_to_cache.replace(prev);
-        res
+    /// The read cache is cleared at the start and when the guard is dropped, so cached buffers do
+    /// not outlive the read. Dropping the guard also restores the previous set, so a nested top
+    /// level read does not disturb the outer one.
+    #[inline]
+    pub(crate) fn top_level_read(&self, arrays_to_cache: Option<ArrayIdSet>) -> TopLevelRead<'_> {
+        // Nothing is cached outside of a read with a set, so without one the cache is empty.
+        let active = arrays_to_cache.is_some() || self.arrays_to_cache.borrow().is_some();
+        let prev = active.then(|| {
+            self.clear_read_cache();
+            self.arrays_to_cache.replace(arrays_to_cache)
+        });
+        TopLevelRead {
+            context: self,
+            prev,
+        }
     }
 
     /// Whether reads of the array `id` go through the read cache.
@@ -497,6 +499,22 @@ impl ReadContext {
         Ok(buf)
     }
 }
+/// Ends a top level read when dropped, see [`ReadContext::top_level_read`].
+pub(crate) struct TopLevelRead<'a> {
+    context: &'a ReadContext,
+    /// The `arrays_to_cache` to restore, or `None` if the read does not use the cache at all.
+    prev: Option<Option<ArrayIdSet>>,
+}
+impl Drop for TopLevelRead<'_> {
+    #[inline]
+    fn drop(&mut self) {
+        if let Some(prev) = self.prev.take() {
+            self.context.clear_read_cache();
+            self.context.arrays_to_cache.replace(prev);
+        }
+    }
+}
+
 impl Default for ReadContext {
     fn default() -> Self {
         Self::new(&DecoderParams::default()).unwrap()
