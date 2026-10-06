@@ -381,7 +381,7 @@ pub struct ReadContext {
     read_cache: RefCell<HashMap<ArrayId, CacheEntry>>,
     /// The arrays whose reads go through `read_cache`, set for the duration of a top level read.
     /// See [`top_level_read`](Self::top_level_read).
-    arrays_to_cache: RefCell<Option<ArrayIdSet>>,
+    arrays_to_cache: RefCell<Option<Arc<ArrayIdSet>>>,
 }
 
 /// A cached read of the region `index` of an array, laid out at `strides` in `data`.
@@ -423,7 +423,10 @@ impl ReadContext {
     /// not outlive the read. Dropping the guard also restores the previous set, so a nested top
     /// level read does not disturb the outer one.
     #[inline]
-    pub(crate) fn top_level_read(&self, arrays_to_cache: Option<ArrayIdSet>) -> TopLevelRead<'_> {
+    pub(crate) fn top_level_read(
+        &self,
+        arrays_to_cache: Option<Arc<ArrayIdSet>>,
+    ) -> TopLevelRead<'_> {
         // Nothing is cached outside of a read with a set, so without one the cache is empty.
         let active = arrays_to_cache.is_some() || self.arrays_to_cache.borrow().is_some();
         let prev = active.then(|| {
@@ -442,7 +445,7 @@ impl ReadContext {
         self.arrays_to_cache
             .borrow()
             .as_ref()
-            .is_some_and(|ids| ids.contains(&id))
+            .is_some_and(|ids| ids.contains(id))
     }
 
     fn clear_read_cache(&self) {
@@ -503,7 +506,7 @@ impl ReadContext {
 pub(crate) struct TopLevelRead<'a> {
     context: &'a ReadContext,
     /// The `arrays_to_cache` to restore, or `None` if the read does not use the cache at all.
-    prev: Option<Option<ArrayIdSet>>,
+    prev: Option<Option<Arc<ArrayIdSet>>>,
 }
 impl Drop for TopLevelRead<'_> {
     #[inline]

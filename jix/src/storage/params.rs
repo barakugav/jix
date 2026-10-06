@@ -596,12 +596,12 @@ pub(crate) struct ArraySpecDynamic {
 
     /// The compact arrays reachable from this array, through any of its inner storages. `None` if
     /// there are none.
-    pub(crate) array_ids: Option<ArrayIdSet>,
+    pub(crate) array_ids: Option<Arc<ArrayIdSet>>,
 
     /// The compact arrays reachable from this array more than once, e.g. `x` in `x + x`. Reads of
     /// these arrays go through the [`ReadContext`](crate::ReadContext) read cache, so repeated
     /// reads of the same region decode it only once. `None` if there are none.
-    pub(crate) arrays_to_cache: Option<ArrayIdSet>,
+    pub(crate) arrays_to_cache: Option<Arc<ArrayIdSet>>,
 }
 impl ArraySpecOwned {
     pub(crate) fn new(
@@ -797,13 +797,16 @@ impl ArraySpecDynamic {
         // Copy on write: the sets are only cloned if a second inner reaches compact arrays.
         for inner in inners {
             let ids = Arc::make_mut(self.array_ids.as_mut().unwrap());
-            for &id in inner.array_ids.as_deref().unwrap() {
+            for id in inner.array_ids.as_deref().unwrap().iter() {
                 if !ids.insert(id) {
                     Arc::make_mut(self.arrays_to_cache.get_or_insert_default()).insert(id);
                 }
             }
             if let Some(to_cache) = &inner.arrays_to_cache {
-                Arc::make_mut(self.arrays_to_cache.get_or_insert_default()).extend(to_cache.iter());
+                let ids = Arc::make_mut(self.arrays_to_cache.get_or_insert_default());
+                for id in to_cache.iter() {
+                    ids.insert(id);
+                }
             }
         }
         self

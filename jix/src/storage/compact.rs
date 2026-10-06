@@ -10,7 +10,6 @@
 //! All three are thin wrappers around [`ArrayBlockTableStorageBase`], which contains the
 //! actual nd-array logic and delegates 1D block I/O to [`BlockTable`](crate::storage::block::BlockTable).
 
-use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -18,7 +17,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::storage::id::ArrayId;
+use crate::storage::id::{ArrayId, ArrayIdSet};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ElementType, StridedBuf};
 use crate::util::iter::NdIter;
@@ -229,7 +228,8 @@ where
         // Reading a compact element is more expensive than reading a plain element (1).
         spec.dynamic_mut().element_cost = 8.0;
         let id = ArrayId::new();
-        spec.dynamic_mut().array_ids = Some(Arc::new(HashSet::from([id])));
+        spec.dynamic_mut().array_ids =
+            Some(Arc::new(ArrayIdSet::Inline([Some(id), None, None, None])));
         Ok(Self {
             id,
             blocks,
@@ -940,7 +940,9 @@ mod tests {
         let za = arange64();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
-        let to_cache = Some(Arc::new(HashSet::from([storage.0.id])));
+        let mut to_cache = ArrayIdSet::default();
+        to_cache.insert(storage.0.id);
+        let to_cache = Some(Arc::new(to_cache));
 
         {
             let _read = ctx.top_level_read(to_cache);
@@ -981,7 +983,7 @@ mod tests {
 
         let ids = |spec: ArraySpec<'_>| {
             let dynamic = spec.dynamic();
-            let set = |s: &Option<ArrayIdSet>| s.as_deref().cloned().unwrap_or_default();
+            let set = |s: &Option<Arc<ArrayIdSet>>| s.iter().flat_map(|s| s.iter()).collect();
             (set(&dynamic.array_ids), set(&dynamic.arrays_to_cache))
         };
         let (x, y) = (arange64(), arange64());
