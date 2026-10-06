@@ -293,7 +293,6 @@ dependencies = [
  "num-complex",
  "num-traits",
  "prost",
- "rustc-hash 2.1.2",
  "zstd",
 ]
 
