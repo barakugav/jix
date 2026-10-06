@@ -447,10 +447,9 @@ impl ReadContext {
     }
 
     fn clear_read_cache(&self) {
-        let cache = std::mem::take(&mut *self.read_cache.borrow_mut());
-        for entry in cache.into_values() {
-            self.buffer_pool.return_shared(entry.data);
-        }
+        self.read_cache
+            .borrow_mut()
+            .clear_with(|entry| self.buffer_pool.return_shared(entry.data));
     }
 
     /// Read the region `index` of the array `id` through the read cache.

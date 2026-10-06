@@ -117,15 +117,16 @@ impl<V> ArrayIdMap<V> {
             .copied()
     }
 
-    pub(crate) fn into_values(self) -> impl Iterator<Item = V> {
-        let (inline, heap) = match self {
-            Self::Inline { values, .. } => (Some(values.into_iter().flatten()), None),
-            Self::Heap(map) => (None, Some(map.into_values())),
-        };
-        inline
-            .into_iter()
-            .flatten()
-            .chain(heap.into_iter().flatten())
+    /// Removes all the entries, passing their values to `f`. Clears the map in place, rather than
+    /// moving it, as the inline variant can be large.
+    pub(crate) fn clear_with(&mut self, f: impl FnMut(V)) {
+        match self {
+            Self::Inline { keys, values } => {
+                *keys = [None; 4];
+                values.iter_mut().filter_map(Option::take).for_each(f);
+            }
+            Self::Heap(map) => map.drain().map(|(_, value)| value).for_each(f),
+        }
     }
 }
 
@@ -176,9 +177,11 @@ mod tests {
         }
         assert_eq!(map.remove(ids[2]), Some(20));
         assert_eq!(map.remove(ids[2]), None);
-        let mut values = map.into_values().collect::<Vec<_>>();
+        let mut values = Vec::new();
+        map.clear_with(|value| values.push(value));
         values.sort();
         assert_eq!(values, [0, 10, 30, 40, 50]);
+        assert_eq!(map.keys().count(), 0);
 
         // Removing from the inline map frees a slot for the next insert.
         let mut map = ArrayIdMap::default();
