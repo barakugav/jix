@@ -1029,6 +1029,7 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Array> {
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
+#[pyo3(signature = (array, repeats, dim=None))]
 pub fn repeat<'py>(
     array: &Bound<'py, PyAny>,
     repeats: u64,

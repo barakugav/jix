@@ -1233,6 +1233,7 @@ impl Array {
     }
 
     /// Repeats each element along the given dim. See [`jix.repeat()`][jix.repeat].
+    #[pyo3(signature = (repeats, dim=None))]
     pub fn repeat<'py>(
         slf: &Bound<'py, Array>,
         repeats: u64,

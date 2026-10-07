@@ -781,6 +781,18 @@ def test_repeat_1d():
     np.testing.assert_array_equal(r.numpy(), [1, 1, 2, 2, 3, 3])
 
 
+def test_repeat_dim_defaults_to_none():
+    # dim=None (the default) repeats along the only dim of a 1-D array, like numpy.
+    za = jix.compact(np.array([1, 2, 3], dtype=np.int32))
+    np.testing.assert_array_equal(jix.repeat(za, 2).numpy(), [1, 1, 2, 2, 3, 3])
+    np.testing.assert_array_equal(za.repeat(2).numpy(), [1, 1, 2, 2, 3, 3])
+
+
+def test_repeat_dim_none_on_non_1d_raises():
+    with pytest.raises(ValueError, match="dim must be specified"):
+        jix.repeat(jix.compact(np.zeros((2, 3))), 2)
+
+
 def test_repeat_2d_dim0():
     arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
     a = jix.compact(arr)
