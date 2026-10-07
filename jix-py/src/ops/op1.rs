@@ -522,14 +522,15 @@ define_op1!(
     /// For **float** types: returns `+1.0` for positive values, `-1.0` for negative values,
     /// `0.0` for `+0.0` and `-0.0`, and `NaN` for `NaN`.
     ///
-    /// **Auto-casting**: `bool` inputs are cast to `int8` before the operation.
+    /// The input is never cast, so the output dtype always equals the input dtype; `bool` is not
+    /// supported (as in numpy).
     ///
     /// Args:
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array` (after
-    ///         any auto-cast). No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`. No
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -548,16 +549,12 @@ define_op1!(
     ///     result = jix.sign(c)
     ///     assert result.dtype == np.uint8
     ///     assert np.array_equal(result.numpy(), [1, 0, 1])
-    ///
-    ///     # bool auto-casts to int8.
-    ///     d = jix.compact([True, False, True], dtype=np.bool_)
-    ///     assert jix.sign(d).dtype == np.int8
     ///     ```
     sign,
     Sign,
     dispatch = {
         [i8, u8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
-        Safe
+        None
     }
 );
 define_op1!(

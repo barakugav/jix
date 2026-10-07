@@ -172,13 +172,12 @@ def test_sign_uint_concrete():
     )
 
 
-def test_sign_auto_cast_bool():
-    """sign(bool) auto-casts to int8."""
-    np_a = np.array([True, False, True], dtype=np.bool_)
-    za = jix.compact(np_a)
-    result = jix.sign(za)
-    assert result.dtype == np.int8
-    np.testing.assert_array_equal(result.numpy(), np.sign(np_a.astype(np.int8)))
+def test_sign_never_casts():
+    for dtype in (np.int8, np.uint16, np.float16):
+        assert jix.sign(jix.compact(np.array([1, 0], dtype=dtype))).dtype == dtype
+    assert jix.sign(-5).numpy() == -1  # untyped Python int -> int64
+    with pytest.raises(RuntimeError, match="sign"):
+        jix.sign(jix.compact(np.array([True, False])))
 
 
 def test_absolute_scalar_concrete():
