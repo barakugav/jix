@@ -434,6 +434,27 @@ def test_permute_dims_none_reverses():
     np.testing.assert_array_equal(r.numpy(), arr.T)
 
 
+@pytest.mark.parametrize("dims", [[-1, 0, 1], [2, -3, -2], [-1, -2, -3], [0, -2, 2]])
+def test_permute_dims_negative(dims):
+    arr = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    za = jix.compact(arr)
+    r = jix.permute_dims(za, dims)
+    np.testing.assert_array_equal(r.numpy(), np.transpose(arr, dims))
+    np.testing.assert_array_equal(za.permute_dims(dims).numpy(), np.transpose(arr, dims))
+
+
+@pytest.mark.parametrize("dims", [[0, -2], [1, -1]])
+def test_permute_dims_negative_duplicate_raises(dims):
+    # -2 resolves to 0 and -1 to 1 for a 2-D array, so these repeat a dim.
+    with pytest.raises(RuntimeError, match="duplicate dim"):
+        jix.permute_dims(jix.compact(np.zeros((2, 3))), dims)
+
+
+def test_permute_dims_out_of_bounds_raises():
+    with pytest.raises(ValueError, match="out of bounds"):
+        jix.permute_dims(jix.compact(np.zeros((2, 3))), [0, -3])
+
+
 # ---------------------------------------------------------------------------
 # broadcast
 # ---------------------------------------------------------------------------

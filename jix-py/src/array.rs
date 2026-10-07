@@ -1176,7 +1176,7 @@ impl Array {
     #[pyo3(signature = (dims=None))]
     pub fn permute_dims<'py>(
         slf: &Bound<'py, Self>,
-        dims: Option<Vec<usize>>,
+        dims: Option<Vec<i32>>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::permute_dims(slf, dims)
     }
