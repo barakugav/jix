@@ -2134,20 +2134,35 @@ mod tests {
         );
     }
 
-    #[test]
-    fn compact_fn_multi_chunk_gets_absolute_indices() {
-        // A small read size forces compaction to read many chunks; `f` must still see absolute
-        // indices, for static and dynamic dimensions (1..=4 dispatch and the `DimDyn` fallback).
+    /// Params whose small read size makes compaction read the array in many chunks, so `f` is
+    /// called for regions that do not start at the origin.
+    fn multi_chunk_params(block_shape: &[BlockSize]) -> ArrayParams {
         let mut params = ArrayParams::new();
-        params.block_shape(&[4, 4]).read_size((16, 64));
-        let a = Array::compact_fn_with((32, 24), params.clone(), |(x, y)| x * 100 + y).unwrap();
+        params.block_shape(block_shape).read_size((8, 64));
+        params
+    }
+
+    #[test]
+    fn compact_fn_multi_chunk_static() {
+        let params = multi_chunk_params(&[4, 4]);
+        let a = Array::compact_fn_with((32, 24), params, |(x, y)| x * 100 + y).unwrap();
         let expected = ndarray::Array2::from_shape_fn((32, 24), |(x, y)| (x * 100 + y) as u64);
         assert_eq!(a.to_ndarray().unwrap(), expected);
-        let a = Array::compact_fn_with([32, 24].as_slice(), params, |i| i[0] * 100 + i[1]).unwrap();
-        assert_eq!(a.to_ndarray().unwrap(), expected.into_dyn());
+    }
 
-        let mut params = ArrayParams::new();
-        params.block_shape(&[2, 2, 2, 2, 2]).read_size((8, 32));
+    #[test]
+    fn compact_fn_multi_chunk_dyn() {
+        // ndim 2: a `DimDyn` shape dispatched to a static walk.
+        let params = multi_chunk_params(&[4, 4]);
+        let a = Array::compact_fn_with([32, 24].as_slice(), params, |i| i[0] * 100 + i[1]).unwrap();
+        let expected = ndarray::Array2::from_shape_fn((32, 24), |(x, y)| (x * 100 + y) as u64);
+        assert_eq!(a.to_ndarray().unwrap(), expected.into_dyn());
+    }
+
+    #[test]
+    fn compact_fn_multi_chunk_dyn_high_ndim() {
+        // ndim 5: a `DimDyn` shape walked dynamically.
+        let params = multi_chunk_params(&[2, 2, 2, 2, 2]);
         let shape = [6u64, 4, 6, 4, 2];
         let f = |i: &[u64]| i.iter().fold(0, |acc, &x| acc * 10 + x);
         let a = Array::compact_fn_with(shape.as_slice(), params, f).unwrap();
