@@ -122,6 +122,28 @@ impl OpFnDescriptor<2, ()> {
         Self::new_args(input_desc, move |inputs, _| f(inputs))
     }
 }
+impl OpFnDescriptor<3, ()> {
+    /// Three inputs, all of dtype `T`.
+    pub(crate) fn new3<T>(
+        allowed_cast: CastKind,
+        f: impl Fn(TypedOperand<T>, TypedOperand<T>, TypedOperand<T>) -> PyResult<ArrayAny>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self
+    where
+        T: Dtyped,
+    {
+        let input_desc = [(); 3].map(|()| OpFnInputDescriptor {
+            dtype: T::DTYPE.try_to_scalar().unwrap(),
+            allowed_cast,
+        });
+        Self::new_args(input_desc, move |inputs, ()| {
+            let [a, b, c] = inputs.map(|input| input.into_typed::<T>().unwrap());
+            f(a, b, c)
+        })
+    }
+}
 impl<ExtraArgs> OpFnDescriptor<2, ExtraArgs> {
     /// Like [`new2`] but passes `extra_args` through to the closure.
     /// Both inputs must have the same dtype `T`.
@@ -269,5 +291,10 @@ impl OpDescriptor<1, ()> {
 impl OpDescriptor<2, ()> {
     pub(crate) fn dispatch2(&self, a: Operand, b: Operand) -> PyResult<ArrayAny> {
         Self::dispatch(self, [a, b])
+    }
+}
+impl OpDescriptor<3, ()> {
+    pub(crate) fn dispatch3(&self, a: Operand, b: Operand, c: Operand) -> PyResult<ArrayAny> {
+        Self::dispatch(self, [a, b, c])
     }
 }

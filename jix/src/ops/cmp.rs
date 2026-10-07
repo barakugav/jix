@@ -505,6 +505,216 @@ define_op2!(
     <crate::scalar::Minimum>::minimum(a, b),
 );
 
+/// Element-wise clamp of `a` to the range `[min, max]`, where `min` and `max` are arrays.
+///
+/// Computed as `minimum(maximum(a, min), max)`, the order used by `numpy.clip` and
+/// `torch.clamp`: where `min > max` the result is `max`. For **float** types a `NaN` in any
+/// operand produces `NaN` (see [`Maximum`] and [`Minimum`]). All three arrays must have the same
+/// dtype and shape.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation, the operation is also available as
+/// [`Array::clamp()`](crate::Array::clamp).
+///
+/// # Examples
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// let a = Array::compact_ndarray(&array![-3i32, 0, 5, 10])?;
+/// let min = Array::compact_ndarray(&array![0i32, 1, 0, 0])?;
+/// let max = Array::compact_ndarray(&array![7i32, 7, 4, 7])?;
+/// let result = a.clamp(min, max).to_ndarray()?;
+/// assert_eq!(result.as_slice().unwrap(), &[0, 1, 4, 7]);
+/// # Ok::<(), jix::Error>(())
+/// ```
+pub struct Clamp<S, SMin, SMax> {
+    a: S,
+    min: SMin,
+    max: SMax,
+    spec: ArraySpecDynamic,
+}
+impl<S, SMin, SMax> Clamp<S, SMin, SMax>
+where
+    S: ArrayStorageTyped,
+    SMin: ArrayStorageTyped<Item = S::Item, Dimension = S::Dimension>,
+    SMax: ArrayStorageTyped<Item = S::Item, Dimension = S::Dimension>,
+    S::Item: crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
+{
+    /// Constructs a [`Clamp`] storage. See the struct docs for semantics and examples.
+    pub fn new(a: S, min: SMin, max: SMax) -> Result<Self> {
+        ensure!(
+            a.shape() == min.shape() && a.shape() == max.shape(),
+            InvalidArgument,
+            "Clamp shape mismatch between `a` {:?}, `min` {:?} and `max` {:?}",
+            a.shape(),
+            min.shape(),
+            max.shape()
+        );
+        let specs = [a.spec(), min.spec(), max.spec()];
+        let (element_cost, read_shape_scale_weight, read_layout_order) =
+            combine_elementwise_hints(&specs.each_ref().map(|spec| {
+                (
+                    spec.element_cost(),
+                    spec.read_shape_scale_weight(),
+                    spec.read_layout_order(),
+                )
+            }));
+        let (block_shape, block_shape_fixed_dims) = combine_block_layout(
+            &specs
+                .each_ref()
+                .map(|spec| (spec.block_shape().as_slice(), spec.block_shape_fixed_dims())),
+        );
+        let spec = ArraySpecDynamic::new(
+            block_shape,
+            block_shape_fixed_dims,
+            element_cost,
+            read_shape_scale_weight,
+            read_layout_order,
+        );
+        Ok(Self { a, min, max, spec })
+    }
+
+    /// Constructs an array with [`Clamp`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(a: Array<S>, min: Array<SMin>, max: Array<SMax>) -> Result<Array<Self>> {
+        Self::new(a.into_storage(), min.into_storage(), max.into_storage()).map(Array::from_storage)
+    }
+}
+impl<S, SMin, SMax> ArrayStorage for Clamp<S, SMin, SMax>
+where
+    S: ArrayStorageTyped,
+    SMin: ArrayStorageTyped<Item = S::Item, Dimension = S::Dimension>,
+    SMax: ArrayStorageTyped<Item = S::Item, Dimension = S::Dimension>,
+    S::Item: crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
+{
+    type ElementType = Ty<S::Item>;
+    type Dimension = S::Dimension;
+
+    #[inline]
+    fn read_data<'a>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        check_out_buf(out.as_deref(), self.shape())?;
+        let out = self
+            .read_as_elementwise_pipeline::<S::Item>(index, context)?
+            .to_buf(index, context, out);
+        Ok(out)
+    }
+
+    #[inline]
+    fn read_as_elementwise_pipeline<'a, T>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ElementwisePipeline<T> + use<'a, T, S, SMin, SMax>>
+    where
+        T: Dtyped,
+    {
+        check_dtype(Dtype::new_ref::<T>(), Dtype::new_ref::<S::Item>())?;
+        let a = self
+            .a
+            .read_as_elementwise_pipeline::<S::Item>(index, context)?;
+        let min = self
+            .min
+            .read_as_elementwise_pipeline::<S::Item>(index, context)?;
+        let max = self
+            .max
+            .read_as_elementwise_pipeline::<S::Item>(index, context)?;
+
+        struct ClampPipeline<P, PMin, PMax, U> {
+            a: P,
+            min: PMin,
+            max: PMax,
+            phantom: std::marker::PhantomData<U>,
+        }
+        impl<T, U, P, PMin, PMax> ElementwisePipelineImpl<T> for ClampPipeline<P, PMin, PMax, U>
+        where
+            P: ElementwisePipelineImpl<U>,
+            PMin: ElementwisePipelineImpl<U>,
+            PMax: ElementwisePipelineImpl<U>,
+            U: crate::scalar::Maximum<Output = U> + crate::scalar::Minimum<Output = U> + Copy,
+            T: Dtyped,
+        {
+            const N_OPERANDS: Option<usize> =
+                n_operands_sum(&[P::N_OPERANDS, PMin::N_OPERANDS, PMax::N_OPERANDS]);
+
+            #[inline]
+            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                self.a
+                    .operands()
+                    .chain(self.min.operands())
+                    .chain(self.max.operands())
+            }
+
+            #[inline(always)]
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+                &self,
+                offset: usize,
+            ) -> [T; N] {
+                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS>(offset) };
+                let min = unsafe { self.min.read_bulk::<N, CONTIGUOUS>(offset) };
+                let max = unsafe { self.max.read_bulk::<N, CONTIGUOUS>(offset) };
+                array_from_fn_inline(|i| {
+                    let x = a[i].maximum(min[i]).minimum(max[i]);
+
+                    const { assert!(size_of::<U>() == size_of::<T>()) };
+                    // SAFETY: we checked `T` and `U` are the same dtype in the outer func
+                    unsafe { std::mem::transmute_copy::<U, T>(&x) }
+                })
+            }
+        }
+
+        Ok(ClampPipeline {
+            a,
+            min,
+            max,
+            phantom: std::marker::PhantomData,
+        })
+    }
+
+    #[inline(always)]
+    fn shape(&self) -> &[u64] {
+        self.a.shape()
+    }
+
+    #[inline(always)]
+    fn dtype(&self) -> &Dtype {
+        Dtype::new_ref::<S::Item>()
+    }
+
+    #[inline]
+    fn spec(&self) -> ArraySpec<'_> {
+        self.a
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
+    }
+
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Clamp", [&self.a, &self.min, &self.max])
+    }
+
+    type DimensionChange<NewD: crate::Dimension> =
+        Clamp<S::DimensionChange<NewD>, SMin::DimensionChange<NewD>, SMax::DimensionChange<NewD>>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Clamp {
+            a: self.a.dimension_change()?,
+            min: self.min.dimension_change()?,
+            max: self.max.dimension_change()?,
+            spec: self.spec,
+        })
+    }
+
+    crate::ops::impl_element_type_change_default!();
+}
+
 /// Element-wise approximate equality test.
 ///
 /// Produces a `bool` array that is `true` at each position where the corresponding elements of
@@ -636,6 +846,23 @@ where
     define_array_op2_method!(less_equal: LessEqual, PartialOrd, fixed_output_type = true);
     define_array_op2_method!(maximum: Maximum, crate::scalar::Maximum);
     define_array_op2_method!(minimum: Minimum, crate::scalar::Minimum);
+
+    /// Applies the [`Clamp`] operation, see the op struct docs for details.
+    #[track_caller]
+    pub fn clamp<SMin, SMax>(
+        self,
+        min: Array<SMin>,
+        max: Array<SMax>,
+    ) -> Array<Clamp<S, SMin, SMax>>
+    where
+        S: ArrayStorageTyped,
+        SMin: ArrayStorageTyped<Item = S::Item, Dimension = S::Dimension>,
+        SMax: ArrayStorageTyped<Item = S::Item, Dimension = S::Dimension>,
+        S::Item:
+            crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
+    {
+        Clamp::new_array(self, min, max).unwrap()
+    }
 
     /// Applies the [`ApproxEq`] operation, see the op struct docs for details.
     #[track_caller]
@@ -1009,5 +1236,46 @@ mod tests {
         let result = zna.view().minimum(znb.view()).to_ndarray().unwrap();
         assert!(result[[0]].is_nan());
         assert!(result[[1]].is_nan());
+    }
+
+    // clamp: per-element bounds, min > max (max wins, as in numpy.clip / torch.clamp), and NaN
+    // in any operand propagating to the output.
+    #[test]
+    fn clamp_concrete() {
+        use crate::Array;
+        let a = ndarray::array![[-3i32, 0, 5], [10, 4, 4]];
+        let lo = ndarray::array![[0i32, 1, 0], [0, 6, 2]];
+        let hi = ndarray::array![[7i32, 7, 4], [7, 3, 9]];
+        let za = Array::compact_ndarray_with(&a, crate::util::arr_params(&[1, 2])).unwrap();
+        let zlo = Array::compact_ndarray(&lo).unwrap();
+        let zhi = Array::compact_ndarray(&hi).unwrap();
+        let expected = ndarray::array![[0i32, 1, 4], [7, 3, 4]]; // [1][1]: min 6 > max 3 -> 3
+        crate::util::assert_array_matches(&za.clamp(zlo, zhi), &expected);
+
+        let f = Array::compact_ndarray(&ndarray::array![f32::NAN, 1.0, 1.0, 5.0]).unwrap();
+        let flo = Array::compact_ndarray(&ndarray::array![0.0f32, f32::NAN, 0.0, 0.0]).unwrap();
+        let fhi = Array::compact_ndarray(&ndarray::array![2.0f32, 2.0, f32::NAN, 2.0]).unwrap();
+        let result = f.clamp(flo, fhi).to_ndarray().unwrap();
+        assert!(result.iter().take(3).all(|x| x.is_nan()));
+        assert_eq!(result[3], 2.0);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn clamp_i32(
+            ((nd_a, za), (nd_lo, zlo)) in crate::util::arrays2_strategy_generic::<i32>(
+                crate::util::shape_strategy(),
+                <i32 as crate::util::ScalarStrategy>::any_strategy(),
+            ),
+            hi_offset in -50i32..50,
+        ) {
+            let nd_hi = nd_lo.mapv(|x| x.saturating_add(hi_offset));
+            let zhi = crate::Array::compact_ndarray(&nd_hi).unwrap();
+            let expected = ndarray::Zip::from(&nd_a)
+                .and(&nd_lo)
+                .and(&nd_hi)
+                .map_collect(|&a, &lo, &hi| a.max(lo).min(hi));
+            crate::util::assert_array_matches(&za.clamp(zlo, zhi), &expected);
+        }
     }
 }

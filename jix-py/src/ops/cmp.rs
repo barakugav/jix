@@ -8,7 +8,7 @@ use crate::ops::asarray_simple;
 use crate::ops::common::{
     broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Scalar,
 };
-use crate::util::{DimArray, IntoPyResult};
+use crate::util::IntoPyResult;
 
 define_op2!(
     /// Element-wise equality test (`a == b`).
@@ -354,27 +354,29 @@ define_op2!(
 
 /// Clamps each element to the range `[min, max]`.
 ///
-/// Elements below `min` are replaced by `min`; elements above `max` are replaced by `max`.
-/// Both `min` and `max` are optional: omitting one removes that bound.
-/// Passing neither `min` nor `max` returns a lazy view of the array unchanged.
+/// Computed as `minimum(maximum(array, min), max)`, like `numpy.clip` and `torch.clamp`: where
+/// `min > max` the result is `max`. `min` and `max` may be scalars or arrays, broadcast with
+/// `array`. With only one bound this is [`jix.maximum()`][jix.maximum] or
+/// [`jix.minimum()`][jix.minimum], and with neither `array` is returned unchanged. For float
+/// dtypes a `NaN` in any operand produces `NaN`.
 ///
 /// Supported dtypes: `bool`, `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
 /// `f16`, `f32`, `f64`.
 ///
+/// **Type promotion**: the operands are cast to a common dtype under Safe casting rules, as in
+/// [`jix.maximum()`][jix.maximum]. For example, clamping an `int32` array to float bounds gives
+/// `float64`.
+///
 /// Args:
 ///     array: Input array.
-///     min: Lower bound (inclusive). A Python scalar or NumPy scalar. When omitted or `None`,
-///         no lower bound is applied.
-///     max: Upper bound (inclusive). A Python scalar or NumPy scalar. When omitted or `None`,
-///         no upper bound is applied.
+///     min: Lower bound (inclusive), a scalar or an array. `None` (default) applies no lower
+///         bound.
+///     max: Upper bound (inclusive), a scalar or an array. `None` (default) applies no upper
+///         bound.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`. No
+///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape and the promoted dtype. No
 ///         computation occurs until the result is read.
-///
-/// Raises:
-///     ValueError: If both `min` and `max` are provided and `min > max` (or either is `NaN`).
-///     TypeError: If a complex limit is provided.
 ///
 /// Examples:
 ///     ```python
@@ -384,21 +386,17 @@ define_op2!(
 ///     a = jix.compact([-3, 0, 5, 10], dtype=np.int32)
 ///
 ///     # Clamp to [0, 7].
-///     result = jix.clamp(a, min=0, max=7)
-///     assert np.array_equal(result.numpy(), [0, 0, 5, 7])
+///     assert np.array_equal(jix.clamp(a, min=0, max=7).numpy(), [0, 0, 5, 7])
 ///
 ///     # Only a lower bound.
-///     result_min = jix.clamp(a, min=2)
-///     assert np.array_equal(result_min.numpy(), [2, 2, 5, 10])
+///     assert np.array_equal(jix.clamp(a, min=2).numpy(), [2, 2, 5, 10])
 ///
-///     # Only an upper bound.
-///     result_max = jix.clamp(a, max=4)
-///     assert np.array_equal(result_max.numpy(), [-3, 0, 4, 4])
+///     # Per-element bounds.
+///     lo = jix.compact([0, 1, 6, 0], dtype=np.int32)
+///     assert np.array_equal(jix.clamp(a, min=lo, max=7).numpy(), [0, 1, 6, 7])
 ///
-///     # Float array: clamp to [0.0, 1.0].
-///     b = jix.compact([-0.5, 0.3, 1.2], dtype=np.float32)
-///     result_f = jix.clamp(b, min=0.0, max=1.0)
-///     assert np.allclose(result_f.numpy(), [0.0, 0.3, 1.0])
+///     # min > max gives max.
+///     assert np.array_equal(jix.clamp(a, min=5, max=2).numpy(), [2, 2, 2, 2])
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyo3::pyfunction(signature = (array, min=None, max=None))]
@@ -407,86 +405,30 @@ pub fn clamp<'py>(
     min: Option<&Bound<'py, PyAny>>,
     max: Option<&Bound<'py, PyAny>>,
 ) -> pyo3::PyResult<Bound<'py, crate::Array>> {
-    if min.is_none() && max.is_none() {
-        return asarray_simple(array);
-    }
     let py = array.py();
+    let (min, max) = match (min, max) {
+        (None, None) => return asarray_simple(array),
+        (Some(min), None) => return Bound::new(py, maximum(array, min)?),
+        (None, Some(max)) => return Bound::new(py, minimum(array, max)?),
+        (Some(min), Some(max)) => (min, max),
+    };
 
-    struct ClampArgs {
-        min: Option<Scalar>,
-        max: Option<Scalar>,
-    }
-    fn clamp_op_descriptor<T>() -> OpFnDescriptor<1, ClampArgs>
+    fn clamp_op_descriptor<T>() -> OpFnDescriptor<3, ()>
     where
-        T: Dtyped + PartialOrd + std::fmt::Debug,
-        bool: jix_core::scalar::Cast<T>,
-        u64: jix_core::scalar::Cast<T>,
-        i64: jix_core::scalar::Cast<T>,
-        f64: jix_core::scalar::Cast<T>,
+        T: Dtyped
+            + jix_core::scalar::Maximum<Output = T>
+            + jix_core::scalar::Minimum<Output = T>
+            + Copy,
     {
-        OpFnDescriptor::new1_args::<T>(CastKind::None, |a, args: ClampArgs| {
-            let [min, max] = [args.min, args.max]
-                .map(|limit| {
-                    limit
-                        .map(|limit| {
-                            Ok(match limit {
-                        Scalar::Bool(v) => <bool as jix_core::scalar::Cast<T>>::cast(v),
-                        Scalar::UInt(v) => <u64 as jix_core::scalar::Cast<T>>::cast(v),
-                        Scalar::Int(v) => <i64 as jix_core::scalar::Cast<T>>::cast(v),
-                        Scalar::Float(v) => <f64 as jix_core::scalar::Cast<T>>::cast(v),
-                        Scalar::Complex(_) => return Err(pyo3::exceptions::PyTypeError::new_err(
-                            "clamp does not support complex limits; pass a real-valued min and max",
-                        )),
-                    })
-                        })
-                        .transpose()
-                })
-                .into_iter()
-                .collect::<Result<DimArray<_>, _>>()?
-                .as_slice()
-                .try_into()
-                .unwrap();
-            Ok(match (min, max) {
-                (None, None) => a.into_any(),
-                (Some(min), None) => {
-                    let res =
-                        jix_core::ops::Map::new_array(a, move |x| if x < min { min } else { x })
-                            .into_py_result()?;
-                    res.into_any()
-                }
-                (None, Some(max)) => {
-                    let res =
-                        jix_core::ops::Map::new_array(a, move |x| if x > max { max } else { x })
-                            .into_py_result()?;
-                    res.into_any()
-                }
-                (Some(min), Some(max)) => {
-                    #[allow(clippy::neg_cmp_op_on_partial_ord)]
-                    if !(min <= max) {
-                        return Err(pyo3::exceptions::PyValueError::new_err(
-                            "min must be less than or equal to max",
-                        ));
-                    }
-                    let res = jix_core::ops::Map::new_array(a, move |x| {
-                        if x < min {
-                            min
-                        } else if x > max {
-                            max
-                        } else {
-                            x
-                        }
-                    })
-                    .into_py_result()?;
-                    res.into_any()
-                }
-            })
+        OpFnDescriptor::new3::<T>(CastKind::Safe, |a, min, max| {
+            let res = jix_core::ops::Clamp::new_array(a, min, max).into_py_result()?;
+            Ok(res.into_any())
         })
     }
-    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ClampArgs>> = LazyLock::new(|| {
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<3, ()>> = LazyLock::new(|| {
         OpDescriptor::new(
             "clamp",
             vec![
-                clamp_op_descriptor::<bool>(),
                 clamp_op_descriptor::<u8>(),
                 clamp_op_descriptor::<i8>(),
                 clamp_op_descriptor::<u16>(),
@@ -498,15 +440,16 @@ pub fn clamp<'py>(
                 clamp_op_descriptor::<f16>(),
                 clamp_op_descriptor::<f32>(),
                 clamp_op_descriptor::<f64>(),
+                clamp_op_descriptor::<bool>(),
             ],
         )
     });
-    let array = Operand::from_any(array)?;
-    let args = ClampArgs {
-        min: min.map(|m| Scalar::from_any(m)).transpose()?,
-        max: max.map(|m| Scalar::from_any(m)).transpose()?,
-    };
-    let res = DISPATCH_TABLE.dispatch_args([array], args)?;
+    let [array, min, max] = broadcast_operands([
+        Operand::from_any(array)?,
+        Operand::from_any(min)?,
+        Operand::from_any(max)?,
+    ])?;
+    let res = DISPATCH_TABLE.dispatch3(array, min, max)?;
     Bound::new(py, crate::Array::from_core(res))
 }
 
