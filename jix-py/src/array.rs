@@ -1269,6 +1269,7 @@ impl Array {
     }
 
     /// Selects a sub-region of the array as a lazy view. See [`jix.slice()`][jix.slice].
+    #[pyo3(signature = (index))]
     pub fn slice<'py>(
         slf: &Bound<'py, Array>,
         index: &Bound<'py, PyAny>,
@@ -1286,6 +1287,7 @@ impl Array {
     }
 
     /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
+    #[pyo3(signature = (dim))]
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Array>,
         dim: ItemOrSequence<i32>,
@@ -1419,6 +1421,7 @@ impl Array {
     // == dim ops ==
 
     /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_dim()`][jix.insert_dim].
+    #[pyo3(signature = (dim))]
     pub fn insert_dim<'py>(
         slf: &Bound<'py, Array>,
         dim: ItemOrSequence<i32>,
@@ -1427,6 +1430,7 @@ impl Array {
     }
 
     /// Removes length-1 dimensions from the array's shape. See [`jix.remove_dim()`][jix.remove_dim].
+    #[pyo3(signature = (dim))]
     pub fn remove_dim<'py>(
         slf: &Bound<'py, Array>,
         dim: ItemOrSequence<i32>,
