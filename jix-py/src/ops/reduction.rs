@@ -216,10 +216,8 @@ define_reduction_op!(
     /// `f16`, `f32`, `f64`, `bool`.
     ///
     /// If multiple elements share the maximum value, the index of the first occurrence is
-    /// returned. For **float** types, a `NaN` never displaces the running best (every
-    /// comparison against `NaN` is `False`); a `NaN` index is returned only when the first
-    /// element along the reduced dim is `NaN`, otherwise `NaN` values are skipped. This
-    /// differs from `numpy.argmax`, which returns the index of the first `NaN`.
+    /// returned. For **float** types, if any element along the reduced dim is `NaN`, the index
+    /// of a `NaN` is returned, but not necessarily the first one as in `numpy.argmax`.
     ///
     /// Args:
     ///     array: Input array.
@@ -257,10 +255,8 @@ define_reduction_op!(
     /// `f16`, `f32`, `f64`, `bool`.
     ///
     /// If multiple elements share the minimum value, the index of the first occurrence is
-    /// returned. For **float** types, a `NaN` never displaces the running best (every
-    /// comparison against `NaN` is `False`); a `NaN` index is returned only when the first
-    /// element along the reduced dim is `NaN`, otherwise `NaN` values are skipped. This
-    /// differs from `numpy.argmin`, which returns the index of the first `NaN`.
+    /// returned. For **float** types, if any element along the reduced dim is `NaN`, the index
+    /// of a `NaN` is returned, but not necessarily the first one as in `numpy.argmin`.
     ///
     /// Args:
     ///     array: Input array.
