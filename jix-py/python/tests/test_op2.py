@@ -27,6 +27,13 @@ from tests_util import (
 import jix
 
 
+@pytest.mark.parametrize(
+    "alias, name", [("sub", "subtract"), ("mul", "multiply"), ("div", "divide"), ("neg", "negative")]
+)
+def test_aliases(alias, name):
+    assert getattr(jix, alias) is getattr(jix, name)
+
+
 @pytest.mark.parametrize("dtype", ints + uints + floats + complexes)
 @given(st.data())
 def test_add(dtype: np.dtype, data: DataObject):

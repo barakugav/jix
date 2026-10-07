@@ -97,6 +97,10 @@ mod jix {
         m.add("concat", m.getattr("concatenate")?)?;
         m.add("clip", m.getattr("clamp")?)?;
         m.add("prod", m.getattr("product")?)?;
+        m.add("sub", m.getattr("subtract")?)?;
+        m.add("mul", m.getattr("multiply")?)?;
+        m.add("div", m.getattr("divide")?)?;
+        m.add("neg", m.getattr("negative")?)?;
 
         Ok(())
     }

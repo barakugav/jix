@@ -25,6 +25,18 @@ def clip(array: typing.Any, min: typing.Optional[typing.Any] = None, max: typing
 
 def prod(array: typing.Any, dim: typing.Optional[builtins.int | typing.Sequence[builtins.int]] = None, *, keepdim: builtins.bool = False) -> Array:
     """Alias for [`jix.product`][jix.product]"""
+
+def sub(a: typing.Any, b: typing.Any) -> Array:
+    """Alias for [`jix.subtract`][jix.subtract]"""
+
+def mul(a: typing.Any, b: typing.Any) -> Array:
+    """Alias for [`jix.multiply`][jix.multiply]"""
+
+def div(a: typing.Any, b: typing.Any) -> Array:
+    """Alias for [`jix.divide`][jix.divide]"""
+
+def neg(array: typing.Any) -> Array:
+    """Alias for [`jix.negative`][jix.negative]"""
 "#,
     );
 
