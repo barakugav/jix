@@ -1509,7 +1509,7 @@ impl Array {
 ///             fixed. Defaults to a size chosen automatically according to the CPU cache sizes.
 ///         - `read_size`: The target byte range for a single preferred read region as
 ///             `(min, max)`, given as either a scalar `s` (treated as `(s, s)`) or a 2-element
-///             `(min, max)` sequence of non-negative ints.
+///             `(min, max)` tuple or list of non-negative ints.
 ///
 ///             A read region is the rectangular slab the engine pulls and decompresses in one
 ///             pass when materializing a lazy pipeline or a sub-region read. Its shape is derived

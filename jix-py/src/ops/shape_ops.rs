@@ -382,7 +382,7 @@ pub(crate) struct ParsedBasicIndex {
 ///
 /// Args:
 ///     array: Input array.
-///     dim: Output-shape index or sequence of indices at which to place new length-1
+///     dim: Output-shape index or tuple/list of indices at which to place new length-1
 ///         dimensions. Negative values are resolved against the output ndim (`ndim + len(dim)`).
 ///
 /// Returns:
@@ -452,7 +452,7 @@ pub fn insert_dim<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     dim: Output-shape index or sequence of indices at which to place new length-1
+///     dim: Output-shape index or tuple/list of indices at which to place new length-1
 ///         dimensions. Negative values are resolved against the output ndim (`ndim + len(dim)`).
 ///
 /// Returns:
@@ -482,7 +482,7 @@ pub fn unsqueeze<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     dim: Dim index or sequence of dim indices to remove. Each must have size 1.
+///     dim: Dim index or tuple/list of dim indices to remove. Each must have size 1.
 ///         Negative values are supported.
 ///
 /// Returns:
@@ -1052,7 +1052,7 @@ pub fn repeat<'py>(
 /// Reverses the order of elements along the given dim.
 ///
 /// Each named dim is independently reversed; non-named dims are left untouched. The shape
-/// and dtype of the output equal the input. `dim` accepts an integer, a sequence of
+/// and dtype of the output equal the input. `dim` accepts an integer, a tuple or list of
 /// integers, or `None` (the default) which reverses every dim. Negative indices are
 /// supported. Duplicate dims are not allowed.
 ///
