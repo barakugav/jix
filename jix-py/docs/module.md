@@ -143,7 +143,7 @@ pass over the compressed source data, block by block.
 a = jix.read_array("data.jix")
 result = (
     a
-     .astype("float64")
+     .cast("float64")
      .exp()
      .sum(axis=0)
 )

@@ -42,7 +42,7 @@ mod jix {
     pub use crate::archive::{read_array, write_array};
 
     #[pymodule_export]
-    pub use crate::ops::{asarray, astype};
+    pub use crate::ops::{asarray, cast};
 
     #[pymodule_export]
     pub use crate::ops::{add, divide, floor_divide, multiply, power, subtract};

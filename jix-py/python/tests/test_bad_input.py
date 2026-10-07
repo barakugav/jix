@@ -47,15 +47,15 @@ def test_dtype_itemsize_too_large():
         jix.compact(np.zeros(2, dtype=dtype))
 
 
-def test_astype_dtype_itemsize_too_large():
+def test_cast_dtype_itemsize_too_large():
     dtype = np.dtype([("a", "i4", (20000,))])
     with pytest.raises(ValueError, match="itemsize"):
-        jix.astype(_array(), dtype)
+        jix.cast(_array(), dtype)
 
 
-def test_astype_none():
+def test_cast_none():
     with pytest.raises(TypeError, match="None"):
-        jix.astype(_array(), None)
+        jix.cast(_array(), None)
 
 
 # ---------------------------------------------------------------------------

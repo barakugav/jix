@@ -14,7 +14,7 @@ use crate::Array;
 ///
 /// This function deviates from numpy in a few ways:
 /// - `x` and `y` must have the same dtype (numpy will upcast if they differ)
-/// - `condition` must already have `bool` dtype; use [`jix.astype(condition, 'bool')`][jix.astype] if needed
+/// - `condition` must already have `bool` dtype; use [`jix.cast(condition, 'bool')`][jix.cast] if needed
 ///   (numpy implicitly casts the condition to bool)
 ///
 /// The result is a lazy view; no computation occurs until the array is read.

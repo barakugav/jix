@@ -78,15 +78,15 @@ use crate::dtype::{dtype_from_numpy, numpy_descr_from_any};
 ///     import numpy as np
 ///
 ///     a = jix.compact([1, 2, 3, 4], dtype=np.int32)
-///     result = jix.astype(a, np.float64)
+///     result = jix.cast(a, np.float64)
 ///     assert np.array_equal(result.numpy(), [1.0, 2.0, 3.0, 4.0])
 ///
 ///     # Zero -> False, non-zero -> True
 ///     b = jix.compact([0, 1, -2, 0], dtype=np.int32)
-///     result = jix.astype(b, bool)
+///     result = jix.cast(b, bool)
 ///     assert np.array_equal(result.numpy(), [False, True, True, False])
 ///     ```
-pub fn astype<'py>(
+pub fn cast<'py>(
     array: &Bound<'py, PyAny>,
     dtype: &Bound<'_, PyAny>,
 ) -> PyResult<Bound<'py, Array>> {
@@ -95,7 +95,7 @@ pub fn astype<'py>(
     let np_dtype = &numpy_descr_from_any(dtype.py(), dtype)?;
     let dtype = dtype_from_numpy(np_dtype)?;
 
-    let array = astype_impl(array.clone(), &dtype)?;
+    let array = cast_impl(array.clone(), &dtype)?;
 
     Bound::new(
         py_arr.py(),
@@ -103,14 +103,14 @@ pub fn astype<'py>(
     )
 }
 #[inline(never)]
-pub(crate) fn astype_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
+pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
     if array.dtype() == dtype {
         return Ok(array); // no-op, same dtype
     }
     if let Some((src, dst)) = array.dtype().try_to_scalar().zip(dtype.try_to_scalar()) {
         use jix_core::scalar::{f16, Complex};
 
-        macro_rules! cast_impl {
+        macro_rules! cast_typed {
             ($src_type:ty, $dst_type:ty) => {{
                 let array = array.into_typed::<$src_type>().unwrap();
                 let array = array.cast::<$dst_type>();
@@ -120,20 +120,20 @@ pub(crate) fn astype_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> 
         macro_rules! cast_num {
             ($src_type:ty) => {
                 match dst {
-                    ScalarKind::I8 => cast_impl!($src_type, i8),
-                    ScalarKind::I16 => cast_impl!($src_type, i16),
-                    ScalarKind::I32 => cast_impl!($src_type, i32),
-                    ScalarKind::I64 => cast_impl!($src_type, i64),
-                    ScalarKind::U8 => cast_impl!($src_type, u8),
-                    ScalarKind::U16 => cast_impl!($src_type, u16),
-                    ScalarKind::U32 => cast_impl!($src_type, u32),
-                    ScalarKind::U64 => cast_impl!($src_type, u64),
-                    ScalarKind::F16 => cast_impl!($src_type, f16),
-                    ScalarKind::F32 => cast_impl!($src_type, f32),
-                    ScalarKind::F64 => cast_impl!($src_type, f64),
-                    ScalarKind::ComplexF32 => cast_impl!($src_type, Complex<f32>),
-                    ScalarKind::ComplexF64 => cast_impl!($src_type, Complex<f64>),
-                    ScalarKind::Bool => cast_impl!($src_type, bool),
+                    ScalarKind::I8 => cast_typed!($src_type, i8),
+                    ScalarKind::I16 => cast_typed!($src_type, i16),
+                    ScalarKind::I32 => cast_typed!($src_type, i32),
+                    ScalarKind::I64 => cast_typed!($src_type, i64),
+                    ScalarKind::U8 => cast_typed!($src_type, u8),
+                    ScalarKind::U16 => cast_typed!($src_type, u16),
+                    ScalarKind::U32 => cast_typed!($src_type, u32),
+                    ScalarKind::U64 => cast_typed!($src_type, u64),
+                    ScalarKind::F16 => cast_typed!($src_type, f16),
+                    ScalarKind::F32 => cast_typed!($src_type, f32),
+                    ScalarKind::F64 => cast_typed!($src_type, f64),
+                    ScalarKind::ComplexF32 => cast_typed!($src_type, Complex<f32>),
+                    ScalarKind::ComplexF64 => cast_typed!($src_type, Complex<f64>),
+                    ScalarKind::Bool => cast_typed!($src_type, bool),
                 }
             };
         }
@@ -151,9 +151,9 @@ pub(crate) fn astype_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> 
                     ScalarKind::F16 => {}
                     ScalarKind::F32 => {}
                     ScalarKind::F64 => {}
-                    ScalarKind::ComplexF32 => cast_impl!($src_type, Complex<f32>),
-                    ScalarKind::ComplexF64 => cast_impl!($src_type, Complex<f64>),
-                    ScalarKind::Bool => cast_impl!($src_type, bool),
+                    ScalarKind::ComplexF32 => cast_typed!($src_type, Complex<f32>),
+                    ScalarKind::ComplexF64 => cast_typed!($src_type, Complex<f64>),
+                    ScalarKind::Bool => cast_typed!($src_type, bool),
                 }
             };
         }

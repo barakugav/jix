@@ -5,7 +5,7 @@ use pyo3_stub_gen::derive::gen_stub_pyfunction;
 
 use crate::array::{resolve_array_params, Array};
 use crate::dtype::{dtype_from_numpy, numpy_descr_from_any};
-use crate::ops::astype_impl;
+use crate::ops::cast_impl;
 use crate::ops::common::Operand;
 
 /// Convert any array-like object to a [`jix.Array`][jix.Array].
@@ -24,7 +24,7 @@ use crate::ops::common::Operand;
 ///     dtype: Optional dtype to cast the array to. Accepts a numpy dtype object, a dtype string
 ///         (e.g. `'float32'`), or a Python type like `np.float32` - anything `numpy.dtype()`
 ///         accepts. When omitted, the input dtype is preserved. The cast is a lazy view, so no
-///         computation happens until the result is read (see [`jix.astype()`][jix.astype]).
+///         computation happens until the result is read (see [`jix.cast()`][jix.cast]).
 ///     params: Block layout and codec configuration. See [`jix.compact()`][jix.compact] for
 ///         details. The returned array is never compressed, so these mostly affect only arrays
 ///         later created from it (e.g. via `compact()` or `write_array()`), which inherit them.
@@ -64,7 +64,7 @@ pub fn asarray<'py>(
     if let Some(dtype) = dtype {
         let np_dtype = &numpy_descr_from_any(py, dtype)?;
         let dtype = dtype_from_numpy(np_dtype)?;
-        let array = astype_impl(py_arr.get().arr.clone(), &dtype)?;
+        let array = cast_impl(py_arr.get().arr.clone(), &dtype)?;
         py_arr = Bound::new(
             py,
             Array::from_core_with_np_dtype(array, np_dtype.clone().unbind()),

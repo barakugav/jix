@@ -9,7 +9,7 @@ use jix_core::scalar::{f16, Complex};
 use jix_core::{Array as CoreArray, ArrayAny, ArrayParams};
 
 use crate::dtype::dtype_from_numpy;
-use crate::ops::astype_impl;
+use crate::ops::cast_impl;
 use crate::ops::common::{Precision, Rank};
 use crate::util::{check_ndim, DimArray, IntoPyResult};
 use crate::Array;
@@ -224,7 +224,7 @@ impl Operand {
         }
 
         let array = self.into_array()?;
-        Ok(Self::Array(astype_impl(array, &Dtype::new_scalar(kind))?))
+        Ok(Self::Array(cast_impl(array, &Dtype::new_scalar(kind))?))
     }
 
     pub(crate) fn into_array(self) -> PyResult<ArrayAny> {
