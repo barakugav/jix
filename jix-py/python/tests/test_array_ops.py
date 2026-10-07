@@ -156,6 +156,35 @@ def test_plain_materializes_to_equal_array():
 
 
 # ---------------------------------------------------------------------------
+# item
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "data, expected_type",
+    [
+        (np.array([[1, 2], [3, 4]], dtype=np.int32), int),
+        (np.array([1.5, 2.25], dtype=np.float64), float),
+        (np.array([1 + 2j, 3 - 1j], dtype=np.complex64), complex),
+    ],
+)
+def test_item_of_full_reduction(data, expected_type):
+    result = jix.sum(jix.compact(data)).item()
+    assert type(result) is expected_type
+    assert result == data.sum().item()
+
+
+def test_item_bool():
+    assert jix.all(jix.compact(np.array([True, False]))).item() is False
+
+
+@pytest.mark.parametrize("shape", [(1,), (2, 3)])
+def test_item_requires_zero_dim(shape):
+    with pytest.raises(ValueError, match="zero-dimensional"):
+        jix.compact(np.zeros(shape)).item()
+
+
+# ---------------------------------------------------------------------------
 # flatten
 # ---------------------------------------------------------------------------
 
