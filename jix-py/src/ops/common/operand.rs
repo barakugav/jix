@@ -1,5 +1,5 @@
 use numpy::{PyUntypedArray, PyUntypedArrayMethods};
-use pyo3::exceptions::{PyOverflowError, PyTypeError};
+use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
@@ -174,7 +174,7 @@ impl Operand {
             .iter()
             .map(|&s| {
                 usize::try_from(s)
-                    .map_err(|_| PyOverflowError::new_err("Negative strides are not supported"))
+                    .map_err(|_| PyValueError::new_err("Negative strides are not supported"))
             })
             .collect::<PyResult<DimArray<_>>>()?;
         let data_ptr = {
