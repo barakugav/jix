@@ -369,6 +369,31 @@ impl Array {
         Ok(*len as usize)
     }
 
+    /// Always raises: an array has no single truth value.
+    ///
+    /// Without this, Python would fall back to `len()` and treat every non-empty array as true,
+    /// so `if a == b:` would silently pass. Reduce explicitly instead, with
+    /// [`any()`][jix.Array.any] or [`all()`][jix.Array.all], and turn a zero-dimensional result
+    /// into a Python `bool` with [`item()`][jix.Array.item].
+    ///
+    /// Raises:
+    ///     ValueError: Always.
+    ///
+    /// ```python
+    /// import jix
+    ///
+    /// a = jix.compact([1, 2, 3])
+    /// b = jix.compact([1, 2, 4])
+    /// assert not (a == b).all().item()
+    /// assert (a == b).any().item()
+    /// ```
+    pub fn __bool__(&self) -> PyResult<bool> {
+        Err(PyValueError::new_err(
+            "the truth value of a jix.Array is ambiguous; use .any() or .all(), \
+             and .item() to get a Python bool from a zero-dimensional result",
+        ))
+    }
+
     /// The data type of the array elements, as a NumPy dtype object.
     ///
     /// Returns:

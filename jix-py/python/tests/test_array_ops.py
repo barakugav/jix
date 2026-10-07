@@ -185,6 +185,28 @@ def test_item_requires_zero_dim(shape):
 
 
 # ---------------------------------------------------------------------------
+# __bool__
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("shape", [(), (1,), (3,), (2, 3), (0,)])
+def test_bool_always_raises(shape):
+    za = jix.compact(np.ones(shape, dtype=np.int32))
+    with pytest.raises(ValueError, match="truth value"):
+        bool(za)
+
+
+def test_bool_of_comparison_raises():
+    a = jix.compact(np.array([1, 2, 3]))
+    b = jix.compact(np.array([1, 2, 4]))
+    with pytest.raises(ValueError, match="truth value"):
+        if a == b:
+            pass
+    assert not (a == b).all().item()
+    assert (a == b).any().item()
+
+
+# ---------------------------------------------------------------------------
 # flatten
 # ---------------------------------------------------------------------------
 
