@@ -945,8 +945,7 @@ mod tests {
         to_cache.insert(storage.0.id);
         let to_cache = Some(Arc::new(to_cache));
 
-        {
-            let _read = ctx.top_level_read(to_cache);
+        ctx.top_level_read(to_cache, || {
             let a = storage.read_data(&[4..20], &ctx, None).unwrap();
             let b = storage.read_data(&[4..20], &ctx, None).unwrap();
             assert_eq!(
@@ -960,7 +959,7 @@ mod tests {
             assert_eq!(read_i32s(&a, 16), (4..20).collect::<Vec<_>>());
             assert_eq!(read_i32s(&b, 16), (4..20).collect::<Vec<_>>());
             assert_eq!(read_i32s(&c, 16), (20..36).collect::<Vec<_>>());
-        }
+        });
 
         // Outside of a top level read nothing is cached.
         let a = storage.read_data(&[4..20], &ctx, None).unwrap();
