@@ -1046,6 +1046,16 @@ impl Array {
         crate::ops::bitwise_left_shift(other, slf)
     }
 
+    /// Element-wise right shift (`a >> b`). See [`jix.bitwise_right_shift()`][jix.bitwise_right_shift].
+    pub fn __rshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_right_shift(slf, other)
+    }
+
+    /// Element-wise right shift (`a >> b`). See [`jix.bitwise_right_shift()`][jix.bitwise_right_shift].
+    pub fn __rrshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_right_shift(other, slf)
+    }
+
     // == comparison ops ==
 
     /// Element-wise less-than test (`a < b`). See [`jix.less()`][jix.less].

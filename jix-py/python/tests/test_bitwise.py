@@ -274,6 +274,16 @@ def test_bitwise_right_shift_concrete():
     check_op2_concrete(jix.bitwise_right_shift, lambda a, b: a >> b, cases)
 
 
+def test_shift_operators():
+    a = np.array([-8, 8, 16], dtype=np.int32)
+    b = np.array([1, 2, 3], dtype=np.int32)
+    za, zb = jix.compact(a), jix.compact(b)
+    np.testing.assert_array_equal((za >> zb).numpy(), a >> b)
+    np.testing.assert_array_equal((za >> np.int32(1)).numpy(), a >> 1)
+    np.testing.assert_array_equal((np.int32(64) >> zb).numpy(), 64 >> b)  # __rrshift__
+    np.testing.assert_array_equal((za << zb).numpy(), a << b)
+
+
 # rotate ops: LHS is any integer dtype; RHS (rotation amount) is always u32.
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
