@@ -6,7 +6,7 @@ Python-specific coverage beyond the Rust tests:
   - negative dim values (e.g. dim=-1 for last dim)
   - list and tuple dim inputs for multi-dim reductions
   - dim=None (reduce all dims)
-  - keepdims=True / False
+  - keepdim=True / False
   - dtype promotion parity with numpy for sum/product/mean/var/std (the output dtype of
     each reduction must match numpy exactly; see test_output_dtype_matches_numpy)
 """
@@ -84,7 +84,7 @@ def _dims_strategy(draw, ndim):
 
 @st.composite
 def _carray_reduction(draw, dtype, element_st, shape_st=None):
-    """Yields (np_array, jix_array, dim, keepdims)."""
+    """Yields (np_array, jix_array, dim, keepdim)."""
     shape = tuple(draw(shape_st or _reduction_shape_strategy()))
     ndim = len(shape)
     np_a = draw(np_arrays(dtype=dtype, shape=shape, elements=element_st))
@@ -93,8 +93,8 @@ def _carray_reduction(draw, dtype, element_st, shape_st=None):
     block_shape = [min(b, max(s, 1)) for b, s in zip(block_shape, shape)]
     za = jix.compact(np_a, params={"block_shape": block_shape})
     dim = draw(_dims_strategy(ndim))
-    keepdims = draw(st.booleans())
-    return np_a, za, dim, keepdims
+    keepdim = draw(st.booleans())
+    return np_a, za, dim, keepdim
 
 
 # ---------------------------------------------------------------------------
@@ -118,12 +118,12 @@ def _out_dtype(dtype):
     return np.float64
 
 
-def _sum_ref(np_a, dim, keepdims, dtype):
-    return np.sum(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdims)
+def _sum_ref(np_a, dim, keepdim, dtype):
+    return np.sum(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdim)
 
 
-def _prod_ref(np_a, dim, keepdims, dtype):
-    return np.prod(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdims)
+def _prod_ref(np_a, dim, keepdim, dtype):
+    return np.prod(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdim)
 
 
 def _element_st(dtype):
@@ -155,10 +155,10 @@ _WIDE_FLOATS = [np.float32, np.float64]
 @pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
 @given(st.data())
 def test_max(dtype: np.dtype, data: DataObject):
-    np_a, za, dim, keepdims = data.draw(_carray_reduction(dtype, _element_st(dtype)), label="array")
+    np_a, za, dim, keepdim = data.draw(_carray_reduction(dtype, _element_st(dtype)), label="array")
     assert_array_matches(
-        jix.max(za, dim=dim, keepdims=keepdims),
-        np.max(np_a, axis=_np_dim(dim), keepdims=keepdims),
+        jix.max(za, dim=dim, keepdim=keepdim),
+        np.max(np_a, axis=_np_dim(dim), keepdims=keepdim),
         data=data,
     )
 
@@ -277,10 +277,10 @@ def test_argmin_concrete():
 @pytest.mark.parametrize("dtype", ints + uints + _WIDE_FLOATS + complexes + [np.bool_])
 @given(st.data())
 def test_sum(dtype: np.dtype, data: DataObject):
-    np_a, za, dim, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
-    result = jix.sum(za, dim=dim, keepdims=keepdims)
+    np_a, za, dim, keepdim = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
+    result = jix.sum(za, dim=dim, keepdim=keepdim)
     rtol = 0.0 if np.issubdtype(dtype, np.integer) else 1e-3
-    assert_array_matches(result, _sum_ref(np_a, dim, keepdims, dtype), data=data, rtol=rtol)
+    assert_array_matches(result, _sum_ref(np_a, dim, keepdim, dtype), data=data, rtol=rtol)
 
 
 # ---------------------------------------------------------------------------
@@ -318,10 +318,10 @@ def test_product_concrete():
 @pytest.mark.parametrize("dtype", ints + uints + _WIDE_FLOATS + complexes + [np.bool_])
 @given(st.data())
 def test_mean(dtype: np.dtype, data: DataObject):
-    np_a, za, dim, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
+    np_a, za, dim, keepdim = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
     assert_array_matches(
-        jix.mean(za, dim=dim, keepdims=keepdims),
-        np.mean(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdims),
+        jix.mean(za, dim=dim, keepdim=keepdim),
+        np.mean(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdim),
         data=data,
         rtol=1e-3,
     )
@@ -437,16 +437,16 @@ def test_dim_list_and_tuple():
     np.testing.assert_array_equal(jix.max(za, dim=(1, 2)).numpy(), d.max(axis=(1, 2)))
 
 
-def test_keepdims():
-    """keepdims=True preserves the reduced dim as size 1."""
+def test_keepdim():
+    """keepdim=True preserves the reduced dim as size 1."""
     d = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     za = jix.compact(d)
 
-    result = jix.sum(za, dim=0, keepdims=True)
+    result = jix.sum(za, dim=0, keepdim=True)
     assert result.shape == (1, 3)
     np.testing.assert_array_equal(result.numpy(), [[5, 7, 9]])
 
-    result = jix.sum(za, dim=None, keepdims=True)
+    result = jix.sum(za, dim=None, keepdim=True)
     assert result.shape == (1, 1)
     assert result.numpy()[(0, 0)] == 21
 
@@ -534,16 +534,16 @@ def _dtype_sample(dtype: np.dtype) -> np.ndarray:
     _DTYPE_MATCH_CASES,
     ids=[f"{f}-{np.dtype(d).name}" for f, d in _DTYPE_MATCH_CASES],
 )
-@pytest.mark.parametrize("dim,keepdims", [(None, False), (None, True), (0, True), (1, False)])
-def test_output_dtype_matches_numpy(func_name: str, dtype: np.dtype, dim, keepdims: bool):
+@pytest.mark.parametrize("dim,keepdim", [(None, False), (None, True), (0, True), (1, False)])
+def test_output_dtype_matches_numpy(func_name: str, dtype: np.dtype, dim, keepdim: bool):
     """jix's reduction output dtype matches numpy exactly across all code paths."""
     jix_fn, np_fn = _REDUCE_FN[func_name]
     np_a = _dtype_sample(dtype)
     za = jix.compact(np_a)
-    jix_out = jix_fn(za, dim=dim, keepdims=keepdims)
-    np_out = np_fn(np_a, axis=dim, keepdims=keepdims)
+    jix_out = jix_fn(za, dim=dim, keepdim=keepdim)
+    np_out = np_fn(np_a, axis=dim, keepdims=keepdim)
     assert jix_out.dtype == np_out.dtype, (
-        f"{func_name}({np.dtype(dtype).name}) dim={dim} keepdims={keepdims}: "
+        f"{func_name}({np.dtype(dtype).name}) dim={dim} keepdim={keepdim}: "
         f"jix -> {jix_out.dtype}, numpy -> {np_out.dtype}"
     )
 
