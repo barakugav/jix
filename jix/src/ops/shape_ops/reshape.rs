@@ -1,5 +1,5 @@
 use crate::ops::prelude::*;
-use crate::{Dim, IntoDimension};
+use crate::IntoDimension;
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
 ///
@@ -364,44 +364,42 @@ where
             None => 0,
         });
 
-        // Walk the dims that DO NOT match any original dim. Matched orig dims forward the requested
-        // range verbatim; the unmatched ones are rewritten on every step of the walk.
-        let mut read_range = dim_arr(orig_ndim, |dim| match same_logical_stride_inv[dim] {
-            Some(new_dim) => index[new_dim as usize].clone(),
-            None => 0..1,
+        // We use an nd-iter over the dims that DO NOT match any original dim.
+        let iteration_shape = D::vec(ndim, |dim| {
+            if same_logical_stride[dim].is_some() {
+                1
+            } else {
+                index[dim].end - index[dim].start
+            }
         });
-        let unmatched = || (0..ndim).filter(|&dim| same_logical_stride[dim].is_none());
-        let walk = ReshapeWalk {
-            len: unmatched()
-                .map(|dim| index[dim].end - index[dim].start)
-                .collect(),
-            flat_strides: unmatched().map(|dim| new_logical_strides[dim]).collect(),
-            out_strides: unmatched().map(|dim| out_strides[dim]).collect(),
-            flat_begin: unmatched()
-                .map(|dim| index[dim].start * new_logical_strides[dim])
-                .sum(),
-            orig_dims: (0..orig_ndim)
-                .filter(|&dim| same_logical_stride_inv[dim].is_none())
-                .map(|dim| (dim as DimIdx, orig_logical_strides[dim], orig_shape[dim]))
-                .collect(),
-        };
-        // The walk is monomorphized over the number of unmatched dims only, and reads the inner
-        // array through a `&dyn ArrayStorage`, so it is instantiated a fixed number of times for
-        // the whole program rather than once per storage type.
-        let walk_fn = match walk.len.len() {
-            1 => reshape_walk::<Dim<1>>,
-            2 => reshape_walk::<Dim<2>>,
-            3 => reshape_walk::<Dim<3>>,
-            _ => reshape_walk::<DimDyn>,
-        };
-        walk_fn(
-            &self.array,
-            &walk,
-            &mut read_range,
-            orig_strides.as_ref(),
-            out_buf,
-            context,
-        )?;
+        let iter = NdIter::builder(iteration_shape).build();
+        for (idx, ()) in iter {
+            let read_range = S::Dimension::vec(orig_ndim, |dim| {
+                if let Some(new_dim) = same_logical_stride_inv[dim] {
+                    debug_assert_eq!(idx[new_dim as usize], 0);
+                    index[new_dim as usize].clone()
+                } else {
+                    let flat: u64 = (0..ndim)
+                        .filter(|&dim| same_logical_stride[dim].is_none())
+                        .map(|dim| (index[dim].start + idx[dim]) * new_logical_strides[dim])
+                        .sum();
+                    let orig_coord = (flat / orig_logical_strides[dim]) % orig_shape[dim];
+                    orig_coord..(orig_coord + 1)
+                }
+            });
+
+            // Read this matched-dims block straight into `buf` at the unmatched dims' byte offset;
+            // the strided destination places each element at its C-order position in `dst`.
+            let dst_byte_offset: usize = (0..ndim)
+                .filter(|&dim| same_logical_stride[dim].is_none())
+                .map(|dim| idx[dim] as usize * out_strides[dim])
+                .sum();
+            let mut sub = unsafe {
+                StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], orig_strides.as_ref())
+            };
+            self.array
+                .read_data(read_range.as_ref(), context, Some(&mut sub))?;
+        }
 
         Ok(out)
     }
@@ -451,52 +449,6 @@ where
             spec: self.spec,
         })
     }
-}
-
-/// The dims of a reshape read that do not line up with any original dim, walked one position
-/// at a time by [`reshape_walk`].
-struct ReshapeWalk {
-    /// Requested length of each unmatched new dim.
-    len: DimArray<u64>,
-    /// Logical (element) stride of each unmatched new dim in the new shape.
-    flat_strides: DimArray<u64>,
-    /// Destination byte stride of each unmatched new dim.
-    out_strides: DimArray<usize>,
-    /// Flat (C-order) element index of the walk's first position, from the unmatched dims.
-    flat_begin: u64,
-    /// Each unmatched original dim as `(axis, logical stride, length)`.
-    orig_dims: DimArray<(DimIdx, u64, u64)>,
-}
-
-/// For every position of the unmatched new dims, decompose its flat index into the unmatched
-/// original coordinates and read the matched-dims block straight into `out_buf` at that position's
-/// byte offset; the strided destination places each element at its C-order position.
-///
-/// `WalkD` must have `walk.len.len()` dims.
-#[inline(never)]
-fn reshape_walk<WalkD: Dimension>(
-    inner: &dyn ArrayStorage,
-    walk: &ReshapeWalk,
-    read_range: &mut [Range<u64>],
-    inner_strides: &[usize],
-    out_buf: &mut [u8],
-    context: &ReadContext,
-) -> Result<()> {
-    let n = walk.len.len();
-    let iter = NdIter::builder(WalkD::vec(n, |k| walk.len[k]))
-        .with_strides_offset_ext(WalkD::vec(n, |k| walk.flat_strides[k]), walk.flat_begin)
-        .with_strides_offset_ext(WalkD::vec(n, |k| walk.out_strides[k]), 0usize)
-        .build();
-    for (_, (flat, dst_byte_offset)) in iter {
-        for &(dim, logical_stride, len) in walk.orig_dims.iter() {
-            let orig_coord = (flat / logical_stride) % len;
-            read_range[dim as usize] = orig_coord..(orig_coord + 1);
-        }
-        let mut sub =
-            unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], inner_strides) };
-        inner.read_data(read_range, context, Some(&mut sub))?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
