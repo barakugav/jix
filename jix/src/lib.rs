@@ -84,7 +84,7 @@
 //!   jix offers little over hand-written iterator code.
 //!   The advantage shows up once the pipeline includes
 //!   operations that change the shape or the access pattern - reductions, broadcasts,
-//!   axis permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on.
+//!   dim permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on.
 //!   These are awkward or impractical to express as plain iterator chains,
 //!   especially when combined with element-wise operations.
 //!   Jix composes element-wise and shape-changing operations uniformly in the same operation chain,
@@ -104,8 +104,8 @@
 //! Array<Compact>
 //!   .neg()                 -> Array<Neg<Compact>>
 //!   .reshape(...)          -> Array<Reshape<Neg<Compact>>>
-//!   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
-//!   .add(other)            -> Array<Add<PermuteAxes<...>, Compact>>
+//!   .permute_dims(&[1, 0]) -> Array<PermuteDims<Reshape<...>>>
+//!   .add(other)            -> Array<Add<PermuteDims<...>, Compact>>
 //!   .sum(0).               -> Array<Sum<Add<...>>>
 //!   .compact()?            -> Array<Compact>  - materialize
 //! ```
@@ -143,8 +143,8 @@
 //!
 //! **Reductions** - `sum`, `mean`, `min`, `max`, `argmin`, `argmax`, `any`, `all`, ...
 //!
-//! **Shape operations** - `reshape`, `slice`, `permute_axes`, `broadcast`,
-//! `insert_axis`, `remove_axis`, `concatenate`, `stack`
+//! **Shape operations** - `reshape`, `slice`, `permute_dims`, `broadcast`,
+//! `insert_dim`, `remove_dim`, `concatenate`, `stack`
 //!
 //! **Type cast** - `cast::<T>()` converts each element to T.
 //!
@@ -217,8 +217,8 @@
 //! # Dimension types
 //!
 //! Every [`ArrayStorage`] carries an associated `type Dimension:
-//! Dimension` that records the number of axes at the type level. When the ndim is known
-//! statically, it is [`Dim<N>`]: the const generic `N` is the axis count and is visible to the
+//! Dimension` that records the number of dims at the type level. When the ndim is known
+//! statically, it is [`Dim<N>`]: the const generic `N` is the dim count and is visible to the
 //! compiler. When the ndim is only known at runtime (e.g. arrays loaded from files), it is
 //! [`DimDyn`]: a stack-allocated array of sizes with capacity [`NDIM_MAX`].
 //! The dimension type propagates through every shape-changing operation automatically.
@@ -283,7 +283,7 @@
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
-//! Shape-changing operations (`reshape`, `permute_axes`, `broadcast`) remap how output indices
+//! Shape-changing operations (`reshape`, `permute_dims`, `broadcast`) remap how output indices
 //! translate to positions in the underlying blocks. When the new layout crosses block boundaries
 //! that the original layout respected, a single read may decompress many more blocks than
 //! needed.
@@ -303,7 +303,7 @@
 //! let mut out_params = ArrayParams::new();
 //! out_params.block_shape(&[128, 128]);
 //! let ctx = a.read_ctx();
-//! let transposed = a.permute_axes(&[1, 0]).compact_with(out_params, &ctx)?;
+//! let transposed = a.permute_dims(&[1, 0]).compact_with(out_params, &ctx)?;
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!

@@ -1,20 +1,20 @@
 use crate::ops::prelude::*;
 
-/// Reverses the order of elements along one or more axes, returned by
+/// Reverses the order of elements along one or more dims, returned by
 /// [`Array::flip`](crate::Array::flip).
 ///
-/// Output shape and dtype equal the input. Axes not listed in `axes` are passed through
-/// unchanged. `axes` may be empty (no-op), and axes of size 0 or 1 do not require any
+/// Output shape and dtype equal the input. Dims not listed in `dims` are passed through
+/// unchanged. `dims` may be empty (no-op), and dims of size 0 or 1 do not require any
 /// data motion.
 ///
-/// See also [`Roll`](crate::ops::Roll), which cyclically shifts elements along an axis
+/// See also [`Roll`](crate::ops::Roll), which cyclically shifts elements along a dim
 /// without reversing them.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples
 ///
-/// `axis` accepts any [`AxesArg`]: a single `usize`, a fixed-size array `[usize; N]`,
+/// `dim` accepts any [`DimsArg`]: a single `usize`, a fixed-size array `[usize; N]`,
 /// a tuple `(usize, ...)`, a `Vec<usize>`, or a slice `&[usize]`.
 ///
 /// ```
@@ -22,11 +22,11 @@ use crate::ops::prelude::*;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?;
-/// // Flip along axis 0 reverses the row order (single axis: pass a usize)
+/// // Flip along dim 0 reverses the row order (single dim: pass a usize)
 /// assert_eq!(a.view().flip(0).to_ndarray()?, array![[4, 5, 6], [1, 2, 3]]);
-/// // Flip along axis 1 reverses each row
+/// // Flip along dim 1 reverses each row
 /// assert_eq!(a.view().flip(1).to_ndarray()?, array![[3, 2, 1], [6, 5, 4]]);
-/// // Flip along both axes (multiple axes: pass an array or tuple)
+/// // Flip along both dims (multiple dims: pass an array or tuple)
 /// assert_eq!(a.flip([0, 1]).to_ndarray()?, array![[6, 5, 4], [3, 2, 1]]);
 /// # Ok::<(), jix::Error>(())
 /// ```
@@ -37,22 +37,22 @@ pub struct Flip<S: ArrayStorage> {
 
 impl<S: ArrayStorage> Flip<S> {
     /// Constructs a [`Flip`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: S, axis: impl AxesArg) -> Result<Self> {
+    pub fn new(array: S, dim: impl DimsArg) -> Result<Self> {
         let input_shape = array.shape();
         let ndim = input_shape.len();
 
         let mut is_flipped = S::Dimension::vec(ndim, |_| false);
-        for i in 0..axis.len() {
-            let ax = axis.get(i);
+        for i in 0..dim.len() {
+            let ax = dim.get(i);
             ensure!(
                 ax < ndim,
                 InvalidShapeOperation,
-                "flip axis {ax} is out of bounds for array with ndim {ndim}"
+                "flip dim {ax} is out of bounds for array with ndim {ndim}"
             );
             ensure!(
                 !is_flipped[ax],
                 InvalidShapeOperation,
-                "duplicate axis {ax} in flip"
+                "duplicate dim {ax} in flip"
             );
             is_flipped[ax] = true;
         }
@@ -60,8 +60,8 @@ impl<S: ArrayStorage> Flip<S> {
     }
 
     /// Constructs an array with [`Flip`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array(array: Array<S>, axis: impl AxesArg) -> Result<Array<Self>> {
-        Self::new(array.into_storage(), axis).map(Array::from_storage)
+    pub fn new_array(array: Array<S>, dim: impl DimsArg) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), dim).map(Array::from_storage)
     }
 }
 
@@ -83,8 +83,8 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
 
         let shape = self.shape();
-        // For each flipped axis d with requested output range [s, e), the inner range is
-        // [shape[d]-e, shape[d]-s) (same length, reversed position). Non-flipped axes pass through.
+        // For each flipped dim d with requested output range [s, e), the inner range is
+        // [shape[d]-e, shape[d]-s) (same length, reversed position). Non-flipped dims pass through.
         let inner_index = S::Dimension::vec(ndim, |d| {
             if self.is_flipped[d] {
                 (shape[d] - index[d].end)..(shape[d] - index[d].start)
@@ -109,7 +109,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         let (out_buf, out_strides) = out.data_mut();
 
         // Iterate one slab at a time. Each slab is a single combination of indices on the
-        // flipped axes; non-flipped axes are copied contiguously via nd_copy per slab.
+        // flipped dims; non-flipped dims are copied contiguously via nd_copy per slab.
         let iter_shape = S::Dimension::vec(ndim, |d| {
             if self.is_flipped[d] {
                 out_shape[d] as u64
@@ -120,7 +120,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         let slab_shape =
             S::Dimension::vec(ndim, |d| if self.is_flipped[d] { 1 } else { out_shape[d] });
 
-        // Step src through the inner view on flipped axes; 0 on non-flipped (iter_shape=1 there).
+        // Step src through the inner view on flipped dims; 0 on non-flipped (iter_shape=1 there).
         let src_ptr_strides = S::Dimension::vec(ndim, |d| {
             if self.is_flipped[d] {
                 src_strides[d]
@@ -134,7 +134,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
             .build();
         let nd_copy = NdCopier::new(dtype);
         for (idx, src_off) in iter {
-            // The output position on a flipped axis mirrors the source position:
+            // The output position on a flipped dim mirrors the source position:
             // out_idx = L-1 - src_idx, placed at the destination's own strides.
             let dst_off = (0..ndim)
                 .filter(|&d| self.is_flipped[d])
@@ -227,12 +227,12 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn shape_preserved_single_axis() {
+    fn shape_preserved_single_dim() {
         assert_eq!(make(arange(12), &[3u64, 4]).flip(0).shape(), &[3, 4]);
     }
 
     #[test]
-    fn shape_preserved_all_axes() {
+    fn shape_preserved_all_dims() {
         assert_eq!(
             make(arange(24), &[2u64, 3, 4]).flip([0, 1, 2]).shape(),
             &[2, 3, 4]
@@ -240,12 +240,12 @@ mod tests {
     }
 
     #[test]
-    fn shape_preserved_empty_axes() {
+    fn shape_preserved_empty_dims() {
         assert_eq!(make(arange(12), &[3u64, 4]).flip([]).shape(), &[3, 4]);
     }
 
     // -----------------------------------------------------------------------
-    // AxesArg input forms
+    // DimsArg input forms
     // -----------------------------------------------------------------------
 
     #[test]
@@ -255,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn input_form_array_two_axes() {
+    fn input_form_array_two_dims() {
         let got = make(arange(6), &[3u64, 2])
             .flip([0, 1])
             .to_ndarray()
@@ -264,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn input_form_tuple_two_axes() {
+    fn input_form_tuple_two_dims() {
         let got = make(arange(6), &[3u64, 2])
             .flip((0, 1))
             .to_ndarray()
@@ -274,9 +274,9 @@ mod tests {
 
     #[test]
     fn input_form_slice_dynamic() {
-        let axes = vec![0, 1];
+        let dims = vec![0, 1];
         let got = make(arange(6), &[3u64, 2])
-            .flip(axes.as_slice())
+            .flip(dims.as_slice())
             .to_ndarray()
             .unwrap();
         assert_eq!(got, array![[5, 4], [3, 2], [1, 0]]);
@@ -287,33 +287,33 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn error_axis_out_of_bounds() {
+    fn error_dim_out_of_bounds() {
         let a = make(arange(12), &[3u64, 4]);
         let err = super::Flip::new_array(a.view(), 2).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
 
     #[test]
-    fn error_duplicate_axis() {
+    fn error_duplicate_dim() {
         let a = make(arange(12), &[3u64, 4]);
         let err = super::Flip::new_array(a.view(), [1, 1]).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
 
     // -----------------------------------------------------------------------
-    // Fast paths: identity (no axis with size > 1)
+    // Fast paths: identity (no dim with size > 1)
     // -----------------------------------------------------------------------
 
     #[test]
-    fn identity_empty_axes_full_read() {
+    fn identity_empty_dims_full_read() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
         let got = make(arange(12), &[3u64, 4]).flip([]).to_ndarray().unwrap();
         assert_eq!(got, nd);
     }
 
     #[test]
-    fn identity_size_one_flipped_axis() {
-        // Flipping a size-1 axis is a no-op.
+    fn identity_size_one_flipped_dim() {
+        // Flipping a size-1 dim is a no-op.
         let nd = ndarray::Array::from_shape_vec((1, 4), arange(4)).unwrap();
         let got = make(arange(4), &[1u64, 4]).flip([0]).to_ndarray().unwrap();
         assert_eq!(got, nd);
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn identity_empty_array() {
-        // Flipping an axis of size 0 is a no-op (no data to move).
+        // Flipping a dim of size 0 is a no-op (no data to move).
         let got = make(vec![], &[0u64, 4]).flip([0]).to_ndarray().unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
@@ -331,7 +331,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn full_read_1d_single_axis() {
+    fn full_read_1d_single_dim() {
         let got = make(vec![10, 20, 30, 40], &[4u64])
             .flip([0])
             .to_ndarray()
@@ -340,19 +340,19 @@ mod tests {
     }
 
     #[test]
-    fn full_read_2d_axis0() {
+    fn full_read_2d_dim0() {
         let got = make(arange(8), &[2u64, 4]).flip([0]).to_ndarray().unwrap();
         assert_eq!(got, array![[4, 5, 6, 7], [0, 1, 2, 3]]);
     }
 
     #[test]
-    fn full_read_2d_axis1() {
+    fn full_read_2d_dim1() {
         let got = make(arange(8), &[2u64, 4]).flip([1]).to_ndarray().unwrap();
         assert_eq!(got, array![[3, 2, 1, 0], [7, 6, 5, 4]]);
     }
 
     #[test]
-    fn full_read_2d_both_axes() {
+    fn full_read_2d_both_dims() {
         let got = make(arange(8), &[2u64, 4])
             .flip([0, 1])
             .to_ndarray()
@@ -361,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn full_read_3d_middle_axis() {
+    fn full_read_3d_middle_dim() {
         let arr = ndarray::Array::from_shape_vec((2, 3, 2), arange(12)).unwrap();
         // Expected: per (i, k), values along j are reversed.
         let mut expected = arr.clone();
@@ -394,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn sub_read_2d_axis0_partial_rows() {
+    fn sub_read_2d_dim0_partial_rows() {
         let got = make(arange(9), &[3u64, 3])
             .flip([0])
             .to_ndarray_sub(&[0..2, 0..3], &ReadContext::default())
@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn sub_read_2d_both_axes_corner() {
+    fn sub_read_2d_both_dims_corner() {
         let got = make(arange(12), &[3u64, 4])
             .flip([0, 1])
             .to_ndarray_sub(&[0..2, 1..3], &ReadContext::default())
@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn compose_permute_then_flip() {
         let got = make(arange(6), &[2u64, 3])
-            .permute_axes(&[1, 0])
+            .permute_dims(&[1, 0])
             .flip([0])
             .to_ndarray()
             .unwrap();
@@ -476,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn compose_flip_then_flip_same_axis_is_identity() {
+    fn compose_flip_then_flip_same_dim_is_identity() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
         let got = make(arange(12), &[3u64, 4])
             .flip([0])
@@ -507,15 +507,15 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Proptest: random shape + axes vs hand-rolled reference
+    // Proptest: random shape + dims vs hand-rolled reference
     // -----------------------------------------------------------------------
 
     fn flip_reference<T: Clone + Default>(
         nd: &ndarray::ArrayD<T>,
-        axes: &[usize],
+        dims: &[usize],
     ) -> ndarray::ArrayD<T> {
         let mut out = nd.clone();
-        for &ax in axes {
+        for &ax in dims {
             out.invert_axis(ndarray::Axis(ax));
         }
         // Materialize so the result has standard strides.
@@ -541,15 +541,15 @@ mod tests {
                 Just(shape.clone()),
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             );
-            // Random subset of axes 0..ndim
-            let axes_mask = proptest::collection::vec(any::<bool>(), ndim);
-            (array_strat, axes_mask).prop_map(|((nd, za), mask)| {
-                let axes = mask
+            // Random subset of dims 0..ndim
+            let dims_mask = proptest::collection::vec(any::<bool>(), ndim);
+            (array_strat, dims_mask).prop_map(|((nd, za), mask)| {
+                let dims = mask
                     .into_iter()
                     .enumerate()
                     .filter_map(|(i, b)| if b { Some(i) } else { None })
                     .collect();
-                (nd, za, axes)
+                (nd, za, dims)
             })
         })
     }
@@ -557,10 +557,10 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn proptest_flip_generic(
-            (nd, za, axes) in flip_strategy()
+            (nd, za, dims) in flip_strategy()
         ) {
-            let expected = flip_reference(&nd, &axes);
-            let actual = za.flip(&axes);
+            let expected = flip_reference(&nd, &dims);
+            let actual = za.flip(&dims);
             crate::util::assert_array_matches(&actual, &expected);
         }
     }

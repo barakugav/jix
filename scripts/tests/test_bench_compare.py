@@ -32,7 +32,7 @@ def test_load_rust_records(tmp_path):
 
 
 def test_load_rust_records_three_level_no_collapse(tmp_path):
-    # criterion nests some benches 3 levels deep: <group>/<dtype>/<axis>/new. Distinct groups
+    # criterion nests some benches 3 levels deep: <group>/<dtype>/<dim>/new. Distinct groups
     # must keep distinct keys (the old 2-level logic collapsed all sizes onto one key).
     _write_criterion(tmp_path, "sum compact [40000, 300]/i32", "all", 1000.0, [1.0, 1.1])
     _write_criterion(tmp_path, "sum compact [400000, 300]/i32", "all", 2000.0, [2.0, 2.1])

@@ -1,6 +1,6 @@
 use crate::ops::prelude::*;
 
-/// Replicates each element along an axis by a scalar count, returned by
+/// Replicates each element along a dim by a scalar count, returned by
 /// [`Array::repeat`](crate::Array::repeat).
 ///
 /// This differs from [`Tile`](crate::ops::Tile): `repeat` replicates each element in place
@@ -26,7 +26,7 @@ use crate::ops::prelude::*;
 /// ```
 pub struct Repeat<S: ArrayStorage> {
     array: S,
-    axis: DimIdx,
+    dim: DimIdx,
     repeats: u64,
     new_shape: S::Dimension,
     spec: ArraySpecDynamic,
@@ -34,7 +34,7 @@ pub struct Repeat<S: ArrayStorage> {
 
 impl<S: ArrayStorage> Repeat<S> {
     /// Constructs a [`Repeat`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: S, repeats: u64, axis: usize) -> Result<Self> {
+    pub fn new(array: S, repeats: u64, dim: usize) -> Result<Self> {
         let input_shape = array.shape();
         let ndim = input_shape.len();
 
@@ -42,25 +42,25 @@ impl<S: ArrayStorage> Repeat<S> {
             ndim < NDIM_MAX,
             InvalidShapeOperation,
             "repeat requires ndim < NDIM_MAX ({NDIM_MAX}); got {ndim} \
-             (one extra axis is used internally during reads)"
+             (one extra dim is used internally during reads)"
         );
         ensure!(
-            axis < ndim,
+            dim < ndim,
             InvalidShapeOperation,
-            "repeat axis {axis} is out of bounds for array with ndim {ndim}"
+            "repeat dim {dim} is out of bounds for array with ndim {ndim}"
         );
 
-        let new_len = input_shape[axis].checked_mul(repeats).ok_or_else(|| {
+        let new_len = input_shape[dim].checked_mul(repeats).ok_or_else(|| {
             error!(
                 InvalidShapeOperation,
-                "repeat overflow: shape[{axis}] ({}) * repeats ({}) exceeds u64",
-                input_shape[axis],
+                "repeat overflow: shape[{dim}] ({}) * repeats ({}) exceeds u64",
+                input_shape[dim],
                 repeats,
             )
         })?;
 
         let new_shape =
-            S::Dimension::from_fn(ndim, |d| if d == axis { new_len } else { input_shape[d] });
+            S::Dimension::from_fn(ndim, |d| if d == dim { new_len } else { input_shape[d] });
         check_shape_overflow(new_shape.as_slice(), array.dtype().itemsize() as _)?;
 
         let inner_spec = array.spec();
@@ -68,7 +68,7 @@ impl<S: ArrayStorage> Repeat<S> {
         // A repeat preserves whether the repeated dimension is fixed: a fixed block length is
         // scaled with the repeat count and stays fixed, a non-fixed one stays non-fixed.
         let block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
-        block_shape[axis] = block_shape[axis]
+        block_shape[dim] = block_shape[dim]
             .saturating_mul(repeats.min(BlockSize::MAX as u64) as BlockSize)
             .min(new_len.min(BlockSize::MAX as u64) as BlockSize)
             .max(1);
@@ -82,7 +82,7 @@ impl<S: ArrayStorage> Repeat<S> {
 
         Ok(Self {
             array,
-            axis: axis as DimIdx,
+            dim: dim as DimIdx,
             repeats,
             new_shape,
             spec,
@@ -90,8 +90,8 @@ impl<S: ArrayStorage> Repeat<S> {
     }
 
     /// Constructs an array with [`Repeat`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array(array: Array<S>, repeats: u64, axis: usize) -> Result<Array<Self>> {
-        Self::new(array.into_storage(), repeats, axis).map(Array::from_storage)
+    pub fn new_array(array: Array<S>, repeats: u64, dim: usize) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), repeats, dim).map(Array::from_storage)
     }
 }
 
@@ -123,14 +123,14 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             ));
         }
 
-        let k = self.axis as usize;
+        let k = self.dim as usize;
         let n = self.repeats; // n > 0
         let s = index[k].start;
         let e = index[k].end;
         let g_start = s / n;
         let g_end = calc_block_end(s, e, n);
 
-        // Read the inner sub-region with axis k collapsed to [g_start..g_end) as a view.
+        // Read the inner sub-region with dim k collapsed to [g_start..g_end) as a view.
         let inner_index = S::Dimension::vec(ndim, |d| {
             if d == k {
                 g_start..g_end
@@ -161,7 +161,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
                 return;
             }
 
-            // (ndim + 1)-D shape: original axes, but axis k is split into
+            // (ndim + 1)-D shape: original dims, but dim k is split into
             // (g_len, p_len) at positions k and k+1.
             let mut copy_shape = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
             copy_shape[..k].copy_from_slice(&out_shape[..k]);
@@ -170,20 +170,20 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             copy_shape[k + 2..].copy_from_slice(&out_shape[k + 1..]);
 
             // src strides: itemsize-strides over inner_shape, with the within-group
-            // (p) axis stride = 0 (the repeat trick).
+            // (p) dim stride = 0 (the repeat trick).
             let mut src_strides = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
             src_strides[..k + 1].copy_from_slice(&inner_strides[..k + 1]);
             src_strides[k + 1] = 0;
             src_strides[k + 2..].copy_from_slice(&inner_strides[k + 1..]);
 
-            // dst strides: from `dst_strides`, with axis k split into
+            // dst strides: from `dst_strides`, with dim k split into
             // (n * dst_strides[k], dst_strides[k]).
             let mut dst_strides_split = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
             dst_strides_split[..k].copy_from_slice(&out_strides[..k]);
             dst_strides_split[k] = out_strides[k] * n as usize;
             dst_strides_split[k + 1..].copy_from_slice(&out_strides[k..]);
 
-            // src slice: tmp_buf from (g_range.start) along the inner k axis to its end.
+            // src slice: tmp_buf from (g_range.start) along the inner k dim to its end.
             let src_byte_offset = (g_range.start as usize) * inner_strides[k];
             let src = unsafe { inner_buf.get_unchecked(src_byte_offset..) };
 
@@ -268,7 +268,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
         Ok(Repeat {
             array: self.array.dimension_change()?,
-            axis: self.axis,
+            dim: self.dim,
             repeats: self.repeats,
             new_shape,
             spec: self.spec,
@@ -282,7 +282,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
     ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
         Ok(Repeat {
             array: self.array.element_type_change()?,
-            axis: self.axis,
+            dim: self.dim,
             repeats: self.repeats,
             new_shape: self.new_shape,
             spec: self.spec,
@@ -321,12 +321,12 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn shape_repeat_axis0() {
+    fn shape_repeat_dim0() {
         assert_eq!(make(arange(12), &[3u64, 4]).repeat(2, 0).shape(), &[6, 4]);
     }
 
     #[test]
-    fn shape_repeat_axis_last() {
+    fn shape_repeat_dim_last() {
         assert_eq!(make(arange(12), &[3u64, 4]).repeat(3, 1).shape(), &[3, 12]);
     }
 
@@ -357,7 +357,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn error_axis_out_of_bounds() {
+    fn error_dim_out_of_bounds() {
         let a = make(arange(12), &[3u64, 4]);
         let err = super::Repeat::new_array(a.view(), 2, 2).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
@@ -437,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn full_read_2d_axis0() {
+    fn full_read_2d_dim0() {
         let got = make(arange(8), &[2u64, 4])
             .repeat(2, 0)
             .to_ndarray()
@@ -449,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn full_read_2d_axis1() {
+    fn full_read_2d_dim1() {
         let got = make(arange(6), &[2u64, 3])
             .repeat(3, 1)
             .to_ndarray()
@@ -461,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    fn full_read_3d_middle_axis() {
+    fn full_read_3d_middle_dim() {
         let got = make(arange(8), &[2u64, 2, 2])
             .repeat(2, 1)
             .to_ndarray()
@@ -480,7 +480,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     // Reference layout for these tests:
-    //   input = [10, 20, 30, 40], repeats=3, axis=0
+    //   input = [10, 20, 30, 40], repeats=3, dim=0
     //   output = [10,10,10, 20,20,20, 30,30,30, 40,40,40] (length 12)
     fn make_1d_repeat3() -> Array<Compact<Ty<i32>, crate::Dim<1>>> {
         make(vec![10, 20, 30, 40], &[4u64])
@@ -557,8 +557,8 @@ mod tests {
     }
 
     #[test]
-    fn sub_read_2d_axis1_head_only() {
-        // [[1,2],[3,4]] repeat 4 axis 1 -> [[1,1,1,1, 2,2,2,2],[3,3,3,3, 4,4,4,4]]
+    fn sub_read_2d_dim1_head_only() {
+        // [[1,2],[3,4]] repeat 4 dim 1 -> [[1,1,1,1, 2,2,2,2],[3,3,3,3, 4,4,4,4]]
         // sub-region cols 2..3 -> still within group 0 (the "1" or "3" group), single column.
         let got = make(vec![1, 2, 3, 4], &[2u64, 2])
             .repeat(4, 1)
@@ -605,11 +605,11 @@ mod tests {
 
     #[test]
     fn compose_permute_then_repeat() {
-        // [[0,1,2],[3,4,5]] (shape [2,3]) permute axes -> shape [3,2] with values
+        // [[0,1,2],[3,4,5]] (shape [2,3]) permute dims -> shape [3,2] with values
         //   [[0,3],[1,4],[2,5]]
-        // then repeat axis 1 by 2 -> [[0,0,3,3],[1,1,4,4],[2,2,5,5]] (shape [3,4])
+        // then repeat dim 1 by 2 -> [[0,0,3,3],[1,1,4,4],[2,2,5,5]] (shape [3,4])
         let got = make(arange(6), &[2u64, 3])
-            .permute_axes(&[1, 0])
+            .permute_dims(&[1, 0])
             .repeat(2, 1)
             .to_ndarray()
             .unwrap();
@@ -639,27 +639,27 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Proptest: random shape + axis + repeats vs hand-rolled reference
+    // Proptest: random shape + dim + repeats vs hand-rolled reference
     // -----------------------------------------------------------------------
 
     /// Reference implementation: produces the expected ndarray result of repeating
-    /// `nd` `repeats` times along `axis`. ndarray has no built-in `repeat`, so we
-    /// build the output by iterating per-slice along `axis`.
+    /// `nd` `repeats` times along `dim`. ndarray has no built-in `repeat`, so we
+    /// build the output by iterating per-slice along `dim`.
     fn repeat_reference<T: Clone + Default>(
         nd: &ndarray::ArrayD<T>,
         repeats: u64,
-        axis: usize,
+        dim: usize,
     ) -> ndarray::ArrayD<T> {
         let mut out_shape = nd.shape().to_vec();
-        out_shape[axis] *= repeats as usize;
+        out_shape[dim] *= repeats as usize;
         let mut out = ndarray::ArrayD::<T>::from_elem(out_shape.as_slice(), T::default());
         if repeats == 0 || nd.is_empty() {
             return out;
         }
-        for (i, src_slice) in nd.axis_iter(ndarray::Axis(axis)).enumerate() {
+        for (i, src_slice) in nd.axis_iter(ndarray::Axis(dim)).enumerate() {
             for r in 0..repeats as usize {
                 let out_idx = i * repeats as usize + r;
-                let mut out_subview = out.index_axis_mut(ndarray::Axis(axis), out_idx);
+                let mut out_subview = out.index_axis_mut(ndarray::Axis(dim), out_idx);
                 out_subview.assign(&src_slice);
             }
         }
@@ -678,7 +678,7 @@ mod tests {
         use proptest::prelude::*;
 
         // Cap ndim to NDIM_MAX - 1 because Repeat needs room for one extra
-        // synthetic axis at read time.
+        // synthetic dim at read time.
         let shape = crate::util::shape_strategy()
             .prop_filter("ndim < NDIM_MAX", |s| s.len() < NDIM_MAX)
             .prop_filter("non-empty ndim", |s| !s.is_empty());
@@ -689,20 +689,19 @@ mod tests {
                 Just(shape.clone()),
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             );
-            let axis = 0..ndim;
+            let dim = 0..ndim;
             let repeats = 0u64..=4u64;
-            (array_strat, axis, repeats)
-                .prop_map(|((nd, za), axis, repeats)| (nd, za, axis, repeats))
+            (array_strat, dim, repeats).prop_map(|((nd, za), dim, repeats)| (nd, za, dim, repeats))
         })
     }
 
     proptest::proptest! {
         #[test]
         fn proptest_repeat_generic(
-            (nd, za, axis, repeats) in repeat_strategy()
+            (nd, za, dim, repeats) in repeat_strategy()
         ) {
-            let expected = repeat_reference(&nd, repeats, axis);
-            let actual = za.repeat(repeats, axis);
+            let expected = repeat_reference(&nd, repeats, dim);
+            let actual = za.repeat(repeats, dim);
             crate::util::assert_array_matches(&actual, &expected);
         }
     }

@@ -60,8 +60,8 @@ use crate::util::{
 ///
 /// ```python
 /// a.numpy()           # full array
-/// a.numpy(0)          # row 0 (integer drops that axis)
-/// a.numpy(slice(1,4)) # rows 1-3 (slice keeps the axis)
+/// a.numpy(0)          # row 0 (integer drops that dim)
+/// a.numpy(slice(1,4)) # rows 1-3 (slice keeps the dim)
 /// a[0, 1:3]           # shorthand via __getitem__
 /// a[..., -1]          # last column of any-rank array
 /// ```
@@ -73,7 +73,7 @@ use crate::util::{
 /// you read the result. Chains compose without intermediate allocations:
 ///
 /// ```python
-/// result = (a.cast('float64') - a.mean()).abs().sum(axis=0).numpy()
+/// result = (a.cast('float64') - a.mean()).abs().sum(dim=0).numpy()
 /// ```
 ///
 /// ## Shape operations
@@ -183,11 +183,11 @@ impl Array {
 
         let mut index = DimArray::new();
         let mut out_shape = DimArray::new();
-        for (axis, item) in parsed.items.iter().enumerate() {
+        for (dim, item) in parsed.items.iter().enumerate() {
             let start = item.start.unwrap() as u64;
             let end = item.end.unwrap() as u64;
             index.push(start..end);
-            if !parsed.drop_axes[axis] {
+            if !parsed.drop_dims[dim] {
                 out_shape.push(end - start);
             }
         }
@@ -202,12 +202,12 @@ impl Array {
         for (dim, r) in index.iter().enumerate() {
             if r.start > r.end || r.end > arr_shape[dim] {
                 return Err(PyIndexError::new_err(format!(
-                    "index {r:?} is out of bounds for axis {dim} with size {}",
+                    "index {r:?} is out of bounds for dim {dim} with size {}",
                     arr_shape[dim]
                 )));
             }
         }
-        Ok((index, out_shape, parsed.drop_axes))
+        Ok((index, out_shape, parsed.drop_dims))
     }
 
     fn check_output_array(
@@ -258,23 +258,23 @@ impl Array {
                 "out array is not aligned to {alignment} bytes"
             )));
         }
-        for (axis, (&stride, &extent)) in out.strides().iter().zip(out.shape()).enumerate() {
+        for (dim, (&stride, &extent)) in out.strides().iter().zip(out.shape()).enumerate() {
             if extent <= 1 {
                 continue; // never stepped, so its stride is irrelevant
             }
             if stride < 0 {
                 return Err(PyValueError::new_err(format!(
-                    "out array has a negative stride {stride} on axis {axis}, unsupported"
+                    "out array has a negative stride {stride} on dim {dim}, unsupported"
                 )));
             }
             if stride == 0 {
                 return Err(PyValueError::new_err(format!(
-                    "out has a zero stride on axis {axis}, broadcast views cannot be written into"
+                    "out has a zero stride on dim {dim}, broadcast views cannot be written into"
                 )));
             }
             if !(stride as usize).is_multiple_of(alignment) {
                 return Err(PyValueError::new_err(format!(
-                    "out has stride {stride} on axis {axis}, which is not a multiple of the \
+                    "out has stride {stride} on dim {dim}, which is not a multiple of the \
                      dtype alignment {alignment}"
                 )));
             }
@@ -286,7 +286,7 @@ impl Array {
 #[gen_stub_pymethods]
 #[pymethods]
 impl Array {
-    /// The shape of the array: a tuple of axis lengths.
+    /// The shape of the array: a tuple of dim lengths.
     ///
     /// Returns:
     ///     The shape as a tuple of integers.
@@ -306,7 +306,7 @@ impl Array {
         PyTuple::new(py, self.arr.shape().iter().copied())
     }
 
-    /// The number of dimensions (axes) of the array.
+    /// The number of dimensions (dims) of the array.
     ///
     /// Returns:
     ///     The number of dimensions as an integer.
@@ -326,7 +326,7 @@ impl Array {
         self.arr.shape().len()
     }
 
-    /// The total number of elements in the array (the product of the axis lengths).
+    /// The total number of elements in the array (the product of the dim lengths).
     ///
     /// Returns:
     ///     The total element count as an integer.
@@ -345,10 +345,10 @@ impl Array {
         Ok(self.arr.shape().iter().product::<u64>())
     }
 
-    /// The length of the array along the first axis (axis 0).
+    /// The length of the array along the first dim (dim 0).
     ///
     /// Returns:
-    ///     The length of axis 0 as an integer.
+    ///     The length of dim 0 as an integer.
     ///
     /// ```python
     /// import jix
@@ -412,28 +412,28 @@ impl Array {
     ///         | Form | Example | Effect |
     ///         |---|---|---|
     ///         | omitted / `None` | `arr.numpy()` | read the whole array |
-    ///         | integer | `arr[2]` or `arr.numpy(2)` | select a single position along axis 0 |
-    ///         | slice | `arr[1:4]` or `arr.numpy(slice(1, 4))` | select a range along axis 0 |
-    ///         | `...` (Ellipsis) | `arr[...]` or `arr.numpy(...)` | fill all remaining axes with full slices |
-    ///         | tuple of the above | `arr[0, 1:3, ..., :-2]` | index each axis independently |
+    ///         | integer | `arr[2]` or `arr.numpy(2)` | select a single position along dim 0 |
+    ///         | slice | `arr[1:4]` or `arr.numpy(slice(1, 4))` | select a range along dim 0 |
+    ///         | `...` (Ellipsis) | `arr[...]` or `arr.numpy(...)` | fill all remaining dims with full slices |
+    ///         | tuple of the above | `arr[0, 1:3, ..., :-2]` | index each dim independently |
     ///
     ///         Most callers use `__getitem__` (`arr[...]`) instead; the two are equivalent.
     ///
-    ///         **Integers:** Select one position along the corresponding axis and **remove** that
-    ///         axis from the output shape (just like NumPy). Negative indices are supported
+    ///         **Integers:** Select one position along the corresponding dim and **remove** that
+    ///         dim from the output shape (just like NumPy). Negative indices are supported
     ///         (`-1` means the last element). Out-of-bounds raises `IndexError`.
     ///
-    ///         **Slices:** Select a contiguous range and **keep** that axis in the output.
-    ///         `start` defaults to `0`; `stop` defaults to the axis length. Both may be
+    ///         **Slices:** Select a contiguous range and **keep** that dim in the output.
+    ///         `start` defaults to `0`; `stop` defaults to the dim length. Both may be
     ///         negative. The **step must be 1**. An empty slice (`start == stop`) is valid and
-    ///         produces an axis of length 0. Bounds are checked strictly (unlike NumPy, which
+    ///         produces a dim of length 0. Bounds are checked strictly (unlike NumPy, which
     ///         silently clamps out-of-range endpoints).
     ///
     ///         **Ellipsis (`...`):** Expands to as many full-range slices as needed to cover all
-    ///         remaining axes. At most one ellipsis is allowed.
+    ///         remaining dims. At most one ellipsis is allowed.
     ///
-    ///         **Omitted trailing axes:** If the index covers fewer axes than the array has
-    ///         dimensions, the remaining axes receive implicit full-range slices.
+    ///         **Omitted trailing dims:** If the index covers fewer dims than the array has
+    ///         dimensions, the remaining dims receive implicit full-range slices.
     ///
     ///     out: An existing NumPy array to decode into, instead of allocating a new one. It must
     ///         have the same dtype as `self` and exactly the shape the `index` selects, and it must
@@ -441,7 +441,7 @@ impl Array {
     ///
     ///         The destination does not have to be C-contiguous - almost any strided view works.
     ///         Two kinds of view are rejected: reversed ones (a negative stride, e.g. `big[::-1]`)
-    ///         and broadcast ones (a zero stride over an axis longer than 1). The destination must
+    ///         and broadcast ones (a zero stride over a dim longer than 1). The destination must
     ///         also be aligned to the dtype.
     ///
     ///         When `out` is given it is returned as-is, so `arr.numpy(out=dst) is dst`.
@@ -476,8 +476,8 @@ impl Array {
     ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds,
     ///         more index items than array dimensions, or more than one ellipsis.
     ///     ValueError: Slice step other than 1. Or `out` has the wrong dtype or shape, is not
-    ///         writeable, is not aligned to the dtype, or has a negative or zero stride on an
-    ///         axis longer than 1.
+    ///         writeable, is not aligned to the dtype, or has a negative or zero stride on a
+    ///         dim longer than 1.
     ///     TypeError: Unsupported index item type (anything other than an integer, slice, `...`,
     ///         or tuple of these). Or `out` is not a NumPy array.
     ///
@@ -503,7 +503,7 @@ impl Array {
         index: Option<&Bound<'py, PyAny>>,
         out: Option<Bound<'py, PyUntypedArray>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        let (index, out_shape, drop_axes) = self.parse_index(index)?;
+        let (index, out_shape, drop_dims) = self.parse_index(index)?;
 
         let itemsize = self.arr.dtype().itemsize() as usize;
         let ndim = index.len();
@@ -511,13 +511,13 @@ impl Array {
 
         let np_arr = match out {
             None => {
-                // Allocate in the axis order the storage reports as cheapest to read into, so the
+                // Allocate in the dim order the storage reports as cheapest to read into, so the
                 // decode writes straight through instead of transposing.
-                let mut np_axis = dim_arr(ndim, |_| 0usize);
-                let mut n_axes = 0;
+                let mut np_dim = dim_arr(ndim, |_| 0usize);
+                let mut n_dims = 0;
                 for dim in 0..ndim {
-                    np_axis[dim] = n_axes;
-                    n_axes += !drop_axes[dim] as usize;
+                    np_dim[dim] = n_dims;
+                    n_dims += !drop_dims[dim] as usize;
                 }
 
                 let order = self
@@ -526,8 +526,8 @@ impl Array {
                     .spec()
                     .read_layout_order()
                     .iter()
-                    .filter(|&&dim| !drop_axes[dim as usize])
-                    .map(|&dim| np_axis[dim as usize])
+                    .filter(|&&dim| !drop_dims[dim as usize])
+                    .map(|&dim| np_dim[dim as usize])
                     .collect::<DimArray<_>>();
                 numpy_empty_ordered(self.dtype(py)?, &out_shape, &order)?
             }
@@ -538,14 +538,14 @@ impl Array {
         };
 
         // `to_ndarray_buf` wants one stride per *array* dimension, but an integer index item drops
-        // its axis from `np_arr`. Put a stride back for each dropped axis. Reading them back off
+        // its dim from `np_arr`. Put a stride back for each dropped dim. Reading them back off
         // `np_arr` keeps one source of truth, whether it is the caller's `out=` or our own
         // allocation above.
         let strides = {
             let mut np_strides = np_arr.strides().iter().rev();
             let mut strides = dim_arr(ndim, |_| 0usize);
             for dim in (0..ndim).rev() {
-                if drop_axes[dim] {
+                if drop_dims[dim] {
                     strides[dim] = if dim + 1 < ndim {
                         strides[dim + 1] * read_shape[dim + 1]
                     } else {
@@ -556,9 +556,9 @@ impl Array {
                     strides[dim] = if stride >= 0 {
                         stride as usize
                     } else {
-                        // `check_output_array` rejected negative strides on axes longer than 1.
-                        // A shorter axis is never stepped, so NumPy reporting a negative stride
-                        // for it (`x[::-1]` where that axis has length 1) is harmless - use the
+                        // `check_output_array` rejected negative strides on dims longer than 1.
+                        // A shorter dim is never stepped, so NumPy reporting a negative stride
+                        // for it (`x[::-1]` where that dim has length 1) is harmless - use the
                         // C-order value instead of casting a negative number to a huge `usize`.
                         debug_assert!(read_shape[dim] <= 1);
                         if dim + 1 < ndim {
@@ -638,9 +638,9 @@ impl Array {
     ///
     /// This is especially useful when a deep or expensive view is broadcast into another operation:
     /// broadcasting reads the same logical elements many times, so each read re-evaluates the whole
-    /// view unless it is materialized first. For example, `a / a.std(axis=1, keepdims=True)`
+    /// view unless it is materialized first. For example, `a / a.std(dim=1, keepdims=True)`
     /// recomputes the standard deviation for every element it is broadcast against, whereas
-    /// `a / a.std(axis=1, keepdims=True).plain()` computes it once and reuses the stored result.
+    /// `a / a.std(dim=1, keepdims=True).plain()` computes it once and reuses the stored result.
     /// Reach for [`compact()`][jix.Array.compact] instead when you would rather compress the
     /// intermediate (e.g. it is large, or will be read many times).
     ///
@@ -658,7 +658,7 @@ impl Array {
     /// a = jix.compact([[1.0, 3.0], [4.0, 8.0]])
     /// # Dividing by the per-row std broadcasts the reduction across the columns; `.plain()`
     /// # materializes it once instead of recomputing it for every column.
-    /// normalized = a / a.std(axis=1, keepdims=True).plain()
+    /// normalized = a / a.std(dim=1, keepdims=True).plain()
     /// # normalized == [[1.0, 3.0], [2.0, 4.0]]
     /// ```
     #[pyo3(signature = (index=None))]
@@ -1016,108 +1016,108 @@ impl Array {
 
     // == reduction ops ==
 
-    /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy. See [`jix.all()`][jix.all].
-    #[pyo3(signature = (axis=None, *, keepdims=false))]
+    /// Reduces one or more dims with logical AND: returns `True` if all elements are truthy. See [`jix.all()`][jix.all].
+    #[pyo3(signature = (dim=None, *, keepdims=false))]
     pub fn all(
         slf: &Bound<'_, Self>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
         keepdims: bool,
     ) -> PyResult<Self> {
-        crate::ops::all(slf, axis, keepdims)
+        crate::ops::all(slf, dim, keepdims)
     }
 
-    /// Reduces one or more axes with logical OR: returns `True` if any element is truthy. See [`jix.any()`][jix.any].
-    #[pyo3(signature = (axis=None, *, keepdims=false))]
+    /// Reduces one or more dims with logical OR: returns `True` if any element is truthy. See [`jix.any()`][jix.any].
+    #[pyo3(signature = (dim=None, *, keepdims=false))]
     pub fn any(
         slf: &Bound<'_, Self>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
         keepdims: bool,
     ) -> PyResult<Self> {
-        crate::ops::any(slf, axis, keepdims)
+        crate::ops::any(slf, dim, keepdims)
     }
 
-    /// Reduces one or more axes by taking the maximum element. See [`jix.max()`][jix.max].
-    #[pyo3(signature = (axis=None, *, keepdims=false))]
+    /// Reduces one or more dims by taking the maximum element. See [`jix.max()`][jix.max].
+    #[pyo3(signature = (dim=None, *, keepdims=false))]
     pub fn max(
         slf: &Bound<'_, Self>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
         keepdims: bool,
     ) -> PyResult<Self> {
-        crate::ops::max(slf, axis, keepdims)
+        crate::ops::max(slf, dim, keepdims)
     }
 
-    /// Reduces one or more axes by taking the minimum element. See [`jix.min()`][jix.min].
-    #[pyo3(signature = (axis=None, *, keepdims=false))]
+    /// Reduces one or more dims by taking the minimum element. See [`jix.min()`][jix.min].
+    #[pyo3(signature = (dim=None, *, keepdims=false))]
     pub fn min(
         slf: &Bound<'_, Self>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
         keepdims: bool,
     ) -> PyResult<Self> {
-        crate::ops::min(slf, axis, keepdims)
+        crate::ops::min(slf, dim, keepdims)
     }
 
-    /// Returns the index of the maximum element along a single axis. See [`jix.argmax()`][jix.argmax].
-    #[pyo3(signature = (axis=None, *, keepdims=false))]
-    pub fn argmax(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::argmax(slf, axis, keepdims)
+    /// Returns the index of the maximum element along a single dim. See [`jix.argmax()`][jix.argmax].
+    #[pyo3(signature = (dim=None, *, keepdims=false))]
+    pub fn argmax(slf: &Bound<'_, Self>, dim: Option<i32>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::argmax(slf, dim, keepdims)
     }
 
-    /// Returns the index of the minimum element along a single axis. See [`jix.argmin()`][jix.argmin].
-    #[pyo3(signature = (axis=None, *, keepdims=false))]
-    pub fn argmin(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::argmin(slf, axis, keepdims)
+    /// Returns the index of the minimum element along a single dim. See [`jix.argmin()`][jix.argmin].
+    #[pyo3(signature = (dim=None, *, keepdims=false))]
+    pub fn argmin(slf: &Bound<'_, Self>, dim: Option<i32>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::argmin(slf, dim, keepdims)
     }
 
-    /// Reduces one or more axes by summing all elements. See [`jix.sum()`][jix.sum].
-    #[pyo3(signature = (axis=None, *, keepdims=false))]
+    /// Reduces one or more dims by summing all elements. See [`jix.sum()`][jix.sum].
+    #[pyo3(signature = (dim=None, *, keepdims=false))]
     pub fn sum(
         slf: &Bound<'_, Self>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
         keepdims: bool,
     ) -> PyResult<Self> {
-        crate::ops::sum(slf, axis, keepdims)
+        crate::ops::sum(slf, dim, keepdims)
     }
 
-    /// Computes the arithmetic mean along one or more axes. See [`jix.mean()`][jix.mean].
-    #[pyo3(signature = (axis=None, *, keepdims=false))]
+    /// Computes the arithmetic mean along one or more dims. See [`jix.mean()`][jix.mean].
+    #[pyo3(signature = (dim=None, *, keepdims=false))]
     pub fn mean(
         slf: &Bound<'_, Self>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
         keepdims: bool,
     ) -> PyResult<Self> {
-        crate::ops::mean(slf, axis, keepdims)
+        crate::ops::mean(slf, dim, keepdims)
     }
 
-    /// Reduces one or more axes by multiplying all elements. See [`jix.product()`][jix.product].
-    #[pyo3(signature = (axis=None, *, keepdims=false))]
+    /// Reduces one or more dims by multiplying all elements. See [`jix.product()`][jix.product].
+    #[pyo3(signature = (dim=None, *, keepdims=false))]
     pub fn prod(
         slf: &Bound<'_, Self>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
         keepdims: bool,
     ) -> PyResult<Self> {
-        crate::ops::product(slf, axis, keepdims)
+        crate::ops::product(slf, dim, keepdims)
     }
 
-    /// Computes the standard deviation along one or more axes. See [`jix.std()`][jix.std].
-    #[pyo3(signature = (axis=None, *, keepdims=false, ddof=0.0))]
+    /// Computes the standard deviation along one or more dims. See [`jix.std()`][jix.std].
+    #[pyo3(signature = (dim=None, *, keepdims=false, ddof=0.0))]
     pub fn std(
         slf: &Bound<'_, Self>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
         keepdims: bool,
         ddof: f64,
     ) -> PyResult<Self> {
-        crate::ops::std(slf, axis, keepdims, ddof)
+        crate::ops::std(slf, dim, keepdims, ddof)
     }
 
-    /// Computes the variance along one or more axes. See [`jix.var()`][jix.var].
-    #[pyo3(signature = (axis=None, *, keepdims=false, ddof=0.0))]
+    /// Computes the variance along one or more dims. See [`jix.var()`][jix.var].
+    #[pyo3(signature = (dim=None, *, keepdims=false, ddof=0.0))]
     pub fn var(
         slf: &Bound<'_, Self>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
         keepdims: bool,
         ddof: f64,
     ) -> PyResult<Self> {
-        crate::ops::var(slf, axis, keepdims, ddof)
+        crate::ops::var(slf, dim, keepdims, ddof)
     }
 
     /// Casts each element of the array to a new dtype. See [`jix.cast()`][jix.cast].
@@ -1143,20 +1143,20 @@ impl Array {
         crate::ops::flatten(slf)
     }
 
-    /// Reorders the axes of an array (generalized transpose). See [`jix.permute_axes()`][jix.permute_axes].
-    #[pyo3(signature = (axes=None))]
-    pub fn permute_axes<'py>(
+    /// Reorders the dims of an array (generalized transpose). See [`jix.permute_dims()`][jix.permute_dims].
+    #[pyo3(signature = (dims=None))]
+    pub fn permute_dims<'py>(
         slf: &Bound<'py, Self>,
-        axes: Option<Vec<usize>>,
+        dims: Option<Vec<usize>>,
     ) -> PyResult<Bound<'py, Self>> {
-        crate::ops::permute_axes(slf, axes)
+        crate::ops::permute_dims(slf, dims)
     }
 
-    /// Reverses all axes; shorthand for `permute_axes()` with no arguments. See [`jix.permute_axes()`][jix.permute_axes].
+    /// Reverses all dims; shorthand for `permute_dims()` with no arguments. See [`jix.permute_dims()`][jix.permute_dims].
     #[allow(non_snake_case)]
     #[getter]
     pub fn T<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Array>> {
-        crate::ops::permute_axes(slf, None)
+        crate::ops::permute_dims(slf, None)
     }
 
     /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See [`jix.broadcast()`][jix.broadcast].
@@ -1177,58 +1177,58 @@ impl Array {
     }
 
     /// Removes length-1 dimensions from the array's shape. See [`jix.squeeze()`][jix.squeeze].
-    #[pyo3(signature = (axis=None))]
+    #[pyo3(signature = (dim=None))]
     pub fn squeeze<'py>(
         slf: &Bound<'py, Array>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::squeeze(slf, axis)
+        crate::ops::squeeze(slf, dim)
     }
 
     /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Array>,
-        axis: ItemOrSequence<i32>,
+        dim: ItemOrSequence<i32>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::unsqueeze(slf, axis)
+        crate::ops::unsqueeze(slf, dim)
     }
 
-    /// Repeats each element along the given axis. See [`jix.repeat()`][jix.repeat].
+    /// Repeats each element along the given dim. See [`jix.repeat()`][jix.repeat].
     pub fn repeat<'py>(
         slf: &Bound<'py, Array>,
         repeats: u64,
-        axis: Option<i32>,
+        dim: Option<i32>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::repeat(slf, repeats, axis)
+        crate::ops::repeat(slf, repeats, dim)
     }
 
-    /// Reverses the order of elements along the given axis. See [`jix.flip()`][jix.flip].
-    #[pyo3(signature = (axis=None))]
+    /// Reverses the order of elements along the given dim. See [`jix.flip()`][jix.flip].
+    #[pyo3(signature = (dim=None))]
     pub fn flip<'py>(
         slf: &Bound<'py, Array>,
-        axis: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrSequence<i32>>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::flip(slf, axis)
+        crate::ops::flip(slf, dim)
     }
 
-    /// Rolls elements along an axis, wrapping at the boundary. See [`jix.roll()`][jix.roll].
-    #[pyo3(signature = (shift, axis=None))]
+    /// Rolls elements along a dim, wrapping at the boundary. See [`jix.roll()`][jix.roll].
+    #[pyo3(signature = (shift, dim=None))]
     pub fn roll<'py>(
         slf: &Bound<'py, Array>,
         shift: i64,
-        axis: Option<i32>,
+        dim: Option<i32>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::roll(slf, shift, axis)
+        crate::ops::roll(slf, shift, dim)
     }
 
-    /// Replicates the array along a single axis. See [`jix.tile()`][jix.tile].
-    #[pyo3(signature = (repeats, axis=None))]
+    /// Replicates the array along a single dim. See [`jix.tile()`][jix.tile].
+    #[pyo3(signature = (repeats, dim=None))]
     pub fn tile<'py>(
         slf: &Bound<'py, Array>,
         repeats: u64,
-        axis: Option<i32>,
+        dim: Option<i32>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::tile(slf, repeats, axis)
+        crate::ops::tile(slf, repeats, dim)
     }
 
     // == complex ops ==
@@ -1315,22 +1315,22 @@ impl Array {
         crate::ops::is_nan(slf)
     }
 
-    // == axis ops ==
+    // == dim ops ==
 
-    /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_axis()`][jix.insert_axis].
-    pub fn insert_axis<'py>(
+    /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_dim()`][jix.insert_dim].
+    pub fn insert_dim<'py>(
         slf: &Bound<'py, Array>,
-        axis: ItemOrSequence<i32>,
+        dim: ItemOrSequence<i32>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::insert_axis(slf, axis)
+        crate::ops::insert_dim(slf, dim)
     }
 
-    /// Removes length-1 dimensions from the array's shape. See [`jix.remove_axis()`][jix.remove_axis].
-    pub fn remove_axis<'py>(
+    /// Removes length-1 dimensions from the array's shape. See [`jix.remove_dim()`][jix.remove_dim].
+    pub fn remove_dim<'py>(
         slf: &Bound<'py, Array>,
-        axis: ItemOrSequence<i32>,
+        dim: ItemOrSequence<i32>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::remove_axis(slf, axis)
+        crate::ops::remove_dim(slf, dim)
     }
 }
 
@@ -1350,7 +1350,7 @@ impl Array {
 /// standalone compressed array.
 ///
 /// In contrast to "simple" views such as unary element-wise operations, lazy ops that change
-/// the shape of the array (e.g. `reshape`, `broadcast`, `permute_axes`) can cause block
+/// the shape of the array (e.g. `reshape`, `broadcast`, `permute_dims`) can cause block
 /// boundaries to no longer align with the logical layout of the array, causing reads to
 /// decompress excess data. Calling `compact` on the result of such an operation re-encodes the
 /// data with a freshly derived block shape that matches the new layout. The block shape is
@@ -1364,7 +1364,7 @@ impl Array {
 /// Note:
 ///     **On copy** (e.g. [`jix.compact()`][jix.Array.compact]): a new compressed array is created,
 ///     inheriting any unset fields from the source array's storage. After shape-changing operations
-///     (`reshape`, `permute_axes`, etc.) the inherited block layout may not suit the new
+///     (`reshape`, `permute_dims`, etc.) the inherited block layout may not suit the new
 ///     shape - consider passing explicit params to `.compact()` after such ops.
 ///
 /// Args:

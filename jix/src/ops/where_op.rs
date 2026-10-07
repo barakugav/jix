@@ -184,7 +184,7 @@ where
         // Operand 0 is the output buffer, `x`, operand 1 `y` and operand 2 the condition mask.
         let iter = NdIterUnordered::new(
             out_shape.as_ref(),
-            // order (x, y, condition), to give priority in axes sort for x and y over condition
+            // order (x, y, condition), to give priority in dims sort for x and y over condition
             [out_strides, y_strides, condition_strides],
             [
                 (dtype.itemsize(), dtype.alignment()),
@@ -376,7 +376,7 @@ where
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
-                // order (x, y, condition), to give priority in axes sort for x and y over condition
+                // order (x, y, condition), to give priority in dims sort for x and y over condition
                 self.x
                     .operands()
                     .chain(self.y.operands())
@@ -788,7 +788,7 @@ mod tests {
         let ndim = out_shape.len();
         let index: Vec<std::ops::Range<u64>> = out_shape.iter().map(|&s| 0..s as u64).collect();
 
-        // A block shape of 2 per axis makes every read span several blocks.
+        // A block shape of 2 per dim makes every read span several blocks.
         let params = || crate::util::arr_params(&vec![2usize; ndim]);
         let view = where_condition(
             Array::compact_ndarray_with(cond, params()).unwrap(),
@@ -798,7 +798,7 @@ mod tests {
         let ctx = view.read_ctx();
         let storage = view.into_storage();
 
-        // Destination byte strides: `inner_gap` slots on the innermost axis, propagated outward so
+        // Destination byte strides: `inner_gap` slots on the innermost dim, propagated outward so
         // the region is gap-free apart from that inner spacing.
         let mut byte_strides = vec![itemsize; ndim];
         if ndim > 0 {

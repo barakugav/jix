@@ -15,12 +15,12 @@ use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimens
 /// element strides with `(1, 1)` to walk something indexed in elements (e.g. `read_bulk`).
 ///
 /// A from-scratch strided walk taking three ideas from NumPy's nditer:
-///   1. sort the axes by descending stride so the innermost axis is the most contiguous - ranking
-///      each axis by the array of its per-operand strides (operand 0 most significant),
-///   2. coalesce adjacent axes when `outer_stride == inner_stride * inner_len` for *every* operand,
-///      collapsing contiguous runs into a single longer axis, and
+///   1. sort the dims by descending stride so the innermost dim is the most contiguous - ranking
+///      each dim by the array of its per-operand strides (operand 0 most significant),
+///   2. coalesce adjacent dims when `outer_stride == inner_stride * inner_len` for *every* operand,
+///      collapsing contiguous runs into a single longer dim, and
 ///   3. split into an outer walk (via [`NdIter`] with a stride-offset extension) over all-but-inner
-///      axes plus a flat inner 1-d run.
+///      dims plus a flat inner 1-d run.
 ///
 /// [`new`](Self::new) performs steps (1) and (2) and computes the innermost-run description; the
 /// caller inspects it via [`inner_len`](Self::inner_len), [`is_aligned`](Self::is_aligned) and
@@ -42,7 +42,7 @@ pub(crate) struct NdIterUnordered<const N_OPERANDS: usize> {
 }
 
 impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
-    /// Order and coalesce the axes and compute the innermost-run flags. An empty region (any axis of
+    /// Order and coalesce the dims and compute the innermost-run flags. An empty region (any dim of
     /// length 0) yields an iterator whose [`foreach_inner_1d`](Self::foreach_inner_1d) visits nothing.
     #[inline]
     pub(crate) fn new(
@@ -53,7 +53,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         Self::new_with(shape, strides, layouts, [true; N_OPERANDS])
     }
 
-    /// Like [`new`](Self::new), with control over which operands take part in the axis ordering.
+    /// Like [`new`](Self::new), with control over which operands take part in the dim ordering.
     ///
     /// An operand whose `affects_dim_order` entry is `false` is skipped by the sort.
     /// This lets the caller add an extra bookkeeping operand along without letting it perturb
@@ -69,8 +69,8 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
             assert_eq!(s.len(), shape.len());
         }
 
-        // (1) Order the axes (per-operand strides non-increasing, size-1 axes dropped). The sort key
-        // is the array of an axis's per-operand strides, compared lexicographically (operand 0
+        // (1) Order the dims (per-operand strides non-increasing, size-1 dims dropped). The sort key
+        // is the array of a dim's per-operand strides, compared lexicographically (operand 0
         // first), so `[usize; N_OPERANDS]`'s derived `Ord` gives exactly the ranking we want.
         let mut dim_perm = DimArray::new();
         for (d, &len) in shape.iter().enumerate() {
@@ -94,20 +94,20 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         }
 
         let (shape, strides) = if dim_perm.len() == 1 {
-            // Only one axis remains after dropping size-1 axes: no sort or coalesce needed.
+            // Only one dim remains after dropping size-1 dims: no sort or coalesce needed.
             let d = dim_perm[0] as usize;
             let shape = DimArray::from_slice(&[shape[d]]).unwrap();
             let strides = array_from_fn_inline(|i| DimArray::from_slice(&[strides[i][d]]).unwrap());
             (shape, strides)
         } else {
-            axes_sort_by(&mut dim_perm, |d1, d2| {
+            dims_sort_by(&mut dim_perm, |d1, d2| {
                 let mut compared = false;
                 for (op_i, strides) in strides.iter().enumerate() {
                     if !affects_dim_order[op_i] {
                         continue;
                     }
-                    // A zero stride means this operand does not move along the axis at all, so it
-                    // has no opinion on where the axis belongs.
+                    // A zero stride means this operand does not move along the dim at all, so it
+                    // has no opinion on where the dim belongs.
                     if strides[d1] == 0 || strides[d2] == 0 {
                         continue;
                     }
@@ -121,12 +121,12 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
                 compared.then_some(Ordering::Equal)
             });
 
-            // (2) Coalesce adjacent contiguous axes into groups. `dim_perm` lists the axes to visit,
-            // outermost first, so a group takes its stride from the innermost axis it reaches down to
+            // (2) Coalesce adjacent contiguous dims into groups. `dim_perm` lists the dims to visit,
+            // outermost first, so a group takes its stride from the innermost dim it reaches down to
             // and its length from the product of the group's shapes. Reading the caller's shape and
             // strides through `dim_perm` leaves the permutation implicit: nothing is materialized until
             // the groups are known, and then only once.
-            let mut group_inner = DimArray::new(); // input axis of each group's inner axis
+            let mut group_inner = DimArray::new(); // input dim of each group's inner dim
             let mut group_len = DimArray::new(); // product of the group's shapes
             for &d in dim_perm.iter() {
                 let d = d as usize;
@@ -136,7 +136,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
                         .iter()
                         .all(|s| s[group_inner[m - 1] as usize] == s[d] * shape[d])
                 {
-                    group_inner[m - 1] = d as DimIdx; // the group now reaches down to axis `d`
+                    group_inner[m - 1] = d as DimIdx; // the group now reaches down to dim `d`
                     group_len[m - 1] *= shape[d];
                 } else {
                     group_inner.push(d as DimIdx);
@@ -270,7 +270,7 @@ fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
     let inner_strides = std::array::from_fn(|i| strides[i][ndim - 1]);
 
     if OuterD::NDIM == Some(1) {
-        // Special case for 2D: the outer `NdIter` is just a single loop over the outer axis, and
+        // Special case for 2D: the outer `NdIter` is just a single loop over the outer dim, and
         // and inner loop is a flat 1-d run.
 
         let outer_len = shape[0];
@@ -285,8 +285,8 @@ fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
             inner_loop(offsets, inner_len, inner_strides);
         }
     } else {
-        // Flat inner 1-d run over the innermost axis [ndim-1]; the outer `NdIter` walks the outer
-        // axes and yields all `N_OPERANDS` running byte offsets at once.
+        // Flat inner 1-d run over the innermost dim [ndim-1]; the outer `NdIter` walks the outer
+        // dims and yields all `N_OPERANDS` running byte offsets at once.
 
         let outer_shape = OuterD::vec(ndim - 1, |k| shape[k] as u64);
         let outer_strides: [_; N_OPERANDS] =
@@ -300,12 +300,12 @@ fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
     }
 }
 
-/// Stable insertion sort over axis indices, with a three-valued comparator.
+/// Stable insertion sort over dim indices, with a three-valued comparator.
 ///
-/// `compare(d0, d1)` returns `None` when the two axes cannot be ordered relative to each other -
+/// `compare(d0, d1)` returns `None` when the two dims cannot be ordered relative to each other -
 /// no operand had anything to say about the pair.
 #[inline]
-pub(super) fn axes_sort_by(
+pub(super) fn dims_sort_by(
     arr: &mut [DimIdx],
     mut compare: impl FnMut(usize, usize) -> Option<Ordering>,
 ) {
@@ -371,7 +371,7 @@ mod tests {
         run_with(shape, strides, layouts, [true; N])
     }
 
-    /// [`run`], with control over which operands take part in the axis ordering.
+    /// [`run`], with control over which operands take part in the dim ordering.
     fn run_with<const N: usize>(
         shape: &[usize],
         strides: [&[usize]; N],
@@ -406,7 +406,7 @@ mod tests {
     }
 
     /// A naive row-major walk of `shape`: the per-operand offset tuple for each logical element,
-    /// in C order. Empty when any axis has length 0. This is the ground truth the unordered walk
+    /// in C order. Empty when any dim has length 0. This is the ground truth the unordered walk
     /// must reproduce (as a multiset - order is deliberately unspecified).
     fn reference<const N: usize>(shape: &[usize], strides: [&[usize]; N]) -> Vec<[usize; N]> {
         let ndim = shape.len();
@@ -419,7 +419,7 @@ mod tests {
             out.push(std::array::from_fn(|i| {
                 (0..ndim).map(|d| idx[d] * strides[i][d]).sum::<usize>()
             }));
-            // Increment the row-major index (rightmost axis fastest); stop once it wraps fully.
+            // Increment the row-major index (rightmost dim fastest); stop once it wraps fully.
             let mut d = ndim;
             loop {
                 if d == 0 {
@@ -457,7 +457,7 @@ mod tests {
     }
 
     /// Byte strides for a row-major array whose backing shape is `shape[d] * mult[d]`, sampling one
-    /// logical element every `mult[d]` slots along axis `d` (mirrors the `nd_copy` test helper).
+    /// logical element every `mult[d]` slots along dim `d` (mirrors the `nd_copy` test helper).
     /// `mult` all ones is fully contiguous (maximal coalescing); any `mult[d] > 1` leaves gaps.
     fn strided_strides(shape: &[usize], mult: &[usize], itemsize: usize) -> Vec<usize> {
         let ndim = shape.len();
@@ -498,12 +498,12 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // Axis ordering and coalescing
+    // Dim ordering and coalescing
     // ---------------------------------------------------------------------------
 
     #[test]
     fn c_order_2d_coalesces_to_one_run() {
-        // Row-major [3,4]: outer stride 4 == inner stride 1 * inner len 4, so both axes merge.
+        // Row-major [3,4]: outer stride 4 == inner stride 1 * inner len 4, so both dims merge.
         let run = assert_visits(&[3, 4], [&[4, 1]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 12);
@@ -513,8 +513,8 @@ mod tests {
 
     #[test]
     fn f_order_2d_is_sorted_then_coalesced() {
-        // Column-major [3,4] (strides [1,3]): the descending-stride sort puts axis 1 outermost,
-        // after which the two axes coalesce into a single contiguous run of 12.
+        // Column-major [3,4] (strides [1,3]): the descending-stride sort puts dim 1 outermost,
+        // after which the two dims coalesce into a single contiguous run of 12.
         let run = assert_visits(&[3, 4], [&[1, 3]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 12);
@@ -523,8 +523,8 @@ mod tests {
     }
 
     #[test]
-    fn strided_outer_axis_does_not_coalesce() {
-        // Outer stride 10 != inner stride 1 * inner len 3, so the axes stay split: the inner run
+    fn strided_outer_dim_does_not_coalesce() {
+        // Outer stride 10 != inner stride 1 * inner len 3, so the dims stay split: the inner run
         // has length 3 and the outer NdIter drives it once per outer position (2 positions).
         let run = assert_visits(&[2, 3], [&[10, 1]], [(1, 1)]);
         let flags = run.flags.unwrap();
@@ -535,8 +535,8 @@ mod tests {
     }
 
     #[test]
-    fn size_one_axes_are_dropped() {
-        // The two length-1 axes contribute no offset and must not block the length-4 axis from
+    fn size_one_dims_are_dropped() {
+        // The two length-1 dims contribute no offset and must not block the length-4 dim from
         // being treated as a single contiguous run.
         let run = assert_visits(&[1, 4, 1], [&[100, 1, 50]], [(1, 1)]);
         let flags = run.flags.unwrap();
@@ -549,11 +549,11 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // Scalar (0-D after size-1 axes are dropped)
+    // Scalar (0-D after size-1 dims are dropped)
     // ---------------------------------------------------------------------------
 
     #[test]
-    fn all_axes_size_one_is_a_single_element() {
+    fn all_dims_size_one_is_a_single_element() {
         let run = assert_visits(&[1, 1], [&[7, 3]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 1);
@@ -565,7 +565,7 @@ mod tests {
 
     #[test]
     fn zero_dim_shape_is_a_single_element() {
-        // A rank-0 region (no axes) is one element at offset 0.
+        // A rank-0 region (no dims) is one element at offset 0.
         let run = assert_visits(&[], [&[]], [(4, 4)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 1);
@@ -616,7 +616,7 @@ mod tests {
     #[test]
     fn zero_strides_broadcast_to_repeated_offsets() {
         // Every element maps to offset 0, visited `product(shape)` times. Coalescing merges the
-        // axes (0 == 0 * len holds for the broadcast operand), and a 0 inner stride is not "size".
+        // dims (0 == 0 * len holds for the broadcast operand), and a 0 inner stride is not "size".
         let run = assert_visits(&[2, 3], [&[0, 0]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 6);
@@ -649,7 +649,7 @@ mod tests {
     #[test]
     fn two_operands_split_when_one_is_strided() {
         // Destination is contiguous, but the source is strided (element strides [1,2]), so the
-        // shared innermost axis cannot coalesce: the walk splits into a length-3 inner run driven
+        // shared innermost dim cannot coalesce: the walk splits into a length-3 inner run driven
         // twice, and only operand 0 is reported contiguous.
         let run = assert_visits(&[2, 3], [&[12, 4], &[1, 2]], [(4, 4), (1, 1)]);
         let flags = run.flags.unwrap();
@@ -681,7 +681,7 @@ mod tests {
 
     #[test]
     fn prop_matches_reference_random_strides() {
-        // Arbitrary (even overlapping / broadcast) strides: whatever the internal axis reordering
+        // Arbitrary (even overlapping / broadcast) strides: whatever the internal dim reordering
         // and coalescing do, the visited offsets must be exactly the naive row-major walk.
         let strategy = (0usize..=4).prop_flat_map(|ndim| {
             (
@@ -700,8 +700,8 @@ mod tests {
 
     #[test]
     fn prop_matches_reference_permuted_contiguous_layouts() {
-        // Two independent contiguous-with-gaps layouts presented under a shared random axis
-        // permutation. This forces the descending-stride sort to actually reorder axes and then
+        // Two independent contiguous-with-gaps layouts presented under a shared random dim
+        // permutation. This forces the descending-stride sort to actually reorder dims and then
         // exercises the coalescing merge on the recovered contiguous runs.
         let strategy = (0usize..=4).prop_flat_map(|ndim| {
             (
@@ -728,7 +728,7 @@ mod tests {
 
     #[test]
     fn prop_empty_region_visits_nothing() {
-        // Any shape containing a zero-length axis is an empty region: no element is visited.
+        // Any shape containing a zero-length dim is an empty region: no element is visited.
         let strategy = (1usize..=4)
             .prop_flat_map(|ndim| {
                 (
@@ -736,7 +736,7 @@ mod tests {
                     prop::collection::vec(0usize..=6, ndim),
                 )
             })
-            .prop_filter("needs a zero-length axis", |(shape, _)| shape.contains(&0));
+            .prop_filter("needs a zero-length dim", |(shape, _)| shape.contains(&0));
         runner(0xDEAD)
             .run(&strategy, |(shape, s0)| {
                 let run = run(&shape, [s0.as_slice()], [(1, 1)]);
@@ -747,17 +747,17 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // axes_sort_by
+    // dims_sort_by
     // ---------------------------------------------------------------------------
 
-    /// Sort by the axis indices themselves, ascending.
-    fn sorted(mut axes: Vec<DimIdx>) -> Vec<DimIdx> {
-        axes_sort_by(&mut axes, |a, b| Some(a.cmp(&b)));
-        axes
+    /// Sort by the dim indices themselves, ascending.
+    fn sorted(mut dims: Vec<DimIdx>) -> Vec<DimIdx> {
+        dims_sort_by(&mut dims, |a, b| Some(a.cmp(&b)));
+        dims
     }
 
     #[test]
-    fn axes_sort_by_orders_ascending() {
+    fn dims_sort_by_orders_ascending() {
         assert_eq!(sorted(vec![]), Vec::<DimIdx>::new());
         assert_eq!(sorted(vec![7]), vec![7]);
         assert_eq!(sorted(vec![1, 2, 3]), vec![1, 2, 3]); // already ordered
@@ -767,35 +767,35 @@ mod tests {
     }
 
     #[test]
-    fn axes_sort_by_is_stable() {
-        // Rank by `d % 3` alone, so the three axes in each rank compare `Equal` to each other and
+    fn dims_sort_by_is_stable() {
+        // Rank by `d % 3` alone, so the three dims in each rank compare `Equal` to each other and
         // only a stable sort keeps them in the order they came in.
-        let mut axes = vec![0, 1, 2, 3, 4, 5, 6, 7, 8];
-        axes_sort_by(&mut axes, |a, b| Some((a % 3).cmp(&(b % 3))));
-        assert_eq!(axes, vec![0, 3, 6, 1, 4, 7, 2, 5, 8]);
+        let mut dims = vec![0, 1, 2, 3, 4, 5, 6, 7, 8];
+        dims_sort_by(&mut dims, |a, b| Some((a % 3).cmp(&(b % 3))));
+        assert_eq!(dims, vec![0, 3, 6, 1, 4, 7, 2, 5, 8]);
     }
 
     #[test]
-    fn axes_sort_by_compares_elements_not_positions() {
-        // The comparator is handed the *elements* - axis indices - never their positions in `arr`.
+    fn dims_sort_by_compares_elements_not_positions() {
+        // The comparator is handed the *elements* - dim indices - never their positions in `arr`.
         // Every element here is >= 10, so a comparator fed positions would hit the panic.
-        let rank = |axis| match axis {
+        let rank = |dim| match dim {
             10 => 2usize,
             11 => 0,
             12 => 1,
             other => panic!("comparator got {other}, which is a position, not an element"),
         };
-        let mut axes = vec![10, 11, 12];
-        axes_sort_by(&mut axes, |a, b| Some(rank(a).cmp(&rank(b))));
-        assert_eq!(axes, vec![11, 12, 10]);
+        let mut dims = vec![10, 11, 12];
+        dims_sort_by(&mut dims, |a, b| Some(rank(a).cmp(&rank(b))));
+        assert_eq!(dims, vec![11, 12, 10]);
     }
 
     #[test]
-    fn axes_sort_by_ranks_axes_by_descending_stride() {
-        // How both walks use it: rank an axis by its per-operand strides, operand 0 most
+    fn dims_sort_by_ranks_dims_by_descending_stride() {
+        // How both walks use it: rank a dim by its per-operand strides, operand 0 most
         // significant, with the comparison reversed so the largest stride ends up outermost.
-        fn sort_by_strides(strides: &[&[usize]], axes: &mut [DimIdx]) {
-            axes_sort_by(axes, |d1, d2| {
+        fn sort_by_strides(strides: &[&[usize]], dims: &mut [DimIdx]) {
+            dims_sort_by(dims, |d1, d2| {
                 for s in strides {
                     match s[d1 as usize].cmp(&s[d2 as usize]) {
                         Ordering::Less => return Some(Ordering::Greater),
@@ -807,14 +807,14 @@ mod tests {
             });
         }
 
-        let mut axes = [0, 1, 2];
-        sort_by_strides(&[&[4, 400, 40], &[1, 100, 10]], &mut axes);
-        assert_eq!(axes, [1, 2, 0]);
+        let mut dims = [0, 1, 2];
+        sort_by_strides(&[&[4, 400, 40], &[1, 100, 10]], &mut dims);
+        assert_eq!(dims, [1, 2, 0]);
 
-        // Operand 0 has the same stride on both axes, so operand 1 breaks the tie.
-        let mut axes = [0, 1];
-        sort_by_strides(&[&[8, 8], &[1, 2]], &mut axes);
-        assert_eq!(axes, [1, 0]);
+        // Operand 0 has the same stride on both dims, so operand 1 breaks the tie.
+        let mut dims = [0, 1];
+        sort_by_strides(&[&[8, 8], &[1, 2]], &mut dims);
+        assert_eq!(dims, [1, 0]);
     }
 
     // ---------------------------------------------------------------------------
@@ -823,9 +823,9 @@ mod tests {
 
     #[test]
     fn inner_strides_reports_the_innermost_run_stride_per_operand() {
-        // Axis 0 is outermost (operand 0's stride is larger), so axis 1 forms the inner run and
-        // each operand's inner stride is its own stride on axis 1. Operand 1's strides block the
-        // coalesce, so the inner run really is axis 1 and not the whole region.
+        // Dim 0 is outermost (operand 0's stride is larger), so dim 1 forms the inner run and
+        // each operand's inner stride is its own stride on dim 1. Operand 1's strides block the
+        // coalesce, so the inner run really is dim 1 and not the whole region.
         let iter = NdIterUnordered::new(&[2, 3], [&[3, 1], &[1, 2]], layouts([(1, 1); 2]));
         assert_eq!(iter.inner_strides(), [1, 2]);
         assert_eq!(iter.inner_len(), 3);
@@ -833,9 +833,9 @@ mod tests {
 
     #[test]
     fn zero_stride_abstains_instead_of_sorting_innermost() {
-        // Operand 0 has stride 0 on axis 0. Sorting `0` as the smallest stride would drag axis 0
+        // Operand 0 has stride 0 on dim 0. Sorting `0` as the smallest stride would drag dim 0
         // into the inner run and leave both operands non-contiguous there; abstaining hands the
-        // decision to operand 1, which puts the larger-stride axis 0 outermost and leaves axis 1 -
+        // decision to operand 1, which puts the larger-stride dim 0 outermost and leaves dim 1 -
         // contiguous for both operands - as the inner run.
         let shape = [4, 5];
         let iter = NdIterUnordered::new(&shape, [&[0, 8], &[40, 8]], layouts([(8, 8); 2]));
@@ -846,14 +846,14 @@ mod tests {
 
     #[test]
     fn new_with_can_exclude_an_operand_from_the_dim_order() {
-        // Operand 0 ties on both axes, so operand 1 decides - it wants axis 1 outermost, leaving
-        // axis 0 (its stride 4) as the inner run.
+        // Operand 0 ties on both dims, so operand 1 decides - it wants dim 1 outermost, leaving
+        // dim 0 (its stride 4) as the inner run.
         let strides: [&[usize]; 2] = [&[8, 8], &[4, 100]];
         let included = NdIterUnordered::new(&[4, 5], strides, layouts([(4, 4); 2]));
         assert_eq!(included.inner_strides(), [8, 4]);
 
-        // Excluded from the ordering, operand 1 no longer gets to flip the axes, so the input
-        // order stands and axis 1 (its stride 100) becomes the inner run instead.
+        // Excluded from the ordering, operand 1 no longer gets to flip the dims, so the input
+        // order stands and dim 1 (its stride 100) becomes the inner run instead.
         let excluded =
             NdIterUnordered::new_with(&[4, 5], strides, layouts([(4, 4); 2]), [true, false]);
         assert_eq!(excluded.inner_strides(), [8, 100]);
@@ -861,9 +861,9 @@ mod tests {
 
     #[test]
     fn new_with_still_coalesces_against_an_excluded_operand() {
-        // Operand 0 alone is fully contiguous and would coalesce both axes into one run of 6.
+        // Operand 0 alone is fully contiguous and would coalesce both dims into one run of 6.
         // Operand 1 is excluded from the *ordering* but must still constrain the *coalesce*: its
-        // stride 5 on axis 0 does not equal 1 * 3, so the axes stay separate.
+        // stride 5 on dim 0 does not equal 1 * 3, so the dims stay separate.
         let iter = NdIterUnordered::new_with(
             &[2, 3],
             [&[3, 1], &[5, 1]],
@@ -876,16 +876,16 @@ mod tests {
     }
 
     #[test]
-    fn axes_sort_by_treats_an_ambiguous_comparison_as_transparent() {
-        // Axis 2 cannot be compared against axis 1, but it is decisively outermost of axis 0. An
-        // ambiguous neighbor must not stop the scan, or axis 2 never reaches the front.
-        let mut axes = vec![0, 1, 2];
-        axes_sort_by(&mut axes, |d0, d1| match (d0, d1) {
+    fn dims_sort_by_treats_an_ambiguous_comparison_as_transparent() {
+        // Dim 2 cannot be compared against dim 1, but it is decisively outermost of dim 0. An
+        // ambiguous neighbor must not stop the scan, or dim 2 never reaches the front.
+        let mut dims = vec![0, 1, 2];
+        dims_sort_by(&mut dims, |d0, d1| match (d0, d1) {
             (2, 1) => None,
             (2, 0) => Some(Ordering::Less),
             (1, 0) => Some(Ordering::Greater),
             other => panic!("unexpected comparison {other:?}"),
         });
-        assert_eq!(axes, vec![2, 0, 1]);
+        assert_eq!(dims, vec![2, 0, 1]);
     }
 }

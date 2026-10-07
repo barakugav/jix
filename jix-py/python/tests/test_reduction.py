@@ -3,9 +3,9 @@ Property tests for reduction ops (max, min, argmax, argmin, sum, product, mean, 
 Mirrors the test block in jix/src/ops/reduction.rs.
 
 Python-specific coverage beyond the Rust tests:
-  - negative axis values (e.g. axis=-1 for last axis)
-  - list and tuple axis inputs for multi-axis reductions
-  - axis=None (reduce all axes)
+  - negative dim values (e.g. dim=-1 for last dim)
+  - list and tuple dim inputs for multi-dim reductions
+  - dim=None (reduce all dims)
   - keepdims=True / False
   - dtype promotion parity with numpy for sum/product/mean/var/std (the output dtype of
     each reduction must match numpy exactly; see test_output_dtype_matches_numpy)
@@ -47,44 +47,44 @@ def _reduction_shape_strategy():
 
 
 # ---------------------------------------------------------------------------
-# Axis strategies - Python-specific: int/list/tuple, positive and negative
+# Dim strategies - Python-specific: int/list/tuple, positive and negative
 # ---------------------------------------------------------------------------
 
 
 @st.composite
-def _axes_strategy(draw, ndim):
+def _dims_strategy(draw, ndim):
     """
-    Return axis as None, int, list[int], or tuple[int].
-    Values may be negative. None means reduce all axes.
+    Return dim as None, int, list[int], or tuple[int].
+    Values may be negative. None means reduce all dims.
     """
     if ndim == 0:
         return None
     # ~25% chance: reduce all (None)
     if draw(st.integers(0, 3)) == 0:
         return None
-    # Pick n unique positive axes then optionally negate each
+    # Pick n unique positive dims then optionally negate each
     n = draw(st.integers(1, ndim))
-    pos_axes = sorted(draw(st.lists(st.integers(0, ndim - 1), min_size=n, max_size=n, unique=True)))
-    axes = [ax - ndim if draw(st.booleans()) else ax for ax in pos_axes]
+    pos_dims = sorted(draw(st.lists(st.integers(0, ndim - 1), min_size=n, max_size=n, unique=True)))
+    dims = [ax - ndim if draw(st.booleans()) else ax for ax in pos_dims]
     # Vary the container type
-    if len(axes) == 1:
+    if len(dims) == 1:
         form = draw(st.integers(0, 2))
         if form == 0:
-            return axes[0]
+            return dims[0]
         if form == 1:
-            return list(axes)
-        return tuple(axes)
-    return tuple(axes) if draw(st.booleans()) else list(axes)
+            return list(dims)
+        return tuple(dims)
+    return tuple(dims) if draw(st.booleans()) else list(dims)
 
 
 # ---------------------------------------------------------------------------
-# Composite array + axis strategies
+# Composite array + dim strategies
 # ---------------------------------------------------------------------------
 
 
 @st.composite
 def _carray_reduction(draw, dtype, element_st, shape_st=None):
-    """Yields (np_array, jix_array, axis, keepdims)."""
+    """Yields (np_array, jix_array, dim, keepdims)."""
     shape = tuple(draw(shape_st or _reduction_shape_strategy()))
     ndim = len(shape)
     np_a = draw(np_arrays(dtype=dtype, shape=shape, elements=element_st))
@@ -92,9 +92,9 @@ def _carray_reduction(draw, dtype, element_st, shape_st=None):
     # A block dim may not exceed its array dim (validation requires 1 <= block <= max(shape, 1)).
     block_shape = [min(b, max(s, 1)) for b, s in zip(block_shape, shape)]
     za = jix.compact(np_a, params={"block_shape": block_shape})
-    axis = draw(_axes_strategy(ndim))
+    dim = draw(_dims_strategy(ndim))
     keepdims = draw(st.booleans())
-    return np_a, za, axis, keepdims
+    return np_a, za, dim, keepdims
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +102,9 @@ def _carray_reduction(draw, dtype, element_st, shape_st=None):
 # ---------------------------------------------------------------------------
 
 
-def _np_axis(axis):
-    """numpy requires axis as int, tuple, or None - not list."""
-    return tuple(axis) if isinstance(axis, list) else axis
+def _np_dim(dim):
+    """numpy requires dim as int, tuple, or None - not list."""
+    return tuple(dim) if isinstance(dim, list) else dim
 
 
 def _out_dtype(dtype):
@@ -118,12 +118,12 @@ def _out_dtype(dtype):
     return np.float64
 
 
-def _sum_ref(np_a, axis, keepdims, dtype):
-    return np.sum(np_a.astype(_out_dtype(dtype)), axis=_np_axis(axis), keepdims=keepdims)
+def _sum_ref(np_a, dim, keepdims, dtype):
+    return np.sum(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdims)
 
 
-def _prod_ref(np_a, axis, keepdims, dtype):
-    return np.prod(np_a.astype(_out_dtype(dtype)), axis=_np_axis(axis), keepdims=keepdims)
+def _prod_ref(np_a, dim, keepdims, dtype):
+    return np.prod(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdims)
 
 
 def _element_st(dtype):
@@ -155,10 +155,10 @@ _WIDE_FLOATS = [np.float32, np.float64]
 @pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
 @given(st.data())
 def test_max(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, _element_st(dtype)), label="array")
+    np_a, za, dim, keepdims = data.draw(_carray_reduction(dtype, _element_st(dtype)), label="array")
     assert_array_matches(
-        jix.max(za, axis=axis, keepdims=keepdims),
-        np.max(np_a, axis=_np_axis(axis), keepdims=keepdims),
+        jix.max(za, dim=dim, keepdims=keepdims),
+        np.max(np_a, axis=_np_dim(dim), keepdims=keepdims),
         data=data,
     )
 
@@ -169,27 +169,27 @@ def test_min_concrete():
     # shapes cross block boundaries.
     d_i8 = np.array([[-128, 0, 127], [5, -100, 3]], dtype=np.int8)
     za = jix.compact(d_i8, params={"block_shape": [1, 2]})
-    for axis in (0, 1, None):
-        assert_array_matches(jix.min(za, axis=axis), np.min(d_i8, axis=_np_axis(axis)))
+    for dim in (0, 1, None):
+        assert_array_matches(jix.min(za, dim=dim), np.min(d_i8, axis=_np_dim(dim)))
 
     d_u8 = np.array([[0, 255, 3], [7, 1, 254]], dtype=np.uint8)
     zb = jix.compact(d_u8, params={"block_shape": [2, 1]})
-    for axis in (0, 1, None):
-        assert_array_matches(jix.min(zb, axis=axis), np.min(d_u8, axis=_np_axis(axis)))
+    for dim in (0, 1, None):
+        assert_array_matches(jix.min(zb, dim=dim), np.min(d_u8, axis=_np_dim(dim)))
 
     d_f = np.array([[-1.5, 0.0, float("inf")], [float("nan"), 2.5, float("-inf")]], dtype=np.float64)
     zc = jix.compact(d_f, params={"block_shape": [1, 3]})
-    for axis in (0, 1, None):
-        assert_array_matches(jix.min(zc, axis=axis), np.min(d_f, axis=_np_axis(axis)))
+    for dim in (0, 1, None):
+        assert_array_matches(jix.min(zc, dim=dim), np.min(d_f, axis=_np_dim(dim)))
 
     d_b = np.array([[True, False, True], [False, False, True]], dtype=np.bool_)
     zd = jix.compact(d_b, params={"block_shape": [1, 1]})
-    for axis in (0, 1, None):
-        assert_array_matches(jix.min(zd, axis=axis), np.min(d_b, axis=_np_axis(axis)))
+    for dim in (0, 1, None):
+        assert_array_matches(jix.min(zd, dim=dim), np.min(d_b, axis=_np_dim(dim)))
 
 
 # ---------------------------------------------------------------------------
-# argmax / argmin - single axis only; output dtype is u64
+# argmax / argmin - single dim only; output dtype is u64
 # ---------------------------------------------------------------------------
 
 
@@ -197,76 +197,76 @@ def test_argmax_concrete():
     # Tie: verify jix returns the FIRST index of the max, matching numpy.argmax.
     d = np.array([[3, 5, 5, 1], [5, 2, 5, 4]], dtype=np.int32)
     za = jix.compact(d, params={"block_shape": [1, 2]})
-    for axis in (0, 1):
-        assert_array_matches(jix.argmax(za, axis=axis), np.argmax(d, axis=_np_axis(axis)).astype(np.uint64))
-    assert jix.argmax(za, axis=1).numpy().tolist() == [1, 0]  # first '5' in each row
+    for dim in (0, 1):
+        assert_array_matches(jix.argmax(za, dim=dim), np.argmax(d, axis=_np_dim(dim)).astype(np.uint64))
+    assert jix.argmax(za, dim=1).numpy().tolist() == [1, 0]  # first '5' in each row
 
-    # axis=None is only valid for 1-D arrays (equivalent to axis=0); tie included.
+    # dim=None is only valid for 1-D arrays (equivalent to dim=0); tie included.
     d_1d = np.array([2, 7, 7, 1, 7], dtype=np.int32)
     zb = jix.compact(d_1d, params={"block_shape": [2]})
-    assert_array_matches(jix.argmax(zb, axis=None), np.argmax(d_1d).astype(np.uint64))
-    assert jix.argmax(zb, axis=None).numpy()[()] == 1  # first occurrence of the max (7)
+    assert_array_matches(jix.argmax(zb, dim=None), np.argmax(d_1d).astype(np.uint64))
+    assert jix.argmax(zb, dim=None).numpy()[()] == 1  # first occurrence of the max (7)
 
     # dtype min/max edges: int8, uint8.
     d_i8 = np.array([[-128, 127, 0], [127, -128, 5]], dtype=np.int8)
     zc = jix.compact(d_i8, params={"block_shape": [2, 1]})
-    for axis in (0, 1):
-        assert_array_matches(jix.argmax(zc, axis=axis), np.argmax(d_i8, axis=_np_axis(axis)).astype(np.uint64))
+    for dim in (0, 1):
+        assert_array_matches(jix.argmax(zc, dim=dim), np.argmax(d_i8, axis=_np_dim(dim)).astype(np.uint64))
 
     d_u8 = np.array([[0, 255, 3], [255, 1, 254]], dtype=np.uint8)
     zd = jix.compact(d_u8, params={"block_shape": [1, 3]})
-    for axis in (0, 1):
-        assert_array_matches(jix.argmax(zd, axis=axis), np.argmax(d_u8, axis=_np_axis(axis)).astype(np.uint64))
+    for dim in (0, 1):
+        assert_array_matches(jix.argmax(zd, dim=dim), np.argmax(d_u8, axis=_np_dim(dim)).astype(np.uint64))
 
     # float, NaN-free: jix's NaN-index semantics diverge from numpy.argmax by design (see
     # reduction.rs docs), so NaN is intentionally excluded from this numpy cross-check.
     d_f = np.array([[-1.5, 2.5, 2.5], [2.5, 0.0, -1.5]], dtype=np.float64)
     ze = jix.compact(d_f, params={"block_shape": [1, 2]})
-    for axis in (0, 1):
-        assert_array_matches(jix.argmax(ze, axis=axis), np.argmax(d_f, axis=_np_axis(axis)).astype(np.uint64))
+    for dim in (0, 1):
+        assert_array_matches(jix.argmax(ze, dim=dim), np.argmax(d_f, axis=_np_dim(dim)).astype(np.uint64))
 
     d_b = np.array([[False, True, True], [True, False, False]], dtype=np.bool_)
     zf = jix.compact(d_b, params={"block_shape": [1, 1]})
-    for axis in (0, 1):
-        assert_array_matches(jix.argmax(zf, axis=axis), np.argmax(d_b, axis=_np_axis(axis)).astype(np.uint64))
+    for dim in (0, 1):
+        assert_array_matches(jix.argmax(zf, dim=dim), np.argmax(d_b, axis=_np_dim(dim)).astype(np.uint64))
 
 
 def test_argmin_concrete():
     # Tie: verify jix returns the FIRST index of the min, matching numpy.argmin.
     d = np.array([[3, 1, 1, 5], [1, 4, 1, 2]], dtype=np.int32)
     za = jix.compact(d, params={"block_shape": [1, 2]})
-    for axis in (0, 1):
-        assert_array_matches(jix.argmin(za, axis=axis), np.argmin(d, axis=_np_axis(axis)).astype(np.uint64))
-    assert jix.argmin(za, axis=1).numpy().tolist() == [1, 0]  # first '1' in each row
+    for dim in (0, 1):
+        assert_array_matches(jix.argmin(za, dim=dim), np.argmin(d, axis=_np_dim(dim)).astype(np.uint64))
+    assert jix.argmin(za, dim=1).numpy().tolist() == [1, 0]  # first '1' in each row
 
-    # axis=None is only valid for 1-D arrays (equivalent to axis=0); tie included.
+    # dim=None is only valid for 1-D arrays (equivalent to dim=0); tie included.
     d_1d = np.array([5, 0, 0, 3, 0], dtype=np.int32)
     zb = jix.compact(d_1d, params={"block_shape": [2]})
-    assert_array_matches(jix.argmin(zb, axis=None), np.argmin(d_1d).astype(np.uint64))
-    assert jix.argmin(zb, axis=None).numpy()[()] == 1  # first occurrence of the min (0)
+    assert_array_matches(jix.argmin(zb, dim=None), np.argmin(d_1d).astype(np.uint64))
+    assert jix.argmin(zb, dim=None).numpy()[()] == 1  # first occurrence of the min (0)
 
     # dtype min/max edges: int8, uint8.
     d_i8 = np.array([[-128, 127, 0], [127, -128, 5]], dtype=np.int8)
     zc = jix.compact(d_i8, params={"block_shape": [2, 1]})
-    for axis in (0, 1):
-        assert_array_matches(jix.argmin(zc, axis=axis), np.argmin(d_i8, axis=_np_axis(axis)).astype(np.uint64))
+    for dim in (0, 1):
+        assert_array_matches(jix.argmin(zc, dim=dim), np.argmin(d_i8, axis=_np_dim(dim)).astype(np.uint64))
 
     d_u8 = np.array([[0, 255, 3], [255, 1, 254]], dtype=np.uint8)
     zd = jix.compact(d_u8, params={"block_shape": [1, 3]})
-    for axis in (0, 1):
-        assert_array_matches(jix.argmin(zd, axis=axis), np.argmin(d_u8, axis=_np_axis(axis)).astype(np.uint64))
+    for dim in (0, 1):
+        assert_array_matches(jix.argmin(zd, dim=dim), np.argmin(d_u8, axis=_np_dim(dim)).astype(np.uint64))
 
     # float, NaN-free: jix's NaN-index semantics diverge from numpy.argmin by design (see
     # reduction.rs docs), so NaN is intentionally excluded from this numpy cross-check.
     d_f = np.array([[-1.5, -1.5, 2.5], [2.5, 0.0, -1.5]], dtype=np.float64)
     ze = jix.compact(d_f, params={"block_shape": [1, 2]})
-    for axis in (0, 1):
-        assert_array_matches(jix.argmin(ze, axis=axis), np.argmin(d_f, axis=_np_axis(axis)).astype(np.uint64))
+    for dim in (0, 1):
+        assert_array_matches(jix.argmin(ze, dim=dim), np.argmin(d_f, axis=_np_dim(dim)).astype(np.uint64))
 
     d_b = np.array([[True, False, False], [False, True, True]], dtype=np.bool_)
     zf = jix.compact(d_b, params={"block_shape": [1, 1]})
-    for axis in (0, 1):
-        assert_array_matches(jix.argmin(zf, axis=axis), np.argmin(d_b, axis=_np_axis(axis)).astype(np.uint64))
+    for dim in (0, 1):
+        assert_array_matches(jix.argmin(zf, dim=dim), np.argmin(d_b, axis=_np_dim(dim)).astype(np.uint64))
 
 
 # ---------------------------------------------------------------------------
@@ -277,10 +277,10 @@ def test_argmin_concrete():
 @pytest.mark.parametrize("dtype", ints + uints + _WIDE_FLOATS + complexes + [np.bool_])
 @given(st.data())
 def test_sum(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
-    result = jix.sum(za, axis=axis, keepdims=keepdims)
+    np_a, za, dim, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
+    result = jix.sum(za, dim=dim, keepdims=keepdims)
     rtol = 0.0 if np.issubdtype(dtype, np.integer) else 1e-3
-    assert_array_matches(result, _sum_ref(np_a, axis, keepdims, dtype), data=data, rtol=rtol)
+    assert_array_matches(result, _sum_ref(np_a, dim, keepdims, dtype), data=data, rtol=rtol)
 
 
 # ---------------------------------------------------------------------------
@@ -304,10 +304,10 @@ def test_product_concrete():
     for dtype, np_a in cases:
         za = jix.compact(np_a, params={"block_shape": [1] * np_a.ndim})
         rtol = 0.0 if np.issubdtype(dtype, np.integer) else 1e-3
-        axes = (0, None) if np_a.ndim == 1 else (0, 1, None)
-        for axis in axes:
-            result = jix.product(za, axis=axis)
-            assert_array_matches(result, _prod_ref(np_a, axis, False, dtype), rtol=rtol)
+        dims = (0, None) if np_a.ndim == 1 else (0, 1, None)
+        for dim in dims:
+            result = jix.product(za, dim=dim)
+            assert_array_matches(result, _prod_ref(np_a, dim, False, dtype), rtol=rtol)
 
 
 # ---------------------------------------------------------------------------
@@ -318,10 +318,10 @@ def test_product_concrete():
 @pytest.mark.parametrize("dtype", ints + uints + _WIDE_FLOATS + complexes + [np.bool_])
 @given(st.data())
 def test_mean(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
+    np_a, za, dim, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
     assert_array_matches(
-        jix.mean(za, axis=axis, keepdims=keepdims),
-        np.mean(np_a.astype(_out_dtype(dtype)), axis=_np_axis(axis), keepdims=keepdims),
+        jix.mean(za, dim=dim, keepdims=keepdims),
+        np.mean(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdims),
         data=data,
         rtol=1e-3,
     )
@@ -348,10 +348,10 @@ _VAR_STD_CASES = [
 def test_var_concrete():
     for np_a in _VAR_STD_CASES:
         za = jix.compact(np_a, params={"block_shape": [1, 2]})
-        for axis in (0, 1, None):
+        for dim in (0, 1, None):
             assert_array_matches(
-                jix.var(za, axis=axis, ddof=0.0),
-                np.var(np_a.astype(np.float64), axis=_np_axis(axis), ddof=0),
+                jix.var(za, dim=dim, ddof=0.0),
+                np.var(np_a.astype(np.float64), axis=_np_dim(dim), ddof=0),
                 rtol=1e-3,
                 # atol covers near-zero cases where the true variance is 0 but numpy
                 # accumulates a tiny FP error (e.g. all-equal elements like
@@ -363,10 +363,10 @@ def test_var_concrete():
 def test_std_concrete():
     for np_a in _VAR_STD_CASES:
         za = jix.compact(np_a, params={"block_shape": [1, 2]})
-        for axis in (0, 1, None):
+        for dim in (0, 1, None):
             assert_array_matches(
-                jix.std(za, axis=axis, ddof=0.0),
-                np.std(np_a.astype(np.float64), axis=_np_axis(axis), ddof=0),
+                jix.std(za, dim=dim, ddof=0.0),
+                np.std(np_a.astype(np.float64), axis=_np_dim(dim), ddof=0),
                 rtol=1e-3,
                 atol=1e-10,
             )
@@ -379,48 +379,48 @@ def test_std_concrete():
 
 def test_all_concrete():
     # bool is the only supported dtype. Mixed rows/columns plus an all-True array exercise
-    # both the True and False outcomes on every axis.
+    # both the True and False outcomes on every dim.
     d = np.array([[True, True, False], [True, True, True], [False, False, False]], dtype=np.bool_)
     za = jix.compact(d, params={"block_shape": [1, 2]})
-    for axis in (0, 1, None):
-        assert_array_matches(jix.all(za, axis=axis), np.all(d, axis=_np_axis(axis)))
+    for dim in (0, 1, None):
+        assert_array_matches(jix.all(za, dim=dim), np.all(d, axis=_np_dim(dim)))
 
     d_all_true = np.array([[True, True], [True, True]], dtype=np.bool_)
     zb = jix.compact(d_all_true, params={"block_shape": [1, 1]})
-    for axis in (0, 1, None):
-        assert_array_matches(jix.all(zb, axis=axis), np.all(d_all_true, axis=_np_axis(axis)))
+    for dim in (0, 1, None):
+        assert_array_matches(jix.all(zb, dim=dim), np.all(d_all_true, axis=_np_dim(dim)))
 
 
 def test_any_concrete():
     # bool is the only supported dtype. Mixed rows/columns plus an all-False array exercise
-    # both the True and False outcomes on every axis.
+    # both the True and False outcomes on every dim.
     d = np.array([[False, False, True], [False, False, False], [True, True, True]], dtype=np.bool_)
     za = jix.compact(d, params={"block_shape": [1, 2]})
-    for axis in (0, 1, None):
-        assert_array_matches(jix.any(za, axis=axis), np.any(d, axis=_np_axis(axis)))
+    for dim in (0, 1, None):
+        assert_array_matches(jix.any(za, dim=dim), np.any(d, axis=_np_dim(dim)))
 
     d_all_false = np.array([[False, False], [False, False]], dtype=np.bool_)
     zb = jix.compact(d_all_false, params={"block_shape": [1, 1]})
-    for axis in (0, 1, None):
-        assert_array_matches(jix.any(zb, axis=axis), np.any(d_all_false, axis=_np_axis(axis)))
+    for dim in (0, 1, None):
+        assert_array_matches(jix.any(zb, dim=dim), np.any(d_all_false, axis=_np_dim(dim)))
 
 
 # ---------------------------------------------------------------------------
-# Handcrafted tests for Python-specific axis API
+# Handcrafted tests for Python-specific dim API
 # ---------------------------------------------------------------------------
 
 
-def test_axis_negative():
-    """Negative axis values are accepted and normalized."""
+def test_dim_negative():
+    """Negative dim values are accepted and normalized."""
     d = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     za = jix.compact(d)
-    np.testing.assert_array_equal(jix.sum(za, axis=-1).numpy(), d.sum(axis=-1))
-    np.testing.assert_array_equal(jix.sum(za, axis=-2).numpy(), d.sum(axis=-2))
-    np.testing.assert_array_equal(jix.max(za, axis=-1).numpy(), d.max(axis=-1))
+    np.testing.assert_array_equal(jix.sum(za, dim=-1).numpy(), d.sum(axis=-1))
+    np.testing.assert_array_equal(jix.sum(za, dim=-2).numpy(), d.sum(axis=-2))
+    np.testing.assert_array_equal(jix.max(za, dim=-1).numpy(), d.max(axis=-1))
 
 
-def test_axis_none_reduces_all():
-    """axis=None reduces over all axes, returning a scalar."""
+def test_dim_none_reduces_all():
+    """dim=None reduces over all dims, returning a scalar."""
     d = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     za = jix.compact(d)
     assert jix.sum(za).numpy()[()] == 21
@@ -428,42 +428,42 @@ def test_axis_none_reduces_all():
     assert jix.min(za).numpy()[()] == 1
 
 
-def test_axis_list_and_tuple():
-    """axis=[0,1] and axis=(0,1) reduce multiple axes simultaneously."""
+def test_dim_list_and_tuple():
+    """dim=[0,1] and dim=(0,1) reduce multiple dims simultaneously."""
     d = np.arange(24, dtype=np.int32).reshape(2, 3, 4)
     za = jix.compact(d)
-    np.testing.assert_array_equal(jix.sum(za, axis=[0, 2]).numpy(), d.sum(axis=(0, 2)))
-    np.testing.assert_array_equal(jix.sum(za, axis=(0, 2)).numpy(), d.sum(axis=(0, 2)))
-    np.testing.assert_array_equal(jix.max(za, axis=(1, 2)).numpy(), d.max(axis=(1, 2)))
+    np.testing.assert_array_equal(jix.sum(za, dim=[0, 2]).numpy(), d.sum(axis=(0, 2)))
+    np.testing.assert_array_equal(jix.sum(za, dim=(0, 2)).numpy(), d.sum(axis=(0, 2)))
+    np.testing.assert_array_equal(jix.max(za, dim=(1, 2)).numpy(), d.max(axis=(1, 2)))
 
 
 def test_keepdims():
-    """keepdims=True preserves the reduced axis as size 1."""
+    """keepdims=True preserves the reduced dim as size 1."""
     d = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     za = jix.compact(d)
 
-    result = jix.sum(za, axis=0, keepdims=True)
+    result = jix.sum(za, dim=0, keepdims=True)
     assert result.shape == (1, 3)
     np.testing.assert_array_equal(result.numpy(), [[5, 7, 9]])
 
-    result = jix.sum(za, axis=None, keepdims=True)
+    result = jix.sum(za, dim=None, keepdims=True)
     assert result.shape == (1, 1)
     assert result.numpy()[(0, 0)] == 21
 
 
-def test_argmax_argmin_axis():
-    """argmax / argmin return u64 indices; negative axis normalized correctly."""
+def test_argmax_argmin_dim():
+    """argmax / argmin return u64 indices; negative dim normalized correctly."""
     d = np.array([[1, 5, 3], [4, 2, 6]], dtype=np.int32)
     za = jix.compact(d)
-    np.testing.assert_array_equal(jix.argmax(za, axis=1).numpy(), [1, 2])
-    np.testing.assert_array_equal(jix.argmax(za, axis=-1).numpy(), [1, 2])
-    np.testing.assert_array_equal(jix.argmin(za, axis=0).numpy(), [0, 1, 0])
-    np.testing.assert_array_equal(jix.argmin(za, axis=-2).numpy(), [0, 1, 0])
-    assert jix.argmax(za, axis=1).dtype == np.dtype("uint64")
+    np.testing.assert_array_equal(jix.argmax(za, dim=1).numpy(), [1, 2])
+    np.testing.assert_array_equal(jix.argmax(za, dim=-1).numpy(), [1, 2])
+    np.testing.assert_array_equal(jix.argmin(za, dim=0).numpy(), [0, 1, 0])
+    np.testing.assert_array_equal(jix.argmin(za, dim=-2).numpy(), [0, 1, 0])
+    assert jix.argmax(za, dim=1).dtype == np.dtype("uint64")
 
 
-def test_argmax_1d_axis_none():
-    """For 1-D arrays, axis=None is equivalent to axis=0."""
+def test_argmax_1d_dim_none():
+    """For 1-D arrays, dim=None is equivalent to dim=0."""
     d = np.array([3, 1, 4, 1, 5, 9, 2, 6], dtype=np.int32)
     za = jix.compact(d)
     assert jix.argmax(za).numpy()[()] == np.uint64(5)
@@ -534,16 +534,16 @@ def _dtype_sample(dtype: np.dtype) -> np.ndarray:
     _DTYPE_MATCH_CASES,
     ids=[f"{f}-{np.dtype(d).name}" for f, d in _DTYPE_MATCH_CASES],
 )
-@pytest.mark.parametrize("axis,keepdims", [(None, False), (None, True), (0, True), (1, False)])
-def test_output_dtype_matches_numpy(func_name: str, dtype: np.dtype, axis, keepdims: bool):
+@pytest.mark.parametrize("dim,keepdims", [(None, False), (None, True), (0, True), (1, False)])
+def test_output_dtype_matches_numpy(func_name: str, dtype: np.dtype, dim, keepdims: bool):
     """jix's reduction output dtype matches numpy exactly across all code paths."""
     jix_fn, np_fn = _REDUCE_FN[func_name]
     np_a = _dtype_sample(dtype)
     za = jix.compact(np_a)
-    jix_out = jix_fn(za, axis=axis, keepdims=keepdims)
-    np_out = np_fn(np_a, axis=axis, keepdims=keepdims)
+    jix_out = jix_fn(za, dim=dim, keepdims=keepdims)
+    np_out = np_fn(np_a, axis=dim, keepdims=keepdims)
     assert jix_out.dtype == np_out.dtype, (
-        f"{func_name}({np.dtype(dtype).name}) axis={axis} keepdims={keepdims}: "
+        f"{func_name}({np.dtype(dtype).name}) dim={dim} keepdims={keepdims}: "
         f"jix -> {jix_out.dtype}, numpy -> {np_out.dtype}"
     )
 

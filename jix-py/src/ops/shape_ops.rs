@@ -6,7 +6,7 @@ use pyo3::types::{PyEllipsis, PySlice, PyTuple};
 
 use crate::ops::{any_to_core_array, asarray_simple};
 use crate::util::{
-    normalize_axes, normalize_axes_optional, normalize_axis, normalize_axis_optional, slice_unpack,
+    normalize_dim, normalize_dim_optional, normalize_dims, normalize_dims_optional, slice_unpack,
     DimArray, IntoPyResult, ItemOrSequence,
 };
 use crate::Array;
@@ -19,8 +19,8 @@ use crate::Array;
 /// `shape[d]` may be `-1` as a shorthand for `input_shape[d]` (keeps the dimension size
 /// unchanged regardless of whether that dimension is 1 or larger).
 ///
-/// `broadcast` is the lazy zero-cost case of replication restricted to length-1 axes. For
-/// general element replication along an axis of any length use [`jix.repeat()`][jix.repeat]
+/// `broadcast` is the lazy zero-cost case of replication restricted to length-1 dims. For
+/// general element replication along a dim of any length use [`jix.repeat()`][jix.repeat]
 /// (each element duplicated in place) or [`jix.tile()`][jix.tile] (the whole sequence
 /// duplicated).
 ///
@@ -110,16 +110,16 @@ pub fn broadcast<'py>(
 ///
 /// | Form | Example | Effect |
 /// |---|---|---|
-/// | integer | `jix.slice(a, 2)` | select a single position along axis 0 (drops the axis) |
-/// | slice | `jix.slice(a, slice(1, 4))` | select a range along axis 0 (keeps the axis) |
-/// | `...` | `jix.slice(a, ...)` | fill all remaining axes with full slices |
-/// | tuple | `jix.slice(a, (0, slice(1, 3), ...))` | index each axis independently |
+/// | integer | `jix.slice(a, 2)` | select a single position along dim 0 (drops the dim) |
+/// | slice | `jix.slice(a, slice(1, 4))` | select a range along dim 0 (keeps the dim) |
+/// | `...` | `jix.slice(a, ...)` | fill all remaining dims with full slices |
+/// | tuple | `jix.slice(a, (0, slice(1, 3), ...))` | index each dim independently |
 ///
-/// **Integers** select one position and drop the corresponding axis. Negative indices
-/// are supported. **Slices** select a contiguous range and keep the axis. The
+/// **Integers** select one position and drop the corresponding dim. Negative indices
+/// are supported. **Slices** select a contiguous range and keep the dim. The
 /// **step must be 1**; non-unit steps raise `ValueError`. Bounds are checked
 /// strictly (no numpy-style clamping). At most one ellipsis is allowed; missing
-/// trailing axes receive implicit full-range slices.
+/// trailing dims receive implicit full-range slices.
 ///
 /// Output dtype equals the input dtype.
 ///
@@ -147,17 +147,17 @@ pub fn broadcast<'py>(
 ///
 ///     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
 ///
-///     # Single row -- axis 0 is dropped, shape goes (3, 4) -> (4,).
+///     # Single row -- dim 0 is dropped, shape goes (3, 4) -> (4,).
 ///     row = jix.slice(a, 1)
 ///     assert row.shape == (4,)
 ///     assert np.array_equal(row.numpy(), [4, 5, 6, 7])
 ///
-///     # Slice on each axis keeps both axes.
+///     # Slice on each dim keeps both dims.
 ///     sub = jix.slice(a, (slice(0, 2), slice(1, 3)))
 ///     assert sub.shape == (2, 2)
 ///     assert np.array_equal(sub.numpy(), [[1, 2], [5, 6]])
 ///
-///     # Ellipsis fills remaining axes.
+///     # Ellipsis fills remaining dims.
 ///     col = jix.slice(a, (..., 2))
 ///     assert col.shape == (3,)
 ///     assert np.array_equal(col.numpy(), [2, 6, 10])
@@ -177,16 +177,16 @@ pub fn slice<'py>(
     let sliced = jix_core::ops::Slice::new_array(arr, spec)
         .into_py_result()?
         .into_any();
-    let drop_axes = parsed
-        .drop_axes
+    let drop_dims = parsed
+        .drop_dims
         .into_iter()
         .enumerate()
-        .filter_map(|(axis, drop)| drop.then_some(axis))
+        .filter_map(|(dim, drop)| drop.then_some(dim))
         .collect::<DimArray<_>>();
-    let result = if drop_axes.is_empty() {
+    let result = if drop_dims.is_empty() {
         sliced
     } else {
-        jix_core::ops::RemoveAxis::new_array(sliced, drop_axes.as_slice())
+        jix_core::ops::RemoveDim::new_array(sliced, drop_dims.as_slice())
             .into_py_result()?
             .into_any()
     };
@@ -197,7 +197,7 @@ pub fn slice<'py>(
     )
 }
 
-/// Parse a Python `__getitem__`-style index into a per-axis [`SliceItem`] list.
+/// Parse a Python `__getitem__`-style index into a per-dim [`SliceItem`] list.
 ///
 /// Accepts an integer, a `slice`, `Ellipsis`, or a tuple of these. Slice steps other
 /// than 1 are rejected. Bounds are validated strictly (no numpy-style clamping).
@@ -271,27 +271,27 @@ pub(crate) fn parse_basic_index<'py>(
 
     let fill = ndim - consumers;
     let mut items = DimArray::new();
-    let mut drop_axes = DimArray::new();
-    let mut axis_cursor = 0usize;
+    let mut drop_dims = DimArray::new();
+    let mut dim_cursor = 0usize;
     for r in raw {
         match r {
             RawIdxItem::Ellipsis => {
                 for _ in 0..fill {
                     items.push(SliceItem {
                         start: Some(0),
-                        end: Some(shape[axis_cursor] as i64),
+                        end: Some(shape[dim_cursor] as i64),
                         step: 1,
                     });
-                    drop_axes.push(false);
-                    axis_cursor += 1;
+                    drop_dims.push(false);
+                    dim_cursor += 1;
                 }
             }
             RawIdxItem::Int(i) => {
-                let len = shape[axis_cursor] as i64;
+                let len = shape[dim_cursor] as i64;
                 let i_resolved = if i < 0 { i + len } else { i };
                 if i_resolved < 0 || i_resolved >= len {
                     return Err(PyIndexError::new_err(format!(
-                        "index {i} is out of bounds for axis {axis_cursor} with size {len}"
+                        "index {i} is out of bounds for dim {dim_cursor} with size {len}"
                     )));
                 }
                 items.push(SliceItem {
@@ -299,11 +299,11 @@ pub(crate) fn parse_basic_index<'py>(
                     end: Some(i_resolved + 1),
                     step: 1,
                 });
-                drop_axes.push(true);
-                axis_cursor += 1;
+                drop_dims.push(true);
+                dim_cursor += 1;
             }
             RawIdxItem::Slice(s) => {
-                let len = shape[axis_cursor] as i64;
+                let len = shape[dim_cursor] as i64;
                 let s = slice_unpack(s, len)?;
                 if s.step != 1 {
                     return Err(PyValueError::new_err("slice step must be 1"));
@@ -314,17 +314,17 @@ pub(crate) fn parse_basic_index<'py>(
                 let stop_norm = if stop < 0 { stop + len } else { stop };
                 if start_norm < 0 || start_norm >= len {
                     return Err(PyIndexError::new_err(format!(
-                        "slice start {start} is out of bounds for axis {axis_cursor} with size {len}"
+                        "slice start {start} is out of bounds for dim {dim_cursor} with size {len}"
                     )));
                 }
                 if stop_norm < 0 || stop_norm > len {
                     return Err(PyIndexError::new_err(format!(
-                        "slice stop {stop} is out of bounds for axis {axis_cursor} with size {len}"
+                        "slice stop {stop} is out of bounds for dim {dim_cursor} with size {len}"
                     )));
                 }
                 if start_norm > stop_norm {
                     return Err(PyIndexError::new_err(format!(
-                        "slice start {start} must be <= stop {stop} for axis {axis_cursor}"
+                        "slice start {start} must be <= stop {stop} for dim {dim_cursor}"
                     )));
                 }
                 items.push(SliceItem {
@@ -332,48 +332,48 @@ pub(crate) fn parse_basic_index<'py>(
                     end: Some(stop_norm),
                     step: 1,
                 });
-                drop_axes.push(false);
-                axis_cursor += 1;
+                drop_dims.push(false);
+                dim_cursor += 1;
             }
         }
     }
-    while axis_cursor < ndim {
+    while dim_cursor < ndim {
         items.push(SliceItem {
             start: Some(0),
-            end: Some(shape[axis_cursor] as i64),
+            end: Some(shape[dim_cursor] as i64),
             step: 1,
         });
-        drop_axes.push(false);
-        axis_cursor += 1;
+        drop_dims.push(false);
+        dim_cursor += 1;
     }
 
-    Ok(ParsedBasicIndex { items, drop_axes })
+    Ok(ParsedBasicIndex { items, drop_dims })
 }
 
 /// Parsed result of a basic-indexing expression (`int`, `slice`, `...`, or tuple of these).
 ///
-/// Integer-indexed axes are kept in `items` as single-element slices (`start..start+1`)
-/// and flagged in `drop_axes`; callers can remove those axes after slicing to recover
+/// Integer-indexed dims are kept in `items` as single-element slices (`start..start+1`)
+/// and flagged in `drop_dims`; callers can remove those dims after slicing to recover
 /// numpy `arr[i]` semantics.
 pub(crate) struct ParsedBasicIndex {
     /// One resolved `SliceItem` per array dimension. `start` and `end` are absolute
     /// (non-negative) indices in the input shape; `step` is always 1.
     pub items: DimArray<SliceItem>,
     /// One flag per array dimension, `true` where the index item was an integer and the
-    /// axis should be dropped from the output. Always the same length as `items`.
-    pub drop_axes: DimArray<bool>,
+    /// dim should be dropped from the output. Always the same length as `items`.
+    pub drop_dims: DimArray<bool>,
 }
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape.
 ///
-/// This matches `numpy.expand_dims`: each value in `axis` refers to a position in the
-/// **output** (larger) shape, not the input shape. With `n = len(axis)` insertions the output
-/// has `ndim + n` dimensions, and the new length-1 axes end up at exactly the requested output
+/// This matches `numpy.expand_dims`: each value in `dim` refers to a position in the
+/// **output** (larger) shape, not the input shape. With `n = len(dim)` insertions the output
+/// has `ndim + n` dimensions, and the new length-1 dims end up at exactly the requested output
 /// positions while the original dimensions fill the rest in order. Negative values are
 /// supported and are resolved against the output ndim (`ndim + n`).
 ///
-/// Repeated output axes are rejected, exactly as in `numpy.expand_dims`. The inverse operation
-/// is [`jix.remove_axis()`][jix.remove_axis] (which is also exposed as
+/// Repeated output dims are rejected, exactly as in `numpy.expand_dims`. The inverse operation
+/// is [`jix.remove_dim()`][jix.remove_dim] (which is also exposed as
 /// [`jix.squeeze()`][jix.squeeze]).
 ///
 /// Output dtype and total number of elements equal the input.
@@ -382,11 +382,11 @@ pub(crate) struct ParsedBasicIndex {
 ///
 /// Args:
 ///     array: Input array.
-///     axis: Output-shape index or sequence of indices at which to place new length-1
-///         dimensions. Negative values are resolved against the output ndim (`ndim + len(axis)`).
+///     dim: Output-shape index or sequence of indices at which to place new length-1
+///         dimensions. Negative values are resolved against the output ndim (`ndim + len(dim)`).
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with new length-1 axes inserted at the specified positions.
+///     A [`jix.Array`][jix.Array] with new length-1 dims inserted at the specified positions.
 ///
 /// Examples:
 ///     ```python
@@ -394,87 +394,87 @@ pub(crate) struct ParsedBasicIndex {
 ///     import numpy as np
 ///
 ///     a = jix.compact([1, 2, 3], dtype=np.int32)   # shape [3]
-///     assert jix.insert_axis(a, 0).numpy().shape == (1, 3)  # -> [1, 3]
-///     assert jix.insert_axis(a, 1).numpy().shape == (3, 1)  # -> [3, 1]
-///     assert jix.insert_axis(a, -1).numpy().shape == (3, 1) # last axis of the output
+///     assert jix.insert_dim(a, 0).numpy().shape == (1, 3)  # -> [1, 3]
+///     assert jix.insert_dim(a, 1).numpy().shape == (3, 1)  # -> [3, 1]
+///     assert jix.insert_dim(a, -1).numpy().shape == (3, 1) # last dim of the output
 ///
 ///     b = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
-///     # axes index the output shape: positions 0 and 2 become new length-1 axes
-///     assert jix.insert_axis(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
+///     # dims index the output shape: positions 0 and 2 become new length-1 dims
+///     assert jix.insert_dim(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-pub fn insert_axis<'py>(
+pub fn insert_dim<'py>(
     array: &Bound<'py, PyAny>,
-    axis: ItemOrSequence<i32>,
+    dim: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
-    if axis.is_empty() {
-        return Ok(py_arr); // no-op if no axes to insert
+    if dim.is_empty() {
+        return Ok(py_arr); // no-op if no dims to insert
     }
-    // numpy.expand_dims semantics: each axis indexes the output (larger) shape.
-    let out_ndim = array.ndim() + axis.len();
+    // numpy.expand_dims semantics: each dim indexes the output (larger) shape.
+    let out_ndim = array.ndim() + dim.len();
     if out_ndim > NDIM_MAX {
         return Err(PyValueError::new_err(format!(
-            "Cannot insert axes: output ndim {out_ndim} exceeds maximum supported {NDIM_MAX}"
+            "Cannot insert dims: output ndim {out_ndim} exceeds maximum supported {NDIM_MAX}"
         )));
     }
-    let axis = axis.into_dim_array().unwrap();
-    let mut out_positions = normalize_axes(&axis, out_ndim)?;
+    let dim = dim.into_dim_array().unwrap();
+    let mut out_positions = normalize_dims(&dim, out_ndim)?;
     out_positions.sort_unstable();
     // Repeated output positions are ambiguous; numpy.expand_dims rejects them too.
     if let Some(w) = out_positions.windows(2).find(|w| w[0] == w[1]) {
         return Err(PyValueError::new_err(format!(
-            "repeated axis {} in `axis` argument to insert_axis",
+            "repeated dim {} in `dim` argument to insert_dim",
             w[0]
         )));
     }
     // Translate each output position into the core "gap index" (a position in the *input*
-    // shape): the i-th smallest output position has exactly i new axes before it, so the
+    // shape): the i-th smallest output position has exactly i new dims before it, so the
     // number of original dimensions preceding it - the gap index - is `position - i`.
     let gaps = out_positions
         .iter()
         .enumerate()
         .map(|(i, &pos)| pos - i)
         .collect::<DimArray<_>>();
-    let ret = jix_core::ops::InsertAxis::new_array(array, gaps.as_slice()).into_py_result()?;
+    let ret = jix_core::ops::InsertDim::new_array(array, gaps.as_slice()).into_py_result()?;
     let np_dtype = py_arr.get().dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }
-/// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for [`jix.insert_axis()`][jix.insert_axis].
+/// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for [`jix.insert_dim()`][jix.insert_dim].
 ///
-/// Like `numpy.expand_dims`, each value in `axis` indexes the output (larger) shape.
+/// Like `numpy.expand_dims`, each value in `dim` indexes the output (larger) shape.
 ///
 /// Args:
 ///     array: Input array.
-///     axis: Output-shape index or sequence of indices at which to place new length-1
-///         dimensions. Negative values are resolved against the output ndim (`ndim + len(axis)`).
+///     dim: Output-shape index or sequence of indices at which to place new length-1
+///         dimensions. Negative values are resolved against the output ndim (`ndim + len(dim)`).
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with new length-1 axes inserted at the specified positions.
+///     A [`jix.Array`][jix.Array] with new length-1 dims inserted at the specified positions.
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn unsqueeze<'py>(
     array: &Bound<'py, PyAny>,
-    axis: ItemOrSequence<i32>,
+    dim: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
-    insert_axis(array, axis)
+    insert_dim(array, dim)
 }
 
 /// Removes length-1 dimensions from an array's shape.
 ///
-/// `axis` is a set of axis indices in the *input* shape (0-based). Each named dimension must
-/// have size exactly 1 and is dropped from the output. Duplicate axis indices are not allowed.
-/// Negative values are supported and are resolved against `ndim`. Removed axes must have size 1.
+/// `dim` is a set of dim indices in the *input* shape (0-based). Each named dimension must
+/// have size exactly 1 and is dropped from the output. Duplicate dim indices are not allowed.
+/// Negative values are supported and are resolved against `ndim`. Removed dims must have size 1.
 ///
-/// The inverse operation is [`jix.insert_axis()`][jix.insert_axis] (also available as
+/// The inverse operation is [`jix.insert_dim()`][jix.insert_dim] (also available as
 /// [`jix.unsqueeze()`][jix.unsqueeze]). [`jix.squeeze()`][jix.squeeze] is a related variant
-/// whose `axis` defaults to "every length-1 dimension".
+/// whose `dim` defaults to "every length-1 dimension".
 ///
 /// Output dtype and total number of elements equal the input.
 ///
@@ -482,11 +482,11 @@ pub fn unsqueeze<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     axis: Axis index or sequence of axis indices to remove. Each must have size 1.
+///     dim: Dim index or sequence of dim indices to remove. Each must have size 1.
 ///         Negative values are supported.
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with the specified length-1 axes removed.
+///     A [`jix.Array`][jix.Array] with the specified length-1 dims removed.
 ///
 /// Examples:
 ///     ```python
@@ -494,26 +494,26 @@ pub fn unsqueeze<'py>(
 ///     import numpy as np
 ///
 ///     a = jix.compact([[1, 2, 3]], dtype=np.int32)  # shape [1, 3]
-///     assert jix.remove_axis(a, 0).numpy().shape == (3,)     # -> [3]
+///     assert jix.remove_dim(a, 0).numpy().shape == (3,)     # -> [3]
 ///
 ///     b = jix.compact([[[10], [20]]], dtype=np.int32)  # shape [1, 2, 1]
-///     assert jix.remove_axis(b, [0, 2]).numpy().shape == (2,)    # -> [2]
-///     assert jix.remove_axis(b, [0, -1]).numpy().shape == (2,)   # negative axis
+///     assert jix.remove_dim(b, [0, 2]).numpy().shape == (2,)    # -> [2]
+///     assert jix.remove_dim(b, [0, -1]).numpy().shape == (2,)   # negative dim
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-pub fn remove_axis<'py>(
+pub fn remove_dim<'py>(
     array: &Bound<'py, PyAny>,
-    axis: ItemOrSequence<i32>,
+    dim: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
-    let axes = normalize_axes(&axis.into_dim_array()?, array.ndim())?;
-    if axes.is_empty() {
-        return Ok(py_arr); // no-op if no axes to remove
+    let dims = normalize_dims(&dim.into_dim_array()?, array.ndim())?;
+    if dims.is_empty() {
+        return Ok(py_arr); // no-op if no dims to remove
     }
-    let ret = jix_core::ops::RemoveAxis::new_array(array, axes.as_slice()).into_py_result()?;
+    let ret = jix_core::ops::RemoveDim::new_array(array, dims.as_slice()).into_py_result()?;
     let np_dtype = py_arr.get().dtype(py)?;
     Bound::new(
         py,
@@ -523,20 +523,20 @@ pub fn remove_axis<'py>(
 
 /// Removes length-1 dimensions from an array's shape.
 ///
-/// When `axis=None` (the default), all size-1 dimensions are removed. When `axis` is given,
-/// only the specified axes are removed; each named dimension must have size exactly 1.
-/// Negative axis values are supported and are resolved against `ndim`.
+/// When `dim=None` (the default), all size-1 dimensions are removed. When `dim` is given,
+/// only the specified dims are removed; each named dimension must have size exactly 1.
+/// Negative dim values are supported and are resolved against `ndim`.
 ///
 /// Output dtype and total number of elements equal the input. The result is a lazy view; no
 /// computation occurs until the array is read.
 ///
 /// Args:
 ///     array: Input array.
-///     axis: Axis or axes to remove. When `None` (default), all size-1 dimensions are
+///     dim: Dim or dims to remove. When `None` (default), all size-1 dimensions are
 ///         removed. Each named dimension must have size exactly 1.
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with length-1 axes removed.
+///     A [`jix.Array`][jix.Array] with length-1 dims removed.
 ///
 /// Examples:
 ///     ```python
@@ -545,18 +545,18 @@ pub fn remove_axis<'py>(
 ///
 ///     a = jix.compact([[[1, 2, 3]]], dtype=np.int32)  # shape [1, 1, 3]
 ///     assert jix.squeeze(a).numpy().shape == (3,)              # remove all size-1 dims
-///     assert jix.squeeze(a, axis=0).numpy().shape == (1, 3)    # remove only axis 0
-///     assert jix.squeeze(a, axis=[0, 1]).numpy().shape == (3,) # remove axes 0 and 1
+///     assert jix.squeeze(a, dim=0).numpy().shape == (1, 3)    # remove only dim 0
+///     assert jix.squeeze(a, dim=[0, 1]).numpy().shape == (3,) # remove dims 0 and 1
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, axis=None))]
+#[pyo3(signature = (array, dim=None))]
 pub fn squeeze<'py>(
     array: &Bound<'py, PyAny>,
-    axis: Option<ItemOrSequence<i32>>,
+    dim: Option<ItemOrSequence<i32>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
-    let axis = axis.unwrap_or_else(|| {
+    let dim = dim.unwrap_or_else(|| {
         ItemOrSequence::Sequence(
             py_arr
                 .get()
@@ -568,17 +568,17 @@ pub fn squeeze<'py>(
                 .collect(),
         )
     });
-    remove_axis(&py_arr, axis)
+    remove_dim(&py_arr, dim)
 }
 
-/// Reorders the axes of an array (generalized transpose).
+/// Reorders the dims of an array (generalized transpose).
 ///
-/// The `i`-th output axis corresponds to axis `axes[i]` of the input - identical to
-/// `numpy.transpose`. `axes` must be a permutation of `0..ndim`: correct length, all values
-/// in range, no duplicates. Integer values are interpreted as unsigned axis indices (negative
-/// axes are **not** supported for `axes`).
+/// The `i`-th output dim corresponds to dim `dims[i]` of the input - identical to
+/// `numpy.transpose`. `dims` must be a permutation of `0..ndim`: correct length, all values
+/// in range, no duplicates. Integer values are interpreted as unsigned dim indices (negative
+/// dims are **not** supported for `dims`).
 ///
-/// When `axes=None` (the default), all axes are reversed: output axis `i` maps to input axis
+/// When `dims=None` (the default), all dims are reversed: output dim `i` maps to input dim
 /// `ndim - 1 - i`. For 2-D arrays this is the standard matrix transpose.
 ///
 /// Output dtype equals the input dtype.
@@ -587,11 +587,11 @@ pub fn squeeze<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     axes: Permutation of axis indices. When `None` (default), reverses all axes.
-///         Integer values must be unsigned (negative axes are not supported).
+///     dims: Permutation of dim indices. When `None` (default), reverses all dims.
+///         Integer values must be unsigned (negative dims are not supported).
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with axes reordered as specified.
+///     A [`jix.Array`][jix.Array] with dims reordered as specified.
 ///
 /// Examples:
 ///     ```python
@@ -600,31 +600,31 @@ pub fn squeeze<'py>(
 ///
 ///     # 2-D transpose: [2, 3] -> [3, 2]
 ///     a = jix.asarray(np.arange(6, dtype=np.int32).reshape(2, 3))
-///     t = jix.permute_axes(a, [1, 0])
+///     t = jix.permute_dims(a, [1, 0])
 ///     assert t.numpy().shape == (3, 2)
 ///     assert np.array_equal(t.numpy(), a.numpy().T)
 ///
-///     # axes=None reverses all axes (same as numpy.transpose with no argument)
-///     assert jix.permute_axes(a).numpy().shape == (3, 2)
+///     # dims=None reverses all dims (same as numpy.transpose with no argument)
+///     assert jix.permute_dims(a).numpy().shape == (3, 2)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (
     array,
-    axes=None,
+    dims=None,
 ))]
-pub fn permute_axes<'py>(
+pub fn permute_dims<'py>(
     array: &Bound<'py, PyAny>,
-    axes: Option<Vec<usize>>,
+    dims: Option<Vec<usize>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
-    let axes = axes.unwrap_or_else(|| (0..array.ndim()).rev().collect());
-    if axes.len() == array.ndim() && axes.iter().enumerate().all(|(i, &ax)| i == ax) {
+    let dims = dims.unwrap_or_else(|| (0..array.ndim()).rev().collect());
+    if dims.len() == array.ndim() && dims.iter().enumerate().all(|(i, &ax)| i == ax) {
         return Ok(py_arr); // no-op permutation
     }
-    let ret = jix_core::ops::PermuteAxes::new_array(array, &axes).into_py_result()?;
+    let ret = jix_core::ops::PermuteDims::new_array(array, &dims).into_py_result()?;
     let np_dtype = py_arr.get().dtype(py)?;
     Bound::new(
         py,
@@ -766,10 +766,10 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     reshape(&py_arr, ItemOrSequence::Item(size as i64))
 }
 
-/// Joins a sequence of arrays along an existing axis.
+/// Joins a sequence of arrays along an existing dim.
 ///
 /// All input arrays must have the same number of dimensions, the same dtype, and identical
-/// sizes on every axis *except* the concatenation axis, along which their sizes may differ.
+/// sizes on every dim *except* the concatenation dim, along which their sizes may differ.
 /// The output has the same number of dimensions as the inputs.
 ///
 /// This function deviates from numpy in a few ways:
@@ -781,10 +781,10 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 /// Args:
 ///     arrays: Sequence of arrays to concatenate. All must have the same dtype and number
 ///         of dimensions.
-///     axis: Axis along which to concatenate. Supports negative values.
+///     dim: Dim along which to concatenate. Supports negative values.
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] formed by concatenating all inputs along the specified axis.
+///     A [`jix.Array`][jix.Array] formed by concatenating all inputs along the specified dim.
 ///
 /// Examples:
 ///     ```python
@@ -797,16 +797,16 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///     c = jix.concatenate([a, b])
 ///     assert np.array_equal(c.numpy(), [1, 2, 3, 4, 5])
 ///
-///     # 2-D: append rows (axis 0) or columns (axis 1 / axis -1)
+///     # 2-D: append rows (dim 0) or columns (dim 1 / dim -1)
 ///     a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
 ///     b = jix.compact([[5, 6]], dtype=np.int32)
-///     assert jix.concatenate([a, b], axis=0).numpy().shape == (3, 2)
-///     assert jix.concatenate([a, b.T], axis=1).numpy().shape == (2, 3)
+///     assert jix.concatenate([a, b], dim=0).numpy().shape == (3, 2)
+///     assert jix.concatenate([a, b.T], dim=1).numpy().shape == (2, 3)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (arrays, axis=0))]
-pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Bound<'py, Array>> {
+#[pyo3(signature = (arrays, dim=0))]
+pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bound<'py, Array>> {
     let py_arrays = arrays
         .iter()
         .map(|arr| asarray_simple(arr))
@@ -829,14 +829,14 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
             ));
         }
     }
-    let axis = normalize_axis(axis, ndim)?;
+    let dim = normalize_dim(dim, ndim)?;
 
-    if arrays.len() == 1 && axis < ndim {
+    if arrays.len() == 1 && dim < ndim {
         // no-op if only one array
         let [array] = py_arrays.try_into().unwrap();
         return Ok(array);
     }
-    let ret = jix_core::ops::Concatenate::new_array(arrays, axis).into_py_result()?;
+    let ret = jix_core::ops::Concatenate::new_array(arrays, dim).into_py_result()?;
     let np_dtype = py_arrays.first().unwrap().get().dtype(py)?;
     Bound::new(
         py,
@@ -844,12 +844,12 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
     )
 }
 
-/// Joins a sequence of arrays along a **new** axis.
+/// Joins a sequence of arrays along a **new** dim.
 ///
-/// All input arrays must have identical shapes and the same dtype. A new axis of size equal
-/// to the number of arrays is inserted at position `axis` in the output. The output has one
+/// All input arrays must have identical shapes and the same dtype. A new dim of size equal
+/// to the number of arrays is inserted at position `dim` in the output. The output has one
 /// more dimension than the inputs - unlike [`jix.concatenate()`][jix.concatenate], which joins along an existing
-/// axis.
+/// dim.
 ///
 /// This function deviates from numpy in a few ways:
 /// - all arrays must have the same dtype (numpy will upcast if they differ)
@@ -858,10 +858,10 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
 ///
 /// Args:
 ///     arrays: Sequence of arrays to stack. All must have identical shapes and the same dtype.
-///     axis: Position of the new axis in the output. Supports negative values.
+///     dim: Position of the new dim in the output. Supports negative values.
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with a new axis inserted and the inputs stacked along it.
+///     A [`jix.Array`][jix.Array] with a new dim inserted and the inputs stacked along it.
 ///
 /// Examples:
 ///     ```python
@@ -871,13 +871,13 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
 ///     a = jix.compact([1, 2, 3], dtype=np.int32)
 ///     b = jix.compact([4, 5, 6], dtype=np.int32)
 ///
-///     # Stack along a new leading axis -> shape [2, 3]
-///     c = jix.stack([a, b], axis=0)
+///     # Stack along a new leading dim -> shape [2, 3]
+///     c = jix.stack([a, b], dim=0)
 ///     assert c.numpy().shape == (2, 3)
 ///     assert np.array_equal(c.numpy()[0], [1, 2, 3])
 ///
-///     # Stack along a new trailing axis -> shape [3, 2]
-///     d = jix.stack([a, b], axis=1)
+///     # Stack along a new trailing dim -> shape [3, 2]
+///     d = jix.stack([a, b], dim=1)
 ///     assert d.numpy().shape == (3, 2)
 ///     assert np.array_equal(d.numpy()[:, 0], [1, 2, 3])
 ///     ```
@@ -885,9 +885,9 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
 #[pyfunction]
 #[pyo3(signature = (
     arrays,
-    axis=0,
+    dim=0,
 ))]
-pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> {
+pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Array> {
     let py_arrays = arrays
         .into_iter()
         .map(|arr| asarray_simple(&arr))
@@ -910,24 +910,24 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> 
             ));
         }
     }
-    let axis = normalize_axis(axis, ndim + 1)?;
-    let res = if arrays.len() == 1 && axis < ndim {
-        // if only one array, equivalent to insert_axis along that axis
+    let dim = normalize_dim(dim, ndim + 1)?;
+    let res = if arrays.len() == 1 && dim < ndim {
+        // if only one array, equivalent to insert_dim along that dim
         let [array] = arrays.try_into().unwrap();
-        let ret = jix_core::ops::InsertAxis::new_array(array, axis).into_py_result()?;
+        let ret = jix_core::ops::InsertDim::new_array(array, dim).into_py_result()?;
         ret.into_any()
     } else {
-        let ret = jix_core::ops::Stack::new_array(arrays, axis).into_py_result()?;
+        let ret = jix_core::ops::Stack::new_array(arrays, dim).into_py_result()?;
         ret.into_any()
     };
     let np_dtype = py_arrays.first().unwrap().get().dtype(py)?;
     Ok(Array::from_core_with_np_dtype(res, np_dtype.unbind()))
 }
 
-/// Repeats each element along the given axis.
+/// Repeats each element along the given dim.
 ///
-/// Every element along `axis` is replicated `repeats` times. The output has the
-/// same number of dimensions as the input; only `shape[axis]` changes, from `n` to
+/// Every element along `dim` is replicated `repeats` times. The output has the
+/// same number of dimensions as the input; only `shape[dim]` changes, from `n` to
 /// `n * repeats`. `repeats == 0` produces an empty output (matches numpy). `repeats == 1`
 /// is the identity.
 ///
@@ -940,12 +940,12 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> 
 ///
 /// Args:
 ///     array: Input array.
-///     repeats: Number of times to repeat each element along `axis`. Must be non-negative.
-///     axis: Axis along which to repeat. Supports negative values. `None` (default) is equivalent
-///         to `axis=0` for 1-D arrays, unsupported for higher dimensions (deviates from numpy).
+///     repeats: Number of times to repeat each element along `dim`. Must be non-negative.
+///     dim: Dim along which to repeat. Supports negative values. `None` (default) is equivalent
+///         to `dim=0` for 1-D arrays, unsupported for higher dimensions (deviates from numpy).
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with `shape[axis]` multiplied by `repeats`.
+///     A [`jix.Array`][jix.Array] with `shape[dim]` multiplied by `repeats`.
 ///
 /// Examples:
 ///     ```python
@@ -957,37 +957,37 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> 
 ///     r = jix.repeat(a, 2)
 ///     assert np.array_equal(r.numpy(), [1, 1, 2, 2, 3, 3])
 ///
-///     # 2-D along rows (axis=0): each row appears `repeats` times
+///     # 2-D along rows (dim=0): each row appears `repeats` times
 ///     b = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
 ///     assert np.array_equal(
-///         jix.repeat(b, 2, axis=0).numpy(),
+///         jix.repeat(b, 2, dim=0).numpy(),
 ///         [[1, 2], [1, 2], [3, 4], [3, 4]],
 ///     )
 ///
-///     # 2-D along columns (axis=1 / axis=-1): each column appears `repeats` times
+///     # 2-D along columns (dim=1 / dim=-1): each column appears `repeats` times
 ///     assert np.array_equal(
-///         jix.repeat(b, 2, axis=-1).numpy(),
+///         jix.repeat(b, 2, dim=-1).numpy(),
 ///         [[1, 1, 2, 2], [3, 3, 4, 4]],
 ///     )
 ///
 ///     # repeats=0 yields an empty array
-///     assert jix.repeat(a, 0, axis=0).numpy().shape == (0,)
+///     assert jix.repeat(a, 0, dim=0).numpy().shape == (0,)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn repeat<'py>(
     array: &Bound<'py, PyAny>,
     repeats: u64,
-    axis: Option<i32>,
+    dim: Option<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
-    let axis = normalize_axis_optional(axis, array.ndim())?;
+    let dim = normalize_dim_optional(dim, array.ndim())?;
     if repeats == 1 {
         return Ok(py_arr); // no-op
     }
-    let ret = jix_core::ops::Repeat::new_array(array, repeats, axis).into_py_result()?;
+    let ret = jix_core::ops::Repeat::new_array(array, repeats, dim).into_py_result()?;
     let np_dtype = py_arr.get().dtype(py)?;
     Bound::new(
         py,
@@ -995,25 +995,25 @@ pub fn repeat<'py>(
     )
 }
 
-/// Reverses the order of elements along the given axis.
+/// Reverses the order of elements along the given dim.
 ///
-/// Each named axis is independently reversed; non-named axes are left untouched. The shape
-/// and dtype of the output equal the input. `axis` accepts an integer, a sequence of
-/// integers, or `None` (the default) which reverses every axis. Negative indices are
-/// supported. Duplicate axes are not allowed.
+/// Each named dim is independently reversed; non-named dims are left untouched. The shape
+/// and dtype of the output equal the input. `dim` accepts an integer, a sequence of
+/// integers, or `None` (the default) which reverses every dim. Negative indices are
+/// supported. Duplicate dims are not allowed.
 ///
-/// See also [`jix.roll()`][jix.roll], which cyclically shifts elements along an axis
+/// See also [`jix.roll()`][jix.roll], which cyclically shifts elements along a dim
 /// without reversing them.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
 ///     array: Input array.
-///     axis: Axis or axes to reverse. Negative indices are supported. When `None` (the
-///         default), all axes are reversed.
+///     dim: Dim or dims to reverse. Negative indices are supported. When `None` (the
+///         default), all dims are reversed.
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with the specified axes reversed.
+///     A [`jix.Array`][jix.Array] with the specified dims reversed.
 ///
 /// Examples:
 ///     ```python
@@ -1024,37 +1024,37 @@ pub fn repeat<'py>(
 ///     a = jix.compact([1, 2, 3, 4], dtype=np.int32)
 ///     assert np.array_equal(jix.flip(a).numpy(), [4, 3, 2, 1])
 ///
-///     # 2-D: flip rows (axis=0)
+///     # 2-D: flip rows (dim=0)
 ///     b = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
-///     assert np.array_equal(jix.flip(b, axis=0).numpy(), [[4, 5, 6], [1, 2, 3]])
+///     assert np.array_equal(jix.flip(b, dim=0).numpy(), [[4, 5, 6], [1, 2, 3]])
 ///
-///     # 2-D: flip columns (axis=1)
-///     assert np.array_equal(jix.flip(b, axis=1).numpy(), [[3, 2, 1], [6, 5, 4]])
+///     # 2-D: flip columns (dim=1)
+///     assert np.array_equal(jix.flip(b, dim=1).numpy(), [[3, 2, 1], [6, 5, 4]])
 ///
-///     # 2-D: flip both axes (default behaviour with axis=None)
+///     # 2-D: flip both dims (default behaviour with dim=None)
 ///     assert np.array_equal(jix.flip(b).numpy(), [[6, 5, 4], [3, 2, 1]])
 ///
-///     # Sequence of axes (negative indices supported)
-///     assert np.array_equal(jix.flip(b, axis=[-1]).numpy(), [[3, 2, 1], [6, 5, 4]])
+///     # Sequence of dims (negative indices supported)
+///     assert np.array_equal(jix.flip(b, dim=[-1]).numpy(), [[3, 2, 1], [6, 5, 4]])
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, axis=None))]
+#[pyo3(signature = (array, dim=None))]
 pub fn flip<'py>(
     array: &Bound<'py, PyAny>,
-    axis: Option<ItemOrSequence<i32>>,
+    dim: Option<ItemOrSequence<i32>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
     let ndim = array.ndim();
-    let axis = axis.map(|a| a.into_dim_array()).transpose()?;
-    let axis = axis.as_ref().map(|a| a.as_slice());
-    let axes = normalize_axes_optional(axis, ndim)?;
-    if axes.is_empty() {
-        return Ok(py_arr); // no-op if no axes to flip
+    let dim = dim.map(|a| a.into_dim_array()).transpose()?;
+    let dim = dim.as_ref().map(|a| a.as_slice());
+    let dims = normalize_dims_optional(dim, ndim)?;
+    if dims.is_empty() {
+        return Ok(py_arr); // no-op if no dims to flip
     }
-    let ret = jix_core::ops::Flip::new_array(array, axes.as_slice()).into_py_result()?;
+    let ret = jix_core::ops::Flip::new_array(array, dims.as_slice()).into_py_result()?;
     let np_dtype = py_arr.get().dtype(py)?;
     Bound::new(
         py,
@@ -1062,13 +1062,13 @@ pub fn flip<'py>(
     )
 }
 
-/// Rolls elements along an axis, wrapping around at the boundary.
+/// Rolls elements along a dim, wrapping around at the boundary.
 ///
-/// Elements pushed off the end of an axis re-enter at the beginning, so the shape and dtype
-/// of the output equal the input. `shift` is taken modulo `shape[axis]`; positive shifts
+/// Elements pushed off the end of a dim re-enter at the beginning, so the shape and dtype
+/// of the output equal the input. `shift` is taken modulo `shape[dim]`; positive shifts
 /// move elements toward larger indices, negative shifts toward smaller indices.
 ///
-/// See also [`jix.flip()`][jix.flip], which reverses element order along an axis without
+/// See also [`jix.flip()`][jix.flip], which reverses element order along a dim without
 /// wrapping.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
@@ -1076,9 +1076,9 @@ pub fn flip<'py>(
 /// Args:
 ///     array: Input array.
 ///     shift: Number of places to shift.
-///     axis: Axis to roll. Negative indices are supported. When `None` (the default), the
-///         input must be 1-D and the only axis is rolled. Unlike `numpy.roll`, this
-///         function does not flatten higher-dimensional inputs when `axis` is omitted.
+///     dim: Dim to roll. Negative indices are supported. When `None` (the default), the
+///         input must be 1-D and the only dim is rolled. Unlike `numpy.roll`, this
+///         function does not flatten higher-dimensional inputs when `dim` is omitted.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with the same shape and dtype as the input.
@@ -1095,27 +1095,27 @@ pub fn flip<'py>(
 ///     # Negative shift wraps the head to the back.
 ///     assert np.array_equal(jix.roll(a, -1).numpy(), [1, 2, 3, 4, 0])
 ///
-///     # 2-D roll along an explicit axis (axis must be given when ndim > 1).
+///     # 2-D roll along an explicit dim (dim must be given when ndim > 1).
 ///     b = jix.compact([[0, 1, 2], [3, 4, 5]], dtype=np.int32)
-///     assert np.array_equal(jix.roll(b, 1, axis=0).numpy(), [[3, 4, 5], [0, 1, 2]])
-///     assert np.array_equal(jix.roll(b, 1, axis=1).numpy(), [[2, 0, 1], [5, 3, 4]])
+///     assert np.array_equal(jix.roll(b, 1, dim=0).numpy(), [[3, 4, 5], [0, 1, 2]])
+///     assert np.array_equal(jix.roll(b, 1, dim=1).numpy(), [[2, 0, 1], [5, 3, 4]])
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, shift, axis=None))]
+#[pyo3(signature = (array, shift, dim=None))]
 pub fn roll<'py>(
     array: &Bound<'py, PyAny>,
     shift: i64,
-    axis: Option<i32>,
+    dim: Option<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let core = py_arr.get().to_core();
-    let axis = normalize_axis_optional(axis, core.ndim())?;
+    let dim = normalize_dim_optional(dim, core.ndim())?;
     if shift == 0 {
         return Ok(py_arr); // no-op if no shift
     }
-    let ret = jix_core::ops::Roll::new_array(core, shift, axis).into_py_result()?;
+    let ret = jix_core::ops::Roll::new_array(core, shift, dim).into_py_result()?;
     let np_dtype = py_arr.get().dtype(py)?;
     Bound::new(
         py,
@@ -1123,28 +1123,28 @@ pub fn roll<'py>(
     )
 }
 
-/// Replicates the array along a single axis.
+/// Replicates the array along a single dim.
 ///
-/// The output shape matches the input except `shape[axis]` is multiplied by `repeats`. Element
-/// `i` along the output axis comes from input element `i mod shape[axis]`, so the whole
+/// The output shape matches the input except `shape[dim]` is multiplied by `repeats`. Element
+/// `i` along the output dim comes from input element `i mod shape[dim]`, so the whole
 /// sequence is repeated rather than each element in place. This differs from
-/// [`jix.repeat()`][jix.repeat], which repeats each element. When the input axis already
+/// [`jix.repeat()`][jix.repeat], which repeats each element. When the input dim already
 /// has length 1, [`jix.broadcast()`][jix.broadcast] is a zero-cost alternative.
 ///
 /// Unlike `numpy.tile`, this function only accepts a single integer `repeats` along a single
-/// `axis`, and does not extend the array with new leading axes. `axis` must satisfy
-/// `-ndim <= axis < ndim`.
+/// `dim`, and does not extend the array with new leading dims. `dim` must satisfy
+/// `-ndim <= dim < ndim`.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
 ///     array: Input array.
-///     repeats: Number of times to repeat the array along `axis`. Must be non-negative.
-///     axis: Axis to tile along. Negative indices are supported. When `None` (the default),
-///         the input must be 1-D and the only axis is tiled.
+///     repeats: Number of times to repeat the array along `dim`. Must be non-negative.
+///     dim: Dim to tile along. Negative indices are supported. When `None` (the default),
+///         the input must be 1-D and the only dim is tiled.
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with `shape[axis]` multiplied by `repeats`.
+///     A [`jix.Array`][jix.Array] with `shape[dim]` multiplied by `repeats`.
 ///
 /// Examples:
 ///     ```python
@@ -1155,38 +1155,38 @@ pub fn roll<'py>(
 ///     a = jix.compact([1, 2, 3], dtype=np.int32)
 ///     assert np.array_equal(jix.tile(a, 2).numpy(), [1, 2, 3, 1, 2, 3])
 ///
-///     # 2-D along rows (axis=0): the matrix is stacked on top of itself
+///     # 2-D along rows (dim=0): the matrix is stacked on top of itself
 ///     b = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
 ///     assert np.array_equal(
-///         jix.tile(b, 2, axis=0).numpy(),
+///         jix.tile(b, 2, dim=0).numpy(),
 ///         [[1, 2], [3, 4], [1, 2], [3, 4]],
 ///     )
 ///
-///     # 2-D along columns (axis=1): each row is repeated horizontally
+///     # 2-D along columns (dim=1): each row is repeated horizontally
 ///     assert np.array_equal(
-///         jix.tile(b, 2, axis=1).numpy(),
+///         jix.tile(b, 2, dim=1).numpy(),
 ///         [[1, 2, 1, 2], [3, 4, 3, 4]],
 ///     )
 ///
-///     # repeats=0 yields an empty array along that axis
+///     # repeats=0 yields an empty array along that dim
 ///     assert jix.tile(a, 0).numpy().shape == (0,)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, repeats, axis=None))]
+#[pyo3(signature = (array, repeats, dim=None))]
 pub fn tile<'py>(
     array: &Bound<'py, PyAny>,
     repeats: u64,
-    axis: Option<i32>,
+    dim: Option<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let core = py_arr.get().to_core();
-    let axis = normalize_axis_optional(axis, core.ndim())?;
+    let dim = normalize_dim_optional(dim, core.ndim())?;
     if repeats == 1 {
         return Ok(py_arr); // no-op
     }
-    let ret = jix_core::ops::Tile::new_array(core, repeats, axis).into_py_result()?;
+    let ret = jix_core::ops::Tile::new_array(core, repeats, dim).into_py_result()?;
     let np_dtype = py_arr.get().dtype(py)?;
     Bound::new(
         py,

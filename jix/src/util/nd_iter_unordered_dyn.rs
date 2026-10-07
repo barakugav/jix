@@ -1,5 +1,5 @@
 use crate::dtype::{Alignment, Itemsize};
-use crate::util::axes_sort_by;
+use crate::util::dims_sort_by;
 use crate::util::iter::NdIter;
 use crate::{dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
@@ -31,8 +31,8 @@ impl NdIterUnorderedDyn {
             assert_eq!(s.len(), shape.len());
         }
 
-        // (1) Order the axes (per-operand strides non-increasing, size-1 axes dropped). The sort key
-        // is the array of an axis's per-operand strides, compared lexicographically (operand 0
+        // (1) Order the dims (per-operand strides non-increasing, size-1 dims dropped). The sort key
+        // is the array of a dim's per-operand strides, compared lexicographically (operand 0
         // first), so ranking by it gives exactly the order we want.
         let mut dim_perm = DimArray::new();
         for (d, &len) in shape.iter().enumerate() {
@@ -56,7 +56,7 @@ impl NdIterUnorderedDyn {
             };
         }
         let (shape, strides) = if dim_perm.len() == 1 {
-            // Only one axis remains after dropping size-1 axes: no sort or coalesce needed.
+            // Only one dim remains after dropping size-1 dims: no sort or coalesce needed.
             let d = dim_perm[0] as usize;
             let shape = DimArray::from_slice(&[shape[d]]).unwrap();
             let strides = strides
@@ -65,11 +65,11 @@ impl NdIterUnorderedDyn {
                 .collect::<Vec<_>>();
             (shape, strides)
         } else {
-            axes_sort_by(&mut dim_perm, |d1, d2| {
+            dims_sort_by(&mut dim_perm, |d1, d2| {
                 let mut compared = false;
                 for strides in strides.iter() {
-                    // A zero stride means this operand does not move along the axis at all, so it
-                    // has no opinion on where the axis belongs.
+                    // A zero stride means this operand does not move along the dim at all, so it
+                    // has no opinion on where the dim belongs.
                     if strides[d1] == 0 || strides[d2] == 0 {
                         continue;
                     }
@@ -83,12 +83,12 @@ impl NdIterUnorderedDyn {
                 compared.then_some(std::cmp::Ordering::Equal)
             });
 
-            // (2) Coalesce adjacent contiguous axes into groups. `dim_perm` lists the axes to visit,
-            // outermost first, so a group takes its stride from the innermost axis it reaches down to
+            // (2) Coalesce adjacent contiguous dims into groups. `dim_perm` lists the dims to visit,
+            // outermost first, so a group takes its stride from the innermost dim it reaches down to
             // and its length from the product of the group's shapes. Reading the caller's shape and
             // strides through `dim_perm` leaves the permutation implicit: nothing is materialized until
             // the groups are known, and then only once.
-            let mut group_inner = DimArray::new(); // input axis of each group's inner axis
+            let mut group_inner = DimArray::new(); // input dim of each group's inner dim
             let mut group_len = DimArray::new(); // product of the group's shapes
             for &d in dim_perm.iter() {
                 let d = d as usize;
@@ -98,7 +98,7 @@ impl NdIterUnorderedDyn {
                         .iter()
                         .all(|s| s[group_inner[m - 1] as usize] == s[d] * shape[d])
                 {
-                    group_inner[m - 1] = d as DimIdx; // the group now reaches down to axis `d`
+                    group_inner[m - 1] = d as DimIdx; // the group now reaches down to dim `d`
                     group_len[m - 1] *= shape[d];
                 } else {
                     group_inner.push(d as DimIdx);
@@ -204,7 +204,7 @@ fn nd_iter_unordered_nd_walk<OuterD: Dimension>(
     let mut offsets = vec![0usize; strides.len()];
 
     if OuterD::NDIM == Some(1) {
-        // Special case for 2D: the outer `NdIter` is just a single loop over the outer axis, and
+        // Special case for 2D: the outer `NdIter` is just a single loop over the outer dim, and
         // and inner loop is a flat 1-d run.
 
         let outer_len = shape[0];
@@ -218,8 +218,8 @@ fn nd_iter_unordered_nd_walk<OuterD: Dimension>(
             inner_loop(&offsets, inner_len, &inner_strides);
         }
     } else {
-        // Flat inner 1-d run over the innermost axis [ndim-1]; the outer `NdIter` walks the outer
-        // axes and yields every operand's running byte offset at once.
+        // Flat inner 1-d run over the innermost dim [ndim-1]; the outer `NdIter` walks the outer
+        // dims and yields every operand's running byte offset at once.
 
         let outer_shape = OuterD::vec(ndim - 1, |k| shape[k] as u64);
         let outer_strides = strides
@@ -319,7 +319,7 @@ mod tests {
 
     /// The whole contract of this type: it must be indistinguishable from [`NdIterUnordered`] on the
     /// same input - same flags, same offsets, same order, same number of inner runs. What the walk
-    /// itself has to do (axis ordering, coalescing, the flags, the scalar and empty sentinels) is
+    /// itself has to do (dim ordering, coalescing, the flags, the scalar and empty sentinels) is
     /// pinned down by the tests in `nd_iter_unordered.rs`, so the cases below only need to reach
     /// each structurally different path and let the comparison do the checking.
     #[track_caller]
@@ -338,7 +338,7 @@ mod tests {
     }
 
     /// Byte strides for a row-major array whose backing shape is `shape[d] * mult[d]`, sampling one
-    /// logical element every `mult[d]` slots along axis `d` (mirrors the `nd_copy` test helper).
+    /// logical element every `mult[d]` slots along dim `d` (mirrors the `nd_copy` test helper).
     /// `mult` all ones is fully contiguous (maximal coalescing); any `mult[d] > 1` leaves gaps.
     fn strided_strides(shape: &[usize], mult: &[usize], itemsize: usize) -> Vec<usize> {
         let ndim = shape.len();
@@ -362,17 +362,17 @@ mod tests {
     #[test]
     fn matches_const_generic_on_every_walk_shape() {
         let cases: &[Case] = &[
-            // 1-d, taken straight to the single-axis branch of `new`.
+            // 1-d, taken straight to the single-dim branch of `new`.
             (&[5], [&[1], &[4]], [(1, 1), (4, 4)]),
             (&[4], [&[2], &[8]], [(1, 1), (4, 4)]),
             // Sort and coalesce: C order merges as-is, F order only after being reordered.
             (&[3, 4], [&[4, 1], &[16, 4]], [(1, 1), (4, 4)]),
             (&[3, 4], [&[1, 3], &[4, 12]], [(1, 1), (4, 4)]),
-            // A gap on the outer axis blocks the merge, so an outer walk survives.
+            // A gap on the outer dim blocks the merge, so an outer walk survives.
             (&[2, 3], [&[10, 1], &[40, 4]], [(1, 1), (4, 4)]),
             // Only one of the two operands is contiguous, so the flags must disagree per operand.
             (&[2, 3], [&[12, 4], &[1, 2]], [(4, 4), (1, 1)]),
-            // Size-1 axes dropped, and the all-size-1 scalar sentinel.
+            // Size-1 dims dropped, and the all-size-1 scalar sentinel.
             (&[1, 4, 1], [&[100, 1, 50], &[7, 4, 9]], [(1, 1), (4, 4)]),
             (&[1, 1], [&[7, 3], &[8, 4]], [(1, 1), (4, 4)]),
             (&[], [&[], &[]], [(4, 4), (1, 1)]),
@@ -382,7 +382,7 @@ mod tests {
             (&[2, 3], [&[0, 0], &[4, 4]], [(1, 1), (4, 4)]),
             (&[3], [&[5], &[8]], [(4, 4), (4, 4)]),
             // One case per outer-rank instantiation of `nd_iter_unordered_nd_walk`: pairing C-order
-            // strides against F-order ones keeps every axis from coalescing, so the post-coalesce
+            // strides against F-order ones keeps every dim from coalescing, so the post-coalesce
             // rank is the input rank and picks Dim<1>, Dim<2>, Dim<3> and then DimDyn in turn.
             (&[2, 3], [&[3, 1], &[1, 2]], [(1, 1), (1, 1)]),
             (&[2, 3, 4], [&[12, 4, 1], &[1, 2, 6]], [(1, 1), (1, 1)]),
@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn prop_matches_const_generic_random_strides() {
         // Arbitrary strides (overlapping, broadcast) over ranks up to 6, and shapes that may
-        // contain a zero-length axis, so the empty sentinel and the DimDyn outer walk both come up.
+        // contain a zero-length dim, so the empty sentinel and the DimDyn outer walk both come up.
         let strategy = (0usize..=6).prop_flat_map(|ndim| {
             (
                 prop::collection::vec(0usize..=3, ndim),
@@ -477,8 +477,8 @@ mod tests {
 
     #[test]
     fn prop_matches_const_generic_permuted_contiguous_layouts() {
-        // Two independent contiguous-with-gaps layouts presented under a shared random axis
-        // permutation: this is what actually forces the descending-stride sort to reorder axes and
+        // Two independent contiguous-with-gaps layouts presented under a shared random dim
+        // permutation: this is what actually forces the descending-stride sort to reorder dims and
         // then run the coalescing merge on the recovered contiguous runs.
         let strategy = (0usize..=5).prop_flat_map(|ndim| {
             (

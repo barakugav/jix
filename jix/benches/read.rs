@@ -168,7 +168,7 @@ fn bench_compact_read_transposed(c: &mut Criterion) {
     group.sample_size(20);
     for (shape, block_shape) in configs {
         let array = create_compact(shape, block_shape.as_slice(), None, &mut rng);
-        let t = array.view().permute_axes(&[1, 0]);
+        let t = array.view().permute_dims(&[1, 0]);
         let full = [0..shape[1], 0..shape[0]];
         let param = format!("shape={shape:?}, block={block_shape:?}");
 

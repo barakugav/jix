@@ -86,7 +86,7 @@ and `read_data(index_ranges, ctx, out)` which reads a rectangular sub-region and
 `read_data` has two modes, mirroring NumPy's `out=`:
 
 - **pull** (`out` is `None`) - the impl returns the cheapest buffer it can, a borrowed view into its
-  own memory (possibly with broadcast 0-stride axes) or a freshly materialized one, and picks the
+  own memory (possibly with broadcast 0-stride dims) or a freshly materialized one, and picks the
   strides itself. Shape ops exploit this to hand back a re-strided view instead of copying.
 - **push** (`out` is `Some(dst)`) - the region is written into `dst` at `dst`'s own strides, and the
   returned buffer is a view of `dst`. This is what lets a whole op pipeline write straight into the
@@ -111,9 +111,9 @@ Storage carries two pieces of compile-time info as associated types:
 ### Lazy evaluation via the type system
 
 Every operation returns `Array<Op<...>>` wrapping its input(s); the type parameter accumulates the
-whole pipeline (e.g. `Array<Sum<Add<PermuteAxes<Compact>, Compact>>>`). There is **no runtime
+whole pipeline (e.g. `Array<Sum<Add<PermuteDims<Compact>, Compact>>>`). There is **no runtime
 evaluation graph or scheduler - the type IS the execution plan.** Shape ops (`Reshape`, `Slice`,
-`Broadcast`, `PermuteAxes`, `InsertAxis`, `RemoveAxis`, ...) just remap index ranges without copying.
+`Broadcast`, `PermuteDims`, `InsertDim`, `RemoveDim`, ...) just remap index ranges without copying.
 Nothing runs until you materialize via `.to_ndarray()`, `.compact()`, or `.write_to_file()`/`.write_to()`
 - at which point the compiler-inlined pipeline executes in a single block-by-block read loop.
 

@@ -1,10 +1,10 @@
 use crate::ops::prelude::*;
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape,
-/// returned by [`Array::insert_axis`](crate::Array::insert_axis). The inverse operation
-/// is [`RemoveAxis`](crate::ops::RemoveAxis).
+/// returned by [`Array::insert_dim`](crate::Array::insert_dim). The inverse operation
+/// is [`RemoveDim`](crate::ops::RemoveDim).
 ///
-/// Each element of `axis` is a **gap index** that identifies a position *between* (or outside)
+/// Each element of `dim` is a **gap index** that identifies a position *between* (or outside)
 /// the input dimensions:
 ///
 /// ```text
@@ -18,7 +18,7 @@ use crate::ops::prelude::*;
 ///
 /// Each occurrence of a gap index inserts one new length-1 dimension at that position. Duplicate
 /// gap indices are allowed and each adds another dimension at the same gap. The order of values in
-/// `axis` does not matter - only the multiset of gap indices matters. Valid gap indices are
+/// `dim` does not matter - only the multiset of gap indices matters. Valid gap indices are
 /// `0..=orig_ndim`.
 ///
 /// Output dtype equals the input dtype.
@@ -27,7 +27,7 @@ use crate::ops::prelude::*;
 ///
 /// # Dimension tracking
 ///
-/// `InsertAxis<S, D>` is generic over `D: Dimension`, determined by the axis argument type.
+/// `InsertDim<S, D>` is generic over `D: Dimension`, determined by the dim argument type.
 /// Statically-sized arguments encode the output ndim in the type:
 ///
 /// | Argument type | Output `D` |
@@ -40,10 +40,10 @@ use crate::ops::prelude::*;
 /// # Examples
 ///
 /// ```text
-/// [N]       axis: [0]     -> [1, N]      (insert before first dim)
-/// [N]       axis: [1]     -> [N, 1]      (append after last dim)
-/// [N, M]    axis: [1]     -> [N, 1, M]   (insert between dims)
-/// [N, M]    axis: [0, 2]  -> [1, N, M, 1]
+/// [N]       dim: [0]     -> [1, N]      (insert before first dim)
+/// [N]       dim: [1]     -> [N, 1]      (append after last dim)
+/// [N, M]    dim: [1]     -> [N, 1, M]   (insert between dims)
+/// [N, M]    dim: [0, 2]  -> [1, N, M, 1]
 /// ```
 ///
 /// Different argument types select both the insertion positions and the output dimension type:
@@ -55,21 +55,21 @@ use crate::ops::prelude::*;
 /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?; // shape [3], Dim<1>
 ///
 /// // usize -> output D = Dim<2> (one more than input Dim<1>)
-/// assert_eq!(a.view().insert_axis(0).shape(), &[1, 3]);
-/// assert_eq!(a.view().insert_axis(1).shape(), &[3, 1]);
+/// assert_eq!(a.view().insert_dim(0).shape(), &[1, 3]);
+/// assert_eq!(a.view().insert_dim(1).shape(), &[3, 1]);
 ///
 /// // [usize; 2] -> output D = Dim<3> (two more than input Dim<1>)
-/// assert_eq!(a.view().insert_axis([0, 1]).shape(), &[1, 3, 1]);
+/// assert_eq!(a.view().insert_dim([0, 1]).shape(), &[1, 3, 1]);
 ///
 /// // &[usize] -> output D = DimDyn
 /// let gaps = vec![0, 1];
-/// assert_eq!(a.view().insert_axis(gaps.as_slice()).shape(), &[1, 3, 1]);
+/// assert_eq!(a.view().insert_dim(gaps.as_slice()).shape(), &[1, 3, 1]);
 ///
 /// // duplicates are allowed; each occurrence inserts one dimension
-/// assert_eq!(a.view().insert_axis([0, 0, 1, 1]).shape(), &[1, 1, 3, 1, 1]);
+/// assert_eq!(a.view().insert_dim([0, 0, 1, 1]).shape(), &[1, 1, 3, 1, 1]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct InsertAxis<S: ArrayStorage, D> {
+pub struct InsertDim<S: ArrayStorage, D> {
     array: S,
     original_dims: <S::Dimension as Dimension>::Vec<DimIdx>,
 
@@ -77,43 +77,43 @@ pub struct InsertAxis<S: ArrayStorage, D> {
     spec: ArraySpecDynamic,
 }
 
-impl<S, D> InsertAxis<S, D>
+impl<S, D> InsertDim<S, D>
 where
     S: ArrayStorage,
     D: Dimension,
 {
-    /// Constructs an [`InsertAxis`] storage. See the struct docs for semantics and examples.
-    pub fn new<Ax>(array: S, axis: Ax) -> Result<Self>
+    /// Constructs an [`InsertDim`] storage. See the struct docs for semantics and examples.
+    pub fn new<Ax>(array: S, dim: Ax) -> Result<Self>
     where
-        Ax: AxesArg<ExpandedDimension<S::Dimension> = D>,
+        Ax: DimsArg<ExpandedDimension<S::Dimension> = D>,
     {
         let orig_ndim = array.shape().len();
-        let new_ndim = orig_ndim + axis.len();
+        let new_ndim = orig_ndim + dim.len();
         check_ndim::<D>(new_ndim)?;
 
-        // Each value in `axes` is a gap index in the *input* shape: 0 means "before input dim 0",
+        // Each value in `dims` is a gap index in the *input* shape: 0 means "before input dim 0",
         // 1 means "before input dim 1" (i.e. between dims 0 and 1), ..., orig_ndim means "after
         // the last input dim". Duplicates are allowed - each occurrence inserts one additional
         // dim at that gap.
-        for i in 0..axis.len() {
-            let ax = axis.get(i);
+        for i in 0..dim.len() {
+            let ax = dim.get(i);
             ensure!(
                 ax <= orig_ndim,
                 InvalidShapeOperation,
-                "axis {ax} out of bounds for array of ndim {orig_ndim} \
+                "dim {ax} out of bounds for array of ndim {orig_ndim} \
                      (gap indices must be in 0..={orig_ndim})"
             );
         }
-        let mut axes = dim_arr(axis.len(), |i| axis.get(i) as DimIdx);
-        axes.sort_unstable();
+        let mut dims = dim_arr(dim.len(), |i| dim.get(i) as DimIdx);
+        dims.sort_unstable();
 
         let mut is_inserted = dim_arr(orig_ndim, |_| false);
         let mut shape = DimArray::from_slice(array.shape()).unwrap();
         let orig_spec = array.spec();
         let mut block_shape = <_ as Clone>::clone(orig_spec.block_shape());
         let mut block_shape_fixed_dims = orig_spec.block_shape_fixed_dims();
-        for (inserted_dim_count, &dim) in axes.iter().enumerate() {
-            let insert_pos = dim as usize + inserted_dim_count;
+        for (inserted_dim_count, &d) in dims.iter().enumerate() {
+            let insert_pos = d as usize + inserted_dim_count;
             is_inserted.insert(insert_pos, true);
             shape.insert(insert_pos, 1);
             block_shape.insert(insert_pos, 1);
@@ -123,13 +123,13 @@ where
         let original_dims = is_inserted
             .iter()
             .enumerate()
-            .filter_map(|(dim, inserted)| (!inserted).then_some(dim as DimIdx))
+            .filter_map(|(d, inserted)| (!inserted).then_some(d as DimIdx))
             .collect_dim_vec::<S::Dimension>(array.shape().len());
         let mut read_shape_scale_weight =
             orig_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>();
-        for (dim, inserted) in is_inserted.iter().enumerate() {
+        for (d, inserted) in is_inserted.iter().enumerate() {
             if *inserted {
-                read_shape_scale_weight.insert(dim, ScaleWeight::NONE);
+                read_shape_scale_weight.insert(d, ScaleWeight::NONE);
             }
         }
         let mut read_layout_order = orig_spec
@@ -137,9 +137,9 @@ where
             .iter()
             .map(|&d| original_dims[d as usize])
             .collect::<DimArray<_>>();
-        for (dim, inserted) in is_inserted.iter().enumerate() {
+        for (d, inserted) in is_inserted.iter().enumerate() {
             if *inserted {
-                read_layout_order_insert_dont_care_dim(&mut read_layout_order, dim);
+                read_layout_order_insert_dont_care_dim(&mut read_layout_order, d);
             }
         }
         let spec = ArraySpecDynamic::new(
@@ -158,12 +158,12 @@ where
         })
     }
 
-    /// Constructs an array with [`InsertAxis`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Ax>(array: Array<S>, axis: Ax) -> Result<Array<Self>>
+    /// Constructs an array with [`InsertDim`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array<Ax>(array: Array<S>, dim: Ax) -> Result<Array<Self>>
     where
-        Ax: AxesArg<ExpandedDimension<S::Dimension> = D>,
+        Ax: DimsArg<ExpandedDimension<S::Dimension> = D>,
     {
-        Self::new(array.into_storage(), axis).map(Array::from_storage)
+        Self::new(array.into_storage(), dim).map(Array::from_storage)
     }
 
     #[inline(always)]
@@ -185,7 +185,7 @@ where
     }
 }
 
-impl<S, D> ArrayStorage for InsertAxis<S, D>
+impl<S, D> ArrayStorage for InsertDim<S, D>
 where
     S: ArrayStorage,
     D: Dimension,
@@ -251,17 +251,17 @@ where
             .map_flags(|flags| flags.clear_compact())
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
-        ArrayStorageInfo::new_deps("InsertAxis", [&self.array])
+        ArrayStorageInfo::new_deps("InsertDim", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = InsertAxis<S, NewD>;
+    type DimensionChange<NewD: crate::Dimension> = InsertDim<S, NewD>;
     #[inline]
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
         check_ndim::<NewD>(self.shape().len())?;
         let shape = NewD::from_slice(self.shape());
-        Ok(InsertAxis {
+        Ok(InsertDim {
             array: self.array,
             original_dims: self.original_dims,
             shape,
@@ -269,12 +269,12 @@ where
         })
     }
 
-    type ElementTypeChange<NewET: crate::ElementType> = InsertAxis<S::ElementTypeChange<NewET>, D>;
+    type ElementTypeChange<NewET: crate::ElementType> = InsertDim<S::ElementTypeChange<NewET>, D>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
         self,
     ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
-        Ok(InsertAxis {
+        Ok(InsertDim {
             array: self.array.element_type_change()?,
             original_dims: self.original_dims,
             shape: self.shape,
@@ -289,7 +289,7 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::codec::ReadContext;
-    use crate::ops::InsertAxis;
+    use crate::ops::InsertDim;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::{Array, Dim, Ty, NDIM_MAX};
@@ -319,34 +319,31 @@ mod tests {
 
     #[test]
     fn shape_insert_before_first_dim() {
-        assert_eq!(make1d(arange(6), 6).insert_axis(&[0]).shape(), &[1, 6]);
+        assert_eq!(make1d(arange(6), 6).insert_dim(&[0]).shape(), &[1, 6]);
     }
 
     #[test]
     fn shape_insert_after_last_dim() {
-        assert_eq!(make1d(arange(6), 6).insert_axis(&[1]).shape(), &[6, 1]);
+        assert_eq!(make1d(arange(6), 6).insert_dim(&[1]).shape(), &[6, 1]);
     }
 
     #[test]
     fn shape_insert_between_dims() {
         assert_eq!(
-            make2d(arange(12), 3, 4).insert_axis(&[1]).shape(),
+            make2d(arange(12), 3, 4).insert_dim(&[1]).shape(),
             &[3, 1, 4]
         );
     }
 
     #[test]
     fn shape_insert_front_and_back() {
-        assert_eq!(
-            make1d(arange(6), 6).insert_axis(&[0, 1]).shape(),
-            &[1, 6, 1]
-        );
+        assert_eq!(make1d(arange(6), 6).insert_dim(&[0, 1]).shape(), &[1, 6, 1]);
     }
 
     #[test]
     fn shape_insert_duplicates_same_gap() {
         assert_eq!(
-            make2d(arange(12), 3, 4).insert_axis(&[0, 0]).shape(),
+            make2d(arange(12), 3, 4).insert_dim(&[0, 0]).shape(),
             &[1, 1, 3, 4]
         );
     }
@@ -355,22 +352,22 @@ mod tests {
     fn shape_insert_user_example() {
         let a = make3d(arange(24), 2, 3, 4);
         assert_eq!(
-            a.insert_axis(&[0, 1, 1, 1, 3]).shape(),
+            a.insert_dim(&[0, 1, 1, 1, 3]).shape(),
             &[1, 2, 1, 1, 1, 3, 4, 1]
         );
     }
 
     #[test]
-    fn shape_insert_unsorted_axes_same_result() {
-        // Order of axes values should not matter; only the multiset matters.
-        let a1 = make3d(arange(24), 2, 3, 4).insert_axis(&[0, 1, 1, 1, 3]);
-        let a2 = make3d(arange(24), 2, 3, 4).insert_axis(&[3, 1, 0, 1, 1]);
+    fn shape_insert_unsorted_dims_same_result() {
+        // Order of dims values should not matter; only the multiset matters.
+        let a1 = make3d(arange(24), 2, 3, 4).insert_dim(&[0, 1, 1, 1, 3]);
+        let a2 = make3d(arange(24), 2, 3, 4).insert_dim(&[3, 1, 0, 1, 1]);
         assert_eq!(a1.shape(), a2.shape());
     }
 
     #[test]
-    fn shape_empty_axes_is_identity() {
-        assert_eq!(make2d(arange(12), 3, 4).insert_axis(&[]).shape(), &[3, 4]);
+    fn shape_empty_dims_is_identity() {
+        assert_eq!(make2d(arange(12), 3, 4).insert_dim(&[]).shape(), &[3, 4]);
     }
 
     // -----------------------------------------------------------------------
@@ -379,7 +376,7 @@ mod tests {
 
     #[test]
     fn full_read_insert_before_first() {
-        let got = make1d(arange(6), 6).insert_axis(&[0]).to_ndarray().unwrap();
+        let got = make1d(arange(6), 6).insert_dim(&[0]).to_ndarray().unwrap();
         assert_eq!(
             got,
             ndarray::Array::from_shape_vec([1, 6], arange(6)).unwrap()
@@ -388,7 +385,7 @@ mod tests {
 
     #[test]
     fn full_read_insert_after_last() {
-        let got = make1d(arange(6), 6).insert_axis(&[1]).to_ndarray().unwrap();
+        let got = make1d(arange(6), 6).insert_dim(&[1]).to_ndarray().unwrap();
         assert_eq!(
             got,
             ndarray::Array::from_shape_vec([6, 1], arange(6)).unwrap()
@@ -398,7 +395,7 @@ mod tests {
     #[test]
     fn full_read_insert_between_dims() {
         let got = make2d(arange(12), 3, 4)
-            .insert_axis(&[1])
+            .insert_dim(&[1])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -410,7 +407,7 @@ mod tests {
     #[test]
     fn full_read_insert_front_and_back() {
         let got = make1d(arange(6), 6)
-            .insert_axis(&[0, 1])
+            .insert_dim(&[0, 1])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -422,7 +419,7 @@ mod tests {
     #[test]
     fn full_read_insert_user_example() {
         let got = make3d(arange(24), 2, 3, 4)
-            .insert_axis(&[0, 1, 1, 1, 3])
+            .insert_dim(&[0, 1, 1, 1, 3])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -432,9 +429,9 @@ mod tests {
     }
 
     #[test]
-    fn full_read_identity_empty_axes() {
+    fn full_read_identity_empty_dims() {
         let got = make2d(arange(12), 3, 4)
-            .insert_axis(&[])
+            .insert_dim(&[])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -450,7 +447,7 @@ mod tests {
     #[test]
     fn sub_read_inserted_dim_is_stripped() {
         let got = make1d(arange(6), 6)
-            .insert_axis(&[0])
+            .insert_dim(&[0])
             .to_ndarray_sub(&[0..1, 2..5], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![[2, 3, 4]]);
@@ -459,7 +456,7 @@ mod tests {
     #[test]
     fn sub_read_2d_with_inserted_middle() {
         let got = make2d(arange(12), 3, 4)
-            .insert_axis(&[1])
+            .insert_dim(&[1])
             .to_ndarray_sub(&[1..3, 0..1, 0..2], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![[[4, 5]], [[8, 9]]]);
@@ -470,10 +467,10 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn error_axis_out_of_bounds() {
+    fn error_dim_out_of_bounds() {
         let a = make1d(arange(4), 4);
-        // orig_ndim=1, valid gaps are 0..=1; axis 2 is out of bounds
-        assert!(InsertAxis::new_array(a, &[2]).is_err());
+        // orig_ndim=1, valid gaps are 0..=1; dim 2 is out of bounds
+        assert!(InsertDim::new_array(a, &[2]).is_err());
     }
 
     // -----------------------------------------------------------------------
@@ -481,7 +478,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[allow(clippy::type_complexity)]
-    fn insert_axis_strategy<T>() -> impl proptest::strategy::Strategy<
+    fn insert_dim_strategy<T>() -> impl proptest::strategy::Strategy<
         Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<usize>),
     >
     where
@@ -497,22 +494,22 @@ mod tests {
                 let gaps = prop::collection::vec(0..=ndim, n_insert);
                 (Just(shape), gaps)
             })
-            .prop_flat_map(|(shape, axes)| {
+            .prop_flat_map(|(shape, dims)| {
                 let array_strat =
                     crate::util::array_strategy_from_shape::<T>(Just(shape), T::any_strategy());
-                (array_strat, Just(axes).prop_shuffle())
+                (array_strat, Just(dims).prop_shuffle())
             })
-            .prop_map(|((nd, za), axes)| (nd, za, axes))
+            .prop_map(|((nd, za), dims)| (nd, za, dims))
     }
 
     proptest::proptest! {
         #[test]
-        fn proptest_insert_axis((nd, za, axes) in insert_axis_strategy::<i32>()) {
-            // Oracle: inserting size-1 axes is a pure reshape - flat order is unchanged.
-            let mut sorted_axes = axes.clone();
-            sorted_axes.sort_unstable();
+        fn proptest_insert_dim((nd, za, dims) in insert_dim_strategy::<i32>()) {
+            // Oracle: inserting size-1 dims is a pure reshape - flat order is unchanged.
+            let mut sorted_dims = dims.clone();
+            sorted_dims.sort_unstable();
             let mut expected_shape= nd.shape().to_vec();
-            for (i, &gap) in sorted_axes.iter().enumerate() {
+            for (i, &gap) in sorted_dims.iter().enumerate() {
                 expected_shape.insert(gap + i, 1);
             }
             let expected = ndarray::ArrayD::from_shape_vec(
@@ -520,7 +517,7 @@ mod tests {
                 nd.iter().cloned().collect::<Vec<_>>(),
             )
             .unwrap();
-            crate::util::assert_array_matches(&za.insert_axis(&axes), &expected);
+            crate::util::assert_array_matches(&za.insert_dim(&dims), &expected);
         }
     }
 }

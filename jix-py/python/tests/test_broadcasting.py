@@ -153,7 +153,7 @@ def test_broadcast_incompatible_raises(shape_a, shape_b):
 # A couple of representative broadcastable shape pairs, reused from
 # test_broadcast_add_shapes, for the concrete (non-property) tests below.
 _BROADCAST_CONCRETE_SHAPE_PAIRS = [
-    ((3, 1), (3, 4)),  # 2-D broadcast along one axis
+    ((3, 1), (3, 4)),  # 2-D broadcast along one dim
     ((4, 1), (1, 3)),  # classic outer-product pattern -> (4, 3)
     ((8, 1, 6, 1), (7, 1, 5)),  # NumPy docs classic multi-dim example -> (8, 7, 6, 5)
 ]
@@ -301,11 +301,11 @@ def broadcastable_shapes_triple(draw, max_ndim: int = 4, max_dim: int = 5):
 _WHERE_SHAPE_TRIPLES = [
     # all equal
     ((3,), (3,), (3,)),
-    # one operand is a length-1 axis
+    # one operand is a length-1 dim
     ((3,), (3,), (1,)),
     ((1,), (3,), (3,)),
     ((3,), (1,), (3,)),
-    # condition drives a leading axis, y is a row vector
+    # condition drives a leading dim, y is a row vector
     ((2, 1), (2, 3), (3,)),
     ((2, 3), (1, 3), (2, 1)),
     # fewer dims get prepended

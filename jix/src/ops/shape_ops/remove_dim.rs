@@ -1,12 +1,12 @@
 use crate::ops::prelude::*;
 
 /// Removes length-1 dimensions from an array's shape,
-/// returned by [`Array::remove_axis`](crate::Array::remove_axis). The inverse operation
-/// is [`InsertAxis`](crate::ops::InsertAxis).
+/// returned by [`Array::remove_dim`](crate::Array::remove_dim). The inverse operation
+/// is [`InsertDim`](crate::ops::InsertDim).
 ///
-/// `axis` is a set of axis indices in the *input* shape (0-based). Each named dimension must have
-/// length exactly 1 and is dropped from the output shape. Duplicate axis indices are not allowed.
-/// The order of values in `axis` does not matter. Valid axis indices are `0..input_ndim`.
+/// `dim` is a set of dim indices in the *input* shape (0-based). Each named dimension must have
+/// length exactly 1 and is dropped from the output shape. Duplicate dim indices are not allowed.
+/// The order of values in `dim` does not matter. Valid dim indices are `0..input_ndim`.
 ///
 /// Output dtype equals the input dtype.
 ///
@@ -14,7 +14,7 @@ use crate::ops::prelude::*;
 ///
 /// # Dimension tracking
 ///
-/// `RemoveAxis<S, D>` is generic over `D: Dimension`, determined by the axis argument type.
+/// `RemoveDim<S, D>` is generic over `D: Dimension`, determined by the dim argument type.
 /// Statically-sized arguments encode the output ndim in the type:
 ///
 /// | Argument type | Output `D` |
@@ -27,13 +27,13 @@ use crate::ops::prelude::*;
 /// # Examples
 ///
 /// ```text
-/// [1, N]          axis: [0]       -> [N]
-/// [N, 1]          axis: [1]       -> [N]
-/// [N, 1, M]       axis: [1]       -> [N, M]
-/// [1, N, 1, M, 1] axis: [0, 2, 4] -> [N, M]
+/// [1, N]          dim: [0]       -> [N]
+/// [N, 1]          dim: [1]       -> [N]
+/// [N, 1, M]       dim: [1]       -> [N, M]
+/// [1, N, 1, M, 1] dim: [0, 2, 4] -> [N, M]
 /// ```
 ///
-/// Different argument types select both the removed axes and the output dimension type:
+/// Different argument types select both the removed dims and the output dimension type:
 ///
 /// ```
 /// use jix::{Array, Dim};
@@ -42,62 +42,58 @@ use crate::ops::prelude::*;
 /// let a = Array::compact_ndarray(&array![[[1i32, 2, 3]]])?; // shape [1, 1, 3], Dim<3>
 ///
 /// // usize -> output D = Dim<2> (one fewer than input Dim<3>)
-/// assert_eq!(a.view().remove_axis(0).shape(), &[1, 3]);
+/// assert_eq!(a.view().remove_dim(0).shape(), &[1, 3]);
 ///
 /// // [usize; 2] -> output D = Dim<1> (two fewer than input Dim<3>)
-/// assert_eq!(a.view().remove_axis([0, 1]).shape(), &[3]);
+/// assert_eq!(a.view().remove_dim([0, 1]).shape(), &[3]);
 ///
 /// // &[usize] -> output D = DimDyn
-/// let axes = vec![0, 1];
-/// assert_eq!(a.remove_axis(axes.as_slice()).shape(), &[3]);
+/// let dims = vec![0, 1];
+/// assert_eq!(a.remove_dim(dims.as_slice()).shape(), &[3]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct RemoveAxis<S, D: Dimension> {
+pub struct RemoveDim<S, D: Dimension> {
     array: S,
-    axes_mapping: D::Vec<DimIdx>,
+    dims_mapping: D::Vec<DimIdx>,
 
     shape: D,
     spec: ArraySpecDynamic,
 }
 
-impl<S, D> RemoveAxis<S, D>
+impl<S, D> RemoveDim<S, D>
 where
     S: ArrayStorage,
     D: Dimension,
 {
-    /// Constructs a [`RemoveAxis`] storage. See the struct docs for semantics and examples.
-    pub fn new<Ax>(array: S, axis: Ax) -> Result<Self>
+    /// Constructs a [`RemoveDim`] storage. See the struct docs for semantics and examples.
+    pub fn new<Ax>(array: S, dim: Ax) -> Result<Self>
     where
-        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         let input_ndim = array.shape().len();
 
-        // Validate axis indices and check for duplicates.
+        // Validate dim indices and check for duplicates.
         let mut is_removed = DimArray::<bool>::from_iter(std::iter::repeat_n(false, input_ndim));
-        let axes = dim_arr(axis.len(), |i| axis.get(i));
-        for &ax in &axes {
+        let dims = dim_arr(dim.len(), |i| dim.get(i));
+        for &ax in &dims {
             ensure!(
                 ax < input_ndim,
                 InvalidShapeOperation,
-                "axis {ax} out of bounds for array of ndim {input_ndim} \
-                 (axis indices must be in 0..{input_ndim})"
+                "dim {ax} out of bounds for array of ndim {input_ndim} \
+                 (dim indices must be in 0..{input_ndim})"
             );
-            ensure!(
-                !is_removed[ax],
-                InvalidShapeOperation,
-                "duplicate axis {ax}"
-            );
+            ensure!(!is_removed[ax], InvalidShapeOperation, "duplicate dim {ax}");
             is_removed[ax] = true;
 
             ensure!(
                 array.shape()[ax] == 1,
                 InvalidShapeOperation,
-                "cannot remove axis {ax} with size {} (only size-1 axes can be removed)",
+                "cannot remove dim {ax} with size {} (only size-1 dims can be removed)",
                 array.shape()[ax]
             );
         }
 
-        let mut axes_mapping = DimArray::new();
+        let mut dims_mapping = DimArray::new();
         let mut shape = DimArray::new();
 
         let inner_spec = array.spec();
@@ -106,19 +102,19 @@ where
 
         for input_dim in 0..input_ndim {
             if !is_removed[input_dim] {
-                axes_mapping.push(input_dim as DimIdx);
+                dims_mapping.push(input_dim as DimIdx);
                 shape.push(array.shape()[input_dim]);
                 block_shape.push(inner_block_shape[input_dim]);
             }
         }
         let shape = D::from_slice(&shape);
-        let axes_mapping = D::vec(axes_mapping.len(), |d| axes_mapping[d]);
+        let dims_mapping = D::vec(dims_mapping.len(), |d| dims_mapping[d]);
 
         let block_shape_fixed_dims = inner_spec
             .block_shape_fixed_dims()
             .into_iter()
             .enumerate()
-            .filter_map(|(dim, c)| (!is_removed[dim]).then_some(c))
+            .filter_map(|(d, c)| (!is_removed[d]).then_some(c))
             .collect();
         let out_dim = |d: usize| (d - (0..d).filter(|&j| is_removed[j]).count()) as DimIdx;
         let read_shape_scale_weight = inner_spec
@@ -143,18 +139,18 @@ where
 
         Ok(Self {
             array,
-            axes_mapping,
+            dims_mapping,
             shape,
             spec,
         })
     }
 
-    /// Constructs an array with [`RemoveAxis`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Ax>(array: Array<S>, axis: Ax) -> Result<Array<Self>>
+    /// Constructs an array with [`RemoveDim`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array<Ax>(array: Array<S>, dim: Ax) -> Result<Array<Self>>
     where
-        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
-        Self::new(array.into_storage(), axis).map(Array::from_storage)
+        Self::new(array.into_storage(), dim).map(Array::from_storage)
     }
 
     #[inline(always)]
@@ -166,14 +162,14 @@ where
 
         let inner_ndim = self.array.shape().len();
         let mut inner_index = S::Dimension::vec(inner_ndim, |_| 0..1);
-        for (index, &axis) in index.iter().zip(self.axes_mapping.as_ref()) {
-            inner_index[axis as usize] = index.clone();
+        for (index, &dim) in index.iter().zip(self.dims_mapping.as_ref()) {
+            inner_index[dim as usize] = index.clone();
         }
         Ok(inner_index)
     }
 }
 
-impl<S, D> ArrayStorage for RemoveAxis<S, D>
+impl<S, D> ArrayStorage for RemoveDim<S, D>
 where
     S: ArrayStorage,
     D: Dimension,
@@ -197,13 +193,13 @@ where
                 out,
                 |inner_strides| {
                     dim_arr(index.len(), |i| {
-                        inner_strides[self.axes_mapping[i] as usize]
+                        inner_strides[self.dims_mapping[i] as usize]
                     })
                 },
                 |out_strides| {
                     let mut s = dim_arr(self.array.shape().len(), |_| 0usize);
-                    for (i, &axis) in self.axes_mapping.as_ref().iter().enumerate() {
-                        s[axis as usize] = out_strides[i];
+                    for (i, &dim) in self.dims_mapping.as_ref().iter().enumerate() {
+                        s[dim as usize] = out_strides[i];
                     }
                     s
                 },
@@ -227,10 +223,10 @@ where
             .map_flags(|flags| flags.clear_compact())
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
-        ArrayStorageInfo::new_deps("RemoveAxis", [&self.array])
+        ArrayStorageInfo::new_deps("RemoveDim", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = RemoveAxis<S, NewD>;
+    type DimensionChange<NewD: crate::Dimension> = RemoveDim<S, NewD>;
     #[inline]
     fn dimension_change<NewD: crate::Dimension>(
         self,
@@ -238,23 +234,23 @@ where
         let ndim = self.shape().len();
         check_ndim::<NewD>(ndim)?;
         let shape = NewD::from_slice(self.shape());
-        let axes_mapping = NewD::vec(ndim, |d| self.axes_mapping[d]);
-        Ok(RemoveAxis {
+        let dims_mapping = NewD::vec(ndim, |d| self.dims_mapping[d]);
+        Ok(RemoveDim {
             array: self.array,
-            axes_mapping,
+            dims_mapping,
             shape,
             spec: self.spec,
         })
     }
 
-    type ElementTypeChange<NewET: crate::ElementType> = RemoveAxis<S::ElementTypeChange<NewET>, D>;
+    type ElementTypeChange<NewET: crate::ElementType> = RemoveDim<S::ElementTypeChange<NewET>, D>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
         self,
     ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
-        Ok(RemoveAxis {
+        Ok(RemoveDim {
             array: self.array.element_type_change()?,
-            axes_mapping: self.axes_mapping,
+            dims_mapping: self.dims_mapping,
             shape: self.shape,
             spec: self.spec,
         })
@@ -298,37 +294,37 @@ mod tests {
 
     #[test]
     fn shape_remove_leading() {
-        let a = make1d(arange(6), 6).insert_axis(&[0]);
-        assert_eq!(a.remove_axis(&[0]).shape(), &[6]);
+        let a = make1d(arange(6), 6).insert_dim(&[0]);
+        assert_eq!(a.remove_dim(&[0]).shape(), &[6]);
     }
 
     #[test]
     fn shape_remove_trailing() {
-        let a = make1d(arange(6), 6).insert_axis(&[1]);
-        assert_eq!(a.remove_axis(&[1]).shape(), &[6]);
+        let a = make1d(arange(6), 6).insert_dim(&[1]);
+        assert_eq!(a.remove_dim(&[1]).shape(), &[6]);
     }
 
     #[test]
     fn shape_remove_middle() {
-        let a = make2d(arange(12), 3, 4).insert_axis(&[1]);
-        assert_eq!(a.remove_axis(&[1]).shape(), &[3, 4]);
+        let a = make2d(arange(12), 3, 4).insert_dim(&[1]);
+        assert_eq!(a.remove_dim(&[1]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_remove_multiple() {
-        let a = make2d(arange(6), 2, 3).insert_axis(&[0, 1, 2]);
-        assert_eq!(a.remove_axis(&[0, 2, 4]).shape(), &[2, 3]);
+        let a = make2d(arange(6), 2, 3).insert_dim(&[0, 1, 2]);
+        assert_eq!(a.remove_dim(&[0, 2, 4]).shape(), &[2, 3]);
     }
 
     #[test]
-    fn shape_remove_empty_axes_is_identity() {
-        assert_eq!(make2d(arange(12), 3, 4).remove_axis(&[]).shape(), &[3, 4]);
+    fn shape_remove_empty_dims_is_identity() {
+        assert_eq!(make2d(arange(12), 3, 4).remove_dim(&[]).shape(), &[3, 4]);
     }
 
     #[test]
-    fn shape_remove_unsorted_axes_same_result() {
-        let a1 = make3d(arange(6), 1, 2, 3).remove_axis(&[0]);
-        let a2 = make3d(arange(6), 1, 2, 3).remove_axis(&[0]);
+    fn shape_remove_unsorted_dims_same_result() {
+        let a1 = make3d(arange(6), 1, 2, 3).remove_dim(&[0]);
+        let a2 = make3d(arange(6), 1, 2, 3).remove_dim(&[0]);
         assert_eq!(a1.shape(), a2.shape());
     }
 
@@ -339,8 +335,8 @@ mod tests {
     #[test]
     fn full_read_remove_leading() {
         let got = make1d(arange(6), 6)
-            .insert_axis(&[0])
-            .remove_axis(&[0])
+            .insert_dim(&[0])
+            .remove_dim(&[0])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ndarray::Array::from_shape_vec([6], arange(6)).unwrap());
@@ -349,8 +345,8 @@ mod tests {
     #[test]
     fn full_read_remove_trailing() {
         let got = make1d(arange(6), 6)
-            .insert_axis(&[1])
-            .remove_axis(&[1])
+            .insert_dim(&[1])
+            .remove_dim(&[1])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ndarray::Array::from_shape_vec([6], arange(6)).unwrap());
@@ -359,8 +355,8 @@ mod tests {
     #[test]
     fn full_read_remove_middle() {
         let got = make2d(arange(12), 3, 4)
-            .insert_axis(&[1])
-            .remove_axis(&[1])
+            .insert_dim(&[1])
+            .remove_dim(&[1])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -372,8 +368,8 @@ mod tests {
     #[test]
     fn full_read_remove_multiple() {
         let got = make2d(arange(6), 2, 3)
-            .insert_axis(&[0, 1, 2])
-            .remove_axis(&[0, 2, 4])
+            .insert_dim(&[0, 1, 2])
+            .remove_dim(&[0, 2, 4])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -383,9 +379,9 @@ mod tests {
     }
 
     #[test]
-    fn full_read_identity_empty_axes() {
+    fn full_read_identity_empty_dims() {
         let got = make2d(arange(12), 3, 4)
-            .remove_axis(&[])
+            .remove_dim(&[])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -401,8 +397,8 @@ mod tests {
     #[test]
     fn sub_read_after_remove_leading() {
         let got = make1d(arange(6), 6)
-            .insert_axis(&[0])
-            .remove_axis(&[0])
+            .insert_dim(&[0])
+            .remove_dim(&[0])
             .to_ndarray_sub(&[2..5], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![2, 3, 4]);
@@ -411,8 +407,8 @@ mod tests {
     #[test]
     fn sub_read_after_remove_middle() {
         let got = make2d(arange(12), 3, 4)
-            .insert_axis(&[1])
-            .remove_axis(&[1])
+            .insert_dim(&[1])
+            .remove_dim(&[1])
             .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![[4, 5], [8, 9]]);
@@ -423,27 +419,27 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn error_axis_out_of_bounds() {
+    fn error_dim_out_of_bounds() {
         let a = make2d(arange(4), 2, 2);
-        // ndim=2, valid axes are 0..2; axis 3 is out of bounds
-        assert!(super::RemoveAxis::new_array(a, &[3]).is_err());
+        // ndim=2, valid dims are 0..2; dim 3 is out of bounds
+        assert!(super::RemoveDim::new_array(a, &[3]).is_err());
     }
 
     #[test]
-    fn error_axis_not_size_one() {
+    fn error_dim_not_size_one() {
         let a = make2d(arange(12), 3, 4);
-        // axis 0 has size 3, cannot remove
-        assert!(super::RemoveAxis::new_array(a, &[0]).is_err());
+        // dim 0 has size 3, cannot remove
+        assert!(super::RemoveDim::new_array(a, &[0]).is_err());
     }
 
     #[test]
-    fn error_duplicate_axis() {
+    fn error_duplicate_dim() {
         let a = make3d(arange(6), 1, 2, 3);
-        assert!(super::RemoveAxis::new_array(a, &[0, 0]).is_err());
+        assert!(super::RemoveDim::new_array(a, &[0, 0]).is_err());
     }
 
     #[allow(clippy::type_complexity)]
-    fn remove_axes_strategy<T>() -> impl proptest::strategy::Strategy<
+    fn remove_dims_strategy<T>() -> impl proptest::strategy::Strategy<
         Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<usize>),
     >
     where
@@ -467,23 +463,23 @@ mod tests {
                 }
                 (Just(shape), Just(dims_to_remove).prop_shuffle())
             })
-            .prop_flat_map(|(shape, axes)| {
+            .prop_flat_map(|(shape, dims)| {
                 let array_strat =
                     crate::util::array_strategy_from_shape::<T>(Just(shape), T::any_strategy());
-                (array_strat, Just(axes))
+                (array_strat, Just(dims))
             })
-            .prop_map(|((nd, za), axes)| (nd, za, axes))
+            .prop_map(|((nd, za), dims)| (nd, za, dims))
     }
 
     proptest::proptest! {
         #[test]
-        fn proptest_remove_axes((nd, za, axes) in remove_axes_strategy::<i32>()) {
-            // Oracle: removing size-1 axes is a pure reshape - flat order is unchanged.
+        fn proptest_remove_dims((nd, za, dims) in remove_dims_strategy::<i32>()) {
+            // Oracle: removing size-1 dims is a pure reshape - flat order is unchanged.
             let expected_shape = nd
                 .shape()
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| !axes.contains(i))
+                .filter(|(i, _)| !dims.contains(i))
                 .map(|(_, &s)| s)
                 .collect::<Vec<_>>();
             let expected = ndarray::ArrayD::from_shape_vec(
@@ -491,7 +487,7 @@ mod tests {
                 nd.iter().cloned().collect::<Vec<_>>(),
             )
             .unwrap();
-            crate::util::assert_array_matches(&za.remove_axis(&axes), &expected);
+            crate::util::assert_array_matches(&za.remove_dim(&dims), &expected);
         }
     }
 }

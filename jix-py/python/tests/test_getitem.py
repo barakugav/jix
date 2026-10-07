@@ -2,8 +2,8 @@
 Index handling for `Array.numpy()` and `Array.__getitem__`.
 
 `.numpy()`, `array[...]` and `jix.slice()` all share `parse_basic_index`, but they consume
-its result differently: `slice()` turns the dropped-axis flags into a `RemoveAxis`, while
-`.numpy()` indexes them per axis to build the output shape and the destination strides.
+its result differently: `slice()` turns the dropped-dim flags into a `RemoveDim`, while
+`.numpy()` indexes them per dim to build the output shape and the destination strides.
 `test_slice.py` covers the first consumer against `__getitem__`; this file pins all three
 against NumPy itself, so a parser change cannot break them in lockstep and go unnoticed.
 """
@@ -19,8 +19,8 @@ def arange(shape):
 
 
 # (shape, index) pairs, covering every index form against a few ranks. Ellipsis cases are
-# spread over ranks on purpose: an ellipsis expands to a different number of axes each
-# time, which is exactly what a per-item (rather than per-axis) parser gets wrong.
+# spread over ranks on purpose: an ellipsis expands to a different number of dims each
+# time, which is exactly what a per-item (rather than per-dim) parser gets wrong.
 CASES = [
     # rank 1
     ((5,), 0),
@@ -42,7 +42,7 @@ CASES = [
     ((3, 4), (Ellipsis, 0, 2)),
     ((3, 4), (0, Ellipsis, 2)),
     ((3, 4), (Ellipsis, slice(1, 3))),
-    # rank 3 - an ellipsis here fills two axes at once
+    # rank 3 - an ellipsis here fills two dims at once
     ((2, 3, 4), 1),
     ((2, 3, 4), (1, 2)),
     ((2, 3, 4), (1, 2, 3)),
@@ -57,12 +57,12 @@ CASES = [
     ((2, 3, 4), (1, Ellipsis, 2)),
     ((2, 3, 4), (slice(0, 1), Ellipsis)),
     ((2, 3, 4), (Ellipsis, slice(1, 3))),
-    # rank 4 - three-axis ellipsis fill
+    # rank 4 - three-dim ellipsis fill
     ((2, 3, 4, 5), (Ellipsis, 2)),
     ((2, 3, 4, 5), (1, Ellipsis)),
     ((2, 3, 4, 5), (1, Ellipsis, 2)),
     ((2, 3, 4, 5), (1, 2, Ellipsis)),
-    # a size-1 axis makes a mis-targeted axis removal succeed instead of erroring, so the
+    # a size-1 dim makes a mis-targeted dim removal succeed instead of erroring, so the
     # damage shows up only as a wrong shape
     ((2, 1, 3, 4), (Ellipsis, 2)),
     ((2, 1, 3, 4), (Ellipsis, 1, 2)),
@@ -93,7 +93,7 @@ def test_getitem_matches_numpy(shape, index):
 @pytest.mark.parametrize("shape,index", CASES, ids=[case_id(c) for c in CASES])
 def test_getitem_into_out_matches_numpy(shape, index):
     # The `out=` path rebuilds one stride per array dimension from the destination's own
-    # strides, re-inserting the axes the index dropped - so it reads the same flags from a
+    # strides, re-inserting the dims the index dropped - so it reads the same flags from a
     # different direction.
     np_a = arange(shape)
     a = jix.compact(np_a)
@@ -111,23 +111,23 @@ def test_numpy_no_index_reads_the_whole_array():
     np.testing.assert_array_equal(a.numpy(None), np_a)
 
 
-def test_omitted_trailing_axes_are_full_slices():
+def test_omitted_trailing_dims_are_full_slices():
     np_a = arange((2, 3, 4))
     a = jix.compact(np_a)
     np.testing.assert_array_equal(a.numpy((1,)), np_a[1])
     np.testing.assert_array_equal(a.numpy((1, 2)), np_a[1, 2])
 
 
-def test_slice_without_an_integer_index_adds_no_remove_axis():
-    # `drop_axes` carries one flag per axis, so "nothing dropped" is all-false rather than
-    # empty - checking emptiness instead wrapped every slice in a no-op `RemoveAxis`.
+def test_slice_without_an_integer_index_adds_no_remove_dim():
+    # `drop_dims` carries one flag per dim, so "nothing dropped" is all-false rather than
+    # empty - checking emptiness instead wrapped every slice in a no-op `RemoveDim`.
     a = jix.compact(arange((2, 3, 4)))
-    assert "RemoveAxis" not in str(jix.slice(a, (slice(0, 2), slice(0, 2))))
-    assert "RemoveAxis" in str(jix.slice(a, (0, slice(0, 2))))
+    assert "RemoveDim" not in str(jix.slice(a, (slice(0, 2), slice(0, 2))))
+    assert "RemoveDim" in str(jix.slice(a, (0, slice(0, 2))))
 
 
-def test_out_with_a_reversed_length_one_axis_is_accepted():
-    # An axis of extent 1 is never stepped, so NumPy handing back a negative stride for it
+def test_out_with_a_reversed_length_one_dim_is_accepted():
+    # A dim of extent 1 is never stepped, so NumPy handing back a negative stride for it
     # is harmless and must not be rejected.
     np_a = arange((1, 4))
     a = jix.compact(np_a)

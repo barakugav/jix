@@ -1042,7 +1042,7 @@ mod tests {
     }
 
     /// `strided_span_bytes` sizes the slices behind `StridedBuf`, so it has to cover the *furthest*
-    /// element - reached by stepping every axis at once, i.e. the sum of the per-axis spans rather
+    /// element - reached by stepping every dim at once, i.e. the sum of the per-dim spans rather
     /// than the largest of them.
     #[test]
     fn strided_span_bytes_covers_the_furthest_element() {
@@ -1074,18 +1074,18 @@ mod tests {
             }
         }
 
-        // A single axis: the span is just that axis's reach.
+        // A single dim: the span is just that dim's reach.
         check(&[4], &[1], 1);
         check(&[3], &[8], 4);
-        // Several axes at once: only the sum reaches element (1, 1) at offset 11.
+        // Several dims at once: only the sum reaches element (1, 1) at offset 11.
         check(&[2, 2], &[10, 1], 1);
         check(&[3, 4], &[16, 4], 4);
         check(&[2, 3, 4], &[48, 16, 4], 4);
-        // Gaps, broadcast axes and unit axes.
+        // Gaps, broadcast dims and unit dims.
         check(&[2, 3], &[100, 4], 4);
         check(&[2, 3], &[0, 4], 4);
         check(&[1, 5, 1], &[400, 4, 200], 4);
-        // A zero-length axis makes the region empty.
+        // A zero-length dim makes the region empty.
         assert_eq!(super::strided_span_bytes(&[0], &[4], 4), 0);
         assert_eq!(super::strided_span_bytes(&[2, 0, 3], &[24, 8, 4], 4), 0);
     }

@@ -11,7 +11,7 @@ use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 /// monomorphized scalar copy for the common power-of-two `(itemsize, alignment)` pairs, a
 /// field-by-field copy for structs that decompose into at most four scalar fields, or a generic
 /// byte-wise fallback for everything else. Each [`copy`](Self::copy) then moves one region by
-/// driving an [`NdIterUnordered`] over `shape` (which sorts, coalesces and walks the axes) and
+/// driving an [`NdIterUnordered`] over `shape` (which sorts, coalesces and walks the dims) and
 /// copying one contiguous-or-strided inner loop at each visited position.
 pub(crate) struct NdCopier<'a>(NdCopierInner<'a>);
 enum NdCopierInner<'a> {
@@ -119,7 +119,7 @@ impl<'a> NdCopier<'a> {
         if shape.contains(&0) {
             return;
         }
-        // Axis ordering, size-1-axis dropping and contiguous-run coalescing all happen inside
+        // Dim ordering, size-1-dim dropping and contiguous-run coalescing all happen inside
         // `nd_iter_unordered` (see `scalar_fn` / `copy_untyped`); here we just dispatch by dtype.
         let args = NdCopyArgs {
             src,
@@ -416,9 +416,9 @@ mod tests {
     }
 
     // Byte strides for a row-major array whose backing shape is `shape[d] * mult[d]`,
-    // with logical elements sampled every `mult[d]` slots along axis `d`. `mult` all
+    // with logical elements sampled every `mult[d]` slots along dim `d`. `mult` all
     // ones gives a fully contiguous layout; any `mult[d] > 1` leaves gaps, exercising
-    // the strided (non-coalesced) path - including a strided innermost axis.
+    // the strided (non-coalesced) path - including a strided innermost dim.
     fn strided_strides(shape: &[usize], mult: &[usize], itemsize: usize) -> Vec<usize> {
         let ndim = shape.len();
         let backing = (0..ndim).map(|d| shape[d] * mult[d]).collect::<Vec<_>>();
@@ -507,9 +507,9 @@ mod tests {
         }
     }
 
-    // A `strided_strides` multiplier vector that leaves a one-element gap only along axis `ax`
+    // A `strided_strides` multiplier vector that leaves a one-element gap only along dim `ax`
     // (all ones - fully contiguous - when `ax` is out of range, e.g. for a 0-D shape).
-    fn strided_axis(ndim: usize, ax: usize) -> Vec<usize> {
+    fn strided_dim(ndim: usize, ax: usize) -> Vec<usize> {
         (0..ndim).map(|d| if d == ax { 2 } else { 1 }).collect()
     }
 
@@ -575,16 +575,16 @@ mod tests {
     // For a fixed (element type, shape), exercise a representative set of source/dst layouts, each
     // aligned and deliberately misaligned:
     //   - contiguous/contiguous: fully coalesces into a single run;
-    //   - strided-outer/contiguous: inner axes coalesce, driving the 1D fast path;
+    //   - strided-outer/contiguous: inner dims coalesce, driving the 1D fast path;
     //   - strided-inner/strided-inner: nothing coalesces, driving the general strided nd iterator.
-    // Gaps stay on a single axis, so buffers never exceed twice the contiguous size - small enough
+    // Gaps stay on a single dim, so buffers never exceed twice the contiguous size - small enough
     // to run the whole matrix under Miri.
     fn check_rank<T: Dtyped>(shape: &[usize]) {
         let itemsize = T::DTYPE.itemsize() as usize;
         let ndim = shape.len();
         let cont = strided_strides(shape, &vec![1; ndim], itemsize);
-        let outer = strided_strides(shape, &strided_axis(ndim, 0), itemsize);
-        let inner = strided_strides(shape, &strided_axis(ndim, ndim.wrapping_sub(1)), itemsize);
+        let outer = strided_strides(shape, &strided_dim(ndim, 0), itemsize);
+        let inner = strided_strides(shape, &strided_dim(ndim, ndim.wrapping_sub(1)), itemsize);
         for (src, dst) in [(&cont, &cont), (&outer, &cont), (&inner, &inner)] {
             for misalign in [0, 1] {
                 check::<T>(shape, src, dst, misalign);
@@ -593,7 +593,7 @@ mod tests {
     }
 
     // Ranks 0 through 8 (the maximum) for one element type. The trailing `[3, k]` shapes put a
-    // contiguous inner run of length k behind a strided outer axis, so the run coalesces to
+    // contiguous inner run of length k behind a strided outer dim, so the run coalesces to
     // `n_contiguous == k` and drives each specialized `copy_1d` arm (k in 1/2/4/8/16/32/64, subject
     // to the size guards) plus the `_` fallback (k = 3).
     fn check_all_dims<T: Dtyped>() {
@@ -625,7 +625,7 @@ mod tests {
     }
 
     // Randomized coverage via `proptest`: deterministic per element type (seeded from the itemsize),
-    // exploring random ranks, extents, per-axis strides and base alignment against the reference.
+    // exploring random ranks, extents, per-dim strides and base alignment against the reference.
     // Buffers are bounded so every draw stays cheap enough to also run under Miri.
     fn fuzz<T: Dtyped>() {
         use proptest::prelude::*;
@@ -690,36 +690,36 @@ mod tests {
         #[cfg(feature = "num-complex")] complex_f64: crate::scalar::Complex<f64>, // (16, 8) -> [u64; 2]
     }
 
-    // A unit (size-1) axis is iterated once at index 0, so its stride never contributes an offset;
+    // A unit (size-1) dim is iterated once at index 0, so its stride never contributes an offset;
     // the coalescing scan treats it as contiguous whatever stride it carries and never lets it block
-    // neighboring axes from merging. Each layout gives a unit axis a stride that would otherwise halt
-    // the scan (a broadcast `0` and an arbitrary multiple), with contiguous axes around it, covering
+    // neighboring dims from merging. Each layout gives a unit dim a stride that would otherwise halt
+    // the scan (a broadcast `0` and an arbitrary multiple), with contiguous dims around it, covering
     // both the scalar (`scalar_fn`) and byte-wise (`copy_untyped`) coalescing routes.
-    fn check_unit_axis<T: Dtyped>() {
+    fn check_unit_dim<T: Dtyped>() {
         let is = T::DTYPE.itemsize() as usize;
         for unit in [0, 5 * is] {
-            // interior unit axis: contiguous both sides (full coalesce), then a strided outer axis
+            // interior unit dim: contiguous both sides (full coalesce), then a strided outer dim
             check::<T>(&[4, 1, 8], &[8 * is, unit, is], &[8 * is, unit, is], 0);
             check::<T>(&[4, 1, 8], &[16 * is, unit, is], &[16 * is, unit, is], 0);
         }
-        // leading and trailing unit axes, contiguous elsewhere
+        // leading and trailing unit dims, contiguous elsewhere
         check::<T>(&[1, 4, 8], &[7 * is, 8 * is, is], &[7 * is, 8 * is, is], 0);
         check::<T>(&[4, 8, 1], &[8 * is, is, 3 * is], &[8 * is, is, 3 * is], 0);
         check::<T>(&[4, 1, 8], &[8 * is, 0, is], &[8 * is, 0, is], 1); // misaligned base
     }
     #[test]
-    fn copy_unit_axis() {
-        check_unit_axis::<u32>(); // scalar route
-        check_unit_axis::<u64>();
-        check_unit_axis::<[i32; 3]>(); // byte-wise copy_untyped route
-        check_unit_axis::<[u8; 3]>();
+    fn copy_unit_dim() {
+        check_unit_dim::<u32>(); // scalar route
+        check_unit_dim::<u64>();
+        check_unit_dim::<[i32; 3]>(); // byte-wise copy_untyped route
+        check_unit_dim::<[u8; 3]>();
     }
 
-    // The 1D copy splits on per-side contiguity: an outer axis that survives coalescing with its byte
+    // The 1D copy splits on per-side contiguity: an outer dim that survives coalescing with its byte
     // stride still equal to the inner run's length is contiguous and is copied as whole blocks (a
     // single `copy_nonoverlapping` when both sides are, a per-side loop when one is, the general loop
     // otherwise). Folding needs *both* strides to match, so at most one side reaches this path
-    // contiguous with `len > 1`. An inner run of `inner` behind a strided outer axis pins each arm; a
+    // contiguous with `len > 1`. An inner run of `inner` behind a strided outer dim pins each arm; a
     // power-of-two `inner` routes through the const-generic `copy_1d`, others through
     // `inner_loop_untyped`. Each combo runs aligned and misaligned so the misaligned arm reaches every
     // per-side contiguity case - in particular the neither-side-contiguous + unaligned branch of

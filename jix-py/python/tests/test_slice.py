@@ -5,7 +5,7 @@ Slicing here returns a new `jix.Array` rather than materializing to numpy. The
 parsing logic for the index (handled by `parse_basic_index` in shape_ops.rs) is
 shared with `.numpy()`; test_getitem.py pins that shared surface against numpy
 for all three consumers. This file focuses on the slice op itself: laziness,
-view semantics, axis dropping, and the strict-bounds errors introduced in the
+view semantics, dim dropping, and the strict-bounds errors introduced in the
 core `resolve` and the Python-side index parser.
 """
 
@@ -79,23 +79,23 @@ def test_slice_preserves_dtype():
 
 
 # ---------------------------------------------------------------------------
-# Shape: slice keeps the axis; integer index drops the axis.
+# Shape: slice keeps the dim; integer index drops the dim.
 # ---------------------------------------------------------------------------
 
 
-def test_slice_keeps_axis():
+def test_slice_keeps_dim():
     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
     result = jix.slice(a, (slice(0, 2), slice(1, 3)))
     assert result.shape == (2, 2)
 
 
-def test_slice_int_drops_axis():
+def test_slice_int_drops_dim():
     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
     result = jix.slice(a, 1)
     assert result.shape == (4,)
 
 
-def test_slice_int_on_each_axis_yields_scalar():
+def test_slice_int_on_each_dim_yields_scalar():
     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
     result = jix.slice(a, (1, 2))
     assert result.shape == ()
@@ -113,28 +113,28 @@ def test_slice_ellipsis_only_is_identity():
     assert result.shape == (3, 4)
 
 
-def test_slice_ellipsis_fills_missing_axes():
-    """`(..., i)` on a 3-D array applies i to the last axis only."""
+def test_slice_ellipsis_fills_missing_dims():
+    """`(..., i)` on a 3-D array applies i to the last dim only."""
     a = jix.compact(np.arange(24, dtype=np.int32).reshape(2, 3, 4))
     result = jix.slice(a, (..., 2))
     assert result.shape == (2, 3)
 
 
-def test_slice_implicit_full_range_on_missing_axes():
-    """Fewer index items than ndim: remaining axes get implicit full slices."""
+def test_slice_implicit_full_range_on_missing_dims():
+    """Fewer index items than ndim: remaining dims get implicit full slices."""
     a = jix.compact(np.arange(24, dtype=np.int32).reshape(2, 3, 4))
-    result = jix.slice(a, 1)  # only axis 0 indexed; axes 1, 2 implicitly full
+    result = jix.slice(a, 1)  # only dim 0 indexed; dims 1, 2 implicitly full
     assert result.shape == (3, 4)
 
 
-def test_slice_empty_slice_produces_length_zero_axis():
+def test_slice_empty_slice_produces_length_zero_dim():
     """`arr[2:2]` is a valid empty slice."""
     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
     result = jix.slice(a, slice(2, 2))
     assert result.shape == (0, 4)
 
 
-def test_slice_negative_indices_resolve_against_axis_length():
+def test_slice_negative_indices_resolve_against_dim_length():
     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
     result = jix.slice(a, slice(-2, None))
     assert result.shape == (2, 4)
@@ -152,7 +152,7 @@ def test_slice_values_match_getitem_basic():
     np.testing.assert_array_equal(result.numpy(), np_a[0:2, 1:3])
 
 
-def test_slice_values_match_getitem_int_axis_dropped():
+def test_slice_values_match_getitem_int_dim_dropped():
     np_a = np.arange(12, dtype=np.int32).reshape(3, 4)
     a = jix.compact(np_a)
     result = jix.slice(a, 1)
@@ -218,7 +218,7 @@ def test_slice_int_out_of_bounds_raises():
 def test_slice_negative_int_out_of_bounds_raises():
     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
     with pytest.raises(IndexError):
-        jix.slice(a, -4)  # axis size 3, -4 normalizes to -1 (oob)
+        jix.slice(a, -4)  # dim size 3, -4 normalizes to -1 (oob)
 
 
 def test_slice_start_out_of_bounds_raises():

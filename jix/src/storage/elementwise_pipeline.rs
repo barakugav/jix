@@ -711,9 +711,9 @@ fn materialize_pipeline_out_buf<'b, 's>(
         Some(out) => out.view_mut(),
         None => {
             let itemsize = output_dtype.itemsize() as usize;
-            let (strides, real_axes) = pick_output_layout(operands, shape.as_ref(), itemsize);
+            let (strides, real_dims) = pick_output_layout(operands, shape.as_ref(), itemsize);
             let nitems = (0..shape.len())
-                .map(|d| if real_axes.get(d) { shape[d] } else { 1 })
+                .map(|d| if real_dims.get(d) { shape[d] } else { 1 })
                 .product::<usize>();
             let buf = context.allocate_buf(nitems * itemsize, output_dtype.alignment());
             unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
@@ -730,40 +730,40 @@ fn pick_output_layout<'s>(
     let ndim = shape.len();
     let small = ndim <= 1 || shape.iter().product::<usize>() * itemsize <= 4096;
 
-    let mut real_axes = (0..ndim).map(|d| shape[d] <= 1).collect::<DimBitmap>();
-    let mut axis_order: Option<DimArray<DimIdx>> = None;
-    let mut axis_order_agreed = true;
+    let mut real_dims = (0..ndim).map(|d| shape[d] <= 1).collect::<DimBitmap>();
+    let mut dim_order: Option<DimArray<DimIdx>> = None;
+    let mut dim_order_agreed = true;
     for operand in operands {
         let strides = operand.strides();
         debug_assert_eq!(strides.len(), ndim);
         #[allow(clippy::needless_range_loop)]
         for d in 0..ndim {
             if strides[d] != 0 {
-                real_axes.set(d, true);
+                real_dims.set(d, true);
             }
         }
-        if small || !axis_order_agreed {
+        if small || !dim_order_agreed {
             continue;
         }
         let mut operand_order = dim_arr(ndim, |d| d as DimIdx);
         operand_order.sort_by_key(|&d| {
             let d = d as usize;
-            let ignore_axis = shape[d] <= 1 || strides[d] == 0;
-            Reverse(if ignore_axis { usize::MAX } else { strides[d] })
+            let ignore_dim = shape[d] <= 1 || strides[d] == 0;
+            Reverse(if ignore_dim { usize::MAX } else { strides[d] })
         });
-        match &axis_order {
-            None => axis_order = Some(operand_order),
+        match &dim_order {
+            None => dim_order = Some(operand_order),
             Some(order) if *order == operand_order => {}
-            Some(_) => axis_order_agreed = false,
+            Some(_) => dim_order_agreed = false,
         }
     }
 
-    let out_shape = dim_arr(ndim, |d| if real_axes.get(d) { shape[d] } else { 1 });
-    let mut strides = match axis_order.filter(|_| axis_order_agreed) {
-        Some(axis_order) => {
+    let out_shape = dim_arr(ndim, |d| if real_dims.get(d) { shape[d] } else { 1 });
+    let mut strides = match dim_order.filter(|_| dim_order_agreed) {
+        Some(dim_order) => {
             let mut strides = dim_arr(ndim, |_| itemsize);
             let mut stride = itemsize;
-            for &d in axis_order.iter().rev() {
+            for &d in dim_order.iter().rev() {
                 let d = d as usize;
                 strides[d] = stride;
                 stride *= out_shape[d];
@@ -773,11 +773,11 @@ fn pick_output_layout<'s>(
         None => default_strides_slice(out_shape.as_ref(), itemsize),
     };
     for d in 0..ndim {
-        if !real_axes.get(d) {
+        if !real_dims.get(d) {
             strides[d] = 0;
         }
     }
-    (strides, real_axes)
+    (strides, real_dims)
 }
 
 pub(crate) const fn n_operands_sum(counts: &[Option<usize>]) -> Option<usize> {
@@ -842,7 +842,7 @@ mod tests {
     }
 
     /// Byte strides for a row-major array whose backing shape is `shape[d] * mult[d]`, sampling one
-    /// logical element every `mult[d]` slots along axis `d`. `mult[d] == 0` broadcasts axis `d`.
+    /// logical element every `mult[d]` slots along dim `d`. `mult[d] == 0` broadcasts dim `d`.
     fn strided_strides(shape: &[usize], mult: &[usize], itemsize: usize) -> Vec<usize> {
         let ndim = shape.len();
         let backing = (0..ndim)
@@ -1012,7 +1012,7 @@ mod tests {
 
     #[test]
     fn strided_operands_split_the_inner_run() {
-        // Gaps along the inner axis stop the coalescing, so every operand keeps its own inner
+        // Gaps along the inner dim stop the coalescing, so every operand keeps its own inner
         // stride and the non-contiguous inner loop runs.
         for push in [false, true] {
             check_add(&[3, 4], [&[1, 2], &[2, 3], &[1, 1]], [0; 3], push);
@@ -1035,7 +1035,7 @@ mod tests {
 
     #[test]
     fn broadcast_operand() {
-        // A 0 stride repeats one element along the axis, both for a direct read and for a gather
+        // A 0 stride repeats one element along the dim, both for a direct read and for a gather
         // into scratch.
         for push in [false, true] {
             check_add(&[3, 4], [&[1, 1], &[0, 1], &[1, 0]], [0; 3], push);
@@ -1059,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    fn scalar_and_size_one_axes() {
+    fn scalar_and_size_one_dims() {
         for push in [false, true] {
             check_add(&[], [&[]; 3], [0; 3], push);
             check_add(&[], [&[]; 3], [1, 1, 1], push);
@@ -1108,7 +1108,7 @@ mod tests {
         let mixed = [operand(c_strides.as_ref()), operand(&f_strides)];
         assert_eq!(pick(&mixed, &big).as_ref(), c_strides.as_ref());
 
-        // No operands at all -> nothing walks any axis, so the whole region collapses to one
+        // No operands at all -> nothing walks any dim, so the whole region collapses to one
         // element and every stride is zero.
         assert_eq!(pick(&[], &big).as_ref(), &[0, 0]);
 
@@ -1129,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn out_layout_collapses_axes_no_operand_walks() {
+    fn out_layout_collapses_dims_no_operand_walks() {
         type T = u32;
         let itemsize = size_of::<T>();
         let dtype = T::DTYPE;
@@ -1141,17 +1141,17 @@ mod tests {
             let buf =
                 unsafe { StridedBuf::from_raw_parts(data.as_ptr(), &shape, strides, itemsize) };
             let ops = [Operand::new_input(buf, &dtype)];
-            let (strides, real_axes) = pick_output_layout(&mut ops.iter(), &shape, itemsize);
+            let (strides, real_dims) = pick_output_layout(&mut ops.iter(), &shape, itemsize);
             (
                 strides.as_ref().to_vec(),
-                real_axes.into_iter().collect::<Vec<_>>(),
+                real_dims.into_iter().collect::<Vec<_>>(),
             )
         };
 
-        // Broadcast along axis 0: the output holds one row, with a zero stride down axis 0, and
-        // axis 1 is packed as if the shape were [1, 64].
+        // Broadcast along dim 0: the output holds one row, with a zero stride down dim 0, and
+        // dim 1 is packed as if the shape were [1, 64].
         assert_eq!(pick(&[0, itemsize]), (vec![0, itemsize], vec![false, true]));
-        // Broadcast along axis 1 instead.
+        // Broadcast along dim 1 instead.
         assert_eq!(pick(&[itemsize, 0]), (vec![itemsize, 0], vec![true, false]));
         // Broadcast along both: a single element.
         assert_eq!(pick(&[0, 0]), (vec![0, 0], vec![false, false]));
@@ -1163,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    fn out_layout_ignores_axes_the_operand_does_not_walk() {
+    fn out_layout_ignores_dims_the_operand_does_not_walk() {
         type T = u32;
         let itemsize = size_of::<T>();
         let dtype = T::DTYPE;
@@ -1172,8 +1172,8 @@ mod tests {
         let c_strides = crate::util::default_strides_slice(&shape, itemsize);
         let f_strides = [itemsize, itemsize * shape[0]];
         let data = vec![0u8; shape[0] * shape[1] * itemsize];
-        // Two operands: the first is broadcast along one axis, the second walks both so no axis
-        // collapses and the layout question is really about the axis *order*.
+        // Two operands: the first is broadcast along one dim, the second walks both so no dim
+        // collapses and the layout question is really about the dim *order*.
         let pick = |broadcast: &[usize], dense: &[usize]| {
             // SAFETY: every layout used here stays inside `data`, sized for the full shape.
             let buf = |strides: &[usize]| unsafe {
@@ -1183,25 +1183,25 @@ mod tests {
                 Operand::new_input(buf(broadcast), &dtype),
                 Operand::new_input(buf(dense), &dtype),
             ];
-            let (strides, real_axes) = pick_output_layout(&mut ops.iter(), &shape, itemsize);
-            assert!(real_axes.all());
+            let (strides, real_dims) = pick_output_layout(&mut ops.iter(), &shape, itemsize);
+            assert!(real_dims.all());
             strides
         };
 
-        // Broadcast along axis 0. Axis 1 is the only one the first operand walks, so it belongs
+        // Broadcast along dim 0. Dim 1 is the only one the first operand walks, so it belongs
         // innermost - C order, not the F order a raw sort by stride would pick for a 0.
         assert_eq!(
             pick(&[0, itemsize], c_strides.as_ref()).as_ref(),
             c_strides.as_ref()
         );
-        // Broadcast along axis 1 instead: now axis 0 is the walked one, so it goes innermost.
+        // Broadcast along dim 1 instead: now dim 0 is the walked one, so it goes innermost.
         assert_eq!(pick(&[itemsize, 0], &f_strides).as_ref(), &f_strides);
 
-        // An extent-1 axis carries no preference either, whatever stride it happens to hold, so a
-        // junk stride there must not flip the layout of the axes that do matter.
+        // An extent-1 dim carries no preference either, whatever stride it happens to hold, so a
+        // junk stride there must not flip the layout of the dims that do matter.
         let shape1 = [1usize, 64, 64];
         let c_strides1 = crate::util::default_strides_slice(&shape1, itemsize);
-        // SAFETY: axis 0 has extent 1, so its stride is never stepped; the rest is dense in `data`.
+        // SAFETY: dim 0 has extent 1, so its stride is never stepped; the rest is dense in `data`.
         let buf = unsafe {
             StridedBuf::from_raw_parts(
                 data.as_ptr(),
@@ -1221,7 +1221,7 @@ mod tests {
 
     #[test]
     fn prop_matches_elementwise_reference() {
-        // Random ranks, extents, per-operand gaps/broadcasts and base misalignments: whatever axis
+        // Random ranks, extents, per-operand gaps/broadcasts and base misalignments: whatever dim
         // order, coalescing, staging and chunking `to_buf` picks, the result must be the plain
         // element-wise sum.
         use proptest::prelude::*;
@@ -1275,7 +1275,7 @@ mod tests {
         let nitems = shape.iter().product::<usize>();
         let itemsize = size_of::<T>();
 
-        // Pull mode picks its own layout - and collapses any axis no operand walks to a single
+        // Pull mode picks its own layout - and collapses any dim no operand walks to a single
         // element with a zero stride - so read the result back through the strides it hands out.
         let pulled = {
             let buf = storage
@@ -1288,7 +1288,7 @@ mod tests {
                 .collect::<Vec<T>>()
         };
 
-        // Push into a destination with a gap along every axis, so the walk cannot coalesce it into
+        // Push into a destination with a gap along every dim, so the walk cannot coalesce it into
         // one contiguous run and the strided write path runs too.
         let mults = vec![2usize; shape.len()];
         let dst_strides = strided_strides(&shape, &mults, itemsize);
@@ -1433,13 +1433,13 @@ mod tests {
         use core::ops::Add;
 
         // `Plain` lends a view of its own buffer, so each leaf keeps the source strides - here a
-        // reversed-axis view, whose operand is strided but never copied.
+        // reversed-dim view, whose operand is strided but never copied.
         let nd_a = ndarray::Array2::from_shape_fn((4, 6), |(i, j)| (i * 6 + j) as i32);
         let nd_b = ndarray::Array2::from_shape_fn((4, 6), |(i, j)| (i as i32) * 100 + j as i32);
         let nd_b_t = nd_b.t();
         let a = crate::Array::plain_ndarray_ref(&nd_a).unwrap();
         let b = crate::Array::plain_ndarray_ref(&nd_b_t).unwrap();
-        let sum = a.add(b.permute_axes(&[1, 0]));
+        let sum = a.add(b.permute_dims(&[1, 0]));
         let index = full_index(sum.storage.shape());
         assert_eq!(
             pipeline_elements::<_, i32>(&sum.storage, &index),
@@ -1540,8 +1540,8 @@ mod tests {
     }
 
     #[test]
-    fn pull_collapses_broadcast_axes() {
-        // A `Neg` over a [1, 1] input broadcast to [4, 5]: no operand steps along either axis, so
+    fn pull_collapses_broadcast_dims() {
+        // A `Neg` over a [1, 1] input broadcast to [4, 5]: no operand steps along either dim, so
         // the pull computes one element and hands the region back with all-zero strides rather
         // than writing the same value 20 times.
         use core::ops::Neg;
@@ -1559,8 +1559,8 @@ mod tests {
     }
 
     #[test]
-    fn pull_collapses_only_the_broadcast_axis() {
-        // Broadcast along axis 1 alone: axis 0 is still walked, so only axis 1 collapses.
+    fn pull_collapses_only_the_broadcast_dim() {
+        // Broadcast along dim 1 alone: dim 0 is still walked, so only dim 1 collapses.
         use core::ops::Neg;
 
         let nd = ndarray::Array2::from_shape_fn((4, 1), |(i, _)| i as f32);
@@ -1578,7 +1578,7 @@ mod tests {
 
     #[test]
     fn pull_collapses_a_scalar_only_pipeline() {
-        // A `Scalar` contributes no operands at all, so every axis collapses.
+        // A `Scalar` contributes no operands at all, so every dim collapses.
         use core::ops::Neg;
 
         let neg = scalar_4x5(7.0).neg();
@@ -1590,8 +1590,8 @@ mod tests {
     }
 
     #[test]
-    fn pull_keeps_axes_any_operand_walks() {
-        // One side broadcast, the other not: the walked side keeps every axis real.
+    fn pull_keeps_dims_any_operand_walks() {
+        // One side broadcast, the other not: the walked side keeps every dim real.
         use core::ops::Add;
 
         let lhs = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as f32);
@@ -1612,7 +1612,7 @@ mod tests {
     #[test]
     fn push_never_collapses() {
         // The caller owns the destination in push mode, so every element of it gets written even
-        // when nothing walks the axis.
+        // when nothing walks the dim.
         use core::ops::Neg;
 
         let nd = ndarray::Array2::from_shape_fn((1, 1), |_| 3.0f32);

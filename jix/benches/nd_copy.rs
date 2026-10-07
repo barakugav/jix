@@ -80,7 +80,7 @@ fn bench_nd_copy(c: &mut Criterion) {
             src_strides: default_strides(&[256, 256], size_of::<i32>()),
             dst_strides: transposed_strides(&[256, 256], size_of::<i32>()),
         },
-        // Outer axis gapped (backing width 2x), inner axis contiguous on BOTH sides: the inner
+        // Outer dim gapped (backing width 2x), inner dim contiguous on BOTH sides: the inner
         // 64-run coalesces, leaving a strided 1D copy of blocks. Should be unaffected by reordering.
         Case {
             name: "outer-strided 4096x64",
@@ -88,7 +88,7 @@ fn bench_nd_copy(c: &mut Criterion) {
             src_strides: vec![2 * 64 * size_of::<i32>(), size_of::<i32>()],
             dst_strides: vec![2 * 64 * size_of::<i32>(), size_of::<i32>()],
         },
-        // Inner axis gapped on both sides (stride 2*size_of::<i32>() != size_of::<i32>()): nothing
+        // Inner dim gapped on both sides (stride 2*size_of::<i32>() != size_of::<i32>()): nothing
         // coalesces, the general strided nd loop runs with a strided innermost on both operands.
         Case {
             name: "strided-inner 4096x64",
@@ -96,7 +96,7 @@ fn bench_nd_copy(c: &mut Criterion) {
             src_strides: vec![128 * size_of::<i32>(), 2 * size_of::<i32>()],
             dst_strides: vec![128 * size_of::<i32>(), 2 * size_of::<i32>()],
         },
-        // 3D axis-reversing transpose, 64^3 = 1 M elements (4 MB): reordering has more axes to work
+        // 3D dim-reversing transpose, 64^3 = 1 M elements (4 MB): reordering has more dims to work
         // with.
         Case {
             name: "transpose 64x64x64",
@@ -105,11 +105,11 @@ fn bench_nd_copy(c: &mut Criterion) {
             dst_strides: transposed_strides(&[64, 64, 64], size_of::<i32>()),
         },
         // Contiguous source copied into a row-padded destination (each 60-element row sits in a
-        // 64-wide slot). The innermost axis is a short both-contiguous run, but the padding stops
-        // it from absorbing the outer axes - which ARE stride-compatible on both sides. The old
+        // 64-wide slot). The innermost dim is a short both-contiguous run, but the padding stops
+        // it from absorbing the outer dims - which ARE stride-compatible on both sides. The old
         // trailing-only coalescing leaves a 2D strided walk ([64, 64]); the general merge collapses
-        // the two outer axes into one, turning the whole copy into a single 1D strided run. Shows
-        // the outer-axis merge (iterator rank reduction), not a raw-bandwidth case.
+        // the two outer dims into one, turning the whole copy into a single 1D strided run. Shows
+        // the outer-dim merge (iterator rank reduction), not a raw-bandwidth case.
         Case {
             name: "padded-rows 64x64x60",
             shape: &[64, 64, 60],

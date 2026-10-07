@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn sum_of_broadcast_scalar_i32() {
-        // sum of [2,2,2] (3 rows, broadcast) over axis 0 = [6,6,6,6] as i64
+        // sum of [2,2,2] (3 rows, broadcast) over dim 0 = [6,6,6,6] as i64
         let got = plain_scalar(2i32, &[3, 4])
             .unwrap()
             .sum(0)

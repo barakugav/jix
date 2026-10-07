@@ -6,28 +6,28 @@ use crate::util::DimArray;
 
 fn keepdims_after_reduction(
     array: ArrayAny,
-    original_reduced_axes: &[usize],
+    original_reduced_dims: &[usize],
 ) -> PyResult<ArrayAny> {
-    // keepdims=true: re-insert singleton axes via insert_axis.
-    // insert_axis uses gap indices in the space of the array it receives, so we must
-    // re-map: original sorted axis a_i -> result-space gap (a_i - i).
-    let mut axes = original_reduced_axes.to_vec();
-    axes.sort_unstable();
-    let mapped_axes = axes
+    // keepdims=true: re-insert singleton dims via insert_dim.
+    // insert_dim uses gap indices in the space of the array it receives, so we must
+    // re-map: original sorted dim a_i -> result-space gap (a_i - i).
+    let mut dims = original_reduced_dims.to_vec();
+    dims.sort_unstable();
+    let mapped_dims = dims
         .iter()
         .enumerate()
         .map(|(i, &ax)| ax - i)
         .collect::<DimArray<_>>();
-    let res = jix_core::ops::InsertAxis::new_array(array, mapped_axes.as_slice());
+    let res = jix_core::ops::InsertDim::new_array(array, mapped_dims.as_slice());
     let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
     Ok(ret.into_any())
 }
 
 #[inline]
-fn keepdim_after_reduction(array: ArrayAny, original_reduced_axis: usize) -> PyResult<ArrayAny> {
-    // keepdims=true: for a single-axis reduction, the result-space gap equals the
-    // original axis index (only one axis removed, shift = 0).
-    let res = jix_core::ops::InsertAxis::new_array(array, &[original_reduced_axis]);
+fn keepdim_after_reduction(array: ArrayAny, original_reduced_dim: usize) -> PyResult<ArrayAny> {
+    // keepdims=true: for a single-dim reduction, the result-space gap equals the
+    // original dim index (only one dim removed, shift = 0).
+    let res = jix_core::ops::InsertDim::new_array(array, &[original_reduced_dim]);
     let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
     Ok(ret.into_any())
 }
@@ -44,19 +44,19 @@ macro_rules! define_reduction_op {
         #[pyo3::pyfunction]
         #[pyo3(signature = (
             array,
-            axis=None,
+            dim=None,
             *,
             keepdims=false,
             $($($extra_arg=$extra_default,)+)?
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-            axis: Option<crate::util::ItemOrSequence<i32>>,
+            dim: Option<crate::util::ItemOrSequence<i32>>,
             keepdims: bool,
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
             struct DispatchArgs {
-                axes: DimArray<usize>,
+                dims: DimArray<usize>,
                 $($($extra_arg: $extra_ty),*)?
             }
             static DISPATCH_TABLE: ::std::sync::LazyLock<crate::ops::common::OpDescriptor<1, DispatchArgs>> = ::std::sync::LazyLock::new(|| {
@@ -64,22 +64,22 @@ macro_rules! define_reduction_op {
                     stringify!($name),
                     crate::ops::common::define_op1_desc!(
                         $core_op,
-                        extra_args = DispatchArgs as args { args.axes.as_slice() $($(, args.$extra_arg)+)? },
+                        extra_args = DispatchArgs as args { args.dims.as_slice() $($(, args.$extra_arg)+)? },
                         $($dispatch)*
                     ),
                 )
             });
 
             let array = crate::ops::as_array::any_to_core_array(array)?;
-            let axis = axis.map(|a| a.into_dim_array()).transpose()?;
-            let axis = axis.as_ref().map(|a| a.as_slice());
-            let axes = crate::util::normalize_axes_optional(axis, array.ndim())?;
+            let dim = dim.map(|a| a.into_dim_array()).transpose()?;
+            let dim = dim.as_ref().map(|a| a.as_slice());
+            let dims = crate::util::normalize_dims_optional(dim, array.ndim())?;
             let mut res = DISPATCH_TABLE.dispatch_args(
                 [crate::ops::common::Operand::Array(array)],
-                DispatchArgs { axes: axes.clone(), $($($extra_arg),+)? }
+                DispatchArgs { dims: dims.clone(), $($($extra_arg),+)? }
             )?;
             if keepdims {
-                res = keepdims_after_reduction(res, &axes)?;
+                res = keepdims_after_reduction(res, &dims)?;
             }
             Ok(crate::Array::from_core(res))
         }
@@ -88,7 +88,7 @@ macro_rules! define_reduction_op {
     (
         $(#[$meta:meta])* $name:ident,
         $core_op:ident,
-        single_axis = true,
+        single_dim = true,
         dispatch = { $($dispatch:tt)* }
     ) => {
         $(#[$meta])*
@@ -96,37 +96,37 @@ macro_rules! define_reduction_op {
         #[pyo3::pyfunction]
         #[pyo3(signature = (
             array,
-            axis=None,
+            dim=None,
             *,
             keepdims=false,
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-            axis: Option<i32>,
+            dim: Option<i32>,
             keepdims: bool,
         ) -> pyo3::PyResult<crate::Array> {
             struct DispatchArgs {
-                axis: usize,
+                dim: usize,
             }
             static DISPATCH_TABLE: ::std::sync::LazyLock<crate::ops::common::OpDescriptor<1, DispatchArgs>> = ::std::sync::LazyLock::new(|| {
                 crate::ops::common::OpDescriptor::new(
                     stringify!($name),
                     crate::ops::common::define_op1_desc!(
                         $core_op,
-                        extra_args = DispatchArgs as args { args.axis },
+                        extra_args = DispatchArgs as args { args.dim },
                         $($dispatch)*
                     ),
                 )
             });
 
             let array = crate::ops::as_array::any_to_core_array(array)?;
-            let axis = crate::util::normalize_axis_optional(axis, array.ndim())?;
+            let dim = crate::util::normalize_dim_optional(dim, array.ndim())?;
             let mut res = DISPATCH_TABLE.dispatch_args(
                 [crate::ops::common::Operand::Array(array)],
-                DispatchArgs { axis }
+                DispatchArgs { dim }
             )?;
             if keepdims {
-                res = keepdim_after_reduction(res, axis)?;
+                res = keepdim_after_reduction(res, dim)?;
             }
             Ok(crate::Array::from_core(res))
         }
@@ -134,7 +134,7 @@ macro_rules! define_reduction_op {
 }
 
 define_reduction_op!(
-    /// Reduces one or more axes by taking the maximum element.
+    /// Reduces one or more dims by taking the maximum element.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `bool`.
@@ -144,12 +144,12 @@ define_reduction_op!(
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
-    ///         When `None`, reduces over all axes, returning a scalar.
-    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
+    ///         When `None`, reduces over all dims, returning a scalar.
+    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -158,12 +158,12 @@ define_reduction_op!(
     ///     import numpy as np
     ///
     ///     a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
-    ///     # Reduce all axes -> scalar
+    ///     # Reduce all dims -> scalar
     ///     assert jix.max(a).numpy()[()] == 6
-    ///     # Reduce axis 0 -> shape [3]
-    ///     assert np.array_equal(jix.max(a, axis=0).numpy(), [4, 5, 6])
-    ///     # Reduce axis 0, keepdims=True -> shape [1, 3]
-    ///     assert jix.max(a, axis=0, keepdims=True).numpy().shape == (1, 3)
+    ///     # Reduce dim 0 -> shape [3]
+    ///     assert np.array_equal(jix.max(a, dim=0).numpy(), [4, 5, 6])
+    ///     # Reduce dim 0, keepdims=True -> shape [1, 3]
+    ///     assert jix.max(a, dim=0, keepdims=True).numpy().shape == (1, 3)
     ///     ```
     max,
     Max,
@@ -173,7 +173,7 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
-    /// Reduces one or more axes by taking the minimum element.
+    /// Reduces one or more dims by taking the minimum element.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `bool`.
@@ -183,12 +183,12 @@ define_reduction_op!(
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
-    ///         When `None`, reduces over all axes, returning a scalar.
-    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
+    ///         When `None`, reduces over all dims, returning a scalar.
+    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -197,10 +197,10 @@ define_reduction_op!(
     ///     import numpy as np
     ///
     ///     a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
-    ///     # Reduce all axes -> scalar
+    ///     # Reduce all dims -> scalar
     ///     assert jix.min(a).numpy()[()] == 1
-    ///     # Reduce axis 0 -> shape [3]
-    ///     assert np.array_equal(jix.min(a, axis=0).numpy(), [1, 2, 3])
+    ///     # Reduce dim 0 -> shape [3]
+    ///     assert np.array_equal(jix.min(a, dim=0).numpy(), [1, 2, 3])
     ///     ```
     min,
     Min,
@@ -210,7 +210,7 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
-    /// Returns the index of the maximum element along a single axis.
+    /// Returns the index of the maximum element along a single dim.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `bool`.
@@ -218,18 +218,18 @@ define_reduction_op!(
     /// If multiple elements share the maximum value, the index of the first occurrence is
     /// returned. For **float** types, a `NaN` never displaces the running best (every
     /// comparison against `NaN` is `False`); a `NaN` index is returned only when the first
-    /// element along the reduced axis is `NaN`, otherwise `NaN` values are skipped. This
+    /// element along the reduced dim is `NaN`, otherwise `NaN` values are skipped. This
     /// differs from `numpy.argmax`, which returns the index of the first `NaN`.
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Single axis to reduce along. Accepts negative values. For 1-D arrays,
-    ///         `None` is equivalent to `axis=0`.
-    ///     keepdims: If `True`, the reduced axis is kept as a length-1 dimension. Default `False`.
+    ///     dim: Single dim to reduce along. Accepts negative values. For 1-D arrays,
+    ///         `None` is equivalent to `dim=0`.
+    ///     keepdims: If `True`, the reduced dim is kept as a length-1 dimension. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `axis` is
-    ///         `None`, returns a scalar. When `keepdims=True`, the reduced axis is kept with size 1.
+    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `dim` is
+    ///         `None`, returns a scalar. When `keepdims=True`, the reduced dim is kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -237,21 +237,21 @@ define_reduction_op!(
     ///     import numpy as np
     ///
     ///     a = jix.compact([[1, 5, 3], [4, 2, 6]], dtype=np.int32)
-    ///     # Index of max along axis 1 (per row)
-    ///     assert np.array_equal(jix.argmax(a, axis=1).numpy(), [1, 2])
-    ///     # Index of max along axis 0 (per column)
-    ///     assert np.array_equal(jix.argmax(a, axis=0).numpy(), [1, 0, 1])
+    ///     # Index of max along dim 1 (per row)
+    ///     assert np.array_equal(jix.argmax(a, dim=1).numpy(), [1, 2])
+    ///     # Index of max along dim 0 (per column)
+    ///     assert np.array_equal(jix.argmax(a, dim=0).numpy(), [1, 0, 1])
     ///     ```
     argmax,
     ArgMax,
-    single_axis = true,
+    single_dim = true,
     dispatch = {
         [bool, u8, i8, u16, i16, i32, u32, i64, u64, f16, f32, f64],
         None
     }
 );
 define_reduction_op!(
-    /// Returns the index of the minimum element along a single axis.
+    /// Returns the index of the minimum element along a single dim.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `bool`.
@@ -259,18 +259,18 @@ define_reduction_op!(
     /// If multiple elements share the minimum value, the index of the first occurrence is
     /// returned. For **float** types, a `NaN` never displaces the running best (every
     /// comparison against `NaN` is `False`); a `NaN` index is returned only when the first
-    /// element along the reduced axis is `NaN`, otherwise `NaN` values are skipped. This
+    /// element along the reduced dim is `NaN`, otherwise `NaN` values are skipped. This
     /// differs from `numpy.argmin`, which returns the index of the first `NaN`.
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Single axis to reduce along. Accepts negative values. For 1-D arrays,
-    ///         `None` is equivalent to `axis=0`.
-    ///     keepdims: If `True`, the reduced axis is kept as a length-1 dimension. Default `False`.
+    ///     dim: Single dim to reduce along. Accepts negative values. For 1-D arrays,
+    ///         `None` is equivalent to `dim=0`.
+    ///     keepdims: If `True`, the reduced dim is kept as a length-1 dimension. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `axis` is
-    ///         `None`, returns a scalar. When `keepdims=True`, the reduced axis is kept with size 1.
+    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `dim` is
+    ///         `None`, returns a scalar. When `keepdims=True`, the reduced dim is kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -278,19 +278,19 @@ define_reduction_op!(
     ///     import numpy as np
     ///
     ///     a = jix.compact([[1, 5, 3], [4, 2, 6]], dtype=np.int32)
-    ///     # Index of min along axis 1 (per row)
-    ///     assert np.array_equal(jix.argmin(a, axis=1).numpy(), [0, 1])
+    ///     # Index of min along dim 1 (per row)
+    ///     assert np.array_equal(jix.argmin(a, dim=1).numpy(), [0, 1])
     ///     ```
     argmin,
     ArgMin,
-    single_axis = true,
+    single_dim = true,
     dispatch = {
         [bool, u8, i8, u16, i16, i32, u32, i64, u64, f16, f32, f64],
         None
     }
 );
 define_reduction_op!(
-    /// Reduces one or more axes by summing all elements.
+    /// Reduces one or more dims by summing all elements.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
@@ -303,12 +303,12 @@ define_reduction_op!(
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
-    ///         When `None`, reduces over all axes, returning a scalar.
-    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
+    ///         When `None`, reduces over all dims, returning a scalar.
+    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -318,7 +318,7 @@ define_reduction_op!(
     ///
     ///     a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     ///     assert jix.sum(a).numpy()[()] == 21
-    ///     assert np.array_equal(jix.sum(a, axis=0).numpy(), [5, 7, 9])
+    ///     assert np.array_equal(jix.sum(a, dim=0).numpy(), [5, 7, 9])
     ///     ```
     sum,
     Sum,
@@ -328,7 +328,7 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
-    /// Reduces one or more axes by multiplying all elements.
+    /// Reduces one or more dims by multiplying all elements.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
@@ -341,12 +341,12 @@ define_reduction_op!(
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
-    ///         When `None`, reduces over all axes, returning a scalar.
-    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
+    ///         When `None`, reduces over all dims, returning a scalar.
+    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -356,7 +356,7 @@ define_reduction_op!(
     ///
     ///     a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     ///     assert jix.product(a).numpy()[()] == 720
-    ///     assert np.array_equal(jix.product(a, axis=0).numpy(), [4, 10, 18])
+    ///     assert np.array_equal(jix.product(a, dim=0).numpy(), [4, 10, 18])
     ///     ```
     product,
     Product,
@@ -366,7 +366,7 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
-    /// Computes the arithmetic mean along one or more axes.
+    /// Computes the arithmetic mean along one or more dims.
     ///
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
     ///
@@ -376,12 +376,12 @@ define_reduction_op!(
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
-    ///         When `None`, reduces over all axes, returning a scalar.
-    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
+    ///         When `None`, reduces over all dims, returning a scalar.
+    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -391,7 +391,7 @@ define_reduction_op!(
     ///
     ///     a = jix.compact([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
     ///     assert jix.mean(a).numpy()[()] == 3.5
-    ///     assert np.allclose(jix.mean(a, axis=0).numpy(), [2.5, 3.5, 4.5])
+    ///     assert np.allclose(jix.mean(a, dim=0).numpy(), [2.5, 3.5, 4.5])
     ///     ```
     mean,
     Mean,
@@ -401,7 +401,7 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
-    /// Computes the variance along one or more axes.
+    /// Computes the variance along one or more dims.
     ///
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
     ///
@@ -412,14 +412,14 @@ define_reduction_op!(
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Axis or axes to reduce. Accepts negative values. When `None`, reduces over
-    ///         all axes, returning a scalar.
-    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     dim: Dim or dims to reduce. Accepts negative values. When `None`, reduces over
+    ///         all dims, returning a scalar.
+    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///     ddof: Delta degrees of freedom. Default `0.0` (population). Use `1.0` for sample
     ///         (Bessel-corrected).
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -440,7 +440,7 @@ define_reduction_op!(
     extra_args = (ddof: f64 = 0.0)
 );
 define_reduction_op!(
-    /// Computes the standard deviation along one or more axes.
+    /// Computes the standard deviation along one or more dims.
     ///
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
     ///
@@ -451,14 +451,14 @@ define_reduction_op!(
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Axis or axes to reduce. Accepts negative values. When `None`, reduces over
-    ///         all axes, returning a scalar.
-    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     dim: Dim or dims to reduce. Accepts negative values. When `None`, reduces over
+    ///         all dims, returning a scalar.
+    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///     ddof: Delta degrees of freedom. Default `0.0` (population). Use `1.0` for sample
     ///         (Bessel-corrected).
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -478,7 +478,7 @@ define_reduction_op!(
     extra_args = (ddof: f64 = 0.0)
 );
 define_reduction_op!(
-    /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy.
+    /// Reduces one or more dims with logical AND: returns `True` if all elements are truthy.
     ///
     /// Supported dtypes: `bool`.
     ///
@@ -488,12 +488,12 @@ define_reduction_op!(
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
-    ///         When `None`, reduces over all axes, returning a scalar.
-    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
+    ///         When `None`, reduces over all dims, returning a scalar.
+    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -503,7 +503,7 @@ define_reduction_op!(
     ///
     ///     a = jix.compact([[True, True], [True, False]])
     ///     assert jix.all(a).numpy()[()] == False
-    ///     assert np.array_equal(jix.all(a, axis=1).numpy(), [True, False])
+    ///     assert np.array_equal(jix.all(a, dim=1).numpy(), [True, False])
     ///     ```
     all,
     All,
@@ -513,7 +513,7 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
-    /// Reduces one or more axes with logical OR: returns `True` if any element is truthy.
+    /// Reduces one or more dims with logical OR: returns `True` if any element is truthy.
     ///
     /// Supported dtypes: `bool`.
     ///
@@ -523,12 +523,12 @@ define_reduction_op!(
     ///
     /// Args:
     ///     array: Input array.
-    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
-    ///         When `None`, reduces over all axes, returning a scalar.
-    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
+    ///         When `None`, reduces over all dims, returning a scalar.
+    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -538,7 +538,7 @@ define_reduction_op!(
     ///
     ///     a = jix.compact([[False, False], [False, True]])
     ///     assert jix.any(a).numpy()[()] == True
-    ///     assert np.array_equal(jix.any(a, axis=1).numpy(), [False, True])
+    ///     assert np.array_equal(jix.any(a, dim=1).numpy(), [False, True])
     ///     ```
     any,
     Any,

@@ -140,7 +140,7 @@ mod complex;
 pub use complex::*;
 
 mod common;
-pub use common::AxesArg;
+pub use common::DimsArg;
 pub(crate) use common::LanesInfo;
 
 pub(crate) mod _traits {
@@ -159,7 +159,7 @@ pub use into_dim::*;
 pub(crate) mod prelude {
     pub(crate) use std::ops::Range;
 
-    pub(crate) use super::AxesArg;
+    pub(crate) use super::DimsArg;
     pub(crate) use crate::codec::ReadContext;
     pub(crate) use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
     pub(crate) use crate::error::*;

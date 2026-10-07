@@ -23,7 +23,7 @@ pub(crate) trait ReductionOpKernel<T> {
     /// `false` may unwrap `init_item` - the caller guarantees it is `Some` for those kernels.
     ///
     /// The bundled index is not always `0`: a lane accumulator is seeded from an interior
-    /// item, and a cell can be re-seeded partway through the stream when the reduced axis
+    /// item, and a cell can be re-seeded partway through the stream when the reduced dim
     /// spans several bulks. Kernels whose result depends on element position (argmax/argmin)
     /// record it; the others ignore it.
     fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State;
@@ -35,7 +35,7 @@ pub(crate) trait ReductionOpKernel<T> {
     ///
     /// MUST be associative and commutative with respect to the folded result (up to float
     /// accuracy): it collapses the interleaved lane accumulators of a single cell, and continues
-    /// a cell's accumulator across the bulks of a large reduced axis. The two subsets never
+    /// a cell's accumulator across the bulks of a large reduced dim. The two subsets never
     /// overlap and together cover the folded elements exactly once.
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State;
 
@@ -73,25 +73,25 @@ pub(crate) trait ReductionOpKernel<T> {
 }
 
 impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
-    pub(crate) fn new<Ax>(array: S, kernel: K, axes: Ax) -> Result<Self>
+    pub(crate) fn new<Ax>(array: S, kernel: K, dims: Ax) -> Result<Self>
     where
         S: ArrayStorageTyped,
         K: ReductionOpKernel<S::Item, Output: Dtyped>,
         D: Dimension,
-        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
         let input_ndim = array.shape().len();
         let mut is_reduced = S::Dimension::vec(input_ndim, |_| false);
-        for i in 0..axes.len() {
-            let ax = axes.get(i);
+        for i in 0..dims.len() {
+            let ax = dims.get(i);
             ensure!(
                 ax < input_ndim,
                 InvalidArgument,
-                "axis {ax} out of bounds for array of ndim {input_ndim}"
+                "dim {ax} out of bounds for array of ndim {input_ndim}"
             );
 
-            ensure!(!is_reduced[ax], InvalidArgument, "duplicate axis {ax}");
+            ensure!(!is_reduced[ax], InvalidArgument, "duplicate dim {ax}");
             is_reduced[ax] = true;
         }
 
@@ -285,7 +285,7 @@ where
     // For every output position `O` covered by `index`, evaluates
     //
     //   stream(O) = iterate inner elements with non-reduced coords matching O,
-    //               in row-major order over the reduced axes
+    //               in row-major order over the reduced dims
     //   buf[O]    = K::finalize_state(fold(stream(O), K::init_state, K::update_state),
     //                                 nitems = stream length)
     //
@@ -303,7 +303,7 @@ where
     //     the whole output buffer.
     //   * **tile** - the inner chunk. Splits *both* dim groups, but is shaped so the
     //     non-reduced part exactly matches one bulk's output block (one tile-along-non-
-    //     reduced per bulk). Within a bulk the tile iterator sweeps the reduced axes in
+    //     reduced per bulk). Within a bulk the tile iterator sweeps the reduced dims in
     //     row-major order, so a tile is `bulk-non-reduced * tile-reduced`. Each
     //     `(bulk, tile)` pair produces *one* `self.array.read_data` call, sized to land
     //     within the source's `read_size` `(min, max)` window.
@@ -315,7 +315,7 @@ where
     // for each bulk:                      // a disjoint block of outputs
     //   bulk_base_item_idx = 0            // reduced-stream position within this bulk
     //   bulk_initialized   = false
-    //   for each tile in this bulk:       // walks the reduced axes; one non-reduced tile
+    //   for each tile in this bulk:       // walks the reduced dims; one non-reduced tile
     //     reduction_size = product(tile_size[d] for d in reduced dims)
     //     items_buf <- self.array.read_data(tile = bulk-non-reduced * tile-reduced)
     //     for each output position O in this bulk's output block:
@@ -400,7 +400,7 @@ where
         .product::<u64>();
 
     // Row-major strides over the reduced sub-shape, so an element's position in the reduced
-    // stream is the dot product of its coordinates with these. Zero on the non-reduced axes, which
+    // stream is the dot product of its coordinates with these. Zero on the non-reduced dims, which
     // drops them from that dot product
     let reduced_shape_logical_strides = {
         let mut reduced_shape_logical_strides = InnerD::vec(inner_ndim, |_| 0usize);
@@ -443,8 +443,8 @@ where
         .as_ref()
         .iter()
         .all(|&s| s.is_multiple_of(kernel_state_alignof.as_usize())));
-    // The state strides lifted to the inner array's axes: zero on a reduced axis, since a reduced
-    // axis does not index the state.
+    // The state strides lifted to the inner array's dims: zero on a reduced dim, since a reduced
+    // dim does not index the state.
     let state_strides_inner = {
         let mut state_strides = state_strides.as_ref().iter().copied();
         InnerD::vec(inner_ndim, |d| {
@@ -652,7 +652,7 @@ fn reduce_tile_impl(
     } else {
         debug_assert!(
             reduced_inner_stride == 0 || inner_len == 1,
-            "a non-reduced innermost axis has no reduced-shape stride",
+            "a non-reduced innermost dim has no reduced-shape stride",
         );
         FoldInnerLoopFlags::AcrossCells {
             contiguous: items_contiguous && items_aligned && state_contiguous,
@@ -880,7 +880,7 @@ where
     unsafe { states[0].assume_init_read() }
 }
 
-/// Inner-loop shape for a non-reduced innermost axis: one item folded into each of the run's cells.
+/// Inner-loop shape for a non-reduced innermost dim: one item folded into each of the run's cells.
 fn fold_run_across_cells_inner_loop<T, K, const CONTIGUOUS: bool>(
     kernel: &K,
     args: FoldInnerLoopArgs<'_>,
@@ -1046,18 +1046,18 @@ where
 ///     Op, Kernel { extra_arg: Type, ... },           // `{ ... }` is optional
 ///     where { S: ArrayStorageTyped, S::Item: ... },  // full where-clause, must end with `,`
 ///     output = <S::Item as Trait>::Output,
-///     single_axis,                                 // optional; omit for multi-axis
+///     single_dim,                                 // optional; omit for multi-dim
 /// );
 /// ```
 macro_rules! define_reduction_op {
-    // single-axis variant
+    // single-dim variant
     (
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident $( { $($extra_arg:ident: $extra_ty:ty),+ $(,)? } )?,
         where { $($where_:tt)+ }
         output = $output_ty:ty,
-        single_axis $(,)?
+        single_dim $(,)?
     ) => {
         struct $Kernel { $($($extra_arg: $extra_ty),+)? }
 
@@ -1073,14 +1073,14 @@ macro_rules! define_reduction_op {
             $($where_)+
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new(array: S, axis: usize $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<Self> {
+            pub fn new(array: S, dim: usize $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<Self> {
                 let kernel = $Kernel { $($($extra_arg,)+)? };
-                Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, &[axis])?))
+                Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, &[dim])?))
             }
 
             #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
-            pub fn new_array(array: crate::Array<S>, axis: usize $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>> {
-                Self::new(array.into_storage(), axis $($(, $extra_arg)+)?).map(crate::Array::from_storage)
+            pub fn new_array(array: crate::Array<S>, dim: usize $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>> {
+                Self::new(array.into_storage(), dim $($(, $extra_arg)+)?).map(crate::Array::from_storage)
             }
         }
 
@@ -1100,7 +1100,7 @@ macro_rules! define_reduction_op {
         }
     };
 
-    // multi-axis variant
+    // multi-dim variant
     (
         $(#[$meta:meta])*
         $Op:ident,
@@ -1119,20 +1119,20 @@ macro_rules! define_reduction_op {
             D: crate::Dimension,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new<Ax>(array: S, axes: Ax $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<Self>
+            pub fn new<Ax>(array: S, dims: Ax $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<Self>
             where
-                Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
+                Ax: crate::ops::DimsArg<ReducedDimension<S::Dimension> = D>,
             {
                 let kernel = $Kernel { $($($extra_arg,)+)? };
-                Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, axes)?))
+                Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, dims)?))
             }
 
             #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
-            pub fn new_array<Ax>(array: crate::Array<S>, axes: Ax $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>>
+            pub fn new_array<Ax>(array: crate::Array<S>, dims: Ax $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>>
             where
-                Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
+                Ax: crate::ops::DimsArg<ReducedDimension<S::Dimension> = D>,
             {
-                Self::new(array.into_storage(), axes $($(, $extra_arg)+)?).map(crate::Array::from_storage)
+                Self::new(array.into_storage(), dims $($(, $extra_arg)+)?).map(crate::Array::from_storage)
             }
         }
 
@@ -1497,7 +1497,7 @@ pub(crate) mod _traits {
 }
 
 define_reduction_op!(
-    /// Reduces one or more axes by taking the maximum element.
+    /// Reduces one or more dims by taking the maximum element.
     ///
     /// For **float** types, `NaN` is propagated: if any element is `NaN`, the result
     /// is `NaN`. This matches the element-wise [`Maximum`](crate::ops::Maximum) op and
@@ -1515,12 +1515,12 @@ define_reduction_op!(
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
-    /// // Reduce all axes -> scalar
+    /// // Reduce all dims -> scalar
     /// let scalar = Array::compact_ndarray(&nd)?
     ///     .max((0, 1)).to_ndarray()?;
     /// assert_eq!(scalar[[]], 6);
     ///
-    /// // Reduce axis 0 -> shape [3]
+    /// // Reduce dim 0 -> shape [3]
     /// let col_max = Array::compact_ndarray(&nd)?
     ///     .max(0).to_ndarray()?;
     /// assert_eq!(col_max.as_slice().unwrap(), &[4, 5, 6]);
@@ -1563,7 +1563,7 @@ where
 }
 
 define_reduction_op!(
-    /// Reduces one or more axes by taking the minimum element.
+    /// Reduces one or more dims by taking the minimum element.
     ///
     /// For **float** types, `NaN` is propagated: if any element is `NaN`, the result
     /// is `NaN`. This matches the element-wise [`Minimum`](crate::ops::Minimum) op and
@@ -1581,12 +1581,12 @@ define_reduction_op!(
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
-    /// // Reduce all axes -> scalar
+    /// // Reduce all dims -> scalar
     /// let scalar = Array::compact_ndarray(&nd)?
     ///     .min((0, 1)).to_ndarray()?;
     /// assert_eq!(scalar[[]], 1);
     ///
-    /// // Reduce axis 0 -> shape [3]
+    /// // Reduce dim 0 -> shape [3]
     /// let col_min = Array::compact_ndarray(&nd)?
     ///     .min(0).to_ndarray()?;
     /// assert_eq!(col_min.as_slice().unwrap(), &[1, 2, 3]);
@@ -1629,14 +1629,14 @@ where
 }
 
 define_reduction_op!(
-    /// Reduces a single axis by returning the index of the maximum element.
+    /// Reduces a single dim by returning the index of the maximum element.
     ///
     /// Output dtype is `u64`.
     ///
-    /// Unlike [`Max`], this op accepts only a single axis. If multiple elements share
+    /// Unlike [`Max`], this op accepts only a single dim. If multiple elements share
     /// the maximum value, the index of the *first* such element is returned, matching
     /// `numpy.argmax`. For **float** types, `NaN` propagates: if any element along the
-    /// reduced axis is `NaN`, the returned index is that of some `NaN` (not necessarily the
+    /// reduced dim is `NaN`, the returned index is that of some `NaN` (not necessarily the
     /// first). This differs from `numpy.argmax`, which returns the index of the *first* `NaN`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -1651,12 +1651,12 @@ define_reduction_op!(
     ///
     /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
     ///
-    /// // Index of max along axis 1 (per row) -> shape [2]
+    /// // Index of max along dim 1 (per row) -> shape [2]
     /// let idx = Array::compact_ndarray(&nd)?
     ///     .argmax(1).to_ndarray()?;
     /// assert_eq!(idx.as_slice().unwrap(), &[1, 2]); // max of row 0 at col 1, row 1 at col 2
     ///
-    /// // Index of max along axis 0 (per column) -> shape [3]
+    /// // Index of max along dim 0 (per column) -> shape [3]
     /// let col_idx = Array::compact_ndarray(&nd)?
     ///     .argmax(0).to_ndarray()?;
     /// assert_eq!(col_idx.as_slice().unwrap(), &[1, 0, 1]); // max of col 0 at row 1, col 1 at row 0, col 2 at row 1
@@ -1669,7 +1669,7 @@ define_reduction_op!(
         S::Item: PartialOrd,
     }
     output = u64,
-    single_axis,
+    single_dim,
 );
 // `item != item` / `bv != bv` are deliberate `NaN` tests (a value is `NaN` iff it is not
 // equal to itself), so the `eq_op` lint does not apply.
@@ -1732,14 +1732,14 @@ where
 }
 
 define_reduction_op!(
-    /// Reduces a single axis by returning the index of the minimum element.
+    /// Reduces a single dim by returning the index of the minimum element.
     ///
     /// Output dtype is `u64`.
     ///
-    /// Unlike [`Min`], this op accepts only a single axis. If multiple elements share
+    /// Unlike [`Min`], this op accepts only a single dim. If multiple elements share
     /// the minimum value, the index of the *first* such element is returned, matching
     /// `numpy.argmin`. For **float** types, `NaN` propagates: if any element along the
-    /// reduced axis is `NaN`, the returned index is that of some `NaN` (not necessarily the
+    /// reduced dim is `NaN`, the returned index is that of some `NaN` (not necessarily the
     /// first). This differs from `numpy.argmin`, which returns the index of the *first* `NaN`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -1754,12 +1754,12 @@ define_reduction_op!(
     ///
     /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
     ///
-    /// // Index of min along axis 1 (per row) -> shape [2]
+    /// // Index of min along dim 1 (per row) -> shape [2]
     /// let idx = Array::compact_ndarray(&nd)?
     ///     .argmin(1).to_ndarray()?;
     /// assert_eq!(idx.as_slice().unwrap(), &[0, 1]); // min of row 0 at col 0, row 1 at col 1
     ///
-    /// // Index of min along axis 0 (per column) -> shape [3]
+    /// // Index of min along dim 0 (per column) -> shape [3]
     /// let col_idx = Array::compact_ndarray(&nd)?
     ///     .argmin(0).to_ndarray()?;
     /// assert_eq!(col_idx.as_slice().unwrap(), &[0, 1, 0]); // min of col 0 at row 0, col 1 at row 1, col 2 at row 0
@@ -1772,7 +1772,7 @@ define_reduction_op!(
         S::Item: PartialOrd,
     }
     output = u64,
-    single_axis,
+    single_dim,
 );
 // `item != item` / `bv != bv` are deliberate `NaN` tests, so `eq_op` does not apply.
 #[allow(clippy::eq_op)]
@@ -1834,7 +1834,7 @@ where
 }
 
 define_reduction_op!(
-    /// Reduces one or more axes by summing all elements along those axes.
+    /// Reduces one or more dims by summing all elements along those dims.
     ///
     /// Supported dtypes and output dtype:
     ///
@@ -1851,7 +1851,7 @@ define_reduction_op!(
     /// Integer inputs are widened to a 64-bit accumulator to reduce overflow on large
     /// reductions; floating-point and complex inputs keep their width, matching NumPy (except
     /// `bool`, which jix sums into `u64` whereas NumPy uses `int64`).
-    /// An empty reduction (zero elements along the reduced axes) returns `0`.
+    /// An empty reduction (zero elements along the reduced dims) returns `0`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -1870,7 +1870,7 @@ define_reduction_op!(
     ///     .sum((0, 1)).to_ndarray()?;
     /// assert_eq!(total[[]], 21);
     ///
-    /// // Sum along axis 0 -> shape [3]
+    /// // Sum along dim 0 -> shape [3]
     /// let col_sums = Array::compact_ndarray(&nd)?
     ///     .sum(0).to_ndarray()?;
     /// assert_eq!(col_sums.as_slice().unwrap(), &[5, 7, 9]);
@@ -1917,7 +1917,7 @@ where
 }
 
 define_reduction_op!(
-    /// Reduces one or more axes by multiplying all elements along those axes.
+    /// Reduces one or more dims by multiplying all elements along those dims.
     ///
     /// Supported dtypes and output dtype:
     ///
@@ -1934,7 +1934,7 @@ define_reduction_op!(
     /// Integer inputs are widened to a 64-bit accumulator to reduce overflow on large
     /// reductions; floating-point and complex inputs keep their width, matching NumPy. `bool`
     /// is not supported (NumPy would promote it to `int64`).
-    /// An empty reduction (zero elements along the reduced axes) returns `1`.
+    /// An empty reduction (zero elements along the reduced dims) returns `1`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -1953,7 +1953,7 @@ define_reduction_op!(
     ///     .product((0, 1)).to_ndarray()?;
     /// assert_eq!(total[[]], 720);
     ///
-    /// // Product along axis 0 -> shape [3]
+    /// // Product along dim 0 -> shape [3]
     /// let col_products = Array::compact_ndarray(&nd)?
     ///     .product(0).to_ndarray()?;
     /// assert_eq!(col_products.as_slice().unwrap(), &[4, 10, 18]);
@@ -2000,7 +2000,7 @@ where
 }
 
 define_reduction_op!(
-    /// Reduces one or more axes by computing the arithmetic mean.
+    /// Reduces one or more dims by computing the arithmetic mean.
     ///
     /// Integer and `bool` inputs promote to `f64`; floating-point and complex inputs keep
     /// their input width (`f16 -> f16`, `f32 -> f32`, `f64 -> f64`, `Complex<f32> ->
@@ -2025,7 +2025,7 @@ define_reduction_op!(
     ///     .mean((0, 1)).to_ndarray()?;
     /// assert_eq!(total[[]], 3.5);
     ///
-    /// // Mean along axis 0 -> shape [3]
+    /// // Mean along dim 0 -> shape [3]
     /// let col_means = Array::compact_ndarray(&nd)?
     ///     .mean(0).to_ndarray()?;
     /// assert_eq!(col_means.as_slice().unwrap(), &[2.5, 3.5, 4.5]);
@@ -2071,7 +2071,7 @@ where
 }
 
 define_reduction_op!(
-    /// Reduces one or more axes by computing the variance.
+    /// Reduces one or more dims by computing the variance.
     ///
     /// The variance is real-valued and its dtype matches NumPy: integer and `bool` inputs
     /// promote to `f64`, real floats keep their width (`f16 -> f16`, `f32 -> f32`, `f64 ->
@@ -2102,7 +2102,7 @@ define_reduction_op!(
     ///     .var((0, 1), 0.0).to_ndarray()?;
     /// assert!((var_all[[]] - 2.9167).abs() < 0.001);
     ///
-    /// // Sample variance (ddof=1) along axis 0 -> shape [3]
+    /// // Sample variance (ddof=1) along dim 0 -> shape [3]
     /// let col_vars = Array::compact_ndarray(&nd)?
     ///     .var(0, 1.0).to_ndarray()?;
     /// assert_eq!(col_vars.as_slice().unwrap(), &[4.5, 4.5, 4.5]);
@@ -2148,7 +2148,7 @@ where
 }
 
 define_reduction_op!(
-    /// Reduces one or more axes by computing the standard deviation.
+    /// Reduces one or more dims by computing the standard deviation.
     ///
     /// The standard deviation is real-valued and follows the same dtype rules as [`Variance`]:
     /// integer and `bool` inputs promote to `f64`, real floats keep their width, and complex
@@ -2175,7 +2175,7 @@ define_reduction_op!(
     ///     .std((0, 1), 0.0).to_ndarray()?;
     /// assert!((std_all[[]] - 1.7078).abs() < 0.001);
     ///
-    /// // Sample std (ddof=1) along axis 0 -> shape [3]
+    /// // Sample std (ddof=1) along dim 0 -> shape [3]
     /// let col_stds = Array::compact_ndarray(&nd)?
     ///     .std(0, 1.0).to_ndarray()?;
     /// assert!((col_stds[[0]] - 2.1213).abs() < 0.001);
@@ -2222,7 +2222,7 @@ where
 }
 
 define_reduction_op!(
-    /// Reduces one or more axes by testing whether all elements are `true`.
+    /// Reduces one or more dims by testing whether all elements are `true`.
     ///
     /// The input array must contain `bool` elements. Output dtype is `bool`.
     /// Returns `true` only when every element is `true`. An empty reduction returns `true`.
@@ -2244,7 +2244,7 @@ define_reduction_op!(
     ///     .all((0, 1)).to_ndarray()?;
     /// assert_eq!(all_true[[]], false);
     ///
-    /// // All true along axis 0 (per column) -> shape [3]
+    /// // All true along dim 0 (per column) -> shape [3]
     /// let col_all = Array::compact_ndarray(&nd)?
     ///     .all(0).to_ndarray()?;
     /// assert_eq!(col_all.as_slice().unwrap(), &[true, false, true]);
@@ -2287,7 +2287,7 @@ impl ReductionOpKernel<bool> for AllKernel {
 }
 
 define_reduction_op!(
-    /// Reduces one or more axes by testing whether any element is `true`.
+    /// Reduces one or more dims by testing whether any element is `true`.
     ///
     /// The input array must contain `bool` elements. Output dtype is `bool`.
     /// Returns `true` when at least one element is `true`. An empty reduction returns `false`.
@@ -2309,7 +2309,7 @@ define_reduction_op!(
     ///     .any((0, 1)).to_ndarray()?;
     /// assert_eq!(any_true[[]], true);
     ///
-    /// // Any true along axis 0 (per column) -> shape [3]
+    /// // Any true along dim 0 (per column) -> shape [3]
     /// let col_any = Array::compact_ndarray(&nd)?
     ///     .any(0).to_ndarray()?;
     /// assert_eq!(col_any.as_slice().unwrap(), &[true, true, true]);
@@ -2351,7 +2351,7 @@ impl ReductionOpKernel<bool> for AnyKernel {
     const PREFER_TREE_MERGE: bool = false;
 }
 
-/// Reduces one or more axes by combining the elements along those axes with a user-supplied
+/// Reduces one or more dims by combining the elements along those dims with a user-supplied
 /// binary closure, in an **unspecified order**.
 ///
 /// The output dtype is the same as the input dtype (`S::Item`), and the closure has signature
@@ -2366,7 +2366,7 @@ impl ReductionOpKernel<bool> for AnyKernel {
 /// # The closure MUST be associative and commutative
 ///
 /// Despite the name, this is **not** [`Iterator::reduce`]: it is not a left fold, and that
-/// holds even when a single axis is reduced. One output cell's elements are spread over multiple
+/// holds even when a single dim is reduced. One output cell's elements are spread over multiple
 /// interleaved lane accumulators that are then collapsed by a pairwise tree, and when the
 /// reduced extent is larger than one read tile a cell's accumulator is merged across tiles.
 /// Which elements land in which accumulator, and in which order the accumulators are combined,
@@ -2393,7 +2393,7 @@ impl ReductionOpKernel<bool> for AnyKernel {
 ///
 /// # Examples
 ///
-/// Custom maximum over a single axis:
+/// Custom maximum over a single dim:
 /// ```
 /// use jix::Array;
 /// use ndarray::array;
@@ -2406,7 +2406,7 @@ impl ReductionOpKernel<bool> for AnyKernel {
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
-/// Multi-axis reduction with a closure that has no built-in equivalent:
+/// Multi-dim reduction with a closure that has no built-in equivalent:
 /// ```
 /// use jix::Array;
 /// use ndarray::array;
@@ -2421,25 +2421,25 @@ impl ReductionOpKernel<bool> for AnyKernel {
 pub struct Reduce<S: ArrayStorage, D, F>(ReductionOp<S, ReduceKernel<F>, D>);
 impl<S: ArrayStorage, D, F> Reduce<S, D, F> {
     /// Constructs a [`Reduce`] storage. See the struct docs for semantics and examples.
-    pub fn new<Ax>(array: S, axes: Ax, f: F) -> Result<Self>
+    pub fn new<Ax>(array: S, dims: Ax, f: F) -> Result<Self>
     where
         S: ArrayStorageTyped,
         D: Dimension,
         F: Fn(S::Item, S::Item) -> S::Item,
-        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
-        Ok(Self(ReductionOp::new(array, ReduceKernel(f), axes)?))
+        Ok(Self(ReductionOp::new(array, ReduceKernel(f), dims)?))
     }
 
     /// Constructs an array with [`Reduce`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Ax>(array: Array<S>, axes: Ax, f: F) -> Result<Array<Reduce<S, D, F>>>
+    pub fn new_array<Ax>(array: Array<S>, dims: Ax, f: F) -> Result<Array<Reduce<S, D, F>>>
     where
         S: ArrayStorageTyped,
         D: Dimension,
         F: Fn(S::Item, S::Item) -> S::Item,
-        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
-        Self::new(array.into_storage(), axes, f).map(Array::from_storage)
+        Self::new(array.into_storage(), dims, f).map(Array::from_storage)
     }
 }
 struct ReduceKernel<F>(F);
@@ -2496,7 +2496,7 @@ where
 }
 
 /*
-/// Reduces one or more axes by folding the elements along those axes through a
+/// Reduces one or more dims by folding the elements along those dims through a
 /// user-supplied closure, starting from an explicit initial accumulator.
 ///
 /// The output dtype is the accumulator type `B` (which can differ from the input element
@@ -2510,17 +2510,17 @@ where
 ///
 /// # Traversal order
 ///
-/// - **Single reduced axis**: elements along that axis are visited in logical order (index
+/// - **Single reduced dim**: elements along that dim are visited in logical order (index
 ///   `0` upward). The result is well-defined for non-commutative / non-associative
 ///   closures.
-/// - **Multiple reduced axes**: elements are visited in an *implementation-defined* order
+/// - **Multiple reduced dims**: elements are visited in an *implementation-defined* order
 ///   driven by the storage's internal tiling. The order is not stable across array shapes,
 ///   block sizes, or library versions. Closures used here MUST be both associative and
 ///   commutative for the result to be well-defined.
 ///
 /// # Empty reductions
 ///
-/// Unlike [`Reduce`], `Fold` supports empty reductions: when a reduced axis has length
+/// Unlike [`Reduce`], `Fold` supports empty reductions: when a reduced dim has length
 /// `0`, every output cell receives `init` unchanged (the closure is never invoked).
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
@@ -2543,7 +2543,7 @@ where
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
-/// Single-axis fold: order is guaranteed to be logical, so the non-commutative closure
+/// Single-dim fold: order is guaranteed to be logical, so the non-commutative closure
 /// produces a deterministic result:
 /// ```
 /// use jix::Array;
@@ -2574,25 +2574,25 @@ where
 pub struct Fold<S: ArrayStorage, D, B, F>(ReductionOp<S, VanillaFoldKernel<B, F>, D>);
 impl<S: ArrayStorage, D, B, F> Fold<S, D, B, F> {
     /// Constructs a [`Fold`] storage. See the struct docs for semantics and examples.
-    pub fn new<Ax>(array: S, axes: Ax, init: B, f: F) -> Result<Self>
+    pub fn new<Ax>(array: S, dims: Ax, init: B, f: F) -> Result<Self>
     where
         S: ArrayStorageTyped,
         D: Dimension,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         Ok(Self(ReductionOp::new(
             array,
             VanillaFoldKernel { init, f },
-            axes,
+            dims,
         )?))
     }
 
     /// Constructs an array with [`Fold`] storage. See the storage struct docs for semantics and examples.
     pub fn new_array<Ax>(
         array: Array<S>,
-        axes: Ax,
+        dims: Ax,
         init: B,
         f: F,
     ) -> Result<Array<Fold<S, D, B, F>>>
@@ -2601,9 +2601,9 @@ impl<S: ArrayStorage, D, B, F> Fold<S, D, B, F> {
         D: Dimension,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
-        Self::new(array.into_storage(), axes, init, f).map(Array::from_storage)
+        Self::new(array.into_storage(), dims, init, f).map(Array::from_storage)
     }
 }
 struct VanillaFoldKernel<B, F> {
@@ -2669,23 +2669,23 @@ where
 /// where-clause on `S` (and its `Item`) is supplied verbatim by the caller so each op can
 /// pick its own bound (`PartialOrd`, `Maximum`, `Sum`, `Item = bool`, ...).
 macro_rules! define_array_reduction_method {
-    // single-axis variant
+    // single-dim variant
     (
         $method:ident: $Op:ident,
         where { $($where_:tt)+ }
         $(, extra_args = ($($extra_arg:ident: $extra_ty:ty),*))?,
-        single_axis $(,)?
+        single_dim $(,)?
     ) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $method(self, axis: usize $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S>>
+        pub fn $method(self, dim: usize $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S>>
         where $($where_)+
         {
-            $Op::new_array(self, axis $($(, $extra_arg)*)?).unwrap()
+            $Op::new_array(self, dim $($(, $extra_arg)*)?).unwrap()
         }
     };
 
-    // multi-axis variant
+    // multi-dim variant
     (
         $method:ident: $Op:ident,
         where { $($where_:tt)+ }
@@ -2694,12 +2694,12 @@ macro_rules! define_array_reduction_method {
     ) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $method<Ax>(self, axis: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Ax::ReducedDimension<S::Dimension>>>
+        pub fn $method<Ax>(self, dim: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Ax::ReducedDimension<S::Dimension>>>
         where
             $($where_)+
-            Ax: AxesArg,
+            Ax: DimsArg,
         {
-            $Op::new_array(self, axis $($(, $extra_arg)*)?).unwrap()
+            $Op::new_array(self, dim $($(, $extra_arg)*)?).unwrap()
         }
     };
 }
@@ -2728,7 +2728,7 @@ where
             S: ArrayStorageTyped,
             S::Item: PartialOrd,
         },
-        single_axis
+        single_dim
     );
     define_array_reduction_method!(
         argmin: ArgMin,
@@ -2736,7 +2736,7 @@ where
             S: ArrayStorageTyped,
             S::Item: PartialOrd,
         },
-        single_axis
+        single_dim
     );
     define_array_reduction_method!(
         sum: Sum,
@@ -2795,15 +2795,15 @@ where
     #[track_caller]
     pub fn reduce_unordered<F, Ax>(
         self,
-        axes: Ax,
+        dims: Ax,
         f: F,
     ) -> Array<Reduce<S, Ax::ReducedDimension<S::Dimension>, F>>
     where
         S: ArrayStorageTyped,
         F: Fn(S::Item, S::Item) -> S::Item,
-        Ax: AxesArg,
+        Ax: DimsArg,
     {
-        Reduce::new_array(self, axes, f).unwrap()
+        Reduce::new_array(self, dims, f).unwrap()
     }
 
     /* TODO
@@ -2812,7 +2812,7 @@ where
     #[allow(clippy::type_complexity)]
     pub fn fold<F, B, Ax>(
         self,
-        axes: Ax,
+        dims: Ax,
         init: B,
         f: F,
     ) -> Array<Fold<S, Ax::ReducedDimension<S::Dimension>, B, F>>
@@ -2820,9 +2820,9 @@ where
         S: ArrayStorageTyped,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        Ax: AxesArg,
+        Ax: DimsArg,
     {
-        Fold::new_array(self, axes, init, f).unwrap()
+        Fold::new_array(self, dims, init, f).unwrap()
     }
     */
 }
@@ -2923,23 +2923,23 @@ pub(crate) mod tests {
         T::assert_matches(actual, expected);
     }
 
-    pub(crate) fn axis_strategy(ndim: usize) -> impl proptest::strategy::Strategy<Value = usize> {
+    pub(crate) fn dim_strategy(ndim: usize) -> impl proptest::strategy::Strategy<Value = usize> {
         0..ndim
     }
 
-    pub(crate) fn axes_strategy(ndim: usize) -> proptest::strategy::BoxedStrategy<Vec<usize>> {
+    pub(crate) fn dims_strategy(ndim: usize) -> proptest::strategy::BoxedStrategy<Vec<usize>> {
         if ndim == 0 {
             return proptest::strategy::Just(vec![]).boxed();
         }
-        let axis_strategy = axis_strategy(ndim).prop_map(|axis| vec![axis]);
-        let multi_axes_strategy = prop::collection::vec(0..ndim, 1..=ndim).prop_map(|mut axes| {
-            axes.sort_unstable();
-            axes.dedup();
-            axes
+        let dim_strategy = dim_strategy(ndim).prop_map(|dim| vec![dim]);
+        let multi_dims_strategy = prop::collection::vec(0..ndim, 1..=ndim).prop_map(|mut dims| {
+            dims.sort_unstable();
+            dims.dedup();
+            dims
         });
         prop::strategy::Union::new_weighted(vec![
-            (3, axis_strategy.boxed()),
-            (1, multi_axes_strategy.boxed()),
+            (3, dim_strategy.boxed()),
+            (1, multi_dims_strategy.boxed()),
         ])
         .boxed()
     }
@@ -2971,12 +2971,12 @@ pub(crate) mod tests {
         array
             .prop_map(|(nd, za)| (nd, Rc::new(za)))
             .prop_flat_map(|(nd, za)| {
-                let axes = axes_strategy(nd.ndim());
-                (Just(nd), Just(za), axes)
+                let dims = dims_strategy(nd.ndim());
+                (Just(nd), Just(za), dims)
             })
     }
 
-    // pub(crate) fn carray_strategy_for_reduction_single_axis<T: crate::util::ScalarStrategy>(
+    // pub(crate) fn carray_strategy_for_reduction_single_dim<T: crate::util::ScalarStrategy>(
     //     elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
     // ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>, DimDyn>>>, usize)>
     // {
@@ -2985,8 +2985,8 @@ pub(crate) mod tests {
     //     array
     //         .prop_map(|(nd, za)| (nd, Rc::new(za)))
     //         .prop_flat_map(|(nd, za)| {
-    //             let axis = axis_strategy(nd.ndim());
-    //             (Just(nd), Just(za), axis)
+    //             let dim = dim_strategy(nd.ndim());
+    //             (Just(nd), Just(za), dim)
     //         })
     // }
 
@@ -3010,8 +3010,8 @@ pub(crate) mod tests {
     {
         let mut runner = TestRunner::new(Config::default());
         runner
-            .run(&cases, |(nd, za, axes)| {
-                check(&nd, &za, &axes);
+            .run(&cases, |(nd, za, dims)| {
+                check(&nd, &za, &dims);
                 Ok(())
             })
             .unwrap();
@@ -3038,10 +3038,10 @@ pub(crate) mod tests {
                                 <$dtype as crate::util::ScalarStrategy>::$strategy()
                             )
                         ),
-                        |nd, za, axes| {
-                            let result = za.view().$op_method(axes);
+                        |nd, za, dims| {
+                            let result = za.view().$op_method(dims);
                             let expected = crate::ops::reduction::tests::ndarray_reduce(
-                                nd, axes,
+                                nd, dims,
                                 |arr| {
                                     let $items = arr.iter().cloned();
                                     $body
@@ -3056,7 +3056,7 @@ pub(crate) mod tests {
 
         (
             $op_method:ident,
-            single_axis = true,
+            single_dim = true,
             |$items:ident| { $body:expr },
             $dtype:ident,
             $strategy:ident
@@ -3065,13 +3065,13 @@ pub(crate) mod tests {
                 proptest::proptest! {
                     #[test]
                     fn [<$op_method _ $dtype>](
-                        (nd, za, axis) in crate::ops::reduction::tests::carray_strategy_for_reduction_single_axis::<$dtype>(
+                        (nd, za, dim) in crate::ops::reduction::tests::carray_strategy_for_reduction_single_dim::<$dtype>(
                             <$dtype as crate::util::ScalarStrategy>::$strategy()
                         )
                     ) {
-                        let result = (*za).as_ref().$op_method(axis);
+                        let result = (*za).as_ref().$op_method(dim);
                         let expected = crate::ops::reduction::tests::ndarray_reduce(
-                            &nd, &[axis],
+                            &nd, &[dim],
                             |arr| {
                                 let $items = arr.iter().cloned();
                                 $body
@@ -3111,14 +3111,14 @@ pub(crate) mod tests {
 
         (
             $op_method:ident,
-            single_axis = true,
+            single_dim = true,
             |$items:ident| { $body:expr },
             [$($dtype:ident),+ $(,)?], $strategy:ident
             $(, #[cfg($cfg:meta)] [$($cfg_dtype:ident),+ $(,)?])*
         ) => {
             $(crate::ops::reduction::tests::test_reduction_dtype!(
                 $op_method,
-                single_axis = true,
+                single_dim = true,
                 |$items| { $body },
                 $dtype,
                 $strategy
@@ -3127,7 +3127,7 @@ pub(crate) mod tests {
                 #[cfg($cfg)]
                 crate::ops::reduction::tests::test_reduction_dtype!(
                     $op_method,
-                    single_axis = true,
+                    single_dim = true,
                     |$items| { $body },
                     $cfg_dtype,
                     $strategy
@@ -3170,16 +3170,16 @@ pub(crate) mod tests {
     );
     #[test]
     fn min_concrete() {
-        // i32: negatives and the signed dtype MIN/MAX edges; axis 0, axis 1, and all axes.
+        // i32: negatives and the signed dtype MIN/MAX edges; dim 0, dim 1, and all dims.
         // A non-default block shape ([2, 2]) also crosses a block boundary on both the
-        // reduced and the kept axis.
+        // reduced and the kept dim.
         let nd = array![[i32::MIN, 3, -5], [7, i32::MAX, -9]];
         let za = Array::compact_ndarray_with(&nd, crate::util::arr_params(&[2, 2])).unwrap();
-        // axis 0 (per column): min(MIN,7)=MIN; min(3,MAX)=3; min(-5,-9)=-9.
+        // dim 0 (per column): min(MIN,7)=MIN; min(3,MAX)=3; min(-5,-9)=-9.
         crate::util::assert_array_matches(&za.view().min(0usize), &array![i32::MIN, 3, -9]);
-        // axis 1 (per row): min(MIN,3,-5)=MIN; min(7,MAX,-9)=-9.
+        // dim 1 (per row): min(MIN,3,-5)=MIN; min(7,MAX,-9)=-9.
         crate::util::assert_array_matches(&za.view().min(1usize), &array![i32::MIN, -9]);
-        // all axes: overall minimum is i32::MIN.
+        // all dims: overall minimum is i32::MIN.
         crate::util::assert_array_matches(&za.view().min((0, 1)), &ndarray::arr0(i32::MIN));
 
         // u8: the unsigned dtype MIN (0) / MAX (255) edges - distinct from the signed case
@@ -3221,13 +3221,13 @@ pub(crate) mod tests {
 
     #[test]
     fn argmax_concrete() {
-        // i32 with negatives and a deliberate 2-way tie on both axes: the kernel must return
+        // i32 with negatives and a deliberate 2-way tie on both dims: the kernel must return
         // the FIRST index among tied maxima, not an arbitrary one.
         let nd = array![[5i32, 5, 2], [5, -1, -8]];
         let za = Array::compact_ndarray(&nd).unwrap();
-        // axis 0 (per column): col 0 ties row 0/row 1 at 5 -> first row (0) wins.
+        // dim 0 (per column): col 0 ties row 0/row 1 at 5 -> first row (0) wins.
         crate::util::assert_array_matches(&za.view().argmax(0usize), &array![0u64, 0, 0]);
-        // axis 1 (per row): row 0 ties col 0/col 1 at 5 -> first col (0) wins.
+        // dim 1 (per row): row 0 ties col 0/col 1 at 5 -> first col (0) wins.
         crate::util::assert_array_matches(&za.view().argmax(1usize), &array![0u64, 0]);
 
         // f32 path, same tie-break rule, negatives included. (`NaN` excluded - see
@@ -3240,15 +3240,15 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn multi_axis_argmax_reports_the_true_stream_position() {
+    fn multi_dim_argmax_reports_the_true_stream_position() {
         use crate::{Array, DimDyn};
 
-        // `ArgMax` is `single_axis`, so a multi-axis argmax is only reachable by building the
+        // `ArgMax` is `single_dim`, so a multi-dim argmax is only reachable by building the
         // `ReductionOp` directly. Argmax is the one kernel whose result depends on an element's
         // position in the reduced stream, which makes it the probe for how that position is
         // computed.
         //
-        // Two reduced axes and a read window small enough that the reduced extent spans many
+        // Two reduced dims and a read window small enough that the reduced extent spans many
         // tiles, so the stream position has to be carried across them. The maximum sits at
         // `(1, 0)`, whose row-major position in the reduced stream is `1 * N + 0`.
         const N: usize = 1 << 12;
@@ -3289,11 +3289,11 @@ pub(crate) mod tests {
         // (name, byte strides, base byte offset)
         let rows: &[(&str, [usize; 3], usize)] = &[
             ("row major", [80, 20, 4], 0),
-            ("reversed, axis 0 innermost", [4, 12, 48], 0),
-            ("permuted, axis 1 innermost", [80, 4, 16], 0),
-            ("zero stride on axis 1", [80, 0, 4], 0),
-            ("zero stride on axis 0", [0, 20, 4], 0),
-            ("gaps on every axis", [320, 80, 8], 0),
+            ("reversed, dim 0 innermost", [4, 12, 48], 0),
+            ("permuted, dim 1 innermost", [80, 4, 16], 0),
+            ("zero stride on dim 1", [80, 0, 4], 0),
+            ("zero stride on dim 0", [0, 20, 4], 0),
+            ("gaps on every dim", [320, 80, 8], 0),
             ("unaligned base", [80, 20, 4], 1),
             ("unaligned base and strides", [82, 22, 6], 1),
         ];
@@ -3308,7 +3308,7 @@ pub(crate) mod tests {
                 // SAFETY: every row's furthest reachable byte is well inside `backing`.
                 unsafe { backing.as_ptr().add(off).cast::<i32>().read_unaligned() }
             };
-            // Output index of a full index, dropping the reduced axes.
+            // Output index of a full index, dropping the reduced dims.
             let out_idx = |full: [usize; 3], kept: &[usize]| {
                 ndarray::IxDyn(&kept.iter().map(|&d| full[d]).collect::<Vec<_>>())
             };
@@ -3331,14 +3331,14 @@ pub(crate) mod tests {
                 .unwrap();
 
                 for mask in 1u8..8 {
-                    let axes = (0..3)
+                    let dims = (0..3)
                         .filter(|d| mask >> d & 1 == 1)
                         .collect::<Vec<usize>>();
                     let kept = (0..3)
                         .filter(|d| mask >> d & 1 == 0)
                         .collect::<Vec<usize>>();
                     let out_shape = kept.iter().map(|&d| SHAPE[d]).collect::<Vec<usize>>();
-                    eprintln!("row={name} window={window:?} axes={axes:?}");
+                    eprintln!("row={name} window={window:?} dims={dims:?}");
 
                     let mut exp_sum = ndarray::ArrayD::<i64>::zeros(ndarray::IxDyn(&out_shape));
                     let mut exp_max =
@@ -3355,16 +3355,16 @@ pub(crate) mod tests {
                             }
                         }
                     }
-                    crate::util::assert_array_matches(&arr.view().sum(axes.as_slice()), &exp_sum);
-                    crate::util::assert_array_matches(&arr.view().max(axes.as_slice()), &exp_max);
+                    crate::util::assert_array_matches(&arr.view().sum(dims.as_slice()), &exp_sum);
+                    crate::util::assert_array_matches(&arr.view().max(dims.as_slice()), &exp_max);
                 }
 
-                // `argmax` is single-axis, and the only op whose result depends on an element's
+                // `argmax` is single-dim, and the only op whose result depends on an element's
                 // position in the reduced stream.
-                for axis in 0..3 {
-                    let kept = (0..3).filter(|&d| d != axis).collect::<Vec<usize>>();
+                for dim in 0..3 {
+                    let kept = (0..3).filter(|&d| d != dim).collect::<Vec<usize>>();
                     let out_shape = kept.iter().map(|&d| SHAPE[d]).collect::<Vec<usize>>();
-                    eprintln!("row={name} window={window:?} argmax axis={axis}");
+                    eprintln!("row={name} window={window:?} argmax dim={dim}");
 
                     let dyn_shape = ndarray::IxDyn(&out_shape);
                     let mut exp = ndarray::ArrayD::<u64>::zeros(dyn_shape.clone());
@@ -3373,19 +3373,19 @@ pub(crate) mod tests {
                         for j in 0..SHAPE[1] {
                             for k in 0..SHAPE[2] {
                                 // Row-major nesting visits a given output cell with a strictly
-                                // increasing `axis` coordinate, so a strict `>` keeps the first
+                                // increasing `dim` coordinate, so a strict `>` keeps the first
                                 // maximum - matching the kernel's tie-break.
                                 let full = [i, j, k];
                                 let oi = out_idx(full, &kept);
                                 let v = val(full);
                                 if best[oi.clone()].is_none_or(|b| v > b) {
                                     best[oi.clone()] = Some(v);
-                                    exp[oi] = full[axis] as u64;
+                                    exp[oi] = full[dim] as u64;
                                 }
                             }
                         }
                     }
-                    crate::util::assert_array_matches(&arr.view().argmax(axis), &exp);
+                    crate::util::assert_array_matches(&arr.view().argmax(dim), &exp);
                 }
             }
         }
@@ -3396,9 +3396,9 @@ pub(crate) mod tests {
         // Same arrays as `argmax_concrete`, exercising the minimum side of the tie-break rule.
         let nd = array![[5i32, 5, 2], [5, -1, -8]];
         let za = Array::compact_ndarray(&nd).unwrap();
-        // axis 0 (per column): col 0 ties row 0/row 1 at 5 -> first row (0) wins.
+        // dim 0 (per column): col 0 ties row 0/row 1 at 5 -> first row (0) wins.
         crate::util::assert_array_matches(&za.view().argmin(0usize), &array![0u64, 1, 1]);
-        // axis 1 (per row): both rows have a unique minimum (2, then -8).
+        // dim 1 (per row): both rows have a unique minimum (2, then -8).
         crate::util::assert_array_matches(&za.view().argmin(1usize), &array![2u64, 2]);
 
         let ndf = array![[2.5f32, 2.5, -1.0], [3.0, 3.0, 0.0]];
@@ -3449,25 +3449,25 @@ pub(crate) mod tests {
         // overflow.
         let nd = array![[2i32, -3, 0], [-1, 5, -2]];
         let za = Array::compact_ndarray(&nd).unwrap();
-        // axis 0 (per column): 2*-1=-2; -3*5=-15; 0*-2=0.
+        // dim 0 (per column): 2*-1=-2; -3*5=-15; 0*-2=0.
         crate::util::assert_array_matches(&za.view().product(0usize), &array![-2i64, -15, 0]);
-        // axis 1 (per row): 2*-3*0=0; -1*5*-2=10.
+        // dim 1 (per row): 2*-3*0=0; -1*5*-2=10.
         crate::util::assert_array_matches(&za.view().product(1usize), &array![0i64, 10]);
-        // all axes: the `0` term collapses the whole product to 0.
+        // all dims: the `0` term collapses the whole product to 0.
         crate::util::assert_array_matches(&za.view().product((0, 1)), &ndarray::arr0(0i64));
 
         // f32 -> f32 (float product keeps its input width). Negatives, no zero this time so
         // the full multiplication chain is exercised (the i32 case above covers the zero edge).
         let ndf = array![[1.5f32, -2.0, 0.5], [2.0, -1.0, 3.0]];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
-        // axis 0 (per column): 1.5*2.0=3.0; -2.0*-1.0=2.0; 0.5*3.0=1.5.
+        // dim 0 (per column): 1.5*2.0=3.0; -2.0*-1.0=2.0; 0.5*3.0=1.5.
         crate::util::assert_array_matches_approx(
             &zaf.view().product(0usize),
             &array![3.0f32, 2.0, 1.5],
             1e-3,
             1e-1,
         );
-        // axis 1 (per row): 1.5*-2.0*0.5=-1.5; 2.0*-1.0*3.0=-6.0.
+        // dim 1 (per row): 1.5*-2.0*0.5=-1.5; 2.0*-1.0*3.0=-6.0.
         crate::util::assert_array_matches_approx(
             &zaf.view().product(1usize),
             &array![-1.5f32, -6.0],
@@ -3558,22 +3558,22 @@ pub(crate) mod tests {
 
     /// Drives a `sum` reduction through the two-level bulk/tile chunking, with `block_shape`
     /// and a small `read_size` chosen so the tile lands at a genuine sub-block (smaller than
-    /// the array along both a reduced and a non-reduced axis). That exercises both non-trivial
+    /// the array along both a reduced and a non-reduced dim). That exercises both non-trivial
     /// paths at once: more than one *bulk*, and more than one *tile* within a bulk.
     ///
     /// The reduction's `read_data` is driven **directly** over the full output range in one
     /// call. The top-level readers (`to_ndarray`, `to_ndarray_sub`) chunk the output by the
     /// reduction op's block shape before calling `read_data`, so each call's non-reduced extent
     /// equals one block and the read-shape heuristic snaps the tile to it - never subdividing
-    /// the non-reduced axis. Handing `read_data` the whole non-reduced extent at once makes it
-    /// split that axis into several tiles per bulk. Correctness is exact: the i64 sum of small
+    /// the non-reduced dim. Handing `read_data` the whole non-reduced extent at once makes it
+    /// split that dim into several tiles per bulk. Correctness is exact: the i64 sum of small
     /// signed values can't reassociate or overflow. During development, path coverage is
     /// confirmed with the temporary debug print in `ReductionOp::read_data`.
     fn check_sum_divided(
         shape: &[usize],
         block_shape: &[u32],
         read_size: (u64, u64),
-        axes: &[usize],
+        dims: &[usize],
     ) {
         use crate::ArrayStorage;
 
@@ -3591,7 +3591,7 @@ pub(crate) mod tests {
         params.read_size(read_size);
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
 
-        let reduced = za.view().sum(axes);
+        let reduced = za.view().sum(dims);
         let out_shape: Vec<u64> = reduced.shape().to_vec();
         let full_index: Vec<std::ops::Range<u64>> = out_shape.iter().map(|&s| 0..s).collect();
         let n_out: usize = out_shape.iter().product::<u64>() as usize;
@@ -3617,7 +3617,7 @@ pub(crate) mod tests {
                 .unwrap();
         }
 
-        let expected = ndarray_reduce(&nd, axes, |v| v.iter().map(|&x| x as i64).sum::<i64>());
+        let expected = ndarray_reduce(&nd, dims, |v| v.iter().map(|&x| x as i64).sum::<i64>());
         assert_eq!(&buf[..n_out], expected.as_slice().unwrap());
     }
 
@@ -3686,30 +3686,30 @@ pub(crate) mod tests {
         let za = Array::compact_ndarray(&nd).unwrap();
         let reduced = za.view().max(1usize); // output shape [5]
         let ctx = reduced.read_ctx();
-        // An empty sub-range along the (sole) output axis.
+        // An empty sub-range along the (sole) output dim.
         let got = reduced.to_ndarray_sub(&[1..1], &ctx).unwrap();
         assert_eq!(got.shape(), &[0]);
     }
 
     #[test]
     fn sum_multi_bulk_multi_tile_2d_reduce_outer() {
-        // Reduce axis 0 (the strided/outer axis), tile == block == [2, 3]. Current scheme:
-        // bulks split the reduced axis 0 (8/2 = 4 bulks); within each bulk, tiles split the
-        // non-reduced axis 1 (6/3 = 2 tiles/bulk).
+        // Reduce dim 0 (the strided/outer dim), tile == block == [2, 3]. Current scheme:
+        // bulks split the reduced dim 0 (8/2 = 4 bulks); within each bulk, tiles split the
+        // non-reduced dim 1 (6/3 = 2 tiles/bulk).
         check_sum_divided(&[8, 6], &[2, 3], (32, 64), &[0]);
     }
 
     #[test]
     fn sum_multi_bulk_multi_tile_2d_reduce_inner() {
-        // Reduce axis 1 (the contiguous/inner axis), tile == block == [3, 2]. bulks split
-        // reduced axis 1 (8/2 = 4); tiles split non-reduced axis 0 (6/3 = 2).
+        // Reduce dim 1 (the contiguous/inner dim), tile == block == [3, 2]. bulks split
+        // reduced dim 1 (8/2 = 4); tiles split non-reduced dim 0 (6/3 = 2).
         check_sum_divided(&[6, 8], &[3, 2], (32, 64), &[1]);
     }
 
     #[test]
     fn sum_multi_bulk_multi_tile_3d_reduce_middle() {
-        // 3D, reduce the middle axis, tile == block == [2, 2, 2]. bulks split reduced axis 1
-        // (4/2 = 2); tiles split the two non-reduced axes 0 and 2 ((4/2)*(4/2) = 4 tiles/bulk).
+        // 3D, reduce the middle dim, tile == block == [2, 2, 2]. bulks split reduced dim 1
+        // (4/2 = 2); tiles split the two non-reduced dims 0 and 2 ((4/2)*(4/2) = 4 tiles/bulk).
         check_sum_divided(&[4, 4, 4], &[2, 2, 2], (32, 64), &[1]);
     }
 
@@ -3757,7 +3757,7 @@ pub(crate) mod tests {
         use crate::storage::StridedBuf;
         use crate::ArrayStorage;
 
-        // [4, 4, 4] i8, reduce the middle axis -> [4, 4] i64.
+        // [4, 4, 4] i8, reduce the middle dim -> [4, 4] i64.
         let nd = ndarray::ArrayD::from_shape_vec(
             vec![4usize, 4, 4],
             (0..64i32).map(|x| (x % 97) as i8).collect(),
@@ -3880,7 +3880,7 @@ pub(crate) mod tests {
     }
 
     /// Proptest driver for `reduce_unordered` over one dtype: the op must agree with a plain
-    /// sequential fold of the same combiner `$f`, for every shape/axes combination the shared
+    /// sequential fold of the same combiner `$f`, for every shape/dims combination the shared
     /// reduction strategy generates.
     macro_rules! test_reduce_unordered_dtype {
         ($f:path, $dtype:ident, $strategy:ident) => {
@@ -3893,9 +3893,9 @@ pub(crate) mod tests {
                                 <$dtype as crate::util::ScalarStrategy>::$strategy()
                             )
                         ),
-                        |nd, za, axes| {
-                            let result = za.view().reduce_unordered(axes, $f);
-                            let expected = ndarray_reduce(nd, axes, |arr| {
+                        |nd, za, dims| {
+                            let result = za.view().reduce_unordered(dims, $f);
+                            let expected = ndarray_reduce(nd, dims, |arr| {
                                 arr.iter().cloned().reduce($f).unwrap()
                             });
                             assert_reduction_matches(&result, &expected);
@@ -3926,26 +3926,26 @@ pub(crate) mod tests {
 
     #[test]
     fn reduce_unordered_concrete() {
-        // Axis 0, axis 1 and all-axes, with a non-default block shape ([2, 2]) so both the
-        // reduced and the kept axis cross a block boundary.
+        // Dim 0, dim 1 and all-dims, with a non-default block shape ([2, 2]) so both the
+        // reduced and the kept dim cross a block boundary.
         let nd = array![[1i32, 5, 3], [4, 2, 6]];
         let za = Array::compact_ndarray_with(&nd, crate::util::arr_params(&[2, 2])).unwrap();
-        // axis 0 (per column): max(1,4)=4; max(5,2)=5; max(3,6)=6.
+        // dim 0 (per column): max(1,4)=4; max(5,2)=5; max(3,6)=6.
         crate::util::assert_array_matches(
             &za.view().reduce_unordered(0usize, maximum::<i32>),
             &array![4, 5, 6],
         );
-        // axis 1 (per row): max(1,5,3)=5; max(4,2,6)=6.
+        // dim 1 (per row): max(1,5,3)=5; max(4,2,6)=6.
         crate::util::assert_array_matches(
             &za.view().reduce_unordered(1usize, maximum::<i32>),
             &array![5, 6],
         );
-        // all axes -> scalar.
+        // all dims -> scalar.
         crate::util::assert_array_matches(
             &za.view().reduce_unordered((0, 1), maximum::<i32>),
             &ndarray::arr0(6),
         );
-        // A reduction over zero axes is a no-op copy: every cell is its own accumulator.
+        // A reduction over zero dims is a no-op copy: every cell is its own accumulator.
         crate::util::assert_array_matches(
             &za.view()
                 .reduce_unordered([0usize; 0].as_slice(), maximum::<i32>),
@@ -3964,19 +3964,19 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn reduce_unordered_errs_on_empty_axis() {
+    fn reduce_unordered_errs_on_empty_dim() {
         // With no seed value and no first element there is nothing to return, so construction
         // fails (`supports_empty() == false`).
         use ndarray::Array2;
         let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
         let a = Array::compact_ndarray(&empty).unwrap();
         let err = Reduce::new_array(a.view(), 1usize, |a: i32, b: i32| a + b)
-            .expect_err("empty reduced axis must be rejected");
+            .expect_err("empty reduced dim must be rejected");
         assert!(
             err.to_string().contains("empty dimension"),
             "unexpected error: {err}"
         );
-        // An empty *kept* axis is fine - the reduced axis is non-empty and the output is empty.
+        // An empty *kept* dim is fine - the reduced dim is non-empty and the output is empty.
         let empty: Array2<i32> = Array2::from_shape_vec((0, 2), vec![]).unwrap();
         let a = Array::compact_ndarray(&empty).unwrap();
         let r = a
@@ -3989,7 +3989,7 @@ pub(crate) mod tests {
 
     #[test]
     #[should_panic(expected = "empty dimension")]
-    fn reduce_unordered_panics_on_empty_axis() {
+    fn reduce_unordered_panics_on_empty_dim() {
         // `Array::reduce_unordered` unwraps the construction error.
         use ndarray::Array2;
         let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
@@ -4000,7 +4000,7 @@ pub(crate) mod tests {
     #[test]
     fn reduce_unordered_multi_bulk_multi_tile_2d_reduce_outer() {
         // Same chunking scenarios as the `sum` bulk/tile tests, driven through the custom
-        // closure instead. Reduce axis 0: bulks split the reduced axis, tiles split the kept one.
+        // closure instead. Reduce dim 0: bulks split the reduced dim, tiles split the kept one.
         check_reduce_unordered_divided(&[8, 6], &[2, 3], (32, 64), &[0]);
     }
 
@@ -4015,8 +4015,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn reduce_unordered_multi_bulk_long_reduced_axis() {
-        // A long, prime-length reduced axis with a tiny read window: the axis is chopped into
+    fn reduce_unordered_multi_bulk_long_reduced_dim() {
+        // A long, prime-length reduced dim with a tiny read window: the dim is chopped into
         // many bulks whose partial accumulators all have to be merged back together, and 137 is
         // not a multiple of the block extent so the last bulk is a short one.
         //
@@ -4041,7 +4041,7 @@ pub(crate) mod tests {
         shape: &[usize],
         block_shape: &[u32],
         read_size: (u64, u64),
-        axes: &[usize],
+        dims: &[usize],
     ) {
         use std::cell::Cell;
 
@@ -4060,7 +4060,7 @@ pub(crate) mod tests {
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
 
         let calls = Cell::new(0u64);
-        let reduced = za.view().reduce_unordered(axes, |a: u8, b: u8| {
+        let reduced = za.view().reduce_unordered(dims, |a: u8, b: u8| {
             calls.set(calls.get() + 1);
             xor(a, b)
         });
@@ -4085,7 +4085,7 @@ pub(crate) mod tests {
                 .unwrap();
         }
 
-        let expected = ndarray_reduce(&nd, axes, |v| v.iter().cloned().reduce(xor).unwrap());
+        let expected = ndarray_reduce(&nd, dims, |v| v.iter().cloned().reduce(xor).unwrap());
         assert_eq!(&buf[..n_out], expected.as_slice().unwrap());
 
         let reduction_size = n / n_out;
@@ -4100,8 +4100,8 @@ pub(crate) mod tests {
 
     /* TODO(reduction-merge): fold tests removed along with the op; restore later.
     #[test]
-    fn fold_single_axis_in_logical_order() {
-        // Single-axis fold with a non-commutative closure (subtraction). Logical-order
+    fn fold_single_dim_in_logical_order() {
+        // Single-dim fold with a non-commutative closure (subtraction). Logical-order
         // traversal makes the result deterministic:
         // ((((100 - 10) - 1) - 2) - 3) = 84.
         let a = Array::compact_ndarray(&array![10i32, 1, 2, 3]).unwrap();
@@ -4131,10 +4131,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn fold_multi_axis_count_predicate() {
-        // Per-row count via fold along axis 1. The closure is commutative + associative
-        // (addition), so single-axis order doesn't matter here - but axis 1 is a single
-        // axis, so order is still guaranteed.
+    fn fold_multi_dim_count_predicate() {
+        // Per-row count via fold along dim 1. The closure is commutative + associative
+        // (addition), so single-dim order doesn't matter here - but dim 1 is a single
+        // dim, so order is still guaranteed.
         let a = Array::compact_ndarray(&array![[1i32, 5, 3, 7], [4, 2, 8, 1]]).unwrap();
         let r = a
             .view()
@@ -4145,9 +4145,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn fold_empty_axis_returns_init() {
-        // Folding over an empty axis must produce the init accumulator at every output
-        // cell - the closure is never invoked. Reducing axis 1 of a `(2, 0)` array
+    fn fold_empty_dim_returns_init() {
+        // Folding over an empty dim must produce the init accumulator at every output
+        // cell - the closure is never invoked. Reducing dim 1 of a `(2, 0)` array
         // yields shape `[2]` with both cells equal to `init`.
         use ndarray::Array2;
         let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
@@ -4162,7 +4162,7 @@ pub(crate) mod tests {
 
     #[test]
     fn fold_init_passed_through_when_closure_never_runs() {
-        // A scalar reduction (reduce all axes) over a 0-element input collapses to a
+        // A scalar reduction (reduce all dims) over a 0-element input collapses to a
         // single output cell whose value is exactly `init`.
         use ndarray::Array1;
         let empty: Array1<i32> = Array1::from_shape_vec(0, vec![]).unwrap();
@@ -4199,77 +4199,77 @@ pub(crate) mod tests {
 
     fn ndarray_reduce<'a, S, D, O>(
         array: &'a ndarray::ArrayBase<S, D>,
-        axes: &[usize],
+        dims: &[usize],
         f: impl Fn(&ndarray::ArrayViewD<'a, S::Elem>) -> O,
     ) -> ndarray::ArrayD<O>
     where
         S: ndarray::Data,
         D: ndarray::Dimension,
     {
-        // Output shape = original with reduction axes removed
-        let mut axes = axes.to_vec();
-        axes.sort_unstable();
-        axes.dedup();
+        // Output shape = original with reduction dims removed
+        let mut dims = dims.to_vec();
+        dims.sort_unstable();
+        dims.dedup();
 
         let out_shape = array
             .shape()
             .iter()
             .enumerate()
-            .filter(|(i, _)| !axes.contains(i))
+            .filter(|(i, _)| !dims.contains(i))
             .map(|(_, &s)| s)
             .collect::<Vec<_>>();
 
-        let values = ndarray_reduction_iter(array, &axes)
+        let values = ndarray_reduction_iter(array, &dims)
             .map(|(_, view)| f(&view))
             .collect::<Vec<_>>();
 
         ndarray::ArrayD::from_shape_vec(out_shape, values).unwrap()
     }
 
-    /// Iterates over all index combinations of the **kept** axes (i.e. axes NOT in `axes`),
-    /// yielding for each combination the multi-index into the kept axes and a view spanning
-    /// the reduction axes.
+    /// Iterates over all index combinations of the **kept** dims (i.e. dims NOT in `dims`),
+    /// yielding for each combination the multi-index into the kept dims and a view spanning
+    /// the reduction dims.
     fn ndarray_reduction_iter<'a, S, D>(
         array: &'a ndarray::ArrayBase<S, D>,
-        axes: &[usize],
+        dims: &[usize],
     ) -> impl Iterator<Item = (Vec<usize>, ndarray::ArrayViewD<'a, S::Elem>)> + 'a
     where
         S: ndarray::Data,
         D: ndarray::Dimension,
     {
-        let mut axes = axes.to_vec();
-        axes.sort_unstable();
-        axes.dedup();
+        let mut dims = dims.to_vec();
+        dims.sort_unstable();
+        dims.dedup();
 
-        // Kept axes = all axes not being reduced
+        // Kept dims = all dims not being reduced
         let ndim = array.ndim();
-        let kept_axes = (0..ndim).filter(|i| !axes.contains(i)).collect::<Vec<_>>();
+        let kept_dims = (0..ndim).filter(|i| !dims.contains(i)).collect::<Vec<_>>();
 
-        // Shape of the kept axes - this is what we iterate over
-        let kept_shape = kept_axes
+        // Shape of the kept dims - this is what we iterate over
+        let kept_shape = kept_dims
             .iter()
             .map(|&ax| array.shape()[ax])
             .collect::<Vec<_>>();
         let total: usize = kept_shape.iter().product();
 
         (0..total).map(move |flat_idx| {
-            // Convert flat index to multi-index over the kept axes
+            // Convert flat index to multi-index over the kept dims
             let mut remaining = flat_idx;
-            let mut kept_indices = Vec::with_capacity(kept_axes.len());
+            let mut kept_indices = Vec::with_capacity(kept_dims.len());
             for &dim_size in kept_shape.iter().rev() {
                 kept_indices.push(remaining % dim_size);
                 remaining /= dim_size;
             }
             kept_indices.reverse();
 
-            // Fix each kept axis to its index, remove in descending order.
-            // We remove kept axes (which are the non-reduction axes), leaving
-            // a view over the reduction axes.
+            // Fix each kept dim to its index, remove in descending order.
+            // We remove kept dims (which are the non-reduction dims), leaving
+            // a view over the reduction dims.
             let mut view = array.view().into_dyn();
 
-            // We must track axis offset: as we remove axes, remaining axis
-            // indices shift down. Process kept axes in descending order.
-            let mut pairs: Vec<(usize, usize)> = kept_axes
+            // We must track dim offset: as we remove dims, remaining dim
+            // indices shift down. Process kept dims in descending order.
+            let mut pairs: Vec<(usize, usize)> = kept_dims
                 .iter()
                 .copied()
                 .zip(kept_indices.iter().copied())

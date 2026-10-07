@@ -31,7 +31,7 @@ assert a[999, 999] == 999_999
 assert a[0, 0:10].tolist() == list(range(10))
 
 # Build a lazy pipeline - no decompression happens yet.
-result = (a - a.mean(axis=0)) / a.std(axis=1)
+result = (a - a.mean(dim=0)) / a.std(dim=1)
 
 # Materialize the pipeline into a NumPy array.
 out = result.numpy()
@@ -92,14 +92,14 @@ output.
 **Reading data from an `Array`:**
 
 The primary output method is `Array.numpy()`, or equivalently `array[...]`. Both accept
-the same indexing syntax as NumPy: integers (drop that axis), slices (keep that axis),
-`...` (fill remaining axes). Note: slices must have step 1; bounds are checked strictly.
+the same indexing syntax as NumPy: integers (drop that dim), slices (keep that dim),
+`...` (fill remaining dims). Note: slices must have step 1; bounds are checked strictly.
 
 <!-- fmt:off -->
 ```python
 a.numpy()            # full array
-a.numpy(0)           # row 0 (integer drops axis 0)
-a.numpy(slice(1, 4)) # rows 1-3 (slice keeps axis 0)
+a.numpy(0)           # row 0 (integer drops dim 0)
+a.numpy(slice(1, 4)) # rows 1-3 (slice keeps dim 0)
 a[0, 1:3]            # row 0, columns 1-2 (shorthand)
 a[..., -1]           # last column of any-rank array
 ```
@@ -122,7 +122,7 @@ You can supply an explicit block shape through `params` when constructing an arr
 a = jix.compact(data, params={"block_shape": [64, 64]})
 ```
 
-After shape-changing operations (`reshape`, `permute_axes`, etc.) the original block
+After shape-changing operations (`reshape`, `permute_dims`, etc.) the original block
 layout may no longer match the new access pattern. Call `jix.compact(arr, params=...)` to
 re-encode with a layout suited to the new shape.
 
@@ -145,7 +145,7 @@ result = (
     a
      .cast("float64")
      .exp()
-     .sum(axis=0)
+     .sum(dim=0)
 )
 
 # This single call decompresses, transforms, and materializes the pipeline.

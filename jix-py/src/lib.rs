@@ -65,7 +65,7 @@ mod jix {
 
     #[pymodule_export]
     pub use crate::ops::{
-        broadcast, concatenate, flatten, flip, insert_axis, permute_axes, remove_axis, repeat,
+        broadcast, concatenate, flatten, flip, insert_dim, permute_dims, remove_dim, repeat,
         reshape, roll, slice, squeeze, stack, tile, unsqueeze,
     };
 

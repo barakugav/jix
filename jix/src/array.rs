@@ -53,9 +53,9 @@ use crate::{
 /// Array<Compact>
 ///   .neg()                 -> Array<Neg<Compact>>
 ///   .reshape(...)          -> Array<Reshape<Neg<Compact>>>
-///   .permute_axes(axes)    -> Array<PermuteAxes<Reshape<...>>>
-///   .add(other_array)      -> Array<Add<PermuteAxes<...>, Compact>>
-///   .sum(axis)             -> Array<Sum<Add<...>>>
+///   .permute_dims(dims)    -> Array<PermuteDims<Reshape<...>>>
+///   .add(other_array)      -> Array<Add<PermuteDims<...>, Compact>>
+///   .sum(dim)             -> Array<Sum<Add<...>>>
 ///   .compact();            -> Array<Compact> - materialize the pipeline
 /// ```
 ///
@@ -124,7 +124,7 @@ use crate::{
 ///
 /// // Materialize the result and write to a file.
 /// let result = scaled
-///     .argmax(/* axis */ 1)                        // Array<ArgMax<Add<Mul<...>, Compact>>>
+///     .argmax(/* dim */ 1)                        // Array<ArgMax<Add<Mul<...>, Compact>>>
 ///     .cast::<i16>()                               // Array<Cast<ArgMax<Add<...>>>>
 ///     // materialize the pipeline bt recompressing
 ///     .compact()?;                                 // Array<Compact>
@@ -146,7 +146,7 @@ use crate::{
 /// user block shape as much as possible while respecting the new shape and layout.
 ///
 /// Shape-changing operations - [`reshape`](Array::reshape),
-/// [`broadcast`](Array::broadcast), [`permute_axes`](Array::permute_axes) - remap how
+/// [`broadcast`](Array::broadcast), [`permute_dims`](Array::permute_dims) - remap how
 /// output indices translate to positions in the underlying blocks. When the new layout crosses
 /// block boundaries that the original respected, a single read may decompress many more blocks
 /// than necessary. To avoid this, materialize with [`compact`](Array::compact) (automatic block shape)
@@ -170,12 +170,12 @@ use crate::{
 ///
 /// # Dimension type tracking
 ///
-/// `S::Dimension` records the number of array axes at the type level. When the ndim is
+/// `S::Dimension` records the number of array dims at the type level. When the ndim is
 /// statically known, `S::Dimension = Dim<N>`, and the compiler can verify that operations that
 /// require a specific ndim are used correctly. When the ndim is only known at runtime (e.g.
 /// for arrays loaded from files), `S::Dimension = DimDyn`.
 ///
-/// The dimension type propagates automatically: passing a `usize` to `insert_axis` on a
+/// The dimension type propagates automatically: passing a `usize` to `insert_dim` on a
 /// `Dim<N>` array produces `Dim<N+1>`; passing `&[usize]` always produces `DimDyn`. Use
 /// [`into_dim::<Dim<N>>()`](Array::into_dim) to assert a specific ndim and recover static
 /// tracking, or [`into_dim_dyn()`](Array::into_dim_dyn) to erase static dimension info.
@@ -683,7 +683,7 @@ impl<S: ArrayStorage> Array<S> {
     /// For [`Array<Compact>`](crate::storage::Compact) (and views layered on top of it),
     /// `to_ndarray_sub` only touches the blocks that overlap `index`:
     ///
-    /// - **Block-aligned ranges**: if `index` aligns to block boundaries on every axis,
+    /// - **Block-aligned ranges**: if `index` aligns to block boundaries on every dim,
     ///   exactly the covered blocks are decompressed - no wasted work.
     /// - **Unaligned ranges**: the overlapping boundary blocks are decompressed in full and
     ///   the requested slice is copied out. Elements outside `index` within those boundary
@@ -693,7 +693,7 @@ impl<S: ArrayStorage> Array<S> {
     /// [`ArrayParams::block_shape`](crate::ArrayParams::block_shape) when creating the array)
     /// that matches your access pattern.
     ///
-    /// For lazy views (e.g. after `reshape`, `permute_axes`, `broadcast`, or element-wise
+    /// For lazy views (e.g. after `reshape`, `permute_dims`, `broadcast`, or element-wise
     /// ops), the index range is propagated inward through the chain and only the
     /// corresponding region of the innermost storage is read. A shape-changing op can
     /// scramble the mapping such that a small output range still touches many input blocks -
@@ -875,7 +875,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The two modes mirror NumPy's `out=`:
     /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
-    ///   into its own memory (possibly with broadcast/stride-0 axes), or a freshly materialized one -
+    ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized one -
     ///   and picks the strides. The bytes are only contiguous if the strides say so.
     /// - **push** (`out` is `Some(dst)`): the region must be written into `dst` at `dst`'s own strides,
     ///   and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have one stride
@@ -1064,7 +1064,7 @@ impl<S: ArrayStorage> Array<S> {
     /// Because broadcasting reads the same logical elements many times, each read would otherwise
     /// re-evaluate the entire view; materializing it once with `to_plain` (or
     /// [`compact`](Array::compact)) avoids the repeated work. For example, dividing an array by its
-    /// per-row standard deviation (`a / a.std(axis=1)` in NumPy terms; in Rust the reduction must be
+    /// per-row standard deviation (`a / a.std(dim=1)` in NumPy terms; in Rust the reduction must be
     /// broadcast back to `a`'s shape explicitly) recomputes the reduction for every element it is
     /// broadcast against unless the `std` result is materialized first.
     ///
@@ -1083,7 +1083,7 @@ impl<S: ArrayStorage> Array<S> {
     /// // Dividing `a` by its per-row std broadcasts the reduction across the columns. Without
     /// // `to_plain` the `std` view would be re-evaluated for every column; materializing it once
     /// // computes each row's std a single time.
-    /// let std = a.view().std(1, 0.0).insert_axis(1).to_plain()?; // shape [2, 1]
+    /// let std = a.view().std(1, 0.0).insert_dim(1).to_plain()?; // shape [2, 1]
     /// let normalized = (a / std.broadcast(&[2, 2])).to_ndarray()?;
     ///
     /// assert_eq!(normalized, array![[1.0f64, 3.0], [2.0, 4.0]]);
@@ -1111,7 +1111,7 @@ impl<S: ArrayStorage> Array<S> {
     /// the result as a standalone `Array<Compact>`.
     ///
     /// In contrast to "simple" views such as unary element-wise operations, lazy ops that change the
-    /// shape of the array (e.g. `reshape`, `broadcast`, `permute_axes`) can cause block boundaries
+    /// shape of the array (e.g. `reshape`, `broadcast`, `permute_dims`) can cause block boundaries
     /// to no longer align with the logical layout of the array, causing reads to decompress excess
     /// data. Calling `compact` on the result of such an operation re-encodes the data with a freshly
     /// derived block shape that matches the new layout. The block shape of copied arrays is
@@ -1702,8 +1702,8 @@ where
     /// // Assert the array is 3-D; fail gracefully if not.
     /// let a3d = a.into_dim::<Dim<3>>()?; // Array<Compact<Dim<3>>>
     ///
-    /// // Now insert_axis knows the result is 4-D at compile time.
-    /// let a4d = a3d.insert_axis(0); // Array<InsertAxis<..., Dim<4>>>
+    /// // Now insert_dim knows the result is 4-D at compile time.
+    /// let a4d = a3d.insert_dim(0); // Array<InsertDim<..., Dim<4>>>
     /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
     /// # Ok::<(), jix::Error>(())
     /// ```
@@ -2310,7 +2310,7 @@ mod tests {
         // `to_ndarray_sub` takes its strides from the allocation, and ndarray zeroes *every*
         // stride once any extent is 0 - so an empty read must not depend on them being dense.
         let a = Array::compact_ndarray(&ndarray::array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
-        let t = a.view().permute_axes(&[1, 0]);
+        let t = a.view().permute_dims(&[1, 0]);
         let ctx = t.read_ctx();
         assert_eq!(
             t.to_ndarray_sub(&[1..1, 0..2], &ctx).unwrap().shape(),
@@ -2336,7 +2336,7 @@ mod tests {
 
         // Transposed: the destination follows the source's layout, so it comes back F-contiguous
         // and the copy runs straight through instead of transposing every element.
-        let t = a.view().permute_axes(&[1, 0]).to_ndarray().unwrap();
+        let t = a.view().permute_dims(&[1, 0]).to_ndarray().unwrap();
         assert_eq!(t, ndarray::array![[1i32, 4], [2, 5], [3, 6]]);
         assert_eq!(t.strides(), &[1, 3]);
         assert!(t.as_slice().is_none());
@@ -2345,7 +2345,7 @@ mod tests {
     #[test]
     fn to_plain_carries_the_hinted_layout_into_the_materialized_leaf() {
         let a = Array::compact_ndarray(&ndarray::array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
-        let plain = a.view().permute_axes(&[1, 0]).to_plain().unwrap();
+        let plain = a.view().permute_dims(&[1, 0]).to_plain().unwrap();
         assert_eq!(plain.shape(), &[3, 2]);
         assert_eq!(
             plain.to_ndarray().unwrap(),
@@ -2364,7 +2364,7 @@ mod tests {
         .unwrap();
         // Shape [5, 4] with layout order [1, 0]. Flip forwards the layout and allocates its own
         // pull-mode buffer, which must follow it: dim 1 outermost, dim 0 contiguous.
-        let f = a.view().permute_axes(&[1, 0]).flip(0);
+        let f = a.view().permute_dims(&[1, 0]).flip(0);
         let ctx = f.read_ctx();
         let buf = f.to_ndarray_buf(&[0..5, 0..4], &ctx, None).unwrap();
         assert_eq!(buf.strides(), &[4, 20]);

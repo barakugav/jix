@@ -539,7 +539,7 @@ enum TestArrayKind {
 /// those strides through every read downstream.
 ///
 /// The `ndarray` half of the pair stays row-major so it remains a clean reference to compare
-/// against, but it does repeat along any axis the layout gave a zero stride.
+/// against, but it does repeat along any dim the layout gave a zero stride.
 pub(crate) fn array_strategy_from_data<T>(
     data: impl Strategy<Value = ndarray::ArrayD<T>>,
 ) -> impl Strategy<Value = (ndarray::ArrayD<T>, TestArray<T>)>
@@ -570,7 +570,7 @@ where
         if let Some(read_size) = read_size {
             params.read_size(read_size);
         }
-        let arr = collapse_zero_stride_axes(arr, &layout.zero_stride_axes);
+        let arr = collapse_zero_stride_dims(arr, &layout.zero_stride_dims);
         let array = build_test_array(&arr, &layout, kind, params);
         (arr, array)
     })
@@ -653,12 +653,12 @@ where
 
 #[derive(Debug, Clone)]
 struct TestArrayLayout {
-    /// Memory order of the axes, outermost (largest stride) first. `[0, 1, .., n-1]` is row-major.
-    axis_order: Vec<usize>,
-    /// Extra bytes inserted before each axis' stride, indexed like `axis_order`. All-zero is packed.
+    /// Memory order of the dims, outermost (largest stride) first. `[0, 1, .., n-1]` is row-major.
+    dim_order: Vec<usize>,
+    /// Extra bytes inserted before each dim' stride, indexed like `dim_order`. All-zero is packed.
     padding_strides: Vec<usize>,
-    /// Axes given a stride of 0, so every index along them aliases one element. Indexed by axis.
-    zero_stride_axes: Vec<bool>,
+    /// Dims given a stride of 0, so every index along them aliases one element. Indexed by dim.
+    zero_stride_dims: Vec<bool>,
     /// Bytes the base pointer is pushed past its natural alignment. `0` leaves it aligned.
     ptr_offset: usize,
 }
@@ -667,9 +667,9 @@ impl TestArrayLayout {
     fn compute_strides(&self, shape: &[usize], itemsize: usize) -> Vec<usize> {
         let mut strides = vec![0usize; shape.len()];
         let mut min_stride = itemsize;
-        for (k, &dim) in self.axis_order.iter().enumerate().rev() {
-            // A zero-stride axis spans no bytes, so it neither takes padding nor grows the extent.
-            if self.zero_stride_axes[dim] {
+        for (k, &dim) in self.dim_order.iter().enumerate().rev() {
+            // A zero-stride dim spans no bytes, so it neither takes padding nor grows the extent.
+            if self.zero_stride_dims[dim] {
                 continue;
             }
             strides[dim] = min_stride + self.padding_strides[k];
@@ -679,14 +679,14 @@ impl TestArrayLayout {
     }
 }
 
-/// Repeats `arr` along each zero-stride axis, so its values match the aliasing the buffer will
+/// Repeats `arr` along each zero-stride dim, so its values match the aliasing the buffer will
 /// have. Only the source side of a read is ever given zero strides, never a write destination.
-fn collapse_zero_stride_axes<T: Clone>(
+fn collapse_zero_stride_dims<T: Clone>(
     mut arr: ndarray::ArrayD<T>,
-    zero_stride_axes: &[bool],
+    zero_stride_dims: &[bool],
 ) -> ndarray::ArrayD<T> {
     let shape = arr.shape().to_vec();
-    for (dim, &zero) in zero_stride_axes.iter().enumerate() {
+    for (dim, &zero) in zero_stride_dims.iter().enumerate() {
         if zero && shape[dim] > 1 {
             arr = arr
                 .index_axis(ndarray::Axis(dim), 0)
@@ -710,12 +710,12 @@ fn layout_strategy(ndim: usize, align: usize) -> BoxedStrategy<TestArrayLayout> 
     #[derive(Debug, Clone, Copy)]
     enum Contiguity {
         Contiguous,
-        PermuteAxes,
+        PermuteDims,
         Strided,
     }
     let contiguity = prop::strategy::Union::new_weighted(vec![
         (6, Just(Contiguity::Contiguous)),
-        (1, Just(Contiguity::PermuteAxes)),
+        (1, Just(Contiguity::PermuteDims)),
         (1, Just(Contiguity::Strided)),
     ]);
     // (pointer aligned, strides aligned)
@@ -731,7 +731,7 @@ fn layout_strategy(ndim: usize, align: usize) -> BoxedStrategy<TestArrayLayout> 
             let padded =
                 matches!(contiguity, Contiguity::Strided) || (!strides_aligned && align > 1);
 
-            let axis_order: BoxedStrategy<Vec<usize>> =
+            let dim_order: BoxedStrategy<Vec<usize>> =
                 if matches!(contiguity, Contiguity::Contiguous) {
                     Just((0..ndim).collect::<Vec<_>>()).boxed()
                 } else {
@@ -753,7 +753,7 @@ fn layout_strategy(ndim: usize, align: usize) -> BoxedStrategy<TestArrayLayout> 
                     .boxed()
             };
 
-            let zero_stride_axes: BoxedStrategy<Vec<bool>> =
+            let zero_stride_dims: BoxedStrategy<Vec<bool>> =
                 if matches!(contiguity, Contiguity::Strided) && ndim > 0 {
                     prop::collection::vec(
                         prop::strategy::Union::new_weighted(vec![
@@ -773,13 +773,13 @@ fn layout_strategy(ndim: usize, align: usize) -> BoxedStrategy<TestArrayLayout> 
                 (1..align).boxed()
             };
 
-            (axis_order, padding_strides, zero_stride_axes, ptr_offset)
+            (dim_order, padding_strides, zero_stride_dims, ptr_offset)
         })
         .prop_map(
-            |(axis_order, padding_strides, zero_stride_axes, ptr_offset)| TestArrayLayout {
-                axis_order,
+            |(dim_order, padding_strides, zero_stride_dims, ptr_offset)| TestArrayLayout {
+                dim_order,
                 padding_strides,
-                zero_stride_axes,
+                zero_stride_dims,
                 ptr_offset,
             },
         )
@@ -1052,7 +1052,7 @@ mod tests {
     ) -> (bool, bool, bool, bool) {
         let strides = layout.compute_strides(shape, itemsize);
         let packed = layout.padding_strides.iter().all(|&p| p == 0);
-        let row_major = packed && layout.axis_order == (0..shape.len()).collect::<Vec<_>>();
+        let row_major = packed && layout.dim_order == (0..shape.len()).collect::<Vec<_>>();
         let ptr_aligned = layout.ptr_offset.is_multiple_of(align);
         let strides_aligned = strides.iter().all(|&s| s.is_multiple_of(align));
         (row_major, packed, ptr_aligned, strides_aligned)
@@ -1079,7 +1079,7 @@ mod tests {
             padded += usize::from(!is_packed);
             unaligned_ptr += usize::from(!ptr_aligned);
             unaligned_strides += usize::from(!strides_aligned);
-            zero_stride += usize::from(layout.zero_stride_axes.iter().any(|&z| z));
+            zero_stride += usize::from(layout.zero_stride_dims.iter().any(|&z| z));
         }
         let pct = |n: usize| 100.0 * n as f64 / N as f64;
         eprintln!(
@@ -1174,7 +1174,7 @@ mod tests {
                 .unwrap();
         let align = i32::DTYPE.alignment().as_usize();
 
-        // name, axis order, padding, zero-stride axes, ptr offset, strides expected unaligned
+        // name, dim order, padding, zero-stride dims, ptr offset, strides expected unaligned
         let cases = [
             ("row-major", [0, 1, 2], [0, 0, 0], [false; 3], 0, false),
             ("transposed", [2, 0, 1], [0, 0, 0], [false; 3], 0, false),
@@ -1213,7 +1213,7 @@ mod tests {
                 true,
             ),
             (
-                "every axis zero stride",
+                "every dim zero stride",
                 [0, 1, 2],
                 [0, 0, 0],
                 [true; 3],
@@ -1222,11 +1222,11 @@ mod tests {
             ),
         ];
 
-        for (name, order, pads, zero_stride_axes, ptr_offset, expect_unaligned) in cases {
+        for (name, order, pads, zero_stride_dims, ptr_offset, expect_unaligned) in cases {
             let layout = TestArrayLayout {
-                axis_order: order.to_vec(),
+                dim_order: order.to_vec(),
                 padding_strides: pads.to_vec(),
-                zero_stride_axes: zero_stride_axes.to_vec(),
+                zero_stride_dims: zero_stride_dims.to_vec(),
                 ptr_offset,
             };
             let strides = layout.compute_strides(arr.shape(), i32::DTYPE.itemsize() as usize);
@@ -1237,12 +1237,12 @@ mod tests {
             );
             assert_eq!(
                 strides.iter().filter(|&&s| s == 0).count(),
-                zero_stride_axes.iter().filter(|&&z| z).count(),
-                "{name}: strides {strides:?} do not match the intended zero-stride axes",
+                zero_stride_dims.iter().filter(|&&z| z).count(),
+                "{name}: strides {strides:?} do not match the intended zero-stride dims",
             );
 
             // The reference has to repeat wherever the buffer aliases.
-            let expected = collapse_zero_stride_axes(arr.clone(), &zero_stride_axes);
+            let expected = collapse_zero_stride_dims(arr.clone(), &zero_stride_dims);
             for kind in [TestArrayKind::Compact, TestArrayKind::Plain] {
                 eprintln!("case {name} / {kind:?}: strides {strides:?}, offset {ptr_offset}");
                 let za = build_test_array(&expected, &layout, kind, ArrayParams::default());

@@ -3,26 +3,26 @@ use crate::ops::prelude::*;
 use crate::util::ArraySequence;
 use crate::{ArraySequenceDimension, ArraySequenceElementType};
 
-/// Joins a sequence of arrays along an existing axis. See [`Concatenate`] for details and examples.
+/// Joins a sequence of arrays along an existing dim. See [`Concatenate`] for details and examples.
 ///
 /// # Panics
 ///
-/// Panics if `arrays` is empty, `axis` is out of bounds, dtypes differ, or shapes differ on any
-/// axis other than `axis`.
+/// Panics if `arrays` is empty, `dim` is out of bounds, dtypes differ, or shapes differ on any
+/// dim other than `dim`.
 #[track_caller]
-pub fn concatenate<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Concatenate<ArraysT>>
+pub fn concatenate<ArraysT>(arrays: ArraysT, dim: usize) -> Array<Concatenate<ArraysT>>
 where
     ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
-    Array::from_storage(Concatenate::new(arrays, axis).unwrap())
+    Array::from_storage(Concatenate::new(arrays, dim).unwrap())
 }
 
-/// Joins a sequence of arrays along an existing axis, returned by [`concatenate`].
+/// Joins a sequence of arrays along an existing dim, returned by [`concatenate`].
 ///
-/// All input arrays must have the same number of dimensions and the same size on every axis
-/// *except* the concatenation axis, along which their sizes may differ. All arrays must share the
+/// All input arrays must have the same number of dimensions and the same size on every dim
+/// *except* the concatenation dim, along which their sizes may differ. All arrays must share the
 /// same [`Dtype`]. The output has the same number of dimensions as the inputs - unlike
-/// [`Stack`](crate::ops::Stack), which introduces a new axis.
+/// [`Stack`](crate::ops::Stack), which introduces a new dim.
 ///
 /// The output dimension type `Concatenate<ArraysT>::Dimension` equals `ArraysT::Dimension` (from
 /// [`ArraySequenceDimension`]) - the common dimension shared by every array in the sequence. This
@@ -42,13 +42,13 @@ where
 /// let c = jix::ops::concatenate((a, b), 0);
 /// assert_eq!(c.shape(), &[5]);
 ///
-/// // 2-D: stack rows (axis 0)
+/// // 2-D: stack rows (dim 0)
 /// let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]])?;
 /// let b = Array::compact_ndarray(&array![[5i32, 6]])?;
 /// let c = jix::ops::concatenate((a, b), 0);
 /// assert_eq!(c.shape(), &[3, 2]);
 ///
-/// // 2-D: append columns (axis 1)
+/// // 2-D: append columns (dim 1)
 /// let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]])?;
 /// let b = Array::compact_ndarray(&array![[5i32, 6, 7], [8, 9, 10]])?;
 /// let c = jix::ops::concatenate((a, b), 1);
@@ -60,7 +60,7 @@ where
     ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     arrays: ArraysT,
-    concat_axis: DimIdx,
+    concat_dim: DimIdx,
     borders: Vec<u64>,
 
     shape: ArraysT::Dimension,
@@ -71,7 +71,7 @@ where
     ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     /// Constructs a [`Concatenate`] storage. See the struct docs for semantics and examples.
-    pub fn new(arrays: ArraysT, axis: usize) -> Result<Self> {
+    pub fn new(arrays: ArraysT, dim: usize) -> Result<Self> {
         let narrays = arrays.narrays();
         ensure!(
             narrays > 0,
@@ -82,12 +82,12 @@ where
         let shape0 = arrays.shape(0);
         let mut shape = DimArray::from_slice(shape0).unwrap();
         ensure!(
-            axis < shape.len(),
+            dim < shape.len(),
             InvalidShapeOperation,
-            "concat axis {axis} out of bounds for arrays with ndim {}",
+            "concat dim {dim} out of bounds for arrays with ndim {}",
             shape.len()
         );
-        shape[axis] = 0;
+        shape[dim] = 0;
 
         let mut borders = Vec::with_capacity(narrays);
         let dtype = arrays.dtype(0);
@@ -98,7 +98,7 @@ where
                     .iter()
                     .zip(shape_i)
                     .enumerate()
-                    .any(|(dim, (&s0, &s_i))| dim != axis && s0 != s_i)
+                    .any(|(d, (&s0, &s_i))| d != dim && s0 != s_i)
             {
                 bail!(
                     InvalidShapeOperation,
@@ -112,8 +112,8 @@ where
                 "cannot stack arrays of different dtypes: {dtype} != {dtype_i}"
             );
 
-            shape[axis] += shape_i[axis];
-            borders.push(shape[axis]);
+            shape[dim] += shape_i[dim];
+            borders.push(shape[dim]);
         }
         check_shape_overflow(&shape, dtype.itemsize() as _)?;
 
@@ -129,11 +129,11 @@ where
                 })
                 .collect::<Vec<_>>();
             let weights = (0..narrays)
-                .map(|i| arrays.shape(i)[axis] as f64)
+                .map(|i| arrays.shape(i)[dim] as f64)
                 .collect::<Vec<_>>();
             combine_select_hints(&inputs, &weights)
         };
-        // Combine the block layout over every input, on all dims including the concat axis (where
+        // Combine the block layout over every input, on all dims including the concat dim (where
         // the inputs' differing lengths naturally leave it non-fixed).
         let (block_shape, block_shape_fixed_dims) = {
             let inputs = (0..narrays)
@@ -156,15 +156,15 @@ where
         Ok(Self {
             shape,
             arrays,
-            concat_axis: axis as DimIdx,
+            concat_dim: dim as DimIdx,
             borders,
             spec,
         })
     }
 
     /// Constructs an array with [`Concatenate`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array(arrays: ArraysT, axis: usize) -> Result<Array<Self>> {
-        Self::new(arrays, axis).map(Array::from_storage)
+    pub fn new_array(arrays: ArraysT, dim: usize) -> Result<Array<Self>> {
+        Self::new(arrays, dim).map(Array::from_storage)
     }
 }
 impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
@@ -176,17 +176,17 @@ where
 
     /// Fills `buf` with the slice of the concatenated array described by `index`.
     ///
-    /// `borders` stores the cumulative end positions of each sub-array along `concat_axis`, so
+    /// `borders` stores the cumulative end positions of each sub-array along `concat_dim`, so
     /// sub-array `i` owns the range `[borders[i-1], borders[i])` (with `borders[-1] == 0`).
-    /// Only the sub-arrays that overlap with `index[concat_axis]` are read.
+    /// Only the sub-arrays that overlap with `index[concat_dim]` are read.
     ///
     /// To skip leading non-overlapping arrays efficiently, the first overlapping sub-array is
     /// located with a linear scan for small `borders` slices or a binary search otherwise.
     /// The loop then runs forward and breaks as soon as an array starts past the requested range.
     ///
-    /// Each overlapping sub-array is read with a local (array-relative) index on the concat axis,
+    /// Each overlapping sub-array is read with a local (array-relative) index on the concat dim,
     /// straight into its sub-region of `buf` at the right byte offset using the destination's own
-    /// strides - no temporary buffer. When `buf` is contiguous and all dimensions before `concat_axis`
+    /// strides - no temporary buffer. When `buf` is contiguous and all dimensions before `concat_dim`
     /// have size <= 1, each sub-array's region is itself contiguous and is read into a plain contiguous
     /// slice (the `inner_contiguous` fast path).
     fn read_data<'a>(
@@ -214,19 +214,19 @@ where
             return Ok(out);
         }
 
-        // When the destination is contiguous and all dims before concat_axis have size <=1, each
+        // When the destination is contiguous and all dims before concat_dim have size <=1, each
         // array's data is a contiguous run in the destination.
-        let concat_axis = self.concat_axis as usize;
+        let concat_dim = self.concat_dim as usize;
         let inner_contiguous = out.is_contiguous(output_shape.as_ref(), dtype)
             && output_shape
                 .as_ref()
                 .iter()
-                .take(concat_axis)
+                .take(concat_dim)
                 .all(|&s| s <= 1);
         let (out_buf, output_strides) = out.data_mut();
-        let concat_stride = output_strides[concat_axis];
-        let req_start = index[concat_axis].start;
-        let req_end = index[concat_axis].end;
+        let concat_stride = output_strides[concat_dim];
+        let req_start = index[concat_dim].start;
+        let req_end = index[concat_dim].end;
 
         // Find the first sub-array whose end exceeds req_start (the first that may overlap).
         const BINARY_SEARCH_THRESHOLD: usize = 32;
@@ -252,9 +252,9 @@ where
             let local_end = overlap_end - arr_start;
             let buf_concat_offset = (overlap_start - req_start) as usize;
 
-            // Sub-index into array `arr`: same as `index` but concat axis uses local coords.
+            // Sub-index into array `arr`: same as `index` but concat dim uses local coords.
             let sub_index = Self::Dimension::vec(index.len(), |dim| {
-                if dim == concat_axis {
+                if dim == concat_dim {
                     local_start..local_end
                 } else {
                     index[dim].clone()
@@ -360,7 +360,7 @@ mod tests {
 
     // in-place path
     #[test]
-    fn test_i32_2d_axis0() {
+    fn test_i32_2d_dim0() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
         let b = array![[7i32, 8, 9]];
         let za = Array::compact_ndarray(&a).unwrap();
@@ -372,7 +372,7 @@ mod tests {
 
     // scatter path
     #[test]
-    fn test_i32_2d_axis1() {
+    fn test_i32_2d_dim1() {
         let a = array![[1i32, 2], [3, 4], [5, 6]];
         let b = array![[7i32, 8, 9], [10, 11, 12], [13, 14, 15]];
         let za = Array::compact_ndarray(&a).unwrap();
@@ -384,7 +384,7 @@ mod tests {
 
     // scatter path
     #[test]
-    fn test_i32_2d_axis1_three_unequal() {
+    fn test_i32_2d_dim1_three_unequal() {
         let a = array![[1i32], [2]];
         let b = array![[3i32, 4, 5], [6, 7, 8]];
         let c = array![[9i32, 10], [11, 12]];
@@ -398,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn test_f32_1d_axis0() {
+    fn test_f32_1d_dim0() {
         let a = array![1.0f32, 2.0, 3.0];
         let b = array![4.0f32, 5.0];
         let za = Array::compact_ndarray(&a).unwrap();
@@ -410,7 +410,7 @@ mod tests {
 
     // scatter path
     #[test]
-    fn test_f32_2d_axis1() {
+    fn test_f32_2d_dim1() {
         let a = array![[1.0f32, 2.0], [3.0, 4.0]];
         let b = array![[5.0f32, 6.0, 7.0], [8.0, 9.0, 10.0]];
         let za = Array::compact_ndarray(&a).unwrap();
@@ -451,7 +451,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Proptest: arbitrary ndim, arbitrary axis, arbitrary number of arrays
+    // Proptest: arbitrary ndim, arbitrary dim, arbitrary number of arrays
     // -----------------------------------------------------------------------
 
     #[allow(clippy::type_complexity)]
@@ -471,32 +471,32 @@ mod tests {
                 let ndim = shape.len();
                 (Just(shape), 0..ndim, 1usize..=5usize)
             })
-            .prop_flat_map(|(shape, axis, n_arrays)| {
-                let prefix = shape[..axis].to_vec();
-                let suffix = shape[axis + 1..].to_vec();
-                // Each array gets the same non-axis dims but an independently drawn axis size.
-                let per_array_strat = (0usize..=5).prop_map(move |axis_size| {
+            .prop_flat_map(|(shape, dim, n_arrays)| {
+                let prefix = shape[..dim].to_vec();
+                let suffix = shape[dim + 1..].to_vec();
+                // Each array shares every dim size except the concat dim, which is drawn independently.
+                let per_array_strat = (0usize..=5).prop_map(move |dim_size| {
                     let mut s = prefix.clone();
-                    s.push(axis_size);
+                    s.push(dim_size);
                     s.extend_from_slice(&suffix);
                     s
                 });
                 let per_array_strat =
                     crate::util::array_strategy_from_shape::<T>(per_array_strat, T::any_strategy());
-                (prop::collection::vec(per_array_strat, n_arrays), Just(axis))
+                (prop::collection::vec(per_array_strat, n_arrays), Just(dim))
             })
-            .prop_map(|(arrays, axis)| {
+            .prop_map(|(arrays, dim)| {
                 let (nds, zas): (Vec<_>, Vec<_>) = arrays.into_iter().unzip();
-                (nds, zas, axis)
+                (nds, zas, dim)
             })
     }
 
     proptest::proptest! {
         #[test]
-        fn proptest_concatenate((nds, zas, axis) in concat_strategy::<i32>()) {
+        fn proptest_concatenate((nds, zas, dim) in concat_strategy::<i32>()) {
             let nd_views: Vec<_> = nds.iter().map(|nd| nd.view()).collect();
-            let expected = ndarray::concatenate(ndarray::Axis(axis), &nd_views).unwrap();
-            crate::util::assert_array_matches(&concatenate(zas, axis), &expected);
+            let expected = ndarray::concatenate(ndarray::Axis(dim), &nd_views).unwrap();
+            crate::util::assert_array_matches(&concatenate(zas, dim), &expected);
         }
     }
 }

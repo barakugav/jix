@@ -34,7 +34,7 @@ use crate::util::assert_unchecked_eq;
 /// // a3d: Array<Storage::Dimension = Dim<3>>
 ///
 /// // Subsequent operations propagate Dim<3> through the type system.
-/// let a4d = a3d.insert_axis(0); // Array<InsertAxis<..., Dim<4>>>
+/// let a4d = a3d.insert_dim(0); // Array<InsertDim<..., Dim<4>>>
 /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
 /// # Ok::<(), jix::Error>(())
 /// ```

@@ -36,9 +36,9 @@ use crate::{Dimension, ElementType};
 /// ```text
 /// arr.neg()                  -> Array<Neg<S>>
 /// arr.reshape(new_shape)     -> Array<Reshape<S>>
-/// arr.permute_axes(axes)     -> Array<PermuteAxes<S>>
+/// arr.permute_dims(dims)     -> Array<PermuteDims<S>>
 /// arr1.add(arr2)             -> Array<Add<S1, S2>>
-/// arr.sum(axis)              -> Array<Sum<S>>
+/// arr.sum(dim)              -> Array<Sum<S>>
 /// arr.cast::<f32>()          -> Array<Cast<S>>
 /// ```
 ///
@@ -69,17 +69,17 @@ pub trait ArrayStorage {
 
     /// The compile-time dimension of arrays backed by this storage.
     ///
-    /// This associated type lets the compiler track how many axes an array has through a chain
+    /// This associated type lets the compiler track how many dims an array has through a chain
     /// of lazy operations. When the dimension is known statically (e.g. arrays created from a
     /// statically-dimensioned ndarray, or after calling
     /// [`Array::into_dim::<Dim<N>>`](crate::Array::into_dim)), it is [`Dim<N>`](crate::Dim);
     /// when it is only known at runtime (e.g. for arrays loaded from a file or created with
     /// slice-based shape arguments) it is [`DimDyn`](crate::DimDyn).
     ///
-    /// Operations that change the number of axes determine the output dimension by either using
+    /// Operations that change the number of dims determine the output dimension by either using
     /// the input dimension's associated type (e.g. `S::Dimension::Smaller` or `S::Dimension::Larger`)
     /// or by accepting an explicit dimension argument from the caller
-    /// (e.g. `reshape()` accepts IntoDimension, `max()` accepts `AxesArg`).
+    /// (e.g. `reshape()` accepts IntoDimension, `max()` accepts `DimsArg`).
     type Dimension: Dimension
     where
         Self: Sized;
@@ -92,7 +92,7 @@ pub trait ArrayStorage {
     ///
     /// The two modes mirror NumPy's `out=`:
     /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
-    ///   into its own memory (possibly with broadcast/stride-0 axes), or a freshly materialized one -
+    ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized one -
     ///   and picks the strides. The bytes are only contiguous if the strides say so.
     /// - **push** (`out` is `Some(dst)`): the region must be written into `dst` at `dst`'s own strides,
     ///   and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have one stride

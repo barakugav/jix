@@ -17,7 +17,7 @@ def pow(a: typing.Any, b: typing.Any) -> Array:
 def abs(array: typing.Any) -> Array:
     """Alias for [`jix.absolute`][jix.absolute]"""
 
-def concat(arrays: typing.Sequence[typing.Any], axis: builtins.int = 0) -> Array:
+def concat(arrays: typing.Sequence[typing.Any], dim: builtins.int = 0) -> Array:
     """Alias for [`jix.concatenate`][jix.concatenate]"""
 
 def clip(array: typing.Any, min: typing.Optional[typing.Any] = None, max: typing.Optional[typing.Any] = None) -> Array:

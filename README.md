@@ -43,7 +43,7 @@ import numpy as np
 a = jix.compact(np.random.rand(1024, 1024).astype(np.float32))
 
 # Build a lazy pipeline - nothing is read yet.
-result = (a - a.mean(axis=0)) / a.std(axis=1)
+result = (a - a.mean(dim=0)) / a.std(dim=1)
 
 # Materialize: decompress, transform, and write to disk in one pass.
 result.write_to("normalized.jix")
@@ -87,7 +87,7 @@ can be used independently, and each fits a different scenario.
     jix offers little over hand-written iterator code.
     The advantage shows up once the pipeline includes
     operations that change the shape or the access pattern - reductions, broadcasts,
-    axis permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on.
+    dim permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on.
     These are awkward or impractical to express as plain iterator chains,
     especially when combined with element-wise operations.
     Jix composes element-wise and shape-changing operations uniformly in the same operation chain,

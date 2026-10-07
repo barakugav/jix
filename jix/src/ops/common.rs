@@ -79,12 +79,12 @@ impl<T: Dtyped> LanesInfo for T {
     };
 }
 
-/// An argument that specifies a set of axis indices, encoding the dimension change in the type.
+/// An argument that specifies a set of dim indices, encoding the dimension change in the type.
 ///
-/// Operations that add or remove axes - `insert_axis`, `remove_axis`, `sum`, `max`, etc. - are
-/// generic over `Ax: AxesArg`. The associated types `ReducedDimension` and `ExpandedDimension`
+/// Operations that add or remove dims - `insert_dim`, `remove_dim`, `sum`, `max`, etc. - are
+/// generic over `Ax: DimsArg`. The associated types `ReducedDimension` and `ExpandedDimension`
 /// compute the output dimension purely from the input dimension `D` and the concrete type of the
-/// axis argument. This means the compiler knows the output ndim without any runtime information.
+/// dim argument. This means the compiler knows the output ndim without any runtime information.
 ///
 /// # Dimension rules by argument type
 ///
@@ -107,47 +107,47 @@ impl<T: Dtyped> LanesInfo for T {
 ///
 /// let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]])?;
 ///
-/// // usize: one axis removed/added - statically one smaller/larger
+/// // usize: one dim removed/added - statically one smaller/larger
 /// let b = a.view().sum(0);               // D::Smaller when a: Dim<N> -> Dim<N-1>
-/// let c = a.view().insert_axis(0);       // D::Larger  when a: Dim<N> -> Dim<N+1>
+/// let c = a.view().insert_dim(0);       // D::Larger  when a: Dim<N> -> Dim<N+1>
 ///
-/// // [usize; 2]: two axes removed - statically two smaller
+/// // [usize; 2]: two dims removed - statically two smaller
 /// let b = a.view().sum([0, 1]);          // Dim<N-2>
-/// let c = a.view().insert_axis([0, 1]);  // Dim<N+2>
+/// let c = a.view().insert_dim([0, 1]);  // Dim<N+2>
 ///
 /// // &[usize]: dynamic count -> DimDyn regardless of input dimension
-/// let axes = vec![0, 1];
-/// let b = a.view().sum(axes.as_slice()); // DimDyn
+/// let dims = vec![0, 1];
+/// let b = a.view().sum(dims.as_slice()); // DimDyn
 /// # Ok::<(), jix::Error>(())
 /// ```
 #[allow(clippy::len_without_is_empty)]
-pub trait AxesArg {
+pub trait DimsArg {
     /// The dimension type of an array produced by a *reducing* operation (e.g. `sum`, `max`,
-    /// `remove_axis`) that removes the axes described by `self` from an input of dimension `D`.
+    /// `remove_dim`) that removes the dims described by `self` from an input of dimension `D`.
     ///
-    /// For a single-axis arg (`usize`), this is `D::Smaller`.
+    /// For a single-dim arg (`usize`), this is `D::Smaller`.
     /// For an N-element fixed arg (`[usize; N]` or N-tuple), this is `D::Smaller` applied N times.
     /// For a slice arg (`&[usize]`), this is `DimDyn`.
     type ReducedDimension<D: Dimension>: Dimension;
 
-    /// The dimension type of an array produced by an *expanding* operation (e.g. `insert_axis`)
-    /// that inserts the axes described by `self` into an input of dimension `D`.
+    /// The dimension type of an array produced by an *expanding* operation (e.g. `insert_dim`)
+    /// that inserts the dims described by `self` into an input of dimension `D`.
     ///
-    /// For a single-axis arg (`usize`), this is `D::Larger`.
+    /// For a single-dim arg (`usize`), this is `D::Larger`.
     /// For an N-element fixed arg (`[usize; N]` or N-tuple), this is `D::Larger` applied N times.
     /// For a slice arg (`&[usize]`), this is `DimDyn`.
     type ExpandedDimension<D: Dimension>: Dimension;
 
-    /// The number of axes described by this argument.
+    /// The number of dims described by this argument.
     fn len(&self) -> usize;
 
-    /// The axis at position `idx` in this argument.
+    /// The dim at position `idx` in this argument.
     ///
     /// `idx` must be less than `self.len()`.
     fn get(&self, idx: usize) -> usize;
 }
 
-impl AxesArg for usize {
+impl DimsArg for usize {
     type ReducedDimension<D: Dimension> = D::Smaller;
     type ExpandedDimension<D: Dimension> = D::Larger;
 
@@ -160,11 +160,11 @@ impl AxesArg for usize {
     fn get(&self, idx: usize) -> usize {
         match idx {
             0 => *self,
-            _ => panic!("Axis index out of bounds"),
+            _ => panic!("Dim index out of bounds"),
         }
     }
 }
-impl AxesArg for &[usize] {
+impl DimsArg for &[usize] {
     type ReducedDimension<D: Dimension> = DimDyn;
     type ExpandedDimension<D: Dimension> = DimDyn;
 
@@ -177,7 +177,7 @@ impl AxesArg for &[usize] {
         self[idx]
     }
 }
-impl AxesArg for Vec<usize> {
+impl DimsArg for Vec<usize> {
     type ReducedDimension<D: Dimension> = DimDyn;
     type ExpandedDimension<D: Dimension> = DimDyn;
 
@@ -191,7 +191,7 @@ impl AxesArg for Vec<usize> {
         self[idx]
     }
 }
-impl AxesArg for &Vec<usize> {
+impl DimsArg for &Vec<usize> {
     type ReducedDimension<D: Dimension> = DimDyn;
     type ExpandedDimension<D: Dimension> = DimDyn;
 
@@ -206,15 +206,15 @@ impl AxesArg for &Vec<usize> {
     }
 }
 
-macro_rules! impl_axes_array {
+macro_rules! impl_dims_array {
     ($($idx:tt),+ $(,)?) => {
-        impl AxesArg for [usize; impl_axes_array!(@count $($idx)*)] {
-            type ReducedDimension<D: Dimension> = impl_axes_array!(@shrink D, $($idx),+);
-            type ExpandedDimension<D: Dimension> = impl_axes_array!(@expand D, $($idx),+);
+        impl DimsArg for [usize; impl_dims_array!(@count $($idx)*)] {
+            type ReducedDimension<D: Dimension> = impl_dims_array!(@shrink D, $($idx),+);
+            type ExpandedDimension<D: Dimension> = impl_dims_array!(@expand D, $($idx),+);
 
             #[inline(always)]
             fn len(&self) -> usize {
-                impl_axes_array!(@count $($idx)*)
+                impl_dims_array!(@count $($idx)*)
             }
 
             #[inline(always)]
@@ -222,13 +222,13 @@ macro_rules! impl_axes_array {
                 self[idx]
             }
         }
-        impl AxesArg for &[usize; impl_axes_array!(@count $($idx)*)] {
-            type ReducedDimension<D: Dimension> = impl_axes_array!(@shrink D, $($idx),+);
-            type ExpandedDimension<D: Dimension> = impl_axes_array!(@expand D, $($idx),+);
+        impl DimsArg for &[usize; impl_dims_array!(@count $($idx)*)] {
+            type ReducedDimension<D: Dimension> = impl_dims_array!(@shrink D, $($idx),+);
+            type ExpandedDimension<D: Dimension> = impl_dims_array!(@expand D, $($idx),+);
 
             #[inline(always)]
             fn len(&self) -> usize {
-                impl_axes_array!(@count $($idx)*)
+                impl_dims_array!(@count $($idx)*)
             }
 
             #[inline(always)]
@@ -239,20 +239,20 @@ macro_rules! impl_axes_array {
     };
 
     (@shrink $D:ty, $head:tt $(, $tail:tt)*) => {
-        <impl_axes_array!(@shrink $D, $($tail),*) as Dimension>::Smaller
+        <impl_dims_array!(@shrink $D, $($tail),*) as Dimension>::Smaller
     };
     (@shrink $D:ty,) => { $D };
 
     (@expand $D:ty, $head:tt $(, $tail:tt)*) => {
-        <impl_axes_array!(@expand $D, $($tail),*) as Dimension>::Larger
+        <impl_dims_array!(@expand $D, $($tail),*) as Dimension>::Larger
     };
     (@expand $D:ty,) => { $D };
 
     (@count ) => { 0 };
-    (@count $head:tt $($tail:tt)*) => { 1 + impl_axes_array!(@count $($tail)*) };
+    (@count $head:tt $($tail:tt)*) => { 1 + impl_dims_array!(@count $($tail)*) };
 }
 
-impl AxesArg for [usize; 0] {
+impl DimsArg for [usize; 0] {
     type ReducedDimension<D: Dimension> = D;
     type ExpandedDimension<D: Dimension> = D;
 
@@ -266,7 +266,7 @@ impl AxesArg for [usize; 0] {
         unreachable!()
     }
 }
-impl AxesArg for &[usize; 0] {
+impl DimsArg for &[usize; 0] {
     type ReducedDimension<D: Dimension> = D;
     type ExpandedDimension<D: Dimension> = D;
 
@@ -280,51 +280,51 @@ impl AxesArg for &[usize; 0] {
         unreachable!()
     }
 }
-impl_axes_array!(0);
-impl_axes_array!(0, 1);
-impl_axes_array!(0, 1, 2);
-impl_axes_array!(0, 1, 2, 3);
-impl_axes_array!(0, 1, 2, 3, 4);
-impl_axes_array!(0, 1, 2, 3, 4, 5);
-impl_axes_array!(0, 1, 2, 3, 4, 5, 6);
-impl_axes_array!(0, 1, 2, 3, 4, 5, 6, 7);
+impl_dims_array!(0);
+impl_dims_array!(0, 1);
+impl_dims_array!(0, 1, 2);
+impl_dims_array!(0, 1, 2, 3);
+impl_dims_array!(0, 1, 2, 3, 4);
+impl_dims_array!(0, 1, 2, 3, 4, 5);
+impl_dims_array!(0, 1, 2, 3, 4, 5, 6);
+impl_dims_array!(0, 1, 2, 3, 4, 5, 6, 7);
 
-macro_rules! impl_axes_tuple {
+macro_rules! impl_dims_tuple {
     ($($idx:tt),+ $(,)?) => {
-        impl AxesArg for ($(impl_axes_tuple!(@replace $idx usize),)+) {
-            type ReducedDimension<D: Dimension> = impl_axes_tuple!(@shrink D, $($idx),+);
-            type ExpandedDimension<D: Dimension> = impl_axes_tuple!(@expand D, $($idx),+);
+        impl DimsArg for ($(impl_dims_tuple!(@replace $idx usize),)+) {
+            type ReducedDimension<D: Dimension> = impl_dims_tuple!(@shrink D, $($idx),+);
+            type ExpandedDimension<D: Dimension> = impl_dims_tuple!(@expand D, $($idx),+);
 
             #[inline(always)]
             fn len(&self) -> usize {
-                impl_axes_tuple!(@count $($idx)*)
+                impl_dims_tuple!(@count $($idx)*)
             }
 
             #[inline(always)]
             fn get(&self, idx: usize) -> usize {
                 match idx {
                     $($idx => self.$idx,)+
-                    _ => panic!("Axis index out of bounds"),
+                    _ => panic!("Dim index out of bounds"),
                 }
             }
         }
     };
 
     (@shrink $D:ty, $head:tt $(, $tail:tt)*) => {
-        <impl_axes_tuple!(@shrink $D, $($tail),*) as Dimension>::Smaller
+        <impl_dims_tuple!(@shrink $D, $($tail),*) as Dimension>::Smaller
     };
     (@shrink $D:ty,) => { $D };
 
     (@expand $D:ty, $head:tt $(, $tail:tt)*) => {
-        <impl_axes_tuple!(@expand $D, $($tail),*) as Dimension>::Larger
+        <impl_dims_tuple!(@expand $D, $($tail),*) as Dimension>::Larger
     };
     (@expand $D:ty,) => { $D };
 
     (@replace $_t:tt $sub:ty) => { $sub };
     (@count ) => { 0 };
-    (@count $head:tt $($tail:tt)*) => { 1 + impl_axes_tuple!(@count $($tail)*) };
+    (@count $head:tt $($tail:tt)*) => { 1 + impl_dims_tuple!(@count $($tail)*) };
 }
-impl AxesArg for () {
+impl DimsArg for () {
     type ReducedDimension<D: Dimension> = D;
     type ExpandedDimension<D: Dimension> = D;
 
@@ -338,11 +338,11 @@ impl AxesArg for () {
         unreachable!()
     }
 }
-impl_axes_tuple!(0);
-impl_axes_tuple!(0, 1);
-impl_axes_tuple!(0, 1, 2);
-impl_axes_tuple!(0, 1, 2, 3);
-impl_axes_tuple!(0, 1, 2, 3, 4);
-impl_axes_tuple!(0, 1, 2, 3, 4, 5);
-impl_axes_tuple!(0, 1, 2, 3, 4, 5, 6);
-impl_axes_tuple!(0, 1, 2, 3, 4, 5, 6, 7);
+impl_dims_tuple!(0);
+impl_dims_tuple!(0, 1);
+impl_dims_tuple!(0, 1, 2);
+impl_dims_tuple!(0, 1, 2, 3);
+impl_dims_tuple!(0, 1, 2, 3, 4);
+impl_dims_tuple!(0, 1, 2, 3, 4, 5);
+impl_dims_tuple!(0, 1, 2, 3, 4, 5, 6);
+impl_dims_tuple!(0, 1, 2, 3, 4, 5, 6, 7);
