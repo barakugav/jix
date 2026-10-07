@@ -478,28 +478,28 @@ def test_permute_dims_out_of_bounds_raises():
 
 
 # ---------------------------------------------------------------------------
-# transpose
+# swapdims
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("dim0, dim1", [(0, 1), (1, 0), (0, 2), (1, 2), (-1, -2), (-3, 1), (1, 1)])
-def test_transpose_swaps_two_dims(dim0, dim1):
+def test_swapdims_swaps_two_dims(dim0, dim1):
     arr = np.arange(24, dtype=np.int32).reshape(2, 3, 4)
     za = jix.compact(arr)
     expected = np.swapaxes(arr, dim0, dim1)
-    np.testing.assert_array_equal(jix.transpose(za, dim0, dim1).numpy(), expected)
-    np.testing.assert_array_equal(za.transpose(dim0, dim1).numpy(), expected)
+    np.testing.assert_array_equal(jix.swapdims(za, dim0, dim1).numpy(), expected)
+    np.testing.assert_array_equal(za.swapdims(dim0, dim1).numpy(), expected)
 
 
-def test_transpose_2d_matches_t():
+def test_swapdims_2d_matches_t():
     arr = np.arange(6, dtype=np.float64).reshape(2, 3)
     za = jix.compact(arr)
-    np.testing.assert_array_equal(jix.transpose(za, 0, 1).numpy(), za.T.numpy())
+    np.testing.assert_array_equal(jix.swapdims(za, 0, 1).numpy(), za.T.numpy())
 
 
-def test_transpose_out_of_bounds_raises():
+def test_swapdims_out_of_bounds_raises():
     with pytest.raises(ValueError, match="out of bounds"):
-        jix.transpose(jix.compact(np.zeros((2, 3))), 0, 2)
+        jix.swapdims(jix.compact(np.zeros((2, 3))), 0, 2)
 
 
 # ---------------------------------------------------------------------------

@@ -641,9 +641,8 @@ pub fn permute_dims<'py>(
 /// Swaps two dims of an array.
 ///
 /// Output dim `dim0` corresponds to input dim `dim1` and vice versa; all other dims keep their
-/// position. Same as `torch.transpose`. This is a special case of
-/// [`jix.permute_dims()`][jix.permute_dims], which takes a full permutation (the NumPy
-/// `numpy.transpose` semantics).
+/// position. Same as `torch.swapdims` (`torch.transpose`) and `numpy.swapaxes`. This is a
+/// special case of [`jix.permute_dims()`][jix.permute_dims], which takes a full permutation.
 ///
 /// Output dtype equals the input dtype.
 ///
@@ -663,16 +662,16 @@ pub fn permute_dims<'py>(
 ///     import numpy as np
 ///
 ///     a = jix.asarray(np.arange(24, dtype=np.int32).reshape(2, 3, 4))
-///     t = jix.transpose(a, 0, 2)
+///     t = jix.swapdims(a, 0, 2)
 ///     assert t.shape == (4, 3, 2)
 ///     assert np.array_equal(t.numpy(), np.swapaxes(a.numpy(), 0, 2))
 ///
 ///     # Negative dims count from the end: swap the last two dims
-///     assert jix.transpose(a, -1, -2).shape == (2, 4, 3)
+///     assert jix.swapdims(a, -1, -2).shape == (2, 4, 3)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-pub fn transpose<'py>(
+pub fn swapdims<'py>(
     array: &Bound<'py, PyAny>,
     dim0: i32,
     dim1: i32,
