@@ -96,7 +96,8 @@ fn bench_dim_generic(c: &mut Criterion) {
     let half: Vec<Range<u64>> = vec![0..n as u64, 0..(m / 2) as u64];
     pair!(g, "slice [:, ::2]", [(a_s, a_d)], |a| {
         let e = a.view().slice((.., SliceItem::new(None, None, 2)));
-        e.to_ndarray_slice(&half, &mut buf, &ctx).unwrap()
+        e.to_ndarray_slice(&half, &mut buf[..n * m * 2], &ctx)
+            .unwrap()
     });
     pair!(g, "flip axis=1", [(a_s, a_d)], |a| {
         a.view()
@@ -139,7 +140,8 @@ fn bench_dim_generic(c: &mut Criterion) {
         pair!(g, format!("plain {side}x{side}"), [(a_s, a_d)], |a| {
             for &(i, j) in &positions {
                 let idx = [i..i + side, j..j + side];
-                a.to_ndarray_slice(&idx, &mut small, &ctx).unwrap();
+                a.to_ndarray_slice(&idx, &mut small[..(side * side * 4) as usize], &ctx)
+                    .unwrap();
             }
         });
         pair!(
@@ -154,7 +156,8 @@ fn bench_dim_generic(c: &mut Criterion) {
                         .slice((1..1020, 2..1022));
                 for &(i, j) in &positions {
                     let idx = [i..i + side, j..j + side];
-                    e.to_ndarray_slice(&idx, &mut small, &ctx).unwrap();
+                    e.to_ndarray_slice(&idx, &mut small[..(side * side * 4) as usize], &ctx)
+                        .unwrap();
                 }
             }
         );
