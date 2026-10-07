@@ -281,6 +281,17 @@ def test_negative_auto_cast_uint(dtype, expected_dtype):
     np.testing.assert_array_equal(result.numpy(), -np_a.astype(expected_dtype))
 
 
+@pytest.mark.parametrize("dtype", ints + floats + complexes + [np.uint8, np.uint64])
+def test_positive_returns_self(dtype):
+    za = jix.compact(np.array([1, 2, 3], dtype=dtype))
+    assert +za is za
+
+
+def test_positive_rejects_bool():
+    with pytest.raises(RuntimeError, match="positive"):
+        +jix.compact(np.array([True, False]))
+
+
 def test_negative_on_bool_auto_casts():
     """negative(bool) auto-casts to the first signed integer impl (i8)."""
     np_a = np.array([True, False, True], dtype=np.bool_)

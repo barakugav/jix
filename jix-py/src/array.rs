@@ -959,6 +959,22 @@ impl Array {
         crate::ops::negative(slf)
     }
 
+    /// Unary plus (`+a`). Returns the array itself, which is immutable.
+    ///
+    /// Supported dtypes: integer, float and complex scalars. Like numpy and torch, `bool` (and
+    /// struct dtypes) raise.
+    pub fn __pos__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
+        let dtype = slf.get().arr.dtype();
+        match dtype.try_to_scalar() {
+            Some(kind) if !kind.is_bool() => Ok(slf.clone()),
+            _ => Err(jix_core::Error::new(
+                jix_core::ErrorKind::UnsupportedDtype,
+                format!("Op positive does not support operands with dtypes [{dtype}]"),
+            ))
+            .into_py_result(),
+        }
+    }
+
     /// Computes the absolute value of each element. See [`jix.absolute()`][jix.absolute].
     pub fn abs(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::absolute(slf)
