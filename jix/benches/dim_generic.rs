@@ -105,7 +105,8 @@ fn bench_dim_generic(c: &mut Criterion) {
             .to_ndarray_slice(&full, &mut buf, &ctx)
             .unwrap()
     });
-    let flat: Vec<Range<u64>> = vec![0..(n * m) as u64];
+    #[allow(clippy::single_range_in_vec_init)]
+    let flat = [0..(n * m) as u64];
     {
         let a = &a_s;
         g.bench_function(BenchmarkId::new("permute+reshape flat", "static"), |b| {

@@ -170,6 +170,10 @@ pub trait Dimension:
     /// Convert the dimension into its index pattern type.
     fn to_index(&self) -> Self::Index<'_>;
 
+    /// Build the index pattern type straight from a slice of `ndim` coordinates.
+    #[doc(hidden)]
+    fn index_from_slice(slice: &[u64]) -> Self::Index<'_>;
+
     /// Build a vec-like container with one value per axis, by applying `f` to each axis index.
     fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T>;
 }
@@ -239,6 +243,11 @@ impl Dimension for DimDyn {
     #[inline(always)]
     fn to_index(&self) -> Self::Index<'_> {
         self.as_slice()
+    }
+
+    #[inline(always)]
+    fn index_from_slice(slice: &[u64]) -> Self::Index<'_> {
+        slice
     }
 
     #[inline(always)]
@@ -345,6 +354,13 @@ macro_rules! impl_dim {
             fn to_index(&self) -> Self::Index<'_> {
                 #[allow(unused_variables)]
                 let $to_index_in = self.as_slice();
+                $to_index
+            }
+
+            #[inline(always)]
+            fn index_from_slice(slice: &[u64]) -> Self::Index<'_> {
+                #[allow(unused_variables)]
+                let $to_index_in = slice;
                 $to_index
             }
 

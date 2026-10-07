@@ -466,24 +466,18 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 let dst_aligned = (out_buf.as_ptr() as usize).is_multiple_of(alignment)
                     && (out_strides.iter().all(|s| s.is_multiple_of(alignment)));
 
-                // TODO: nd_iter_unordered
-                let iter = NdIter::builder(read_shape)
-                    .with_strides_offset_ext(out_strides.to_dim_vec::<D>(), 0)
-                    .build()
-                    .map(|(idx, dst_offset)| {
-                        let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
-                        let dst = unsafe { out_buf.get_unchecked_mut(dst_offset..).as_mut_ptr() };
-                        (value, dst.cast::<T>())
-                    });
-                if dst_aligned {
-                    for (value, dst) in iter {
-                        unsafe { dst.write(value) };
-                    }
+                let fill_fn = if const { D::NDIM.is_some() } {
+                    fn_storage_fill::<D, D, T, F>
                 } else {
-                    for (value, dst) in iter {
-                        unsafe { dst.write_unaligned(value) };
+                    match ndim {
+                        1 => fn_storage_fill::<crate::Dim<1>, D, T, F>,
+                        2 => fn_storage_fill::<crate::Dim<2>, D, T, F>,
+                        3 => fn_storage_fill::<crate::Dim<3>, D, T, F>,
+                        4 => fn_storage_fill::<crate::Dim<4>, D, T, F>,
+                        _ => fn_storage_fill::<D, D, T, F>,
                     }
-                }
+                };
+                fill_fn(&self.f, index, out_buf, out_strides, dst_aligned);
                 Ok(out)
             }
 
@@ -527,6 +521,43 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
         });
 
         array.compact_with(params, &array.try_read_ctx()?)
+    }
+}
+
+/// Evaluate `f` at every absolute index of `index`, writing into `out_buf` at `out_strides`.
+///
+/// `IterD` is the dimension the walk is monomorphized over (a runtime-dispatched `Dim<N>` when the
+/// storage dimension `D` is dynamic); `f` still receives `D`'s index pattern.
+#[inline(always)]
+fn fn_storage_fill<IterD, D, T, F>(
+    f: &F,
+    index: &[Range<u64>],
+    out_buf: &mut [u8],
+    out_strides: &[usize],
+    dst_aligned: bool,
+) where
+    IterD: Dimension,
+    D: Dimension,
+    T: Dtyped,
+    F: Fn(D::Index<'_>) -> T,
+{
+    let ndim = index.len();
+    let begin = IterD::vec(ndim, |dim| index[dim].start);
+    let end = IterD::vec(ndim, |dim| index[dim].end);
+    let base = out_buf.as_mut_ptr();
+    let iter = NdIter::builder_with_begin(begin, end)
+        .with_strides_offset_ext(out_strides.to_dim_vec::<IterD>(), 0)
+        .build();
+    if dst_aligned {
+        iter.for_each(|idx, dst_offset| {
+            let value = f(D::index_from_slice(idx.as_ref()));
+            unsafe { base.add(dst_offset).cast::<T>().write(value) };
+        });
+    } else {
+        iter.for_each(|idx, dst_offset| {
+            let value = f(D::index_from_slice(idx.as_ref()));
+            unsafe { base.add(dst_offset).cast::<T>().write_unaligned(value) };
+        });
     }
 }
 
@@ -2101,6 +2132,33 @@ mod tests {
             a.to_ndarray().unwrap(),
             array![[0, 1, 2], [7, 8, 9], [14, 15, 16]].into_dyn()
         );
+    }
+
+    #[test]
+    fn compact_fn_multi_chunk_gets_absolute_indices() {
+        // A small read size forces compaction to read many chunks; `f` must still see absolute
+        // indices, for static and dynamic dimensions (1..=4 dispatch and the `DimDyn` fallback).
+        let mut params = ArrayParams::new();
+        params.block_shape(&[4, 4]).read_size((16, 64));
+        let a = Array::compact_fn_with((32, 24), params.clone(), |(x, y)| x * 100 + y).unwrap();
+        let expected = ndarray::Array2::from_shape_fn((32, 24), |(x, y)| (x * 100 + y) as u64);
+        assert_eq!(a.to_ndarray().unwrap(), expected);
+        let a = Array::compact_fn_with([32, 24].as_slice(), params, |i| i[0] * 100 + i[1]).unwrap();
+        assert_eq!(a.to_ndarray().unwrap(), expected.into_dyn());
+
+        let mut params = ArrayParams::new();
+        params.block_shape(&[2, 2, 2, 2, 2]).read_size((8, 32));
+        let shape = [6u64, 4, 6, 4, 2];
+        let f = |i: &[u64]| i.iter().fold(0, |acc, &x| acc * 10 + x);
+        let a = Array::compact_fn_with(shape.as_slice(), params, f).unwrap();
+        let shape_usize = shape.map(|s| s as usize);
+        let expected = ndarray::ArrayD::from_shape_fn(shape_usize.as_slice(), |i| {
+            f(&ndarray::Dimension::slice(&i)
+                .iter()
+                .map(|&x| x as u64)
+                .collect::<Vec<_>>())
+        });
+        assert_eq!(a.to_ndarray().unwrap(), expected);
     }
 
     #[test]
