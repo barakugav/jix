@@ -96,7 +96,7 @@ impl<S: ArrayStorage> Tile<S> {
             read_shape_scale_weight,
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
         )
-        .with_array_ids([inner_spec.dynamic()]);
+        .with_cache_ids(None, [inner_spec.dynamic()]);
 
         Ok(Self {
             array,

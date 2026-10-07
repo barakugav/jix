@@ -155,6 +155,23 @@ impl<'a> StridedBuf<'a> {
         }
     }
 
+    /// Whether the buffer owns a pooled allocation, e.g. a buffer allocated by a pull-mode read.
+    pub(crate) fn owns_pool_buf(&self) -> bool {
+        matches!(self.data, StridedBufData::PoolBuf { .. })
+    }
+
+    /// The pooled allocation of the buffer, with its offset and strides.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the buffer does not [own a pooled allocation](Self::owns_pool_buf).
+    pub(crate) fn into_pool_buf(self) -> (PoolBuf<'a>, usize, DimArray<usize>) {
+        match self.data {
+            StridedBufData::PoolBuf { buf, offset } => (buf, offset, self.strides),
+            _ => panic!("the buffer does not own a pooled allocation"),
+        }
+    }
+
     #[inline]
     pub(crate) fn is_writable(&self) -> bool {
         !matches!(

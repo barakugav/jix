@@ -62,6 +62,7 @@ pub struct Where<SC, SX, SY> {
     condition: SC,
     x: SX,
     y: SY,
+    cache_id: ArrayCacheId,
     spec: ArraySpecDynamic,
 }
 impl<SC, SX, SY> Where<SC, SX, SY>
@@ -121,6 +122,7 @@ where
             (x_spec.block_shape(), x_spec.block_shape_fixed_dims()),
             (y_spec.block_shape(), y_spec.block_shape_fixed_dims()),
         ]);
+        let cache_id = ArrayCacheId::new();
         let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
@@ -128,11 +130,15 @@ where
             read_shape_scale_weight,
             read_layout_order,
         )
-        .with_array_ids([c_spec.dynamic(), x_spec.dynamic(), y_spec.dynamic()]);
+        .with_cache_ids(
+            Some(cache_id),
+            [c_spec.dynamic(), x_spec.dynamic(), y_spec.dynamic()],
+        );
         Ok(Self {
             condition,
             x,
             y,
+            cache_id,
             spec,
         })
     }
@@ -161,188 +167,192 @@ where
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
-        let out_shape = <Self::Dimension as Dimension>::vec(index.len(), |d| {
-            (index[d].end - index[d].start) as usize
-        });
-        let dtype = self.dtype();
-        let (itemsize, alignment) = (dtype.itemsize() as usize, dtype.alignment().as_usize());
+        context.read_cached(self.cache_id, index, out, CacheScope::Current, &|out| {
+            let out_shape = <Self::Dimension as Dimension>::vec(index.len(), |d| {
+                (index[d].end - index[d].start) as usize
+            });
+            let dtype = self.dtype();
+            let (itemsize, alignment) = (dtype.itemsize() as usize, dtype.alignment().as_usize());
 
-        let condition_view = self.condition.read_data(index, context, None)?;
-        let y_view = self.y.read_data(index, context, None)?;
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape.as_ref(),
-            dtype,
-            self.spec().read_layout_order(),
-        );
-        self.x.read_data(index, context, Some(&mut out))?;
+            let condition_view = self.condition.read_data(index, context, None)?;
+            let y_view = self.y.read_data(index, context, None)?;
+            let mut out = materialize_out_buf(
+                out,
+                context,
+                out_shape.as_ref(),
+                dtype,
+                self.spec().read_layout_order(),
+            );
+            self.x.read_data(index, context, Some(&mut out))?;
 
-        let (out_buf, out_strides) = out.data_mut();
-        let (condition, condition_strides) = condition_view.data();
-        let (y_buf, y_strides) = y_view.data();
+            let (out_buf, out_strides) = out.data_mut();
+            let (condition, condition_strides) = condition_view.data();
+            let (y_buf, y_strides) = y_view.data();
 
-        // Operand 0 is the output buffer, `x`, operand 1 `y` and operand 2 the condition mask.
-        let iter = NdIterUnordered::new(
-            out_shape.as_ref(),
-            // order (x, y, condition), to give priority in axes sort for x and y over condition
-            [out_strides, y_strides, condition_strides],
-            [
-                (dtype.itemsize(), dtype.alignment()),
-                (dtype.itemsize(), dtype.alignment()),
-                (1, Alignment::of::<bool>()),
-            ],
-        );
-        let aligned = !REQUIRE_ALIGNED || {
-            let [x_aligned, y_aligned, cond_aligned] = iter.is_aligned();
-            debug_assert!(cond_aligned);
-            (x_aligned && (out_buf.as_ptr() as usize).is_multiple_of(alignment))
-                && (y_aligned && (y_buf.as_ptr() as usize).is_multiple_of(alignment))
-        };
-        let contiguous = iter.is_contiguous().iter().all(|&c| c);
-
-        type InnerLoopFn = unsafe fn(
-            PtrMutNoalias<'_, u8>,
-            PtrNoalias<'_, u8>,
-            PtrNoalias<'_, bool>,
-            usize,
-            [usize; 3],
-            usize,
-        );
-        let mut inner_loop_fn: InnerLoopFn = inner_loop_generic;
-        if aligned {
-            fn create_inner_loop_fn<T: Copy, const LANES: usize>(contiguous: bool) -> InnerLoopFn {
-                match contiguous {
-                    true => inner_loop::<T, LANES, true>,
-                    false => inner_loop::<T, LANES, false>,
-                }
-            }
-            let typed_inner_loop_fn = match (itemsize, alignment) {
-                (1, 1) => Some(create_inner_loop_fn::<u8, 16>(contiguous)),
-                (2, 2) => Some(create_inner_loop_fn::<u16, 16>(contiguous)),
-                (4, 2) => Some(create_inner_loop_fn::<[u16; 2], 16>(contiguous)),
-                (4, 4) => Some(create_inner_loop_fn::<u32, 16>(contiguous)),
-                (8, 4) => Some(create_inner_loop_fn::<[u32; 2], 8>(contiguous)),
-                (8, 8) => Some(create_inner_loop_fn::<u64, 8>(contiguous)),
-                (16, 8 | 16) => Some(create_inner_loop_fn::<[u64; 2], 4>(contiguous)),
-                _ => None,
+            // Operand 0 is the output buffer, `x`, operand 1 `y` and operand 2 the condition mask.
+            let iter = NdIterUnordered::new(
+                out_shape.as_ref(),
+                // order (x, y, condition), to give priority in axes sort for x and y over condition
+                [out_strides, y_strides, condition_strides],
+                [
+                    (dtype.itemsize(), dtype.alignment()),
+                    (dtype.itemsize(), dtype.alignment()),
+                    (1, Alignment::of::<bool>()),
+                ],
+            );
+            let aligned = !REQUIRE_ALIGNED || {
+                let [x_aligned, y_aligned, cond_aligned] = iter.is_aligned();
+                debug_assert!(cond_aligned);
+                (x_aligned && (out_buf.as_ptr() as usize).is_multiple_of(alignment))
+                    && (y_aligned && (y_buf.as_ptr() as usize).is_multiple_of(alignment))
             };
-            if let Some(typed_inner_loop_fn) = typed_inner_loop_fn {
-                inner_loop_fn = typed_inner_loop_fn;
-            }
-        }
+            let contiguous = iter.is_contiguous().iter().all(|&c| c);
 
-        let mut out_buf = PtrMutNoalias::<u8>::from_slice(out_buf);
-        let y_buf = PtrNoalias::<u8>::from_slice(y_buf);
-        let condition = PtrNoalias::<bool>::from_slice(condition);
-        iter.foreach_inner_1d(
-            move |[out_offset, y_offset, cond_offset], len, strides| unsafe {
-                inner_loop_fn(
-                    out_buf.bytes_offset(out_offset),
-                    y_buf.bytes_offset(y_offset),
-                    condition.bytes_offset(cond_offset),
-                    len,
-                    strides,
-                    itemsize,
-                )
-            },
-        );
-
-        #[inline(never)]
-        unsafe fn inner_loop<T: Copy, const LANES: usize, const CONTIGUOUS: bool>(
-            x: PtrMutNoalias<u8>,
-            y: PtrNoalias<u8>,
-            condition: PtrNoalias<bool>,
-            len: usize,
-            strides: [usize; 3],
-            itemsize: usize,
-        ) {
-            let [x_stride, y_stride, cond_stride] = strides;
-            if CONTIGUOUS {
-                debug_assert_eq!(x_stride, size_of::<T>());
-                debug_assert_eq!(y_stride, size_of::<T>());
-                debug_assert_eq!(cond_stride, size_of::<bool>());
+            type InnerLoopFn = unsafe fn(
+                PtrMutNoalias<'_, u8>,
+                PtrNoalias<'_, u8>,
+                PtrNoalias<'_, bool>,
+                usize,
+                [usize; 3],
+                usize,
+            );
+            let mut inner_loop_fn: InnerLoopFn = inner_loop_generic;
+            if aligned {
+                fn create_inner_loop_fn<T: Copy, const LANES: usize>(
+                    contiguous: bool,
+                ) -> InnerLoopFn {
+                    match contiguous {
+                        true => inner_loop::<T, LANES, true>,
+                        false => inner_loop::<T, LANES, false>,
+                    }
+                }
+                let typed_inner_loop_fn = match (itemsize, alignment) {
+                    (1, 1) => Some(create_inner_loop_fn::<u8, 16>(contiguous)),
+                    (2, 2) => Some(create_inner_loop_fn::<u16, 16>(contiguous)),
+                    (4, 2) => Some(create_inner_loop_fn::<[u16; 2], 16>(contiguous)),
+                    (4, 4) => Some(create_inner_loop_fn::<u32, 16>(contiguous)),
+                    (8, 4) => Some(create_inner_loop_fn::<[u32; 2], 8>(contiguous)),
+                    (8, 8) => Some(create_inner_loop_fn::<u64, 8>(contiguous)),
+                    (16, 8 | 16) => Some(create_inner_loop_fn::<[u64; 2], 4>(contiguous)),
+                    _ => None,
+                };
+                if let Some(typed_inner_loop_fn) = typed_inner_loop_fn {
+                    inner_loop_fn = typed_inner_loop_fn;
+                }
             }
-            assert_eq!(itemsize, size_of::<T>());
-            let x = x.as_mut_ptr().cast::<T>();
-            let condition = condition.as_ptr();
-            let y = y.as_ptr().cast::<T>();
-            let mut i = 0;
-            unsafe {
+
+            let mut out_buf = PtrMutNoalias::<u8>::from_slice(out_buf);
+            let y_buf = PtrNoalias::<u8>::from_slice(y_buf);
+            let condition = PtrNoalias::<bool>::from_slice(condition);
+            iter.foreach_inner_1d(
+                move |[out_offset, y_offset, cond_offset], len, strides| unsafe {
+                    inner_loop_fn(
+                        out_buf.bytes_offset(out_offset),
+                        y_buf.bytes_offset(y_offset),
+                        condition.bytes_offset(cond_offset),
+                        len,
+                        strides,
+                        itemsize,
+                    )
+                },
+            );
+
+            #[inline(never)]
+            unsafe fn inner_loop<T: Copy, const LANES: usize, const CONTIGUOUS: bool>(
+                x: PtrMutNoalias<u8>,
+                y: PtrNoalias<u8>,
+                condition: PtrNoalias<bool>,
+                len: usize,
+                strides: [usize; 3],
+                itemsize: usize,
+            ) {
+                let [x_stride, y_stride, cond_stride] = strides;
                 if CONTIGUOUS {
-                    let body_limit = len - len % LANES;
-                    while i < body_limit {
-                        let x_chunk_ptr = x.add(i).cast::<[T; LANES]>();
-                        let x_chunk = x_chunk_ptr.read_maybe_aligned::<REQUIRE_ALIGNED>();
-                        let y_chunk = y
-                            .add(i)
-                            .cast::<[T; LANES]>()
-                            .read_maybe_aligned::<REQUIRE_ALIGNED>();
-                        let cond_chunk = condition
-                            .add(i)
-                            .cast::<[bool; LANES]>()
-                            .read_maybe_aligned::<REQUIRE_ALIGNED>();
-                        let mut out = x_chunk;
-                        for k in 0..LANES {
-                            out[k] = if cond_chunk[k] {
-                                x_chunk[k]
-                            } else {
-                                y_chunk[k]
-                            };
+                    debug_assert_eq!(x_stride, size_of::<T>());
+                    debug_assert_eq!(y_stride, size_of::<T>());
+                    debug_assert_eq!(cond_stride, size_of::<bool>());
+                }
+                assert_eq!(itemsize, size_of::<T>());
+                let x = x.as_mut_ptr().cast::<T>();
+                let condition = condition.as_ptr();
+                let y = y.as_ptr().cast::<T>();
+                let mut i = 0;
+                unsafe {
+                    if CONTIGUOUS {
+                        let body_limit = len - len % LANES;
+                        while i < body_limit {
+                            let x_chunk_ptr = x.add(i).cast::<[T; LANES]>();
+                            let x_chunk = x_chunk_ptr.read_maybe_aligned::<REQUIRE_ALIGNED>();
+                            let y_chunk = y
+                                .add(i)
+                                .cast::<[T; LANES]>()
+                                .read_maybe_aligned::<REQUIRE_ALIGNED>();
+                            let cond_chunk = condition
+                                .add(i)
+                                .cast::<[bool; LANES]>()
+                                .read_maybe_aligned::<REQUIRE_ALIGNED>();
+                            let mut out = x_chunk;
+                            for k in 0..LANES {
+                                out[k] = if cond_chunk[k] {
+                                    x_chunk[k]
+                                } else {
+                                    y_chunk[k]
+                                };
+                            }
+                            x_chunk_ptr.write_maybe_aligned::<REQUIRE_ALIGNED>(out);
+                            i += LANES;
                         }
-                        x_chunk_ptr.write_maybe_aligned::<REQUIRE_ALIGNED>(out);
-                        i += LANES;
                     }
-                }
-                while i < len {
-                    let (x, cond, y) = if CONTIGUOUS {
-                        (x.add(i), condition.add(i), y.add(i))
-                    } else {
-                        (
-                            x.byte_add(i * x_stride),
-                            condition.byte_add(i * cond_stride),
-                            y.byte_add(i * y_stride),
-                        )
-                    };
-                    let x_val = x.read_maybe_aligned::<REQUIRE_ALIGNED>();
-                    let y_val = y.read_maybe_aligned::<REQUIRE_ALIGNED>();
-                    let val = if cond.read_maybe_aligned::<REQUIRE_ALIGNED>() {
-                        x_val
-                    } else {
-                        y_val
-                    };
-                    x.write_maybe_aligned::<REQUIRE_ALIGNED>(val);
-                    i += 1;
-                }
-            }
-        }
-
-        #[inline(never)]
-        unsafe fn inner_loop_generic(
-            x: PtrMutNoalias<u8>,
-            y: PtrNoalias<u8>,
-            condition: PtrNoalias<bool>,
-            len: usize,
-            strides: [usize; 3],
-            itemsize: usize,
-        ) {
-            let [x_stride, y_stride, cond_stride] = strides;
-            let x = x.as_mut_ptr();
-            let condition = condition.as_ptr();
-            let y = y.as_ptr();
-            unsafe {
-                for i in 0..len {
-                    let cond = condition.byte_add(i * cond_stride).read();
-                    if !cond {
-                        let x = x.byte_add(i * x_stride);
-                        let y = y.byte_add(i * y_stride);
-                        x.copy_from_nonoverlapping(y, itemsize);
+                    while i < len {
+                        let (x, cond, y) = if CONTIGUOUS {
+                            (x.add(i), condition.add(i), y.add(i))
+                        } else {
+                            (
+                                x.byte_add(i * x_stride),
+                                condition.byte_add(i * cond_stride),
+                                y.byte_add(i * y_stride),
+                            )
+                        };
+                        let x_val = x.read_maybe_aligned::<REQUIRE_ALIGNED>();
+                        let y_val = y.read_maybe_aligned::<REQUIRE_ALIGNED>();
+                        let val = if cond.read_maybe_aligned::<REQUIRE_ALIGNED>() {
+                            x_val
+                        } else {
+                            y_val
+                        };
+                        x.write_maybe_aligned::<REQUIRE_ALIGNED>(val);
+                        i += 1;
                     }
                 }
             }
-        }
 
-        Ok(out)
+            #[inline(never)]
+            unsafe fn inner_loop_generic(
+                x: PtrMutNoalias<u8>,
+                y: PtrNoalias<u8>,
+                condition: PtrNoalias<bool>,
+                len: usize,
+                strides: [usize; 3],
+                itemsize: usize,
+            ) {
+                let [x_stride, y_stride, cond_stride] = strides;
+                let x = x.as_mut_ptr();
+                let condition = condition.as_ptr();
+                let y = y.as_ptr();
+                unsafe {
+                    for i in 0..len {
+                        let cond = condition.byte_add(i * cond_stride).read();
+                        if !cond {
+                            let x = x.byte_add(i * x_stride);
+                            let y = y.byte_add(i * y_stride);
+                            x.copy_from_nonoverlapping(y, itemsize);
+                        }
+                    }
+                }
+            }
+
+            Ok(out)
+        })
     }
 
     #[inline]
@@ -428,6 +438,7 @@ where
             condition: self.condition.dimension_change()?,
             x: self.x.dimension_change()?,
             y: self.y.dimension_change()?,
+            cache_id: self.cache_id,
             spec: self.spec,
         })
     }
@@ -445,6 +456,7 @@ where
             condition: self.condition,
             x: self.x.element_type_change()?,
             y: self.y.element_type_change()?,
+            cache_id: self.cache_id,
             spec: self.spec,
         })
     }

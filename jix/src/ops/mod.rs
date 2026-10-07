@@ -160,9 +160,10 @@ pub(crate) mod prelude {
     pub(crate) use std::ops::Range;
 
     pub(crate) use super::AxesArg;
-    pub(crate) use crate::codec::ReadContext;
+    pub(crate) use crate::codec::{CacheScope, ReadContext};
     pub(crate) use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
     pub(crate) use crate::error::*;
+    pub(crate) use crate::storage::cache_id::ArrayCacheId;
     pub(crate) use crate::storage::params::{
         combine_block_layout, combine_elementwise_hints, combine_select_hints,
         read_layout_order_insert_dont_care_dim, ArraySpecDynamic,

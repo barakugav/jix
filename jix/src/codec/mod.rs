@@ -6,7 +6,7 @@
 mod filter;
 pub use filter::*;
 
-use std::cell::{RefCell, UnsafeCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::marker::PhantomData;
 use std::ops::Range;
 use std::sync::Arc;
@@ -15,13 +15,11 @@ use crate::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
 use crate::dtype::{Alignment, Dtype};
 #[allow(unused_imports)]
 use crate::error::{ensure, error, Result};
-use crate::storage::id::{ArrayId, ArrayIdMap, ArrayIdSet};
+use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
 use crate::storage::StridedBuf;
 use crate::util::arrayvec::ArrayVec;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
-use crate::util::{
-    dim_arr, strides_for_layout_order, AlignedBytes, AlternatingBuffers, DimArray, DimIdx, SliceExt,
-};
+use crate::util::{AlignedBytes, AlternatingBuffers, DimArray, SliceExt};
 use crate::DimDyn;
 
 /// The compression algorithm applied to each block.
@@ -374,20 +372,57 @@ pub struct ReadContext {
     #[cfg(not(miri))]
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     buffer_pool: BufferPool,
-    /// The last pull-mode read of each compact array, so a repeated read (e.g. `x + x`) decodes
-    /// only once. See [`read_cached`](Self::read_cached).
-    read_cache: RefCell<ArrayIdMap<CacheEntry>>,
-    /// The arrays whose reads go through `read_cache`, set for the duration of a top level read.
-    /// See [`top_level_read`](Self::top_level_read).
-    arrays_to_cache: RefCell<Option<Arc<ArrayIdSet>>>,
+    /// The last pull-mode read of each storage with an [`ArrayCacheId`] whose reads are cached, so
+    /// a repeated read (e.g. of `x` in `x + x`) is computed only once. See
+    /// [`read_cached`](Self::read_cached).
+    read_cache: RefCell<ArrayCacheIdMap<CacheEntry>>,
+    /// The storages whose reads are added to `read_cache` in the current scope. See
+    /// [`top_level_read`](Self::top_level_read) and [`CacheScope`].
+    arrays_to_cache: RefCell<Option<Arc<ArrayCacheIdSet>>>,
+    /// Whether a top level read with storages to cache is in progress, so `read_cache` may be used.
+    cache_active: Cell<bool>,
 }
 
-/// A cached read of the region `index` of an array, laid out at `strides` in `data`.
+/// A cached read of the region `index` of a storage, laid out at `strides` from `offset` in
+/// `data`.
 struct CacheEntry {
     index: DimArray<Range<u64>>,
     strides: DimArray<usize>,
+    offset: usize,
     data: Arc<AlignedBytes>,
 }
+
+/// The scope in which a storage with an [`ArrayCacheId`] reads its inner storages, which decides
+/// the arrays to cache while it does. See [`ReadContext::read_cached`].
+#[derive(Clone, Copy)]
+pub(crate) enum CacheScope<'a> {
+    /// The current scope: the storage reads its inner storages, if any, at the region it is read
+    /// at (compact arrays, element-wise ops), so their reads are cached as reads outside of the
+    /// storage are.
+    Current,
+    /// A scope of its own: the storage reads its inner storages at other regions than its own
+    /// (reductions), which reads outside of it do not read. Only the arrays the storage reaches
+    /// more than once itself (`arrays_to_cache`) are cached while it reads them, and their entries
+    /// are dropped once the read is done.
+    Own(&'a Option<Arc<ArrayCacheIdSet>>),
+}
+
+/// The read of a storage passed to [`ReadContext::read_cached`]: a closure taking the `out` of the
+/// read. A trait object of it adds a single function to each storage, where a `dyn Fn` would add
+/// the `call_once` and `call_mut` shims too.
+pub(crate) trait CachedRead<'a, 'b: 'a> {
+    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>;
+}
+impl<'a, 'b: 'a, F> CachedRead<'a, 'b> for F
+where
+    F: Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
+{
+    #[inline(always)]
+    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>> {
+        self(out)
+    }
+}
+
 impl ReadContext {
     /// Creates a new `ReadContext` configured with the given decoder parameters.
     ///
@@ -398,8 +433,9 @@ impl ReadContext {
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
             buffer_pool: BufferPool::new(),
-            read_cache: RefCell::new(ArrayIdMap::default()),
+            read_cache: RefCell::new(ArrayCacheIdMap::default()),
             arrays_to_cache: RefCell::new(None),
+            cache_active: Cell::new(false),
         })
     }
 
@@ -413,7 +449,7 @@ impl ReadContext {
         self.buffer_pool.get(size, alignment)
     }
 
-    /// Run `read`, a top level read of an array, with the reads of `arrays_to_cache` (the arrays
+    /// Run `read`, a top level read of an array, with the reads of `arrays_to_cache` (the storages
     /// reachable more than once from the read array) going through the read cache.
     ///
     /// The read cache is cleared before and after `read`, so cached buffers do not outlive it, and
@@ -422,28 +458,21 @@ impl ReadContext {
     #[inline]
     pub(crate) fn top_level_read<R>(
         &self,
-        arrays_to_cache: Option<Arc<ArrayIdSet>>,
+        arrays_to_cache: Option<Arc<ArrayCacheIdSet>>,
         read: impl FnOnce() -> R,
     ) -> R {
         // Nothing is cached outside of a read with a set, so without one the cache is empty.
-        if arrays_to_cache.is_none() && self.arrays_to_cache.borrow().is_none() {
+        if arrays_to_cache.is_none() && !self.cache_active.get() {
             return read();
         }
         self.clear_read_cache();
+        let prev_active = self.cache_active.replace(arrays_to_cache.is_some());
         let prev = self.arrays_to_cache.replace(arrays_to_cache);
         let result = read();
         self.clear_read_cache();
         self.arrays_to_cache.replace(prev);
+        self.cache_active.set(prev_active);
         result
-    }
-
-    /// Whether reads of the array `id` go through the read cache.
-    #[inline]
-    pub(crate) fn is_cached(&self, id: ArrayId) -> bool {
-        self.arrays_to_cache
-            .borrow()
-            .as_ref()
-            .is_some_and(|ids| ids.contains(id))
     }
 
     fn clear_read_cache(&self) {
@@ -452,58 +481,98 @@ impl ReadContext {
             .clear_with(|entry| self.buffer_pool.return_shared(entry.data));
     }
 
-    /// Read the region `index` of the array `id` through the read cache.
+    /// Read the region `index` of the storage `id` with `read` (called with `out`), through the
+    /// read cache.
     ///
-    /// On a hit, returns a read-only view of the cached buffer. On a miss, evicts the cached read
-    /// of another region of `id` (if any), lets `read` fill a new buffer laid out by
-    /// `layout_order`, caches it and returns a read-only view of it.
+    /// A pull-mode read (`out` is `None`) of a region in the cache returns a read-only view of the
+    /// cached buffer, whatever the arrays to cache. Otherwise `read` reads the region and, if `id` is
+    /// one of the arrays to cache, its buffer is added to the cache: a buffer it allocated is
+    /// shared with the cache, and replaces the cached read of another region of `id`, if any. See
+    /// [`CacheScope`] for the arrays to cache while `read` reads the inner storages.
     ///
     /// The cached buffers are reference counted, so evicting an entry never invalidates views
     /// handed out earlier; an allocation returns to the pool when its last reference is dropped.
-    pub(crate) fn read_cached(
-        &self,
-        id: ArrayId,
+    #[inline(never)]
+    pub(crate) fn read_cached<'a, 'b>(
+        &'a self,
+        id: ArrayCacheId,
         index: &[Range<u64>],
-        dtype: &Dtype,
-        layout_order: &[DimIdx],
-        read: impl FnOnce(&mut StridedBuf<'_>) -> Result<()>,
-    ) -> Result<StridedBuf<'_>> {
-        {
+        out: Option<&'a mut StridedBuf<'b>>,
+        scope: CacheScope<'_>,
+        read: &dyn CachedRead<'a, 'b>,
+    ) -> Result<StridedBuf<'a>> {
+        // Not generic and not inlined, so it adds no code to the many storages that call it.
+        if !self.cache_active.get() {
+            return read.read(out);
+        }
+        let mut insert = false;
+        if out.is_none() {
             let mut cache = self.read_cache.borrow_mut();
             if let Some(entry) = cache.get(id)
                 && entry.index.as_slice() == index
             {
                 let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
-                return Ok(unsafe { StridedBuf::from_shared(buf, &entry.strides) });
+                let buf = unsafe { StridedBuf::from_shared(buf, &entry.strides) };
+                return Ok(unsafe { buf.with_offset(entry.offset) });
             }
-            // Evict before allocating, so the read below can reuse the buffer.
-            if let Some(stale) = cache.remove(id) {
+            insert = self.is_cached(id);
+            // Evict before reading, so the read can reuse the buffer.
+            if insert && let Some(stale) = cache.remove(id) {
                 self.buffer_pool.return_shared(stale.data);
             }
         }
 
-        let itemsize = dtype.itemsize() as usize;
-        let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
-        let strides = strides_for_layout_order(shape.as_slice(), itemsize, layout_order);
-        let nbytes = shape.iter().product::<usize>() * itemsize;
-        let mut data = self.buffer_pool.get_raw(nbytes, dtype.alignment());
-        let mut dst = unsafe { StridedBuf::from_slice_mut(data.as_mut_slice(), &strides) };
-        read(&mut dst)?;
-        drop(dst);
+        let prev = match scope {
+            CacheScope::Current => None,
+            CacheScope::Own(ids) => Some(self.arrays_to_cache.replace(ids.clone())),
+        };
+        let buf = read.read(out);
+        if let Some(prev) = prev
+            && let Some(ids) = self.arrays_to_cache.replace(prev)
+        {
+            let mut cache = self.read_cache.borrow_mut();
+            for id in ids.iter() {
+                if let Some(entry) = cache.remove(id) {
+                    self.buffer_pool.return_shared(entry.data);
+                }
+            }
+        }
+        let buf = buf?;
 
-        let data = Arc::new(data);
+        // A view of memory the read did not allocate, e.g. a cached buffer, is not cached.
+        if !insert || !buf.owns_pool_buf() {
+            return Ok(buf);
+        }
+        let (buf, offset, strides) = buf.into_pool_buf();
+        let data = Arc::new(buf.into_inner());
         let buf = PoolBufShared::new(data.clone(), &self.buffer_pool);
-        let buf = unsafe { StridedBuf::from_shared(buf, &strides) };
-        let index = index.to_dim_vec::<DimDyn>();
+        let buf = unsafe { StridedBuf::from_shared(buf, &strides).with_offset(offset) };
         let entry = CacheEntry {
-            index,
+            index: index.to_dim_vec::<DimDyn>(),
             strides,
+            offset,
             data,
         };
-        self.read_cache.borrow_mut().insert(id, entry);
+        if let Some(stale) = self.read_cache.borrow_mut().insert(id, entry) {
+            self.buffer_pool.return_shared(stale.data);
+        }
         Ok(buf)
     }
+
+    #[cfg(test)]
+    pub(crate) fn read_cache_len(&self) -> usize {
+        self.read_cache.borrow().keys().count()
+    }
+
+    /// Whether reads of the storage `id` are added to the read cache in the current scope.
+    fn is_cached(&self, id: ArrayCacheId) -> bool {
+        self.arrays_to_cache
+            .borrow()
+            .as_ref()
+            .is_some_and(|ids| ids.contains(id))
+    }
 }
+
 impl Default for ReadContext {
     fn default() -> Self {
         Self::new(&DecoderParams::default()).unwrap()

@@ -37,23 +37,16 @@ impl BufferPool {
     /// The buffer is popped from the free list when one is available; otherwise a fresh allocation
     /// is made. The allocation is returned to the pool when the `PoolBuf` is dropped.
     pub(crate) fn get(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
-        PoolBuf {
-            buf: self.get_raw(size, alignment),
-            buffers: self,
-        }
-    }
-
-    /// Like [`get`](Self::get), but returns the bare allocation instead of a guard. Hand it back
-    /// with [`return_shared`](Self::return_shared) (or let it free normally).
-    #[inline(always)]
-    pub(crate) fn get_raw(&self, size: usize, alignment: Alignment) -> AlignedBytes {
         let (pool, pool_align) = self.get_pool(alignment);
         let pool = unsafe { &mut *pool };
-        let mut buf = pool
+        let tmp_buf = pool
             .pop()
             .unwrap_or_else(|| AlignedBytes::with_capacity_exact(pool_align.as_usize(), size));
-        buf.reserve(size);
-        unsafe { buf.set_len(size) };
+        let mut buf = PoolBuf {
+            buf: tmp_buf,
+            buffers: self,
+        };
+        buf.set_len(size);
         buf
     }
 
@@ -120,6 +113,14 @@ pub(crate) struct PoolBuf<'a> {
     buffers: &'a BufferPool,
 }
 impl PoolBuf<'_> {
+    /// Resizes the buffer to `new_len` bytes. The new contents are uninitialized.
+    #[inline]
+    pub(crate) fn set_len(&mut self, new_len: usize) {
+        self.buf.clear();
+        self.buf.reserve(new_len);
+        unsafe { self.buf.set_len(new_len) };
+    }
+
     #[inline(always)]
     pub(crate) fn as_slice(&self) -> &[u8] {
         self.buf.as_slice()
@@ -128,6 +129,13 @@ impl PoolBuf<'_> {
     #[inline(always)]
     pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
         self.buf.as_mut_slice()
+    }
+
+    /// Take the allocation out of the guard, which then does not return it to the pool.
+    pub(crate) fn into_inner(self) -> AlignedBytes {
+        let this = ManuallyDrop::new(self);
+        // SAFETY: `this` is never used or dropped again.
+        unsafe { std::ptr::read(&this.buf) }
     }
 }
 impl Drop for PoolBuf<'_> {

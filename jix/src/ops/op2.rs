@@ -6,6 +6,7 @@ pub(crate) struct Op2<S1, S2, K> {
     pub(crate) a: S1,
     pub(crate) b: S2,
     kernel: K,
+    cache_id: ArrayCacheId,
     spec: ArraySpecDynamic,
 }
 pub(crate) trait Op2Kernel<T1, T2> {
@@ -46,6 +47,7 @@ impl<S1, S2, K> Op2<S1, S2, K> {
             (a_spec.block_shape(), a_spec.block_shape_fixed_dims()),
             (b_spec.block_shape(), b_spec.block_shape_fixed_dims()),
         ]);
+        let cache_id = ArrayCacheId::new();
         let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
@@ -53,8 +55,14 @@ impl<S1, S2, K> Op2<S1, S2, K> {
             read_shape_scale_weight,
             read_layout_order,
         )
-        .with_array_ids([a_spec.dynamic(), b_spec.dynamic()]);
-        Ok(Self { a, b, kernel, spec })
+        .with_cache_ids(Some(cache_id), [a_spec.dynamic(), b_spec.dynamic()]);
+        Ok(Self {
+            a,
+            b,
+            kernel,
+            cache_id,
+            spec,
+        })
     }
 }
 
@@ -75,10 +83,11 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        let out = self
-            .read_as_elementwise_pipeline::<K::Output>(index, context)?
-            .to_buf(index, context, out);
-        Ok(out)
+        context.read_cached(self.cache_id, index, out, CacheScope::Current, &|out| {
+            Ok(self
+                .read_as_elementwise_pipeline::<K::Output>(index, context)?
+                .to_buf(index, context, out))
+        })
     }
 
     #[inline]
@@ -178,6 +187,7 @@ where
             a: self.a.dimension_change()?,
             b: self.b.dimension_change()?,
             kernel: self.kernel,
+            cache_id: self.cache_id,
             spec: self.spec,
         })
     }

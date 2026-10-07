@@ -243,6 +243,7 @@ where
 pub struct MapMultiple<ArraysT, F> {
     arrays: ArraysT,
     map_fn: F,
+    cache_id: ArrayCacheId,
     spec: ArraySpecDynamic,
 }
 impl<ArraysT, F> MapMultiple<ArraysT, F> {
@@ -286,6 +287,7 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
                 .collect::<Vec<_>>();
             combine_block_layout(&inputs)
         };
+        let cache_id = ArrayCacheId::new();
         let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
@@ -293,10 +295,14 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
             read_shape_scale_weight,
             read_layout_order,
         )
-        .with_array_ids((0..narrays).map(|i| arrays.spec(i).dynamic()));
+        .with_cache_ids(
+            Some(cache_id),
+            (0..narrays).map(|i| arrays.spec(i).dynamic()),
+        );
         Ok(Self {
             arrays,
             map_fn,
+            cache_id,
             spec,
         })
     }
@@ -318,10 +324,11 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        let out = self
-            .read_as_elementwise_pipeline::<O>(index, context)?
-            .to_buf(index, context, out);
-        Ok(out)
+        context.read_cached(self.cache_id, index, out, CacheScope::Current, &|out| {
+            Ok(self
+                .read_as_elementwise_pipeline::<O>(index, context)?
+                .to_buf(index, context, out))
+        })
     }
 
     #[inline]
