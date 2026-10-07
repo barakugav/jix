@@ -638,6 +638,54 @@ pub fn permute_dims<'py>(
     )
 }
 
+/// Swaps two dims of an array.
+///
+/// Output dim `dim0` corresponds to input dim `dim1` and vice versa; all other dims keep their
+/// position. Same as `torch.transpose`. This is a special case of
+/// [`jix.permute_dims()`][jix.permute_dims], which takes a full permutation (the NumPy
+/// `numpy.transpose` semantics).
+///
+/// Output dtype equals the input dtype.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// Args:
+///     array: Input array.
+///     dim0: First dim to swap. Supports negative values.
+///     dim1: Second dim to swap. Supports negative values.
+///
+/// Returns:
+///     A [`jix.Array`][jix.Array] with `dim0` and `dim1` swapped.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.asarray(np.arange(24, dtype=np.int32).reshape(2, 3, 4))
+///     t = jix.transpose(a, 0, 2)
+///     assert t.shape == (4, 3, 2)
+///     assert np.array_equal(t.numpy(), np.swapaxes(a.numpy(), 0, 2))
+///
+///     # Negative dims count from the end: swap the last two dims
+///     assert jix.transpose(a, -1, -2).shape == (2, 4, 3)
+///     ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyfunction]
+pub fn transpose<'py>(
+    array: &Bound<'py, PyAny>,
+    dim0: i32,
+    dim1: i32,
+) -> PyResult<Bound<'py, Array>> {
+    let py_arr = asarray_simple(array)?;
+    let ndim = py_arr.get().ndim();
+    let dim0 = normalize_dim(dim0, ndim)?;
+    let dim1 = normalize_dim(dim1, ndim)?;
+    let mut dims = (0..ndim as i32).collect::<Vec<_>>();
+    dims.swap(dim0, dim1);
+    permute_dims(py_arr.as_any(), Some(dims))
+}
+
 /// Reinterprets an array with a different shape.
 ///
 /// The total number of elements must be preserved: the product of `shape` must equal the
