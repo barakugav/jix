@@ -239,15 +239,14 @@ define_op2!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`,
     /// `f64`.
     ///
-    /// The result has the sign of the dividend `a` (truncated remainder, matching Rust's `%`),
-    /// so it pairs with [`jix.floor_divide()`][jix.floor_divide], which truncates toward zero:
-    /// `a == (a // b) * b + a % b`. When the operands have opposite signs this differs from
-    /// numpy's `remainder` and Python's `%`, which take the sign of the divisor (e.g. `-7 % 3`
-    /// is `-1` here, but `2` in numpy); it matches `numpy.fmod` and `torch.fmod`. For
-    /// non-negative operands they all agree.
+    /// The result has the sign of the dividend `a` (truncated remainder, Rust's `%`), so it pairs
+    /// with [`jix.floor_divide()`][jix.floor_divide], which truncates toward zero:
+    /// `a == (a // b) * b + a % b`. This is `numpy.fmod` and `torch.fmod`. It differs from
+    /// `numpy.remainder`, `torch.remainder` and Python's `%`, which take the sign of the
+    /// divisor, when the operands have opposite signs: `-7 % 3` is `-1` here and `2` there.
     ///
-    /// For **integer** dtypes a zero divisor raises an error. For **float** dtypes it produces
-    /// `NaN`.
+    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning).
+    /// For **float** dtypes it produces `NaN`.
     ///
     /// Available via the `%` operator on arrays.
     ///
