@@ -58,22 +58,22 @@ impl<S: ArrayStorage> PermuteDims<S> {
             dims.len()
         );
         let mut seen = S::Dimension::vec(ndim, |_| false);
-        for &ax in dims.as_ref().iter() {
+        for &d in dims.as_ref().iter() {
             ensure!(
-                ax < ndim,
+                d < ndim,
                 InvalidShapeOperation,
-                "dim {ax} out of bounds for array of ndim {ndim}"
+                "dim {d} out of bounds for array of ndim {ndim}"
             );
             ensure!(
-                !seen[ax],
+                !seen[d],
                 InvalidShapeOperation,
-                "duplicate dim {ax} in dims {dims:?}"
+                "duplicate dim {d} in dims {dims:?}"
             );
-            seen[ax] = true;
+            seen[d] = true;
         }
         let mut inv_dims = S::Dimension::vec(ndim, |_| DimIdx::default());
-        for (i, &ax) in dims.as_ref().iter().enumerate() {
-            inv_dims[ax] = i as DimIdx;
+        for (i, &d) in dims.as_ref().iter().enumerate() {
+            inv_dims[d] = i as DimIdx;
         }
 
         let input_shape = array.shape();

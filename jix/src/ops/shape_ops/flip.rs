@@ -43,18 +43,18 @@ impl<S: ArrayStorage> Flip<S> {
 
         let mut is_flipped = S::Dimension::vec(ndim, |_| false);
         for i in 0..dim.len() {
-            let ax = dim.get(i);
+            let d = dim.get(i);
             ensure!(
-                ax < ndim,
+                d < ndim,
                 InvalidShapeOperation,
-                "flip dim {ax} is out of bounds for array with ndim {ndim}"
+                "flip dim {d} is out of bounds for array with ndim {ndim}"
             );
             ensure!(
-                !is_flipped[ax],
+                !is_flipped[d],
                 InvalidShapeOperation,
-                "duplicate dim {ax} in flip"
+                "duplicate dim {d} in flip"
             );
-            is_flipped[ax] = true;
+            is_flipped[d] = true;
         }
         Ok(Self { array, is_flipped })
     }
@@ -515,8 +515,8 @@ mod tests {
         dims: &[usize],
     ) -> ndarray::ArrayD<T> {
         let mut out = nd.clone();
-        for &ax in dims {
-            out.invert_axis(ndarray::Axis(ax));
+        for &d in dims {
+            out.invert_axis(ndarray::Axis(d));
         }
         // Materialize so the result has standard strides.
         ndarray::ArrayD::from_shape_vec(out.shape().to_vec(), out.iter().cloned().collect())

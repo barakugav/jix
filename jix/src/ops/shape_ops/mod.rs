@@ -173,9 +173,12 @@ where
     ///
     /// Panics if any dim is out of bounds, duplicated, or has length != 1.
     #[track_caller]
-    pub fn remove_dim<Ax>(self, dim: Ax) -> Array<RemoveDim<S, Ax::ReducedDimension<S::Dimension>>>
+    pub fn remove_dim<Dims>(
+        self,
+        dim: Dims,
+    ) -> Array<RemoveDim<S, Dims::ReducedDimension<S::Dimension>>>
     where
-        Ax: DimsArg,
+        Dims: DimsArg,
     {
         RemoveDim::new_array(self, dim).unwrap()
     }
@@ -190,9 +193,12 @@ where
     ///
     /// Panics if any value in `dim` is > `self.ndim()` or the resulting ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
     #[track_caller]
-    pub fn insert_dim<Ax>(self, dim: Ax) -> Array<InsertDim<S, Ax::ExpandedDimension<S::Dimension>>>
+    pub fn insert_dim<Dims>(
+        self,
+        dim: Dims,
+    ) -> Array<InsertDim<S, Dims::ExpandedDimension<S::Dimension>>>
     where
-        Ax: DimsArg,
+        Dims: DimsArg,
     {
         InsertDim::new_array(self, dim).unwrap()
     }

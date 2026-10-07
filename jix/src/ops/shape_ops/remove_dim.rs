@@ -66,30 +66,30 @@ where
     D: Dimension,
 {
     /// Constructs a [`RemoveDim`] storage. See the struct docs for semantics and examples.
-    pub fn new<Ax>(array: S, dim: Ax) -> Result<Self>
+    pub fn new<Dims>(array: S, dim: Dims) -> Result<Self>
     where
-        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
+        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         let input_ndim = array.shape().len();
 
         // Validate dim indices and check for duplicates.
         let mut is_removed = DimArray::<bool>::from_iter(std::iter::repeat_n(false, input_ndim));
         let dims = dim_arr(dim.len(), |i| dim.get(i));
-        for &ax in &dims {
+        for &d in &dims {
             ensure!(
-                ax < input_ndim,
+                d < input_ndim,
                 InvalidShapeOperation,
-                "dim {ax} out of bounds for array of ndim {input_ndim} \
+                "dim {d} out of bounds for array of ndim {input_ndim} \
                  (dim indices must be in 0..{input_ndim})"
             );
-            ensure!(!is_removed[ax], InvalidShapeOperation, "duplicate dim {ax}");
-            is_removed[ax] = true;
+            ensure!(!is_removed[d], InvalidShapeOperation, "duplicate dim {d}");
+            is_removed[d] = true;
 
             ensure!(
-                array.shape()[ax] == 1,
+                array.shape()[d] == 1,
                 InvalidShapeOperation,
-                "cannot remove dim {ax} with size {} (only size-1 dims can be removed)",
-                array.shape()[ax]
+                "cannot remove dim {d} with size {} (only size-1 dims can be removed)",
+                array.shape()[d]
             );
         }
 
@@ -146,9 +146,9 @@ where
     }
 
     /// Constructs an array with [`RemoveDim`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Ax>(array: Array<S>, dim: Ax) -> Result<Array<Self>>
+    pub fn new_array<Dims>(array: Array<S>, dim: Dims) -> Result<Array<Self>>
     where
-        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
+        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         Self::new(array.into_storage(), dim).map(Array::from_storage)
     }

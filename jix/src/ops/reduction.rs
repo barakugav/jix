@@ -73,26 +73,26 @@ pub(crate) trait ReductionOpKernel<T> {
 }
 
 impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
-    pub(crate) fn new<Ax>(array: S, kernel: K, dims: Ax) -> Result<Self>
+    pub(crate) fn new<Dims>(array: S, kernel: K, dims: Dims) -> Result<Self>
     where
         S: ArrayStorageTyped,
         K: ReductionOpKernel<S::Item, Output: Dtyped>,
         D: Dimension,
-        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
+        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
         let input_ndim = array.shape().len();
         let mut is_reduced = S::Dimension::vec(input_ndim, |_| false);
         for i in 0..dims.len() {
-            let ax = dims.get(i);
+            let d = dims.get(i);
             ensure!(
-                ax < input_ndim,
+                d < input_ndim,
                 InvalidArgument,
-                "dim {ax} out of bounds for array of ndim {input_ndim}"
+                "dim {d} out of bounds for array of ndim {input_ndim}"
             );
 
-            ensure!(!is_reduced[ax], InvalidArgument, "duplicate dim {ax}");
-            is_reduced[ax] = true;
+            ensure!(!is_reduced[d], InvalidArgument, "duplicate dim {d}");
+            is_reduced[d] = true;
         }
 
         if !K::SUPPORTS_EMPTY
@@ -1119,18 +1119,18 @@ macro_rules! define_reduction_op {
             D: crate::Dimension,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new<Ax>(array: S, dims: Ax $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<Self>
+            pub fn new<Dims>(array: S, dims: Dims $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<Self>
             where
-                Ax: crate::ops::DimsArg<ReducedDimension<S::Dimension> = D>,
+                Dims: crate::ops::DimsArg<ReducedDimension<S::Dimension> = D>,
             {
                 let kernel = $Kernel { $($($extra_arg,)+)? };
                 Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, dims)?))
             }
 
             #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
-            pub fn new_array<Ax>(array: crate::Array<S>, dims: Ax $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>>
+            pub fn new_array<Dims>(array: crate::Array<S>, dims: Dims $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>>
             where
-                Ax: crate::ops::DimsArg<ReducedDimension<S::Dimension> = D>,
+                Dims: crate::ops::DimsArg<ReducedDimension<S::Dimension> = D>,
             {
                 Self::new(array.into_storage(), dims $($(, $extra_arg)+)?).map(crate::Array::from_storage)
             }
@@ -2421,23 +2421,23 @@ impl ReductionOpKernel<bool> for AnyKernel {
 pub struct Reduce<S: ArrayStorage, D, F>(ReductionOp<S, ReduceKernel<F>, D>);
 impl<S: ArrayStorage, D, F> Reduce<S, D, F> {
     /// Constructs a [`Reduce`] storage. See the struct docs for semantics and examples.
-    pub fn new<Ax>(array: S, dims: Ax, f: F) -> Result<Self>
+    pub fn new<Dims>(array: S, dims: Dims, f: F) -> Result<Self>
     where
         S: ArrayStorageTyped,
         D: Dimension,
         F: Fn(S::Item, S::Item) -> S::Item,
-        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
+        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         Ok(Self(ReductionOp::new(array, ReduceKernel(f), dims)?))
     }
 
     /// Constructs an array with [`Reduce`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Ax>(array: Array<S>, dims: Ax, f: F) -> Result<Array<Reduce<S, D, F>>>
+    pub fn new_array<Dims>(array: Array<S>, dims: Dims, f: F) -> Result<Array<Reduce<S, D, F>>>
     where
         S: ArrayStorageTyped,
         D: Dimension,
         F: Fn(S::Item, S::Item) -> S::Item,
-        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
+        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         Self::new(array.into_storage(), dims, f).map(Array::from_storage)
     }
@@ -2574,13 +2574,13 @@ where
 pub struct Fold<S: ArrayStorage, D, B, F>(ReductionOp<S, VanillaFoldKernel<B, F>, D>);
 impl<S: ArrayStorage, D, B, F> Fold<S, D, B, F> {
     /// Constructs a [`Fold`] storage. See the struct docs for semantics and examples.
-    pub fn new<Ax>(array: S, dims: Ax, init: B, f: F) -> Result<Self>
+    pub fn new<Dims>(array: S, dims: Dims, init: B, f: F) -> Result<Self>
     where
         S: ArrayStorageTyped,
         D: Dimension,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
+        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         Ok(Self(ReductionOp::new(
             array,
@@ -2590,9 +2590,9 @@ impl<S: ArrayStorage, D, B, F> Fold<S, D, B, F> {
     }
 
     /// Constructs an array with [`Fold`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Ax>(
+    pub fn new_array<Dims>(
         array: Array<S>,
-        dims: Ax,
+        dims: Dims,
         init: B,
         f: F,
     ) -> Result<Array<Fold<S, D, B, F>>>
@@ -2601,7 +2601,7 @@ impl<S: ArrayStorage, D, B, F> Fold<S, D, B, F> {
         D: Dimension,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        Ax: DimsArg<ReducedDimension<S::Dimension> = D>,
+        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         Self::new(array.into_storage(), dims, init, f).map(Array::from_storage)
     }
@@ -2694,10 +2694,10 @@ macro_rules! define_array_reduction_method {
     ) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $method<Ax>(self, dim: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Ax::ReducedDimension<S::Dimension>>>
+        pub fn $method<Dims>(self, dim: Dims $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Dims::ReducedDimension<S::Dimension>>>
         where
             $($where_)+
-            Ax: DimsArg,
+            Dims: DimsArg,
         {
             $Op::new_array(self, dim $($(, $extra_arg)*)?).unwrap()
         }
@@ -2793,15 +2793,15 @@ where
     /// `f` MUST be associative and commutative: the elements are visited in an unspecified
     /// order, and `f` combines partial accumulators as well as single elements.
     #[track_caller]
-    pub fn reduce_unordered<F, Ax>(
+    pub fn reduce_unordered<F, Dims>(
         self,
-        dims: Ax,
+        dims: Dims,
         f: F,
-    ) -> Array<Reduce<S, Ax::ReducedDimension<S::Dimension>, F>>
+    ) -> Array<Reduce<S, Dims::ReducedDimension<S::Dimension>, F>>
     where
         S: ArrayStorageTyped,
         F: Fn(S::Item, S::Item) -> S::Item,
-        Ax: DimsArg,
+        Dims: DimsArg,
     {
         Reduce::new_array(self, dims, f).unwrap()
     }
@@ -2810,17 +2810,17 @@ where
     /// Applies the [`Fold`] operation, see the op struct docs for details.
     #[track_caller]
     #[allow(clippy::type_complexity)]
-    pub fn fold<F, B, Ax>(
+    pub fn fold<F, B, Dims>(
         self,
-        dims: Ax,
+        dims: Dims,
         init: B,
         f: F,
-    ) -> Array<Fold<S, Ax::ReducedDimension<S::Dimension>, B, F>>
+    ) -> Array<Fold<S, Dims::ReducedDimension<S::Dimension>, B, F>>
     where
         S: ArrayStorageTyped,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        Ax: DimsArg,
+        Dims: DimsArg,
     {
         Fold::new_array(self, dims, init, f).unwrap()
     }
@@ -4248,7 +4248,7 @@ pub(crate) mod tests {
         // Shape of the kept dims - this is what we iterate over
         let kept_shape = kept_dims
             .iter()
-            .map(|&ax| array.shape()[ax])
+            .map(|&d| array.shape()[d])
             .collect::<Vec<_>>();
         let total: usize = kept_shape.iter().product();
 
@@ -4276,8 +4276,8 @@ pub(crate) mod tests {
                 .collect();
             pairs.sort_unstable_by_key(|p| core::cmp::Reverse(p.0));
 
-            for (ax, idx) in &pairs {
-                view = view.index_axis_move(ndarray::Axis(*ax), *idx);
+            for (d, idx) in &pairs {
+                view = view.index_axis_move(ndarray::Axis(*d), *idx);
             }
 
             (kept_indices, view)

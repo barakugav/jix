@@ -82,13 +82,13 @@ impl<T: Dtyped> LanesInfo for T {
 /// An argument that specifies a set of dim indices, encoding the dimension change in the type.
 ///
 /// Operations that add or remove dims - `insert_dim`, `remove_dim`, `sum`, `max`, etc. - are
-/// generic over `Ax: DimsArg`. The associated types `ReducedDimension` and `ExpandedDimension`
+/// generic over `Dims: DimsArg`. The associated types `ReducedDimension` and `ExpandedDimension`
 /// compute the output dimension purely from the input dimension `D` and the concrete type of the
 /// dim argument. This means the compiler knows the output ndim without any runtime information.
 ///
 /// # Dimension rules by argument type
 ///
-/// | `Ax` type | `ReducedDimension<D>` | `ExpandedDimension<D>` |
+/// | `Dims` type | `ReducedDimension<D>` | `ExpandedDimension<D>` |
 /// |---|---|---|
 /// | `usize` | `D::Smaller` | `D::Larger` |
 /// | `[usize; 0]` / `()` | `D` | `D` |

@@ -16,7 +16,7 @@ fn keepdims_after_reduction(
     let mapped_dims = dims
         .iter()
         .enumerate()
-        .map(|(i, &ax)| ax - i)
+        .map(|(i, &d)| d - i)
         .collect::<DimArray<_>>();
     let res = jix_core::ops::InsertDim::new_array(array, mapped_dims.as_slice());
     let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;

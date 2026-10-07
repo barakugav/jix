@@ -83,9 +83,9 @@ where
     D: Dimension,
 {
     /// Constructs an [`InsertDim`] storage. See the struct docs for semantics and examples.
-    pub fn new<Ax>(array: S, dim: Ax) -> Result<Self>
+    pub fn new<Dims>(array: S, dim: Dims) -> Result<Self>
     where
-        Ax: DimsArg<ExpandedDimension<S::Dimension> = D>,
+        Dims: DimsArg<ExpandedDimension<S::Dimension> = D>,
     {
         let orig_ndim = array.shape().len();
         let new_ndim = orig_ndim + dim.len();
@@ -96,11 +96,11 @@ where
         // the last input dim". Duplicates are allowed - each occurrence inserts one additional
         // dim at that gap.
         for i in 0..dim.len() {
-            let ax = dim.get(i);
+            let d = dim.get(i);
             ensure!(
-                ax <= orig_ndim,
+                d <= orig_ndim,
                 InvalidShapeOperation,
-                "dim {ax} out of bounds for array of ndim {orig_ndim} \
+                "dim {d} out of bounds for array of ndim {orig_ndim} \
                      (gap indices must be in 0..={orig_ndim})"
             );
         }
@@ -159,9 +159,9 @@ where
     }
 
     /// Constructs an array with [`InsertDim`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Ax>(array: Array<S>, dim: Ax) -> Result<Array<Self>>
+    pub fn new_array<Dims>(array: Array<S>, dim: Dims) -> Result<Array<Self>>
     where
-        Ax: DimsArg<ExpandedDimension<S::Dimension> = D>,
+        Dims: DimsArg<ExpandedDimension<S::Dimension> = D>,
     {
         Self::new(array.into_storage(), dim).map(Array::from_storage)
     }

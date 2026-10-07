@@ -507,10 +507,10 @@ mod tests {
         }
     }
 
-    // A `strided_strides` multiplier vector that leaves a one-element gap only along dim `ax`
-    // (all ones - fully contiguous - when `ax` is out of range, e.g. for a 0-D shape).
-    fn strided_dim(ndim: usize, ax: usize) -> Vec<usize> {
-        (0..ndim).map(|d| if d == ax { 2 } else { 1 }).collect()
+    // A `strided_strides` multiplier vector that leaves a one-element gap only along `dim`
+    // (all ones - fully contiguous - when `dim` is out of range, e.g. for a 0-D shape).
+    fn strided_dim(ndim: usize, dim: usize) -> Vec<usize> {
+        (0..ndim).map(|d| if d == dim { 2 } else { 1 }).collect()
     }
 
     // Run a single copy through `NdCopier` for element type `T` at a chosen base alignment

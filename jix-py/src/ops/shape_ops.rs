@@ -621,7 +621,7 @@ pub fn permute_dims<'py>(
     let py = py_arr.py();
     let array = py_arr.get().to_core();
     let dims = dims.unwrap_or_else(|| (0..array.ndim()).rev().collect());
-    if dims.len() == array.ndim() && dims.iter().enumerate().all(|(i, &ax)| i == ax) {
+    if dims.len() == array.ndim() && dims.iter().enumerate().all(|(i, &d)| i == d) {
         return Ok(py_arr); // no-op permutation
     }
     let ret = jix_core::ops::PermuteDims::new_array(array, &dims).into_py_result()?;

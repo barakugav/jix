@@ -65,7 +65,7 @@ def _dims_strategy(draw, ndim):
     # Pick n unique positive dims then optionally negate each
     n = draw(st.integers(1, ndim))
     pos_dims = sorted(draw(st.lists(st.integers(0, ndim - 1), min_size=n, max_size=n, unique=True)))
-    dims = [ax - ndim if draw(st.booleans()) else ax for ax in pos_dims]
+    dims = [d - ndim if draw(st.booleans()) else d for d in pos_dims]
     # Vary the container type
     if len(dims) == 1:
         form = draw(st.integers(0, 2))
