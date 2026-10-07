@@ -22,6 +22,9 @@ def concat(arrays: typing.Sequence[typing.Any], dim: builtins.int = 0) -> Array:
 
 def clip(array: typing.Any, min: typing.Optional[typing.Any] = None, max: typing.Optional[typing.Any] = None) -> Array:
     """Alias for [`jix.clamp`][jix.clamp]"""
+
+def prod(array: typing.Any, dim: typing.Optional[builtins.int | typing.Sequence[builtins.int]] = None, *, keepdim: builtins.bool = False) -> Array:
+    """Alias for [`jix.product`][jix.product]"""
 "#,
     );
 
