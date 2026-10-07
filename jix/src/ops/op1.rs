@@ -356,15 +356,35 @@ pub(crate) mod _traits {
         Sign,
         sign,
         |a| a.signum(),
-        [i8, i16, i32, i64, f32, f64] => "same"
+        [i8, i16, i32, i64] => "same"
     );
+    // Unlike `signum`, which maps `+-0.0` to `+-1.0`, zero maps to `0.0` (as in numpy and torch).
+    // `NaN` stays `NaN`.
+    macro_rules! impl_sign_float {
+        ($($t:ty),*) => {
+            $(
+                impl Sign for $t {
+                    type Output = $t;
+                    #[inline(always)]
+                    fn sign(self) -> Self::Output {
+                        if self == 0.0 { 0.0 } else { self.signum() }
+                    }
+                }
+            )*
+        };
+    }
+    impl_sign_float!(f32, f64);
     #[cfg(feature = "half")]
     impl Sign for f16 {
         type Output = f16;
 
         #[inline(always)]
         fn sign(self) -> Self::Output {
-            <Self as num_traits::Float>::signum(self)
+            if self == f16::ZERO {
+                f16::ZERO
+            } else {
+                <Self as num_traits::Float>::signum(self)
+            }
         }
     }
     macro_rules! impl_sign_uint {
@@ -829,9 +849,8 @@ define_op1!(
     /// For **unsigned integer** types: returns `0` or `1` of the same type (since
     /// unsigned values cannot be negative).
     ///
-    /// For **float** types: returns `+1.0` for positive values and `-1.0` for
-    /// negative values. Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns
-    /// `-1.0`. Semantics follow [`f32::signum`].
+    /// For **float** types: returns `+1.0` for positive values, `-1.0` for negative values,
+    /// `0.0` for `+0.0` and `-0.0`, and `NaN` for `NaN`, like `numpy.sign`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -851,10 +870,10 @@ define_op1!(
     /// let result = b.sign().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0, -1.0]);
     ///
-    /// // Float: positive zero returns +1.0.
-    /// let c = Array::compact_ndarray(&array![0.0f32])?;
+    /// // Float: both zeros return 0.0.
+    /// let c = Array::compact_ndarray(&array![0.0f32, -0.0])?;
     /// let result = c.sign().to_ndarray()?;
-    /// assert_eq!(result[[0]], 1.0);
+    /// assert_eq!(result.as_slice().unwrap(), &[0.0, 0.0]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Sign,
@@ -1307,18 +1326,20 @@ pub(crate) mod tests {
         let expectedu = ndu.mapv(|a: u32| if a == 0 { a - a } else { a - a + 1 });
         crate::util::assert_array_matches(&zau.view().sign(), &expectedu);
 
-        // f32: zero is signed - +0.0 -> +1.0, -0.0 -> -1.0 - plus a negative and a positive
-        // value.
+        // f32: both zeros map to +0.0 (not signum's +-1.0), and NaN stays NaN.
         let ndf = ndarray::array![-3.0f32, -0.0, 0.0, 5.0];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
-        let expectedf = ndf.mapv(|a: f32| a.signum());
-        crate::util::assert_array_matches(&zaf.view().sign(), &expectedf);
+        let resf = zaf.view().sign().to_ndarray().unwrap();
+        assert_eq!(resf.as_slice().unwrap(), &[-1.0, 0.0, 0.0, 1.0]);
+        assert!(resf.iter().all(|x| !x.is_sign_negative() || *x == -1.0));
+        let nan = Array::compact_ndarray(&ndarray::array![f32::NAN]).unwrap();
+        assert!(nan.sign().to_ndarray().unwrap()[0].is_nan());
 
-        // f64: same signed-zero behavior, plus a non-default block shape.
+        // f64: same, plus a non-default block shape.
         let ndd = ndarray::array![-3.0f64, -0.0, 0.0, 5.0];
         let zad = Array::compact_ndarray_with(&ndd, crate::util::arr_params(&[2])).unwrap();
-        let expectedd = ndd.mapv(|a: f64| a.signum());
-        crate::util::assert_array_matches(&zad.view().sign(), &expectedd);
+        let resd = zad.view().sign().to_ndarray().unwrap();
+        assert_eq!(resd.as_slice().unwrap(), &[-1.0, 0.0, 0.0, 1.0]);
     }
     // abs: same dtype for scalar types; complex types have a different output dtype (see below).
     #[test]

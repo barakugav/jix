@@ -519,8 +519,8 @@ define_op1!(
     /// For **unsigned integer** types: returns `0` or `1` of the same dtype (unsigned values
     /// cannot be negative).
     ///
-    /// For **float** types: returns `+1.0` for positive values and `-1.0` for negative values.
-    /// Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns `-1.0`.
+    /// For **float** types: returns `+1.0` for positive values, `-1.0` for negative values,
+    /// `0.0` for `+0.0` and `-0.0`, and `NaN` for `NaN`.
     ///
     /// **Auto-casting**: `bool` inputs are cast to `int8` before the operation.
     ///
