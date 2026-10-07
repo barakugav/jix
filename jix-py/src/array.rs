@@ -906,6 +906,16 @@ impl Array {
         crate::ops::floor_divide(other, slf)
     }
 
+    /// Element-wise remainder of two arrays. See [`jix.remainder()`][jix.remainder].
+    pub fn __mod__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::remainder(slf, other)
+    }
+
+    /// Element-wise remainder of two arrays. See [`jix.remainder()`][jix.remainder].
+    pub fn __rmod__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::remainder(other, slf)
+    }
+
     /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
     pub fn pow(slf: &Bound<'_, Self>, exponent: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::power(slf, exponent)

@@ -234,6 +234,59 @@ define_op2!(
     }
 );
 define_op2!(
+    /// Element-wise remainder of two arrays (`a % b`).
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`,
+    /// `f64`.
+    ///
+    /// The result has the sign of the dividend `a` (truncated remainder, matching Rust's `%`),
+    /// so it pairs with [`jix.floor_divide()`][jix.floor_divide], which truncates toward zero:
+    /// `a == (a // b) * b + a % b`. When the operands have opposite signs this differs from
+    /// numpy's `remainder` and Python's `%`, which take the sign of the divisor (e.g. `-7 % 3`
+    /// is `-1` here, but `2` in numpy); it matches `numpy.fmod` and `torch.fmod`. For
+    /// non-negative operands they all agree.
+    ///
+    /// For **integer** dtypes a zero divisor raises an error. For **float** dtypes it produces
+    /// `NaN`.
+    ///
+    /// Available via the `%` operator on arrays.
+    ///
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
+    /// smallest type that can represent both without information loss (Safe casting
+    /// rules). For example `u8 % i32 -> i32`.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+    ///
+    /// Args:
+    ///     a: First operand (the dividend).
+    ///     b: Second operand (the divisor).
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
+    ///         No computation occurs until the result is read.
+    ///
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([10, 20, 30], dtype=np.int32)
+    ///     b = jix.compact([3, 6, 7], dtype=np.int32)
+    ///     result = jix.remainder(a, b)  # same as `a % b`
+    ///     assert np.array_equal(result.numpy(), [1, 2, 2])
+    ///
+    ///     # The sign follows the dividend
+    ///     c = jix.compact([-7, 7], dtype=np.int32)
+    ///     assert np.array_equal((c % 3).numpy(), [-1, 1])
+    ///     ```
+    remainder,
+    Rem,
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        Safe
+    }
+);
+define_op2!(
     /// Element-wise exponentiation (`a` raised to the power `b`).
     ///
     /// Supported base dtypes: `u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`,

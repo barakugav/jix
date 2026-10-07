@@ -578,6 +578,39 @@ define_op2!(
     core_op = Div::div,
 );
 define_op2!(
+    /// Element-wise remainder of two arrays (`a % b`).
+    ///
+    /// Semantics follow Rust's `%`: the result has the sign of the dividend `a` (truncated
+    /// remainder, like C's `fmod`), so it pairs with the truncating integer [`Div`]:
+    /// `a == (a / b) * b + a % b`. This differs from Python's and NumPy's `%`, which take the
+    /// sign of the divisor, whenever the operands have opposite signs.
+    ///
+    /// For **integer** types a zero divisor panics in both debug and release builds, as does
+    /// `MIN % -1` for signed types.
+    /// For **float** types semantics follow `f32::rem`: a zero divisor produces `NaN`.
+    ///
+    /// Available via the `%` operator on arrays. For the remainder of every element by a
+    /// constant, use [`Array::map`]: `a.map(|x| x % 3i32)`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![7i32, -7, 7, -7])?;
+    /// let b = Array::compact_ndarray(&array![3i32, 3, -3, -3])?;
+    /// let result = (a % b).to_ndarray()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[1, -1, 1, -1]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    Rem,
+    RemKernel,
+    <core::ops::Rem>::rem(a, b),
+    core_op = Rem::rem,
+);
+define_op2!(
     /// Element-wise exponentiation (`a` raised to the power `b`).
     ///
     /// A negative base with a non-integer exponent produces `NaN`.
@@ -676,7 +709,7 @@ pub(crate) mod tests {
                         <$dtype as crate::util::ScalarStrategy>::$strategy(),
                         |nd_a, nd_b, za, zb| {
                             #[allow(unused_imports)]
-                            use core::ops::{Add, Div, Mul, Sub};
+                            use core::ops::{Add, Div, Mul, Rem, Sub};
                             let result = za.$op_method(zb);
                             let expected =
                                 ndarray::Zip::from(nd_a).and(nd_b).map_collect(|& $a, & $b| $body);
@@ -829,6 +862,44 @@ pub(crate) mod tests {
         #[cfg(feature = "num-complex")]
         [complex_f32, complex_f64]
     );
+
+    test_op2!(
+        rem,
+        |a, b| a % b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
+        op_safe_non_zero_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+
+    // rem with mixed signs: the result takes the sign of the dividend, and pairs with the
+    // truncating div so that `a == (a / b) * b + a % b`.
+    #[test]
+    fn rem_concrete() {
+        use crate::Array;
+
+        let nd_a = ndarray::array![[7i32, -7, 7, -7], [0, 100, -100, 5]];
+        let nd_b = ndarray::array![[3i32, 3, -3, -3], [5, 7, 7, -100]];
+        let za = Array::compact_ndarray_with(&nd_a, crate::util::arr_params(&[1, 2])).unwrap();
+        let zb = Array::compact_ndarray(&nd_b).unwrap();
+        let expected = ndarray::array![[1i32, -1, 1, -1], [0, 2, -2, 5]];
+        crate::util::assert_array_matches(&(za % zb), &expected);
+
+        let za = Array::compact_ndarray(&nd_a).unwrap();
+        let zb = Array::compact_ndarray(&nd_b).unwrap();
+        let quotient = (za / zb).to_ndarray().unwrap();
+        let reconstructed = &quotient * &nd_b + &expected;
+        assert_eq!(reconstructed.into_dyn(), nd_a.into_dyn());
+
+        let nd_f = ndarray::array![-7.5f64, 7.5, 1.0];
+        let nd_g = ndarray::array![2.0f64, -2.0, 0.0];
+        let zf = Array::compact_ndarray(&nd_f).unwrap();
+        let zg = Array::compact_ndarray(&nd_g).unwrap();
+        let result = (zf % zg).to_ndarray().unwrap();
+        assert_eq!(result[0], -1.5);
+        assert_eq!(result[1], 1.5);
+        assert!(result[2].is_nan());
+    }
 
     // sub_u32: a = c + b guarantees a - b == c with no unsigned underflow.
     proptest::proptest! {

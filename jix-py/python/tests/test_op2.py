@@ -313,6 +313,51 @@ def test_floor_divide_rejects_floats():
         _ = jix.floor_divide(a, b).numpy()
 
 
+@pytest.mark.parametrize("dtype", ints + uints + floats)
+@given(st.data())
+def test_remainder(dtype: np.dtype, data: DataObject):
+    # jix's `%` is the truncated remainder (sign of the dividend, Rust `%`), which is numpy's
+    # fmod rather than numpy's `%`. Non-zero divisors avoid the integer divide-by-zero error.
+    nz = op_safe_non_zero_element_strategy(dtype)
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
+    assert_array_matches(za % zb, np.fmod(np_a, np_b), data=data)
+
+
+def test_remainder_custom_inputs():
+    def check(result, expected):
+        np.testing.assert_array_equal(result.numpy(), expected)
+
+    d = np.array([[10, 20, 30], [40, 50, 61]], dtype=np.int64)
+    za = jix.compact(d)
+    check(za % np.int64(7), d % 7)
+    check(np.int64(65) % za, 65 % d)  # __rmod__
+    check(za % [[3, 6, 7], [9, 8, 10]], d % [[3, 6, 7], [9, 8, 10]])
+    check(jix.remainder(za, np.int64(7)), d % 7)
+    check(jix.remainder(np.int64(65), za), 65 % d)  # scalar first via free-function
+
+    # Opposite signs: the result takes the sign of the dividend, unlike numpy's `%`.
+    a = np.array([7, -7, 7, -7], dtype=np.int32)
+    b = np.array([3, 3, -3, -3], dtype=np.int32)
+    za, zb = jix.compact(a), jix.compact(b)
+    check(za % zb, [1, -1, 1, -1])
+    # Pairs with the truncating `//`: a == (a // b) * b + a % b.
+    check((za // zb) * zb + za % zb, a)
+
+    f = np.array([-7.5, 7.5, 5.0], dtype=np.float64)
+    check(jix.compact(f) % 2.0, np.fmod(f, 2.0))
+
+
+def test_remainder_float_zero_divisor_is_nan():
+    result = jix.compact(np.array([1.0, -1.0], dtype=np.float32)) % np.float32(0.0)
+    assert np.isnan(result.numpy()).all()
+
+
+def test_remainder_rejects_complex():
+    a = jix.compact(np.array([1 + 1j, 2 + 2j], dtype=np.complex64))
+    with pytest.raises(RuntimeError):
+        _ = (a % a).numpy()
+
+
 # Every (base_dtype, exponent_dtype) pair the power dispatch table accepts directly.
 # Each pair maps onto exactly one impl, so the result dtype is the base dtype.
 # Integer bases require an unsigned exponent; float bases accept int or float.
