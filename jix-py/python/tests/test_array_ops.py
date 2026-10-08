@@ -314,7 +314,7 @@ def test_insert_dim_multiple():
     arr = np.arange(6, dtype=np.int32).reshape(2, 3)
     za = jix.compact(arr)
     # numpy expand_dims semantics: dims index the output shape -> (1, 2, 1, 3)
-    r = jix.insert_dim(za, [0, 2])
+    r = jix.insert_dim(za, (0, 2))
     assert r.shape == (1, 2, 1, 3)
     np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, (0, 2)))
 
@@ -324,7 +324,7 @@ def test_insert_dim_repeated_dim_raises():
     za = jix.compact(arr)
     # like numpy.expand_dims, repeated output dims are rejected
     with pytest.raises(Exception):
-        jix.insert_dim(za, [0, 0])
+        jix.insert_dim(za, (0, 0))
 
 
 def test_insert_dim_out_of_range_raises():
@@ -342,18 +342,17 @@ def test_insert_dim_out_of_range_raises():
         ((3,), 1),
         ((3,), -1),
         ((3,), -2),
-        ((2, 3), [0, 2]),
-        ((2, 3), [0, 1]),
+        ((2, 3), (0, 2)),
+        ((2, 3), (0, 1)),
         ((2, 3), -1),
-        ((2, 3, 4), [0, 2, 5]),
-        ((2, 3, 4), [-1, -3]),
+        ((2, 3, 4), (0, 2, 5)),
+        ((2, 3, 4), (-1, -3)),
     ],
 )
 def test_insert_dim_matches_numpy_expand_dims(shape, dim):
     arr = np.arange(int(np.prod(shape)), dtype=np.int32).reshape(shape)
     za = jix.compact(arr)
-    np_dim = tuple(dim) if isinstance(dim, list) else dim
-    expected = np.expand_dims(arr, np_dim)
+    expected = np.expand_dims(arr, dim)
     got = jix.insert_dim(za, dim).numpy()
     assert got.shape == expected.shape
     np.testing.assert_array_equal(got, expected)
@@ -406,8 +405,8 @@ def test_unsqueeze_single():
 def test_unsqueeze_same_as_insert_dim():
     arr = np.arange(6, dtype=np.int32).reshape(2, 3)
     za = jix.compact(arr)
-    r1 = jix.unsqueeze(za, [0, 2])
-    r2 = jix.insert_dim(za, [0, 2])
+    r1 = jix.unsqueeze(za, (0, 2))
+    r2 = jix.insert_dim(za, (0, 2))
     assert r1.shape == r2.shape
     np.testing.assert_array_equal(r1.numpy(), r2.numpy())
 
@@ -416,7 +415,7 @@ def test_unsqueeze_method_matches_numpy_expand_dims():
     arr = np.arange(6, dtype=np.int32).reshape(2, 3)
     za = jix.compact(arr)
     # the Array.unsqueeze method uses the same output-world semantics
-    r = za.unsqueeze([0, 2])
+    r = za.unsqueeze((0, 2))
     np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, (0, 2)))
 
 
@@ -895,10 +894,10 @@ def test_flip_dim_int():
     np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=0))
 
 
-def test_flip_dim_list():
+def test_flip_dim_tuple():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.flip(a, dim=[1])
+    r = jix.flip(a, dim=(1,))
     np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=1))
 
 
@@ -919,7 +918,7 @@ def test_flip_dim_none_reverses_all():
 def test_flip_multiple_dims():
     arr = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
     a = jix.compact(arr)
-    r = jix.flip(a, dim=[0, 2])
+    r = jix.flip(a, dim=(0, 2))
     np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=(0, 2)))
 
 

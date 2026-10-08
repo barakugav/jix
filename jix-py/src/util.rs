@@ -196,22 +196,25 @@ pub(crate) fn normalize_dims_optional(
     }
 }
 
-/// A single `T`, or a `tuple` or `list` of `T`.
-pub enum ItemOrSequence<T> {
+/// A single `T`, or a `tuple` of `T`. With `LIST` (the default), a `list` of `T` is accepted too.
+pub enum ItemOrSequence<T, const LIST: bool = true> {
     Item(T),
     Sequence(Vec<T>),
 }
-impl<'py, T> FromPyObject<'_, 'py> for ItemOrSequence<T>
+/// A single `T` or a `tuple` of `T`, for dim arguments. Like numpy's reductions and `squeeze`, a
+/// `list` is rejected.
+pub type ItemOrTuple<T> = ItemOrSequence<T, false>;
+impl<'py, T, const LIST: bool> FromPyObject<'_, 'py> for ItemOrSequence<T, LIST>
 where
     T: FromPyObjectOwned<'py>,
 {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
-        // Only tuples and lists count as sequences, unlike pyo3's `Vec<T>`, which accepts any
-        // object with the sequence protocol: an array passed where dims are expected is rejected
-        // instead of having its elements read as dims.
-        if obj.is_instance_of::<PyTuple>() || obj.is_instance_of::<PyList>() {
+        // Only tuples (and lists, with `LIST`) count as sequences, unlike pyo3's `Vec<T>`, which
+        // accepts any object with the sequence protocol: an array passed where dims are expected
+        // is rejected instead of having its elements read as dims.
+        if obj.is_instance_of::<PyTuple>() || (LIST && obj.is_instance_of::<PyList>()) {
             let items = obj
                 .try_iter()?
                 .map(|item| item?.extract::<T>().map_err(Into::into))
@@ -225,13 +228,14 @@ where
             }
             let type_name = obj.get_type().name().map(|n| n.to_string());
             PyTypeError::new_err(format!(
-                "expected an int, or a tuple or list of ints, got {}",
+                "expected an int, or a tuple{} of ints, got {}",
+                if LIST { " or list" } else { "" },
                 type_name.as_deref().unwrap_or("?")
             ))
         })
     }
 }
-impl<T> ItemOrSequence<T> {
+impl<T, const LIST: bool> ItemOrSequence<T, LIST> {
     #[inline]
     pub(crate) fn into_dim_array(self) -> PyResult<DimArray<T>> {
         match self {
@@ -287,11 +291,14 @@ impl<T, const N: usize> From<[T; N]> for ItemOrSequence<T> {
 macro_rules! impl_item_or_sequence_stub_type {
     ($($t:ty),*) => {
         $(
-            impl pyo3_stub_gen::PyStubType for ItemOrSequence<$t> {
+            impl<const LIST: bool> pyo3_stub_gen::PyStubType for ItemOrSequence<$t, LIST> {
                 fn type_output() -> pyo3_stub_gen::TypeInfo {
                     let mut info = <$t as pyo3_stub_gen::PyStubType>::type_input();
-                    let item = &info.name;
-                    info.name = format!("{item} | builtins.tuple[{item}, ...] | builtins.list[{item}]");
+                    let item = std::mem::take(&mut info.name);
+                    info.name = format!("{item} | builtins.tuple[{item}, ...]");
+                    if LIST {
+                        info.name += &format!(" | builtins.list[{item}]");
+                    }
                     info
                 }
             }

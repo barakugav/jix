@@ -18,7 +18,7 @@ use crate::dtype::dtype_to_numpy;
 use crate::ops::asarray_simple;
 use crate::util::{
     dim_arr, maybe_detach, numpy_empty_ordered, strided_span_bytes, DimArray, IntoPyResult,
-    ItemOrSequence,
+    ItemOrSequence, ItemOrTuple,
 };
 
 /// A multi-dimensional compressed array.
@@ -1110,7 +1110,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn all(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::all(slf, dim, keepdim)
@@ -1120,7 +1120,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn any(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::any(slf, dim, keepdim)
@@ -1130,7 +1130,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn max(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::max(slf, dim, keepdim)
@@ -1140,7 +1140,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn min(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::min(slf, dim, keepdim)
@@ -1162,7 +1162,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn sum(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::sum(slf, dim, keepdim)
@@ -1172,7 +1172,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn mean(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::mean(slf, dim, keepdim)
@@ -1182,7 +1182,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn prod(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::product(slf, dim, keepdim)
@@ -1192,7 +1192,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn std(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
@@ -1203,7 +1203,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn var(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
@@ -1281,7 +1281,7 @@ impl Array {
     #[pyo3(signature = (dim=None))]
     pub fn squeeze<'py>(
         slf: &Bound<'py, Array>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
     ) -> PyResult<Bound<'py, Array>> {
         crate::ops::squeeze(slf, dim)
     }
@@ -1290,7 +1290,7 @@ impl Array {
     #[pyo3(signature = (dim))]
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Array>,
-        dim: ItemOrSequence<i32>,
+        dim: ItemOrTuple<i32>,
     ) -> PyResult<Bound<'py, Array>> {
         crate::ops::unsqueeze(slf, dim)
     }
@@ -1309,7 +1309,7 @@ impl Array {
     #[pyo3(signature = (dim=None))]
     pub fn flip<'py>(
         slf: &Bound<'py, Array>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
     ) -> PyResult<Bound<'py, Array>> {
         crate::ops::flip(slf, dim)
     }
@@ -1424,7 +1424,7 @@ impl Array {
     #[pyo3(signature = (dim))]
     pub fn insert_dim<'py>(
         slf: &Bound<'py, Array>,
-        dim: ItemOrSequence<i32>,
+        dim: ItemOrTuple<i32>,
     ) -> PyResult<Bound<'py, Array>> {
         crate::ops::insert_dim(slf, dim)
     }
@@ -1433,7 +1433,7 @@ impl Array {
     #[pyo3(signature = (dim))]
     pub fn remove_dim<'py>(
         slf: &Bound<'py, Array>,
-        dim: ItemOrSequence<i32>,
+        dim: ItemOrTuple<i32>,
     ) -> PyResult<Bound<'py, Array>> {
         crate::ops::remove_dim(slf, dim)
     }
