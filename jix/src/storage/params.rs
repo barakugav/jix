@@ -1,11 +1,10 @@
-use std::marker::PhantomPinned;
-use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
 use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
-use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight, SendSyncPtr};
+use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight};
 use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt};
 
 /// Target byte range for a single read region.
@@ -493,27 +492,24 @@ impl ArrayParams {
 
 /// Internal specs of an array.
 pub struct ArraySpec<'a> {
-    shared: Pin<&'a (ArraySpecShared, PhantomPinned)>,
+    shared: &'a Arc<ArraySpecShared>,
     dynamic: &'a ArraySpecDynamic,
     flags: ArraySpecFlags,
 }
 /// Owned version of [`ArraySpec`].
 ///
 /// The struct holds two sets of parameters:
-/// - "shared" parameters: these are parameters that an array allocated on the heap, and any views
-///   derived from it hold a raw pointer to it, using [`ArraySpecPtr`].
+/// - "shared" parameters: these are parameters that are rarely modified by view operations. They
+///   live behind an [`Arc`], so cloning an owned spec (see [`ArraySpec::to_owned`]) does not copy
+///   them.
 /// - "dynamic" parameters: these are parameters that are stored directly in the array struct. With
 ///   the intention that these parameters are more likely to be modified by view operations.
 ///
-/// The idea behind this structure is to let views modify some of the parameters without having to
-/// allocate a full `ArraySpec`. We could have used Rc/Arc, but Rc locks you from multithreading, and
-/// Arc creates contention on cache lines between CPUs. Raw pointers are not safe, but views always
-/// hold a reference to the source array, so they are guaranteed to be valid as long as the source
-/// array is alive.
-/// This resembles self referential structs.
+/// Views that only modify the dynamic parameters hold just an [`ArraySpecDynamic`], and borrow the
+/// shared parameters from their input with [`ArraySpec::with_dynamic_spec`].
 #[derive(Clone)]
 pub(crate) struct ArraySpecOwned {
-    shared: Pin<Box<(ArraySpecShared, PhantomPinned)>>,
+    shared: Arc<ArraySpecShared>,
     dynamic: ArraySpecDynamic,
     flags: ArraySpecFlags,
 }
@@ -617,7 +613,7 @@ impl ArraySpecOwned {
             dim_arr(ndim, |i| i as DimIdx), // default to C-order
         );
         Self {
-            shared: Box::pin((shared, PhantomPinned)),
+            shared: Arc::new(shared),
             dynamic,
             flags,
         }
@@ -626,7 +622,7 @@ impl ArraySpecOwned {
     #[inline]
     pub(crate) fn as_ref(&self) -> ArraySpec<'_> {
         ArraySpec {
-            shared: self.shared.as_ref(),
+            shared: &self.shared,
             dynamic: &self.dynamic,
             flags: self.flags,
         }
@@ -660,10 +656,17 @@ impl<'a> ArraySpec<'a> {
         self
     }
 
+    pub(crate) fn to_owned(&self) -> ArraySpecOwned {
+        ArraySpecOwned {
+            shared: Arc::clone(self.shared),
+            dynamic: self.dynamic.clone(),
+            flags: self.flags,
+        }
+    }
+
     #[inline(always)]
     fn shared(&self) -> &'a ArraySpecShared {
-        let inner = &self.shared.0;
-        unsafe { std::mem::transmute::<&ArraySpecShared, &'a ArraySpecShared>(inner) }
+        self.shared
     }
     #[inline(always)]
     pub(crate) fn dynamic(&self) -> &'a ArraySpecDynamic {
@@ -879,55 +882,6 @@ pub(crate) fn combine_block_layout(
         })
         .collect::<DimBitmap>();
     (block_shape, block_shape_fixed_dims)
-}
-
-/// See [`ArraySpecOwned`] docs.
-#[derive(Clone)]
-pub(crate) struct ArraySpecPtr {
-    shared: SendSyncPtr<(ArraySpecShared, PhantomPinned)>,
-    dynamic: ArraySpecDynamic,
-    flags: ArraySpecFlags,
-}
-impl ArraySpecPtr {
-    pub(crate) fn new(spec: ArraySpec<'_>) -> Self {
-        let shared = spec.shared.get_ref();
-        let shared = unsafe { SendSyncPtr::new(shared) };
-        Self {
-            shared,
-            dynamic: spec.dynamic.clone(),
-            flags: spec.flags,
-        }
-    }
-
-    /// Returns a reference to the underlying `ArraySpec`.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure the source of this ArraySpecPtr is still alive and has not been
-    /// modified in a way that would invalidate the reference.
-    pub(crate) unsafe fn as_ref<'a>(
-        &self,
-        #[allow(unused_variables)] source_spec: impl FnOnce() -> ArraySpec<'a>,
-    ) -> ArraySpec<'_> {
-        #[cfg(debug_assertions)]
-        {
-            let source_spec = source_spec();
-            let source_shared = source_spec.shared.get_ref();
-            debug_assert!(
-                std::ptr::eq(
-                    self.shared.as_ptr(),
-                    source_shared as *const (ArraySpecShared, PhantomPinned),
-                ),
-                "ArraySpecPtr::as_ref() called with a different source spec than the one used to create the pointer"
-            );
-        }
-
-        ArraySpec {
-            shared: unsafe { Pin::new_unchecked(&*self.shared.as_ptr()) },
-            dynamic: &self.dynamic,
-            flags: self.flags,
-        }
-    }
 }
 
 pub(crate) use flags::ArraySpecFlags;

@@ -112,14 +112,39 @@ def shift_safe_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     }[dtype]
 
 
+def _op_safe_float(x: int) -> float:
+    return float((x - 100 * 100) / 100.0)
+
+
 def _float_op_safe_st() -> st.SearchStrategy:
     """float op_safe: (0..=20000).map(|x| (x - 10000) / 100.0) -> [-100.0, 100.0]."""
-    return st.integers(0, 2 * 100 * 100).map(lambda x: float((x - 100 * 100) / 100.0))
+    return st.integers(0, 2 * 100 * 100).map(_op_safe_float)
+
+
+def _complex_op_safe_st(non_zero: bool) -> st.SearchStrategy:
+    """Complex with both parts drawn like _float_op_safe_st(), each part non-zero if `non_zero`.
+
+    Hypothesis draws array elements one by one and every strategy layer (tuples, map, filter) adds
+    per-element overhead, so build both parts from raw integers in a single st.builds. The nested
+    st.tuples(_f, _f).map(complex) was slow enough to intermittently fail HealthCheck.too_slow.
+    """
+    zero = 100 * 100  # the integer that _op_safe_float() maps to 0.0
+    if non_zero:
+        # Draw one value fewer and step over `zero`, a .filter() would cost more than all the rest.
+        ints = st.integers(0, 2 * zero - 1)
+
+        def part(x: int) -> float:
+            return _op_safe_float(x if x < zero else x + 1)
+    else:
+        ints = st.integers(0, 2 * zero)
+        part = _op_safe_float
+    return st.builds(lambda re, im: complex(part(re), part(im)), ints, ints)
 
 
 def op_safe_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     """Bounded element strategy mirroring ScalarStrategy::op_safe_strategy() in Rust."""
     _f = _float_op_safe_st()
+    _c = _complex_op_safe_st(non_zero=False)
     return {
         np.int8: st.integers(-4, 4),
         np.int16: st.integers(-22, 22),
@@ -132,8 +157,8 @@ def op_safe_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
         np.float16: _f,
         np.float32: _f,
         np.float64: _f,
-        np.complex64: st.tuples(_f, _f).map(lambda x: complex(x[0], x[1])),
-        np.complex128: st.tuples(_f, _f).map(lambda x: complex(x[0], x[1])),
+        np.complex64: _c,
+        np.complex128: _c,
         np.bool_: st.booleans(),
     }[dtype]
 
@@ -160,6 +185,7 @@ def carray_strategy(draw, dtype: np.dtype, element_st=None):
 def op_safe_non_zero_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     """Non-zero element strategy mirroring ScalarStrategy::op_safe_non_zero_strategy() in Rust."""
     _f_nz = _float_op_safe_st().filter(lambda x: x != 0.0)
+    _c_nz = _complex_op_safe_st(non_zero=True)
     return {
         np.int8: st.one_of(st.integers(-4, -1), st.integers(1, 4)),
         np.int16: st.one_of(st.integers(-22, -1), st.integers(1, 22)),
@@ -172,8 +198,8 @@ def op_safe_non_zero_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
         np.float16: _f_nz,
         np.float32: _f_nz,
         np.float64: _f_nz,
-        np.complex64: st.tuples(_f_nz, _f_nz).map(lambda x: complex(x[0], x[1])),
-        np.complex128: st.tuples(_f_nz, _f_nz).map(lambda x: complex(x[0], x[1])),
+        np.complex64: _c_nz,
+        np.complex128: _c_nz,
     }[dtype]
 
 
