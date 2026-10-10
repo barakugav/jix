@@ -6,7 +6,7 @@ use crate::error::{check_dtype, Result};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, CompactBorrowed, ElementwisePipeline, OperandTyped, StridedBuf,
 };
-use crate::{Dimension, ElementType};
+use crate::{DimDyn, Dimension, ElementType, TypeDyn};
 
 /// The backing data source of an [`Array<S>`](crate::Array).
 ///
@@ -167,10 +167,7 @@ pub trait ArrayStorage {
     /// If this storage is a compact block-compressed backend, return a borrowed view of itself.
     #[doc(hidden)]
     #[inline(always)]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>>
-    where
-        Self: Sized,
-    {
+    fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn, DimDyn>> {
         None
     }
 

@@ -11,7 +11,6 @@
 - benchmark LANES of {32/64/128/256} / itemsize on x86
 - replace array_from_fn_inline with map_enumerate
 - arrays_map, arrays_map_enumerate
-- as_compact() doesnt work through Any
 - optimize reshape and its flags propagation
 - local_prelude
 - document archive compatibility

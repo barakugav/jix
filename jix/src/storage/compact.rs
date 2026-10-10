@@ -20,7 +20,7 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ElementType, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, NdCopier, PtrMutNoalias, PtrNoalias};
-use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dimension};
+use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dimension, TypeDyn};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -152,10 +152,11 @@ macro_rules! impl_array_storage {
                 crate::storage::ArrayStorageInfo::new("Compact")
             }
 
-            fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
+            fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn, DimDyn>> {
                 Some(CompactBorrowed(ArrayBlockTableStorageBase {
-                    blocks: self.0.blocks.as_ref(),
-                    shape: self.0.shape.clone(),
+                    // Re-tagging to `TypeDyn` never fails
+                    blocks: self.0.blocks.as_ref().element_type_change().ok()?,
+                    shape: DimDyn::from_slice(self.0.shape()),
                     spec: self.0.spec.clone(),
                 }))
             }

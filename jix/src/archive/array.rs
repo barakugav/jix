@@ -1128,4 +1128,41 @@ mod tests {
         let got = got.into_typed::<i32>().unwrap().to_ndarray().unwrap();
         assert_eq!(got, expected.into_dyn());
     }
+
+    /// A compact source behind a wrapper that does not change its data is written by copying its
+    /// compressed blocks: the output is byte-identical to writing the source itself and `params` is
+    /// ignored.
+    #[test]
+    fn write_compact_behind_wrappers_copies_blocks() {
+        use crate::DimDyn;
+
+        fn write<S: crate::ArrayStorage>(a: &Array<S>) -> Vec<u8> {
+            let mut buf = Cursor::new(Vec::new());
+            // A block shape different from the source's, ignored when the source is compact.
+            a.write_to_with(&mut buf, arr_params(&[2, 8]), &a.read_ctx())
+                .unwrap();
+            buf.into_inner()
+        }
+        let make = || compact::<i32, _>((0..64).collect(), [8, 8], &[4, 4]);
+        let mut expected = Cursor::new(Vec::new());
+        make().write_to(&mut expected).unwrap();
+        let expected = expected.into_inner();
+
+        assert_eq!(write(&make()), expected);
+        assert_eq!(write(&make().view()), expected);
+        assert_eq!(write(&make().view().into_type_dyn()), expected);
+        assert_eq!(
+            write(&make().view().into_dim::<DimDyn>().unwrap()),
+            expected
+        );
+        assert_eq!(write(&make().into_any()), expected);
+        assert_eq!(write(&make().into_any().into_any()), expected);
+        assert_eq!(
+            write(&make().into_any().into_typed::<i32>().unwrap()),
+            expected
+        );
+
+        // A lazy op with the same values is re-encoded with the given params.
+        assert_ne!(write(&(-(-make())).into_any()), expected);
+    }
 }

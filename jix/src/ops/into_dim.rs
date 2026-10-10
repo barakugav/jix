@@ -123,6 +123,10 @@ where
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("IntoDim", [&self.inner])
     }
+    #[inline]
+    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn, DimDyn>> {
+        self.inner.as_compact()
+    }
 
     type DimensionChange<NewD: Dimension> = IntoDim<S, NewD>;
     #[inline]
