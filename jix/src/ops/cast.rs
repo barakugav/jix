@@ -101,6 +101,33 @@ pub(crate) mod _traits {
                 }
             }
         };
+        // `!= 0` as a mask, stored as `bool`s.
+        (bool => bool, (mask)) => { impl_cast!(bool => bool, (scalar)); };
+        (f16 => bool, (mask)) => { impl_cast!(f16 => bool, (scalar)); };
+        ($src_type:ident => bool, (mask)) => {
+            impl Cast<bool> for $src_type {
+                #[inline(always)]
+                fn cast(self) -> bool {
+                    self != (0 as $src_type)
+                }
+
+                #[inline(always)]
+                fn cast_bulk<S: fearless_simd::Simd, const N: usize>(
+                    xs: [Self; N],
+                    simd: S,
+                ) -> [bool; N] {
+                    use fearless_simd::SimdBase;
+                    type V<S> = <$src_type as simd::SimdLane>::V<S>;
+                    let zero = <V<S> as SimdBase<S>>::splat(simd, 0 as $src_type);
+                    crate::scalar::simd::map_vectors_to_bools::<S, Self, N>(
+                        simd,
+                        xs,
+                        #[inline(always)] |x| <Self as Cast<bool>>::cast(x),
+                        #[inline(always)] |v| v.simd_ne(zero),
+                    )
+                }
+            }
+        };
         ($src_type:ident => $dst_type:ident, $bulk:tt) => {
             impl Cast<$dst_type> for $src_type {
                 #[inline(always)]
@@ -199,7 +226,7 @@ pub(crate) mod _traits {
             $(impl_cast_num!(@group $src_type, [$($dst_type),+], ($bulk $(on $($level)|+)?));)*
             #[cfg(feature = "half")]
             impl_cast!($src_type => f16, (scalar));
-            impl_cast!($src_type => bool, (scalar));
+            impl_cast!($src_type => bool, (mask));
             #[cfg(all(feature = "half", feature = "num-complex"))]
             impl_cast_num!(@impl_to_complex, $src_type, Complex<f16>);
             #[cfg(feature = "num-complex")]
@@ -292,12 +319,12 @@ pub(crate) mod _traits {
         f64: [float];
     });
     impl_cast_num!(f32 {
-        i8: [truncate(i32), saturating_narrow, saturating_narrow] on Sse4_2 | Avx2 | Avx512 | Neon;
-        i16: [truncate(i32), saturating_narrow] on Sse4_2 | Avx2 | Avx512 | Neon;
+        i8: [truncate(i32), saturating_narrow, saturating_narrow];
+        i16: [truncate(i32), saturating_narrow];
         i32, u32: [truncate];
         i64, u64: [widen, truncate] on Sse4_2 | Avx2 | Avx512 | Neon;
-        u8: [truncate(u32), saturating_narrow, saturating_narrow] on Sse4_2 | Avx2 | Avx512 | Neon;
-        u16: [truncate(u32), saturating_narrow] on Sse4_2 | Avx2 | Avx512 | Neon;
+        u8: [truncate(u32), saturating_narrow, saturating_narrow];
+        u16: [truncate(u32), saturating_narrow];
         f32: scalar;
         f64: [widen] on Avx2 | Avx512 | Neon;
     });
@@ -948,7 +975,7 @@ mod tests {
             simd.vectorize(|| {
                 cases!(
                     i8, i16, i32, i64, u8, u16, u32, u64, f32, f64
-                        => [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]
+                        => [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool]
                 );
             });
         }

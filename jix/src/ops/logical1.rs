@@ -11,7 +11,9 @@ pub(crate) mod _traits {
     macro_rules! classify_op1 {
         ($(#[$meta:meta])* $Trait:ident, $f:ident, $f_bulk:ident) => {
             define_scalar_op1_trait!($(#[$meta])* $Trait, $f, $f_bulk);
-            impl_scalar_op1!($Trait::$f, |x| x.$f(), [f32 => bool, f64 => bool]);
+            impl_scalar_op1!(
+                $Trait::$f / $f_bulk, |x| x.$f(), simd_mask: |x| x.$f(), [f32, f64] => bool
+            );
             #[cfg(feature = "half")]
             impl_scalar_op1!($Trait::$f, |x| x.$f(), [f16 => bool]);
         };

@@ -1447,6 +1447,10 @@ pub(crate) mod _traits {
     /// scalar loop (up to 2x).
     macro_rules! update_bulk_simd {
         ($Trait:ident, $op:tt) => {
+            update_bulk_simd!($Trait, $op, scalar_on_x86_64 = []);
+        };
+        // Scalar on the x86-64 levels `$level` too.
+        ($Trait:ident, $op:tt, scalar_on_x86_64 = [$($level:ident),*]) => {
             #[inline(always)]
             fn update_bulk<S: fearless_simd::Simd, const N: usize>(
                 states: [Self::Output; N],
@@ -1454,8 +1458,10 @@ pub(crate) mod _traits {
                 simd: S,
             ) -> [Self::Output; N] {
                 use crate::scalar::simd::{simd_level, SimdLevel};
-                if size_of::<Self::Output>() >= 4 * size_of::<Self>()
-                    && matches!(simd_level(simd), SimdLevel::Sse2 | SimdLevel::Neon)
+                if (size_of::<Self::Output>() >= 4 * size_of::<Self>()
+                    && matches!(simd_level(simd), SimdLevel::Sse2 | SimdLevel::Neon))
+                    || (cfg!(target_arch = "x86_64")
+                        && (false $(|| simd_level(simd) == SimdLevel::$level)*))
                 {
                     return states.map_enumerate(
                         #[inline(always)]
@@ -1562,6 +1568,14 @@ pub(crate) mod _traits {
         ($item_ty:ty, $output_ty:ty, simd) => {
             impl_product!($item_ty, $output_ty, { update_bulk_simd!(Product, *); });
         };
+        // 64-bit integer products: fearless_simd multiplies 64-bit lanes in 32-bit halves
+        // (`pmuludq` steps) up to AVX2, slower than scalar `imul` in the one-cell loop on SSE2 /
+        // SSE4.2 (static analysis: 0.6-0.9x). On i686 (no 64-bit `imul`) the SIMD body is 1.7-2.6x.
+        ($item_ty:ty, $output_ty:ty, simd_int) => {
+            impl_product!($item_ty, $output_ty, {
+                update_bulk_simd!(Product, *, scalar_on_x86_64 = [Sse2, Sse4_2]);
+            });
+        };
         ($item_ty:ty, $output_ty:ty) => {
             impl_product!($item_ty, $output_ty, {});
         };
@@ -1585,14 +1599,14 @@ pub(crate) mod _traits {
             }
         };
     }
-    impl_product!(i8, i64, simd);
-    impl_product!(i16, i64, simd);
-    impl_product!(i32, i64, simd);
-    impl_product!(i64, i64, simd);
-    impl_product!(u8, u64, simd);
-    impl_product!(u16, u64, simd);
-    impl_product!(u32, u64, simd);
-    impl_product!(u64, u64, simd);
+    impl_product!(i8, i64, simd_int);
+    impl_product!(i16, i64, simd_int);
+    impl_product!(i32, i64, simd_int);
+    impl_product!(i64, i64, simd_int);
+    impl_product!(u8, u64, simd_int);
+    impl_product!(u16, u64, simd_int);
+    impl_product!(u32, u64, simd_int);
+    impl_product!(u64, u64, simd_int);
     #[cfg(feature = "half")]
     impl_product!(f16, f16);
     impl_product!(f32, f32, simd);

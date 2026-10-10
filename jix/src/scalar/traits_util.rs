@@ -88,6 +88,35 @@ macro_rules! impl_scalar_op1 {
             $f_bulk, |$v| $vector
         );)*
     };
+    // `bool` outputs: `$mask` is the mask of the vector `$v`, stored as `bool`s.
+    (
+        $Trait:ident::$f:ident / $f_bulk:ident, |$x:ident| $scalar:expr,
+        simd_mask: |$v:ident| $mask:expr,
+        [$($t:ty),* $(,)?] => bool
+    ) => {
+        $(impl $Trait for $t {
+            type Output = bool;
+            #[inline(always)]
+            fn $f(self) -> bool {
+                let $x = self;
+                $scalar
+            }
+            #[inline(always)]
+            fn $f_bulk<S: fearless_simd::Simd, const N: usize>(
+                xs: [Self; N],
+                simd: S,
+            ) -> [bool; N] {
+                #[allow(unused_imports)]
+                use fearless_simd::{SimdBase, SimdFloat};
+                crate::scalar::simd::map_vectors_to_bools::<S, Self, N>(
+                    simd,
+                    xs,
+                    #[inline(always)] |x| <Self as $Trait>::$f(x),
+                    #[inline(always)] |$v| $mask,
+                )
+            }
+        })*
+    };
     (
         @one $Trait:ident::$f:ident, |$x:ident| $scalar:expr, $t:ty, ($($Out:ty)?)
         $(, $f_bulk:ident, |$v:ident| $vector:expr)?
@@ -208,6 +237,38 @@ macro_rules! impl_scalar_op2 {
         $(crate::scalar::traits_util::impl_scalar_op2!(
             @one $Trait::$f, |$a, $b| $scalar, $t, $rhs, $Out
         );)*
+    };
+    // `bool` outputs: `$mask` is the mask of the vectors `$va` and `$vb`, stored as `bool`s.
+    (
+        $Trait:ident::$f:ident / $f_bulk:ident, |$a:ident, $b:ident| $scalar:expr,
+        simd_mask: |$va:ident, $vb:ident| $mask:expr,
+        [$($t:ty),* $(,)?] => bool
+    ) => {
+        $(impl $Trait for $t {
+            type Output = bool;
+            #[inline(always)]
+            fn $f(self, rhs: Self) -> bool {
+                let $a = self;
+                let $b = rhs;
+                $scalar
+            }
+            #[inline(always)]
+            fn $f_bulk<S: fearless_simd::Simd, const N: usize>(
+                xs: [Self; N],
+                ys: [Self; N],
+                simd: S,
+            ) -> [bool; N] {
+                #[allow(unused_imports)]
+                use fearless_simd::SimdBase;
+                crate::scalar::simd::map_vectors2_to_bools::<S, Self, N>(
+                    simd,
+                    xs,
+                    ys,
+                    #[inline(always)] |a, b| <Self as $Trait>::$f(a, b),
+                    #[inline(always)] |$va, $vb| $mask,
+                )
+            }
+        })*
     };
     // Without `=> $Out`: the output is `Self`.
     ($($args:tt)*) => {
