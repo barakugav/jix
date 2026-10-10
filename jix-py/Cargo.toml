@@ -19,7 +19,7 @@ crate-type = [
 ]
 
 [dependencies]
-pyo3 = "0.29.2"
+pyo3 = "0.29.3"
 jix_core = { package = "jix", path = "../jix", version = "=0.0.5", features = [
     "half",
     "num-complex",
