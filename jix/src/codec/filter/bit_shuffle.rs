@@ -1,3 +1,5 @@
+use fearless_simd::{Level as SimdLevel, Simd};
+
 use super::byte_shuffle::ByteShuffleFilter;
 use crate::array_from_fn_inline;
 use crate::buf_pool::BufferPool;
@@ -92,9 +94,7 @@ use crate::dtype::Dtype;
 /// elements that don't fill a group are copied verbatim at the end of the
 /// buffer, exactly as in the reference C implementation.
 #[derive(Default)]
-pub(super) struct BitShuffleFilter {
-    byte_shuffle: ByteShuffleFilter,
-}
+pub(super) struct BitShuffleFilter;
 
 impl FilterImpl for BitShuffleFilter {
     /// Encode: `(N, B)` element-major bytes -> `(B, 8, G)` bit-plane-major
@@ -111,24 +111,19 @@ impl FilterImpl for BitShuffleFilter {
     ///
     /// After pass 3 the final output is in `dst`; `tmp` is scratch and is
     /// discarded on return.
-    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &BufferPool) {
+    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool) {
         assert_eq!(src.len(), dst.len());
         let typesize = dtype.itemsize() as usize;
         let n = src.len() / typesize;
         let n_full = (n / 8) * 8;
         let full_bytes = n_full * typesize;
 
-        let mut tmp = tmp_buffers.get(full_bytes, 16.try_into().unwrap());
+        let mut tmp = buf_pool.get(full_bytes, 16.try_into().unwrap());
         let tmp = tmp.as_mut_slice();
 
         // Pass 1: byte shuffle, `(N, B) -> (B, N)`. After this, `dst` holds per
         // byte-plane a contiguous run of N bytes (one byte per element).
-        self.byte_shuffle.encode(
-            &src[..full_bytes],
-            &mut dst[..full_bytes],
-            dtype,
-            tmp_buffers,
-        );
+        ByteShuffleFilter.encode(&src[..full_bytes], &mut dst[..full_bytes], dtype, buf_pool);
 
         // Pass 2: TRANS_BIT_8X8 + scatter, `(B, G, 8, 8) bits -> (8, B, G, 8) bits`.
         // For each 8-byte group within each byte-plane, bit-transpose the
@@ -155,14 +150,14 @@ impl FilterImpl for BitShuffleFilter {
     /// | 1    | [`untrans_bitrow_eight`]   | `src` | `dst` | encode pass 3  |
     /// | 2    | [`untrans_bit_byte`]       | `dst` | `tmp` | encode pass 2  |
     /// | 3    | [`ByteShuffleFilter::decode`] (SoA->AoS) | `tmp` | `dst` | encode pass 1 |
-    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &BufferPool) {
+    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool) {
         assert_eq!(src.len(), dst.len());
         let typesize = dtype.itemsize() as usize;
         let n = src.len() / typesize;
         let n_full = (n / 8) * 8;
         let full_bytes = n_full * typesize;
 
-        let mut tmp = tmp_buffers.get(full_bytes, 16.try_into().unwrap());
+        let mut tmp = buf_pool.get(full_bytes, 16.try_into().unwrap());
         let tmp = tmp.as_mut_slice();
 
         // Pass 1: invert encode pass 3. `(B, 8, G) -> (8, B, G)`. Length-`G`
@@ -176,8 +171,7 @@ impl FilterImpl for BitShuffleFilter {
         untrans_bit_byte(&dst[..full_bytes], tmp, n_full, typesize);
 
         // Pass 3: invert encode pass 1 via byte_shuffle's own decode (SoA -> AoS).
-        self.byte_shuffle
-            .decode(tmp, &mut dst[..full_bytes], dtype, tmp_buffers);
+        ByteShuffleFilter.decode(tmp, &mut dst[..full_bytes], dtype, buf_pool);
 
         // Tail was copied verbatim by the encoder; copy it back.
         dst[full_bytes..].copy_from_slice(&src[full_bytes..]);
@@ -209,15 +203,16 @@ impl FilterImpl for BitShuffleFilter {
 /// Equivalent to `bshuf_trans_bit_byte_scal` from the reference C
 /// implementation on little-endian targets (the `u64` read + `TRANS_BIT_8X8`
 /// + strided scatter pattern).
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
 fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
+    fearless_simd::dispatch!(SimdLevel::new(), simd => trans_bit_byte_simd(src, dst, n_full, typesize, simd))
+}
+fn trans_bit_byte_simd<S: Simd>(
+    src: &[u8],
+    dst: &mut [u8],
+    n_full: usize,
+    typesize: usize,
+    _simd: S,
+) {
     let n_per_plane = n_full / 8;
     let bit_row_skip = typesize * n_per_plane; // = B * G
 
@@ -254,15 +249,16 @@ fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
 ///
 /// Equivalent to `bshuf_trans_bitrow_eight` in the reference, itself a
 /// specialization of `bshuf_trans_elem(lda=8, ldb=B, elem_size=G)`.
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
 fn trans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
+    fearless_simd::dispatch!(SimdLevel::new(), simd => trans_bitrow_eight_simd(src, dst, n_full, typesize, simd))
+}
+fn trans_bitrow_eight_simd<S: Simd>(
+    src: &[u8],
+    dst: &mut [u8],
+    n_full: usize,
+    typesize: usize,
+    _simd: S,
+) {
     let n_per_plane = n_full / 8;
     for i in 0..8 {
         for b in 0..typesize {
@@ -278,15 +274,16 @@ fn trans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize
 ///
 /// `(B, 8, G) -> (8, B, G)` byte-level outer-axis swap. Pure data movement in
 /// length-`G` runs; reads and writes are just the encode-side roles flipped.
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
 fn untrans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
+    fearless_simd::dispatch!(SimdLevel::new(), simd => untrans_bitrow_eight_simd(src, dst, n_full, typesize, simd))
+}
+fn untrans_bitrow_eight_simd<S: Simd>(
+    src: &[u8],
+    dst: &mut [u8],
+    n_full: usize,
+    typesize: usize,
+    _simd: S,
+) {
     let n_per_plane = n_full / 8;
     for b in 0..typesize {
         for i in 0..8 {
@@ -306,15 +303,16 @@ fn untrans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usi
 /// `(b, g)`, in bit-transposed form. Applying [`transpose8x8`] again - which
 /// is self-inverse - restores the original element-major 8-byte group, which
 /// we then write contiguously at `dst[b * N + g * 8 .. b * N + g * 8 + 8]`.
-#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
-    // x86-64-v4
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
-    // x86-64-v3
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
-    // x86-64-v2
-    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
-)))]
 fn untrans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
+    fearless_simd::dispatch!(SimdLevel::new(), simd => untrans_bit_byte_simd(src, dst, n_full, typesize, simd))
+}
+fn untrans_bit_byte_simd<S: Simd>(
+    src: &[u8],
+    dst: &mut [u8],
+    n_full: usize,
+    typesize: usize,
+    _simd: S,
+) {
     let n_per_plane = n_full / 8;
     let bit_row_skip = typesize * n_per_plane;
 
@@ -499,10 +497,10 @@ mod tests {
         let src = data.as_slice();
         let typesize = T::DTYPE.itemsize() as usize;
         let dtype = T::DTYPE;
-        let tmp_buffers = BufferPool::new();
+        let buf_pool = BufferPool::new();
 
         let mut optimized_out = vec![0u8; src.len()];
-        BitShuffleFilter::default().encode(src, &mut optimized_out, &dtype, &tmp_buffers);
+        BitShuffleFilter::default().encode(src, &mut optimized_out, &dtype, &buf_pool);
 
         let mut trivial_out = vec![0u8; src.len()];
         bit_shuffle_trivial(src, &mut trivial_out, typesize);

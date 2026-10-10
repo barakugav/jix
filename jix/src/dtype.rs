@@ -649,6 +649,7 @@ impl Dtype {
         const { &T::DTYPE }
     }
 
+    #[allow(clippy::needless_bool)]
     fn is_aligned_struct(
         fields: &[(Cow<'static, str>, Itemsize, Dtype)],
         itemsize: Itemsize,
@@ -686,6 +687,7 @@ impl Dtype {
         true
     }
 
+    #[allow(clippy::needless_bool)]
     fn is_packed_struct(
         fields: &[(Cow<'static, str>, Itemsize, Dtype)],
         itemsize: Itemsize,
