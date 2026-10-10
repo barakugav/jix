@@ -1501,3 +1501,84 @@ Real timing (this machine, AVX2 level, marginal ns per item with a reused `ReadC
 2^17 items): the one-cell loop is L2-bound for every variant (all / any 0.015, shipped all 0.016,
 shipped any 0.065); across cells ([n / 1024, 1024] along axis 0) E is 0.028 / 0.029 against
 shipped 0.038 / 0.049.
+
+## fearless_simd 1.1.0 (`results/fs*`, `results/pre-pull`)
+
+What 1.1.0 changes for these kernels (its generated code, per level; `CHANGELOG.md` of the crate):
+no existing function changed on AVX-512, NEON or the fallback. On x86 below AVX-512:
+- SSE2: f32 -> i32 / u32 conversions (`cvttps2dq` and fix-ups, was per lane), `i64` / `u64`
+  multiply (`pmuludq` steps, was per lane) and right shift by a scalar.
+- SSE4.2 / AVX2: `i64` / `u64` min / max / `simd_lt` / `simd_le`, multiply, right shift by a
+  scalar; precise f32 -> u32.
+- New: mask <-> vector (`to_vector`), mask widen / narrow (`MaskWiden` / `MaskNarrow`),
+  `simd_ne`, float classification (`is_nan`, ...), `round`, compress / expand, concat swizzles.
+- Unchanged: shifts by vectors (Shl, the 8 / 16 / 64-bit Shr), rotates, count_ones, int <-> f64
+  conversions, widening, the SSE2 `unzip` / `deinterleave` (still per lane: `ByteShuffle`'s
+  choice of `interleave` on SSE2 holds). `Level::new()` is unchanged (`try_detect` became
+  `#[inline]`), so a captured constant of a dispatch is still reloaded.
+
+Runs: `fs10` / `fs11` the branch with 1.0.0 / 1.1.0 (`fs10` x86 only), `pre-pull` the commit
+before the pull (`c8e8ba2`, 1.0.0); `fs-unroll` `fs11` + the source-level unroll below; `fs-new`
+/ `fs-none` (on `fs-unroll`): every Cast body on every level + the new bodies / no Cast body and
+no 64-bit Mul / Square / Maximum / Minimum / integer Product body; `fs-final` the result, `fs-prod`
+its Product gate fixed (below).
+
+**The pull itself** (`arr_ext`, renames, the filters): `pre-pull` = `fs10` on all 2666 kernels.
+
+**The bump alone** (`fs11` over `fs10`; other kernels within 2%):
+
+| kernel | SSE2 | SSE4.2 | AVX2 | i686 |
+|---|---:|---:|---:|---:|
+| `cast_f32_i32` | 6.07 | 1.00 | 1.00 | 7.28 |
+| `cast_f32_u32` | 2.83 | 1.03 | 1.10 | 4.28 |
+| `cast_f32_u8` / `u16` | 1.00 | 1.06-1.07 | 1.08-1.11 | 1.00 |
+| `square_i64` | 1.33 | 1.36 | 1.11 | 1.17 |
+| `mul_i64` | _0.61_ | _0.75_ | 1.06 | 1.19 |
+| `reduce_max/min_i64/u64_cell` | 1.00 | 1.23-1.43, _0.93_ (min u64) | 1.00 | 1.00 |
+| `reduce_product_*_cell` (integers) | _0.34-0.35_ (32/64-bit) | _0.55_ | 1.00-1.10 | 1.35-1.37, _0.74_ (i64) |
+
+**`map_vectors` / `map_vectors2` unrolled in the source.** The `mul_i64` / product regressions are
+not the multiply: with 1.1.0's intrinsic sequence LLVM no longer fully unrolls the bulk helpers'
+`for c in 0..N / lanes` loop, so the arrays of vectors stay on the stack (65 stack ops per
+iteration, an inner loop of 8). `for_each_unrolled(n, f)` makes the calls `f(0)`, .., `f(31)`
+(guarded by `k < n`, folded) in the source; debug builds loop instead (unrolled, the test crate
+needs more than 12 GB to compile). `fs-unroll` over `fs11`: only 9 kernels change, all faster:
+`mul_i64` 2.11 / 1.78 (SSE2 / SSE4.2), integer `reduce_product_*_cell` 1.57-2.19 (SSE2 /
+SSE4.2), 1.27-2.92 (i686).
+
+**Integer products** (`fs-none` over `fs-unroll`, i.e. without over with the body): an `i64`
+product as `pmuludq` steps is slower than scalar `imul` on x86-64 SSE2 / SSE4.2 (0.52-0.88), but
+1.7-2.6x faster on i686 (no 64-bit `imul`): `update_bulk_simd!(Product, *, scalar_on_x86_64 =
+[Sse2, Sse4_2])`. The gate is a chain of `==`: `[..].contains(&level)` did not fold early enough
+and the loop came out half `pmuludq` (`fs-final`, fixed in `fs-prod`). The elementwise `mul_i64`
+/ `square_i64` bodies stay (1.06-1.36 over no body).
+
+**Removed bodies retried with the new API** (`fs-new` over `fs-unroll`; ranges over the kernels):
+
+| kernels | SSE2 | SSE4.2 | AVX2 | AVX-512 | i686 | aarch64 | M1 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| comparisons (8/16-bit) | 1.00-1.03 | 1.00 | 1.00-1.73 | 0.90-0.91 | 1.00-1.03 | 1.00 | 1.00 |
+| comparisons (32/64-bit) | 0.70-1.31 | 1.00 | 1.06-1.44 | 0.55-0.75 | 1.00 | 0.36-0.58 | 0.16-0.27 |
+| is_nan / is_finite / is_infinite | 0.95-1.65 | 0.86-4.93 | 1.10-6.71 | 0.47-0.77 | 0.99-1.63 | 0.32-0.50 | 0.12-0.32 |
+| casts to bool | 0.95-1.03 | 0.97-1.02 | 1.00-1.94 | 0.46-0.87 | 1.00 | 0.32-1.00 | 0.12-1.00 |
+| round | 0.79-0.97 | 1.00 | 1.00 | 0.98 | 0.81-0.87 | 0.99-1.00 | 1.00 |
+
+- `bool` outputs: the masks of `size_of::<T>()` vectors narrowed to one of bytes (`MaskNarrow`,
+  `packssdw` / `packsswb` on SSE2), `to_vector() & 1`, stored, `!= 0` (folds away). Kept on AVX2
+  only (`masks_to_bools`): on SSE2 / SSE4.2 it is mostly LLVM's own code; on AVX-512 LLVM stores
+  the compare's `k` mask directly (`vmovdqu8 {k}{z}`) where fearless_simd narrows the masks
+  through general registers and `vpinsrw`; on NEON LLVM splits the narrowing of the `vmovn`
+  halves into lane moves.
+- `round` (`trunc(x + copysign(0.49999997, x))`): no gain, not kept.
+
+**Cast gates** (`fs-new` over `fs-none`, the bar as before: faster or within 3% on every platform
+of the level): f32 -> i8 / i16 (3.6x) / u8 (1.15-1.19x) / u16 (1.16-1.48x) now on SSE2 too (its
+f32 -> i32 / u32 is SIMD now). The others unchanged: i16 -> f32 on SSE2 is 0.94 on x86-64 (the
+same instructions, as before), f32 -> u64 on SSE4.2 0.969.
+
+**Net, `fs-final` / `fs-prod` over `fs10`** (x86; AVX-512, aarch64 and M1 are unchanged): faster
+are the casts above, `mul_i64` 1.06-1.33, `square_i64` 1.11-1.36, `reduce_max/min_*64_cell` on
+SSE4.2 1.23-1.43, integer products on AVX2 1.02-1.10 / i686 1.74-2.55, and on AVX2 the `bool`
+outputs (comparisons 1.06-1.73, classification 1.10-6.71, casts to bool 1.09-1.94). Slower:
+`reduce_min_u64_cell` on SSE4.2 0.93 (fearless_simd's `min_u64`), unsigned products on SSE4.2
+0.98.
