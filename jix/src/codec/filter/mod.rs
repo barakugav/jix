@@ -39,26 +39,14 @@ pub enum Filter {
     BitShuffle,
 }
 impl Filter {
-    pub(crate) fn encode(
-        &self,
-        src: &[u8],
-        dst: &mut [u8],
-        dtype: &Dtype,
-        buf_pool: &BufferPool,
-    ) {
+    pub(crate) fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool) {
         match self {
             Filter::ByteShuffle => ByteShuffleFilter.encode(src, dst, dtype, buf_pool),
             Filter::BitShuffle => BitShuffleFilter.encode(src, dst, dtype, buf_pool),
         }
     }
 
-    pub(crate) fn decode(
-        &self,
-        src: &[u8],
-        dst: &mut [u8],
-        dtype: &Dtype,
-        buf_pool: &BufferPool,
-    ) {
+    pub(crate) fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool) {
         match self {
             Filter::ByteShuffle => ByteShuffleFilter.decode(src, dst, dtype, buf_pool),
             Filter::BitShuffle => BitShuffleFilter.decode(src, dst, dtype, buf_pool),

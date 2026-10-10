@@ -3,13 +3,10 @@ use std::mem::{ManuallyDrop, MaybeUninit};
 
 #[inline(always)]
 pub(crate) fn array_from_fn_inline<T, const N: usize>(mut f: impl FnMut(usize) -> T) -> [T; N] {
-    match array_try_from_fn_inline(
+    unwrap_infallible(array_try_from_fn_inline(
         #[inline(always)]
         |i| Result::<_, Infallible>::Ok(f(i)),
-    ) {
-        Ok(arr) => arr,
-        Err(never) => match never {},
-    }
+    ))
 }
 #[inline(always)]
 pub(crate) fn array_try_from_fn_inline<T, E, const N: usize>(
@@ -60,6 +57,46 @@ pub(crate) fn array_try_from_fn_inline<T, E, const N: usize>(
     Ok(unsafe { data.assume_init() })
 }
 
+#[inline(always)]
+fn array_try_map_inline<T, U, E, const N: usize>(
+    src: [T; N],
+    mut f: impl FnMut(usize, T) -> Result<U, E>,
+) -> Result<[U; N], E> {
+    let mut src = ManuallyDrop::new(src);
+    if const { !std::mem::needs_drop::<T>() } {
+        // SAFETY: every index is read at most once, and `src` is never dropped (`T` has no drop)
+        return array_try_from_fn_inline(
+            #[inline(always)]
+            |i| f(i, unsafe { std::ptr::read(&src[i]) }),
+        );
+    }
+
+    /// Drops the items `src[next..]` that were not mapped yet
+    struct DropGuard<'a, T, const N: usize> {
+        src: &'a mut ManuallyDrop<[T; N]>,
+        next: usize,
+    }
+    impl<T, const N: usize> Drop for DropGuard<'_, T, N> {
+        #[inline(always)]
+        fn drop(&mut self) {
+            // SAFETY: the items `next..` were never read out, and are dropped exactly once here.
+            unsafe { std::ptr::drop_in_place(&mut self.src[self.next..]) };
+        }
+    }
+    let mut unconsumed = DropGuard {
+        src: &mut src,
+        next: 0,
+    };
+    array_try_from_fn_inline(
+        #[inline(always)]
+        |i| {
+            let item = unsafe { std::ptr::read(&unconsumed.src[i]) };
+            unconsumed.next = i + 1;
+            f(i, item)
+        },
+    )
+}
+
 pub(crate) trait ArrayExt<T, const N: usize> {
     fn map_inline<U>(self, f: impl FnMut(T) -> U) -> [U; N]
     where
@@ -82,73 +119,18 @@ pub(crate) trait ArrayExt<T, const N: usize> {
     where
         Self: Sized;
 }
-/// Map `src` by value into a new array, consuming its items in index order.
-///
-/// Items are read straight out of `src` by index rather than pulled from `array::IntoIter`: an
-/// iterator carries its own cursor, which LLVM cannot always prove equal to the fill index, so a
-/// per-item "is there a next item" check can survive into the loop and block vectorization (and
-/// moving `src` into the iterator costs a full-array copy).
-///
-/// If `f` returns an error or panics, the items it has not consumed yet are dropped here, the
-/// outputs produced so far are dropped by [`array_try_from_fn_inline`], and the item passed to
-/// the failing call belongs to `f`.
-#[inline(always)]
-fn array_try_map_by_index<T, U, E, const N: usize>(
-    src: [T; N],
-    mut f: impl FnMut(usize, T) -> Result<U, E>,
-) -> Result<[U; N], E> {
-    let mut src = ManuallyDrop::new(src);
-    if const { !std::mem::needs_drop::<T>() } {
-        // SAFETY: every index is read at most once, and `src` is never dropped. `T` has no drop
-        // glue, so the items left unread on an early return need no cleanup.
-        return array_try_from_fn_inline(
-            #[inline(always)]
-            |i| f(i, unsafe { std::ptr::read(&src[i]) }),
-        );
-    }
-
-    /// Drops the items `src[next..]` that were not handed to `f` yet.
-    struct Unconsumed<'a, T, const N: usize> {
-        src: &'a mut ManuallyDrop<[T; N]>,
-        next: usize,
-    }
-    impl<T, const N: usize> Drop for Unconsumed<'_, T, N> {
-        #[inline(always)]
-        fn drop(&mut self) {
-            // SAFETY: the items `next..` were never read out, and are dropped exactly once here.
-            unsafe { std::ptr::drop_in_place(&mut self.src[self.next..]) };
-        }
-    }
-    let mut unconsumed = Unconsumed {
-        src: &mut src,
-        next: 0,
-    };
-    array_try_from_fn_inline(
-        #[inline(always)]
-        |i| {
-            // SAFETY: indices arrive in order `0..N`, each once, and `next` moves past `i` before
-            // `f` runs, so the guard never drops an item that was read out.
-            let item = unsafe { std::ptr::read(&unconsumed.src[i]) };
-            unconsumed.next = i + 1;
-            f(i, item)
-        },
-    )
-}
-
 impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     #[inline(always)]
     fn map_inline<U>(self, mut f: impl FnMut(T) -> U) -> [U; N]
     where
         Self: Sized,
     {
-        match array_try_map_by_index(
+        // use array_try_from_fn_inline directly to avoid extra monomorphizations
+        unwrap_infallible(array_try_map_inline(
             self,
             #[inline(always)]
             |_, x| Result::<_, Infallible>::Ok(f(x)),
-        ) {
-            Ok(arr) => arr,
-            Err(never) => match never {},
-        }
+        ))
     }
 
     #[inline(always)]
@@ -156,7 +138,7 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        array_try_map_by_index(
+        array_try_map_inline(
             self,
             #[inline(always)]
             |_, x| f(x),
@@ -168,10 +150,11 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        array_from_fn_inline(
+        // use array_try_from_fn_inline directly to avoid extra monomorphizations
+        unwrap_infallible(array_try_from_fn_inline(
             #[inline(always)]
-            |i| f(&self[i]),
-        )
+            |i| Result::<_, Infallible>::Ok(f(&self[i])),
+        ))
     }
 
     #[inline(always)]
@@ -190,30 +173,22 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        match array_try_map_by_index(
+        // use array_try_from_fn_inline directly to avoid extra monomorphizations
+        unwrap_infallible(array_try_map_inline(
             self,
             #[inline(always)]
             |i, x| Result::<_, Infallible>::Ok(f(i, x)),
-        ) {
-            Ok(arr) => arr,
-            Err(never) => match never {},
-        }
+        ))
     }
 }
 
-// pub(crate) fn array_map2_inline<T, U, V, const N: usize>(
-//     a: [T; N],
-//     b: [U; N],
-//     mut f: impl FnMut(T, U) -> V,
-// ) -> [V; N] {
-//     let mut data_a = a.into_iter();
-//     let mut data_b = b.into_iter();
-//     array_from_fn_inline(|_| {
-//         let x = unsafe { data_a.next().unwrap_unchecked() };
-//         let y = unsafe { data_b.next().unwrap_unchecked() };
-//         f(x, y)
-//     })
-// }
+#[inline(always)]
+fn unwrap_infallible<T>(result: Result<T, Infallible>) -> T {
+    match result {
+        Ok(value) => value,
+        Err(never) => match never {},
+    }
+}
 
 #[cfg(test)]
 mod tests {

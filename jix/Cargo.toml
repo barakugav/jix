@@ -34,12 +34,13 @@ libc = "0.2"
 
 
 [features]
+default = []
+
 # Add the `half` crate for f16, and implement scalar kernels for it.
 half = ["dep:half"]
 
 # Add the `num-complex` crate for complex numbers, and implement scalar kernels for Complex<f32>
 # and Complex<f64>.
-# `Complex<f16>` arithmetic needs `half`'s `num-traits` impls.
 num-complex = ["dep:num-complex", "half?/num-traits"]
 
 

@@ -26,32 +26,21 @@ impl FilterImpl for ByteShuffleFilter {
 
 pub(super) fn encode(src: &[u8], dst: &mut [u8], itemsize: usize) {
     assert!(src.len() == dst.len() && src.len().is_multiple_of(itemsize));
-
-    let encode_sized_fn: Option<fn(_, _) -> _> = match itemsize {
-        1 => {
-            // no-op
-            dst.copy_from_slice(src);
-            return;
-        }
-        2 => Some(encode_impl::<2>),
-        4 => Some(encode_impl::<4>),
-        8 => Some(encode_impl::<8>),
-        16 => Some(encode_impl::<16>),
-        _ => None,
-    };
-
-    let mut n_elements_done = 0;
-    if let Some(encode_fn) = encode_sized_fn {
-        n_elements_done = encode_fn(src, dst);
+    match itemsize {
+        1 => dst.copy_from_slice(src), // no-op
+        2 => encode_impl::<2>(src, dst),
+        4 => encode_impl::<4>(src, dst),
+        8 => encode_impl::<8>(src, dst),
+        16 => encode_impl::<16>(src, dst),
+        _ => encode_impl_generic(src, dst, itemsize, 0),
     }
-
-    // Tail of the remaining items
-    encode_impl_generic(src, dst, itemsize, n_elements_done);
 }
 
 #[inline(never)]
-fn encode_impl<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) -> usize {
-    fearless_simd::dispatch!(SimdLevel::new(), simd => encode_simd::<ITEMSIZE, _>(src, dst, simd))
+fn encode_impl<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) {
+    let n_elements_done = fearless_simd::dispatch!(SimdLevel::new(), simd => encode_simd::<ITEMSIZE, _>(src, dst, simd));
+    // Tail of the remaining items
+    encode_impl_generic_inline(src, dst, ITEMSIZE, n_elements_done);
 }
 
 /// Encode main loop.
@@ -124,6 +113,10 @@ fn encode_simd<const ITEMSIZE: usize, S: Simd>(src: &[u8], dst: &mut [u8], simd:
 
 #[inline(never)]
 fn encode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
+    encode_impl_generic_inline(src, dst, itemsize, start);
+}
+#[inline(always)]
+fn encode_impl_generic_inline(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
     debug_assert!(src.len().is_multiple_of(itemsize));
 
     let nitems = src.len() / itemsize;
@@ -141,32 +134,21 @@ fn encode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize
 
 pub(super) fn decode(src: &[u8], dst: &mut [u8], itemsize: usize) {
     assert!(src.len() == dst.len() && src.len().is_multiple_of(itemsize));
-
-    let decode_sized_fn: Option<fn(_, _) -> usize> = match itemsize {
-        1 => {
-            // no-op
-            dst.copy_from_slice(src);
-            return;
-        }
-        2 => Some(decode_impl::<2>),
-        4 => Some(decode_impl::<4>),
-        8 => Some(decode_impl::<8>),
-        16 => Some(decode_impl::<16>),
-        _ => None,
-    };
-
-    let mut n_elements_done = 0;
-    if let Some(decode_fn) = decode_sized_fn {
-        n_elements_done = decode_fn(src, dst);
+    match itemsize {
+        1 => dst.copy_from_slice(src), // no-op
+        2 => decode_impl::<2>(src, dst),
+        4 => decode_impl::<4>(src, dst),
+        8 => decode_impl::<8>(src, dst),
+        16 => decode_impl::<16>(src, dst),
+        _ => decode_impl_generic(src, dst, itemsize, 0),
     }
-
-    // Tail of the remaining items
-    decode_impl_generic(src, dst, itemsize, n_elements_done);
 }
 
 #[inline(never)]
-fn decode_impl<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) -> usize {
-    fearless_simd::dispatch!(SimdLevel::new(), simd => decode_simd::<ITEMSIZE, _>(src, dst, simd))
+fn decode_impl<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) {
+    let n_elements_done = fearless_simd::dispatch!(SimdLevel::new(), simd => decode_simd::<ITEMSIZE, _>(src, dst, simd));
+    // Tail of the remaining items
+    decode_impl_generic_inline(src, dst, ITEMSIZE, n_elements_done);
 }
 
 /// Decode main loop.
@@ -219,6 +201,10 @@ fn decode_simd<const ITEMSIZE: usize, S: Simd>(src: &[u8], dst: &mut [u8], simd:
 
 #[inline(never)]
 fn decode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
+    decode_impl_generic_inline(src, dst, itemsize, start);
+}
+#[inline(always)]
+fn decode_impl_generic_inline(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
     debug_assert!(src.len().is_multiple_of(itemsize));
 
     let nitems = src.len() / itemsize;
