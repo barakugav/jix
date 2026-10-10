@@ -43,7 +43,7 @@ pub(crate) mod _traits {
         use crate::util::{array_from_fn_inline, ArrayExt};
         use fearless_simd::{Simd, SimdNarrow, SimdWiden};
 
-        pub(super) use crate::scalar::simd::{level, map_vectors, Level, SimdLane};
+        pub(super) use crate::scalar::simd::{map_vectors, simd_level, SimdLane, SimdLevel};
 
         /// Widen `K` vectors to `2K` vectors (in order) of lanes twice as wide.
         pub(super) trait WidenVectors<S> {
@@ -133,7 +133,7 @@ pub(crate) mod _traits {
                     simd::{NarrowVectors, SimdLane, WidenVectors},
                 };
                 $(
-                    if !matches!(simd::level(simd), $(simd::Level::$level)|+) {
+                    if !matches!(simd::simd_level(simd), $(simd::SimdLevel::$level)|+) {
                         return xs.map_inline(#[inline(always)] |x| <Self as Cast<$dst_type>>::cast(x));
                     }
                 )?

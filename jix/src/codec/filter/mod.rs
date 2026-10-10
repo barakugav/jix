@@ -44,11 +44,11 @@ impl Filter {
         src: &[u8],
         dst: &mut [u8],
         dtype: &Dtype,
-        tmp_buffers: &BufferPool,
+        buf_pool: &BufferPool,
     ) {
         match self {
-            Filter::ByteShuffle => ByteShuffleFilter.encode(src, dst, dtype, tmp_buffers),
-            Filter::BitShuffle => BitShuffleFilter.encode(src, dst, dtype, tmp_buffers),
+            Filter::ByteShuffle => ByteShuffleFilter.encode(src, dst, dtype, buf_pool),
+            Filter::BitShuffle => BitShuffleFilter.encode(src, dst, dtype, buf_pool),
         }
     }
 
@@ -57,18 +57,18 @@ impl Filter {
         src: &[u8],
         dst: &mut [u8],
         dtype: &Dtype,
-        tmp_buffers: &BufferPool,
+        buf_pool: &BufferPool,
     ) {
         match self {
-            Filter::ByteShuffle => ByteShuffleFilter.decode(src, dst, dtype, tmp_buffers),
-            Filter::BitShuffle => BitShuffleFilter.decode(src, dst, dtype, tmp_buffers),
+            Filter::ByteShuffle => ByteShuffleFilter.decode(src, dst, dtype, buf_pool),
+            Filter::BitShuffle => BitShuffleFilter.decode(src, dst, dtype, buf_pool),
         }
     }
 }
 
 trait FilterImpl {
-    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &BufferPool);
-    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &BufferPool);
+    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool);
+    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool);
 }
 
 #[cfg(test)]
@@ -86,11 +86,11 @@ mod tests {
         let data = gen_data_bytes_from_slice::<T>(items);
         let src = data.as_slice();
         let dtype = T::DTYPE;
-        let tmp_buffers = BufferPool::new();
+        let buf_pool = BufferPool::new();
         let mut encoded = vec![0u8; src.len()];
-        F::default().encode(src, &mut encoded, &dtype, &tmp_buffers);
+        F::default().encode(src, &mut encoded, &dtype, &buf_pool);
         let mut decoded = vec![0u8; src.len()];
-        F::default().decode(&encoded, &mut decoded, &dtype, &tmp_buffers);
+        F::default().decode(&encoded, &mut decoded, &dtype, &buf_pool);
         assert_eq!(decoded, src);
     }
 

@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use fearless_simd::{dispatch, Level, Simd, SimdBase};
+use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 use std::cmp::Reverse;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -46,7 +46,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     ///
     /// `simd` is the SIMD level the read runs at: nodes may compute with its vectors. Inside
     /// [`inner_loop_contiguous`]'s dispatch it is the dispatched level, elsewhere the level the
-    /// target enables statically (`Level::baseline()`).
+    /// target enables statically (`SimdLevel::baseline()`).
     ///
     /// # Safety
     ///
@@ -504,9 +504,9 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
 ) where
     T: Dtyped,
 {
-    // `Level::baseline()` is a const: the dispatch folds to the target's static level, with no
+    // `SimdLevel::baseline()` is a const: the dispatch folds to the target's static level, with no
     // runtime check and no copy of the loop for the other levels.
-    dispatch!(Level::baseline(), simd => inner_loop_impl::<T, LANES, IN_CONTIGUOUS, OUT_CONTIGUOUS>(
+    fearless_simd::dispatch!(SimdLevel::baseline(), simd => inner_loop_impl::<T, LANES, IN_CONTIGUOUS, OUT_CONTIGUOUS>(
         dst,
         dst_stride,
         len,
@@ -540,7 +540,7 @@ fn inner_loop_contiguous<T>(
 ) where
     T: Dtyped,
 {
-    dispatch!(Level::new(), simd => inner_loop_level(simd, pipeline, dst, dst_stride, len));
+    fearless_simd::dispatch!(SimdLevel::new(), simd => inner_loop_level(simd, pipeline, dst, dst_stride, len));
 }
 
 /// One arm of [`inner_loop_contiguous`]. The lanes depend on the level, so they are matched on as

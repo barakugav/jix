@@ -3,7 +3,7 @@ use crate::buf_pool::BufferPool;
 use crate::codec::filter::FilterImpl;
 use crate::dtype::Dtype;
 use core::ops::{BitAnd, BitXor, Shl, Shr};
-use fearless_simd::{dispatch, Bytes, Level, Simd, SimdBase};
+use fearless_simd::{Bytes, Level as SimdLevel, Simd, SimdBase};
 
 // Bitshuffle filter, derived from Bitshuffle by Kiyoshi Masui (MIT,
 // https://github.com/kiyo-masui/bitshuffle) via its adaptation in
@@ -63,13 +63,13 @@ use fearless_simd::{dispatch, Bytes, Level, Simd, SimdBase};
 pub(super) struct BitShuffleFilter;
 
 impl FilterImpl for BitShuffleFilter {
-    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &BufferPool) {
+    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool) {
         assert_eq!(src.len(), dst.len());
         let typesize = dtype.itemsize() as usize;
         let n_full = src.len() / typesize / 8 * 8;
         let full_bytes = n_full * typesize;
 
-        let mut tmp = tmp_buffers.get(n_full, 16.try_into().unwrap());
+        let mut tmp = buf_pool.get(n_full, 16.try_into().unwrap());
         let tmp = &mut tmp.as_mut_slice()[..n_full];
 
         byte_shuffle::encode(&src[..full_bytes], &mut dst[..full_bytes], typesize);
@@ -83,13 +83,13 @@ impl FilterImpl for BitShuffleFilter {
         dst[full_bytes..].copy_from_slice(&src[full_bytes..]);
     }
 
-    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &BufferPool) {
+    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool) {
         assert_eq!(src.len(), dst.len());
         let typesize = dtype.itemsize() as usize;
         let n_full = src.len() / typesize / 8 * 8;
         let full_bytes = n_full * typesize;
 
-        let mut tmp = tmp_buffers.get(full_bytes, 16.try_into().unwrap());
+        let mut tmp = buf_pool.get(full_bytes, 16.try_into().unwrap());
         let tmp = &mut tmp.as_mut_slice()[..full_bytes];
 
         let plane = n_full.max(1); // no byte-plane at all when there is no full group
@@ -112,7 +112,8 @@ impl FilterImpl for BitShuffleFilter {
 ///
 /// Self-inverse, so it serves both directions of the filter.
 fn transpose_bit_rows(src: &[u8], dst: &mut [u8]) {
-    let done = dispatch!(Level::new(), simd => transpose_bit_rows_simd(simd, src, dst));
+    let done =
+        fearless_simd::dispatch!(SimdLevel::new(), simd => transpose_bit_rows_simd(simd, src, dst));
     // Tail of the remaining columns, one at a time.
     let g = src.len() / 8;
     for j in done..g {
@@ -266,11 +267,11 @@ mod tests {
     }
 
     /// `transpose_bit_rows_simd` at every SIMD level this CPU supports (not only the one
-    /// `dispatch!` picks) plus the dispatched function with its tail, against the reference.
+    /// `fearless_simd::dispatch!` picks) plus the dispatched function with its tail, against the reference.
     #[test]
     fn transpose_bit_rows_all_levels() {
         use super::{transpose_bit_rows, transpose_bit_rows_simd};
-        use fearless_simd::{Level, Simd};
+        use fearless_simd::{Level as SimdLevel, Simd};
 
         let lengths = [
             0, 1, 7, 8, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 300,
@@ -294,7 +295,7 @@ mod tests {
             }
         }
         use fearless_simd::SimdBase;
-        let level = Level::new();
+        let level = SimdLevel::new();
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
             if let Some(s) = level.as_sse2() {
@@ -376,10 +377,10 @@ mod tests {
         let src = data.as_slice();
         let typesize = T::DTYPE.itemsize() as usize;
         let dtype = T::DTYPE;
-        let tmp_buffers = BufferPool::new();
+        let buf_pool = BufferPool::new();
 
         let mut optimized_out = vec![0u8; src.len()];
-        BitShuffleFilter.encode(src, &mut optimized_out, &dtype, &tmp_buffers);
+        BitShuffleFilter.encode(src, &mut optimized_out, &dtype, &buf_pool);
 
         let mut trivial_out = vec![0u8; src.len()];
         bit_shuffle_trivial(src, &mut trivial_out, typesize);

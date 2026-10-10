@@ -6,7 +6,7 @@ use fearless_simd::{Simd, SimdBase, SimdElement};
 /// The fearless_simd levels a SIMD body can be limited to.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)] // Each target constructs only the variants of its arch.
-pub(crate) enum Level {
+pub(crate) enum SimdLevel {
     Sse2,
     Sse4_2,
     Avx2,
@@ -18,19 +18,19 @@ pub(crate) enum Level {
 
 /// The level of `simd`. A constant for each `S`, so a check of it folds away.
 #[inline(always)]
-pub(crate) fn level<S: Simd>(simd: S) -> Level {
+pub(crate) fn simd_level<S: Simd>(simd: S) -> SimdLevel {
     match simd.level() {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        fearless_simd::Level::Sse2(_) => Level::Sse2,
+        fearless_simd::Level::Sse2(_) => SimdLevel::Sse2,
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        fearless_simd::Level::Sse4_2(_) => Level::Sse4_2,
+        fearless_simd::Level::Sse4_2(_) => SimdLevel::Sse4_2,
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        fearless_simd::Level::Avx2(_) => Level::Avx2,
+        fearless_simd::Level::Avx2(_) => SimdLevel::Avx2,
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        fearless_simd::Level::Avx512(_) => Level::Avx512,
+        fearless_simd::Level::Avx512(_) => SimdLevel::Avx512,
         #[cfg(target_arch = "aarch64")]
-        fearless_simd::Level::Neon(_) => Level::Neon,
-        _ => Level::Other,
+        fearless_simd::Level::Neon(_) => SimdLevel::Neon,
+        _ => SimdLevel::Other,
     }
 }
 

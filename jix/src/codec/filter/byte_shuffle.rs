@@ -1,108 +1,102 @@
 use crate::buf_pool::BufferPool;
 use crate::codec::filter::FilterImpl;
 use crate::dtype::Dtype;
-use fearless_simd::{dispatch, Level, Simd, SimdBase};
+use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
+
+// This code has been optimized by static analysis using cargo-asm and llvm-mca, for
+// - x86-64 SSE4.2 (Sandy Bridge, Jaguar)
+// - AVX2 (Skylake, Alder Lake, Zen 3)
+// - AVX-512 (Ice Lake, Sapphire Rapids, Zen 4)
+// - i686 SSE2 (Skylake)
+// - aarch64 NEON (Cortex-A72, Neoverse N1 / V2, Apple M1)
+
+const MIN_BYTES_PER_ITERATION: usize = 256;
 
 #[derive(Default)]
 pub(in crate::codec::filter) struct ByteShuffleFilter;
 impl FilterImpl for ByteShuffleFilter {
-    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _tmp_buffers: &BufferPool) {
+    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _buf_pool: &BufferPool) {
         encode(src, dst, dtype.itemsize() as usize);
     }
 
-    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _tmp_buffers: &BufferPool) {
+    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _buf_pool: &BufferPool) {
         decode(src, dst, dtype.itemsize() as usize);
     }
 }
 
-/// Byte-shuffle `src` into `dst` for elements of `itemsize` bytes.
 pub(super) fn encode(src: &[u8], dst: &mut [u8], itemsize: usize) {
-    assert_eq!(src.len(), dst.len());
-    debug_assert!(src.len().is_multiple_of(itemsize));
-    match itemsize {
-        1 => dst.copy_from_slice(src), // identity permutation
-        2 => encode_dispatch::<2>(src, dst),
-        4 => encode_dispatch::<4>(src, dst),
-        8 => encode_dispatch::<8>(src, dst),
-        16 => encode_dispatch::<16>(src, dst),
-        _ => encode_impl_generic(src, dst, itemsize, 0),
-    }
-}
+    assert!(src.len() == dst.len() && src.len().is_multiple_of(itemsize));
 
-/// Inverse of [`encode`].
-pub(super) fn decode(src: &[u8], dst: &mut [u8], itemsize: usize) {
-    assert_eq!(src.len(), dst.len());
-    debug_assert!(src.len().is_multiple_of(itemsize));
-    match itemsize {
-        1 => dst.copy_from_slice(src), // identity permutation
-        2 => decode_dispatch::<2>(src, dst),
-        4 => decode_dispatch::<4>(src, dst),
-        8 => decode_dispatch::<8>(src, dst),
-        16 => decode_dispatch::<16>(src, dst),
-        _ => decode_impl_generic(src, dst, itemsize, 0),
-    }
-}
+    let encode_sized_fn: Option<fn(_, _) -> _> = match itemsize {
+        1 => {
+            // no-op
+            dst.copy_from_slice(src);
+            return;
+        }
+        2 => Some(encode_impl::<2>),
+        4 => Some(encode_impl::<4>),
+        8 => Some(encode_impl::<8>),
+        16 => Some(encode_impl::<16>),
+        _ => None,
+    };
 
-#[inline(always)]
-fn is_sse2<S: Simd>(simd: S) -> bool {
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    if let Level::Sse2(_) = simd.level() {
-        return true;
+    let mut n_elements_done = 0;
+    if let Some(encode_fn) = encode_sized_fn {
+        n_elements_done = encode_fn(src, dst);
     }
-    let _ = simd;
-    false
-}
 
-fn encode_dispatch<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) {
-    let done = dispatch!(Level::new(), simd => encode_simd::<_, ITEMSIZE>(simd, src, dst));
     // Tail of the remaining items
-    encode_impl_generic(src, dst, ITEMSIZE, done);
+    encode_impl_generic(src, dst, itemsize, n_elements_done);
 }
 
-/// Encode main loop: shuffles whole chunks of `S::u8s::LEN` items, and returns the number of
-/// items encoded. `ITEMSIZE` must be a power of two (checked at compile time).
+#[inline(never)]
+fn encode_impl<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) -> usize {
+    fearless_simd::dispatch!(SimdLevel::new(), simd => encode_simd::<ITEMSIZE, _>(src, dst, simd))
+}
+
+/// Encode main loop.
 ///
-/// Each chunk is a transpose of ITEMSIZE vectors of whole items into one vector per byte plane:
-/// log2(ITEMSIZE) rounds of the inverse perfect shuffle, the exact inverse of [`decode_simd`].
+/// # Returns
 ///
-/// Optimized by static analysis of the generated asm (cargo-asm + llvm-mca, steady-state cycles
-/// of the main loop), for x86-64 SSE4.2 (Sandy Bridge, Jaguar), AVX2 (Skylake, Alder Lake, Zen 3)
-/// and AVX-512 (Ice Lake, Sapphire Rapids, Zen 4), i686 SSE2 (Skylake), and aarch64 NEON
-/// (Cortex-A72, Neoverse N1 / V2, Apple M1).
+/// The number of items encoded.
 #[inline(always)]
-fn encode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mut [u8]) -> usize {
-    let shuffle_steps = const {
+fn encode_simd<const ITEMSIZE: usize, S: Simd>(src: &[u8], dst: &mut [u8], simd: S) -> usize {
+    let nitems = src.len() / ITEMSIZE;
+    assert!(dst.len() >= nitems * ITEMSIZE);
+
+    let lanes = S::u8s::LEN;
+    let unroll = (MIN_BYTES_PER_ITERATION / (ITEMSIZE * lanes)).max(1);
+    let nchunks = nitems / (lanes * unroll) * unroll;
+
+    let deinterleave_steps = const {
         assert!(ITEMSIZE.is_power_of_two());
         ITEMSIZE.ilog2()
     };
-    let lanes = S::u8s::LEN;
-    // Chunks per loop iteration, so an iteration covers at least MIN_BYTES_PER_ITER bytes: amortizes
-    // the loop overhead for narrow vectors and small itemsizes.
-    let unroll = (MIN_BYTES_PER_ITER / (ITEMSIZE * lanes)).max(1);
-    // A decode round is a perfect shuffle of the chunk's ITEMSIZE * lanes bytes (a rotation of the
-    // byte index bits by one), and decode rotates by log2(ITEMSIZE). The inverse is either
-    // log2(ITEMSIZE) inverse rounds (`deinterleave`), or log2(lanes) more decode rounds
-    // (`interleave`). `interleave` is never more expensive than `deinterleave`, so use it when it
-    // needs no more rounds. On SSE2, which has no byte shuffle, fearless_simd's `deinterleave` is
-    // scalar code: always use `interleave` there.
-    let interleave_steps = lanes.ilog2();
-    let use_deinterleave = shuffle_steps < interleave_steps && !is_sse2(simd);
-    let nitems = src.len() / ITEMSIZE;
-    assert!(dst.len() >= nitems * ITEMSIZE);
-    let nchunks = nitems / (lanes * unroll) * unroll;
-    for c in (0..nchunks).step_by(unroll) {
+    let interleave_steps = const {
+        let lanes = S::u8s::LEN;
+        assert!(lanes.is_power_of_two());
+        lanes.ilog2()
+    };
+    // `interleave` is never more expensive than `deinterleave`, so use it when it
+    // needs no more rounds. SSE2 has no byte shuffle, fearless_simd's `deinterleave` is
+    // scalar code, so always use `interleave` there.
+    let use_deinterleave = deinterleave_steps < interleave_steps && !is_sse2(simd);
+
+    for chunk in (0..nchunks).step_by(unroll) {
         for u in 0..unroll {
-            let i = (c + u) * lanes;
-            // SAFETY (all `get_unchecked*` below): `b < ITEMSIZE` and `i + lanes <= nitems`, so
-            // the ranges are within the `nitems * ITEMSIZE` bytes of `src` and `dst`.
+            let i = (chunk + u) * lanes;
+
+            // load from src into registers
             let mut v = [S::u8s::splat(simd, 0); ITEMSIZE];
             for (b, x) in v.iter_mut().enumerate() {
                 let start = i * ITEMSIZE + b * lanes;
                 *x = S::u8s::from_slice(simd, unsafe { src.get_unchecked(start..start + lanes) });
             }
+
+            // shuffle
             if use_deinterleave {
-                for _ in 0..shuffle_steps {
-                    let mut w = v;
+                for _ in 0..deinterleave_steps {
+                    let mut w = [S::u8s::splat(simd, 0); ITEMSIZE];
                     for j in 0..ITEMSIZE / 2 {
                         (w[j], w[j + ITEMSIZE / 2]) = v[2 * j].deinterleave(v[2 * j + 1]);
                     }
@@ -110,13 +104,15 @@ fn encode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mut [u
                 }
             } else {
                 for _ in 0..interleave_steps {
-                    let mut w = v;
+                    let mut w = [S::u8s::splat(simd, 0); ITEMSIZE];
                     for j in 0..ITEMSIZE / 2 {
                         (w[2 * j], w[2 * j + 1]) = v[j].interleave(v[j + ITEMSIZE / 2]);
                     }
                     v = w;
                 }
             }
+
+            // store into dst
             for (b, x) in v.iter().enumerate() {
                 let start = b * nitems + i;
                 x.store_slice(unsafe { dst.get_unchecked_mut(start..start + lanes) });
@@ -126,103 +122,126 @@ fn encode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mut [u
     nchunks * lanes
 }
 
-/// Scalar encode of the items from `start` on, for any itemsize. Compiled for each SIMD level
-/// (auto-vectorized).
 #[inline(never)]
 fn encode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
     debug_assert!(src.len().is_multiple_of(itemsize));
+
     let nitems = src.len() / itemsize;
     assert!(dst.len() >= nitems * itemsize);
-    let src = src.as_ptr();
-    let dst = dst.as_mut_ptr();
-    dispatch!(Level::new(), _ => {
+
+    fearless_simd::dispatch!(SimdLevel::new(), _ => {
         for b in 0..itemsize {
             for i in start..nitems {
-                unsafe {
-                    let elm = src.add(i * itemsize + b).read();
-                    dst.add(b * nitems + i).write(elm);
-                }
+                let elm = unsafe { *src.get_unchecked(i * itemsize + b) };
+                unsafe { *dst.get_unchecked_mut(b * nitems + i) = elm };
             }
         }
     })
 }
 
-fn decode_dispatch<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) {
-    let done = dispatch!(Level::new(), simd => decode_simd::<_, ITEMSIZE>(simd, src, dst));
+pub(super) fn decode(src: &[u8], dst: &mut [u8], itemsize: usize) {
+    assert!(src.len() == dst.len() && src.len().is_multiple_of(itemsize));
+
+    let decode_sized_fn: Option<fn(_, _) -> usize> = match itemsize {
+        1 => {
+            // no-op
+            dst.copy_from_slice(src);
+            return;
+        }
+        2 => Some(decode_impl::<2>),
+        4 => Some(decode_impl::<4>),
+        8 => Some(decode_impl::<8>),
+        16 => Some(decode_impl::<16>),
+        _ => None,
+    };
+
+    let mut n_elements_done = 0;
+    if let Some(decode_fn) = decode_sized_fn {
+        n_elements_done = decode_fn(src, dst);
+    }
+
     // Tail of the remaining items
-    decode_impl_generic(src, dst, ITEMSIZE, done);
+    decode_impl_generic(src, dst, itemsize, n_elements_done);
 }
 
-const MIN_BYTES_PER_ITER: usize = 256;
+#[inline(never)]
+fn decode_impl<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) -> usize {
+    fearless_simd::dispatch!(SimdLevel::new(), simd => decode_simd::<ITEMSIZE, _>(src, dst, simd))
+}
 
-/// Decode main loop: un-shuffles whole chunks of `S::u8s::LEN` items, and returns the number of
-/// items decoded. `ITEMSIZE` must be a power of two (checked at compile time).
+/// Decode main loop.
 ///
-/// Each chunk is a transpose of ITEMSIZE vectors (one per byte plane): log2(ITEMSIZE) rounds of
-/// a perfect shuffle, pairing plane `j` with plane `j + ITEMSIZE / 2`.
+/// # Returns
 ///
-/// Optimized by static analysis of the generated asm (cargo-asm + llvm-mca, steady-state cycles
-/// of the main loop), for x86-64 SSE4.2 (Sandy Bridge, Jaguar), AVX2 (Skylake, Alder Lake, Zen 3)
-/// and AVX-512 (Ice Lake, Sapphire Rapids, Zen 4), i686 SSE2 (Skylake), and aarch64 NEON
-/// (Cortex-A72, Neoverse N1 / V2, Apple M1).
+/// The number of items decoded.
 #[inline(always)]
-fn decode_simd<S: Simd, const ITEMSIZE: usize>(simd: S, src: &[u8], dst: &mut [u8]) -> usize {
-    let shuffle_steps = const {
-        assert!(ITEMSIZE.is_power_of_two());
-        ITEMSIZE.ilog2()
-    };
-    let lanes = S::u8s::LEN;
-    // Chunks per loop iteration, so an iteration covers at least MIN_BYTES_PER_ITER bytes: amortizes
-    // the loop overhead for narrow vectors and small itemsizes.
-    let unroll = (MIN_BYTES_PER_ITER / (ITEMSIZE * lanes)).max(1);
+fn decode_simd<const ITEMSIZE: usize, S: Simd>(src: &[u8], dst: &mut [u8], simd: S) -> usize {
     let nitems = src.len() / ITEMSIZE;
     assert!(dst.len() >= nitems * ITEMSIZE);
-    let nchunks = nitems / (lanes * unroll) * unroll;
-    for c in (0..nchunks).step_by(unroll) {
+
+    let lanes = S::u8s::LEN;
+    let unroll = (MIN_BYTES_PER_ITERATION / (ITEMSIZE * lanes)).max(1);
+    let n_chunks = nitems / (lanes * unroll) * unroll;
+
+    for chunk in (0..n_chunks).step_by(unroll) {
         for u in 0..unroll {
-            let i = (c + u) * lanes;
-            // SAFETY (all `get_unchecked*` below): `b < ITEMSIZE` and `i + lanes <= nitems`, so
-            // the ranges are within the `nitems * ITEMSIZE` bytes of `src` and `dst`.
+            let i = (chunk + u) * lanes;
+
+            // load from src into registers
             let mut v = [S::u8s::splat(simd, 0); ITEMSIZE];
             for (b, x) in v.iter_mut().enumerate() {
                 let start = b * nitems + i;
                 *x = S::u8s::from_slice(simd, unsafe { src.get_unchecked(start..start + lanes) });
             }
-            for _ in 0..shuffle_steps {
-                let mut w = v;
+
+            // shuffle
+            let interleave_steps = const {
+                assert!(ITEMSIZE.is_power_of_two());
+                ITEMSIZE.ilog2()
+            };
+            for _ in 0..interleave_steps {
+                let mut w = [S::u8s::splat(simd, 0); ITEMSIZE];
                 for j in 0..ITEMSIZE / 2 {
                     (w[2 * j], w[2 * j + 1]) = v[j].interleave(v[j + ITEMSIZE / 2]);
                 }
                 v = w;
             }
+
+            // write to dst
             for (b, x) in v.iter().enumerate() {
                 let start = i * ITEMSIZE + b * lanes;
                 x.store_slice(unsafe { dst.get_unchecked_mut(start..start + lanes) });
             }
         }
     }
-    nchunks * lanes
+    n_chunks * lanes
 }
 
-/// Scalar decode of the items from `start` on, for any itemsize. Compiled for each SIMD level
-/// (auto-vectorized).
 #[inline(never)]
 fn decode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
     debug_assert!(src.len().is_multiple_of(itemsize));
+
     let nitems = src.len() / itemsize;
     assert!(dst.len() >= nitems * itemsize);
-    let src = src.as_ptr();
-    let dst = dst.as_mut_ptr();
-    dispatch!(Level::new(), _ => {
+
+    fearless_simd::dispatch!(SimdLevel::new(), _ => {
         for i in start..nitems {
             for b in 0..itemsize {
-                unsafe {
-                    let elm = src.add(b * nitems + i).read();
-                    dst.add(i * itemsize + b).write(elm);
-                }
+                let elm = *unsafe { src.get_unchecked(b * nitems + i) };
+                unsafe { *dst.get_unchecked_mut(i * itemsize + b) = elm };
             }
         }
     })
+}
+
+#[inline(always)]
+fn is_sse2<S: Simd>(simd: S) -> bool {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    if matches!(simd.level(), SimdLevel::Sse2(_)) {
+        return true;
+    }
+    let _ = simd;
+    false
 }
 
 #[cfg(test)]
@@ -262,11 +281,11 @@ mod tests {
         let src = data.as_slice();
         let itemsize = T::DTYPE.itemsize() as usize;
         let dtype = T::DTYPE;
-        let tmp_buffers = BufferPool::new();
+        let buf_pool = BufferPool::new();
 
         // Encode: optimized vs reference.
         let mut optimized_encoded = vec![0u8; src.len()];
-        ByteShuffleFilter.encode(src, &mut optimized_encoded, &dtype, &tmp_buffers);
+        ByteShuffleFilter.encode(src, &mut optimized_encoded, &dtype, &buf_pool);
         let mut reference_encoded = vec![0u8; src.len()];
         byte_shuffle_encode_reference(src, &mut reference_encoded, itemsize);
         assert_eq!(optimized_encoded, reference_encoded);
@@ -274,18 +293,18 @@ mod tests {
         // Decode: optimized vs reference, applied to the shuffled bytes.
         let shuffled = reference_encoded.as_slice();
         let mut optimized_decoded = vec![0u8; src.len()];
-        ByteShuffleFilter.decode(shuffled, &mut optimized_decoded, &dtype, &tmp_buffers);
+        ByteShuffleFilter.decode(shuffled, &mut optimized_decoded, &dtype, &buf_pool);
         let mut reference_decoded = vec![0u8; src.len()];
         byte_shuffle_decode_reference(shuffled, &mut reference_decoded, itemsize);
         assert_eq!(optimized_decoded, reference_decoded);
     }
 
-    /// `decode_simd` at every SIMD level this CPU supports (not only the one `dispatch!` picks),
+    /// `decode_simd` at every SIMD level this CPU supports (not only the one `fearless_simd::dispatch!` picks),
     /// against the reference, for every power-of-two itemsize and lengths around the chunk sizes.
     #[test]
     fn decode_simd_all_levels() {
         use super::{decode_impl_generic, decode_simd};
-        use fearless_simd::{Level, Simd};
+        use fearless_simd::{Level as SimdLevel, Simd};
 
         fn check<S: Simd>(simd: S) {
             fn one<S: Simd, const ITEMSIZE: usize>(simd: S) {
@@ -294,7 +313,7 @@ mod tests {
                     let mut expected = vec![0u8; src.len()];
                     byte_shuffle_decode_reference(&src, &mut expected, ITEMSIZE);
                     let mut dst = vec![0u8; src.len()];
-                    let done = simd.vectorize(|| decode_simd::<S, ITEMSIZE>(simd, &src, &mut dst));
+                    let done = simd.vectorize(|| decode_simd::<ITEMSIZE, S>(&src, &mut dst, simd));
                     decode_impl_generic(&src, &mut dst, ITEMSIZE, done);
                     assert_eq!(dst, expected, "itemsize {ITEMSIZE}, nitems {nitems}");
                 }
@@ -305,7 +324,7 @@ mod tests {
             one::<S, 16>(simd);
         }
 
-        let level = Level::new();
+        let level = SimdLevel::new();
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
             if let Some(s) = level.as_sse2() {
@@ -327,12 +346,12 @@ mod tests {
         }
     }
 
-    /// `encode_simd` at every SIMD level this CPU supports (not only the one `dispatch!` picks),
+    /// `encode_simd` at every SIMD level this CPU supports (not only the one `fearless_simd::dispatch!` picks),
     /// against the reference, for every power-of-two itemsize and lengths around the chunk sizes.
     #[test]
     fn encode_simd_all_levels() {
         use super::{encode_impl_generic, encode_simd};
-        use fearless_simd::{Level, Simd};
+        use fearless_simd::{Level as SimdLevel, Simd};
 
         fn check<S: Simd>(simd: S) {
             fn one<S: Simd, const ITEMSIZE: usize>(simd: S) {
@@ -341,7 +360,7 @@ mod tests {
                     let mut expected = vec![0u8; src.len()];
                     byte_shuffle_encode_reference(&src, &mut expected, ITEMSIZE);
                     let mut dst = vec![0u8; src.len()];
-                    let done = simd.vectorize(|| encode_simd::<S, ITEMSIZE>(simd, &src, &mut dst));
+                    let done = simd.vectorize(|| encode_simd::<ITEMSIZE, S>(&src, &mut dst, simd));
                     encode_impl_generic(&src, &mut dst, ITEMSIZE, done);
                     assert_eq!(dst, expected, "itemsize {ITEMSIZE}, nitems {nitems}");
                 }
@@ -352,7 +371,7 @@ mod tests {
             one::<S, 16>(simd);
         }
 
-        let level = Level::new();
+        let level = SimdLevel::new();
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
             if let Some(s) = level.as_sse2() {

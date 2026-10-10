@@ -232,7 +232,7 @@ The design:
   `vsubps` with memory operands, one `vmovups` store, no stack traffic; the same on AVX2 and NEON.
 
 How the rows map to what runs: the probe is compiled with each platform's features, which makes
-that level's `dispatch!` arm the one inlined into `inner_loop_contiguous` (higher levels stay
+that level's `fearless_simd::dispatch!` arm the one inlined into `inner_loop_contiguous` (higher levels stay
 separate `vectorize_*` functions). So x86_64-v2/v3/v4 are the Sse4_2/Avx2/Avx512 arms, aarch64
 the Neon arm, and x86_64/i686 (no features) the baseline `Sse2` arm, which only CPUs without
 SSE4.2 run. **A shipped x86-64 wheel now runs the v3/v4 rows on AVX2/AVX-512 CPUs**, instead of
@@ -1153,7 +1153,7 @@ Configurations:
   what users run: they run the x86_64 (SSE2) build, `red-base-x86` (the x86_64 build simulated on
   every x86 CPU) is the baseline of the x86 platforms below.
 - `red-mv` (`17329f3`, `90313c3`): the three contiguous entry points dispatch on the runtime level
-  (`dispatch!(Level::new(), ...)`), the loops left to auto-vectorize. Two traps on the way: the
+  (`fearless_simd::dispatch!(SimdLevel::new(), ...)`), the loops left to auto-vectorize. Two traps on the way: the
   dispatch captures by reference, and a captured constant (a stride) is reloaded in the
   dispatched arm after the level detection's possible call, no longer a constant (finalize on AVX2
   was 20-30x slower until the strides were computed inside the dispatched expression); and the

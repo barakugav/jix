@@ -1,7 +1,7 @@
 use std::mem::MaybeUninit;
 use std::ops::Not;
 
-use fearless_simd::{dispatch, Level, Simd, SimdBase};
+use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 
 use crate::ops::prelude::*;
 
@@ -876,10 +876,10 @@ where
     K: ReductionOpKernel<T>,
 {
     if CONTIGUOUS {
-        dispatch!(Level::new(), simd => fold_run_leaf_level(simd, ctx, begin, len))
+        fearless_simd::dispatch!(SimdLevel::new(), simd => fold_run_leaf_level(simd, ctx, begin, len))
     } else {
-        // `Level::baseline()` is a const: the target's static level, no runtime dispatch.
-        dispatch!(Level::baseline(), simd => {
+        // `SimdLevel::baseline()` is a const: the target's static level, no runtime dispatch.
+        fearless_simd::dispatch!(SimdLevel::baseline(), simd => {
             fold_run_leaf_impl::<_, T, K, ONE_CELL_LANES, CONTIGUOUS>(simd, ctx, begin, len)
         })
     }
@@ -1062,7 +1062,7 @@ fn fold_across_cells_contiguous<T, K, const INIT: bool>(
 {
     // Constants are not captured: the dispatch captures by reference, and a capture reloaded in
     // the dispatched arm is no longer a constant to LLVM.
-    dispatch!(Level::new(), _simd => fold_across_cells::<T, K, true, INIT>(
+    fearless_simd::dispatch!(SimdLevel::new(), _simd => fold_across_cells::<T, K, true, INIT>(
         kernel,
         items,
         states,
@@ -1218,7 +1218,7 @@ fn finalize_states_contiguous<T, K>(
     K: ReductionOpKernel<T>,
 {
     // Constants are not captured, see `fold_across_cells_contiguous`.
-    dispatch!(Level::new(), _simd => finalize_states_run::<T, K>(
+    fearless_simd::dispatch!(SimdLevel::new(), _simd => finalize_states_run::<T, K>(
         kernel,
         (state, size_of::<K::State>()),
         (out, size_of::<K::Output>()),
@@ -1453,9 +1453,9 @@ pub(crate) mod _traits {
                 items: [Self; N],
                 simd: S,
             ) -> [Self::Output; N] {
-                use crate::scalar::simd::{level, Level};
+                use crate::scalar::simd::{simd_level, SimdLevel};
                 if size_of::<Self::Output>() >= 4 * size_of::<Self>()
-                    && matches!(level(simd), Level::Sse2 | Level::Neon)
+                    && matches!(simd_level(simd), SimdLevel::Sse2 | SimdLevel::Neon)
                 {
                     return states.map_enumerate(
                         #[inline(always)]

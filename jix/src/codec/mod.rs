@@ -110,7 +110,7 @@ pub(crate) struct Encoder {
     pub(crate) compressor: Compressor,
     filters_tmp_buf1: AlignedBytes,
     filters_tmp_buf2: AlignedBytes,
-    tmp_buffers: BufferPool,
+    buf_pool: BufferPool,
 }
 pub(crate) enum Compressor {
     #[cfg(not(miri))]
@@ -127,7 +127,7 @@ impl Encoder {
             filters: params.filters.clone(),
             filters_tmp_buf1,
             filters_tmp_buf2,
-            tmp_buffers: BufferPool::new(),
+            buf_pool: BufferPool::new(),
             compressor: match params.codec {
                 Codec::Zstd => {
                     #[cfg(not(miri))]
@@ -158,7 +158,7 @@ impl Encoder {
             unsafe { tmp_buf1.set_len(data.len()) };
             let tmp_buf1 = tmp_buf1.as_mut_slice();
             if self.filters.len() == 1 {
-                self.filters[0].encode(data, tmp_buf1, &self.dtype, &self.tmp_buffers);
+                self.filters[0].encode(data, tmp_buf1, &self.dtype, &self.buf_pool);
                 tmp_buf1
             } else {
                 let tmp_buf2 = &mut self.filters_tmp_buf2;
@@ -169,7 +169,7 @@ impl Encoder {
                 let mut buffers = AlternatingBuffers::with_const_src(data, tmp_buf1, tmp_buf2);
                 for filter in &self.filters {
                     let (data, buf) = buffers.edit();
-                    filter.encode(data, buf, &self.dtype, &self.tmp_buffers);
+                    filter.encode(data, buf, &self.dtype, &self.buf_pool);
                 }
                 buffers.into_data()
             }
