@@ -514,11 +514,10 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
         let dtype = Ty::<T>::new();
 
         params.tune(shape.as_slice(), dtype.dtype())?;
-        let spec = params.clone().into_spec(
-            shape.as_slice(),
-            dtype.dtype(),
-            ArraySpecFlags::new().set_compact(),
-        )?;
+        let spec =
+            params
+                .clone()
+                .into_spec(shape.as_slice(), dtype.dtype(), ArraySpecFlags::new())?;
         let array = Array::from_storage(FnStorage {
             dtype,
             shape,
@@ -1498,7 +1497,7 @@ impl<S: ArrayStorage> Array<S> {
     /// # Ok::<(), jix::Error>(())
     /// ```
     pub fn is_compact(&self) -> bool {
-        self.storage().as_compact().is_some()
+        self.storage().spec().flags().is_compact()
     }
 
     /// Ensure this array is in compact block-compressed form, re-compressing
@@ -2480,5 +2479,29 @@ mod tests {
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
+    }
+
+    #[test]
+    fn is_compact_through_wrappers() {
+        let make = || Array::compact_ndarray(&array![[1i32, 2], [3, 4]]).unwrap();
+
+        // Wrappers that do not change the data keep reporting the source as compact.
+        assert!(make().is_compact());
+        assert!(make().view().is_compact());
+        assert!(make().view().into_type_dyn().is_compact());
+        assert!(make()
+            .view()
+            .into_dim::<crate::DimDyn>()
+            .unwrap()
+            .is_compact());
+        assert!(make().into_any().is_compact());
+        assert!(make().into_any().into_any().is_compact());
+        assert!(make().into_any().into_typed::<i32>().unwrap().is_compact());
+
+        // Lazy ops are not compact, also when type-erased.
+        let a = make();
+        assert!(!(-a.view()).is_compact());
+        assert!(!a.view().reshape([4]).is_compact());
+        assert!(!(-make()).into_any().is_compact());
     }
 }

@@ -31,7 +31,7 @@ where
 {
     /// Constructs a [`MaybeCompact`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, params: ArrayParams, context: &ReadContext) -> Result<Self> {
-        Ok(Self(if array.as_compact().is_some() {
+        Ok(Self(if array.spec().flags().is_compact() {
             ToCompactInner::Original(array)
         } else {
             ToCompactInner::Compact(
@@ -99,13 +99,12 @@ where
         };
         ArrayStorageInfo::new_deps("MaybeCompact", [inner])
     }
-    fn as_compact(
-        &self,
-    ) -> Option<crate::storage::CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
-        Some(match &self.0 {
-            ToCompactInner::Original(s) => s.as_compact().unwrap(),
-            ToCompactInner::Compact(c) => c.as_compact().unwrap(),
-        })
+    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn, DimDyn>> {
+        let compact = match &self.0 {
+            ToCompactInner::Original(s) => s.as_compact(),
+            ToCompactInner::Compact(c) => c.as_compact(),
+        };
+        Some(compact.unwrap())
     }
 
     type DimensionChange<NewD: Dimension> = MaybeCompact<S::DimensionChange<NewD>>;
@@ -133,6 +132,7 @@ mod tests {
 
     use ndarray::ArrayD;
 
+    use super::ToCompactInner;
     use crate::dtype::Dtyped;
     use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
@@ -279,6 +279,30 @@ mod tests {
         result.write_to(&mut result_bytes).unwrap();
 
         assert_eq!(result_bytes.into_inner(), original_bytes);
+    }
+
+    // -----------------------------------------------------------------------
+    // Explicit: a compact source behind a type-erased wrapper is kept as-is
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn maybe_compact_any_compact_source_kept() {
+        let vals: Vec<i32> = (0..16i32).collect();
+        let a = compact::<i32>(vals.clone(), &[16], &[4]);
+        let original_bytes = to_bytes(&a);
+        let a = a.into_any();
+        let ctx = a.read_ctx();
+
+        let result = a.maybe_compact_with(arr_params(&[8]), &ctx).unwrap();
+        assert!(matches!(result.storage().0, ToCompactInner::Original(_)));
+        assert!(result.storage().as_compact().is_some());
+        // No re-compression: serialized bytes must be identical.
+        let mut result_bytes = Cursor::new(Vec::new());
+        result.write_to(&mut result_bytes).unwrap();
+        assert_eq!(result_bytes.into_inner(), original_bytes);
+
+        let got = result.into_typed::<i32>().unwrap().to_ndarray().unwrap();
+        assert_eq!(got, ArrayD::from_shape_vec(vec![16], vals).unwrap());
     }
 
     // -----------------------------------------------------------------------

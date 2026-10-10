@@ -168,6 +168,11 @@ impl ArrayStorage for &dyn ArrayStorage {
         (**self).info()
     }
 
+    #[inline]
+    fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn, crate::DimDyn>> {
+        (**self).as_compact()
+    }
+
     crate::ops::impl_dimension_change_default!();
     crate::ops::impl_element_type_change_default!();
 }
@@ -216,7 +221,7 @@ macro_rules! impl_array_storage_forward {
         #[inline]
         fn as_compact(
             &self,
-        ) -> Option<crate::storage::CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
+        ) -> Option<crate::storage::CompactBorrowed<'_, crate::TypeDyn, crate::DimDyn>> {
             self.0.as_compact()
         }
     };
