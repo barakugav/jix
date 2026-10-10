@@ -42,7 +42,7 @@ impl Filter {
     pub(crate) fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool) {
         match self {
             Filter::ByteShuffle => ByteShuffleFilter.encode(src, dst, dtype, buf_pool),
-            Filter::BitShuffle => BitShuffleFilter::default().encode(src, dst, dtype, buf_pool),
+            Filter::BitShuffle => BitShuffleFilter.encode(src, dst, dtype, buf_pool),
         }
     }
 
