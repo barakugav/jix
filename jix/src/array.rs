@@ -514,11 +514,10 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
         let dtype = Ty::<T>::new();
 
         params.tune(shape.as_slice(), dtype.dtype())?;
-        let spec = params.clone().into_spec(
-            shape.as_slice(),
-            dtype.dtype(),
-            ArraySpecFlags::new().set_compact(),
-        )?;
+        let spec =
+            params
+                .clone()
+                .into_spec(shape.as_slice(), dtype.dtype(), ArraySpecFlags::new())?;
         let array = Array::from_storage(FnStorage {
             dtype,
             shape,
