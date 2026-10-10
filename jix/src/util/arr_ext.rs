@@ -1,13 +1,12 @@
 use std::convert::Infallible;
-use std::hint::unreachable_unchecked;
-use std::mem::MaybeUninit;
+use std::mem::{ManuallyDrop, MaybeUninit};
 
 #[inline(always)]
 pub(crate) fn array_from_fn_inline<T, const N: usize>(mut f: impl FnMut(usize) -> T) -> [T; N] {
-    match array_try_from_fn_inline(|i| Result::<_, Infallible>::Ok(f(i))) {
-        Ok(arr) => arr,
-        Err(_) => unsafe { unreachable_unchecked() },
-    }
+    unwrap_infallible(array_try_from_fn_inline(
+        #[inline(always)]
+        |i| Result::<_, Infallible>::Ok(f(i)),
+    ))
 }
 #[inline(always)]
 pub(crate) fn array_try_from_fn_inline<T, E, const N: usize>(
@@ -58,6 +57,46 @@ pub(crate) fn array_try_from_fn_inline<T, E, const N: usize>(
     Ok(unsafe { data.assume_init() })
 }
 
+#[inline(always)]
+fn array_try_map_inline<T, U, E, const N: usize>(
+    src: [T; N],
+    mut f: impl FnMut(usize, T) -> Result<U, E>,
+) -> Result<[U; N], E> {
+    let mut src = ManuallyDrop::new(src);
+    if const { !std::mem::needs_drop::<T>() } {
+        // SAFETY: every index is read at most once, and `src` is never dropped (`T` has no drop)
+        return array_try_from_fn_inline(
+            #[inline(always)]
+            |i| f(i, unsafe { std::ptr::read(&src[i]) }),
+        );
+    }
+
+    /// Drops the items `src[next..]` that were not mapped yet
+    struct DropGuard<'a, T, const N: usize> {
+        src: &'a mut ManuallyDrop<[T; N]>,
+        next: usize,
+    }
+    impl<T, const N: usize> Drop for DropGuard<'_, T, N> {
+        #[inline(always)]
+        fn drop(&mut self) {
+            // SAFETY: the items `next..` were never read out, and are dropped exactly once here.
+            unsafe { std::ptr::drop_in_place(&mut self.src[self.next..]) };
+        }
+    }
+    let mut unconsumed = DropGuard {
+        src: &mut src,
+        next: 0,
+    };
+    array_try_from_fn_inline(
+        #[inline(always)]
+        |i| {
+            let item = unsafe { std::ptr::read(&unconsumed.src[i]) };
+            unconsumed.next = i + 1;
+            f(i, item)
+        },
+    )
+}
+
 pub(crate) trait ArrayExt<T, const N: usize> {
     fn map_inline<U>(self, f: impl FnMut(T) -> U) -> [U; N]
     where
@@ -86,14 +125,12 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        let mut data = self.into_iter();
         // use array_try_from_fn_inline directly to avoid extra monomorphizations
-        match array_try_from_fn_inline(|_| {
-            Result::<_, Infallible>::Ok(f(unsafe { data.next().unwrap_unchecked() }))
-        }) {
-            Ok(arr) => arr,
-            Err(_) => unsafe { unreachable_unchecked() },
-        }
+        unwrap_infallible(array_try_map_inline(
+            self,
+            #[inline(always)]
+            |_, x| Result::<_, Infallible>::Ok(f(x)),
+        ))
     }
 
     #[inline(always)]
@@ -101,8 +138,11 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        let mut data = self.into_iter();
-        array_try_from_fn_inline(|_| f(unsafe { data.next().unwrap_unchecked() }))
+        array_try_map_inline(
+            self,
+            #[inline(always)]
+            |_, x| f(x),
+        )
     }
 
     #[inline(always)]
@@ -110,14 +150,11 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        let mut data = self.iter();
         // use array_try_from_fn_inline directly to avoid extra monomorphizations
-        match array_try_from_fn_inline(|_| {
-            Result::<_, Infallible>::Ok(f(unsafe { data.next().unwrap_unchecked() }))
-        }) {
-            Ok(arr) => arr,
-            Err(_) => unsafe { unreachable_unchecked() },
-        }
+        unwrap_infallible(array_try_from_fn_inline(
+            #[inline(always)]
+            |i| Result::<_, Infallible>::Ok(f(&self[i])),
+        ))
     }
 
     #[inline(always)]
@@ -125,8 +162,10 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        let mut data = self.iter();
-        array_try_from_fn_inline(|_| f(unsafe { data.next().unwrap_unchecked() }))
+        array_try_from_fn_inline(
+            #[inline(always)]
+            |i| f(&self[i]),
+        )
     }
 
     #[inline(always)]
@@ -134,33 +173,22 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     where
         Self: Sized,
     {
-        let mut data = self.into_iter();
-        let mut i = 0;
         // use array_try_from_fn_inline directly to avoid extra monomorphizations
-        match array_try_from_fn_inline(|_| {
-            let res = f(i, unsafe { data.next().unwrap_unchecked() });
-            i += 1;
-            Result::<_, Infallible>::Ok(res)
-        }) {
-            Ok(arr) => arr,
-            Err(_) => unsafe { unreachable_unchecked() },
-        }
+        unwrap_infallible(array_try_map_inline(
+            self,
+            #[inline(always)]
+            |i, x| Result::<_, Infallible>::Ok(f(i, x)),
+        ))
     }
 }
 
-// pub(crate) fn array_map2_inline<T, U, V, const N: usize>(
-//     a: [T; N],
-//     b: [U; N],
-//     mut f: impl FnMut(T, U) -> V,
-// ) -> [V; N] {
-//     let mut data_a = a.into_iter();
-//     let mut data_b = b.into_iter();
-//     array_from_fn_inline(|_| {
-//         let x = unsafe { data_a.next().unwrap_unchecked() };
-//         let y = unsafe { data_b.next().unwrap_unchecked() };
-//         f(x, y)
-//     })
-// }
+#[inline(always)]
+fn unwrap_infallible<T>(result: Result<T, Infallible>) -> T {
+    match result {
+        Ok(value) => value,
+        Err(never) => match never {},
+    }
+}
 
 #[cfg(test)]
 mod tests {

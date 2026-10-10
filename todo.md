@@ -15,3 +15,4 @@
 - optimize reshape and its flags propagation
 - local_prelude
 - document archive compatibility
+- examine the asm of [T;4].into_iter().next().unwrap() and make sure llvm optimize it away
