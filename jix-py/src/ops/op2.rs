@@ -1,6 +1,10 @@
+use std::sync::LazyLock;
+
 use jix_core::scalar::{f16, Complex};
 
-use crate::ops::common::define_op2;
+use crate::ops::common::{
+    broadcast_operands, define_op2, define_op2_desc, OpDescriptor, Operand, Scalar,
+};
 
 define_op2!(
     /// Element-wise addition of two arrays.
@@ -233,84 +237,155 @@ define_op2!(
         Safe
     }
 );
-define_op2!(
-    /// Element-wise exponentiation (`a` raised to the power `b`).
-    ///
-    /// Supported base dtypes: `u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`,
-    /// `f32`, `f64`. For an **integer** base the exponent must be a non-negative
-    /// integer (it is cast to an unsigned type); for a **float** base the exponent
-    /// may be an integer or a float. Complex dtypes are not supported yet.
-    ///
-    /// For a directly supported `(base, exponent)` pair the output dtype equals the
-    /// base dtype - e.g. `u8 ** u8 -> u8`, `i32 ** u32 -> i32`, `f32 ** i32 -> f32`,
-    /// `f64 ** f64 -> f64`. Integer results wrap on overflow (two's complement).
-    ///
-    /// Negative base with a non-integer exponent produces `NaN`.
-    ///
-    /// **Type promotion**: when `a` and `b` do not directly match a supported pair,
-    /// both operands are cast under Safe casting rules and the first matching pair
-    /// is used. Two consequences are worth noting:
-    /// - A **signed** exponent cannot fill the unsigned-exponent slot, so an integer
-    ///   base with a signed exponent promotes to float: `i8 ** i8 -> f32`,
-    ///   `i32 ** i32 -> f64`. (A plain Python `int` exponent is signed, so
-    ///   `power(int_array, 3)` is float; pass `np.uint32(3)` to keep an integer result.)
-    /// - The widest exponent slot is 32-bit, so a 64-bit exponent also promotes the
-    ///   result to float: `u8 ** u64 -> f64`.
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
-    ///
-    /// Args:
-    ///     a: First operand (the base).
-    ///     b: Second operand (the exponent).
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast
-    ///         shape. No computation occurs until the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([2.0, 3.0, 4.0], dtype=np.float32)
-    ///     b = jix.compact([3.0, 2.0, 0.5], dtype=np.float32)
-    ///     result = jix.power(a, b)
-    ///     assert np.array_equal(result.numpy(), [8.0, 9.0, 2.0])
-    ///
-    ///     # Raise each element to a fixed exponent using a typed scalar.
-    ///     result2 = jix.power(a, np.float32(2.0))
-    ///     assert np.array_equal(result2.numpy(), [4.0, 9.0, 16.0])
-    ///
-    ///     # Integer base with an unsigned integer exponent keeps the base dtype.
-    ///     ai = jix.compact([2, 3, 4], dtype=np.int32)
-    ///     result3 = jix.power(ai, np.uint32(3))
-    ///     assert result3.dtype == np.dtype("int32")
-    ///     assert np.array_equal(result3.numpy(), [8, 27, 64])
-    ///     ```
-    power,
-    Pow,
-    dispatch = {
-        [
-            // integers, exponent must be unsigned
-            (u8, u8),
-            (i8, u8),
-            (u16, u16),
-            (i16, u16),
-            (u32, u32),
-            (i32, u32),
-            (u64, u32),
-            (i64, u32),
-            // floats
-            (f32, i32),
-            (f32, f32),
-            (f64, i32),
-            (f64, f64)
-            // complex TODO
-            // (Complex<f32>, i32),
-            // (Complex<f32>, f32),
-            // (Complex<f64>, i64),
-            // (Complex<f64>, f64)
-        ],
-        Safe
+
+/// Element-wise exponentiation (`a` raised to the power `b`).
+///
+/// Supported base dtypes: `u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`,
+/// `f32`, `f64`. For an **integer** base the exponent must be a non-negative
+/// integer (it is cast to an unsigned type); for a **float** base the exponent
+/// may be an integer or a float. Complex dtypes are not supported yet.
+///
+/// For a directly supported `(base, exponent)` pair the output dtype equals the
+/// base dtype - e.g. `u8 ** u8 -> u8`, `i32 ** u32 -> i32`, `f32 ** i32 -> f32`,
+/// `f64 ** f64 -> f64`. Integer results wrap on overflow (two's complement).
+///
+/// Negative base with a non-integer exponent produces `NaN`.
+///
+/// **Type promotion**: when `a` and `b` do not directly match a supported pair,
+/// both operands are cast under Safe casting rules and the first matching pair
+/// is used. Two consequences are worth noting:
+/// - A **signed** exponent cannot fill the unsigned-exponent slot, so an integer
+///   base with a signed exponent promotes to float: `i8 ** i8 -> f32`,
+///   `i32 ** i32 -> f64`. (A plain Python `int` is signed, so `power(int_array, 3)`
+///   is float; pass `np.uint32(3)` to keep an integer result.)
+/// - The widest exponent slot is 32-bit, so a 64-bit exponent also promotes the
+///   result to float: `u8 ** u64 -> f64`.
+///
+/// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+///
+/// Args:
+///     a: First operand (the base).
+///     b: Second operand (the exponent).
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast
+///         shape. No computation occurs until the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([2.0, 3.0, 4.0], dtype=np.float32)
+///     b = jix.compact([3.0, 2.0, 0.5], dtype=np.float32)
+///     result = jix.power(a, b)
+///     assert np.array_equal(result.numpy(), [8.0, 9.0, 2.0])
+///
+///     # Raise each element to a fixed exponent using a typed scalar.
+///     result2 = jix.power(a, np.float32(2.0))
+///     assert np.array_equal(result2.numpy(), [4.0, 9.0, 16.0])
+///
+///     # Integer base with an unsigned integer exponent keeps the base dtype.
+///     ai = jix.compact([2, 3, 4], dtype=np.int32)
+///     result3 = jix.power(ai, np.uint32(3))
+///     assert result3.dtype == np.dtype("int32")
+///     assert np.array_equal(result3.numpy(), [8, 27, 64])
+///     ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyo3::pyfunction]
+pub fn power<'py>(
+    a: &pyo3::Bound<'py, pyo3::PyAny>,
+    b: &pyo3::Bound<'py, pyo3::PyAny>,
+) -> pyo3::PyResult<crate::Array> {
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "power",
+            // TODO complex bases: (Complex<f32>, i32), (Complex<f32>, f32),
+            // (Complex<f64>, i64), (Complex<f64>, f64).
+            define_op2_desc!(
+                Pow,
+                [
+                    // integers, exponent must be unsigned
+                    (u8, u8),
+                    (i8, u8),
+                    (u16, u16),
+                    (i16, u16),
+                    (u32, u32),
+                    (i32, u32),
+                    (u64, u32),
+                    (i64, u32),
+                    // floats
+                    (f32, i32),
+                    (f32, f32),
+                    (f64, i32),
+                    (f64, f64)
+                ],
+                Safe
+            ),
+        )
+    });
+
+    macro_rules! pow_shortcut_desc {
+    ($core_op:ident, [$(($a_ty:ty, $b_ty:ty)),* $(,)?]) => {
+        vec![
+            $(
+                crate::ops::common::OpFnDescriptor::new2::<$a_ty, $b_ty>(
+                    crate::ops::common::CastKind::Safe,
+                    |a, _exponent| {
+                        let res = jix_core::ops::$core_op::new_array(a)
+                            .map(|res| res.into_any());
+                        <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
+                    },
+                ),
+            )*
+        ]
+    };
+}
+
+    // `x ** 2`. Same pairs as `DISPATCH_TABLE`, so the promotion is identical.
+    static SQUARE_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "power",
+            pow_shortcut_desc!(
+                Square,
+                [
+                    (u8, u8),
+                    (i8, u8),
+                    (u16, u16),
+                    (i16, u16),
+                    (u32, u32),
+                    (i32, u32),
+                    (u64, u32),
+                    (i64, u32),
+                    (f32, i32),
+                    (f32, f32),
+                    (f64, i32),
+                    (f64, f64),
+                ]
+            ),
+        )
+    });
+    // `x ** 0.5`.
+    static SQRT_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "power",
+            pow_shortcut_desc!(Sqrt, [(f32, i32), (f32, f32), (f64, i32), (f64, f64)]),
+        )
+    });
+
+    let a = Operand::from_any(a)?;
+    let b = Operand::from_any(b)?;
+
+    let mut table = &*DISPATCH_TABLE;
+    if let Operand::Scalar { value, .. } = &b {
+        match value {
+            Scalar::UInt(2) | Scalar::Int(2) | Scalar::Float(2.0) => table = &*SQUARE_TABLE,
+            Scalar::Float(0.5) => table = &*SQRT_TABLE,
+            _ => {}
+        };
     }
-);
+
+    let [a, b] = broadcast_operands([a, b])?;
+    let res = table.dispatch2(a, b)?;
+    Ok(crate::Array::from_core(res))
+}
