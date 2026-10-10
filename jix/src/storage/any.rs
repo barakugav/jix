@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::storage::params::ArraySpecPtr;
+use crate::storage::params::ArraySpecOwned;
 use crate::storage::{ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 
@@ -28,7 +28,7 @@ trait AnyInner: Send + Sync {
 struct AnyMeta {
     shape: DimDyn,
     element_type: TypeDyn,
-    spec: ArraySpecPtr,
+    spec: ArraySpecOwned,
 }
 impl ArrayStorageAny {
     pub(crate) fn new(storage: impl ArrayStorage + Send + Sync + 'static) -> Self {
@@ -74,8 +74,7 @@ impl ArrayStorage for ArrayStorageAny {
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        let meta = self.inner.meta();
-        unsafe { meta.spec.as_ref(|| self.inner.storage().spec()) }
+        self.inner.meta().spec.as_ref()
     }
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -105,7 +104,7 @@ impl AnyMeta {
         Self {
             shape: DimDyn::from_slice(storage.shape()),
             element_type: TypeDyn::from_dtype(storage.dtype().clone()).unwrap(),
-            spec: ArraySpecPtr::new(storage.spec()),
+            spec: storage.spec().to_owned(),
         }
     }
 }
