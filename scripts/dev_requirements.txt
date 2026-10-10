@@ -2,8 +2,9 @@ maturin~=1.13
 mkdocs~=1.6
 mkdocs-material~=9.7
 mkdocstrings[python]~=1.0
+pymdown-extensions<12  # hack to solve compatibility issues with mkdocstrings
 griffelib~=2.0
-ruff~=0.16
+ruff~=0.16.0
 pytest~=9.0
 pytest-xdist~=3.0
 pytest-cov~=7.1
