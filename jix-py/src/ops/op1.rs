@@ -299,7 +299,7 @@ pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<
     }
     fn log_op_descriptor<T>() -> OpFnDescriptor<1, LogArgs>
     where
-        T: Dtyped + num_traits::Float,
+        T: Dtyped + jix_core::scalar::Ln<Output = T> + core::ops::Mul<Output = T> + Copy,
         f64: jix_core::scalar::Cast<T>,
     {
         OpFnDescriptor::new1_args::<T>(CastKind::Safe, |a, args: LogArgs| {

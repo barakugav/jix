@@ -1,13 +1,258 @@
 use crate::ops::common::{define_array_op1_method, define_array_op2_method};
+use crate::ops::define_op1;
 use crate::ops::op2::define_op2;
 use crate::ops::prelude::*;
-use crate::ops::{define_op1, define_op2_rhs_fixed};
+
+pub(crate) mod _traits {
+    use crate::scalar::traits_util::{
+        define_scalar_op1_trait, define_scalar_op2_trait, impl_scalar_op1, impl_scalar_op2,
+    };
+
+    define_scalar_op2_trait!(
+        /// Bitwise AND operation, like [`core::ops::BitAnd`].
+        ///
+        /// Applies the bitwise AND to each pair of corresponding bits. For `bool` this is
+        /// equivalent to logical AND (`&&`).
+        BitAnd,
+        /// Bitwise AND with another value.
+        bitand,
+    );
+    define_scalar_op2_trait!(
+        /// Bitwise OR operation, like [`core::ops::BitOr`].
+        ///
+        /// Applies the bitwise OR to each pair of corresponding bits. For `bool` this is
+        /// equivalent to logical OR (`||`).
+        BitOr,
+        /// Bitwise OR with another value.
+        bitor,
+    );
+    define_scalar_op2_trait!(
+        /// Bitwise XOR operation, like [`core::ops::BitXor`].
+        ///
+        /// Applies the bitwise XOR to each pair of corresponding bits. For `bool` this is
+        /// equivalent to logical XOR.
+        BitXor,
+        /// Bitwise XOR with another value.
+        bitxor,
+    );
+    define_scalar_op1_trait!(
+        /// Bitwise NOT operation, like [`core::ops::Not`].
+        ///
+        /// Flips every bit. For `bool` this is equivalent to logical NOT.
+        Not,
+        /// Bitwise NOT of the value.
+        not,
+    );
+
+    macro_rules! impl_bitwise2 {
+        ($Trait:ident::$f:ident, $op:tt) => {
+            impl_scalar_op2!(
+                impl $Trait for [i8, i16, i32, i64, u8, u16, u32, u64] {
+                    fn $f = |a, b| a $op b,
+                }
+            );
+            impl_scalar_op2!(
+                impl $Trait for [bool] {
+                    fn $f = |a, b| a $op b,
+                }
+            );
+        };
+    }
+    impl_bitwise2!(BitAnd::bitand, &);
+    impl_bitwise2!(BitOr::bitor, |);
+    impl_bitwise2!(BitXor::bitxor, ^);
+
+    impl_scalar_op1!(
+        impl Not for [i8, i16, i32, i64, u8, u16, u32, u64] {
+            fn not = |x| !x,
+        }
+    );
+    impl_scalar_op1!(
+        impl Not for [bool] {
+            fn not = |x| !x,
+        }
+    );
+
+    define_scalar_op2_trait!(
+        /// Right shift operation, like [`core::ops::Shr`].
+        ///
+        /// For **unsigned** types this is a logical shift: vacated bits are filled with zeros.
+        /// For **signed** types this is an arithmetic shift: vacated bits are filled with the
+        /// sign bit (the result preserves the sign of the value).
+        /// The shift uses Rust's `>>` operator: shifting by a value greater than or equal to the
+        /// bit width of the type panics in debug builds and masks the shift amount modulo the bit
+        /// width in release builds (it does NOT produce zero).
+        Shr,
+        /// Shift the bits right by another value.
+        shr,
+    );
+    impl_scalar_op2!(
+        impl Shr for [i8, i16, i32, i64, u8, u16, u32, u64] x [i8, i16, i64, u8, u16, u64] {
+            fn shr = |a, b| a >> b,
+        }
+    );
+    impl_scalar_op2!(
+        impl Shr for [i8, i16, i64, u8, u16, u64] x [i32, u32] {
+            fn shr = |a, b| a >> b,
+        }
+    );
+    impl_scalar_op2!(
+        impl Shr for [i32, u32] x [i32, u32] {
+            fn shr = |a, b| a >> b,
+        }
+    );
+
+    define_scalar_op1_trait!(
+        /// Zero-bit count operation, as [`u32::count_zeros`].
+        ///
+        /// Output dtype is `u32`.
+        ///
+        /// Equivalent to `bit_width - count_ones`. For signed integers the full bit
+        /// representation (including the sign bit) is used.
+        CountZeros,
+        /// Count the unset bits (`0`s).
+        count_zeros,
+    );
+    impl_scalar_op1!(
+        impl CountZeros for [i8, i16, i32, i64, u8, u16, u32, u64] {
+            type Output = u32;
+            fn count_zeros = |x| x.count_zeros(),
+        }
+    );
+
+    macro_rules! int_op1 {
+        (
+            $(#[$trait_meta:meta])* $Trait:ident,
+            $(#[$fn_meta:meta])* $f:ident,
+            $Out:ty
+        ) => {
+            define_scalar_op1_trait!(
+                $(#[$trait_meta])* $Trait,
+                $(#[$fn_meta])* $f,
+            );
+            impl_scalar_op1!(
+                impl $Trait for [i8, i16, i32, i64, u8, u16, u32, u64] {
+                    type Output = $Out;
+                    fn $f = |x| x.$f(),
+                }
+            );
+        };
+    }
+    int_op1!(
+        /// Set-bit count operation, as [`u32::count_ones`].
+        ///
+        /// Output dtype is `u32`.
+        ///
+        /// Also known as the population count or Hamming weight. For signed integers the
+        /// bit representation (including the sign bit) is used.
+        CountOnes,
+        /// Count the set bits (`1`s).
+        count_ones,
+        u32
+    );
+    int_op1!(
+        /// Leading-zero count operation, as [`u32::leading_zeros`].
+        ///
+        /// Output dtype is `u32`.
+        ///
+        /// Counts zeros from the most-significant bit down to (but not including) the first
+        /// set bit. Returns the bit width of the type for a value of zero (e.g. `32` for
+        /// `0u32`).
+        LeadingZeros,
+        /// Count the leading zero bits.
+        leading_zeros,
+        u32
+    );
+    int_op1!(
+        /// Trailing-zero count operation, as [`u32::trailing_zeros`].
+        ///
+        /// Output dtype is `u32`.
+        ///
+        /// Counts zeros from the least-significant bit up to (but not including) the first
+        /// set bit. Returns the bit width of the type for a value of zero (e.g. `32` for
+        /// `0u32`).
+        TrailingZeros,
+        /// Count the trailing zero bits.
+        trailing_zeros,
+        u32
+    );
+    int_op1!(
+        /// Byte-order reversal operation, as [`u32::swap_bytes`].
+        ///
+        /// Swaps the bytes of the value (e.g. converts between big-endian and little-endian
+        /// representation). Single-byte types (`i8`, `u8`) are not supported since swapping one
+        /// byte is a no-op.
+        SwapBytes,
+        /// Reverse the byte order.
+        swap_bytes,
+        Self
+    );
+    int_op1!(
+        /// Bit-order reversal operation, as [`u32::reverse_bits`].
+        ///
+        /// The most-significant bit becomes the least-significant and vice versa.
+        ReverseBits,
+        /// Reverse the bit order.
+        reverse_bits,
+        Self
+    );
+
+    define_scalar_op2_trait!(
+        /// Left rotation operation, as [`u32::rotate_left`].
+        ///
+        /// Rotates the bits left by `rhs`. Unlike a left shift, bits shifted out of the
+        /// most-significant position wrap around to the least-significant position, so no bits
+        /// are lost. The rotation amount is taken modulo the bit width of the type.
+        RotateLeft<Rhs = u32>,
+        /// Rotate the bits left by another value.
+        rotate_left,
+    );
+    define_scalar_op2_trait!(
+        /// Right rotation operation, as [`u32::rotate_right`].
+        ///
+        /// Rotates the bits right by `rhs`. Unlike a right shift, bits shifted out of the
+        /// least-significant position wrap around to the most-significant position, so no bits
+        /// are lost. The rotation amount is taken modulo the bit width of the type.
+        RotateRight<Rhs = u32>,
+        /// Rotate the bits right by another value.
+        rotate_right,
+    );
+    impl_scalar_op2!(
+        impl RotateLeft for [i8, i16, i32, i64, u8, u16, u32, u64] x [u32] {
+            fn rotate_left = |a, b| a.rotate_left(b),
+        }
+    );
+    impl_scalar_op2!(
+        impl RotateRight for [i8, i16, i32, i64, u8, u16, u32, u64] x [u32] {
+            fn rotate_right = |a, b| a.rotate_right(b),
+        }
+    );
+
+    define_scalar_op2_trait!(
+        /// Left shift operation, like [`core::ops::Shl`].
+        ///
+        /// Shifts the bits left by `rhs`. Vacated bits are filled with zeros. The shift uses
+        /// Rust's `<<` operator: shifting by a value greater than or equal to the bit width of
+        /// the type panics in debug builds and masks the shift amount modulo the bit width in
+        /// release builds (it does NOT produce zero).
+        Shl,
+        /// Shift the bits left by another value.
+        shl,
+    );
+    impl_scalar_op2!(
+        impl Shl for
+            [i8, i16, i32, i64, u8, u16, u32, u64] x [i8, i16, i32, i64, u8, u16, u32, u64]
+        {
+            fn shl = |a, b| a << b,
+        }
+    );
+}
 
 define_op2!(
     /// Element-wise bitwise AND of two arrays.
     ///
-    /// Applies the bitwise AND to each pair of corresponding bits. For `bool` this is
-    /// equivalent to logical AND (`&&`).
+    /// See [`jix::scalar::BitAnd`](crate::scalar::BitAnd) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -33,14 +278,13 @@ define_op2!(
     /// ```
     And,
     AndKernel,
-    <core::ops::BitAnd>::bitand(a, b),
-    core_op = BitAnd::bitand,
+    crate::scalar::BitAnd::bitand,
+    core_op: core::ops::BitAnd::bitand,
 );
 define_op2!(
     /// Element-wise bitwise OR of two arrays.
     ///
-    /// Applies the bitwise OR to each pair of corresponding bits. For `bool` this is
-    /// equivalent to logical OR (`||`).
+    /// See [`jix::scalar::BitOr`](crate::scalar::BitOr) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -66,14 +310,14 @@ define_op2!(
     /// ```
     Or,
     OrKernel,
-    <core::ops::BitOr>::bitor(a, b),
-    core_op = BitOr::bitor,
+    crate::scalar::BitOr::bitor,
+    core_op: core::ops::BitOr::bitor,
 );
 define_op2!(
     /// Element-wise bitwise XOR of two arrays.
     ///
-    /// Applies the bitwise XOR to each pair of corresponding bits. For `bool` this is
-    /// equivalent to logical XOR.
+    /// See [`jix::scalar::BitXor`](crate::scalar::BitXor) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -99,14 +343,14 @@ define_op2!(
     /// ```
     Xor,
     XorKernel,
-    <core::ops::BitXor>::bitxor(a, b),
-    core_op = BitXor::bitxor,
+    crate::scalar::BitXor::bitxor,
+    core_op: core::ops::BitXor::bitxor,
 );
 
 define_op1!(
     /// Element-wise bitwise NOT.
     ///
-    /// Flips every bit. For `bool` this is equivalent to logical NOT.
+    /// See [`jix::scalar::Not`](crate::scalar::Not) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -130,17 +374,14 @@ define_op1!(
     /// ```
     Not,
     NotKernel,
-    <core::ops::Not>::not,
-    core_op = Not::not,
+    crate::scalar::Not::not,
+    core_op: core::ops::Not::not,
 );
 
 define_op2!(
     /// Element-wise left shift (`a << b`).
     ///
-    /// Shifts the bits of each element of `a` left by the corresponding value in `b`.
-    /// Vacated bits are filled with zeros. The shift uses Rust's `<<` operator: shifting by
-    /// a value greater than or equal to the bit width of the type panics in debug builds and
-    /// masks the shift amount modulo the bit width in release builds (it does NOT produce zero).
+    /// See [`jix::scalar::Shl`](crate::scalar::Shl) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -166,18 +407,13 @@ define_op2!(
     /// ```
     BitwiseShiftLeft,
     BitwiseShiftLeftKernel,
-    <core::ops::Shl>::shl(a, b),
+    crate::scalar::Shl::shl,
 );
 
 define_op2!(
     /// Element-wise right shift (`a >> b`).
     ///
-    /// For **unsigned** types this is a logical shift: vacated bits are filled with zeros.
-    /// For **signed** types this is an arithmetic shift: vacated bits are filled with the
-    /// sign bit (the result preserves the sign of the value).
-    /// The shift uses Rust's `>>` operator: shifting by a value greater than or equal to the
-    /// bit width of the type panics in debug builds and masks the shift amount modulo the bit
-    /// width in release builds (it does NOT produce zero).
+    /// See [`jix::scalar::Shr`](crate::scalar::Shr) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -203,15 +439,13 @@ define_op2!(
     /// ```
     BitwiseShiftRight,
     BitwiseShiftRightKernel,
-    <core::ops::Shr>::shr(a, b),
+    crate::scalar::Shr::shr,
 );
-define_op2_rhs_fixed!(
+define_op2!(
     /// Element-wise bitwise left rotation (`a.rotate_left(b as u32)`).
     ///
-    /// Rotates the bits of each element of `a` left by the corresponding value in `b`
-    /// cast to `u32`. Unlike a left shift, bits shifted out of the most-significant
-    /// position wrap around to the least-significant position, so no bits are lost.
-    /// The rotation amount is taken modulo the bit width of the type.
+    /// See [`jix::scalar::RotateLeft`](crate::scalar::RotateLeft) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -237,19 +471,14 @@ define_op2_rhs_fixed!(
     /// ```
     BitwiseRotateLeft,
     BitwiseRotateLeftKernel,
-    <num_traits::PrimInt>::rotate_left(a, b),
-    rhs = u32,
-    type Output<T1> = T1,
-    type Output<S1> = S1::Item,
+    crate::scalar::RotateLeft::rotate_left,
 );
 
-define_op2_rhs_fixed!(
+define_op2!(
     /// Element-wise bitwise right rotation (`a.rotate_right(b as u32)`).
     ///
-    /// Rotates the bits of each element of `a` right by the corresponding value in `b`
-    /// cast to `u32`. Unlike a right shift, bits shifted out of the least-significant
-    /// position wrap around to the most-significant position, so no bits are lost.
-    /// The rotation amount is taken modulo the bit width of the type.
+    /// See [`jix::scalar::RotateRight`](crate::scalar::RotateRight) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -275,18 +504,13 @@ define_op2_rhs_fixed!(
     /// ```
     BitwiseRotateRight,
     BitwiseRotateRightKernel,
-    <num_traits::PrimInt>::rotate_right(a, b),
-    rhs = u32,
-    type Output<T1> = T1,
-    type Output<S1> = S1::Item,
+    crate::scalar::RotateRight::rotate_right,
 );
 define_op1!(
     /// Counts the number of set bits (`1`s) in each element.
     ///
-    /// Output dtype is `u32`.
-    ///
-    /// Also known as the population count or Hamming weight. For signed integers the
-    /// bit representation (including the sign bit) is used.
+    /// See [`jix::scalar::CountOnes`](crate::scalar::CountOnes) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -310,16 +534,13 @@ define_op1!(
     /// ```
     CountOnes,
     CountOnesKernel,
-    <num_traits::PrimInt>::count_ones,
-    type Output = u32,
+    crate::scalar::CountOnes::count_ones,
 );
 define_op1!(
     /// Counts the number of unset bits (`0`s) in each element.
     ///
-    /// Output dtype is `u32`.
-    ///
-    /// Equivalent to `bit_width - count_ones`. For signed integers the full bit
-    /// representation (including the sign bit) is used.
+    /// See [`jix::scalar::CountZeros`](crate::scalar::CountZeros) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -343,17 +564,13 @@ define_op1!(
     /// ```
     CountZeros,
     CountZerosKernel,
-    <num_traits::PrimInt>::count_zeros,
-    type Output = u32,
+    crate::scalar::CountZeros::count_zeros,
 );
 define_op1!(
     /// Counts the number of leading zero bits in each element.
     ///
-    /// Output dtype is `u32`.
-    ///
-    /// Counts zeros from the most-significant bit down to (but not including) the first
-    /// set bit. Returns the bit width of the type for a value of zero (e.g. `32` for
-    /// `0u32`).
+    /// See [`jix::scalar::LeadingZeros`](crate::scalar::LeadingZeros) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -377,17 +594,13 @@ define_op1!(
     /// ```
     LeadingZeros,
     LeadingZerosKernel,
-    <num_traits::PrimInt>::leading_zeros,
-    type Output = u32,
+    crate::scalar::LeadingZeros::leading_zeros,
 );
 define_op1!(
     /// Counts the number of trailing zero bits in each element.
     ///
-    /// Output dtype is `u32`.
-    ///
-    /// Counts zeros from the least-significant bit up to (but not including) the first
-    /// set bit. Returns the bit width of the type for a value of zero (e.g. `32` for
-    /// `0u32`).
+    /// See [`jix::scalar::TrailingZeros`](crate::scalar::TrailingZeros) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -411,15 +624,13 @@ define_op1!(
     /// ```
     TrailingZeros,
     TrailingZerosKernel,
-    <num_traits::PrimInt>::trailing_zeros,
-    type Output = u32,
+    crate::scalar::TrailingZeros::trailing_zeros,
 );
 define_op1!(
     /// Reverses the byte order of each element.
     ///
-    /// Swaps the bytes of each element in-place (e.g. converts between big-endian and
-    /// little-endian representation). Single-byte types (`i8`, `u8`) are not supported
-    /// since swapping one byte is a no-op.
+    /// See [`jix::scalar::SwapBytes`](crate::scalar::SwapBytes) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -443,13 +654,13 @@ define_op1!(
     /// ```
     SwapBytes,
     SwapBytesKernel,
-    <num_traits::PrimInt>::swap_bytes,
-    type Output<T> = T,
+    crate::scalar::SwapBytes::swap_bytes,
 );
 define_op1!(
     /// Reverses the bit order of each element.
     ///
-    /// The most-significant bit becomes the least-significant and vice versa.
+    /// See [`jix::scalar::ReverseBits`](crate::scalar::ReverseBits) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -473,24 +684,23 @@ define_op1!(
     /// ```
     ReverseBits,
     ReverseBitsKernel,
-    <num_traits::PrimInt>::reverse_bits,
-    type Output<T> = T,
+    crate::scalar::ReverseBits::reverse_bits,
 );
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op2_method!(bitwise_shift_left: BitwiseShiftLeft, core::ops::Shl);
-    define_array_op2_method!(bitwise_shift_right: BitwiseShiftRight, core::ops::Shr);
-    define_array_op2_method!(bitwise_rotate_left: BitwiseRotateLeft, num_traits::PrimInt, fixed_lhs_type = u32);
-    define_array_op2_method!(bitwise_rotate_right: BitwiseRotateRight, num_traits::PrimInt, fixed_lhs_type = u32);
-    define_array_op1_method!(count_ones: CountOnes, num_traits::PrimInt, fixed_output_type = true);
-    define_array_op1_method!(count_zeros: CountZeros, num_traits::PrimInt, fixed_output_type = true);
-    define_array_op1_method!(leading_zeros: LeadingZeros, num_traits::PrimInt, fixed_output_type = true);
-    define_array_op1_method!(trailing_zeros: TrailingZeros, num_traits::PrimInt, fixed_output_type = true);
-    define_array_op1_method!(swap_bytes: SwapBytes, num_traits::PrimInt, fixed_output_type = true);
-    define_array_op1_method!(reverse_bits: ReverseBits, num_traits::PrimInt, fixed_output_type = true);
+    define_array_op2_method!(bitwise_shift_left: BitwiseShiftLeft, crate::scalar::Shl);
+    define_array_op2_method!(bitwise_shift_right: BitwiseShiftRight, crate::scalar::Shr);
+    define_array_op2_method!(bitwise_rotate_left: BitwiseRotateLeft, crate::scalar::RotateLeft, fixed_lhs_type = u32);
+    define_array_op2_method!(bitwise_rotate_right: BitwiseRotateRight, crate::scalar::RotateRight, fixed_lhs_type = u32);
+    define_array_op1_method!(count_ones: CountOnes, crate::scalar::CountOnes);
+    define_array_op1_method!(count_zeros: CountZeros, crate::scalar::CountZeros);
+    define_array_op1_method!(leading_zeros: LeadingZeros, crate::scalar::LeadingZeros);
+    define_array_op1_method!(trailing_zeros: TrailingZeros, crate::scalar::TrailingZeros);
+    define_array_op1_method!(swap_bytes: SwapBytes, crate::scalar::SwapBytes);
+    define_array_op1_method!(reverse_bits: ReverseBits, crate::scalar::ReverseBits);
 }
 
 #[cfg(test)]

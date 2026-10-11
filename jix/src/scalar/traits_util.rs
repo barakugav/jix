@@ -1,230 +1,186 @@
-macro_rules! define_op1_trait {
+macro_rules! define_scalar_op1_trait {
     (
-        $trait_name:ident,
-        $method_name:ident,
-        |$a:ident| $kernel_expr:expr,
-        [$($input_type:ty => $output_type:ty),* $(,)?]
+        $(#[$trait_meta:meta])* $Trait:ident,
+        $(#[$fn_meta:meta])* $f:ident,
     ) => {
-        #[doc = concat!("Scalar kernel trait for the `", stringify!($method_name), "` element-wise unary operation.")]
-        pub trait $trait_name {
-            #[doc = "The output element type produced by this operation."]
+        $(#[$trait_meta])*
+        pub trait $Trait {
+            /// The output element type.
             type Output;
-            #[doc = concat!("Apply the `", stringify!($method_name), "` operation to `self`, returning a value of type `Self::Output`.")]
-            fn $method_name(self) -> Self::Output;
+
+            $(#[$fn_meta])*
+            #[allow(clippy::wrong_self_convention)]
+            fn $f(self) -> Self::Output;
         }
-        $(
-            impl $trait_name for $input_type {
-                type Output = $output_type;
-
-                #[inline(always)]
-                fn $method_name(self) -> Self::Output {
-                    let $a = self;
-                    $kernel_expr
-                }
-            }
-        )*
-    };
-
-    (
-        $trait_name:ident,
-        $method_name:ident,
-        |$a:ident| $kernel_expr:expr,
-        [$($input_type:ty),* $(,)?] => $output_type:ty
-    ) => {
-        define_op1_trait!(
-            $trait_name,
-            $method_name,
-            |$a| $kernel_expr,
-            [$($input_type => $output_type),*]
-        );
-    };
-
-    (
-        $trait_name:ident,
-        $method_name:ident,
-        |$a:ident| $kernel_expr:expr,
-        [$($input_type:ty),* $(,)?] => "same"
-    ) => {
-        define_op1_trait!(
-            $trait_name,
-            $method_name,
-            |$a| $kernel_expr,
-            [$($input_type => $input_type),*]
-        );
     };
 }
 
-pub(crate) use define_op1_trait;
-
-#[allow(unused)]
-macro_rules! define_op2_trait {
+macro_rules! impl_scalar_op1 {
+    // Without `type Output`, default to `Self`
     (
-        $trait_name:ident,
-        $method_name:ident,
-        |$a:ident, $b:ident| $kernel_expr:expr,
-        [$(($input_a_type:tt, $input_b_type:tt) => $output_type:tt),* $(,)?]
-    ) => {
-        pub trait $trait_name<Rhs = Self> {
-            type Output;
-            fn $method_name(self, rhs: Rhs) -> Self::Output;
+        impl $Trait:ident for [$($t:ty),* $(,)?] {
+            fn $f:ident = |$x:ident| $f_expr:expr,
         }
-        $(
-            impl $trait_name<$input_b_type> for $input_a_type {
-                type Output = $output_type;
-
-                #[inline(always)]
-                fn $method_name(self, rhs: $input_b_type) -> Self::Output {
-                    let $a = self;
-                    let $b = rhs;
-                    $kernel_expr
-                }
+    ) => {
+        crate::scalar::traits_util::impl_scalar_op1!(
+            impl $Trait for [$($t),*] {
+                type Output = Self;
+                fn $f = |$x| $f_expr,
             }
-        )*
-    };
-
-    (
-        $trait_name:ident,
-        $method_name:ident,
-        |$a:ident, $b:ident| $kernel_expr:expr,
-        [[$($input_type:tt),*] => "same"]
-    ) => {
-        define_op2_trait!(
-            $trait_name,
-            $method_name,
-            |$a, $b| $kernel_expr,
-            [$($input_type => $input_type),*]
         );
     };
 
-    // given [multiple] input types for a single output type, expand to multiple input-output type pairs
-    // [i8, u32] => i8 means i8 => i8, u32 => i8
     (
-        $trait_name:ident,
-        $method_name:ident,
-        |$a:ident, $b:ident| $kernel_expr:expr,
-        [$([$($input_type:ty),*] => $output_type:ty),* $(,)?]
-    ) => {
-        define_op2_trait!(
-            $trait_name,
-            $method_name,
-            |$a, $b| $kernel_expr,
-            [$($($input_type => $output_type),*),*]
-        );
-    };
-
-    // given a single input type, assume both inputs of the same dtype
-    // i8 => i8 means (i8, i8) => i8
-    (
-        $trait_name:ident,
-        $method_name:ident,
-        |$a:ident, $b:ident| $kernel_expr:expr,
-        [$($input_type:tt => $output_type:tt),* $(,)?]
-    ) => {
-        define_op2_trait!(
-            $trait_name,
-            $method_name,
-            |$a, $b| $kernel_expr,
-            [$(($input_type, $input_type) => $output_type),*]
-        );
-    };
-
-
-    // pairs_of
-    (
-        $trait_name:ident,
-        $method_name:ident,
-        |$a:ident, $b:ident| $kernel_expr:expr,
-        [pairs_of[$($input_type:ty),*] => $output_type:ty]
-    ) => {
-        #[doc = concat!("Scalar kernel trait for the `", stringify!($method_name), "` element-wise binary operation.")]
-        pub trait $trait_name<Rhs = Self> {
-            #[doc = "The output element type produced by this operation."]
-            type Output;
-            #[doc = concat!("Apply the `", stringify!($method_name), "` operation to `self` and `rhs`, returning a value of type `Self::Output`.")]
-            fn $method_name(self, rhs: Rhs) -> Self::Output;
+        impl $Trait:ident for [$($t:ty),* $(,)?] {
+            type Output = $Out:ty;
+            fn $f:ident = |$x:ident| $f_expr:expr,
         }
-
-        define_op2_trait!(
-            @pairs_of_impl2
-            $trait_name,
-            $method_name,
-            |$a, $b| $kernel_expr,
-            [[$($input_type),*], [$($input_type),*] => $output_type]
-        );
-    };
-    (
-        @pairs_of_impl2
-        $trait_name:ident,
-        $method_name:ident,
-        |$a:ident, $b:ident| $kernel_expr:expr,
-        [[$($lhs_ty:ty),*], $rhs_ty:tt => $output_type:ty]
     ) => {
-        $(
-            define_op2_trait!(
-                @pairs_of_impl
-                $trait_name,
-                $method_name,
-                |$a, $b| $kernel_expr,
-                [$lhs_ty, $rhs_ty => $output_type]
-            );
-        )*
-    };
-    (
-        @pairs_of_impl
-        $trait_name:ident,
-        $method_name:ident,
-        |$a:ident, $b:ident| $kernel_expr:expr,
-        [$lhs_ty:ty, [$($rhs_ty:ty),*] => $output_type:ty]
-    ) => {
-        $(
-            impl $trait_name<$rhs_ty> for $lhs_ty {
-                type Output = $output_type;
-
-                #[inline(always)]
-                fn $method_name(self, rhs: $rhs_ty) -> Self::Output {
-                    let $a = self;
-                    let $b = rhs;
-                    $kernel_expr
-                }
+        $(crate::scalar::traits_util::impl_scalar_op1!(
+            @impl_one
+            impl $Trait for $t {
+                type Output = $Out;
+                fn $f = |$x| $f_expr,
             }
-        )*
+        );)*
+    };
+
+    (
+        @impl_one
+        impl $Trait:ident for $t:ty {
+            type Output = $Out:ty;
+            fn $f:ident = |$x:ident| $f_expr:expr,
+        }
+    ) => {
+        impl $Trait for $t {
+            type Output = $Out;
+            #[inline(always)]
+            fn $f(self) -> Self::Output {
+                let $x = self;
+                $f_expr
+            }
+        }
     };
 }
 
-#[allow(unused)]
-pub(crate) use define_op2_trait;
+macro_rules! define_scalar_op2_trait {
+    (
+        $(#[$trait_meta:meta])* $Trait:ident,
+        $(#[$fn_meta:meta])* $f:ident,
+    ) => {
+        crate::scalar::traits_util::define_scalar_op2_trait!(
+            $(#[$trait_meta])* $Trait<Rhs = Self>,
+            $(#[$fn_meta])* $f,
+        );
+    };
+    (
+        $(#[$trait_meta:meta])* $Trait:ident<Rhs = $Rhs:ty>,
+        $(#[$fn_meta:meta])* $f:ident,
+    ) => {
+        $(#[$trait_meta])*
+        pub trait $Trait<Rhs = $Rhs> {
+            /// The output element type.
+            type Output;
 
-// macro_rules! impl_for_pairs {
-//     (
-//         $macro:ident,
-//         [$($types:ty),*]
-//     ) => {
-//         impl_for_pairs!(
-//             @doit
-//             $macro,
-//             [$($types),*]
-//         );
-//     };
-//     (
-//         @doit
-//         $macro:ident,
-//         [$lhs_ty:ty, $($rhs:ty),*]
-//     ) => {
-//         $macro!($lhs_ty, $lhs_ty);
-//         $(
-//             $macro!($lhs_ty, $rhs);
-//         )*
-//         impl_for_pairs!(
-//             @doit
-//             $macro,
-//             [$($rhs),*]
-//         );
-//     };
-//     (
-//         @doit
-//         $macro:ident,
-//         [$lhs_ty:ty]
-//     ) => {
-//         $macro!($lhs_ty, $lhs_ty);
-//     };
-// }
+            $(#[$fn_meta])*
+            fn $f(self, rhs: Rhs) -> Self::Output;
+        }
+    };
+}
+
+macro_rules! impl_scalar_op2 {
+    // Without `type Output`, default to `Self`
+    (
+        impl $Trait:ident for [$($t:ty),* $(,)?] {
+            fn $f:ident = |$a:ident, $b:ident| $f_expr:expr,
+        }
+    ) => {
+        crate::scalar::traits_util::impl_scalar_op2!(
+            impl $Trait for [$($t),*] {
+                type Output = Self;
+                fn $f = |$a, $b| $f_expr,
+            }
+        );
+    };
+    (
+        impl $Trait:ident for [$($t:ty),* $(,)?] x $rhs:tt {
+            fn $f:ident = |$a:ident, $b:ident| $f_expr:expr,
+        }
+    ) => {
+        crate::scalar::traits_util::impl_scalar_op2!(
+            impl $Trait for [$($t),*] x $rhs {
+                type Output = Self;
+                fn $f = |$a, $b| $f_expr,
+            }
+        );
+    };
+
+    // Each type with itself as the right-hand side
+    (
+        impl $Trait:ident for [$($t:ty),* $(,)?] {
+            type Output = $Out:ty;
+            fn $f:ident = |$a:ident, $b:ident| $f_expr:expr,
+        }
+    ) => {
+        $(crate::scalar::traits_util::impl_scalar_op2!(
+            @impl_one
+            impl $Trait<$t> for $t {
+                type Output = $Out;
+                fn $f = |$a, $b| $f_expr,
+            }
+        );)*
+    };
+
+    // Each left-hand type with each of the right-hand types
+    (
+        impl $Trait:ident for [$($t:ty),* $(,)?] x $rhs:tt {
+            type Output = $Out:ty;
+            fn $f:ident = |$a:ident, $b:ident| $f_expr:expr,
+        }
+    ) => {
+        $(crate::scalar::traits_util::impl_scalar_op2!(
+            @impl_cross
+            impl $Trait<$rhs> for $t {
+                type Output = $Out;
+                fn $f = |$a, $b| $f_expr,
+            }
+        );)*
+    };
+    (
+        @impl_cross
+        impl $Trait:ident<[$($rhs:ty),* $(,)?]> for $t:ty {
+            type Output = $Out:ty;
+            fn $f:ident = |$a:ident, $b:ident| $f_expr:expr,
+        }
+    ) => {
+        $(crate::scalar::traits_util::impl_scalar_op2!(
+            @impl_one
+            impl $Trait<$rhs> for $t {
+                type Output = $Out;
+                fn $f = |$a, $b| $f_expr,
+            }
+        );)*
+    };
+
+    (
+        @impl_one
+        impl $Trait:ident<$rhs:ty> for $t:ty {
+            type Output = $Out:ty;
+            fn $f:ident = |$a:ident, $b:ident| $f_expr:expr,
+        }
+    ) => {
+        impl $Trait<$rhs> for $t {
+            type Output = $Out;
+            #[inline(always)]
+            fn $f(self, rhs: $rhs) -> Self::Output {
+                let $a = self;
+                let $b = rhs;
+                $f_expr
+            }
+        }
+    };
+}
+
+pub(crate) use {
+    define_scalar_op1_trait, define_scalar_op2_trait, impl_scalar_op1, impl_scalar_op2,
+};
