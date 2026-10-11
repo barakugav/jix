@@ -84,9 +84,8 @@
 //! ```
 //!
 //! Each op additionally requires the input element type to implement the relevant scalar trait,
-//! such as traits in [`core::ops`], [`num_traits`] or [`jix::scalar`](crate::scalar).
-//! For example, `add()` requires `core::ops::Add`, `exp()` requires `num_traits::Float`, and
-//! `sum()` requires `crate::scalar::Sum`.
+//! of [`jix::scalar`](crate::scalar). For example, `a + b` requires `crate::scalar::Add`, `exp()`
+//! requires `crate::scalar::Exp`, and `sum()` requires `crate::scalar::Sum`.
 //!
 //! # Multi-array operations
 //!
@@ -144,9 +143,12 @@ pub use common::AxesArg;
 pub(crate) use common::LanesInfo;
 
 pub(crate) mod _traits {
+    pub use super::bitwise::_traits::*;
     pub use super::cast::_traits::*;
     pub use super::cmp::_traits::*;
+    pub use super::logical1::_traits::*;
     pub use super::op1::_traits::*;
+    pub use super::op2::_traits::*;
     pub use super::reduction::_traits::*;
 }
 

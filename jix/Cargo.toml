@@ -23,12 +23,9 @@ include = [
 jix-macros = { path = "../jix-macros", version = "=0.0.5" }
 ndarray = ">=0.16,<0.18"
 memmap2 = "0.9"
-num-traits = "0.2" # TODO make it optional
 zstd = { version = "0.14", default-features = false }
 prost = "0.14"
-half = { version = "2", default-features = false, features = [
-    "num-traits",
-], optional = true }
+half = { version = "2", default-features = false, optional = true }
 num-complex = { version = "0.4", default-features = false, optional = true }
 fearless_simd = "1.0"
 
@@ -44,7 +41,7 @@ half = ["dep:half"]
 
 # Add the `num-complex` crate for complex numbers, and implement scalar kernels for Complex<f32>
 # and Complex<f64>.
-num-complex = ["dep:num-complex"]
+num-complex = ["dep:num-complex", "half?/num-traits"]
 
 
 [package.metadata.docs.rs]

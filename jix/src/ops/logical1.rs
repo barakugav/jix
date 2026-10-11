@@ -2,13 +2,72 @@ use crate::ops::common::define_array_op1_method;
 use crate::ops::define_op1;
 use crate::ops::prelude::*;
 
+pub(crate) mod _traits {
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
+    use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
+
+    /// Define the float classification scalar trait `$Trait` as `f32`'s `$f`.
+    macro_rules! classify_op1 {
+        (
+            $(#[$trait_meta:meta])* $Trait:ident,
+            $(#[$fn_meta:meta])* $f:ident,
+        ) => {
+            define_scalar_op1_trait!(
+                $(#[$trait_meta])* $Trait,
+                $(#[$fn_meta])* $f,
+            );
+            impl_scalar_op1!(
+                impl $Trait for [f32, f64] {
+                    type Output = bool;
+                    fn $f = |x| x.$f(),
+                }
+            );
+            #[cfg(feature = "half")]
+            impl_scalar_op1!(
+                impl $Trait for [f16] {
+                    type Output = bool;
+                    fn $f = |x| x.$f(),
+                }
+            );
+        };
+    }
+    classify_op1!(
+        /// NaN test operation, as [`f32::is_nan`].
+        ///
+        /// Output dtype is `bool`.
+        ///
+        /// Returns `true` if the element is `NaN`, `false` otherwise.
+        IsNan,
+        /// Test whether the value is `NaN` (not a number).
+        is_nan,
+    );
+    classify_op1!(
+        /// Finiteness test operation, as [`f32::is_finite`].
+        ///
+        /// Output dtype is `bool`.
+        ///
+        /// Returns `true` if the element is a finite number, `false` for `+/-inf` and `NaN`.
+        IsFinite,
+        /// Test whether the value is finite (not `+/-inf` and not `NaN`).
+        is_finite,
+    );
+    classify_op1!(
+        /// Infinity test operation, as [`f32::is_infinite`].
+        ///
+        /// Output dtype is `bool`.
+        ///
+        /// Returns `true` only for `+inf` and `-inf`; returns `false` for finite values and `NaN`.
+        IsInfinite,
+        /// Test whether the value is infinite (`+inf` or `-inf`).
+        is_infinite,
+    );
+}
+
 define_op1!(
     /// Tests whether each element is `NaN` (not a number).
     ///
-    /// Output dtype is `bool`.
-    ///
-    /// Returns `true` if the element is `NaN`, `false` otherwise.
-    /// Semantics follow [`f32::is_nan`].
+    /// See [`jix::scalar::IsNan`](crate::scalar::IsNan) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -34,16 +93,13 @@ define_op1!(
     /// ```
     IsNan,
     IsNanKernel,
-    <num_traits::Float>::is_nan,
-    type Output = bool,
+    crate::scalar::IsNan::is_nan,
 );
 define_op1!(
     /// Tests whether each element is finite (not `+/-inf` and not `NaN`).
     ///
-    /// Output dtype is `bool`.
-    ///
-    /// Returns `true` if the element is a finite number, `false` for `+/-inf` and `NaN`.
-    /// Semantics follow [`f32::is_finite`].
+    /// See [`jix::scalar::IsFinite`](crate::scalar::IsFinite) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -69,16 +125,13 @@ define_op1!(
     /// ```
     IsFinite,
     IsFiniteKernel,
-    <num_traits::Float>::is_finite,
-    type Output = bool,
+    crate::scalar::IsFinite::is_finite,
 );
 define_op1!(
     /// Tests whether each element is infinite (`+inf` or `-inf`).
     ///
-    /// Output dtype is `bool`.
-    ///
-    /// Returns `true` only for `+inf` and `-inf`; returns `false` for finite values and `NaN`.
-    /// Semantics follow [`f32::is_infinite`].
+    /// See [`jix::scalar::IsInfinite`](crate::scalar::IsInfinite) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -104,17 +157,16 @@ define_op1!(
     /// ```
     IsInfinite,
     IsInfiniteKernel,
-    <num_traits::Float>::is_infinite,
-    type Output = bool,
+    crate::scalar::IsInfinite::is_infinite,
 );
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op1_method!(is_nan: IsNan, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(is_finite: IsFinite, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(is_infinite: IsInfinite, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(is_nan: IsNan, crate::scalar::IsNan);
+    define_array_op1_method!(is_finite: IsFinite, crate::scalar::IsFinite);
+    define_array_op1_method!(is_infinite: IsInfinite, crate::scalar::IsInfinite);
 }
 
 #[cfg(test)]

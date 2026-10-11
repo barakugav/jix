@@ -157,19 +157,19 @@ macro_rules! define_op1 {
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident,
-        $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
+        crate::scalar::$trait:ident::$kernel_fn:ident,
+        $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
         struct $Kernel;
         impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
         where
-            T: $($trait)::+,
+            T: crate::scalar::$trait + Copy + 'static,
         {
-            type Output = <T as $($trait)::+>::Output;
+            type Output = <T as crate::scalar::$trait>::Output;
 
             #[inline(always)]
             fn apply(&self, x: T) -> Self::Output {
-                <T as $($trait)::+>::$kernel_fn(x)
+                <T as crate::scalar::$trait>::$kernel_fn(x)
             }
         }
         $(#[$meta])*
@@ -177,7 +177,7 @@ macro_rules! define_op1 {
         impl<S> $Op<S>
         where
             S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+            S::Item: crate::scalar::$trait<Output: crate::dtype::Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(array: S) -> crate::error::Result<Self> {
@@ -192,9 +192,9 @@ macro_rules! define_op1 {
         impl<S> ArrayStorage for $Op<S>
         where
             S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+            S::Item: crate::scalar::$trait<Output: crate::dtype::Dtyped>,
         {
-            type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
+            type ElementType = crate::Ty<<S::Item as crate::scalar::$trait>::Output>;
             type Dimension = S::Dimension;
             crate::storage::impl_array_storage_forward!(<S>);
 
@@ -214,118 +214,27 @@ macro_rules! define_op1 {
         }
 
         define_op1!(@define_core
-            impl $Op
-            $(core_op = $core_op_trait::$core_op_fn,)?
+            impl $Op,
+            $trait,
+            $(core_op: $core_op_trait::$core_op_fn,)?
         );
-    };
-
-    (
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident,
-        type Output<T> = T,
-    ) => {
-        define_op1!(
-            $(#[$meta])*
-            $Op,
-            $Kernel,
-            <$($trait)::+> :: $kernel_fn,
-            type Output<T> = T,
-            type Output<S> = S::Item,
-        );
-    };
-    (
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident,
-        type Output = $output_type:ty,
-    ) => {
-        define_op1!(
-            $(#[$meta])*
-            $Op,
-            $Kernel,
-            <$($trait)::+> :: $kernel_fn,
-            type Output<T> = $output_type,
-            type Output<S> = $output_type,
-        );
-    };
-    (
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        <$($trait:ident)::+> :: $kernel_fn:ident,
-        type Output<T> = $output_type_t:ty,
-        type Output<S> = $output_type_s:ty,
-    ) => {
-        struct $Kernel;
-        impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
-        where
-            T: $($trait)::+,
-        {
-            type Output = $output_type_t;
-
-            #[inline(always)]
-            fn apply(&self, x: T) -> Self::Output {
-                <T as $($trait)::+>::$kernel_fn(x)
-            }
-        }
-        $(#[$meta])*
-        pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
-        impl<S> $Op<S>
-        where
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+,
-        {
-            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new(array: S) -> crate::error::Result<Self> {
-                Ok(Self(crate::ops::op1::Op1::new(array, $Kernel)?))
-            }
-
-            #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
-            pub fn new_array(array: crate::Array<S>) -> crate::error::Result<crate::Array<Self>> {
-                Self::new(array.into_storage()).map(crate::Array::from_storage)
-            }
-        }
-        impl<S> ArrayStorage for $Op<S>
-        where
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+,
-        {
-            type ElementType = crate::Ty<$output_type_s>;
-            type Dimension = S::Dimension;
-            crate::storage::impl_array_storage_forward!(<S>);
-
-            fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
-                crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
-            }
-
-            type DimensionChange<NewD: crate::Dimension> = $Op<S::DimensionChange<NewD>>;
-            #[inline]
-            fn dimension_change<NewD: crate::Dimension>(
-                self,
-            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-                Ok($Op(self.0.dimension_change()?))
-            }
-
-            crate::ops::impl_element_type_change_default!();
-        }
     };
 
     (
         @define_core
-        impl $Op:ident
+        impl $Op:ident,
+        $trait:ident,
     ) => {};
     (
         @define_core
-        impl $Op:ident
-        core_op = $core_op_trait:ident::$core_op_fn:ident,
+        impl $Op:ident,
+        $trait:ident,
+        core_op: $core_op_trait:ident::$core_op_fn:ident,
     ) => {
         impl<S> core::ops::$core_op_trait for Array<S>
         where
             S: crate::storage::ArrayStorageTyped,
-            S::Item: core::ops::$core_op_trait<Output: crate::dtype::Dtyped>,
+            S::Item: crate::scalar::$trait<Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S>>;
             #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
@@ -342,86 +251,296 @@ pub(crate) use define_op1;
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::scalar::traits_util::define_op1_trait;
+    use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
 
-    define_op1_trait!(
-        Abs,
-        abs,
-        |a| a.abs(),
-        [i8, i16, i32, i64, f32, f64] => "same"
-    );
-    define_op1_trait!(
+    define_scalar_op1_trait!(
+        /// Sign operation: as [`f32::signum`] and [`i32::signum`], `0` or `1` for unsigned
+        /// integers.
+        ///
+        /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+        /// `f16`, `f32`, `f64`.
+        ///
+        /// For **signed integer** types: returns `-1`, `0`, or `+1` of the same type.
+        ///
+        /// For **unsigned integer** types: returns `0` or `1` of the same type (since
+        /// unsigned values cannot be negative).
+        ///
+        /// For **float** types: returns `+1.0` for positive values and `-1.0` for
+        /// negative values. Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns
+        /// `-1.0`. Semantics follow [`f32::signum`].
         Sign,
+        /// Compute the sign of the value.
         sign,
-        |a| a.signum(),
-        [i8, i16, i32, i64, f32, f64] => "same"
+    );
+    impl_scalar_op1!(
+        impl Sign for [i8, i16, i32, i64, f32, f64] {
+            fn sign = |x| x.signum(),
+        }
+    );
+    impl_scalar_op1!(
+        impl Sign for [u8, u16, u32, u64] {
+            fn sign = |x| (x != 0) as Self,
+        }
     );
     #[cfg(feature = "half")]
-    impl Sign for f16 {
-        type Output = f16;
-
-        #[inline(always)]
-        fn sign(self) -> Self::Output {
-            <Self as num_traits::Float>::signum(self)
+    impl_scalar_op1!(
+        impl Sign for [f16] {
+            fn sign = |x| f16::from_f32(x.to_f32().signum()),
         }
-    }
-    macro_rules! impl_sign_uint {
-        ($($t:ty),*) => {
-            $(
-                impl Sign for $t {
-                    type Output = $t;
-                    #[inline(always)]
-                    fn sign(self) -> Self::Output {
-                        if self == 0 { 0 } else { 1 }
-                    }
+    );
+    define_scalar_op1_trait!(
+        /// Absolute value operation: the magnitude for complex types.
+        ///
+        /// Supported dtypes and output dtype:
+        ///
+        /// | Input dtype | Output dtype |
+        /// |-------------|--------------|
+        /// | `i8`, `i16`, `i32`, `i64` | same |
+        /// | `f16`, `f32`, `f64` | same |
+        /// | `Complex<f32>` | `f32` |
+        /// | `Complex<f64>` | `f64` |
+        ///
+        /// For **complex** types the result is the modulus `sqrt(re^2 + im^2)`, computed
+        /// via `hypot` for numerical stability. The output dtype is the real component type
+        /// (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
+        ///
+        /// For **signed integer** types, `MIN.abs()` overflows: `(-128i8).abs()` wraps back
+        /// to `i8::MIN` in release builds and panics in debug builds.
+        ///
+        /// Floating-point semantics follow [`f32::abs`].
+        Abs,
+        /// Compute the absolute value.
+        abs,
+    );
+    impl_scalar_op1!(
+        impl Abs for [i8, i16, i32, i64, f32, f64] {
+            fn abs = |x| x.abs(),
+        }
+    );
+    #[cfg(feature = "half")]
+    impl_scalar_op1!(
+        impl Abs for [f16] {
+            fn abs = |x| f16::from_f32(x.to_f32().abs()),
+        }
+    );
+    #[cfg(feature = "num-complex")]
+    impl_scalar_op1!(
+        impl Abs for [Complex<f32>] {
+            type Output = f32;
+            fn abs = |x| x.re.hypot(x.im),
+        }
+    );
+    #[cfg(feature = "num-complex")]
+    impl_scalar_op1!(
+        impl Abs for [Complex<f64>] {
+            type Output = f64;
+            fn abs = |x| x.re.hypot(x.im),
+        }
+    );
+
+    define_scalar_op1_trait!(
+        /// Squaring operation: `x * x`.
+        ///
+        /// The output dtype is the input dtype.
+        ///
+        /// For **integer** types squaring can overflow, following the semantics of the `*`
+        /// operator: it wraps in release builds and panics in debug builds.
+        Square,
+        /// Compute the square of the value.
+        square,
+    );
+    impl_scalar_op1!(
+        impl Square for [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64] {
+            fn square = |x| x * x,
+        }
+    );
+    // In f32 without FP16, as `Mul`.
+    #[cfg(all(
+        feature = "half",
+        not(all(target_arch = "aarch64", target_feature = "fp16"))
+    ))]
+    impl_scalar_op1!(
+        impl Square for [f16] {
+            fn square = |x| f16::from_f32(x.to_f32() * x.to_f32()),
+        }
+    );
+    #[cfg(all(feature = "half", target_arch = "aarch64", target_feature = "fp16"))]
+    impl_scalar_op1!(
+        impl Square for [f16] {
+            fn square = |x| x * x,
+        }
+    );
+    #[cfg(feature = "num-complex")]
+    impl_scalar_op1!(
+        impl Square for [Complex<f32>, Complex<f64>] {
+            fn square = |x| x * x,
+        }
+    );
+    #[cfg(all(feature = "half", feature = "num-complex"))]
+    impl_scalar_op1!(
+        impl Square for [Complex<f16>] {
+            fn square = |x| x * x,
+        }
+    );
+
+    define_scalar_op1_trait!(
+        /// Negation operation, like [`core::ops::Neg`].
+        ///
+        /// For **integer** types the result is the two's-complement negation.
+        /// Negating the minimum representable value (e.g. `i32::MIN`) overflows:
+        /// it wraps in release builds and panics in debug builds.
+        ///
+        /// For **complex** types both components are negated independently:
+        /// `-(a + bi) = -a - bi`.
+        ///
+        /// Floating-point semantics follow `f32::neg`.
+        Neg,
+        /// Negate the value.
+        neg,
+    );
+    impl_scalar_op1!(
+        impl Neg for [f32, f64, i8, i16, i32, i64] {
+            fn neg = |x| -x,
+        }
+    );
+    #[cfg(feature = "half")]
+    impl_scalar_op1!(
+        impl Neg for [f16] {
+            fn neg = |x| -x,
+        }
+    );
+    #[cfg(feature = "num-complex")]
+    impl_scalar_op1!(
+        impl Neg for [Complex<f32>, Complex<f64>] {
+            fn neg = |x| -x,
+        }
+    );
+    #[cfg(all(feature = "half", feature = "num-complex"))]
+    impl_scalar_op1!(
+        impl Neg for [Complex<f16>] {
+            fn neg = |x| -x,
+        }
+    );
+
+    macro_rules! float_op1 {
+        (
+            $(#[$trait_meta:meta])* $Trait:ident,
+            $(#[$fn_meta:meta])* $f:ident,
+        ) => {
+            define_scalar_op1_trait!(
+                $(#[$trait_meta])* $Trait,
+                $(#[$fn_meta])* $f,
+            );
+            float_op1!(@impl $Trait, $f);
+            #[cfg(feature = "half")]
+            impl_scalar_op1!(
+                impl $Trait for [f16] {
+                    fn $f = |x| f16::from_f32(x.to_f32().$f()),
                 }
-            )*
+            );
+        };
+        (@impl $Trait:ident, $f:ident) => {
+            impl_scalar_op1!(
+                impl $Trait for [f32, f64] {
+                    fn $f = |x| x.$f(),
+                }
+            );
         };
     }
-    impl_sign_uint!(u8, u16, u32, u64);
-    #[cfg(feature = "half")]
-    impl Abs for f16 {
-        type Output = f16;
-
-        #[inline(always)]
-        fn abs(self) -> Self::Output {
-            <Self as num_traits::Float>::abs(self)
-        }
-    }
-    #[cfg(feature = "num-complex")]
-    impl Abs for Complex<f32> {
-        type Output = f32;
-
-        #[inline(always)]
-        fn abs(self) -> Self::Output {
-            self.re.hypot(self.im)
-        }
-    }
-    #[cfg(feature = "num-complex")]
-    impl Abs for Complex<f64> {
-        type Output = f64;
-
-        #[inline(always)]
-        fn abs(self) -> Self::Output {
-            self.re.hypot(self.im)
-        }
-    }
+    float_op1!(
+        /// Flooring operation, as [`f32::floor`].
+        Floor,
+        /// Round down to the nearest integer (towards -inf).
+        floor,
+    );
+    float_op1!(
+        /// Ceiling operation, as [`f32::ceil`].
+        Ceil,
+        /// Round up to the nearest integer (towards +inf).
+        ceil,
+    );
+    float_op1!(
+        /// Square root operation, as [`f32::sqrt`].
+        ///
+        /// Negative inputs produce `NaN`.
+        Sqrt,
+        /// Compute the square root.
+        sqrt,
+    );
+    float_op1!(
+        /// Rounding operation, as [`f32::round`].
+        ///
+        /// Ties (values exactly halfway between two integers) are broken by rounding
+        /// away from zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from
+        /// "round-half-to-even" (banker's rounding) used in some other libraries.
+        Round,
+        /// Round to the nearest integer.
+        round,
+    );
+    float_op1!(
+        /// Natural exponential operation (`e^x`), as [`f32::exp`].
+        Exp,
+        /// Compute the natural exponential.
+        exp,
+    );
+    float_op1!(
+        /// Natural logarithm operation, as [`f32::ln`].
+        ///
+        /// Negative inputs produce `NaN`; zero produces `-inf`.
+        Ln,
+        /// Compute the natural logarithm.
+        ln,
+    );
+    float_op1!(
+        /// Sine operation, as [`f32::sin`].
+        Sin,
+        /// Compute the sine (input in radians).
+        sin,
+    );
+    float_op1!(
+        /// Cosine operation, as [`f32::cos`].
+        Cos,
+        /// Compute the cosine (input in radians).
+        cos,
+    );
+    float_op1!(
+        /// Tangent operation, as [`f32::tan`].
+        Tan,
+        /// Compute the tangent (input in radians).
+        tan,
+    );
+    float_op1!(
+        /// Arcsine operation, as [`f32::asin`].
+        ///
+        /// Inputs outside `[-1, 1]` produce `NaN`.
+        Asin,
+        /// Compute the arcsine; the output is in radians in `[-pi/2, pi/2]`.
+        asin,
+    );
+    float_op1!(
+        /// Arccosine operation, as [`f32::acos`].
+        ///
+        /// Inputs outside `[-1, 1]` produce `NaN`.
+        Acos,
+        /// Compute the arccosine; the output is in radians in `[0, pi]`.
+        acos,
+    );
+    float_op1!(
+        /// Arctangent operation, as [`f32::atan`].
+        Atan,
+        /// Compute the arctangent; the output is in radians in `(-pi/2, pi/2)`.
+        atan,
+    );
 }
 
 define_op1!(
     /// Arithmetic negation applied element-wise.
     ///
-    /// For **integer** types the result is the two's-complement negation.
-    /// Negating the minimum representable value (e.g. `i32::MIN`) overflows:
-    /// it wraps in release builds and panics in debug builds.
-    ///
-    /// For **complex** types both components are negated independently:
-    /// `-(a + bi) = -a - bi`.
+    /// See [`jix::scalar::Neg`](crate::scalar::Neg) scalar trait for the per-element semantics.
     ///
     /// Available via the unary `-` operator on [`Array`](crate::Array): `-arr`.
-    /// Floating-point semantics follow `f32::neg`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -445,13 +564,13 @@ define_op1!(
     /// ```
     Neg,
     NegKernel,
-    <core::ops::Neg>::neg,
-    core_op = Neg::neg,
+    crate::scalar::Neg::neg,
+    core_op: core::ops::Neg::neg,
 );
 define_op1!(
     /// Rounds each element down to the nearest integer (towards -inf).
     ///
-    /// Semantics follow [`f32::floor`].
+    /// See [`jix::scalar::Floor`](crate::scalar::Floor) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -475,13 +594,12 @@ define_op1!(
     /// ```
     Floor,
     FloorKernel,
-    <num_traits::Float>::floor,
-    type Output<T> = T,
+    crate::scalar::Floor::floor,
 );
 define_op1!(
     /// Rounds each element up to the nearest integer (towards +inf).
     ///
-    /// Semantics follow [`f32::ceil`].
+    /// See [`jix::scalar::Ceil`](crate::scalar::Ceil) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -505,16 +623,12 @@ define_op1!(
     /// ```
     Ceil,
     CeilKernel,
-    <num_traits::Float>::ceil,
-    type Output<T> = T,
+    crate::scalar::Ceil::ceil,
 );
 define_op1!(
     /// Rounds each element to the nearest integer.
     ///
-    /// Ties (values exactly halfway between two integers) are broken by rounding
-    /// away from zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from
-    /// "round-half-to-even" (banker's rounding) used in some other libraries.
-    /// Semantics follow [`f32::round`].
+    /// See [`jix::scalar::Round`](crate::scalar::Round) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -538,13 +652,12 @@ define_op1!(
     /// ```
     Round,
     RoundKernel,
-    <num_traits::Float>::round,
-    type Output<T> = T,
+    crate::scalar::Round::round,
 );
 define_op1!(
     /// Computes the square root of each element.
     ///
-    /// Negative inputs produce `NaN`. Semantics follow [`f32::sqrt`].
+    /// See [`jix::scalar::Sqrt`](crate::scalar::Sqrt) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -568,13 +681,12 @@ define_op1!(
     /// ```
     Sqrt,
     SqrtKernel,
-    <num_traits::Float>::sqrt,
-    type Output<T> = T,
+    crate::scalar::Sqrt::sqrt,
 );
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
     ///
-    /// Semantics follow [`f32::exp`].
+    /// See [`jix::scalar::Exp`](crate::scalar::Exp) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -599,14 +711,12 @@ define_op1!(
     /// ```
     Exp,
     ExpKernel,
-    <num_traits::Float>::exp,
-    type Output<T> = T,
+    crate::scalar::Exp::exp,
 );
 define_op1!(
     /// Computes the natural logarithm (`ln x`) of each element.
     ///
-    /// Negative inputs produce `NaN`; zero produces `-inf`.
-    /// Semantics follow [`f32::ln`].
+    /// See [`jix::scalar::Ln`](crate::scalar::Ln) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -632,13 +742,12 @@ define_op1!(
     /// ```
     Ln,
     LnKernel,
-    <num_traits::Float>::ln,
-    type Output<T> = T,
+    crate::scalar::Ln::ln,
 );
 define_op1!(
     /// Computes the sine of each element (input in radians).
     ///
-    /// Semantics follow [`f32::sin`].
+    /// See [`jix::scalar::Sin`](crate::scalar::Sin) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -662,13 +771,12 @@ define_op1!(
     /// ```
     Sin,
     SinKernel,
-    <num_traits::Float>::sin,
-    type Output<T> = T,
+    crate::scalar::Sin::sin,
 );
 define_op1!(
     /// Computes the cosine of each element (input in radians).
     ///
-    /// Semantics follow [`f32::cos`].
+    /// See [`jix::scalar::Cos`](crate::scalar::Cos) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -693,13 +801,12 @@ define_op1!(
     /// ```
     Cos,
     CosKernel,
-    <num_traits::Float>::cos,
-    type Output<T> = T,
+    crate::scalar::Cos::cos,
 );
 define_op1!(
     /// Computes the tangent of each element (input in radians).
     ///
-    /// Semantics follow [`f32::tan`].
+    /// See [`jix::scalar::Tan`](crate::scalar::Tan) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -723,13 +830,12 @@ define_op1!(
     /// ```
     Tan,
     TanKernel,
-    <num_traits::Float>::tan,
-    type Output<T> = T,
+    crate::scalar::Tan::tan,
 );
 define_op1!(
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
     ///
-    /// Inputs outside `[-1, 1]` produce `NaN`. Semantics follow [`f32::asin`].
+    /// See [`jix::scalar::Asin`](crate::scalar::Asin) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -754,13 +860,12 @@ define_op1!(
     /// ```
     Asin,
     AsinKernel,
-    <num_traits::Float>::asin,
-    type Output<T> = T,
+    crate::scalar::Asin::asin,
 );
 define_op1!(
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
     ///
-    /// Inputs outside `[-1, 1]` produce `NaN`. Semantics follow [`f32::acos`].
+    /// See [`jix::scalar::Acos`](crate::scalar::Acos) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -785,13 +890,12 @@ define_op1!(
     /// ```
     Acos,
     AcosKernel,
-    <num_traits::Float>::acos,
-    type Output<T> = T,
+    crate::scalar::Acos::acos,
 );
 define_op1!(
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
     ///
-    /// Semantics follow [`f32::atan`].
+    /// See [`jix::scalar::Atan`](crate::scalar::Atan) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -815,23 +919,12 @@ define_op1!(
     /// ```
     Atan,
     AtanKernel,
-    <num_traits::Float>::atan,
-    type Output<T> = T,
+    crate::scalar::Atan::atan,
 );
 define_op1!(
     /// Returns the sign of each element.
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`.
-    ///
-    /// For **signed integer** types: returns `-1`, `0`, or `+1` of the same type.
-    ///
-    /// For **unsigned integer** types: returns `0` or `1` of the same type (since
-    /// unsigned values cannot be negative).
-    ///
-    /// For **float** types: returns `+1.0` for positive values and `-1.0` for
-    /// negative values. Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns
-    /// `-1.0`. Semantics follow [`f32::signum`].
+    /// See [`jix::scalar::Sign`](crate::scalar::Sign) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -859,28 +952,12 @@ define_op1!(
     /// ```
     Sign,
     SignKernel,
-    <crate::scalar::Sign>::sign,
+    crate::scalar::Sign::sign,
 );
 define_op1!(
     /// Computes the absolute value of each element.
     ///
-    /// Supported dtypes and output dtype:
-    ///
-    /// | Input dtype | Output dtype |
-    /// |-------------|--------------|
-    /// | `i8`, `i16`, `i32`, `i64` | same |
-    /// | `f16`, `f32`, `f64` | same |
-    /// | `Complex<f32>` | `f32` |
-    /// | `Complex<f64>` | `f64` |
-    ///
-    /// For **complex** types the result is the modulus `sqrt(re^2 + im^2)`, computed
-    /// via `hypot` for numerical stability. The output dtype is the real component type
-    /// (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
-    ///
-    /// For **signed integer** types, `MIN.abs()` overflows: `(-128i8).abs()` wraps back
-    /// to `i8::MIN` in release builds and panics in debug builds.
-    ///
-    /// Floating-point semantics follow [`f32::abs`].
+    /// See [`jix::scalar::Abs`](crate::scalar::Abs) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -914,105 +991,57 @@ define_op1!(
     /// ```
     Abs,
     AbsKernel,
-    <crate::scalar::Abs>::abs,
+    crate::scalar::Abs::abs,
 );
 
-/// Squares each element (`x * x`).
-///
-/// The output dtype is `<T as Mul>::Output`, which is the same as the input dtype
-/// for all built-in scalar and complex types.
-///
-/// For **integer** types squaring can overflow, following the semantics of the `*`
-/// operator: it wraps in release builds and panics in debug builds.
-///
-/// The result is a lazy view; no computation occurs until the array is read.
-///
-/// This struct is the bare storage implementation, the operation is also available as
-/// [`Array::square()`](crate::Array::square).
-///
-/// # Examples
-/// ```
-/// use jix::Array;
-/// use ndarray::array;
-///
-/// let a = Array::compact_ndarray(&array![1.0f32, -2.0, 3.0])?;
-/// let result = a.square().to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[1.0, 4.0, 9.0]);
-///
-/// // Works on integer types too.
-/// let b = Array::compact_ndarray(&array![2i32, -3, 4])?;
-/// let result = b.square().to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[4, 9, 16]);
-/// # Ok::<(), jix::Error>(())
-/// ```
-pub struct Square<S>(Op1<S, SquareKernel>);
-struct SquareKernel;
-impl<T> Op1Kernel<T> for SquareKernel
-where
-    T: core::ops::Mul + Copy,
-{
-    type Output = <T as core::ops::Mul>::Output;
-
-    #[inline(always)]
-    fn apply(&self, x: T) -> Self::Output {
-        x * x
-    }
-}
-impl<S> Square<S>
-where
-    S: ArrayStorageTyped,
-    S::Item: core::ops::Mul<Output: Dtyped>,
-{
-    /// Constructs a [`Square`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: S) -> Result<Self> {
-        Ok(Self(Op1::new(array, SquareKernel)?))
-    }
-
-    /// Constructs an array with [`Square`] storage. See the storage struct docs for semantics
-    /// and examples.
-    pub fn new_array(array: Array<S>) -> Result<Array<Self>> {
-        Self::new(array.into_storage()).map(Array::from_storage)
-    }
-}
-impl<S> ArrayStorage for Square<S>
-where
-    S: ArrayStorageTyped,
-    S::Item: core::ops::Mul<Output: Dtyped>,
-{
-    type ElementType = Ty<<S::Item as core::ops::Mul>::Output>;
-    type Dimension = S::Dimension;
-    crate::storage::impl_array_storage_forward!(<S>);
-
-    fn info(&self) -> ArrayStorageInfo<'_> {
-        ArrayStorageInfo::new_deps("Square", [&self.0.array])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = Square<S::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        Ok(Square(self.0.dimension_change()?))
-    }
-
-    crate::ops::impl_element_type_change_default!();
-}
+define_op1!(
+    /// Squares each element (`x * x`).
+    ///
+    /// See [`jix::scalar::Square`](crate::scalar::Square) scalar trait for the
+    /// per-element semantics.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, the operation is also available as
+    /// [`Array::square()`](crate::Array::square).
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![1.0f32, -2.0, 3.0])?;
+    /// let result = a.square().to_ndarray()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[1.0, 4.0, 9.0]);
+    ///
+    /// // Works on integer types too.
+    /// let b = Array::compact_ndarray(&array![2i32, -3, 4])?;
+    /// let result = b.square().to_ndarray()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[4, 9, 16]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    Square,
+    SquareKernel,
+    crate::scalar::Square::square,
+);
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op1_method!(floor: Floor, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(ceil: Ceil, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(round: Round, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(sqrt: Sqrt, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(square: Square, core::ops::Mul);
-    define_array_op1_method!(exp: Exp, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(ln: Ln, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(sin: Sin, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(cos: Cos, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(tan: Tan, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(asin: Asin, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(acos: Acos, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(atan: Atan, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(floor: Floor, crate::scalar::Floor);
+    define_array_op1_method!(ceil: Ceil, crate::scalar::Ceil);
+    define_array_op1_method!(round: Round, crate::scalar::Round);
+    define_array_op1_method!(sqrt: Sqrt, crate::scalar::Sqrt);
+    define_array_op1_method!(square: Square, crate::scalar::Square);
+    define_array_op1_method!(exp: Exp, crate::scalar::Exp);
+    define_array_op1_method!(ln: Ln, crate::scalar::Ln);
+    define_array_op1_method!(sin: Sin, crate::scalar::Sin);
+    define_array_op1_method!(cos: Cos, crate::scalar::Cos);
+    define_array_op1_method!(tan: Tan, crate::scalar::Tan);
+    define_array_op1_method!(asin: Asin, crate::scalar::Asin);
+    define_array_op1_method!(acos: Acos, crate::scalar::Acos);
+    define_array_op1_method!(atan: Atan, crate::scalar::Atan);
     define_array_op1_method!(sign: Sign, crate::scalar::Sign);
     define_array_op1_method!(abs: Abs, crate::scalar::Abs);
 }

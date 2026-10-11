@@ -6,120 +6,234 @@ use crate::ops::{Op2, Op2Kernel};
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
+    use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
 
-    /// Element-wise maximum with NaN-propagating semantics for floating-point types.
-    ///
-    /// This trait exists because neither of the standard alternatives covers all supported dtypes:
-    ///
-    /// - [`std::cmp::max`] requires [`Ord`], which floating-point types do not implement due to
-    ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
-    /// - [`f32::max`] / [`f64::max`] use **NaN-ignoring** semantics: when exactly one operand is
-    ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmax` / `numpy.nanmax`, not
-    ///   `numpy.maximum`.
-    ///
-    /// `Maximum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
-    /// the result is `NaN`. This matches `numpy.maximum` and makes NaN visible rather than
-    /// silently discarding it.
-    ///
-    /// For integer and `bool` types the implementation delegates to [`std::cmp::max`], which is
-    /// equivalent. The trait therefore provides a single uniform interface usable across all
-    /// supported numeric dtypes.
-    pub trait Maximum<Rhs = Self> {
-        /// The output element type of this maximum operation.
-        type Output;
-        /// Return the element-wise maximum of `self` and `other`, propagating `NaN` for floats.
-        fn maximum(self, other: Rhs) -> Self::Output;
-    }
-    macro_rules! impl_integer_maximum {
-        ($($t:ty),* $(,)?) => {
-            $(impl Maximum for $t {
-                type Output = Self;
-
-                #[inline(always)]
-                fn maximum(self, other: Self) -> Self {
-                    std::cmp::max(self, other)
-                }
-            })*
-        };
-    }
-    macro_rules! impl_float_maximum {
-        ($($t:ty),* $(,)?) => {
-            $(impl Maximum for $t {
-                type Output = Self;
-
-                #[inline(always)]
-                fn maximum(self, other: Self) -> Self {
-                    if self.is_nan() | other.is_nan() {
-                        Self::NAN
-                    } else {
-                        self.max(other)
-                    }
-                }
-            })*
-        };
-    }
-    impl_integer_maximum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
-    impl_float_maximum!(f32, f64);
+    define_scalar_op2_trait!(
+        /// Maximum operation with NaN-propagating semantics for floating-point types.
+        ///
+        /// This trait exists because neither of the standard alternatives covers all supported dtypes:
+        ///
+        /// - [`std::cmp::max`] requires [`Ord`], which floating-point types do not implement due to
+        ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
+        /// - [`f32::max`] / [`f64::max`] use **NaN-ignoring** semantics: when exactly one operand is
+        ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmax` / `numpy.nanmax`, not
+        ///   `numpy.maximum`.
+        ///
+        /// `Maximum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
+        /// the result is `NaN`. This matches `numpy.maximum` and makes NaN visible rather than
+        /// silently discarding it.
+        ///
+        /// For integer and `bool` types the implementation delegates to [`std::cmp::max`], which is
+        /// equivalent. The trait therefore provides a single uniform interface usable across all
+        /// supported numeric dtypes.
+        Maximum,
+        /// Compute the maximum with another value.
+        maximum,
+    );
+    impl_scalar_op2!(
+        impl Maximum for [i8, i16, i32, i64, u8, u16, u32, u64, bool] {
+            fn maximum = |a, b| std::cmp::max(a, b),
+        }
+    );
+    // NaN-propagating: `a + b` is NaN where an operand is.
+    impl_scalar_op2!(
+        impl Maximum for [f32, f64] {
+            fn maximum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.max(b) },
+        }
+    );
     #[cfg(feature = "half")]
-    impl_float_maximum!(f16);
+    impl_scalar_op2!(
+        impl Maximum for [f16] {
+            fn maximum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.max(b) },
+        }
+    );
 
-    /// Element-wise minimum with NaN-propagating semantics for floating-point types.
-    ///
-    /// This trait exists because neither of the standard alternatives covers all supported dtypes:
-    ///
-    /// - [`std::cmp::min`] requires [`Ord`], which floating-point types do not implement due to
-    ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
-    /// - [`f32::min`] / [`f64::min`] use **NaN-ignoring** semantics: when exactly one operand is
-    ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmin` / `numpy.nanmin`, not
-    ///   `numpy.minimum`.
-    ///
-    /// `Minimum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
-    /// the result is `NaN`. This matches `numpy.minimum` and makes NaN visible rather than
-    /// silently discarding it.
-    ///
-    /// For integer and `bool` types the implementation delegates to [`std::cmp::min`], which is
-    /// equivalent. The trait therefore provides a single uniform interface usable across all
-    /// supported numeric dtypes.
-    pub trait Minimum<Rhs = Self> {
-        /// The output element type of this minimum operation.
-        type Output;
-        /// Return the element-wise minimum of `self` and `other`, propagating `NaN` for floats.
-        fn minimum(self, other: Rhs) -> Self::Output;
-    }
-    macro_rules! impl_integer_minimum {
-        ($($t:ty),* $(,)?) => {
-            $(impl Minimum for $t {
-                type Output = Self;
+    define_scalar_op2_trait!(
+        /// Minimum operation with NaN-propagating semantics for floating-point types.
+        ///
+        /// This trait exists because neither of the standard alternatives covers all supported dtypes:
+        ///
+        /// - [`std::cmp::min`] requires [`Ord`], which floating-point types do not implement due to
+        ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
+        /// - [`f32::min`] / [`f64::min`] use **NaN-ignoring** semantics: when exactly one operand is
+        ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmin` / `numpy.nanmin`, not
+        ///   `numpy.minimum`.
+        ///
+        /// `Minimum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
+        /// the result is `NaN`. This matches `numpy.minimum` and makes NaN visible rather than
+        /// silently discarding it.
+        ///
+        /// For integer and `bool` types the implementation delegates to [`std::cmp::min`], which is
+        /// equivalent. The trait therefore provides a single uniform interface usable across all
+        /// supported numeric dtypes.
+        Minimum,
+        /// Compute the minimum with another value.
+        minimum,
+    );
+    impl_scalar_op2!(
+        impl Minimum for [i8, i16, i32, i64, u8, u16, u32, u64, bool] {
+            fn minimum = |a, b| std::cmp::min(a, b),
+        }
+    );
+    // NaN-propagating: `a + b` is NaN where an operand is.
+    impl_scalar_op2!(
+        impl Minimum for [f32, f64] {
+            fn minimum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.min(b) },
+        }
+    );
+    #[cfg(feature = "half")]
+    impl_scalar_op2!(
+        impl Minimum for [f16] {
+            fn minimum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.min(b) },
+        }
+    );
 
-                #[inline(always)]
-                fn minimum(self, other: Self) -> Self {
-                    std::cmp::min(self, other)
-                }
-            })*
-        };
-    }
-    macro_rules! impl_float_minimum {
-    ($($t:ty),* $(,)?) => {
-        $(impl Minimum for $t {
-            type Output = Self;
-
-            #[inline(always)]
-            fn minimum(self, other: Self) -> Self {
-                if self.is_nan() | other.is_nan() {
-                    Self::NAN
-                } else {
-                    self.min(other)
-                }
+    macro_rules! cmp_op2 {
+        (
+            $(#[$trait_meta:meta])*
+            impl $Trait:ident {
+                $(#[$fn_meta:meta])*
+                fn $f:ident = $op:tt,
+                bool: |$a:ident, $b:ident| $bool:expr,
             }
-        })*
-    };
-}
-    impl_integer_minimum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
-    impl_float_minimum!(f32, f64);
-    #[cfg(feature = "half")]
-    impl_float_minimum!(f16);
+        ) => {
+            define_scalar_op2_trait!(
+                $(#[$trait_meta])* $Trait,
+                $(#[$fn_meta])* $f,
+            );
+            impl_scalar_op2!(
+                impl $Trait for [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64] {
+                    type Output = bool;
+                    fn $f = |a, b| a $op b,
+                }
+            );
+            #[cfg(feature = "half")]
+            impl_scalar_op2!(
+                impl $Trait for [f16] {
+                    type Output = bool;
+                    fn $f = |a, b| a $op b,
+                }
+            );
+            impl_scalar_op2!(
+                impl $Trait for [bool] {
+                    type Output = bool;
+                    fn $f = |$a, $b| $bool,
+                }
+            );
+        };
+        (
+            @complex
+            impl $Trait:ident {
+                fn $f:ident = $op:tt,
+            }
+        ) => {
+            #[cfg(feature = "num-complex")]
+            impl_scalar_op2!(
+                impl $Trait for [Complex<f32>, Complex<f64>] {
+                    type Output = bool;
+                    fn $f = |a, b| a $op b,
+                }
+            );
+            #[cfg(all(feature = "half", feature = "num-complex"))]
+            impl_scalar_op2!(
+                impl $Trait for [Complex<f16>] {
+                    type Output = bool;
+                    fn $f = |a, b| a $op b,
+                }
+            );
+        };
+    }
+    cmp_op2!(
+        /// Equality operation, as [`PartialEq::eq`].
+        ///
+        /// Output dtype is `bool`.
+        ///
+        /// For **float** types, `NaN != NaN` per IEEE 754: comparing two `NaN` values
+        /// returns `false`.
+        /// For **complex** types, both the real and imaginary components must be equal.
+        impl Equal {
+            /// Test whether the value equals another value.
+            fn equal = ==,
+            bool: |a, b| a == b,
+        }
+    );
+    cmp_op2!(@complex
+        impl Equal {
+            fn equal = ==,
+        }
+    );
+    cmp_op2!(
+        /// Inequality operation, as [`PartialEq::ne`].
+        ///
+        /// Output dtype is `bool`.
+        ///
+        /// For **float** types, `NaN != NaN` returns `true` per IEEE 754.
+        /// For **complex** types, returns `true` if either the real or imaginary component differs.
+        impl NotEqual {
+            /// Test whether the value differs from another value.
+            fn not_equal = !=,
+            bool: |a, b| a != b,
+        }
+    );
+    cmp_op2!(@complex
+        impl NotEqual {
+            fn not_equal = !=,
+        }
+    );
+    cmp_op2!(
+        /// Greater-than operation, as [`PartialOrd::gt`].
+        ///
+        /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
+        ///
+        /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
+        /// For **bool**: `true > false`.
+        impl Greater {
+            /// Test whether the value is greater than another value.
+            fn greater = >,
+            bool: |a, b| a & !b,
+        }
+    );
+    cmp_op2!(
+        /// Greater-than-or-equal operation, as [`PartialOrd::ge`].
+        ///
+        /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
+        ///
+        /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
+        /// For **bool**: `true >= false`, and both `true >= true` and `false >= false` hold.
+        impl GreaterEqual {
+            /// Test whether the value is greater than or equal to another value.
+            fn greater_equal = >=,
+            bool: |a, b| a | !b,
+        }
+    );
+    cmp_op2!(
+        /// Less-than operation, as [`PartialOrd::lt`].
+        ///
+        /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
+        ///
+        /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
+        /// For **bool**: `false < true`.
+        impl Less {
+            /// Test whether the value is less than another value.
+            fn less = <,
+            bool: |a, b| !a & b,
+        }
+    );
+    cmp_op2!(
+        /// Less-than-or-equal operation, as [`PartialOrd::le`].
+        ///
+        /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
+        ///
+        /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
+        /// For **bool**: `false <= true`, and both `false <= false` and `true <= true` hold.
+        impl LessEqual {
+            /// Test whether the value is less than or equal to another value.
+            fn less_equal = <=,
+            bool: |a, b| !a | b,
+        }
+    );
 
     /// Approximate equality check of two scalar values.
     ///
@@ -174,15 +288,15 @@ pub(crate) mod _traits {
                         return false;
                     }
 
-                    let abs_diff = <$T as num_traits::Float>::abs(self - other);
+                    let abs_diff = crate::scalar::Abs::abs(*self - *other);
 
                     // For when the numbers are really close together
                     if abs_diff <= *atol {
                         return true;
                     }
 
-                    let abs_self = <$T as num_traits::Float>::abs(*self);
-                    let abs_other = <$T as num_traits::Float>::abs(*other);
+                    let abs_self = crate::scalar::Abs::abs(*self);
+                    let abs_other = crate::scalar::Abs::abs(*other);
 
                     let largest = if abs_other > abs_self {
                         abs_other
@@ -225,11 +339,7 @@ pub(crate) mod _traits {
 define_op2!(
     /// Element-wise equality test (`a == b`).
     ///
-    /// Output dtype is `bool`.
-    ///
-    /// For **float** types, `NaN != NaN` per IEEE 754: comparing two `NaN` values
-    /// returns `false`.
-    /// For **complex** types, both the real and imaginary components must be equal.
+    /// See [`jix::scalar::Equal`](crate::scalar::Equal) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -255,16 +365,13 @@ define_op2!(
     /// ```
     Equal,
     EqualKernel,
-    <PartialEq>::eq(&a, &b),
-    type Output = bool,
+    crate::scalar::Equal::equal,
 );
 define_op2!(
     /// Element-wise inequality test (`a != b`).
     ///
-    /// Output dtype is `bool`.
-    ///
-    /// For **float** types, `NaN != NaN` returns `true` per IEEE 754.
-    /// For **complex** types, returns `true` if either the real or imaginary component differs.
+    /// See [`jix::scalar::NotEqual`](crate::scalar::NotEqual) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -290,16 +397,13 @@ define_op2!(
     /// ```
     NotEqual,
     NotEqualKernel,
-    <PartialEq>::ne(&a, &b),
-    type Output = bool,
+    crate::scalar::NotEqual::not_equal,
 );
 define_op2!(
     /// Element-wise greater-than test (`a > b`).
     ///
-    /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
-    ///
-    /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
-    /// For **bool**: `true > false`.
+    /// See [`jix::scalar::Greater`](crate::scalar::Greater) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -325,16 +429,13 @@ define_op2!(
     /// ```
     Greater,
     GreaterKernel,
-    <PartialOrd>::gt(&a, &b),
-    type Output = bool,
+    crate::scalar::Greater::greater,
 );
 define_op2!(
     /// Element-wise greater-than-or-equal test (`a >= b`).
     ///
-    /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
-    ///
-    /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
-    /// For **bool**: `true >= false`, and both `true >= true` and `false >= false` hold.
+    /// See [`jix::scalar::GreaterEqual`](crate::scalar::GreaterEqual) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -360,16 +461,12 @@ define_op2!(
     /// ```
     GreaterEqual,
     GreaterEqualKernel,
-    <PartialOrd>::ge(&a, &b),
-    type Output = bool,
+    crate::scalar::GreaterEqual::greater_equal,
 );
 define_op2!(
     /// Element-wise less-than test (`a < b`).
     ///
-    /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
-    ///
-    /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
-    /// For **bool**: `false < true`.
+    /// See [`jix::scalar::Less`](crate::scalar::Less) scalar trait for the per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -395,16 +492,13 @@ define_op2!(
     /// ```
     Less,
     LessKernel,
-    <PartialOrd>::lt(&a, &b),
-    type Output = bool,
+    crate::scalar::Less::less,
 );
 define_op2!(
     /// Element-wise less-than-or-equal test (`a <= b`).
     ///
-    /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
-    ///
-    /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
-    /// For **bool**: `false <= true`, and both `false <= false` and `true <= true` hold.
+    /// See [`jix::scalar::LessEqual`](crate::scalar::LessEqual) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -430,17 +524,14 @@ define_op2!(
     /// ```
     LessEqual,
     LessEqualKernel,
-    <PartialOrd>::le(&a, &b),
-    type Output = bool,
+    crate::scalar::LessEqual::less_equal,
 );
 
 define_op2!(
     /// Element-wise maximum of two arrays.
     ///
-    /// For **integer** and **bool** types the result is `std::cmp::max(a, b)`.
-    /// For **float** types this operation is NaN-propagating: if either operand is `NaN`,
-    /// the result is `NaN`. This deviates from [`f32::max`], which returns the non-`NaN`
-    /// operand when exactly one is `NaN`, but matches the behavior of `numpy.maximum`.
+    /// See [`jix::scalar::Maximum`](crate::scalar::Maximum) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -467,15 +558,13 @@ define_op2!(
     /// ```
     Maximum,
     MaximumKernel,
-    <crate::scalar::Maximum>::maximum(a, b),
+    crate::scalar::Maximum::maximum,
 );
 define_op2!(
     /// Element-wise minimum of two arrays.
     ///
-    /// For **integer** and **bool** types the result is `std::cmp::min(a, b)`.
-    /// For **float** types this operation is NaN-propagating: if either operand is `NaN`,
-    /// the result is `NaN`. This deviates from [`f32::min`], which returns the non-`NaN`
-    /// operand when exactly one is `NaN`, but matches the behavior of `numpy.minimum`.
+    /// See [`jix::scalar::Minimum`](crate::scalar::Minimum) scalar trait for the
+    /// per-element semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -502,7 +591,7 @@ define_op2!(
     /// ```
     Minimum,
     MinimumKernel,
-    <crate::scalar::Minimum>::minimum(a, b),
+    crate::scalar::Minimum::minimum,
 );
 
 /// Element-wise approximate equality test.
@@ -628,12 +717,12 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op2_method!(equal: Equal, PartialEq, fixed_output_type = true);
-    define_array_op2_method!(not_equal: NotEqual, PartialEq, fixed_output_type = true);
-    define_array_op2_method!(greater: Greater, PartialOrd, fixed_output_type = true);
-    define_array_op2_method!(greater_equal: GreaterEqual, PartialOrd, fixed_output_type = true);
-    define_array_op2_method!(less: Less, PartialOrd, fixed_output_type = true);
-    define_array_op2_method!(less_equal: LessEqual, PartialOrd, fixed_output_type = true);
+    define_array_op2_method!(equal: Equal, crate::scalar::Equal);
+    define_array_op2_method!(not_equal: NotEqual, crate::scalar::NotEqual);
+    define_array_op2_method!(greater: Greater, crate::scalar::Greater);
+    define_array_op2_method!(greater_equal: GreaterEqual, crate::scalar::GreaterEqual);
+    define_array_op2_method!(less: Less, crate::scalar::Less);
+    define_array_op2_method!(less_equal: LessEqual, crate::scalar::LessEqual);
     define_array_op2_method!(maximum: Maximum, crate::scalar::Maximum);
     define_array_op2_method!(minimum: Minimum, crate::scalar::Minimum);
 
@@ -827,7 +916,15 @@ mod tests {
 
     // approx_equal: output is bool so NaN inputs are safe; use dedicated proptest tests because
     // the method takes extra rtol/atol parameters that test_op2! cannot supply.
-    fn ref_approx_eq<T: num_traits::Float>(a: T, b: T, rtol: T, atol: T) -> bool {
+    fn ref_approx_eq<T>(a: T, b: T, rtol: T, atol: T) -> bool
+    where
+        T: Copy
+            + PartialOrd
+            + core::ops::Sub<Output = T>
+            + core::ops::Mul<Output = T>
+            + crate::scalar::Abs<Output = T>
+            + crate::scalar::IsInfinite<Output = bool>,
+    {
         if a == b {
             return true;
         }
