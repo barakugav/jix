@@ -1170,8 +1170,8 @@ macro_rules! define_reduction_op {
 /// expose a richer state machine (`type State`, `init`, `update`, `finalize`) because the
 /// final result is not just the accumulator.
 ///
-/// Max/Min/argmax/argmin do **not** appear here - those ops are bounded directly by
-/// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`] / [`PartialOrd`].
+/// Max/Min do **not** appear here - those ops are bounded directly by the element-wise
+/// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`].
 pub(crate) mod _traits {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
@@ -1290,6 +1290,57 @@ pub(crate) mod _traits {
     #[cfg(feature = "num-complex")]
     impl_product!(Complex<f64>, Complex<f64>);
 
+    macro_rules! define_arg_trait {
+        ($Trait:ident, $what:literal) => {
+            #[doc = concat!("Scalar kernel trait for the `arg", $what, "` reduction: the position of the ", $what, "imum.")]
+            ///
+            /// The state is `(index, value)` of the running best. `NaN` propagates: a `NaN` item
+            /// becomes the best, and sticks (no later item beats it). On ties the earlier index
+            /// wins, as in NumPy.
+            pub trait $Trait: Copy {
+                /// Fold `item`, at stream position `idx`, into `state`.
+                fn update(state: (u64, Self), item: Self, idx: u64) -> (u64, Self);
+                /// Combine two states folded over disjoint subsets of the stream.
+                fn merge_states(a: (u64, Self), b: (u64, Self)) -> (u64, Self);
+            }
+        };
+    }
+    define_arg_trait!(ArgMax, "max");
+    define_arg_trait!(ArgMin, "min");
+
+    macro_rules! impl_arg {
+        ($Trait:ident, $op:tt, [$($t:ty),*]) => {$(
+            #[allow(clippy::eq_op)]
+            impl $Trait for $t {
+                #[inline(always)]
+                fn update(state: (u64, Self), item: Self, idx: u64) -> (u64, Self) {
+                    if item $op state.1 || /* nan check */ item != item {
+                        (idx, item)
+                    } else {
+                        state
+                    }
+                }
+                #[inline(always)]
+                fn merge_states(a: (u64, Self), b: (u64, Self)) -> (u64, Self) {
+                    let ((ai, av), (bi, bv)) = (a, b);
+                    if bv $op av || bv != bv {
+                        b
+                    } else if av $op bv || /* nan check */ av != av || /* prefer lower idx */ ai <= bi {
+                        a
+                    } else {
+                        b
+                    }
+                }
+            }
+        )*};
+    }
+    impl_arg!(ArgMax, >, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
+    impl_arg!(ArgMin, <, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
+    #[cfg(feature = "half")]
+    impl_arg!(ArgMax, >, [f16]);
+    #[cfg(feature = "half")]
+    impl_arg!(ArgMin, <, [f16]);
+
     /// Scalar kernel trait for the element-wise `mean` reduction.
     ///
     /// The mean is computed as the sum divided by the count. Integer and `bool` inputs promote
@@ -1398,9 +1449,8 @@ pub(crate) mod _traits {
         type State;
         /// Return the initial (empty) accumulator.
         fn init() -> Self::State;
-        /// Fold `item` into the running Welford accumulator. `idx` is ignored: the count is
-        /// tracked inside the state so interleaved lanes stay correct.
-        fn update(state: Self::State, item: Self, idx: u64) -> Self::State;
+        /// Fold `item` into the running Welford accumulator.
+        fn update(state: Self::State, item: Self) -> Self::State;
         /// Combine two Welford accumulators computed over disjoint subsets (Chan's parallel
         /// algorithm). Associative + commutative up to float error.
         fn merge_states(a: Self::State, b: Self::State) -> Self::State;
@@ -1425,7 +1475,7 @@ pub(crate) mod _traits {
                     }
                 }
                 #[inline(always)]
-                fn update(mut state: Self::State, item: Self, _idx: u64) -> Self::State {
+                fn update(mut state: Self::State, item: Self) -> Self::State {
                     state.count += 1;
                     let x = <_ as crate::scalar::Cast<$mean_ty>>::cast(item);
                     let $delta = x - state.mean;
@@ -1666,17 +1716,14 @@ define_reduction_op!(
     ArgMaxKernel,
     where {
         S: ArrayStorageTyped,
-        S::Item: PartialOrd,
+        S::Item: crate::scalar::ArgMax,
     }
     output = u64,
     single_axis,
 );
-// `item != item` / `bv != bv` are deliberate `NaN` tests (a value is `NaN` iff it is not
-// equal to itself), so the `eq_op` lint does not apply.
-#[allow(clippy::eq_op)]
 impl<T> ReductionOpKernel<T> for ArgMaxKernel
 where
-    T: PartialOrd,
+    T: crate::scalar::ArgMax,
 {
     type Output = u64;
     /// `(best_idx, best_val)`.
@@ -1689,43 +1736,15 @@ where
     }
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
-        // `NaN` propagates: `item != item` holds only for `NaN`, so a `NaN` becomes - and,
-        // being neither `>` nor `!=`-equal to a later value, sticks as - the running best.
-        // For integer types the `NaN` term folds away, leaving the plain `item > best_val`.
-        let (best_idx, best_val) = state;
-        if item > best_val || item != item {
-            (idx, item)
-        } else {
-            (best_idx, best_val)
-        }
+        <T as crate::scalar::ArgMax>::update(state, item, idx)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
-        // The larger value wins, and any `NaN` wins (propagating as in `update_state`). On an
-        // exact value tie the *smaller* index wins - together with `update_state` keeping the
-        // earlier index on ties, this makes argmax report the first occurrence of the maximum,
-        // matching `numpy.argmax`. The two subsets folded into `a`/`b` need not be contiguous
-        // index ranges (lane interleaving, tree merge), so the tie-break must compare indices
-        // rather than assume one side is "earlier". A `NaN` tie's index is still unspecified.
-        let (ai, av) = a;
-        let (bi, bv) = b;
-        if bv > av || bv != bv {
-            (bi, bv)
-        } else if av > bv || av != av {
-            (ai, av)
-        } else {
-            // av == bv and neither is `NaN`: keep the earlier index.
-            if bi < ai {
-                (bi, bv)
-            } else {
-                (ai, av)
-            }
-        }
+        <T as crate::scalar::ArgMax>::merge_states(a, b)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
-        let (best_idx, _best_val) = state;
-        best_idx
+        state.0
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = false;
@@ -1769,16 +1788,14 @@ define_reduction_op!(
     ArgMinKernel,
     where {
         S: ArrayStorageTyped,
-        S::Item: PartialOrd,
+        S::Item: crate::scalar::ArgMin,
     }
     output = u64,
     single_axis,
 );
-// `item != item` / `bv != bv` are deliberate `NaN` tests, so `eq_op` does not apply.
-#[allow(clippy::eq_op)]
 impl<T> ReductionOpKernel<T> for ArgMinKernel
 where
-    T: PartialOrd,
+    T: crate::scalar::ArgMin,
 {
     type Output = u64;
     /// `(best_idx, best_val)`.
@@ -1791,43 +1808,15 @@ where
     }
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
-        // `NaN` propagates (see [`ArgMaxKernel::update_state`]): `item != item` holds only
-        // for `NaN`, so a `NaN` becomes and sticks as the running best. For integer types the
-        // `NaN` term folds away, leaving the plain `item < best_val`.
-        let (best_idx, best_val) = state;
-        if item < best_val || item != item {
-            (idx, item)
-        } else {
-            (best_idx, best_val)
-        }
+        <T as crate::scalar::ArgMin>::update(state, item, idx)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
-        // The smaller value wins, and any `NaN` wins (propagating as in `update_state`). On an
-        // exact value tie the *smaller* index wins - together with `update_state` keeping the
-        // earlier index on ties, this makes argmin report the first occurrence of the minimum,
-        // matching `numpy.argmin`. The two subsets folded into `a`/`b` need not be contiguous
-        // index ranges (lane interleaving, tree merge), so the tie-break must compare indices
-        // rather than assume one side is "earlier". A `NaN` tie's index is still unspecified.
-        let (ai, av) = a;
-        let (bi, bv) = b;
-        if bv < av || bv != bv {
-            (bi, bv)
-        } else if av < bv || av != av {
-            (ai, av)
-        } else {
-            // av == bv and neither is `NaN`: keep the earlier index.
-            if bi < ai {
-                (bi, bv)
-            } else {
-                (ai, av)
-            }
-        }
+        <T as crate::scalar::ArgMin>::merge_states(a, b)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
-        let (best_idx, _best_val) = state;
-        best_idx
+        state.0
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = false;
@@ -1894,8 +1883,8 @@ where
     #[inline(always)]
     fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
         let mut state = <T as crate::scalar::Sum>::init();
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+        if let Some((item, idx)) = init_item {
+            state = self.update_state(state, item, idx);
         }
         state
     }
@@ -1977,8 +1966,8 @@ where
     #[inline(always)]
     fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
         let mut state = <T as crate::scalar::Product>::init();
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+        if let Some((item, idx)) = init_item {
+            state = self.update_state(state, item, idx);
         }
         state
     }
@@ -2049,8 +2038,8 @@ where
     #[inline(always)]
     fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
         let mut state = <T as crate::scalar::Mean>::init();
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+        if let Some((item, idx)) = init_item {
+            state = self.update_state(state, item, idx);
         }
         state
     }
@@ -2126,14 +2115,14 @@ where
     #[inline(always)]
     fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
         let mut state = <T as crate::scalar::Variance>::init();
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+        if let Some((item, idx)) = init_item {
+            state = self.update_state(state, item, idx);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
-        <T as crate::scalar::Variance>::update(state, item, idx)
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        <T as crate::scalar::Variance>::update(state, item)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -2185,13 +2174,15 @@ define_reduction_op!(
     StandardDeviationKernel { ddof: f64 },
     where {
         S: ArrayStorageTyped,
-        S::Item: crate::scalar::Variance<Output: num_traits::Float + Dtyped>,
+        S::Item: crate::scalar::Variance<Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped>,
     }
     output = <S::Item as crate::scalar::Variance>::Output,
 );
 impl<T> ReductionOpKernel<T> for StandardDeviationKernel
 where
-    T: crate::scalar::Variance<Output: num_traits::Float>,
+    T: crate::scalar::Variance<
+        Output: crate::scalar::Sqrt<Output = <T as crate::scalar::Variance>::Output>,
+    >,
 {
     type Output = <T as crate::scalar::Variance>::Output;
     type State = <T as crate::scalar::Variance>::State;
@@ -2199,14 +2190,14 @@ where
     #[inline(always)]
     fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
         let mut state = <T as crate::scalar::Variance>::init();
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+        if let Some((item, idx)) = init_item {
+            state = self.update_state(state, item, idx);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
-        <T as crate::scalar::Variance>::update(state, item, idx)
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        <T as crate::scalar::Variance>::update(state, item)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -2215,7 +2206,7 @@ where
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
         let var = <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems);
-        <_ as num_traits::Float>::sqrt(var)
+        crate::scalar::Sqrt::sqrt(var)
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;
@@ -2264,14 +2255,15 @@ impl ReductionOpKernel<bool> for AllKernel {
     #[inline(always)]
     fn init_state(&self, init_item: Option<(bool, u64)>) -> Self::State {
         let mut state = true;
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+        if let Some((item, idx)) = init_item {
+            state = self.update_state(state, item, idx);
         }
         state
     }
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
-        state && item
+        // & instead of &&, the compiler auto vectorize it better
+        state & item
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -2329,14 +2321,15 @@ impl ReductionOpKernel<bool> for AnyKernel {
     #[inline(always)]
     fn init_state(&self, init_item: Option<(bool, u64)>) -> Self::State {
         let mut state = false;
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+        if let Some((item, idx)) = init_item {
+            state = self.update_state(state, item, idx);
         }
         state
     }
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
-        state || item
+        // | instead of || the compiler auto vectorize it better
+        state | item
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -2619,10 +2612,10 @@ where
     type State = B;
 
     #[inline(always)]
-    fn init_state(&self, first: Option<T>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
         let mut state = self.init;
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, 0);
+        if let Some((item, idx)) = init_item {
+            state = self.update_state(state, item, idx);
         }
         state
     }
@@ -2667,7 +2660,7 @@ where
 
 /// Emits an `Array::$method(...)` helper that forwards to `$Op::new_array(...)`. The full
 /// where-clause on `S` (and its `Item`) is supplied verbatim by the caller so each op can
-/// pick its own bound (`PartialOrd`, `Maximum`, `Sum`, `Item = bool`, ...).
+/// pick its own bound (`ArgMax`, `Maximum`, `Sum`, `Item = bool`, ...).
 macro_rules! define_array_reduction_method {
     // single-axis variant
     (
@@ -2726,7 +2719,7 @@ where
         argmax: ArgMax,
         where {
             S: ArrayStorageTyped,
-            S::Item: PartialOrd,
+            S::Item: crate::scalar::ArgMax,
         },
         single_axis
     );
@@ -2734,7 +2727,7 @@ where
         argmin: ArgMin,
         where {
             S: ArrayStorageTyped,
-            S::Item: PartialOrd,
+            S::Item: crate::scalar::ArgMin,
         },
         single_axis
     );
@@ -2771,7 +2764,7 @@ where
         std: StandardDeviation,
         where {
             S: ArrayStorageTyped,
-            S::Item: crate::scalar::Variance<Output: num_traits::Float + Dtyped>,
+            S::Item: crate::scalar::Variance<Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped>,
         },
         extra_args = (ddof: f64)
     );
