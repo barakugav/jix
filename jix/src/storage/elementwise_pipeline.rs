@@ -1,4 +1,6 @@
 use std::cell::Cell;
+
+use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 use std::cmp::Reverse;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -11,8 +13,8 @@ use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::util::{PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
 use crate::{
-    array_from_fn_inline, dim_arr, strided_span_bytes, ArrayExt, DimArray, DimBitmap, DimDyn,
-    DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
+    array_from_fn_inline, dim_arr, prev_power_of_two, strided_span_bytes, ArrayExt, DimArray,
+    DimBitmap, DimDyn, DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
 };
 
 /// A lazy pipeline of element-wise operations over a rectangular region.
@@ -43,7 +45,11 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// Every operand's `current_ptr` must be aligned for its dtype when [`REQUIRE_ALIGNED`] is
     /// set, and elements `offset..offset + N` at `inner_stride` must be in bounds of its
     /// `original_data`.
-    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N];
+    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: Simd>(
+        &self,
+        offset: usize,
+        simd: S,
+    ) -> [T; N];
 
     fn to_buf<'b>(
         &mut self,
@@ -124,12 +130,10 @@ fn to_buf_impl<T, const N_OPERANDS: usize>(
     to_buf_type_erased(operands, index, context, &|dst, dst_stride, len, flags| {
         let dst = dst.cast();
         match (flags.inputs_contiguous, flags.output_contiguous) {
-            (true, true) => pick_inner_loop::<T, _, true, true>()(pipeline, dst, dst_stride, len),
-            (true, false) => pick_inner_loop::<T, _, true, false>()(pipeline, dst, dst_stride, len),
-            (false, true) => pick_inner_loop::<T, _, false, true>()(pipeline, dst, dst_stride, len),
-            (false, false) => {
-                pick_inner_loop::<T, _, false, false>()(pipeline, dst, dst_stride, len)
-            }
+            (true, true) => inner_loop::<T, _, true, true>(pipeline, dst, dst_stride, len),
+            (true, false) => inner_loop::<T, _, true, false>(pipeline, dst, dst_stride, len),
+            (false, true) => inner_loop::<T, _, false, true>(pipeline, dst, dst_stride, len),
+            (false, false) => inner_loop::<T, _, false, false>(pipeline, dst, dst_stride, len),
         }
     });
 }
@@ -151,12 +155,10 @@ fn to_buf_impl_dyn<T>(
     to_buf_type_erased_dyn(&operands, index, context, &|dst, dst_stride, len, flags| {
         let dst = dst.cast();
         match (flags.inputs_contiguous, flags.output_contiguous) {
-            (true, true) => pick_inner_loop::<T, _, true, true>()(pipeline, dst, dst_stride, len),
-            (true, false) => pick_inner_loop::<T, _, true, false>()(pipeline, dst, dst_stride, len),
-            (false, true) => pick_inner_loop::<T, _, false, true>()(pipeline, dst, dst_stride, len),
-            (false, false) => {
-                pick_inner_loop::<T, _, false, false>()(pipeline, dst, dst_stride, len)
-            }
+            (true, true) => inner_loop::<T, _, true, true>(pipeline, dst, dst_stride, len),
+            (true, false) => inner_loop::<T, _, true, false>(pipeline, dst, dst_stride, len),
+            (false, true) => inner_loop::<T, _, false, true>(pipeline, dst, dst_stride, len),
+            (false, false) => inner_loop::<T, _, false, false>(pipeline, dst, dst_stride, len),
         }
     });
 }
@@ -481,12 +483,19 @@ impl Staging<'_> {
     }
 }
 
-#[inline(never)]
-fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
+#[inline(always)]
+fn inner_loop_impl<
+    T,
+    const LANES: usize,
+    const IN_CONTIGUOUS: bool,
+    const OUT_CONTIGUOUS: bool,
+    S: Simd,
+>(
     pipeline: &impl ElementwisePipelineImpl<T>,
     dst: PtrMutNoalias<T>,
     dst_stride: usize,
     len: usize,
+    simd: S,
 ) where
     T: Dtyped,
 {
@@ -501,7 +510,7 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
     let body_limit = len - len % LANES;
     let mut i = 0;
     while i < body_limit {
-        let chunk = unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS>(i) };
+        let chunk = unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS, _>(i, simd) };
         if OUT_CONTIGUOUS {
             unsafe {
                 dst.add(i)
@@ -520,7 +529,7 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
         i += LANES;
     }
     while i < len {
-        let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS>(i) };
+        let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS, _>(i, simd) };
         if OUT_CONTIGUOUS {
             unsafe { dst.add(i).write_maybe_aligned::<REQUIRE_ALIGNED>(val) };
         } else {
@@ -533,42 +542,78 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
     }
 }
 
+#[inline(never)]
+fn inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
+    pipeline: &P,
+    dst: PtrMutNoalias<T>,
+    dst_stride: usize,
+    len: usize,
+) where
+    T: Dtyped,
+    P: ElementwisePipelineImpl<T>,
+{
+    let simd_level = if const { IN_CONTIGUOUS && OUT_CONTIGUOUS } {
+        SimdLevel::new()
+    } else {
+        const { SimdLevel::baseline() }
+    };
+    fearless_simd::dispatch!(simd_level, simd => inner_loop_per_level::<_, _, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(pipeline, dst, dst_stride, len, simd));
+}
+
+#[inline(always)]
+fn inner_loop_per_level<
+    T: Dtyped,
+    P: ElementwisePipelineImpl<T>,
+    const IN_CONTIGUOUS: bool,
+    const OUT_CONTIGUOUS: bool,
+    S: Simd,
+>(
+    pipeline: &P,
+    dst: PtrMutNoalias<T>,
+    dst_stride: usize,
+    len: usize,
+    simd: S,
+) {
+    let lanes = const {
+        if IN_CONTIGUOUS && OUT_CONTIGUOUS {
+            let per_vector = prev_power_of_two(S::u8s::LEN / size_of::<T>());
+            let used_simd_registers = if cfg!(target_arch = "x86") { 4 } else { 8 };
+            let lanes = used_simd_registers * per_vector;
+            assert!(lanes.is_power_of_two());
+            lanes
+        } else {
+            const STRIDED_LANES: usize = 4;
+            let lanes = <T as LanesInfo>::LANES;
+            if lanes < STRIDED_LANES {
+                lanes
+            } else {
+                STRIDED_LANES
+            }
+        }
+    };
+    macro_rules! dispatch_lanes {
+        ($($lanes:literal)*) => {
+            match lanes {
+                $($lanes => inner_loop_impl::<T, $lanes, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(
+                    pipeline,
+                    dst,
+                    dst_stride,
+                    len,
+                    simd,
+                ),)*
+                _ => unreachable!(),
+            }
+        };
+    }
+    dispatch_lanes!(1 2 4 8 16 32 64 128 256 512);
+}
+
 #[derive(Clone, Copy)]
 struct InnerLoopFlags {
     inputs_contiguous: bool,
     output_contiguous: bool,
 }
 type InnerLoop<'a> = dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, InnerLoopFlags) + 'a;
-
-const fn pick_inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
-) -> fn(&P, PtrMutNoalias<'_, T>, usize, usize)
-where
-    T: Dtyped,
-    P: ElementwisePipelineImpl<T>,
-{
-    const {
-        let default_lanes = <T as LanesInfo>::LANES;
-        const STRIDED_LANES: usize = 4;
-        let lanes = if IN_CONTIGUOUS && OUT_CONTIGUOUS || default_lanes < STRIDED_LANES {
-            default_lanes
-        } else {
-            STRIDED_LANES
-        };
-        match lanes {
-            1 => inner_loop::<_, 1, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            2 => inner_loop::<_, 2, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            4 => inner_loop::<_, 4, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            8 => inner_loop::<_, 8, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            16 => inner_loop::<_, 16, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            32 => inner_loop::<_, 32, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            64 => inner_loop::<_, 64, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            128 => inner_loop::<_, 128, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            256 => inner_loop::<_, 256, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            512 => inner_loop::<_, 512, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-            _ => inner_loop::<_, 1024, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
-        }
-    }
-}
 
 /// One region a pipeline reads - or writes - plus the cursor it is walked through.
 ///
@@ -673,7 +718,11 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     }
 
     #[inline(always)]
-    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N] {
+    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
+        &self,
+        offset: usize,
+        _simd: S,
+    ) -> [T; N] {
         let base = self.operand.current_ptr.get().cast::<T>();
         debug_assert!(!base.is_null());
         if REQUIRE_ALIGNED {
@@ -963,12 +1012,14 @@ mod tests {
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
                 self.lhs.operands().chain(self.rhs.operands())
             }
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+            #[inline(always)]
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
+                simd: S,
             ) -> [T; N] {
-                let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS>(offset) };
-                let rhs = unsafe { self.rhs.read_bulk::<N, CONTIGUOUS>(offset) };
+                let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS, _>(offset, simd) };
+                let rhs = unsafe { self.rhs.read_bulk::<N, CONTIGUOUS, _>(offset, simd) };
                 array_from_fn_inline(|i| lhs[i] + rhs[i])
             }
         }

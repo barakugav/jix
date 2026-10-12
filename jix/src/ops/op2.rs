@@ -11,6 +11,22 @@ pub(crate) struct Op2<S1, S2, K> {
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
     fn apply(&self, a: T1, b: T2) -> Self::Output;
+
+    #[inline(always)]
+    fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
+        &self,
+        a: [T1; N],
+        b: [T2; N],
+        simd: S,
+    ) -> [Self::Output; N] {
+        let _ = simd;
+        crate::util::array2_map_inline(
+            a,
+            b,
+            #[inline(always)]
+            |_, x, y| self.apply(x, y),
+        )
+    }
 }
 impl<S1, S2, K> Op2<S1, S2, K> {
     pub(crate) fn new(a: S1, b: S2, kernel: K) -> Result<Self>
@@ -120,19 +136,18 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
+                simd: S,
             ) -> [T; N] {
-                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS>(offset) };
-                let b = unsafe { self.b.read_bulk::<N, CONTIGUOUS>(offset) };
-                array_from_fn_inline(|i| {
-                    let x = self.kernel.apply(a[i], b[i]);
+                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, simd) };
+                let b = unsafe { self.b.read_bulk::<N, CONTIGUOUS, S>(offset, simd) };
+                let ys = self.kernel.apply_bulk(a, b, simd);
 
-                    const { assert!(size_of::<K::Output>() == size_of::<T>()) };
-                    // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
-                    unsafe { std::mem::transmute_copy::<K::Output, T>(&x) }
-                })
+                const { assert!(size_of::<K::Output>() == size_of::<T>()) };
+                // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
+                unsafe { std::mem::transmute_copy::<[K::Output; N], [T; N]>(&ys) }
             }
         }
 
@@ -201,6 +216,7 @@ macro_rules! define_op2 {
         $Op:ident,
         $Kernel:ident,
         crate::scalar::$trait:ident::$kernel_fn:ident,
+        simd: $bulk_fn:ident,
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -213,6 +229,16 @@ macro_rules! define_op2 {
             #[inline(always)]
             fn apply(&self, a: T1, b: T2) -> Self::Output {
                 <T1 as crate::scalar::$trait<T2>>::$kernel_fn(a, b)
+            }
+
+            #[inline(always)]
+            fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
+                &self,
+                a: [T1; N],
+                b: [T2; N],
+                simd: S,
+            ) -> [Self::Output; N] {
+                <T1 as crate::scalar::$trait<T2>>::$bulk_fn(a, b, simd)
             }
         }
         $(#[$meta])*
@@ -309,6 +335,7 @@ pub(crate) mod _traits {
         Add,
         /// Add another value.
         add,
+        bulk_fn: add_bulk,
     );
     define_scalar_op2_trait!(
         /// Subtraction operation, like [`core::ops::Sub`].
@@ -319,6 +346,7 @@ pub(crate) mod _traits {
         Sub,
         /// Subtract another value.
         sub,
+        bulk_fn: sub_bulk,
     );
     define_scalar_op2_trait!(
         /// Multiplication operation, like [`core::ops::Mul`].
@@ -329,6 +357,7 @@ pub(crate) mod _traits {
         Mul,
         /// Multiply with another value.
         mul,
+        bulk_fn: mul_bulk,
     );
     define_scalar_op2_trait!(
         /// Division operation, like [`core::ops::Div`].
@@ -340,12 +369,22 @@ pub(crate) mod _traits {
         Div,
         /// Divide by another value.
         div,
+        bulk_fn: div_bulk,
     );
 
     macro_rules! impl_arith {
-        ($Trait:ident::$f:ident, $op:tt, [$($t:ty),*]) => {
+        (
+            $Trait:ident::$f:ident, $op:tt, [$($scalar:ty),*],
+            simd: $f_bulk:ident, [$($simd:ty),*]
+        ) => {
             impl_scalar_op2!(
-                impl $Trait for [$($t),*] {
+                impl $Trait for [$($simd),*] {
+                    fn $f = |a, b| a $op b,
+                    fn $f_bulk = |a, b| a $op b,
+                }
+            );
+            impl_scalar_op2!(
+                impl $Trait for [$($scalar),*] {
                     fn $f = |a, b| a $op b,
                 }
             );
@@ -378,22 +417,20 @@ pub(crate) mod _traits {
         };
     }
     impl_arith!(
-        Add::add, +,
-        [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64]
+        Add::add, +, [],
+        simd: add_bulk, [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64]
     );
     impl_arith!(
-        Sub::sub, -,
-        [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64]
+        Sub::sub, -, [],
+        simd: sub_bulk, [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64]
     );
-    // i8: the auto-vectorized scalar kernel is as fast (static analysis).
     impl_arith!(
-        Mul::mul, *,
-        [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64]
+        Mul::mul, *, [i8], // i8 auto-vectorized scalar is faster
+        simd: mul_bulk, [f32, f64, i16, i32, i64, u8, u16, u32, u64]
     );
-    // Integers: no SIMD division.
     impl_arith!(
-        Div::div, /,
-        [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64]
+        Div::div, /, [i8, i16, i32, i64, u8, u16, u32, u64], // integers have no SIMD division
+        simd: div_bulk, [f32, f64]
     );
 
     define_scalar_op2_trait!(
@@ -405,6 +442,7 @@ pub(crate) mod _traits {
         Pow,
         /// Raise to the power of another value.
         pow,
+        bulk_fn: pow_bulk,
     );
     impl_scalar_op2!(
         impl Pow for [i8, i16, i32, i64, u8, u16, u32, u64] x [u8, u16, u32] {
@@ -452,6 +490,7 @@ define_op2!(
     Add,
     AddKernel,
     crate::scalar::Add::add,
+    simd: add_bulk,
     core_op: core::ops::Add::add,
 );
 define_op2!(
@@ -478,6 +517,7 @@ define_op2!(
     Sub,
     SubKernel,
     crate::scalar::Sub::sub,
+    simd: sub_bulk,
     core_op: core::ops::Sub::sub,
 );
 define_op2!(
@@ -504,6 +544,7 @@ define_op2!(
     Mul,
     MulKernel,
     crate::scalar::Mul::mul,
+    simd: mul_bulk,
     core_op: core::ops::Mul::mul,
 );
 
@@ -531,6 +572,7 @@ define_op2!(
     Div,
     DivKernel,
     crate::scalar::Div::div,
+    simd: div_bulk,
     core_op: core::ops::Div::div,
 );
 define_op2!(
@@ -562,6 +604,7 @@ define_op2!(
     Pow,
     PowKernel,
     crate::scalar::Pow::pow,
+    simd: pow_bulk,
 );
 
 impl<S> Array<S>
@@ -573,6 +616,60 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
+    /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
+    /// their scalar semantics (release builds: wrapping), on every SIMD level of the CPU, over edge
+    /// cases.
+    #[test]
+    fn simd_bodies_all_levels() {
+        use super::{AddKernel, DivKernel, MulKernel, Op2Kernel, SubKernel};
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $t:ty, $f:expr) => {
+                    let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
+                    let what = concat!(stringify!($kernel), " ", stringify!($t));
+                    assert_same_elements($kernel.apply_bulk(a, b, simd), |i| $f(a[i], b[i]), what);
+                };
+            }
+            macro_rules! ints {
+                ($kernel:ident, $f:ident) => {
+                    case!($kernel, i8, i8::$f);
+                    case!($kernel, i16, i16::$f);
+                    case!($kernel, i32, i32::$f);
+                    case!($kernel, i64, i64::$f);
+                    case!($kernel, u8, u8::$f);
+                    case!($kernel, u16, u16::$f);
+                    case!($kernel, u32, u32::$f);
+                    case!($kernel, u64, u64::$f);
+                };
+            }
+            simd.vectorize(|| {
+                case!(AddKernel, f32, |x, y| x + y);
+                case!(AddKernel, f64, |x, y| x + y);
+                ints!(AddKernel, wrapping_add);
+                case!(SubKernel, f32, |x, y| x - y);
+                case!(SubKernel, f64, |x, y| x - y);
+                ints!(SubKernel, wrapping_sub);
+                case!(MulKernel, f32, |x, y| x * y);
+                case!(MulKernel, f64, |x, y| x * y);
+                case!(MulKernel, i16, i16::wrapping_mul);
+                case!(MulKernel, i32, i32::wrapping_mul);
+                case!(MulKernel, i64, i64::wrapping_mul);
+                case!(MulKernel, u8, u8::wrapping_mul);
+                case!(MulKernel, u16, u16::wrapping_mul);
+                case!(MulKernel, u32, u32::wrapping_mul);
+                case!(MulKernel, u64, u64::wrapping_mul);
+                case!(DivKernel, f32, |x, y| x / y);
+                case!(DivKernel, f64, |x, y| x / y);
+                // Not a multiple of the vector length: scalar.
+                assert_eq!(AddKernel.apply_bulk([1.5f32], [2.0], simd), [3.5]);
+            });
+        }
+        for_each_simd_level!(check);
+    }
+
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     #[cfg(feature = "num-complex")]

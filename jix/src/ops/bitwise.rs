@@ -16,6 +16,7 @@ pub(crate) mod _traits {
         BitAnd,
         /// Bitwise AND with another value.
         bitand,
+        bulk_fn: bitand_bulk,
     );
     define_scalar_op2_trait!(
         /// Bitwise OR operation, like [`core::ops::BitOr`].
@@ -25,6 +26,7 @@ pub(crate) mod _traits {
         BitOr,
         /// Bitwise OR with another value.
         bitor,
+        bulk_fn: bitor_bulk,
     );
     define_scalar_op2_trait!(
         /// Bitwise XOR operation, like [`core::ops::BitXor`].
@@ -34,6 +36,7 @@ pub(crate) mod _traits {
         BitXor,
         /// Bitwise XOR with another value.
         bitxor,
+        bulk_fn: bitxor_bulk,
     );
     define_scalar_op1_trait!(
         /// Bitwise NOT operation, like [`core::ops::Not`].
@@ -42,13 +45,15 @@ pub(crate) mod _traits {
         Not,
         /// Bitwise NOT of the value.
         not,
+        bulk_fn: not_bulk,
     );
 
     macro_rules! impl_bitwise2 {
-        ($Trait:ident::$f:ident, $op:tt) => {
+        ($Trait:ident::$f:ident / $f_bulk:ident, $op:tt) => {
             impl_scalar_op2!(
                 impl $Trait for [i8, i16, i32, i64, u8, u16, u32, u64] {
                     fn $f = |a, b| a $op b,
+                    fn $f_bulk = |a, b| a $op b,
                 }
             );
             impl_scalar_op2!(
@@ -58,13 +63,14 @@ pub(crate) mod _traits {
             );
         };
     }
-    impl_bitwise2!(BitAnd::bitand, &);
-    impl_bitwise2!(BitOr::bitor, |);
-    impl_bitwise2!(BitXor::bitxor, ^);
+    impl_bitwise2!(BitAnd::bitand / bitand_bulk, &);
+    impl_bitwise2!(BitOr::bitor / bitor_bulk, |);
+    impl_bitwise2!(BitXor::bitxor / bitxor_bulk, ^);
 
     impl_scalar_op1!(
         impl Not for [i8, i16, i32, i64, u8, u16, u32, u64] {
             fn not = |x| !x,
+            fn not_bulk = |x| !x,
         }
     );
     impl_scalar_op1!(
@@ -85,6 +91,7 @@ pub(crate) mod _traits {
         Shr,
         /// Shift the bits right by another value.
         shr,
+        bulk_fn: shr_bulk,
     );
     impl_scalar_op2!(
         impl Shr for [i8, i16, i32, i64, u8, u16, u32, u64] x [i8, i16, i64, u8, u16, u64] {
@@ -96,9 +103,23 @@ pub(crate) mod _traits {
             fn shr = |a, b| a >> b,
         }
     );
+    // SIMD for 32-bit values only: the others are not faster than the auto-vectorized scalar.
     impl_scalar_op2!(
-        impl Shr for [i32, u32] x [i32, u32] {
+        impl Shr for [i32, u32] {
             fn shr = |a, b| a >> b,
+            fn shr_bulk = |a, b| a >> (b & 31),
+        }
+    );
+    impl_scalar_op2!(
+        impl Shr for [i32] x [u32] {
+            fn shr = |a, b| a >> b,
+            fn shr_bulk = |a, b| a >> (b & 31).bitcast::<S::i32s>(), // TODO: is this module 32 correct?
+        }
+    );
+    impl_scalar_op2!(
+        impl Shr for [u32] x [i32] {
+            fn shr = |a, b| a >> b,
+            fn shr_bulk = |a, b| a >> (b & 31).bitcast::<S::u32s>(), // TODO: is this module 32 correct?
         }
     );
 
@@ -112,9 +133,24 @@ pub(crate) mod _traits {
         CountZeros,
         /// Count the unset bits (`0`s).
         count_zeros,
+        bulk_fn: count_zeros_bulk,
     );
     impl_scalar_op1!(
-        impl CountZeros for [i8, i16, i32, i64, u8, u16, u32, u64] {
+        impl CountZeros for [u32] {
+            type Output = u32;
+            fn count_zeros = |x| x.count_zeros(),
+            fn count_zeros_bulk = |x| (!x).count_ones(),
+        }
+    );
+    impl_scalar_op1!(
+        impl CountZeros for [i32] {
+            type Output = u32;
+            fn count_zeros = |x| x.count_zeros(),
+            fn count_zeros_bulk = |x| (!x).count_ones().bitcast::<S::u32s>(),
+        }
+    );
+    impl_scalar_op1!(
+        impl CountZeros for [i8, i16, i64, u8, u16, u64] {
             type Output = u32;
             fn count_zeros = |x| x.count_zeros(),
         }
@@ -124,11 +160,12 @@ pub(crate) mod _traits {
         (
             $(#[$trait_meta:meta])* $Trait:ident,
             $(#[$fn_meta:meta])* $f:ident,
-            $Out:ty
+            $f_bulk:ident, $Out:ty
         ) => {
             define_scalar_op1_trait!(
                 $(#[$trait_meta])* $Trait,
                 $(#[$fn_meta])* $f,
+                bulk_fn: $f_bulk,
             );
             impl_scalar_op1!(
                 impl $Trait for [i8, i16, i32, i64, u8, u16, u32, u64] {
@@ -148,6 +185,7 @@ pub(crate) mod _traits {
         CountOnes,
         /// Count the set bits (`1`s).
         count_ones,
+        count_ones_bulk,
         u32
     );
     int_op1!(
@@ -161,6 +199,7 @@ pub(crate) mod _traits {
         LeadingZeros,
         /// Count the leading zero bits.
         leading_zeros,
+        leading_zeros_bulk,
         u32
     );
     int_op1!(
@@ -174,6 +213,7 @@ pub(crate) mod _traits {
         TrailingZeros,
         /// Count the trailing zero bits.
         trailing_zeros,
+        trailing_zeros_bulk,
         u32
     );
     int_op1!(
@@ -185,6 +225,7 @@ pub(crate) mod _traits {
         SwapBytes,
         /// Reverse the byte order.
         swap_bytes,
+        swap_bytes_bulk,
         Self
     );
     int_op1!(
@@ -194,6 +235,7 @@ pub(crate) mod _traits {
         ReverseBits,
         /// Reverse the bit order.
         reverse_bits,
+        reverse_bits_bulk,
         Self
     );
 
@@ -206,6 +248,7 @@ pub(crate) mod _traits {
         RotateLeft<Rhs = u32>,
         /// Rotate the bits left by another value.
         rotate_left,
+        bulk_fn: rotate_left_bulk,
     );
     define_scalar_op2_trait!(
         /// Right rotation operation, as [`u32::rotate_right`].
@@ -216,6 +259,7 @@ pub(crate) mod _traits {
         RotateRight<Rhs = u32>,
         /// Rotate the bits right by another value.
         rotate_right,
+        bulk_fn: rotate_right_bulk,
     );
     impl_scalar_op2!(
         impl RotateLeft for [i8, i16, i32, i64, u8, u16, u32, u64] x [u32] {
@@ -238,6 +282,7 @@ pub(crate) mod _traits {
         Shl,
         /// Shift the bits left by another value.
         shl,
+        bulk_fn: shl_bulk,
     );
     impl_scalar_op2!(
         impl Shl for
@@ -279,6 +324,7 @@ define_op2!(
     And,
     AndKernel,
     crate::scalar::BitAnd::bitand,
+    simd: bitand_bulk,
     core_op: core::ops::BitAnd::bitand,
 );
 define_op2!(
@@ -311,6 +357,7 @@ define_op2!(
     Or,
     OrKernel,
     crate::scalar::BitOr::bitor,
+    simd: bitor_bulk,
     core_op: core::ops::BitOr::bitor,
 );
 define_op2!(
@@ -344,6 +391,7 @@ define_op2!(
     Xor,
     XorKernel,
     crate::scalar::BitXor::bitxor,
+    simd: bitxor_bulk,
     core_op: core::ops::BitXor::bitxor,
 );
 
@@ -375,6 +423,7 @@ define_op1!(
     Not,
     NotKernel,
     crate::scalar::Not::not,
+    simd: not_bulk,
     core_op: core::ops::Not::not,
 );
 
@@ -408,6 +457,7 @@ define_op2!(
     BitwiseShiftLeft,
     BitwiseShiftLeftKernel,
     crate::scalar::Shl::shl,
+    simd: shl_bulk,
 );
 
 define_op2!(
@@ -440,6 +490,7 @@ define_op2!(
     BitwiseShiftRight,
     BitwiseShiftRightKernel,
     crate::scalar::Shr::shr,
+    simd: shr_bulk,
 );
 define_op2!(
     /// Element-wise bitwise left rotation (`a.rotate_left(b as u32)`).
@@ -472,6 +523,7 @@ define_op2!(
     BitwiseRotateLeft,
     BitwiseRotateLeftKernel,
     crate::scalar::RotateLeft::rotate_left,
+    simd: rotate_left_bulk,
 );
 
 define_op2!(
@@ -505,6 +557,7 @@ define_op2!(
     BitwiseRotateRight,
     BitwiseRotateRightKernel,
     crate::scalar::RotateRight::rotate_right,
+    simd: rotate_right_bulk,
 );
 define_op1!(
     /// Counts the number of set bits (`1`s) in each element.
@@ -535,6 +588,7 @@ define_op1!(
     CountOnes,
     CountOnesKernel,
     crate::scalar::CountOnes::count_ones,
+    simd: count_ones_bulk,
 );
 define_op1!(
     /// Counts the number of unset bits (`0`s) in each element.
@@ -565,6 +619,7 @@ define_op1!(
     CountZeros,
     CountZerosKernel,
     crate::scalar::CountZeros::count_zeros,
+    simd: count_zeros_bulk,
 );
 define_op1!(
     /// Counts the number of leading zero bits in each element.
@@ -595,6 +650,7 @@ define_op1!(
     LeadingZeros,
     LeadingZerosKernel,
     crate::scalar::LeadingZeros::leading_zeros,
+    simd: leading_zeros_bulk,
 );
 define_op1!(
     /// Counts the number of trailing zero bits in each element.
@@ -625,6 +681,7 @@ define_op1!(
     TrailingZeros,
     TrailingZerosKernel,
     crate::scalar::TrailingZeros::trailing_zeros,
+    simd: trailing_zeros_bulk,
 );
 define_op1!(
     /// Reverses the byte order of each element.
@@ -655,6 +712,7 @@ define_op1!(
     SwapBytes,
     SwapBytesKernel,
     crate::scalar::SwapBytes::swap_bytes,
+    simd: swap_bytes_bulk,
 );
 define_op1!(
     /// Reverses the bit order of each element.
@@ -685,6 +743,7 @@ define_op1!(
     ReverseBits,
     ReverseBitsKernel,
     crate::scalar::ReverseBits::reverse_bits,
+    simd: reverse_bits_bulk,
 );
 
 impl<S> Array<S>
@@ -709,6 +768,85 @@ mod tests {
 
     use crate::ops::op1::tests::test_op1;
     use crate::ops::op2::tests::test_op2;
+
+    /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
+    /// their scalar semantics (release builds: shift amounts modulo the bit width), on every SIMD
+    /// level of the CPU, over edge cases.
+    #[test]
+    fn simd_bodies_all_levels() {
+        use super::{
+            AndKernel, BitwiseShiftRightKernel, CountOnesKernel, CountZerosKernel, NotKernel,
+            OrKernel, XorKernel,
+        };
+        use crate::ops::op1::Op1Kernel;
+        use crate::ops::op2::Op2Kernel;
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $ta:ty, $tb:ty, $f:expr) => {
+                    let (a, b) = (<$ta>::simd_test_values(0), <$tb>::simd_test_values(5));
+                    let what = concat!(
+                        stringify!($kernel),
+                        " ",
+                        stringify!($ta),
+                        " ",
+                        stringify!($tb)
+                    );
+                    assert_same_elements($kernel.apply_bulk(a, b, simd), |i| $f(a[i], b[i]), what);
+                };
+            }
+            macro_rules! case1 {
+                ($kernel:ident, $t:ty, $f:expr) => {
+                    let xs = <$t>::simd_test_values(0);
+                    let what = concat!(stringify!($kernel), " ", stringify!($t));
+                    assert_same_elements($kernel.apply_bulk(xs, simd), |i| $f(xs[i]), what);
+                };
+            }
+            macro_rules! ints {
+                ($m:ident!($kernel:ident, $f:expr)) => {
+                    $m!($kernel, i8, i8, $f);
+                    $m!($kernel, i16, i16, $f);
+                    $m!($kernel, i32, i32, $f);
+                    $m!($kernel, i64, i64, $f);
+                    $m!($kernel, u8, u8, $f);
+                    $m!($kernel, u16, u16, $f);
+                    $m!($kernel, u32, u32, $f);
+                    $m!($kernel, u64, u64, $f);
+                };
+            }
+            // Every 32-bit (value, amount) pair of signedness.
+            macro_rules! shifts {
+                ($kernel:ident, $f:ident) => {
+                    shifts!(@width $kernel, $f, i32, u32);
+                };
+                (@width $kernel:ident, $f:ident, $i:ty, $u:ty) => {
+                    case!($kernel, $i, $i, |x: $i, y: $i| x.$f(y as u32));
+                    case!($kernel, $i, $u, |x: $i, y: $u| x.$f(y as u32));
+                    case!($kernel, $u, $u, |x: $u, y: $u| x.$f(y as u32));
+                    case!($kernel, $u, $i, |x: $u, y: $i| x.$f(y as u32));
+                };
+            }
+            simd.vectorize(|| {
+                ints!(case!(AndKernel, |x, y| x & y));
+                ints!(case!(OrKernel, |x, y| x | y));
+                ints!(case!(XorKernel, |x, y| x ^ y));
+                macro_rules! not {
+                    ($kernel:ident, $t:ty, $_t:ty, $f:expr) => {
+                        case1!($kernel, $t, |x: $t| !x)
+                    };
+                }
+                ints!(not!(NotKernel, ()));
+                shifts!(BitwiseShiftRightKernel, wrapping_shr);
+                case1!(CountOnesKernel, i32, i32::count_ones);
+                case1!(CountOnesKernel, u32, u32::count_ones);
+                case1!(CountZerosKernel, i32, i32::count_zeros);
+                case1!(CountZerosKernel, u32, u32::count_zeros);
+            });
+        }
+        for_each_simd_level!(check);
+    }
 
     test_op1!(count_ones, |a| a.count_ones(), [u8, u32], any_strategy);
     test_op2!(bitand, |a, b| a & b, [u8, u32], any_strategy);

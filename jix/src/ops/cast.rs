@@ -16,65 +16,154 @@ pub(crate) mod _traits {
     /// - From any integer or floating-point type to a complex type. A complex value can only be
     ///   cast to another complex type or to `bool` - not to a real integer or floating-point type.
     /// - Between `bool` and any other scalar, and vice versa: zero -> `false`, any non-zero value -> `true`.
-    pub trait Cast<D> {
-        /// Casts `self` to `D`.
-        fn cast(self) -> D;
+    pub trait Cast<T> {
+        /// Casts `self` to `T`.
+        fn cast(self) -> T;
+
+        /// Apply [`cast`](Self::cast) on each of `xs`, vectorized with `simd` where the type has
+        /// SIMD support.
+        #[inline(always)]
+        fn cast_bulk<const N: usize, S: fearless_simd::Simd>(xs: [Self; N], simd: S) -> [T; N]
+        where
+            Self: Sized,
+        {
+            let _ = simd;
+            crate::util::ArrayExt::map_inline(
+                xs,
+                #[inline(always)]
+                |x| Self::cast(x),
+            )
+        }
     }
+
     macro_rules! impl_cast {
-        ($src_type:ident => $dst_type:ident) => {
+        ($src_type:ident => $dst_type:ident, bulk=$bulk:tt) => {
             impl Cast<$dst_type> for $src_type {
                 #[inline(always)]
                 fn cast(self) -> $dst_type {
                     #![allow(clippy::redundant_locals)]
                     let value = self;
-                    let value = impl_cast!(@from $src_type, value);
-                    let value = impl_cast!(@to $dst_type, value);
+                    let value = impl_cast!(@scalar_from $src_type, value);
+                    let value = impl_cast!(@scalar_to $dst_type, value);
                     value
                 }
+
+                impl_cast!(@bulk $src_type => $dst_type, bulk=$bulk);
             }
         };
 
-        (@from bool, $value:expr) => {
-            ($value) as i8
-        };
-        (@from f16, $value:expr) => {
-            ($value).to_f32()
-        };
-        (@from $type:ident, $value:expr) => {
-            $value
-        };
+        (@scalar_from bool,        $value:expr) => { ($value) as i8 };
+        (@scalar_from f16,         $value:expr) => { ($value).to_f32() };
+        (@scalar_from $type:ident, $value:expr) => { $value };
+        (@scalar_to   bool,        $value:expr) => { ($value) != (0 as _) };
+        (@scalar_to   f16,         $value:expr) => { f16::from_f32(($value) as f32) };
+        (@scalar_to   $type:ident, $value:expr) => { ($value) as $type };
 
-        (@to bool, $value:expr) => {
-            ($value) != (0 as _)
+        (@bulk $src_type:ident => $dst_type:ident, bulk=("disabled")) => {};
+        (@bulk $src_type:ident => $dst_type:ident,
+            bulk=([$($step:ident $(($T:ident))?),*] $(only_on($($level:ident)|+))?)
+        ) => {
+            #[inline(always)]
+            #[allow(clippy::identity_op, clippy::let_and_return)]
+            fn cast_bulk<const N: usize, S: fearless_simd::Simd>(
+                xs: [Self; N],
+                simd: S,
+            ) -> [$dst_type; N] {
+                #[allow(unused_imports)]
+                use {
+                    crate::util::ArrayExt,
+                    fearless_simd::{Bytes, SimdCvtFloat, SimdCvtTruncate},
+                    simd::{NarrowVectors, SimdElementExt, WidenVectors},
+                };
+                $(
+                    if !matches!(simd::simd_level(simd), $(simd::SimdLevel::$level)|+) {
+                        return xs.map_inline(#[inline(always)] |x| <Self as Cast<$dst_type>>::cast(x));
+                    }
+                )?
+                simd::map_vectors_different_width::<
+                    $src_type, $dst_type,
+                    N,
+                    { 1 $(* impl_cast!(@vectors_in $step))* },
+                    { 1 $(* impl_cast!(@vectors_out $step))* },
+                    S,
+                >(xs, #[inline(always)] |x| <Self as Cast<$dst_type>>::cast(x), #[inline(always)] |v| {
+                    $(let v = impl_cast!(@step $step $(($T))?, v);)*
+                    v
+                }, simd)
+            }
         };
-        (@to f16, $value:expr) => {
-            f16::from_f32(($value) as f32)
+        (@step widen, $v:ident) => { WidenVectors::<S>::widen($v) };
+        (@step narrow, $v:ident) => { NarrowVectors::<S>::narrow($v) };
+        (@step saturating_narrow, $v:ident) => { NarrowVectors::<S>::saturating_narrow($v) };
+        (@step bitcast, $v:ident) => { $v.map_inline(#[inline(always)] |x| x.bitcast()) };
+        (@step float, $v:ident) => { $v.map_inline(#[inline(always)] |x| SimdCvtFloat::float_from(x)) };
+        (@step truncate, $v:ident) => { $v.map_inline(#[inline(always)] |x| SimdCvtTruncate::truncate_from_precise(x)) };
+        (@step truncate($T:ident), $v:ident) => {
+            $v.map_inline(#[inline(always)] |x| -> <$T as SimdElementExt>::V<S> { SimdCvtTruncate::truncate_from_precise(x) })
         };
-        (@to $type:ident, $value:expr) => {
-            ($value) as $type
+        (@vectors_in narrow) => { 2 };
+        (@vectors_in saturating_narrow) => { 2 };
+        (@vectors_in $step:ident) => { 1 };
+        (@vectors_out widen) => { 2 };
+        (@vectors_out $step:ident) => { 1 };
+    }
+
+    macro_rules! impl_cast_to_bool {
+        (f16) => { impl_cast!(f16 => bool, bulk=("disabled")); };
+        (bool) => { impl_cast!(bool => bool, bulk=("disabled")); };
+        ($src_type:ident) => {
+            impl Cast<bool> for $src_type {
+                #[inline(always)]
+                fn cast(self) -> bool {
+                    self != (0 as $src_type)
+                }
+
+                #[inline(always)]
+                fn cast_bulk<const N: usize, S: fearless_simd::Simd>(
+                    xs: [Self; N],
+                    simd: S,
+                ) -> [bool; N] {
+                    use fearless_simd::SimdBase;
+                    type V<S> = <$src_type as simd::SimdElementExt>::V<S>;
+                    let zero = <V<S> as SimdBase<S>>::splat(simd, 0 as $src_type);
+                    crate::scalar::simd::map_vectors_to_bools::<Self, N, S>(
+                        xs,
+                        #[inline(always)] |x| <Self as Cast<bool>>::cast(x),
+                        #[inline(always)] |v| v.simd_ne(zero),
+                        simd,
+                    )
+                }
+            }
         };
     }
+
     macro_rules! impl_cast_num {
-        ($src_type:ident) => {
-            impl_cast!($src_type => i8);
-            impl_cast!($src_type => i16);
-            impl_cast!($src_type => i32);
-            impl_cast!($src_type => i64);
-            impl_cast!($src_type => u8);
-            impl_cast!($src_type => u16);
-            impl_cast!($src_type => u32);
-            impl_cast!($src_type => u64);
+        ($src_type:ident {
+            $(
+                $($dst_type:ident),+:
+                    bulk=$bulk:tt $(only_on($($level:ident)|+))?;
+            )*
+        }) => {
+            $(impl_cast_num!(
+                @group $src_type, [$($dst_type),+],
+                bulk=($bulk $(only_on($($level)|+))?));
+            )*
+
             #[cfg(feature = "half")]
-            impl_cast!($src_type => f16);
-            impl_cast!($src_type => f32);
-            impl_cast!($src_type => f64);
-            impl_cast!($src_type => bool);
+            impl_cast!($src_type => f16, bulk=("disabled"));
+
+            impl_cast_to_bool!($src_type);
+
             #[cfg(all(feature = "half", feature = "num-complex"))]
             impl_cast_num!(@impl_to_complex, $src_type, Complex<f16>);
             #[cfg(feature = "num-complex")]
             impl_cast_num!(@impl_to_complex, $src_type, Complex<f32>);
             #[cfg(feature = "num-complex")]
             impl_cast_num!(@impl_to_complex, $src_type, Complex<f64>);
+        };
+
+        (@group $src_type:ident, [$($dst_type:ident),+], bulk=$bulk:tt) => {
+            $(impl_cast!($src_type => $dst_type, bulk=$bulk);)+
         };
 
         (@impl_to_complex, $src_type:ident, Complex<$dst_type:ident>) => {
@@ -89,19 +178,96 @@ pub(crate) mod _traits {
             }
         };
     }
-    impl_cast_num!(i8);
-    impl_cast_num!(i16);
-    impl_cast_num!(i32);
-    impl_cast_num!(i64);
-    impl_cast_num!(u8);
-    impl_cast_num!(u16);
-    impl_cast_num!(u32);
-    impl_cast_num!(u64);
+    // SIMD bodies on the levels where static analysis (cargo-asm + llvm-mca) shows them
+    // faster or even. Even ones too so that a fused chain of ops stays in vectors.
+    impl_cast_num!(i8 {
+        i8, u8: bulk="disabled";
+        i16, u16: bulk=[widen, bitcast] only_on(Sse2 | Avx2 | Avx512 | Neon);
+        i32, u32: bulk=[widen, widen, bitcast] only_on(Sse2 | Neon);
+        i64, u64: bulk=[widen, widen, widen, bitcast] only_on(Sse2 | Neon);
+        f32: bulk=[widen, widen, float] only_on(Sse2);
+        f64: bulk=[widen, widen, widen, float] only_on(Neon);
+    });
+    impl_cast_num!(i16 {
+        i8, u8: bulk=[narrow, bitcast];
+        i16, u16: bulk="disabled";
+        i32, u32: bulk=[widen, bitcast] only_on(Sse2 | Avx2 | Avx512 | Neon);
+        i64, u64: bulk=[widen, widen, bitcast] only_on(Sse2 | Neon);
+        f32: bulk=[widen, float] only_on(Sse2 | Avx2 | Avx512 | Neon);
+        f64: bulk=[widen, widen, float] only_on(Neon);
+    });
+    impl_cast_num!(i32 {
+        i8, u8: bulk=[narrow, narrow, bitcast] only_on(Neon);
+        i16, u16: bulk=[narrow, bitcast];
+        i32, u32: bulk="disabled";
+        i64, u64: bulk=[widen, bitcast] only_on(Sse2 | Avx2 | Avx512 | Neon);
+        f32: bulk=[float];
+        f64: bulk=[widen, float] only_on(Neon);
+    });
+    impl_cast_num!(i64 {
+        i8, u8: bulk=[narrow, narrow, narrow, bitcast] only_on(Sse2 | Sse4_2 | Avx512 | Neon);
+        i16, u16: bulk=[narrow, narrow, bitcast] only_on(Sse4_2 | Avx2 | Avx512 | Neon);
+        i32, u32: bulk=[narrow, bitcast];
+        i64, u64: bulk="disabled";
+        f32: bulk="disabled"; // would round twice through `f64`.
+        f64: bulk=[float] only_on(Sse2 | Avx2 | Avx512 | Neon);
+    });
+    impl_cast_num!(u8 {
+        i8, u8: bulk="disabled";
+        i16, u16: bulk=[widen, bitcast] only_on(Sse2 | Avx2 | Avx512 | Neon);
+        i32, u32: bulk=[widen, widen, bitcast] only_on(Sse2 | Neon);
+        i64, u64: bulk=[widen, widen, widen, bitcast] only_on(Sse2 | Neon);
+        f32: bulk=[widen, widen, float] only_on(Sse2 | Neon);
+        f64: bulk=[widen, widen, widen, float] only_on(Sse2 | Sse4_2 | Neon);
+    });
+    impl_cast_num!(u16 {
+        i8, u8: bulk=[narrow, bitcast];
+        i16, u16: bulk="disabled";
+        i32, u32: bulk=[widen, bitcast] only_on(Sse2 | Avx2 | Avx512 | Neon);
+        i64, u64: bulk=[widen, widen, bitcast] only_on(Sse2 | Neon);
+        f32: bulk=[widen, float] only_on(Sse2 | Avx512 | Neon);
+        f64: bulk=[widen, widen, float] only_on(Sse2 | Neon);
+    });
+    impl_cast_num!(u32 {
+        i8, u8: bulk=[narrow, narrow, bitcast] only_on(Neon);
+        i16, u16: bulk=[narrow, bitcast];
+        i32, u32: bulk="disabled";
+        i64, u64: bulk=[widen, bitcast] only_on(Avx2 | Avx512 | Neon);
+        f32: bulk=[float];
+        f64: bulk=[widen, float] only_on(Avx2 | Neon);
+    });
+    impl_cast_num!(u64 {
+        i8, u8: bulk=[narrow, narrow, narrow, bitcast] only_on(Sse2 | Sse4_2 | Avx512 | Neon);
+        i16, u16: bulk=[narrow, narrow, bitcast] only_on(Sse4_2 | Avx2 | Avx512 | Neon);
+        i32, u32: bulk=[narrow, bitcast];
+        i64, u64: bulk="disabled";
+        f32: bulk="disabled"; // would round twice through `f64`.
+        f64: bulk=[float];
+    });
+    impl_cast_num!(f32 {
+        i8: bulk=[truncate(i32), saturating_narrow, saturating_narrow];
+        i16: bulk=[truncate(i32), saturating_narrow];
+        i32, u32: bulk=[truncate];
+        i64, u64: bulk=[widen, truncate] only_on(Sse4_2 | Avx2 | Avx512 | Neon);
+        u8: bulk=[truncate(u32), saturating_narrow, saturating_narrow];
+        u16: bulk=[truncate(u32), saturating_narrow];
+        f32: bulk="disabled";
+        f64: bulk=[widen] only_on(Avx2 | Avx512 | Neon);
+    });
+    impl_cast_num!(f64 {
+        i8: bulk=[truncate(i64), saturating_narrow, saturating_narrow, saturating_narrow] only_on(Avx2 | Avx512 | Neon);
+        i16: bulk=[truncate(i64), saturating_narrow, saturating_narrow] only_on(Avx2 | Avx512 | Neon);
+        i32: bulk=[truncate(i64), saturating_narrow] only_on(Avx2 | Avx512 | Neon);
+        i64, u64: bulk=[truncate];
+        u8: bulk=[truncate(u64), saturating_narrow, saturating_narrow, saturating_narrow] only_on(Avx2 | Avx512 | Neon);
+        u16: bulk=[truncate(u64), saturating_narrow, saturating_narrow] only_on(Avx2 | Avx512 | Neon);
+        u32: bulk=[truncate(u64), saturating_narrow] only_on(Avx2 | Avx512 | Neon);
+        f32: bulk=[narrow] only_on(Sse2 | Sse4_2 | Avx2 | Neon);
+        f64: bulk="disabled";
+    });
     #[cfg(feature = "half")]
-    impl_cast_num!(f16);
-    impl_cast_num!(f32);
-    impl_cast_num!(f64);
-    impl_cast_num!(bool);
+    impl_cast_num!(f16 { i8, i16, i32, i64, u8, u16, u32, u64, f32, f64: bulk="disabled"; });
+    impl_cast_num!(bool { i8, i16, i32, i64, u8, u16, u32, u64, f32, f64: bulk="disabled"; });
 
     #[cfg(feature = "num-complex")]
     macro_rules! impl_cast_complex_to_complex {
@@ -139,6 +305,56 @@ pub(crate) mod _traits {
     impl_cast_complex!(f32);
     #[cfg(feature = "num-complex")]
     impl_cast_complex!(f64);
+
+    // Building blocks for SIMD cast_bulk
+    mod simd {
+        use crate::util::{array_from_fn_inline, ArrayExt};
+        use fearless_simd::{Simd, SimdNarrow, SimdWiden};
+
+        pub(super) use crate::scalar::simd::{
+            map_vectors_different_width, simd_level, SimdElementExt, SimdLevel,
+        };
+
+        /// Widen `K` vectors to `2K` vectors of lanes twice as wide
+        pub(super) trait WidenVectors<S> {
+            type Widened;
+            fn widen(self) -> Self::Widened;
+        }
+        /// Narrow `2K` vectors to `K` vectors of lanes half as wide
+        pub(super) trait NarrowVectors<S> {
+            type Narrowed;
+            fn narrow(self) -> Self::Narrowed;
+            fn saturating_narrow(self) -> Self::Narrowed;
+        }
+        macro_rules! impl_vectors_widen_narrow {
+            ($($k:literal => $k2:literal,)*) => {$(
+                impl<S: Simd, V: SimdWiden<S>> WidenVectors<S> for [V; $k] {
+                    type Widened = [V::Widened; $k2];
+                    #[inline(always)]
+                    fn widen(self) -> Self::Widened {
+                        let halves = self.map_inline(#[inline(always)] |x| x.widen());
+                        array_from_fn_inline(|i| if i % 2 == 0 { halves[i / 2].0 } else { halves[i / 2].1 })
+                    }
+                }
+                impl<S: Simd, V: SimdNarrow<S>> NarrowVectors<S> for [V; $k2] {
+                    type Narrowed = [V::Narrowed; $k];
+                    #[inline(always)]
+                    fn narrow(self) -> Self::Narrowed {
+                        array_from_fn_inline(#[inline(always)] |i| self[2 * i].narrow(self[2 * i + 1]))
+                    }
+                    #[inline(always)]
+                    fn saturating_narrow(self) -> Self::Narrowed {
+                        array_from_fn_inline(#[inline(always)] |i| self[2 * i].saturating_narrow(self[2 * i + 1]))
+                    }
+                }
+            )*};
+        }
+        impl_vectors_widen_narrow!(
+            1 => 2,
+            2 => 4,
+            4 => 8,
+        );
+    }
 }
 
 /// Casts each element to a new element type, returned by [`Array::cast`].
@@ -189,6 +405,15 @@ where
     #[inline(always)]
     fn apply(&self, x: T1) -> Self::Output {
         x.cast()
+    }
+
+    #[inline(always)]
+    fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
+        &self,
+        xs: [T1; N],
+        simd: S,
+    ) -> [Self::Output; N] {
+        T1::cast_bulk(xs, simd)
     }
 }
 impl<S, T> Cast<S, T>
@@ -264,8 +489,8 @@ mod tests {
     type complex_f64 = crate::scalar::Complex<f64>;
 
     // --- element-wise conversion for expected values ---
-    trait CastTo<D>: Copy {
-        fn cast_to(self) -> D;
+    trait CastTo<T>: Copy {
+        fn cast_to(self) -> T;
     }
     macro_rules! impl_cast_as_single {
         (bool => bool) => {
@@ -698,5 +923,38 @@ mod tests {
                 .cast::<complex_f64>(),
             &expected_c64_c64,
         );
+    }
+
+    /// `cast_bulk` of every pair of integer and float types, at every SIMD level, matches `cast`.
+    #[test]
+    fn cast_bulk_all_levels() {
+        use crate::scalar::Cast;
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! cases {
+                ($($src:ident),* => $dsts:tt) => {
+                    $(cases!(@src $src => $dsts);)*
+                };
+                (@src $src:ident => [$($dst:ident),*]) => {$({
+                    for shift in [0, 5] {
+                        let xs = <$src>::simd_test_values(shift);
+                        assert_same_elements(
+                            <$src as Cast<$dst>>::cast_bulk(xs, simd),
+                            |i| <$src as Cast<$dst>>::cast(xs[i]),
+                            concat!(stringify!($src), " => ", stringify!($dst)),
+                        );
+                    }
+                })*};
+            }
+            simd.vectorize(|| {
+                cases!(
+                    i8, i16, i32, i64, u8, u16, u32, u64, f32, f64
+                        => [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool]
+                );
+            });
+        }
+        for_each_simd_level!(check);
     }
 }

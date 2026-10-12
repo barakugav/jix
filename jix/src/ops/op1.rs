@@ -9,6 +9,19 @@ pub(crate) struct Op1<S, K> {
 pub(crate) trait Op1Kernel<T> {
     type Output;
     fn apply(&self, x: T) -> Self::Output;
+
+    #[inline(always)]
+    fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
+        &self,
+        xs: [T; N],
+        simd: S,
+    ) -> [Self::Output; N] {
+        let _ = simd;
+        xs.map_inline(
+            #[inline(always)]
+            |x| self.apply(x),
+        )
+    }
 }
 impl<S, K> Op1<S, K> {
     pub(crate) fn new(array: S, kernel: K) -> Result<Self>
@@ -82,18 +95,17 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
+                simd: S,
             ) -> [T; N] {
-                let xs = unsafe { self.inner.read_bulk::<N, CONTIGUOUS>(offset) };
-                xs.map_inline(|x| {
-                    let x = self.kernel.apply(x);
+                let xs = unsafe { self.inner.read_bulk::<N, CONTIGUOUS, S>(offset, simd) };
+                let ys = self.kernel.apply_bulk(xs, simd);
 
-                    const { assert!(size_of::<K::Output>() == size_of::<T>()) };
-                    // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
-                    unsafe { std::mem::transmute_copy::<K::Output, T>(&x) }
-                })
+                const { assert!(size_of::<K::Output>() == size_of::<T>()) };
+                // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
+                unsafe { std::mem::transmute_copy::<[K::Output; N], [T; N]>(&ys) }
             }
         }
 
@@ -158,6 +170,7 @@ macro_rules! define_op1 {
         $Op:ident,
         $Kernel:ident,
         crate::scalar::$trait:ident::$kernel_fn:ident,
+        simd: $bulk_fn:ident,
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -170,6 +183,15 @@ macro_rules! define_op1 {
             #[inline(always)]
             fn apply(&self, x: T) -> Self::Output {
                 <T as crate::scalar::$trait>::$kernel_fn(x)
+            }
+
+            #[inline(always)]
+            fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
+                &self,
+                xs: [T; N],
+                simd: S,
+            ) -> [Self::Output; N] {
+                <T as crate::scalar::$trait>::$bulk_fn(xs, simd)
             }
         }
         $(#[$meta])*
@@ -273,6 +295,7 @@ pub(crate) mod _traits {
         Sign,
         /// Compute the sign of the value.
         sign,
+        bulk_fn: sign_bulk,
     );
     impl_scalar_op1!(
         impl Sign for [i8, i16, i32, i64, f32, f64] {
@@ -313,10 +336,12 @@ pub(crate) mod _traits {
         Abs,
         /// Compute the absolute value.
         abs,
+        bulk_fn: abs_bulk,
     );
     impl_scalar_op1!(
         impl Abs for [i8, i16, i32, i64, f32, f64] {
             fn abs = |x| x.abs(),
+            fn abs_bulk = |x| x.abs(),
         }
     );
     #[cfg(feature = "half")]
@@ -350,13 +375,21 @@ pub(crate) mod _traits {
         Square,
         /// Compute the square of the value.
         square,
+        bulk_fn: square_bulk,
+    );
+    // SIMD for the types with SIMD mul
+    impl_scalar_op1!(
+        impl Square for [f32, f64, i16, i32, i64, u8, u16, u32, u64] {
+            fn square = |x| x * x,
+            fn square_bulk = |x| x * x,
+        }
     );
     impl_scalar_op1!(
-        impl Square for [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64] {
+        impl Square for [i8] {
             fn square = |x| x * x,
         }
     );
-    // In f32 without FP16, as `Mul`.
+    // In f32 without FP16
     #[cfg(all(
         feature = "half",
         not(all(target_arch = "aarch64", target_feature = "fp16"))
@@ -399,10 +432,12 @@ pub(crate) mod _traits {
         Neg,
         /// Negate the value.
         neg,
+        bulk_fn: neg_bulk,
     );
     impl_scalar_op1!(
         impl Neg for [f32, f64, i8, i16, i32, i64] {
             fn neg = |x| -x,
+            fn neg_bulk = |x| -x,
         }
     );
     #[cfg(feature = "half")]
@@ -428,12 +463,14 @@ pub(crate) mod _traits {
         (
             $(#[$trait_meta:meta])* $Trait:ident,
             $(#[$fn_meta:meta])* $f:ident,
+            $f_bulk:ident $(, $simd:ident="enabled")?
         ) => {
             define_scalar_op1_trait!(
                 $(#[$trait_meta])* $Trait,
                 $(#[$fn_meta])* $f,
+                bulk_fn: $f_bulk,
             );
-            float_op1!(@impl $Trait, $f);
+            float_op1!(@impl $Trait, $f, $f_bulk $(, $simd="enabled")?);
             #[cfg(feature = "half")]
             impl_scalar_op1!(
                 impl $Trait for [f16] {
@@ -441,7 +478,15 @@ pub(crate) mod _traits {
                 }
             );
         };
-        (@impl $Trait:ident, $f:ident) => {
+        (@impl $Trait:ident, $f:ident, $f_bulk:ident, simd="enabled") => {
+            impl_scalar_op1!(
+                impl $Trait for [f32, f64] {
+                    fn $f = |x| x.$f(),
+                    fn $f_bulk = |x| x.$f(),
+                }
+            );
+        };
+        (@impl $Trait:ident, $f:ident, $f_bulk:ident) => {
             impl_scalar_op1!(
                 impl $Trait for [f32, f64] {
                     fn $f = |x| x.$f(),
@@ -454,12 +499,16 @@ pub(crate) mod _traits {
         Floor,
         /// Round down to the nearest integer (towards -inf).
         floor,
+        floor_bulk,
+        simd = "enabled"
     );
     float_op1!(
         /// Ceiling operation, as [`f32::ceil`].
         Ceil,
         /// Round up to the nearest integer (towards +inf).
         ceil,
+        ceil_bulk,
+        simd = "enabled"
     );
     float_op1!(
         /// Square root operation, as [`f32::sqrt`].
@@ -468,6 +517,8 @@ pub(crate) mod _traits {
         Sqrt,
         /// Compute the square root.
         sqrt,
+        sqrt_bulk,
+        simd = "enabled"
     );
     float_op1!(
         /// Rounding operation, as [`f32::round`].
@@ -478,12 +529,14 @@ pub(crate) mod _traits {
         Round,
         /// Round to the nearest integer.
         round,
+        round_bulk
     );
     float_op1!(
         /// Natural exponential operation (`e^x`), as [`f32::exp`].
         Exp,
         /// Compute the natural exponential.
         exp,
+        exp_bulk
     );
     float_op1!(
         /// Natural logarithm operation, as [`f32::ln`].
@@ -492,24 +545,28 @@ pub(crate) mod _traits {
         Ln,
         /// Compute the natural logarithm.
         ln,
+        ln_bulk
     );
     float_op1!(
         /// Sine operation, as [`f32::sin`].
         Sin,
         /// Compute the sine (input in radians).
         sin,
+        sin_bulk
     );
     float_op1!(
         /// Cosine operation, as [`f32::cos`].
         Cos,
         /// Compute the cosine (input in radians).
         cos,
+        cos_bulk
     );
     float_op1!(
         /// Tangent operation, as [`f32::tan`].
         Tan,
         /// Compute the tangent (input in radians).
         tan,
+        tan_bulk
     );
     float_op1!(
         /// Arcsine operation, as [`f32::asin`].
@@ -518,6 +575,7 @@ pub(crate) mod _traits {
         Asin,
         /// Compute the arcsine; the output is in radians in `[-pi/2, pi/2]`.
         asin,
+        asin_bulk
     );
     float_op1!(
         /// Arccosine operation, as [`f32::acos`].
@@ -526,12 +584,14 @@ pub(crate) mod _traits {
         Acos,
         /// Compute the arccosine; the output is in radians in `[0, pi]`.
         acos,
+        acos_bulk
     );
     float_op1!(
         /// Arctangent operation, as [`f32::atan`].
         Atan,
         /// Compute the arctangent; the output is in radians in `(-pi/2, pi/2)`.
         atan,
+        atan_bulk
     );
 }
 
@@ -565,6 +625,7 @@ define_op1!(
     Neg,
     NegKernel,
     crate::scalar::Neg::neg,
+    simd: neg_bulk,
     core_op: core::ops::Neg::neg,
 );
 define_op1!(
@@ -595,6 +656,7 @@ define_op1!(
     Floor,
     FloorKernel,
     crate::scalar::Floor::floor,
+    simd: floor_bulk,
 );
 define_op1!(
     /// Rounds each element up to the nearest integer (towards +inf).
@@ -624,6 +686,7 @@ define_op1!(
     Ceil,
     CeilKernel,
     crate::scalar::Ceil::ceil,
+    simd: ceil_bulk,
 );
 define_op1!(
     /// Rounds each element to the nearest integer.
@@ -653,6 +716,7 @@ define_op1!(
     Round,
     RoundKernel,
     crate::scalar::Round::round,
+    simd: round_bulk,
 );
 define_op1!(
     /// Computes the square root of each element.
@@ -682,6 +746,7 @@ define_op1!(
     Sqrt,
     SqrtKernel,
     crate::scalar::Sqrt::sqrt,
+    simd: sqrt_bulk,
 );
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
@@ -712,6 +777,7 @@ define_op1!(
     Exp,
     ExpKernel,
     crate::scalar::Exp::exp,
+    simd: exp_bulk,
 );
 define_op1!(
     /// Computes the natural logarithm (`ln x`) of each element.
@@ -743,6 +809,7 @@ define_op1!(
     Ln,
     LnKernel,
     crate::scalar::Ln::ln,
+    simd: ln_bulk,
 );
 define_op1!(
     /// Computes the sine of each element (input in radians).
@@ -772,6 +839,7 @@ define_op1!(
     Sin,
     SinKernel,
     crate::scalar::Sin::sin,
+    simd: sin_bulk,
 );
 define_op1!(
     /// Computes the cosine of each element (input in radians).
@@ -802,6 +870,7 @@ define_op1!(
     Cos,
     CosKernel,
     crate::scalar::Cos::cos,
+    simd: cos_bulk,
 );
 define_op1!(
     /// Computes the tangent of each element (input in radians).
@@ -831,6 +900,7 @@ define_op1!(
     Tan,
     TanKernel,
     crate::scalar::Tan::tan,
+    simd: tan_bulk,
 );
 define_op1!(
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
@@ -861,6 +931,7 @@ define_op1!(
     Asin,
     AsinKernel,
     crate::scalar::Asin::asin,
+    simd: asin_bulk,
 );
 define_op1!(
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
@@ -891,6 +962,7 @@ define_op1!(
     Acos,
     AcosKernel,
     crate::scalar::Acos::acos,
+    simd: acos_bulk,
 );
 define_op1!(
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
@@ -920,6 +992,7 @@ define_op1!(
     Atan,
     AtanKernel,
     crate::scalar::Atan::atan,
+    simd: atan_bulk,
 );
 define_op1!(
     /// Returns the sign of each element.
@@ -953,6 +1026,7 @@ define_op1!(
     Sign,
     SignKernel,
     crate::scalar::Sign::sign,
+    simd: sign_bulk,
 );
 define_op1!(
     /// Computes the absolute value of each element.
@@ -992,6 +1066,7 @@ define_op1!(
     Abs,
     AbsKernel,
     crate::scalar::Abs::abs,
+    simd: abs_bulk,
 );
 
 define_op1!(
@@ -1023,6 +1098,7 @@ define_op1!(
     Square,
     SquareKernel,
     crate::scalar::Square::square,
+    simd: square_bulk,
 );
 
 impl<S> Array<S>
@@ -1059,6 +1135,64 @@ pub(crate) mod tests {
 
     use proptest::strategy::BoxedStrategy;
     use proptest::test_runner::{Config, TestRunner};
+
+    /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
+    /// their scalar semantics (release builds: wrapping), on every SIMD level of the CPU, over edge
+    /// cases.
+    #[test]
+    fn simd_bodies_all_levels() {
+        use super::{
+            AbsKernel, CeilKernel, FloorKernel, NegKernel, Op1Kernel, RoundKernel, SqrtKernel,
+            SquareKernel,
+        };
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $t:ty, $f:expr) => {
+                    let xs = <$t>::simd_test_values(0);
+                    let what = concat!(stringify!($kernel), " ", stringify!($t));
+                    assert_same_elements($kernel.apply_bulk(xs, simd), |i| $f(xs[i]), what);
+                };
+            }
+            simd.vectorize(|| {
+                case!(NegKernel, f32, |x: f32| -x);
+                case!(NegKernel, f64, |x: f64| -x);
+                case!(NegKernel, i8, i8::wrapping_neg);
+                case!(NegKernel, i16, i16::wrapping_neg);
+                case!(NegKernel, i32, i32::wrapping_neg);
+                case!(NegKernel, i64, i64::wrapping_neg);
+                case!(FloorKernel, f32, f32::floor);
+                case!(FloorKernel, f64, f64::floor);
+                case!(CeilKernel, f32, f32::ceil);
+                case!(CeilKernel, f64, f64::ceil);
+                case!(RoundKernel, f32, f32::round);
+                case!(RoundKernel, f64, f64::round);
+                case!(SqrtKernel, f32, f32::sqrt);
+                case!(SqrtKernel, f64, f64::sqrt);
+                case!(AbsKernel, f32, f32::abs);
+                case!(AbsKernel, f64, f64::abs);
+                case!(AbsKernel, i8, i8::wrapping_abs);
+                case!(AbsKernel, i16, i16::wrapping_abs);
+                case!(AbsKernel, i32, i32::wrapping_abs);
+                case!(AbsKernel, i64, i64::wrapping_abs);
+                case!(SquareKernel, f32, |x: f32| x * x);
+                case!(SquareKernel, f64, |x: f64| x * x);
+                case!(SquareKernel, i16, |x: i16| x.wrapping_mul(x));
+                case!(SquareKernel, i32, |x: i32| x.wrapping_mul(x));
+                case!(SquareKernel, i64, |x: i64| x.wrapping_mul(x));
+                case!(SquareKernel, u8, |x: u8| x.wrapping_mul(x));
+                case!(SquareKernel, u16, |x: u16| x.wrapping_mul(x));
+                case!(SquareKernel, u32, |x: u32| x.wrapping_mul(x));
+                case!(SquareKernel, u64, |x: u64| x.wrapping_mul(x));
+                // Not a multiple of the vector length, and a type without a SIMD body: scalar.
+                assert_eq!(NegKernel.apply_bulk([1.5f32], simd), [-1.5]);
+                assert_eq!(FloorKernel.apply_bulk([1.5f32, 2.5], simd), [1.0, 2.0]);
+            });
+        }
+        for_each_simd_level!(check);
+    }
 
     /// Shared proptest driver for unary-op tests.
     ///
