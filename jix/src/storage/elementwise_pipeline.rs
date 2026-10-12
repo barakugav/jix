@@ -133,12 +133,13 @@ fn to_buf_impl<T, const N_OPERANDS: usize>(
 
     to_buf_type_erased(operands, index, context, &|dst, dst_stride, len, flags| {
         let dst = dst.cast();
-        match (flags.inputs_contiguous, flags.output_contiguous) {
-            (true, true) => inner_loop::<T, _, true, true>(pipeline, dst, dst_stride, len),
-            (true, false) => inner_loop::<T, _, true, false>(pipeline, dst, dst_stride, len),
-            (false, true) => inner_loop::<T, _, false, true>(pipeline, dst, dst_stride, len),
-            (false, false) => inner_loop::<T, _, false, false>(pipeline, dst, dst_stride, len),
-        }
+        let inner_loop_fn = match (flags.inputs_contiguous, flags.output_contiguous) {
+            (true, true) => inner_loop::<_, _, true, true>,
+            (true, false) => inner_loop::<_, _, true, false>,
+            (false, true) => inner_loop::<_, _, false, true>,
+            (false, false) => inner_loop::<_, _, false, false>,
+        };
+        inner_loop_fn(pipeline, dst, dst_stride, len)
     });
 }
 
@@ -158,12 +159,13 @@ fn to_buf_impl_dyn<T>(
 
     to_buf_type_erased_dyn(&operands, index, context, &|dst, dst_stride, len, flags| {
         let dst = dst.cast();
-        match (flags.inputs_contiguous, flags.output_contiguous) {
-            (true, true) => inner_loop::<T, _, true, true>(pipeline, dst, dst_stride, len),
-            (true, false) => inner_loop::<T, _, true, false>(pipeline, dst, dst_stride, len),
-            (false, true) => inner_loop::<T, _, false, true>(pipeline, dst, dst_stride, len),
-            (false, false) => inner_loop::<T, _, false, false>(pipeline, dst, dst_stride, len),
-        }
+        let inner_loop_fn = match (flags.inputs_contiguous, flags.output_contiguous) {
+            (true, true) => inner_loop::<_, _, true, true>,
+            (true, false) => inner_loop::<_, _, true, false>,
+            (false, true) => inner_loop::<_, _, false, true>,
+            (false, false) => inner_loop::<_, _, false, false>,
+        };
+        inner_loop_fn(pipeline, dst, dst_stride, len);
     });
 }
 
