@@ -32,6 +32,37 @@ pub(crate) fn simd_level<S: Simd>(simd: S) -> SimdLevel {
     }
 }
 
+/// Like [`fearless_simd::dispatch!`], but with [`Level::baseline`](fearless_simd::Level::baseline)
+macro_rules! dispatch_baseline {
+    ($simd:ident => $op:expr) => {{
+        match const { fearless_simd::Level::baseline() } {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            fearless_simd::Level::Sse2($simd) => {
+                fearless_simd::Simd::vectorize($simd, #[inline(always)] || $op)
+            }
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            fearless_simd::Level::Sse4_2($simd) => {
+                fearless_simd::Simd::vectorize($simd, #[inline(always)] || $op)
+            }
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            fearless_simd::Level::Avx2($simd) => {
+                fearless_simd::Simd::vectorize($simd, #[inline(always)] || $op)
+            }
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            fearless_simd::Level::Avx512($simd) => {
+                fearless_simd::Simd::vectorize($simd, #[inline(always)] || $op)
+            }
+            #[cfg(target_arch = "aarch64")]
+            fearless_simd::Level::Neon($simd) => {
+                fearless_simd::Simd::vectorize($simd, #[inline(always)] || $op)
+            }
+            #[allow(unreachable_patterns)]
+            level => fearless_simd::dispatch!(level, $simd => $op),
+        }
+    }};
+}
+pub(crate) use dispatch_baseline;
+
 pub(crate) trait SimdElementExt: SimdElement {
     type V<S: Simd>: SimdBase<S, Element = Self>;
 

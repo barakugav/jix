@@ -556,12 +556,11 @@ fn inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
     T: Dtyped,
     P: ElementwisePipelineImpl<T>,
 {
-    let simd_level = if const { IN_CONTIGUOUS && OUT_CONTIGUOUS } {
-        SimdLevel::new()
+    if const { IN_CONTIGUOUS && OUT_CONTIGUOUS } {
+        fearless_simd::dispatch!(SimdLevel::new(), simd => inner_loop_per_level::<_, _, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(pipeline, dst, dst_stride, len, simd));
     } else {
-        const { SimdLevel::baseline() }
-    };
-    fearless_simd::dispatch!(simd_level, simd => inner_loop_per_level::<_, _, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(pipeline, dst, dst_stride, len, simd));
+        crate::scalar::simd::dispatch_baseline!(simd => inner_loop_per_level::<_, _, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(pipeline, dst, dst_stride, len, simd));
+    }
 }
 
 #[inline(always)]
