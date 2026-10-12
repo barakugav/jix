@@ -12,15 +12,18 @@ pub(crate) mod _traits {
         (
             $(#[$trait_meta:meta])* $Trait:ident,
             $(#[$fn_meta:meta])* $f:ident,
+            $f_bulk:ident
         ) => {
             define_scalar_op1_trait!(
                 $(#[$trait_meta])* $Trait,
                 $(#[$fn_meta])* $f,
+                bulk_fn: $f_bulk,
             );
             impl_scalar_op1!(
                 impl $Trait for [f32, f64] {
                     type Output = bool;
                     fn $f = |x| x.$f(),
+                    fn $f_bulk = |x| x.$f(),
                 }
             );
             #[cfg(feature = "half")]
@@ -41,6 +44,7 @@ pub(crate) mod _traits {
         IsNan,
         /// Test whether the value is `NaN` (not a number).
         is_nan,
+        is_nan_bulk
     );
     classify_op1!(
         /// Finiteness test operation, as [`f32::is_finite`].
@@ -51,6 +55,7 @@ pub(crate) mod _traits {
         IsFinite,
         /// Test whether the value is finite (not `+/-inf` and not `NaN`).
         is_finite,
+        is_finite_bulk
     );
     classify_op1!(
         /// Infinity test operation, as [`f32::is_infinite`].
@@ -61,6 +66,7 @@ pub(crate) mod _traits {
         IsInfinite,
         /// Test whether the value is infinite (`+inf` or `-inf`).
         is_infinite,
+        is_infinite_bulk
     );
 }
 
@@ -94,6 +100,7 @@ define_op1!(
     IsNan,
     IsNanKernel,
     crate::scalar::IsNan::is_nan,
+    simd: is_nan_bulk,
 );
 define_op1!(
     /// Tests whether each element is finite (not `+/-inf` and not `NaN`).
@@ -126,6 +133,7 @@ define_op1!(
     IsFinite,
     IsFiniteKernel,
     crate::scalar::IsFinite::is_finite,
+    simd: is_finite_bulk,
 );
 define_op1!(
     /// Tests whether each element is infinite (`+inf` or `-inf`).
@@ -158,6 +166,7 @@ define_op1!(
     IsInfinite,
     IsInfiniteKernel,
     crate::scalar::IsInfinite::is_infinite,
+    simd: is_infinite_bulk,
 );
 
 impl<S> Array<S>
@@ -172,6 +181,35 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ops::op1::tests::test_op1;
+
+    /// The `apply_bulk` of the kernels of this module against their scalar semantics, on every
+    /// SIMD level of the CPU, over edge cases.
+    #[test]
+    fn simd_bodies_all_levels() {
+        use super::{IsFiniteKernel, IsInfiniteKernel, IsNanKernel};
+        use crate::ops::op1::Op1Kernel;
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $t:ty, $f:expr) => {
+                    let xs = <$t>::simd_test_values(0);
+                    let what = concat!(stringify!($kernel), " ", stringify!($t));
+                    assert_same_elements($kernel.apply_bulk(xs, simd), |i| $f(xs[i]), what);
+                };
+            }
+            simd.vectorize(|| {
+                case!(IsNanKernel, f32, f32::is_nan);
+                case!(IsNanKernel, f64, f64::is_nan);
+                case!(IsFiniteKernel, f32, f32::is_finite);
+                case!(IsFiniteKernel, f64, f64::is_finite);
+                case!(IsInfiniteKernel, f32, f32::is_infinite);
+                case!(IsInfiniteKernel, f64, f64::is_infinite);
+            });
+        }
+        for_each_simd_level!(check);
+    }
     #[cfg(feature = "half")]
     use crate::scalar::f16;
 

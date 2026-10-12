@@ -373,6 +373,12 @@ where
         {
             const N_OPERANDS: Option<usize> =
                 n_operands_sum(&[PC::N_OPERANDS, PX::N_OPERANDS, PY::N_OPERANDS]);
+            const MAX_ITEMSIZE: usize = max_itemsize(&[
+                size_of::<T>(),
+                PC::MAX_ITEMSIZE,
+                PX::MAX_ITEMSIZE,
+                PY::MAX_ITEMSIZE,
+            ]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -384,13 +390,15 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
+                simd: S,
             ) -> [T; N] {
-                let condition = unsafe { self.condition.read_bulk::<N, CONTIGUOUS>(offset) };
-                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS>(offset) };
-                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS>(offset) };
+                let condition =
+                    unsafe { self.condition.read_bulk::<N, CONTIGUOUS, _>(offset, simd) };
+                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS, _>(offset, simd) };
+                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS, _>(offset, simd) };
                 array_from_fn_inline(|i| if condition[i] { x[i] } else { y[i] })
             }
         }

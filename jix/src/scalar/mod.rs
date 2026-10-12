@@ -12,6 +12,9 @@
 //! requires [`Add`], and [`crate::ops::Exp`] requires [`Exp`].
 //! In addition to element-wise trait, this module also contains reduction traits such as [`Sum`]
 //! and [`Mean`].
+//! Each such trait has the scalar
+//! function (`add`) and a bulk one on `N` elements (`add_bulk`), which the ops call, vectorized
+//! with SIMD for the types with SIMD support (the default computes element by element).
 
 #[cfg(feature = "half")]
 pub use half::f16;
@@ -19,5 +22,6 @@ pub use half::f16;
 #[cfg(feature = "num-complex")]
 pub use num_complex::Complex;
 
+pub(crate) mod simd;
 pub(crate) mod traits_util;
 pub use crate::ops::_traits::*;

@@ -158,6 +158,7 @@ where
         impl<T: Dtyped> ElementwisePipelineImpl<T> for Constant<T> {
             // The value lives in the node, so there is nothing to walk.
             const N_OPERANDS: Option<usize> = Some(0);
+            const MAX_ITEMSIZE: usize = size_of::<T>();
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -165,9 +166,10 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 _offset: usize,
+                _simd: S,
             ) -> [T; N] {
                 [self.0; N]
             }

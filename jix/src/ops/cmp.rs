@@ -31,9 +31,16 @@ pub(crate) mod _traits {
         Maximum,
         /// Compute the maximum with another value.
         maximum,
+        bulk_fn: maximum_bulk,
     );
     impl_scalar_op2!(
-        impl Maximum for [i8, i16, i32, i64, u8, u16, u32, u64, bool] {
+        impl Maximum for [i8, i16, i32, i64, u8, u16, u32, u64] {
+            fn maximum = |a, b| std::cmp::max(a, b),
+            fn maximum_bulk = |a, b| a.max(b),
+        }
+    );
+    impl_scalar_op2!(
+        impl Maximum for [bool] {
             fn maximum = |a, b| std::cmp::max(a, b),
         }
     );
@@ -41,6 +48,7 @@ pub(crate) mod _traits {
     impl_scalar_op2!(
         impl Maximum for [f32, f64] {
             fn maximum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.max(b) },
+            fn maximum_bulk = |a, b| (/* NaN check */ a.simd_eq(a) & b.simd_eq(b)).select(a.max(b), /* NaN */ a + b),
         }
     );
     #[cfg(feature = "half")]
@@ -71,9 +79,16 @@ pub(crate) mod _traits {
         Minimum,
         /// Compute the minimum with another value.
         minimum,
+        bulk_fn: minimum_bulk,
     );
     impl_scalar_op2!(
-        impl Minimum for [i8, i16, i32, i64, u8, u16, u32, u64, bool] {
+        impl Minimum for [i8, i16, i32, i64, u8, u16, u32, u64] {
+            fn minimum = |a, b| std::cmp::min(a, b),
+            fn minimum_bulk = |a, b| a.min(b),
+        }
+    );
+    impl_scalar_op2!(
+        impl Minimum for [bool] {
             fn minimum = |a, b| std::cmp::min(a, b),
         }
     );
@@ -81,6 +96,7 @@ pub(crate) mod _traits {
     impl_scalar_op2!(
         impl Minimum for [f32, f64] {
             fn minimum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.min(b) },
+            fn minimum_bulk = |a, b| (/* NaN check */ a.simd_eq(a) & b.simd_eq(b)).select(a.min(b), /* NaN */ a + b),
         }
     );
     #[cfg(feature = "half")]
@@ -96,17 +112,26 @@ pub(crate) mod _traits {
             impl $Trait:ident {
                 $(#[$fn_meta:meta])*
                 fn $f:ident = $op:tt,
+                fn $f_bulk:ident = $simd_f:ident,
                 bool: |$a:ident, $b:ident| $bool:expr,
             }
         ) => {
             define_scalar_op2_trait!(
                 $(#[$trait_meta])* $Trait,
                 $(#[$fn_meta])* $f,
+                bulk_fn: $f_bulk,
             );
             impl_scalar_op2!(
                 impl $Trait for [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64] {
                     type Output = bool;
                     fn $f = |a, b| a $op b,
+                    fn $f_bulk = |a, b| a.$simd_f(b),
+                }
+            );
+            impl_scalar_op2!(
+                impl $Trait for [bool] {
+                    type Output = bool;
+                    fn $f = |$a, $b| $bool,
                 }
             );
             #[cfg(feature = "half")]
@@ -114,12 +139,6 @@ pub(crate) mod _traits {
                 impl $Trait for [f16] {
                     type Output = bool;
                     fn $f = |a, b| a $op b,
-                }
-            );
-            impl_scalar_op2!(
-                impl $Trait for [bool] {
-                    type Output = bool;
-                    fn $f = |$a, $b| $bool,
                 }
             );
         };
@@ -156,6 +175,7 @@ pub(crate) mod _traits {
         impl Equal {
             /// Test whether the value equals another value.
             fn equal = ==,
+            fn equal_bulk = simd_eq,
             bool: |a, b| a == b,
         }
     );
@@ -174,6 +194,7 @@ pub(crate) mod _traits {
         impl NotEqual {
             /// Test whether the value differs from another value.
             fn not_equal = !=,
+            fn not_equal_bulk = simd_ne,
             bool: |a, b| a != b,
         }
     );
@@ -192,6 +213,7 @@ pub(crate) mod _traits {
         impl Greater {
             /// Test whether the value is greater than another value.
             fn greater = >,
+            fn greater_bulk = simd_gt,
             bool: |a, b| a & !b,
         }
     );
@@ -205,6 +227,7 @@ pub(crate) mod _traits {
         impl GreaterEqual {
             /// Test whether the value is greater than or equal to another value.
             fn greater_equal = >=,
+            fn greater_equal_bulk = simd_ge,
             bool: |a, b| a | !b,
         }
     );
@@ -218,6 +241,7 @@ pub(crate) mod _traits {
         impl Less {
             /// Test whether the value is less than another value.
             fn less = <,
+            fn less_bulk = simd_lt,
             bool: |a, b| !a & b,
         }
     );
@@ -231,6 +255,7 @@ pub(crate) mod _traits {
         impl LessEqual {
             /// Test whether the value is less than or equal to another value.
             fn less_equal = <=,
+            fn less_equal_bulk = simd_le,
             bool: |a, b| !a | b,
         }
     );
@@ -262,6 +287,28 @@ pub(crate) mod _traits {
             rtol: &Self::RelativeTolerance,
             atol: &Self::AbsoluteTolerance,
         ) -> bool;
+
+        /// Apply [`approx_eq`](Self::approx_eq) on each pair of `xs` and `ys`, vectorized with
+        /// `simd` where the types have SIMD support.
+        #[inline(always)]
+        fn approx_eq_bulk<const N: usize, S: fearless_simd::Simd>(
+            xs: [Self; N],
+            ys: [Self; N],
+            rtol: &Self::RelativeTolerance,
+            atol: &Self::AbsoluteTolerance,
+            simd: S,
+        ) -> [bool; N]
+        where
+            Self: Sized,
+        {
+            let _ = simd;
+            crate::util::array2_map_inline(
+                xs,
+                ys,
+                #[inline(always)]
+                |_, x, y| x.approx_eq(&y, rtol, atol),
+            )
+        }
     }
     macro_rules! impl_approx_eq {
         ($T:ty) => {
@@ -366,6 +413,7 @@ define_op2!(
     Equal,
     EqualKernel,
     crate::scalar::Equal::equal,
+    simd: equal_bulk,
 );
 define_op2!(
     /// Element-wise inequality test (`a != b`).
@@ -398,6 +446,7 @@ define_op2!(
     NotEqual,
     NotEqualKernel,
     crate::scalar::NotEqual::not_equal,
+    simd: not_equal_bulk,
 );
 define_op2!(
     /// Element-wise greater-than test (`a > b`).
@@ -430,6 +479,7 @@ define_op2!(
     Greater,
     GreaterKernel,
     crate::scalar::Greater::greater,
+    simd: greater_bulk,
 );
 define_op2!(
     /// Element-wise greater-than-or-equal test (`a >= b`).
@@ -462,6 +512,7 @@ define_op2!(
     GreaterEqual,
     GreaterEqualKernel,
     crate::scalar::GreaterEqual::greater_equal,
+    simd: greater_equal_bulk,
 );
 define_op2!(
     /// Element-wise less-than test (`a < b`).
@@ -493,6 +544,7 @@ define_op2!(
     Less,
     LessKernel,
     crate::scalar::Less::less,
+    simd: less_bulk,
 );
 define_op2!(
     /// Element-wise less-than-or-equal test (`a <= b`).
@@ -525,6 +577,7 @@ define_op2!(
     LessEqual,
     LessEqualKernel,
     crate::scalar::LessEqual::less_equal,
+    simd: less_equal_bulk,
 );
 
 define_op2!(
@@ -559,6 +612,7 @@ define_op2!(
     Maximum,
     MaximumKernel,
     crate::scalar::Maximum::maximum,
+    simd: maximum_bulk,
 );
 define_op2!(
     /// Element-wise minimum of two arrays.
@@ -592,6 +646,7 @@ define_op2!(
     Minimum,
     MinimumKernel,
     crate::scalar::Minimum::minimum,
+    simd: minimum_bulk,
 );
 
 /// Element-wise approximate equality test.
@@ -654,6 +709,16 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
     #[inline(always)]
     fn apply(&self, a: T, b: T) -> Self::Output {
         a.approx_eq(&b, &self.rtol, &self.atol)
+    }
+
+    #[inline(always)]
+    fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
+        &self,
+        a: [T; N],
+        b: [T; N],
+        simd: S,
+    ) -> [Self::Output; N] {
+        T::approx_eq_bulk(a, b, &self.rtol, &self.atol, simd)
     }
 }
 impl<S1, S2> ApproxEq<S1, S2>
@@ -754,6 +819,60 @@ mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::scalar::Complex<f64>;
     use crate::ops::op2::tests::test_op2;
+
+    /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
+    /// their scalar semantics, on every SIMD level of the CPU, over edge cases (NaN included).
+    #[test]
+    fn simd_bodies_all_levels() {
+        use super::{
+            EqualKernel, GreaterEqualKernel, GreaterKernel, LessEqualKernel, LessKernel,
+            MaximumKernel, MinimumKernel, NotEqualKernel,
+        };
+        use crate::ops::op2::Op2Kernel;
+        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $ta:ty, $tb:ty, $f:expr) => {
+                    let (a, b) = (<$ta>::simd_test_values(0), <$tb>::simd_test_values(5));
+                    let what = concat!(
+                        stringify!($kernel),
+                        " ",
+                        stringify!($ta),
+                        " ",
+                        stringify!($tb)
+                    );
+                    assert_same_elements($kernel.apply_bulk(a, b, simd), |i| $f(a[i], b[i]), what);
+                };
+            }
+            macro_rules! all {
+                ($kernel:ident, $f:expr) => {
+                    case!($kernel, f32, f32, $f);
+                    case!($kernel, f64, f64, $f);
+                    case!($kernel, i8, i8, $f);
+                    case!($kernel, i16, i16, $f);
+                    case!($kernel, i32, i32, $f);
+                    case!($kernel, i64, i64, $f);
+                    case!($kernel, u8, u8, $f);
+                    case!($kernel, u16, u16, $f);
+                    case!($kernel, u32, u32, $f);
+                    case!($kernel, u64, u64, $f);
+                };
+            }
+            simd.vectorize(|| {
+                all!(EqualKernel, |x, y| x == y);
+                all!(NotEqualKernel, |x, y| x != y);
+                all!(GreaterKernel, |x, y| x > y);
+                all!(GreaterEqualKernel, |x, y| x >= y);
+                all!(LessKernel, |x, y| x < y);
+                all!(LessEqualKernel, |x, y| x <= y);
+                all!(MaximumKernel, Maximum::maximum);
+                all!(MinimumKernel, Minimum::minimum);
+            });
+        }
+        for_each_simd_level!(check);
+    }
 
     // Shared by greater_equal_concrete and less_equal_concrete: NaN operands, inf/-inf
     // ordering, and an equal pair (1.0 == 1.0).

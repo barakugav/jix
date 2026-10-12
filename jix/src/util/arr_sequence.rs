@@ -6,8 +6,8 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::{
-    n_operands_mul, n_operands_sum, ArraySpec, ArrayStorageTyped, ElementwisePipelineImpl, Operand,
-    StridedBuf,
+    max_itemsize, n_operands_mul, n_operands_sum, ArraySpec, ArrayStorageTyped,
+    ElementwisePipelineImpl, Operand, StridedBuf,
 };
 use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, Dimension, ElementType};
 
@@ -143,6 +143,9 @@ pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> 
     /// `&[Array<_>]`), or one whose arrays are themselves pipelines with an unknown operand count.
     const N_OPERANDS: Option<usize>;
 
+    /// The largest [`MAX_ITEMSIZE`](ElementwisePipelineImpl::MAX_ITEMSIZE) of the arrays' pipelines.
+    const MAX_ITEMSIZE: usize;
+
     /// The leaf operands the pipeline reads from.
     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's;
 
@@ -153,9 +156,15 @@ pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> 
     /// Same contract as [`ElementwisePipelineImpl::read_bulk`]. In addition, the returned
     /// iterator (and anything it yielded) must be dropped before the next call: a runtime-length
     /// sequence groups each position through a scratch buffer that the next call overwrites.
-    unsafe fn read_bulk_as_iter<'s, const N: usize, const CONTIGUOUS: bool>(
+    unsafe fn read_bulk_as_iter<
+        's,
+        const N: usize,
+        const CONTIGUOUS: bool,
+        V: fearless_simd::Simd,
+    >(
         &'s self,
         offset: usize,
+        simd: V,
     ) -> impl Iterator<Item = ArraysT::ItemSequence<'s>> + 's;
 }
 
@@ -229,6 +238,7 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>;
             D: ElementwisePipelineImpl<S::Item>,
         {
             const N_OPERANDS: Option<usize> = n_operands_mul(D::N_OPERANDS, N);
+            const MAX_ITEMSIZE: usize = D::MAX_ITEMSIZE;
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -236,14 +246,19 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>;
             }
 
             #[inline(always)]
-            unsafe fn read_bulk_as_iter<'s, const M: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk_as_iter<
+                's,
+                const M: usize,
+                const CONTIGUOUS: bool,
+                V: fearless_simd::Simd,
+            >(
                 &'s self,
                 offset: usize,
+                simd: V,
             ) -> impl Iterator<Item = [S::Item; N]> + 's {
-                let items = self
-                    .inners
-                    .each_ref()
-                    .map_inline(|inner| unsafe { inner.read_bulk::<M, CONTIGUOUS>(offset) });
+                let items = self.inners.each_ref().map_inline(|inner| unsafe {
+                    inner.read_bulk::<M, CONTIGUOUS, _>(offset, simd)
+                });
                 (0..M).map(move |item_idx| {
                     array_from_fn_inline::<_, N>(|arr_idx| items[arr_idx][item_idx])
                 })
@@ -322,6 +337,7 @@ impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [A
             D: ElementwisePipelineImpl<S::Item>,
         {
             const N_OPERANDS: Option<usize> = n_operands_mul(D::N_OPERANDS, N);
+            const MAX_ITEMSIZE: usize = D::MAX_ITEMSIZE;
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -329,14 +345,19 @@ impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [A
             }
 
             #[inline(always)]
-            unsafe fn read_bulk_as_iter<'s, const M: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk_as_iter<
+                's,
+                const M: usize,
+                const CONTIGUOUS: bool,
+                V: fearless_simd::Simd,
+            >(
                 &'s self,
                 offset: usize,
+                simd: V,
             ) -> impl Iterator<Item = [S::Item; N]> + 's {
-                let items = self
-                    .inners
-                    .each_ref()
-                    .map_inline(|inner| unsafe { inner.read_bulk::<M, CONTIGUOUS>(offset) });
+                let items = self.inners.each_ref().map_inline(|inner| unsafe {
+                    inner.read_bulk::<M, CONTIGUOUS, _>(offset, simd)
+                });
                 (0..M).map(move |item_idx| {
                     array_from_fn_inline::<_, N>(|arr_idx| items[arr_idx][item_idx])
                 })
@@ -422,6 +443,7 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
         {
             // The number of arrays in the sequence is only known at runtime.
             const N_OPERANDS: Option<usize> = None;
+            const MAX_ITEMSIZE: usize = D::MAX_ITEMSIZE;
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -429,9 +451,15 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
             }
 
             #[inline(always)]
-            unsafe fn read_bulk_as_iter<'s, const M: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk_as_iter<
+                's,
+                const M: usize,
+                const CONTIGUOUS: bool,
+                V: fearless_simd::Simd,
+            >(
                 &'s self,
                 offset: usize,
+                simd: V,
             ) -> impl Iterator<Item = &'s [S::Item]> + 's {
                 let narrays = self.inners.len();
                 // SAFETY: the caller must have dropped everything the previous call yielded, so
@@ -446,7 +474,7 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
                 };
 
                 for (arr, inner) in self.inners.iter().enumerate() {
-                    let items = unsafe { inner.read_bulk::<M, CONTIGUOUS>(offset) };
+                    let items = unsafe { inner.read_bulk::<M, CONTIGUOUS, _>(offset, simd) };
                     for (item_idx, item) in items.into_iter().enumerate() {
                         tmp_buf[item_idx * narrays + arr] = item;
                     }
@@ -540,6 +568,7 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
         {
             // The number of arrays in the sequence is only known at runtime.
             const N_OPERANDS: Option<usize> = None;
+            const MAX_ITEMSIZE: usize = D::MAX_ITEMSIZE;
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -547,9 +576,15 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
             }
 
             #[inline(always)]
-            unsafe fn read_bulk_as_iter<'s, const M: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk_as_iter<
+                's,
+                const M: usize,
+                const CONTIGUOUS: bool,
+                V: fearless_simd::Simd,
+            >(
                 &'s self,
                 offset: usize,
+                simd: V,
             ) -> impl Iterator<Item = &'s [S::Item]> + 's {
                 let narrays = self.inners.len();
                 // SAFETY: the caller must have dropped everything the previous call yielded, so
@@ -564,7 +599,7 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
                 };
 
                 for (arr, inner) in self.inners.iter().enumerate() {
-                    let items = unsafe { inner.read_bulk::<M, CONTIGUOUS>(offset) };
+                    let items = unsafe { inner.read_bulk::<M, CONTIGUOUS, _>(offset, simd) };
                     for (item_idx, item) in items.into_iter().enumerate() {
                         tmp_buf[item_idx * narrays + arr] = item;
                     }
@@ -676,6 +711,7 @@ macro_rules! impl_array_sequence_for_tuple {
                     $($D: ElementwisePipelineImpl<$S::Item>,)+
                 {
                     const N_OPERANDS: Option<usize> = n_operands_sum(&[$($D::N_OPERANDS),+]);
+                    const MAX_ITEMSIZE: usize = max_itemsize(&[$($D::MAX_ITEMSIZE),+]);
 
                     #[inline(always)]
                     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -684,12 +720,9 @@ macro_rules! impl_array_sequence_for_tuple {
                     }
 
                     #[inline(always)]
-                    unsafe fn read_bulk_as_iter<'s, const N: usize, const CONTIGUOUS: bool>(
-                        &'s self,
-                        offset: usize,
-                    ) -> impl Iterator<Item = ($($S::Item,)+)> + 's {
+                    unsafe fn read_bulk_as_iter<'s, const N: usize, const CONTIGUOUS: bool, V: fearless_simd::Simd>(&'s self, offset: usize, simd: V) -> impl Iterator<Item = ($($S::Item,)+)> + 's {
                         let items = ($(
-                            unsafe { self.$idx.read_bulk::<N, CONTIGUOUS>(offset) },
+                            unsafe { self.$idx.read_bulk::<N, CONTIGUOUS, _>(offset, simd) },
                         )+);
                         (0..N).map(move |item_idx| {
                             ($(items.$idx[item_idx],)+)

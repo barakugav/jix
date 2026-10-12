@@ -349,6 +349,7 @@ where
             D: ElementwisePipelineTuple<ArraysT>,
         {
             const N_OPERANDS: Option<usize> = D::N_OPERANDS;
+            const MAX_ITEMSIZE: usize = max_itemsize(&[size_of::<T>(), D::MAX_ITEMSIZE]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -356,13 +357,17 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
+                simd: S,
             ) -> [T; N] {
                 // The iterator is consumed here and dropped before the next call, as
                 // `read_bulk_as_iter` requires.
-                let mut items = unsafe { self.inner.read_bulk_as_iter::<N, CONTIGUOUS>(offset) };
+                let mut items = unsafe {
+                    self.inner
+                        .read_bulk_as_iter::<N, CONTIGUOUS, _>(offset, simd)
+                };
                 array_from_fn_inline(|_| {
                     let x = (self.f)(items.next().unwrap());
 

@@ -787,6 +787,15 @@ impl<T> PtrMutExt<T> for *mut T {
     }
 }
 
+#[inline]
+pub(crate) const fn prev_power_of_two(x: usize) -> usize {
+    if x == 0 {
+        1
+    } else {
+        1 << x.ilog2()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1088,6 +1097,19 @@ mod tests {
         // A zero-length axis makes the region empty.
         assert_eq!(super::strided_span_bytes(&[0], &[4], 4), 0);
         assert_eq!(super::strided_span_bytes(&[2, 0, 3], &[24, 8, 4], 4), 0);
+    }
+
+    #[test]
+    fn prev_power_of_two() {
+        use super::prev_power_of_two;
+        assert_eq!(prev_power_of_two(0), 1);
+        assert_eq!(prev_power_of_two(1), 1);
+        assert_eq!(prev_power_of_two(2), 2);
+        assert_eq!(prev_power_of_two(3), 2);
+        assert_eq!(prev_power_of_two(5), 4);
+        assert_eq!(prev_power_of_two(8), 8);
+        assert_eq!(prev_power_of_two(1023), 512);
+        assert_eq!(prev_power_of_two(usize::MAX), 1 << (usize::BITS - 1));
     }
 }
 
