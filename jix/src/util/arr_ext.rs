@@ -97,6 +97,72 @@ fn array_try_map_inline<T, U, E, const N: usize>(
     )
 }
 
+#[inline(always)]
+pub(crate) fn array2_map_inline<T1, T2, U, const N: usize>(
+    src1: [T1; N],
+    src2: [T2; N],
+    mut f: impl FnMut(usize, T1, T2) -> U,
+) -> [U; N] {
+    unwrap_infallible(array2_try_map_inline(
+        src1,
+        src2,
+        #[inline(always)]
+        |idx, x, y| Result::<_, Infallible>::Ok(f(idx, x, y)),
+    ))
+}
+
+#[inline(always)]
+pub(crate) fn array2_try_map_inline<T1, T2, U, E, const N: usize>(
+    src1: [T1; N],
+    src2: [T2; N],
+    mut f: impl FnMut(usize, T1, T2) -> Result<U, E>,
+) -> Result<[U; N], E> {
+    let mut src1 = ManuallyDrop::new(src1);
+    let mut src2 = ManuallyDrop::new(src2);
+    if const { !std::mem::needs_drop::<T1>() && !std::mem::needs_drop::<T2>() } {
+        // SAFETY: every index is read at most once, and `src1` and `src2` are never
+        // dropped (`T1` and `T2` have no drop)
+        return array_try_from_fn_inline(
+            #[inline(always)]
+            |i| {
+                f(i, unsafe { std::ptr::read(&src1[i]) }, unsafe {
+                    std::ptr::read(&src2[i])
+                })
+            },
+        );
+    }
+
+    struct DropGuard<'a, T1, T2, const N: usize> {
+        src1: &'a mut ManuallyDrop<[T1; N]>,
+        src2: &'a mut ManuallyDrop<[T2; N]>,
+        next: usize,
+    }
+    impl<T1, T2, const N: usize> Drop for DropGuard<'_, T1, T2, N> {
+        #[inline(always)]
+        fn drop(&mut self) {
+            // SAFETY: the items `next..` were never read out, and are dropped exactly once here.
+            unsafe {
+                std::ptr::drop_in_place(&mut self.src1[self.next..]);
+                std::ptr::drop_in_place(&mut self.src2[self.next..]);
+            }
+        }
+    }
+    let mut unconsumed = DropGuard {
+        src1: &mut src1,
+        src2: &mut src2,
+        next: 0,
+    };
+    array_try_from_fn_inline(
+        #[inline(always)]
+        |i| {
+            let item1 = unsafe { std::ptr::read(&unconsumed.src1[i]) };
+            let item2 = unsafe { std::ptr::read(&unconsumed.src2[i]) };
+            unconsumed.next = i + 1;
+            f(i, item1, item2)
+        },
+    )
+}
+
 pub(crate) trait ArrayExt<T, const N: usize> {
     fn map_inline<U>(self, f: impl FnMut(T) -> U) -> [U; N]
     where
@@ -739,5 +805,134 @@ mod tests {
         assert_eq!(log.borrow().called, vec![0]);
         // No output produced; all inputs dropped once (0 unwinding the closure, 1,2 by IntoIter).
         assert_eq!(sorted_dropped(&log), vec![0, 1, 2]);
+    }
+
+    // =====================================================================
+    // array2_map_inline / array2_try_map_inline
+    // =====================================================================
+
+    /// `[Tracked; N]` with ids `offset..offset + N`.
+    fn tracked_array_from<const N: usize>(offset: u32, log: &LogRef) -> [Tracked; N] {
+        std::array::from_fn(|i| Tracked::new(offset + i as u32, log))
+    }
+
+    #[test]
+    fn array2_map_inline_pairs_elements_by_index() {
+        let out: [(usize, i64); 4] =
+            array2_map_inline([1i32, 2, 3, 4], [10u8, 20, 30, 40], |i, x, y| {
+                (i, x as i64 + y as i64)
+            });
+        assert_eq!(out, [(0, 11), (1, 22), (2, 33), (3, 44)]);
+    }
+
+    #[test]
+    fn array2_map_inline_empty_never_calls() {
+        let called = Cell::new(0u32);
+        let out: [u32; 0] = array2_map_inline([] as [u32; 0], [] as [u32; 0], |_, x, y| {
+            called.set(called.get() + 1);
+            x + y
+        });
+        assert_eq!(out, [] as [u32; 0]);
+        assert_eq!(called.get(), 0);
+    }
+
+    #[test]
+    fn array2_try_map_inline_short_circuits_on_err() {
+        let calls = Cell::new(0u32);
+        let out: Result<[i32; 5], usize> =
+            array2_try_map_inline([1, 2, 3, 4, 5], [5, 4, 3, 2, 1], |i, x, y| {
+                calls.set(calls.get() + 1);
+                if x == y {
+                    Err(i)
+                } else {
+                    Ok(x - y)
+                }
+            });
+        assert_eq!(out, Err(2));
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn array2_map_inline_ok_drops_inputs_and_returns_outputs() {
+        let log: LogRef = Default::default();
+        let xs: [Tracked; 3] = tracked_array_from(0, &log);
+        let ys: [Tracked; 3] = tracked_array_from(10, &log);
+
+        let out = array2_map_inline(xs, ys, |_, x, y| Tracked::new(100 + x.id + y.id, &log));
+
+        assert_eq!(sorted_dropped(&log), vec![0, 1, 2, 10, 11, 12]);
+        let ids: Vec<u32> = out.iter().map(|t| t.id).collect();
+        assert_eq!(ids, vec![110, 112, 114]);
+
+        drop(out);
+        assert_eq!(
+            sorted_dropped(&log),
+            vec![0, 1, 2, 10, 11, 12, 110, 112, 114]
+        );
+    }
+
+    #[test]
+    fn array2_try_map_inline_err_middle_drops_everything_exactly_once() {
+        let log: LogRef = Default::default();
+        let xs: [Tracked; 5] = tracked_array_from(0, &log);
+        let ys: [Tracked; 5] = tracked_array_from(10, &log);
+
+        let result: Result<[Tracked; 5], u32> = array2_try_map_inline(xs, ys, |_, x, y| {
+            log.borrow_mut().called.push(x.id);
+            if x.id == 2 {
+                Err(x.id)
+            } else {
+                Ok(Tracked::new(100 + x.id + y.id, &log))
+            }
+        });
+
+        assert_eq!(result.err(), Some(2));
+        assert_eq!(log.borrow().called, vec![0, 1, 2]);
+        // Inputs 0..=2 / 10..=12 dropped in the closure, 3,4 / 13,14 by the DropGuard; outputs
+        // 110, 112 (produced for 0 and 1) freed by array_try_from_fn_inline's InitGuard.
+        assert_eq!(
+            sorted_dropped(&log),
+            vec![0, 1, 2, 3, 4, 10, 11, 12, 13, 14, 110, 112]
+        );
+    }
+
+    #[test]
+    fn array2_try_map_inline_panic_drops_everything_exactly_once() {
+        let log: LogRef = Default::default();
+        let xs: [Tracked; 4] = tracked_array_from(0, &log);
+        let ys: [Tracked; 4] = tracked_array_from(10, &log);
+        let log_in = Rc::clone(&log);
+        let caught = catch_unwind(AssertUnwindSafe(move || {
+            let _: Result<[Tracked; 4], ()> = array2_try_map_inline(xs, ys, |_, x, y| {
+                log_in.borrow_mut().called.push(x.id);
+                if x.id == 1 {
+                    panic!("boom");
+                }
+                Ok(Tracked::new(100 + x.id + y.id, &log_in))
+            });
+            unreachable!("closure above always panics");
+        }));
+
+        assert!(caught.is_err());
+        assert_eq!(log.borrow().called, vec![0, 1]);
+        assert_eq!(sorted_dropped(&log), vec![0, 1, 2, 3, 10, 11, 12, 13, 110]);
+    }
+
+    #[test]
+    fn array2_try_map_inline_err_only_one_side_needs_drop() {
+        let log: LogRef = Default::default();
+        let ys: [Tracked; 4] = tracked_array_from(10, &log);
+
+        let result: Result<[u32; 4], u32> =
+            array2_try_map_inline([0u32, 1, 2, 3], ys, |_, x, y| {
+                if x == 1 {
+                    Err(y.id)
+                } else {
+                    Ok(x + y.id)
+                }
+            });
+
+        assert_eq!(result.err(), Some(11));
+        assert_eq!(sorted_dropped(&log), vec![10, 11, 12, 13]);
     }
 }
