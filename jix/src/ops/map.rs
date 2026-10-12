@@ -349,6 +349,7 @@ where
             D: ElementwisePipelineTuple<ArraysT>,
         {
             const N_OPERANDS: Option<usize> = D::N_OPERANDS;
+            const MAX_ITEMSIZE: usize = max_itemsize(&[size_of::<T>(), D::MAX_ITEMSIZE]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {

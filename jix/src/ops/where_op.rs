@@ -373,6 +373,12 @@ where
         {
             const N_OPERANDS: Option<usize> =
                 n_operands_sum(&[PC::N_OPERANDS, PX::N_OPERANDS, PY::N_OPERANDS]);
+            const MAX_ITEMSIZE: usize = max_itemsize(&[
+                size_of::<T>(),
+                PC::MAX_ITEMSIZE,
+                PX::MAX_ITEMSIZE,
+                PY::MAX_ITEMSIZE,
+            ]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
