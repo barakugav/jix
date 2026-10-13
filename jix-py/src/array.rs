@@ -73,7 +73,7 @@ use crate::util::{
 /// you read the result. Chains compose without intermediate allocations:
 ///
 /// ```python
-/// result = (a.astype('float64') - a.mean()).abs().sum(axis=0).numpy()
+/// result = (a.cast('float64') - a.mean()).abs().sum(axis=0).numpy()
 /// ```
 ///
 /// ## Shape operations
@@ -1120,12 +1120,12 @@ impl Array {
         crate::ops::var(slf, axis, keepdims, ddof)
     }
 
-    /// Casts each element of the array to a new dtype. See [`jix.astype()`][jix.astype].
-    pub fn astype<'py>(
+    /// Casts each element of the array to a new dtype. See [`jix.cast()`][jix.cast].
+    pub fn cast<'py>(
         slf: &Bound<'py, Self>,
         dtype: &Bound<'_, PyAny>,
     ) -> PyResult<Bound<'py, Self>> {
-        crate::ops::astype(slf, dtype)
+        crate::ops::cast(slf, dtype)
     }
 
     // == shape ops ==

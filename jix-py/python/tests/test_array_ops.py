@@ -1,4 +1,4 @@
-"""Tests for shape/axis manipulation, compact, astype, asarray, concatenate, stack, where,
+"""Tests for shape/axis manipulation, compact, cast, asarray, concatenate, stack, where,
 flatten, reshape, broadcast, permute_axes, squeeze/unsqueeze, insert_axis/remove_axis,
 read_array/write_array."""
 
@@ -77,7 +77,7 @@ def test_asarray_dtype_unsupported_cast_raises():
 
 
 # ---------------------------------------------------------------------------
-# astype
+# cast
 # ---------------------------------------------------------------------------
 
 
@@ -95,25 +95,25 @@ def test_asarray_dtype_unsupported_cast_raises():
         (np.complex128, np.complex64),
     ],
 )
-def test_astype_scalar_casts(src_dtype, dst_dtype):
+def test_cast_scalar_dtypes(src_dtype, dst_dtype):
     data = np.array([1, 2, 3, 4], dtype=src_dtype)
     za = jix.compact(data)
-    result = jix.astype(za, dst_dtype)
+    result = jix.cast(za, dst_dtype)
     assert result.dtype == np.dtype(dst_dtype)
     np.testing.assert_array_equal(result.numpy(), data.astype(dst_dtype))
 
 
-def test_astype_preserves_shape():
+def test_cast_preserves_shape():
     arr = np.arange(12, dtype=np.int32).reshape(3, 4)
     za = jix.compact(arr)
-    result = jix.astype(za, np.float64)
+    result = jix.cast(za, np.float64)
     assert result.shape == (3, 4)
 
 
-def test_astype_float_to_bool():
+def test_cast_float_to_bool():
     data = np.array([0.0, 1.0, -3.5], dtype=np.float32)
     za = jix.compact(data)
-    result = jix.astype(za, np.bool_)
+    result = jix.cast(za, np.bool_)
     np.testing.assert_array_equal(result.numpy(), [False, True, True])
 
 
@@ -625,19 +625,19 @@ def test_read_array_mmap():
 
 
 # ---------------------------------------------------------------------------
-# Relaxed inputs: shape ops + astype accept anything `jix.asarray` accepts
+# Relaxed inputs: shape ops + cast accept anything `jix.asarray` accepts
 # (numpy arrays, Python lists, tuples, scalars), not just `jix.Array` instances.
 # ---------------------------------------------------------------------------
 
 
-def test_astype_accepts_numpy_array():
-    result = jix.astype(np.array([1, 2, 3], dtype=np.int32), np.float64)
+def test_cast_accepts_numpy_array():
+    result = jix.cast(np.array([1, 2, 3], dtype=np.int32), np.float64)
     assert result.dtype == np.float64
     np.testing.assert_array_equal(result.numpy(), [1.0, 2.0, 3.0])
 
 
-def test_astype_accepts_python_list():
-    result = jix.astype([1, 2, 3], np.float32)
+def test_cast_accepts_python_list():
+    result = jix.cast([1, 2, 3], np.float32)
     assert result.dtype == np.float32
     np.testing.assert_array_equal(result.numpy(), [1.0, 2.0, 3.0])
 
