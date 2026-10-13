@@ -513,6 +513,38 @@ impl<'a> NdCopier<'a> {
     }
 }
 
+/// Write `n` copies of the `itemsize`-byte element at `src` contiguously into `dst`.
+pub(crate) unsafe fn fill_contiguous(src: *const u8, dst: *mut u8, n: usize, itemsize: usize) {
+    let (src, dst) = unsafe {
+        (
+            PtrNoalias::new(src, itemsize),
+            PtrMutNoalias::new(dst, n * itemsize),
+        )
+    };
+    unsafe {
+        match itemsize {
+            1 => NdCopier::inner_loop_broadcast::<u8, false, true>(src, dst, n, 0, 1),
+            2 => {
+                NdCopier::inner_loop_broadcast::<u16, false, true>(src.cast(), dst.cast(), n, 0, 2)
+            }
+            4 => {
+                NdCopier::inner_loop_broadcast::<u32, false, true>(src.cast(), dst.cast(), n, 0, 4)
+            }
+            8 => {
+                NdCopier::inner_loop_broadcast::<u64, false, true>(src.cast(), dst.cast(), n, 0, 8)
+            }
+            16 => NdCopier::inner_loop_broadcast::<[u64; 2], false, true>(
+                src.cast(),
+                dst.cast(),
+                n,
+                0,
+                16,
+            ),
+            _ => NdCopier::inner_loop_untyped_broadcast(src, dst, n, 0, itemsize, itemsize),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -915,6 +947,25 @@ mod tests {
         check_broadcast_src::<StructNoPad>();
         check_broadcast_src::<[i32; 3]>();
         check_broadcast_src::<[u8; 3]>();
+    }
+
+    // `fill_contiguous` for every item size it dispatches on, plus odd ones for the byte-wise loop,
+    // from a misaligned source into a misaligned destination.
+    #[test]
+    fn fill_contiguous_repeats_the_element() {
+        for itemsize in [1, 2, 3, 4, 8, 12, 16, 24] {
+            for n in [1, 3, 64, 100] {
+                let elem = (0..itemsize as u8).map(|i| i.wrapping_mul(37).wrapping_add(11));
+                let src = std::iter::once(0).chain(elem.clone()).collect::<Vec<u8>>();
+                let mut dst = vec![0u8; 1 + n * itemsize + 1];
+                unsafe { fill_contiguous(src[1..].as_ptr(), dst[1..].as_mut_ptr(), n, itemsize) };
+                let expected = std::iter::once(0)
+                    .chain(elem.cycle().take(n * itemsize))
+                    .chain(std::iter::once(0))
+                    .collect::<Vec<u8>>();
+                assert_eq!(dst, expected, "itemsize={itemsize} n={n}");
+            }
+        }
     }
 
     // Zero-length dimensions across the scalar, struct and dynamic dispatch routes.
