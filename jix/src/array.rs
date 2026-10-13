@@ -1503,6 +1503,13 @@ impl<S: ArrayStorage> Array<S> {
         }
     }
 
+    #[inline]
+    pub(crate) fn view_from_storage(storage: &S) -> Array<View<'_, S>> {
+        Array {
+            storage: View::new(storage),
+        }
+    }
+
     /// Convert this array into a type-erased [`ArrayAny`](crate::ArrayAny).
     ///
     /// The storage is wrapped in an `Arc` and hidden behind [`ArrayStorageAny`], so the

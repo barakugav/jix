@@ -192,7 +192,6 @@ impl<A> Plain<A, TypeDyn> {
         })
     }
 }
-
 impl<T> Array<Plain<Vec<T>, Ty<T>>> {
     /// Create a [`Plain`] array that takes ownership of an `ndarray` array.
     ///

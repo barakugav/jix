@@ -177,6 +177,6 @@ pub(crate) mod prelude {
         ScaleWeight, SliceExt, REQUIRE_ALIGNED,
     };
     pub(crate) use crate::{
-        Array, ArrayStorage, DimDyn, DimVec, Dimension, ElementType, Ty, TypeDyn, NDIM_MAX,
+        Array, ArrayStorage, DimDyn, Dimension, ElementType, Ty, TypeDyn, NDIM_MAX,
     };
 }

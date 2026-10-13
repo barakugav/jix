@@ -3,6 +3,7 @@ use std::ops::Not;
 
 use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 
+use crate::dimension::DimVec;
 use crate::ops::prelude::*;
 use crate::{array2_map_inline, const_max, const_min, prev_power_of_two, Dim};
 
@@ -1283,10 +1284,10 @@ macro_rules! define_reduction_op {
         output = $output_ty:ty,
         single_dim $(,)?
     ) => {
-        struct $Kernel { $($($extra_arg: $extra_ty),+)? }
+        pub(crate) struct $Kernel { $($(pub(crate) $extra_arg: $extra_ty),+)? }
 
         $(#[$meta])*
-        pub struct $Op<S>(crate::ops::reduction::ReductionOp<S, $Kernel>)
+        pub struct $Op<S>(pub(crate) crate::ops::reduction::ReductionOp<S, $Kernel>)
         where
             S: crate::ArrayStorage;
 
@@ -1328,10 +1329,10 @@ macro_rules! define_reduction_op {
         where { $($where_:tt)+ }
         output = $output_ty:ty $(,)?
     ) => {
-        struct $Kernel { $($($extra_arg: $extra_ty),+)? }
+        pub(crate) struct $Kernel { $($(pub(crate) $extra_arg: $extra_ty),+)? }
 
         $(#[$meta])*
-        pub struct $Op<S: crate::ArrayStorage>(crate::ops::reduction::ReductionOp<S, $Kernel>);
+        pub struct $Op<S: crate::ArrayStorage>(pub(crate) crate::ops::reduction::ReductionOp<S, $Kernel>);
 
         impl<S> $Op<S>
         where
@@ -1344,6 +1345,7 @@ macro_rules! define_reduction_op {
             }
 
             #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
+            #[allow(unused)]
             pub fn new_array(array: crate::Array<S>, dims: impl crate::ops::DimsArg $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>> {
                 Self::new(array.into_storage(), dims $($(, $extra_arg)+)?).map(crate::Array::from_storage)
             }
@@ -1813,6 +1815,18 @@ pub(crate) mod _traits {
         ///
         /// Returns `NaN` if the effective denominator (`nitems - ddof`) is non-positive.
         fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output;
+
+        /// TODO
+        fn two_pass<'a, S, T: crate::dtype::Dtyped>(
+            array: crate::Array<S>,
+            dims: &[usize],
+            ddof: f64,
+            to_result: impl Fn(Self::Output) -> T,
+            context: &'a crate::ReadContext,
+            out: Option<&'a mut crate::storage::StridedBuf<'_>>,
+        ) -> crate::error::Result<crate::storage::StridedBuf<'a>>
+        where
+            S: crate::storage::ArrayStorageTyped<Item = Self>;
     }
     macro_rules! impl_variance {
         (
@@ -1901,6 +1915,110 @@ pub(crate) mod _traits {
                         state.m2 / denom
                     };
                     <_ as crate::scalar::Cast<Self::Output>>::cast(res)
+                }
+
+                fn two_pass<'a, S, T: crate::dtype::Dtyped>(
+                    array: crate::Array<S>,
+                    dims: &[usize],
+                    ddof: f64,
+                    to_result: impl Fn(Self::Output) -> T,
+                    context: &'a crate::ReadContext,
+                    out: Option<&'a mut crate::storage::StridedBuf<'_>>,
+                ) -> crate::error::Result<crate::storage::StridedBuf<'a>>
+                where
+                    S: crate::storage::ArrayStorageTyped<Item = Self>,
+                {
+                    // implemented var like numpy, with two passed.
+                    // ```
+                    // def variance_two_pass(array, dim, ddof):
+                    //     # --- number of elements being reduced per output position ---
+                    //     n = 1
+                    //     for d in dims:
+                    //         n *= array.shape[d]
+                    //
+                    //     # --- pass 1: mean, kept broadcastable against `array` ---
+                    //     mu = mean(array, axis=dims, keepdims=True)  # shape: reduced dims -> 1
+                    //
+                    //     # --- pass 2: sum of squared deviations ---
+                    //     dev = array - mu                            # broadcast
+                    //     if is_complex(dev):
+                    //         sq = real(dev * conj(dev))              # |dev|^2, result is real
+                    //     else:
+                    //         sq = dev * dev
+                    //     ss = sum(sq, axis=dims)                     # keepdims=False
+                    //
+                    //     # --- normalize ---
+                    //     # NumPy clamps the divisor at 0, so n <= ddof gives inf/nan
+                    //     # (plus a RuntimeWarning) rather than a negative variance.
+                    //     denom = max(n - ddof, 0)
+                    //     return ss / denom
+                    // ```
+                    let shape = array.shape();
+                    let n = dims.iter().map(|&d| shape[d]).product::<u64>();
+
+                    // pass 1
+                    let mean = array.view().mean(dims);
+                    let mean_idx = mean
+                        .shape()
+                        .iter()
+                        .map(|&s| 0..s)
+                        .collect::<crate::DimArray<_>>();
+                    let mean_buf = <_ as crate::ArrayStorage>::read_data(
+                        &mean.storage,
+                        &mean_idx,
+                        context,
+                        None,
+                    )?;
+                    let mean = unsafe {
+                        crate::Array::<
+                            crate::storage::Plain<
+                                _,
+                                crate::Ty<<Self as crate::scalar::Mean>::Output>,
+                            >,
+                        >::plain_ndarray_ptr(
+                            mean_buf.data_ptr(),
+                            mean.shape(),
+                            &mean_buf.strides(),
+                            <<Self as crate::scalar::Mean>::Output as crate::dtype::Dtyped>::DTYPE,
+                            crate::ArrayParams::default(), // TODO
+                        )?
+                    };
+
+                    // pass 2: sum of squared deviations
+                    let deviations = array.view().cast::<$mean_ty>()
+                        - mean.insert_dim(dims).broadcast(shape).cast::<$mean_ty>();
+                    let sq = impl_variance!(@square_dev is_complex=$is_complex, deviations);
+                    let ss = sq.sum(dims);
+
+                    // normalize by the number of items minus the degrees of freedom
+                    let denom = (n as f64 - ddof).max(0.0);
+                    let result = ss.map(move |x| {
+                        to_result(<_ as crate::scalar::Cast<Self::Output>>::cast(x / denom))
+                    });
+
+                    let result_shape = result.shape();
+                    let index = result_shape
+                        .iter()
+                        .map(|ll| 0..*ll)
+                        .collect::<crate::DimArray<_>>();
+                    let result_shape_usize = result_shape
+                        .iter()
+                        .map(|&x| x as usize)
+                        .collect::<crate::DimArray<_>>();
+                    let mut out = crate::storage::materialize_out_buf(
+                        out,
+                        context,
+                        &result_shape_usize,
+                        &result.dtype(),
+                        <_ as crate::ArrayStorage>::spec(&result.storage).read_layout_order(),
+                    );
+                    <_ as crate::ArrayStorage>::read_data(
+                        &result.storage,
+                        &index,
+                        context,
+                        Some(&mut out),
+                    )?;
+                    Ok(out)
                 }
             }
         };
@@ -2619,211 +2737,401 @@ where
     const NEEDS_INDICES: bool = false;
 }
 
-define_reduction_op!(
-    /// Reduces one or more dims by computing the variance.
-    ///
-    /// The variance is real-valued and its dtype matches NumPy: integer and `bool` inputs
-    /// promote to `f64`, real floats keep their width (`f16 -> f16`, `f32 -> f32`, `f64 ->
-    /// f64`), and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
-    /// `Complex<f64> -> f64`), computing `E[|x - mean|^2]`.
-    ///
-    /// The `ddof` parameter (delta degrees of freedom) adjusts the divisor: the variance
-    /// is computed as `sum((x - mean)^2) / (n - ddof)`. Use `ddof=0` for the population
-    /// variance and `ddof=1` for the sample variance (Bessel's correction). If
-    /// `n - ddof <= 0`, the result is `NaN`.
-    ///
-    /// Uses Welford's online algorithm for numerical stability.
-    ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
-    /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::var()`](crate::Array::var).
-    ///
-    /// # Examples
-    /// ```
-    /// use jix::Array;
-    /// use ndarray::{array, Ix0};
-    ///
-    /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
-    ///
-    /// // Population variance (ddof=0) of all elements -> f64
-    /// let var_all = Array::compact_ndarray(&nd)?
-    ///     .var((0, 1), 0.0).to_ndarray::<Ix0>()?;
-    /// assert!((var_all[[]] - 2.9167).abs() < 0.001);
-    ///
-    /// // Sample variance (ddof=1) along dim 0 -> shape [3]
-    /// let col_vars = Array::compact_ndarray(&nd)?
-    ///     .var(0, 1.0).to_ndarray()?;
-    /// assert_eq!(col_vars, array![4.5, 4.5, 4.5]);
-    /// # Ok::<(), jix::Error>(())
-    /// ```
-    Variance,
-    VarianceKernel { ddof: f64 },
-    where {
-        S: ArrayStorageTyped,
-        S::Item: crate::scalar::Variance<Output: Dtyped>,
-    }
-    output = <S::Item as crate::scalar::Variance>::Output,
-);
-impl<T> ReductionOpKernel<T> for VarianceKernel
-where
-    T: crate::scalar::Variance,
-{
-    type Output = <T as crate::scalar::Variance>::Output;
-    type State = <T as crate::scalar::Variance>::State;
+mod variance {
+    use crate::ops::prelude::*;
 
-    #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
-        let mut state = <T as crate::scalar::Variance>::init();
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, None);
+    use super::ReductionOpKernel;
+
+    define_reduction_op!(
+        VarianceImpl,
+        VarianceKernel { ddof: f64 },
+        where {
+            S: ArrayStorageTyped,
+            S::Item: crate::scalar::Variance<Output: Dtyped>,
         }
-        state
+        output = <S::Item as crate::scalar::Variance>::Output,
+    );
+    impl<T> ReductionOpKernel<T> for VarianceKernel
+    where
+        T: crate::scalar::Variance,
+    {
+        type Output = <T as crate::scalar::Variance>::Output;
+        type State = <T as crate::scalar::Variance>::State;
+
+        #[inline(always)]
+        fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
+            let mut state = <T as crate::scalar::Variance>::init();
+            if let Some((item, _idx)) = init_item {
+                state = self.update_state(state, item, None);
+            }
+            state
+        }
+        #[inline(always)]
+        fn init_state_bulk<const N: usize, S: fearless_simd::Simd>(
+            &self,
+            items: [T; N],
+            _indices: Option<[u64; N]>,
+            simd: S,
+        ) -> [Self::State; N] {
+            // somehow this helps the compiler optimize the loop better, avoid lane shuffles
+            let states = array_from_fn_inline(
+                #[inline(always)]
+                |_| <T as crate::scalar::Variance>::init(),
+            );
+            <T as crate::scalar::Variance>::update_bulk(states, items, simd)
+        }
+        #[inline(always)]
+        fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
+            <T as crate::scalar::Variance>::update(state, item)
+        }
+        #[inline(always)]
+        fn update_state_bulk<const N: usize, S: fearless_simd::Simd>(
+            &self,
+            states: [Self::State; N],
+            items: [T; N],
+            _indices: Option<[u64; N]>,
+            simd: S,
+        ) -> [Self::State; N] {
+            <T as crate::scalar::Variance>::update_bulk(states, items, simd)
+        }
+        #[inline(always)]
+        fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
+            <T as crate::scalar::Variance>::merge_states(a, b)
+        }
+        #[inline(always)]
+        fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
+            <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems)
+        }
+        const SUPPORTS_EMPTY: bool = false;
+        const PREFER_TREE_MERGE: bool = true;
+        const NEEDS_INDICES: bool = false;
     }
-    #[inline(always)]
-    fn init_state_bulk<const N: usize, S: fearless_simd::Simd>(
-        &self,
-        items: [T; N],
-        _indices: Option<[u64; N]>,
-        simd: S,
-    ) -> [Self::State; N] {
-        // somehow this helps the compiler optimize the loop better, avoid lane shuffles
-        let states = array_from_fn_inline(
-            #[inline(always)]
-            |_| <T as crate::scalar::Variance>::init(),
-        );
-        <T as crate::scalar::Variance>::update_bulk(states, items, simd)
+
+    define_reduction_op!(
+        StandardDeviationImpl,
+        StandardDeviationKernel { ddof: f64 },
+        where {
+            S: ArrayStorageTyped,
+            S::Item: crate::scalar::Variance<Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped>,
+        }
+        output = <S::Item as crate::scalar::Variance>::Output,
+    );
+    impl<T> ReductionOpKernel<T> for StandardDeviationKernel
+    where
+        T: crate::scalar::Variance<
+            Output: crate::scalar::Sqrt<Output = <T as crate::scalar::Variance>::Output>,
+        >,
+    {
+        type Output = <T as crate::scalar::Variance>::Output;
+        type State = <T as crate::scalar::Variance>::State;
+
+        #[inline(always)]
+        fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
+            let mut state = <T as crate::scalar::Variance>::init();
+            if let Some((item, _idx)) = init_item {
+                state = self.update_state(state, item, None);
+            }
+            state
+        }
+        #[inline(always)]
+        fn init_state_bulk<const N: usize, S: fearless_simd::Simd>(
+            &self,
+            items: [T; N],
+            _indices: Option<[u64; N]>,
+            simd: S,
+        ) -> [Self::State; N] {
+            // somehow this helps the compiler optimize the loop better, avoid lane shuffles
+            let states = array_from_fn_inline(
+                #[inline(always)]
+                |_| <T as crate::scalar::Variance>::init(),
+            );
+            <T as crate::scalar::Variance>::update_bulk(states, items, simd)
+        }
+        #[inline(always)]
+        fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
+            <T as crate::scalar::Variance>::update(state, item)
+        }
+        #[inline(always)]
+        fn update_state_bulk<const N: usize, S: fearless_simd::Simd>(
+            &self,
+            states: [Self::State; N],
+            items: [T; N],
+            _indices: Option<[u64; N]>,
+            simd: S,
+        ) -> [Self::State; N] {
+            <T as crate::scalar::Variance>::update_bulk(states, items, simd)
+        }
+        #[inline(always)]
+        fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
+            <T as crate::scalar::Variance>::merge_states(a, b)
+        }
+        #[inline(always)]
+        fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
+            let var = <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems);
+
+            let mut status = Default::default();
+            let result = crate::scalar::Sqrt::sqrt(var, &mut status);
+            debug_assert!(status.is_ok()); // variance is never negative
+            result
+        }
+        const SUPPORTS_EMPTY: bool = false;
+        const PREFER_TREE_MERGE: bool = true;
+        const NEEDS_INDICES: bool = false;
     }
-    #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
-        <T as crate::scalar::Variance>::update(state, item)
-    }
-    #[inline(always)]
-    fn update_state_bulk<const N: usize, S: Simd>(
-        &self,
-        states: [Self::State; N],
-        items: [T; N],
-        _indices: Option<[u64; N]>,
-        simd: S,
-    ) -> [Self::State; N] {
-        <T as crate::scalar::Variance>::update_bulk(states, items, simd)
-    }
-    #[inline(always)]
-    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
-        <T as crate::scalar::Variance>::merge_states(a, b)
-    }
-    #[inline(always)]
-    fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
-        <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems)
-    }
-    const SUPPORTS_EMPTY: bool = false;
-    const PREFER_TREE_MERGE: bool = true;
-    const NEEDS_INDICES: bool = false;
 }
 
-define_reduction_op!(
-    /// Reduces one or more dims by computing the standard deviation.
-    ///
-    /// The standard deviation is real-valued and follows the same dtype rules as [`Variance`]:
-    /// integer and `bool` inputs promote to `f64`, real floats keep their width, and complex
-    /// inputs reduce to their real component type (`Complex<f32> -> f32`, `Complex<f64> ->
-    /// f64`), computing `sqrt(E[|x - mean|^2])`.
-    ///
-    /// Equivalent to `sqrt(variance)`. The `ddof` parameter has the same meaning as in
-    /// [`Variance`]: use `ddof=0` for population std and `ddof=1` for sample std.
-    ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
-    /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::std()`](crate::Array::std).
-    ///
-    /// # Examples
-    /// ```
-    /// use jix::Array;
-    /// use ndarray::{array, Ix0, Ix1};
-    ///
-    /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
-    ///
-    /// // Population std (ddof=0) of all elements -> f64
-    /// let std_all = Array::compact_ndarray(&nd)?
-    ///     .std((0, 1), 0.0).to_ndarray::<Ix0>()?;
-    /// assert!((std_all[[]] - 1.7078).abs() < 0.001);
-    ///
-    /// // Sample std (ddof=1) along dim 0 -> shape [3]
-    /// let col_stds = Array::compact_ndarray(&nd)?
-    ///     .std(0, 1.0).to_ndarray::<Ix1>()?;
-    /// assert!((col_stds[[0]] - 2.1213).abs() < 0.001);
-    /// # Ok::<(), jix::Error>(())
-    /// ```
-    StandardDeviation,
-    StandardDeviationKernel { ddof: f64 },
-    where {
-        S: ArrayStorageTyped,
-        S::Item: crate::scalar::Variance<Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped>,
-    }
-    output = <S::Item as crate::scalar::Variance>::Output,
-);
-impl<T> ReductionOpKernel<T> for StandardDeviationKernel
+/// Reduces one or more dims by computing the variance.
+///
+/// The variance is real-valued and its dtype matches NumPy: integer and `bool` inputs
+/// promote to `f64`, real floats keep their width (`f16 -> f16`, `f32 -> f32`, `f64 ->
+/// f64`), and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
+/// `Complex<f64> -> f64`), computing `E[|x - mean|^2]`.
+///
+/// The `ddof` parameter (delta degrees of freedom) adjusts the divisor: the variance
+/// is computed as `sum((x - mean)^2) / (n - ddof)`. Use `ddof=0` for the population
+/// variance and `ddof=1` for the sample variance (Bessel's correction). If
+/// `n - ddof <= 0`, the result is `NaN`.
+///
+/// Uses Welford's online algorithm for numerical stability.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation, the operation is also available as
+/// [`Array::var()`](crate::Array::var).
+///
+/// # Examples
+/// ```
+/// use jix::Array;
+/// use ndarray::{array, Ix0};
+///
+/// let nd = array![[1i32, 2, 3], [4, 5, 6]];
+///
+/// // Population variance (ddof=0) of all elements -> f64
+/// let var_all = Array::compact_ndarray(&nd)?
+///     .var((0, 1), 0.0).to_ndarray::<Ix0>()?;
+/// assert!((var_all[[]] - 2.9167).abs() < 0.001);
+///
+/// // Sample variance (ddof=1) along dim 0 -> shape [3]
+/// let col_vars = Array::compact_ndarray(&nd)?
+///     .var(0, 1.0).to_ndarray()?;
+/// assert_eq!(col_vars, array![4.5, 4.5, 4.5]);
+/// # Ok::<(), jix::Error>(())
+/// ```
+pub struct Variance<S: ArrayStorage>(variance::VarianceImpl<S>);
+impl<S> Variance<S>
 where
-    T: crate::scalar::Variance<
-        Output: crate::scalar::Sqrt<Output = <T as crate::scalar::Variance>::Output>,
+    S: ArrayStorageTyped,
+    S::Item: crate::scalar::Variance<Output: Dtyped>,
+{
+    /// Constructs a [`Variance`] storage. See the struct docs for semantics and examples.
+    pub fn new(array: S, dims: impl DimsArg, ddof: f64) -> Result<Self> {
+        Ok(Self(variance::VarianceImpl::new(array, dims, ddof)?))
+    }
+
+    /// Constructs an array with [`Variance`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(array: Array<S>, dims: impl DimsArg, ddof: f64) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), dims, ddof).map(Array::from_storage)
+    }
+}
+impl<S> ArrayStorage for Variance<S>
+where
+    S: ArrayStorageTyped,
+    S::Item: crate::scalar::Variance<Output: Dtyped>,
+{
+    type ElementType = Ty<<S::Item as crate::scalar::Variance>::Output>;
+
+    fn read_data<'rd>(
+        &'rd self,
+        index: &[Range<u64>],
+        context: &'rd ReadContext,
+        out: Option<&'rd mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'rd>> {
+        if self.0 .0.array.spec().element_cost() < 100.0 {
+            let reduction_op = &self.0 .0;
+            let dims = reduction_op
+                .is_reduced
+                .as_ref()
+                .iter()
+                .enumerate()
+                .filter_map(|(i, r)| r.then_some(i))
+                .collect::<DimArray<_>>();
+            let mut out_index = index.iter();
+            let input_index = reduction_op
+                .is_reduced
+                .as_ref()
+                .iter()
+                .zip(reduction_op.array.shape())
+                .map(|(&r, &len)| {
+                    if r {
+                        0..len
+                    } else {
+                        out_index.next().unwrap().clone()
+                    }
+                })
+                .collect::<DimArray<_>>();
+            let array = Array::view_from_storage(&reduction_op.array);
+            let array = array.slice(&input_index[..]);
+            <S::Item as crate::scalar::Variance>::two_pass(
+                array,
+                &dims,
+                reduction_op.kernel.ddof,
+                #[inline(always)]
+                |x| x,
+                context,
+                out,
+            )
+        } else {
+            self.0.read_data(index, context, out)
+        }
+    }
+
+    #[inline(always)]
+    fn shape(&self) -> &[u64] {
+        self.0.shape()
+    }
+    #[inline(always)]
+    fn dtype(&self) -> &Dtype {
+        self.0.dtype()
+    }
+    #[inline(always)]
+    fn spec(&self) -> crate::storage::ArraySpec<'_> {
+        self.0.spec()
+    }
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Variance", [&self.0 .0.array])
+    }
+    crate::ops::impl_element_type_change_default!();
+}
+
+/// Reduces one or more dims by computing the standard deviation.
+///
+/// The standard deviation is real-valued and follows the same dtype rules as [`Variance`]:
+/// integer and `bool` inputs promote to `f64`, real floats keep their width, and complex
+/// inputs reduce to their real component type (`Complex<f32> -> f32`, `Complex<f64> ->
+/// f64`), computing `sqrt(E[|x - mean|^2])`.
+///
+/// Equivalent to `sqrt(variance)`. The `ddof` parameter has the same meaning as in
+/// [`Variance`]: use `ddof=0` for population std and `ddof=1` for sample std.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation, the operation is also available as
+/// [`Array::std()`](crate::Array::std).
+///
+/// # Examples
+/// ```
+/// use jix::Array;
+/// use ndarray::{array, Ix0, Ix1};
+///
+/// let nd = array![[1i32, 2, 3], [4, 5, 6]];
+///
+/// // Population std (ddof=0) of all elements -> f64
+/// let std_all = Array::compact_ndarray(&nd)?
+///     .std((0, 1), 0.0).to_ndarray::<Ix0>()?;
+/// assert!((std_all[[]] - 1.7078).abs() < 0.001);
+///
+/// // Sample std (ddof=1) along dim 0 -> shape [3]
+/// let col_stds = Array::compact_ndarray(&nd)?
+///     .std(0, 1.0).to_ndarray::<Ix1>()?;
+/// assert!((col_stds[[0]] - 2.1213).abs() < 0.001);
+/// # Ok::<(), jix::Error>(())
+/// ```
+pub struct StandardDeviation<S: ArrayStorage>(variance::StandardDeviationImpl<S>);
+impl<S> StandardDeviation<S>
+where
+    S: ArrayStorageTyped,
+    S::Item: crate::scalar::Variance<
+        Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped,
     >,
 {
-    type Output = <T as crate::scalar::Variance>::Output;
-    type State = <T as crate::scalar::Variance>::State;
+    /// Constructs a [`StandardDeviation`] storage. See the struct docs for semantics and examples.
+    pub fn new(array: S, dims: impl DimsArg, ddof: f64) -> Result<Self> {
+        Ok(Self(variance::StandardDeviationImpl::new(
+            array, dims, ddof,
+        )?))
+    }
 
-    #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
-        let mut state = <T as crate::scalar::Variance>::init();
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, None);
+    /// Constructs an array with [`StandardDeviation`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(array: Array<S>, dims: impl DimsArg, ddof: f64) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), dims, ddof).map(Array::from_storage)
+    }
+}
+impl<S> ArrayStorage for StandardDeviation<S>
+where
+    S: ArrayStorageTyped,
+    S::Item: crate::scalar::Variance<
+        Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped,
+    >,
+{
+    type ElementType = Ty<<S::Item as crate::scalar::Variance>::Output>;
+
+    fn read_data<'rd>(
+        &'rd self,
+        index: &[Range<u64>],
+        context: &'rd ReadContext,
+        out: Option<&'rd mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'rd>> {
+        if self.0 .0.array.spec().element_cost() < 100.0 {
+            let reduction_op = &self.0 .0;
+            let dims = reduction_op
+                .is_reduced
+                .as_ref()
+                .iter()
+                .enumerate()
+                .filter_map(|(i, r)| r.then_some(i))
+                .collect::<DimArray<_>>();
+            let mut out_index = index.iter();
+            let input_index = reduction_op
+                .is_reduced
+                .as_ref()
+                .iter()
+                .zip(reduction_op.array.shape())
+                .map(|(&r, &len)| {
+                    if r {
+                        0..len
+                    } else {
+                        out_index.next().unwrap().clone()
+                    }
+                })
+                .collect::<DimArray<_>>();
+            let array = Array::view_from_storage(&reduction_op.array);
+            let array = array.slice(&input_index[..]);
+            <S::Item as crate::scalar::Variance>::two_pass(
+                array,
+                &dims,
+                reduction_op.kernel.ddof,
+                #[inline(always)]
+                |x| {
+                    let mut status = Default::default();
+                    let std = <_ as crate::scalar::Sqrt>::sqrt(x, &mut status);
+                    debug_assert!(status.is_ok()); // variance is never negative
+                    std
+                },
+                context,
+                out,
+            )
+        } else {
+            self.0.read_data(index, context, out)
         }
-        state
     }
-    #[inline(always)]
-    fn init_state_bulk<const N: usize, S: fearless_simd::Simd>(
-        &self,
-        items: [T; N],
-        _indices: Option<[u64; N]>,
-        simd: S,
-    ) -> [Self::State; N] {
-        // somehow this helps the compiler optimize the loop better, avoid lane shuffles
-        let states = array_from_fn_inline(
-            #[inline(always)]
-            |_| <T as crate::scalar::Variance>::init(),
-        );
-        <T as crate::scalar::Variance>::update_bulk(states, items, simd)
-    }
-    #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
-        <T as crate::scalar::Variance>::update(state, item)
-    }
-    #[inline(always)]
-    fn update_state_bulk<const N: usize, S: Simd>(
-        &self,
-        states: [Self::State; N],
-        items: [T; N],
-        _indices: Option<[u64; N]>,
-        simd: S,
-    ) -> [Self::State; N] {
-        <T as crate::scalar::Variance>::update_bulk(states, items, simd)
-    }
-    #[inline(always)]
-    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
-        <T as crate::scalar::Variance>::merge_states(a, b)
-    }
-    #[inline(always)]
-    fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
-        let var = <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems);
 
-        let mut status = Default::default();
-        let result = crate::scalar::Sqrt::sqrt(var, &mut status);
-        debug_assert!(status.is_ok()); // variance is never negative
-        result
+    #[inline(always)]
+    fn shape(&self) -> &[u64] {
+        self.0.shape()
     }
-    const SUPPORTS_EMPTY: bool = false;
-    const PREFER_TREE_MERGE: bool = true;
-    const NEEDS_INDICES: bool = false;
+    #[inline(always)]
+    fn dtype(&self) -> &Dtype {
+        self.0.dtype()
+    }
+    #[inline(always)]
+    fn spec(&self) -> crate::storage::ArraySpec<'_> {
+        self.0.spec()
+    }
+
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("StandardDeviation", [&self.0 .0.array])
+    }
+    crate::ops::impl_element_type_change_default!();
 }
 
 define_reduction_op!(
