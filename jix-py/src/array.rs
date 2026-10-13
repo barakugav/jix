@@ -736,7 +736,7 @@ impl Array {
     pub fn compact<'py>(
         slf: &Bound<'py, Self>,
         params: Option<Bound<'_, PyDict>>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::compact(slf, None, params)
     }
 
@@ -814,7 +814,7 @@ impl Array {
     /// Write the array to a file or a file-like object. See [`jix.write_array()`][jix.write_array].
     #[pyo3(signature = (path_or_writer, *, append=false, params=None))]
     pub fn write_to(
-        slf: &Bound<'_, Array>,
+        slf: &Bound<'_, Self>,
         path_or_writer: &Bound<'_, PyAny>,
         append: bool,
         params: Option<Bound<'_, PyDict>>,
@@ -1240,73 +1240,73 @@ impl Array {
     /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See [`jix.broadcast()`][jix.broadcast].
     #[pyo3(signature = (shape))]
     pub fn broadcast<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         shape: ItemOrSequence<i64>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::broadcast(slf, shape)
     }
 
     /// Selects a sub-region of the array as a lazy view. See [`jix.slice()`][jix.slice].
     pub fn slice<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         index: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::slice(slf, index)
     }
 
     /// Removes length-1 dimensions from the array's shape. See [`jix.squeeze()`][jix.squeeze].
     #[pyo3(signature = (dim=None))]
     pub fn squeeze<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         dim: Option<ItemOrSequence<i32>>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::squeeze(slf, dim)
     }
 
     /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
     pub fn unsqueeze<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         dim: ItemOrSequence<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::unsqueeze(slf, dim)
     }
 
     /// Repeats each element along the given dim. See [`jix.repeat()`][jix.repeat].
     #[pyo3(signature = (repeats, dim=None))]
     pub fn repeat<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         repeats: u64,
         dim: Option<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::repeat(slf, repeats, dim)
     }
 
     /// Reverses the order of elements along the given dim. See [`jix.flip()`][jix.flip].
     #[pyo3(signature = (dim=None))]
     pub fn flip<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         dim: Option<ItemOrSequence<i32>>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::flip(slf, dim)
     }
 
     /// Rolls elements along a dim, wrapping at the boundary. See [`jix.roll()`][jix.roll].
     #[pyo3(signature = (shift, dim=None))]
     pub fn roll<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         shift: i64,
         dim: Option<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::roll(slf, shift, dim)
     }
 
     /// Replicates the array along a single dim. See [`jix.tile()`][jix.tile].
     #[pyo3(signature = (repeats, dim=None))]
     pub fn tile<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         repeats: u64,
         dim: Option<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::tile(slf, repeats, dim)
     }
 
@@ -1314,13 +1314,13 @@ impl Array {
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].
     #[getter]
-    pub fn real(slf: &Bound<'_, Array>) -> PyResult<Array> {
+    pub fn real(slf: &Bound<'_, Self>) -> PyResult<Array> {
         crate::ops::real(slf)
     }
 
     /// Extracts the imaginary part of each complex element. See [`jix.imag()`][jix.imag].
     #[getter]
-    pub fn imag(slf: &Bound<'_, Array>) -> PyResult<Array> {
+    pub fn imag(slf: &Bound<'_, Self>) -> PyResult<Array> {
         crate::ops::imag(slf)
     }
 
@@ -1398,17 +1398,17 @@ impl Array {
 
     /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_dim()`][jix.insert_dim].
     pub fn insert_dim<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         dim: ItemOrSequence<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::insert_dim(slf, dim)
     }
 
     /// Removes length-1 dimensions from the array's shape. See [`jix.remove_dim()`][jix.remove_dim].
     pub fn remove_dim<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         dim: ItemOrSequence<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::remove_dim(slf, dim)
     }
 }
