@@ -201,11 +201,11 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
     let iter = NdIterUnordered::new(shape, strides, layouts);
     let chunk_len_max = iter.inner_len().min(Staging::BUFFER_SIZE);
 
-    let stage_strided = stage_strided_inputs(&iter.is_contiguous());
+    let stage_strided = stage_strided_inputs(iter.is_contiguous());
     let mut staging = array_from_fn_inline::<_, N_OPERANDS>(|i| {
         let operand = operands[i];
         let need_staging_unaligned = REQUIRE_ALIGNED
-            && !(iter.is_aligned()[i]
+            && !(iter.is_strides_aligned()[i]
                 && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
         let need_staging_strided =
             stage_strided && !is_output_operand(i) && !iter.is_contiguous()[i];
@@ -329,7 +329,7 @@ fn to_buf_type_erased_dyn(
         .enumerate()
         .map(|(i, operand)| {
             let need_staging_unaligned = REQUIRE_ALIGNED
-                && !(iter.is_aligned()[i]
+                && !(iter.is_strides_aligned()[i]
                     && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
             let need_staging_strided =
                 stage_strided && !is_output_operand(i) && !iter.is_contiguous()[i];
@@ -505,9 +505,7 @@ fn inner_loop_impl<
 ) where
     T: Dtyped,
 {
-    if OUT_CONTIGUOUS {
-        debug_assert_eq!(dst_stride, size_of::<T>());
-    }
+    unsafe { std::hint::assert_unchecked(OUT_CONTIGUOUS == (dst_stride == size_of::<T>())) };
     let dst = dst.as_mut_ptr();
     if REQUIRE_ALIGNED {
         debug_assert!(dst.is_aligned());

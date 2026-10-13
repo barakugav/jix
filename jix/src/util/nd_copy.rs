@@ -14,11 +14,13 @@ use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 /// driving an [`NdIterUnordered`] over `shape` (which sorts, coalesces and walks the dims) and
 /// copying one contiguous-or-strided inner loop at each visited position.
 pub(crate) struct NdCopier<'a>(NdCopierInner<'a>);
+
 enum NdCopierInner<'a> {
     Simple(NdCopyFn),
     Struct(NdCopierStruct<'a>),
 }
-type NdCopyFn = fn(NdCopyArgs);
+type NdCopyFn = unsafe fn(NdCopyArgs);
+type InnerLoopFn<T> = unsafe fn(PtrNoalias<'_, T>, PtrMutNoalias<'_, T>, usize, usize, usize);
 struct NdCopierStruct<'a> {
     scalar_fns: ArrayVec<NdCopyFn, 4>,
     offsets: ArrayVec<Itemsize, 4>,
@@ -130,13 +132,15 @@ impl<'a> NdCopier<'a> {
             dtype,
         };
         match &self.0 {
-            NdCopierInner::Simple(f) => f(args),
-            NdCopierInner::Struct(struct_copier) => Self::copy_struct(struct_copier, args),
+            NdCopierInner::Simple(f) => unsafe { f(args) },
+            NdCopierInner::Struct(struct_copier) => unsafe {
+                Self::copy_struct(struct_copier, args)
+            },
         }
     }
 
     #[inline]
-    const fn create_scalar_fn(dtype: &Dtype) -> Option<fn(NdCopyArgs)> {
+    const fn create_scalar_fn(dtype: &Dtype) -> Option<unsafe fn(NdCopyArgs)> {
         Some(match (dtype.itemsize(), dtype.alignment().as_usize()) {
             (1, 1) => Self::scalar_fn::<u8>,
             (2, 2) => Self::scalar_fn::<u16>,
@@ -148,7 +152,7 @@ impl<'a> NdCopier<'a> {
         })
     }
 
-    fn scalar_fn<T: Copy + 'static>(args: NdCopyArgs) {
+    unsafe fn scalar_fn<T: Copy + 'static>(args: NdCopyArgs) {
         let NdCopyArgs {
             src,
             dst,
@@ -245,12 +249,8 @@ impl<'a> NdCopier<'a> {
         src_stride: usize,
         dst_stride: usize,
     ) {
-        if SRC_CONTIGUOUS {
-            debug_assert_eq!(src_stride, size_of::<T>());
-        }
-        if DST_CONTIGUOUS {
-            debug_assert_eq!(dst_stride, size_of::<T>());
-        }
+        unsafe { std::hint::assert_unchecked(SRC_CONTIGUOUS == (src_stride == size_of::<T>())) };
+        unsafe { std::hint::assert_unchecked(DST_CONTIGUOUS == (dst_stride == size_of::<T>())) };
         let src = src.as_ptr();
         let dst = dst.as_mut_ptr();
         unsafe {
@@ -283,8 +283,6 @@ impl<'a> NdCopier<'a> {
         }
     }
 
-    /// One inner run where both operands are contiguous and its length is the compile-time `N`:
-    /// a single `[T; N]` load/store (branchless), the common small-run fast path.
     unsafe fn inner_loop_contiguous_const_len<T: Copy, const LEN: usize, const ALIGNED: bool>(
         src: PtrNoalias<T>,
         dst: PtrMutNoalias<T>,
@@ -329,7 +327,7 @@ impl<'a> NdCopier<'a> {
     }
 
     #[inline(never)]
-    fn copy_struct(struct_copier: &NdCopierStruct, args: NdCopyArgs) {
+    unsafe fn copy_struct(struct_copier: &NdCopierStruct, args: NdCopyArgs) {
         let NdCopyArgs {
             src,
             mut dst,
@@ -352,11 +350,11 @@ impl<'a> NdCopier<'a> {
                 dst_strides,
                 dtype: field_dtype,
             };
-            f(field_args)
+            unsafe { f(field_args) }
         }
     }
 
-    fn copy_untyped(args: NdCopyArgs) {
+    unsafe fn copy_untyped(args: NdCopyArgs) {
         let NdCopyArgs {
             src,
             mut dst,
