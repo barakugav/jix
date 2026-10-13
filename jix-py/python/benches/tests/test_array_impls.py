@@ -52,12 +52,12 @@ def test_low_entropy_compresses(name):
     assert stored_bytes(arr.raw) < data.nbytes
 
 
-def _run(op, arr_a, arr_b, axis):
+def _run(op, arr_a, arr_b, dim):
     """Evaluate `op` on a built array, returning a NumPy array.
 
     Mirrors the per-engine expressions benchmarked in test_ops.py (dispatched by the raw array
     type) so this cross-checks that every backend agrees with NumPy on the same logical
-    operation. `arr_b` is only used by `add`; `axis` only by `sum`/`std`.
+    operation. `arr_b` is only used by `add`; `dim` only by `sum`/`std`.
     """
     a = arr_a.raw
     b = None if arr_b is None else arr_b.raw
@@ -85,23 +85,23 @@ def _run(op, arr_a, arr_b, axis):
         case "sum":
             match a:
                 case jix.Array():
-                    return np.asarray(a.sum(axis=axis).numpy())
+                    return np.asarray(a.sum(dim=dim).numpy())
                 case np.ndarray():
-                    return np.asarray(a.sum(axis=axis))
+                    return np.asarray(a.sum(axis=dim))
                 case blosc2.NDArray():
-                    return np.asarray(blosc2.sum(a, axis=axis))
+                    return np.asarray(blosc2.sum(a, axis=dim))
                 case zarr.Array():
-                    return np.asarray(np.asarray(a[:]).sum(axis=axis))
+                    return np.asarray(np.asarray(a[:]).sum(axis=dim))
         case "std":
             match a:
                 case jix.Array():
-                    return np.asarray(a.std(axis=axis).numpy())
+                    return np.asarray(a.std(dim=dim).numpy())
                 case np.ndarray():
-                    return np.asarray(a.std(axis=axis))
+                    return np.asarray(a.std(axis=dim))
                 case blosc2.NDArray():
-                    return np.asarray(blosc2.std(a, axis=axis))
+                    return np.asarray(blosc2.std(a, axis=dim))
                 case zarr.Array():
-                    return np.asarray(np.asarray(a[:]).std(axis=axis))
+                    return np.asarray(np.asarray(a[:]).std(axis=dim))
         case "pipeline_elementwise":
             match a:
                 case jix.Array():
@@ -116,7 +116,7 @@ def _run(op, arr_a, arr_b, axis):
         case "pipeline_reduction":
             match a:
                 case jix.Array():
-                    return np.asarray(a.exp().sum(axis=0).numpy())
+                    return np.asarray(a.exp().sum(dim=0).numpy())
                 case np.ndarray():
                     return np.asarray(np.exp(a).sum(axis=0))
                 case blosc2.NDArray():
@@ -132,18 +132,18 @@ AGREE_OPS = [
     ("add", None),
     ("pipeline_elementwise", None),
     ("pipeline_reduction", None),
-    *[("sum", axis) for axis in (0, 1, None)],
-    *[("std", axis) for axis in (0, 1, None)],
+    *[("sum", dim) for dim in (0, 1, None)],
+    *[("std", dim) for dim in (0, 1, None)],
 ]
 
 
-@pytest.mark.parametrize("op,axis", AGREE_OPS)
-def test_ops_agree_across_libraries(op, axis):
+@pytest.mark.parametrize("op,dim", AGREE_OPS)
+def test_ops_agree_across_libraries(op, dim):
     data_a = make_data("smooth", (32, 16), dtype=np.float64, seed=0)
     data_b = make_data("smooth", (32, 16), dtype=np.float64, seed=1)
     arrs_a = {n: ARRAY_IMPLS[n].from_numpy(data_a, block_shape=(8, 16)) for n in BASE_LIBS}
     arrs_b = {n: ARRAY_IMPLS[n].from_numpy(data_b, block_shape=(8, 16)) for n in BASE_LIBS}
-    ref = _run(op, arrs_a["numpy"], arrs_b["numpy"], axis)
+    ref = _run(op, arrs_a["numpy"], arrs_b["numpy"], dim)
     for lib in ("jix", "jix-plain", "blosc2", "zarr"):
-        got = _run(op, arrs_a[lib], arrs_b[lib], axis)
-        assert np.allclose(got, ref), f"{lib} disagrees on op {op} (axis={axis})"
+        got = _run(op, arrs_a[lib], arrs_b[lib], dim)
+        assert np.allclose(got, ref), f"{lib} disagrees on op {op} (dim={dim})"

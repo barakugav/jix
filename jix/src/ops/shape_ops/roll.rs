@@ -1,14 +1,14 @@
 use crate::ops::prelude::*;
 
-/// Rolls elements along an axis, wrapping around at the boundary, returned by
+/// Rolls elements along a dim, wrapping around at the boundary, returned by
 /// [`Array::roll`](crate::Array::roll).
 ///
-/// `output[..., i, ...] = input[..., (i - shift) mod L, ...]` on the rolled axis, where
-/// `L = shape[axis]`. A positive `shift` moves elements toward larger indices (elements
+/// `output[..., i, ...] = input[..., (i - shift) mod L, ...]` on the rolled dim, where
+/// `L = shape[dim]`. A positive `shift` moves elements toward larger indices (elements
 /// that fall off the end re-enter at the beginning); a negative `shift` moves them toward
 /// smaller indices. `shift` is reduced modulo `L`, so any signed integer is accepted.
 ///
-/// See also [`Flip`](crate::ops::Flip), which reverses element order along an axis
+/// See also [`Flip`](crate::ops::Flip), which reverses element order along a dim
 /// without wrapping.
 ///
 /// Output shape and dtype equal the input. The result is a lazy view; no computation
@@ -31,23 +31,23 @@ use crate::ops::prelude::*;
 /// ```
 pub struct Roll<S: ArrayStorage> {
     array: S,
-    axis: DimIdx,
-    /// `shift` normalized to `[0, shape[axis])`. Zero means the op is a pass-through.
+    dim: DimIdx,
+    /// `shift` normalized to `[0, shape[dim])`. Zero means the op is a pass-through.
     shift: u64,
 }
 
 impl<S: ArrayStorage> Roll<S> {
     /// Constructs a [`Roll`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: S, shift: i64, axis: usize) -> Result<Self> {
+    pub fn new(array: S, shift: i64, dim: usize) -> Result<Self> {
         let input_shape = array.shape();
         let ndim = input_shape.len();
         ensure!(
-            axis < ndim,
+            dim < ndim,
             InvalidShapeOperation,
-            "roll axis {axis} is out of bounds for array with ndim {ndim}"
+            "roll dim {dim} is out of bounds for array with ndim {ndim}"
         );
 
-        let len = input_shape[axis];
+        let len = input_shape[dim];
         let shift = if len == 0 {
             0
         } else {
@@ -56,14 +56,14 @@ impl<S: ArrayStorage> Roll<S> {
 
         Ok(Self {
             array,
-            axis: axis as DimIdx,
+            dim: dim as DimIdx,
             shift,
         })
     }
 
     /// Constructs an array with [`Roll`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array(array: Array<S>, shift: i64, axis: usize) -> Result<Array<Self>> {
-        Self::new(array.into_storage(), shift, axis).map(Array::from_storage)
+    pub fn new_array(array: Array<S>, shift: i64, dim: usize) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), shift, dim).map(Array::from_storage)
     }
 }
 
@@ -80,7 +80,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         check_get_range(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
 
-        let k = self.axis as usize;
+        let k = self.dim as usize;
         let shift = self.shift;
 
         let ndim = index.len();
@@ -89,7 +89,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         let s = index[k].start;
         let e = index[k].end;
 
-        // Non-wrap: the rolled output sub-range on axis k maps to a single contiguous input
+        // Non-wrap: the rolled output sub-range on dim k maps to a single contiguous input
         // range. The shape of that read is exactly `out_shape`, so we read straight into buf.
         if s >= shift || e <= shift {
             let j_start = if s >= shift { s - shift } else { s + l - shift };
@@ -103,9 +103,9 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             return self.array.read_data(inner_index.as_ref(), context, out);
         }
 
-        // Wrap: split the output along axis k into two regions and gather each into the destination.
-        //   Region 1 (output axis-k [0, len1)):   input axis-k [s + L - shift, L), length len1.
-        //   Region 2 (output axis-k [len1, end)): input axis-k [0, e - shift),     length len2.
+        // Wrap: split the output along dim k into two regions and gather each into the destination.
+        //   Region 1 (output dim-k [0, len1)):   input dim-k [s + L - shift, L), length len1.
+        //   Region 2 (output dim-k [len1, end)): input dim-k [0, e - shift),     length len2.
         let len1 = shift - s;
         let len2 = e - shift;
         let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
@@ -120,8 +120,8 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             return Ok(out);
         }
         let (out_buf, out_strides) = out.data_mut();
-        let mut read_region = |inner_index: &[Range<u64>], dst_axis_k_offset: u64| -> Result<()> {
-            let dst_byte_offset = dst_axis_k_offset as usize * out_strides[k];
+        let mut read_region = |inner_index: &[Range<u64>], dst_dim_k_offset: u64| -> Result<()> {
+            let dst_byte_offset = dst_dim_k_offset as usize * out_strides[k];
             let mut sub =
                 unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides) };
             self.array.read_data(inner_index, context, Some(&mut sub))?;
@@ -169,7 +169,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
         Ok(Roll {
             array: self.array.dimension_change()?,
-            axis: self.axis,
+            dim: self.dim,
             shift: self.shift,
         })
     }
@@ -181,7 +181,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
         Ok(Roll {
             array: self.array.element_type_change()?,
-            axis: self.axis,
+            dim: self.dim,
             shift: self.shift,
         })
     }
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn shape_preserved_large_shift() {
-        // shift larger than the axis length is reduced mod L.
+        // shift larger than the dim length is reduced mod L.
         assert_eq!(make(arange(12), &[3u64, 4]).roll(100, 0).shape(), &[3, 4]);
     }
 
@@ -238,7 +238,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn error_axis_out_of_bounds() {
+    fn error_dim_out_of_bounds() {
         let a = make(arange(12), &[3u64, 4]);
         let err = super::Roll::new_array(a.view(), 1, 2).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn identity_shift_equals_axis_len() {
+    fn identity_shift_equals_dim_len() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
         let got = make(arange(12), &[3u64, 4])
             .roll(3, 0)
@@ -279,8 +279,8 @@ mod tests {
     }
 
     #[test]
-    fn identity_size_one_axis() {
-        // Rolling a size-1 axis is a no-op for any shift.
+    fn identity_size_one_dim() {
+        // Rolling a size-1 dim is a no-op for any shift.
         let nd = ndarray::Array::from_shape_vec((1, 4), arange(4)).unwrap();
         let got = make(arange(4), &[1u64, 4]).roll(7, 0).to_ndarray().unwrap();
         assert_eq!(got, nd);
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn identity_empty_array() {
-        // Rolling an axis of size 0 is a no-op (no data to move).
+        // Rolling a dim of size 0 is a no-op (no data to move).
         let got = make(vec![], &[0u64, 4]).roll(3, 0).to_ndarray().unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
@@ -310,20 +310,20 @@ mod tests {
     }
 
     #[test]
-    fn full_read_2d_axis0() {
+    fn full_read_2d_dim0() {
         let got = make(arange(8), &[2u64, 4]).roll(1, 0).to_ndarray().unwrap();
         assert_eq!(got, array![[4, 5, 6, 7], [0, 1, 2, 3]]);
     }
 
     #[test]
-    fn full_read_2d_axis1() {
+    fn full_read_2d_dim1() {
         let got = make(arange(6), &[2u64, 3]).roll(1, 1).to_ndarray().unwrap();
         assert_eq!(got, array![[2, 0, 1], [5, 3, 4]]);
     }
 
     #[test]
-    fn full_read_3d_middle_axis() {
-        // Compare against a hand-rolled reference along axis 1 by +1.
+    fn full_read_3d_middle_dim() {
+        // Compare against a hand-rolled reference along dim 1 by +1.
         let arr = ndarray::Array::from_shape_vec((2, 3, 2), arange(12)).unwrap();
         let mut expected = arr.clone();
         for i in 0..2 {
@@ -376,8 +376,8 @@ mod tests {
     }
 
     #[test]
-    fn sub_read_2d_axis0_wrap() {
-        // [[0,1,2],[3,4,5],[6,7,8]] roll +1 axis 0 -> [[6,7,8],[0,1,2],[3,4,5]]
+    fn sub_read_2d_dim0_wrap() {
+        // [[0,1,2],[3,4,5],[6,7,8]] roll +1 dim 0 -> [[6,7,8],[0,1,2],[3,4,5]]
         // Sub rows [0..2), cols [0..3) -> [[6,7,8],[0,1,2]]. Wraps at i=1.
         let got = make(arange(9), &[3u64, 3])
             .roll(1, 0)
@@ -387,9 +387,9 @@ mod tests {
     }
 
     #[test]
-    fn sub_read_2d_axis1_wrap() {
-        // [[0,1,2,3],[4,5,6,7]] roll +1 axis 1 -> [[3,0,1,2],[7,4,5,6]]
-        // Sub rows [0..2), cols [0..3) -> [[3,0,1],[7,4,5]]. Wraps at i=1 on axis 1.
+    fn sub_read_2d_dim1_wrap() {
+        // [[0,1,2,3],[4,5,6,7]] roll +1 dim 1 -> [[3,0,1,2],[7,4,5,6]]
+        // Sub rows [0..2), cols [0..3) -> [[3,0,1],[7,4,5]]. Wraps at i=1 on dim 1.
         let got = make(arange(8), &[2u64, 4])
             .roll(1, 1)
             .to_ndarray_sub(&[0..2, 0..3], &ReadContext::default())
@@ -454,9 +454,9 @@ mod tests {
 
     #[test]
     fn compose_permute_then_roll() {
-        // [[0,1,2],[3,4,5]] permute -> [[0,3],[1,4],[2,5]]; roll +1 axis 0 -> [[2,5],[0,3],[1,4]]
+        // [[0,1,2],[3,4,5]] permute -> [[0,3],[1,4],[2,5]]; roll +1 dim 0 -> [[2,5],[0,3],[1,4]]
         let got = make(arange(6), &[2u64, 3])
-            .permute_axes(&[1, 0])
+            .permute_dims(&[1, 0])
             .roll(1, 0)
             .to_ndarray()
             .unwrap();
@@ -464,8 +464,8 @@ mod tests {
     }
 
     #[test]
-    fn compose_roll_then_roll_same_axis_combines() {
-        // Two rolls on the same axis are equivalent to one roll with the sum of shifts.
+    fn compose_roll_then_roll_same_dim_combines() {
+        // Two rolls on the same dim are equivalent to one roll with the sum of shifts.
         let nd1 = make(arange(5), &[5u64])
             .roll(2, 0)
             .roll(1, 0)
@@ -507,24 +507,24 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Proptest: random shape + axis + shift vs hand-rolled reference
+    // Proptest: random shape + dim + shift vs hand-rolled reference
     // -----------------------------------------------------------------------
 
     fn roll_reference<T: Clone + Default>(
         nd: &ndarray::ArrayD<T>,
         shift: i64,
-        axis: usize,
+        dim: usize,
     ) -> ndarray::ArrayD<T> {
-        let l = nd.shape()[axis];
+        let l = nd.shape()[dim];
         let mut out = ndarray::ArrayD::<T>::from_elem(nd.shape(), T::default());
         if l == 0 {
             return out;
         }
         let l_i128 = l as i128;
         let s_prime = ((shift as i128).rem_euclid(l_i128)) as usize;
-        for (i, src_slice) in nd.axis_iter(ndarray::Axis(axis)).enumerate() {
+        for (i, src_slice) in nd.axis_iter(ndarray::Axis(dim)).enumerate() {
             let dst_i = (i + s_prime) % l;
-            let mut dst = out.index_axis_mut(ndarray::Axis(axis), dst_i);
+            let mut dst = out.index_axis_mut(ndarray::Axis(dim), dst_i);
             dst.assign(&src_slice);
         }
         out
@@ -549,20 +549,20 @@ mod tests {
                 Just(shape.clone()),
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             );
-            let axis = 0..ndim;
+            let dim = 0..ndim;
             // Mix of small positive, small negative, zero, and large-magnitude shifts.
             let shift = -20i64..=20i64;
-            (array_strat, axis, shift).prop_map(|((nd, za), axis, shift)| (nd, za, axis, shift))
+            (array_strat, dim, shift).prop_map(|((nd, za), dim, shift)| (nd, za, dim, shift))
         })
     }
 
     proptest::proptest! {
         #[test]
         fn proptest_roll_generic(
-            (nd, za, axis, shift) in roll_strategy()
+            (nd, za, dim, shift) in roll_strategy()
         ) {
-            let expected = roll_reference(&nd, shift, axis);
-            let actual = za.roll(shift, axis);
+            let expected = roll_reference(&nd, shift, dim);
+            let actual = za.roll(shift, dim);
             crate::util::assert_array_matches(&actual, &expected);
         }
     }

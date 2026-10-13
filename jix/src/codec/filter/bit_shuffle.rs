@@ -57,7 +57,7 @@ use crate::dtype::Dtype;
 ///   rows = elements-in-group                        rows = bit-within-byte
 ///   cols = bit-within-byte                          cols = elements-in-group
 ///
-///            pass 3: trans_bitrow_eight             (outer-axis swap)
+///            pass 3: trans_bitrow_eight             (outer-dim swap)
 ///   P2  ----------------------------------------->  dst
 ///   (8, B, G)   length-G byte runs                  (B, 8, G) length-G byte runs
 /// ```
@@ -73,7 +73,7 @@ use crate::dtype::Dtype;
 /// 8 separate bit-plane regions of the destination - so byte `k` of the
 /// transposed group goes to the `k`-th bit-plane.
 ///
-/// Pass 3 is pure data movement: it swaps the outer `(8, B)` axes of the
+/// Pass 3 is pure data movement: it swaps the outer `(8, B)` dims of the
 /// `(8, B, G)` byte array while keeping each length-`G` inner run intact, so
 /// that the final layout is byte-plane-major with bit-planes nested inside
 /// (the `(B, 8, G)` layout expected by the bitshuffle wire format).
@@ -81,7 +81,7 @@ use crate::dtype::Dtype;
 /// # Decoding
 ///
 /// Decoding is the exact inverse of encoding in reverse pass order. Pass 3
-/// and pass 1 have trivial byte-level inverses (the reverse outer-axis swap
+/// and pass 1 have trivial byte-level inverses (the reverse outer-dim swap
 /// and [`ByteShuffleFilter::decode`] respectively). Pass 2's inverse gathers
 /// 8 bytes from 8 different bit-plane regions and applies [`transpose8x8`]
 /// again - because [`transpose8x8`] is self-inverse, a single primitive serves
@@ -131,7 +131,7 @@ impl FilterImpl for BitShuffleFilter {
         // regions of `tmp`.
         trans_bit_byte(&dst[..full_bytes], tmp, n_full, typesize);
 
-        // Pass 3: outer-axis swap, `(8, B, G) bytes -> (B, 8, G) bytes`.
+        // Pass 3: outer-dim swap, `(8, B, G) bytes -> (B, 8, G) bytes`.
         // Just moves length-`G` byte runs around to produce the final
         // byte-plane-major, bit-plane-minor layout.
         trans_bitrow_eight(tmp, &mut dst[..full_bytes], n_full, typesize);
@@ -234,9 +234,9 @@ fn trans_bit_byte_simd<S: Simd>(
     }
 }
 
-/// Encode pass 3 - outer-axis swap.
+/// Encode pass 3 - outer-dim swap.
 ///
-/// Swaps the `(8, B)` outer axes of an `(8, B, G)` byte array, keeping each
+/// Swaps the `(8, B)` outer dims of an `(8, B, G)` byte array, keeping each
 /// length-`G` innermost run intact. No bits are permuted within a byte; this
 /// pass is pure data movement via `copy_from_slice` on length-`G` runs.
 ///
@@ -272,7 +272,7 @@ fn trans_bitrow_eight_simd<S: Simd>(
 
 /// Decode pass 1 - inverse of [`trans_bitrow_eight`].
 ///
-/// `(B, 8, G) -> (8, B, G)` byte-level outer-axis swap. Pure data movement in
+/// `(B, 8, G) -> (8, B, G)` byte-level outer-dim swap. Pure data movement in
 /// length-`G` runs; reads and writes are just the encode-side roles flipped.
 fn untrans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     fearless_simd::dispatch!(SimdLevel::new(), simd => untrans_bitrow_eight_simd(src, dst, n_full, typesize, simd))

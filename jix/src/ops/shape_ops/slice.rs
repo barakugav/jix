@@ -8,12 +8,12 @@ use crate::ops::prelude::*;
 /// Standard range types and negative integer ranges are all accepted:
 ///
 /// ```text
-/// array.slice((.., 1..4))                            // axis 0: all, axis 1: indices 1, 2, 3
-/// array.slice((2.., ..3))                            // axis 0: from 2, axis 1: up to (excl.) 3
-/// array.slice((1..=3, ..))                           // axis 0: indices 1-3 (inclusive end)
-/// array.slice(((-2..), ..))                          // axis 0: last 2 elements
-/// array.slice((.., ..-1))                            // axis 1: all but the last
-/// array.slice((.., SliceItem::new(None, None, 2)))   // axis 1: every other element (step=2)
+/// array.slice((.., 1..4))                            // dim 0: all, dim 1: indices 1, 2, 3
+/// array.slice((2.., ..3))                            // dim 0: from 2, dim 1: up to (excl.) 3
+/// array.slice((1..=3, ..))                           // dim 0: indices 1-3 (inclusive end)
+/// array.slice(((-2..), ..))                          // dim 0: last 2 elements
+/// array.slice((.., ..-1))                            // dim 1: all but the last
+/// array.slice((.., SliceItem::new(None, None, 2)))   // dim 1: every other element (step=2)
 /// ```
 ///
 /// # Slice convention
@@ -29,7 +29,7 @@ use crate::ops::prelude::*;
 /// literals work for Python-style end-relative indexing.
 ///
 /// `Slice<S>` carries `type Dimension = S::Dimension` - slicing does not change the number of
-/// axes so the dimension type is preserved unchanged.
+/// dims so the dimension type is preserved unchanged.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -389,7 +389,7 @@ impl DimSlice {
             ensure!(
                 (0..=dim_len as i64).contains(&norm),
                 InvalidIndex,
-                "slice {label} {idx} is out of bounds for axis with size {dim_len}"
+                "slice {label} {idx} is out of bounds for dim with size {dim_len}"
             );
             Ok(norm as u64)
         };
@@ -482,7 +482,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn shape_strided_step2_both_axes() {
+    fn shape_strided_step2_both_dims() {
         // [3, 8], step 2 on both -> ceil(3/2)=2, ceil(8/2)=4
         assert_eq!(
             make2d(arange(24), 3, 8)
@@ -537,7 +537,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn full_read_strided_axis1_step2() {
+    fn full_read_strided_dim1_step2() {
         let got = make2d(arange(24), 3, 8)
             .slice((.., SliceItem::new(None, None, 2)))
             .to_ndarray()
@@ -546,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn full_read_strided_axis0_step2() {
+    fn full_read_strided_dim0_step2() {
         let got = make2d(arange(24), 6, 4)
             .slice((SliceItem::new(None, None, 2), ..))
             .to_ndarray()
@@ -566,7 +566,7 @@ mod tests {
         let s = plain6x4().slice((SliceItem::new(None, None, 2), ..)); // rows 0, 2, 4
         let ctx = s.read_ctx();
         let view = s.storage().read_data(&[0..3, 0..4], &ctx, None).unwrap();
-        // Zero-copy: axis-0 stride is 2 * row-stride (2*16), not the packed 16 a copy would carry.
+        // Zero-copy: dim-0 stride is 2 * row-stride (2*16), not the packed 16 a copy would carry.
         assert_eq!(view.strides(), &[2 * 16, 4]);
 
         let base = view.data_ptr();
@@ -610,7 +610,7 @@ mod tests {
     }
 
     #[test]
-    fn full_read_strided_both_axes() {
+    fn full_read_strided_both_dims() {
         let got = make2d(arange(24), 4, 6)
             .slice((SliceItem::new(None, None, 2), SliceItem::new(None, None, 2)))
             .to_ndarray()
@@ -620,7 +620,7 @@ mod tests {
 
     #[test]
     fn full_read_strided_with_start_offset() {
-        // [6, 8]: axis 1 from index 1, step 2 -> indices 1,3,5,7
+        // [6, 8]: dim 1 from index 1, step 2 -> indices 1,3,5,7
         let got = make2d(arange(48), 6, 8)
             .slice((.., SliceItem::new(Some(1), None, 2)))
             .to_ndarray()
@@ -636,7 +636,7 @@ mod tests {
             .slice((.., SliceItem::new(None, None, 2), ..))
             .to_ndarray()
             .unwrap();
-        // inner[i,j,k] = i*16 + j*4 + k; axis 1 keeps j=0,2
+        // inner[i,j,k] = i*16 + j*4 + k; dim 1 keeps j=0,2
         let mut expected = vec![];
         for i in 0..4i32 {
             for j in [0i32, 2] {
@@ -657,7 +657,7 @@ mod tests {
 
     #[test]
     fn negative_start_last_two_rows() {
-        // (-2..) on axis 0 of [5, 4] -> rows 3 and 4
+        // (-2..) on dim 0 of [5, 4] -> rows 3 and 4
         let got = make2d(arange(20), 5, 4)
             .slice((-2.., ..))
             .to_ndarray()
@@ -667,7 +667,7 @@ mod tests {
 
     #[test]
     fn negative_end_all_but_last_col() {
-        // (..-1) on axis 1 of [3, 4] -> cols 0,1,2
+        // (..-1) on dim 1 of [3, 4] -> cols 0,1,2
         let got = make2d(arange(12), 3, 4)
             .slice((.., ..-1))
             .to_ndarray()
@@ -677,7 +677,7 @@ mod tests {
 
     #[test]
     fn negative_start_and_end() {
-        // [3, 6]: axis 1 with (-4..-1) -> indices 2,3,4
+        // [3, 6]: dim 1 with (-4..-1) -> indices 2,3,4
         let got = make2d(arange(18), 3, 6)
             .slice((.., -4..-1))
             .to_ndarray()
@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn negative_start_strided() {
-        // [6, 4]: axis 0 from -6 (= 0) step 2 -> rows 0, 2, 4
+        // [6, 4]: dim 0 from -6 (= 0) step 2 -> rows 0, 2, 4
         // negative start + step requires SliceItem since range syntax has no step
         let got = make2d(arange(24), 6, 4)
             .slice((SliceItem::new(Some(-6), None, 2), ..))
@@ -816,7 +816,7 @@ mod tests {
 
     #[test]
     fn resolve_rejects_start_positive_out_of_range() {
-        // axis 0 has size 3; start = 4 is out of [-3, 3].
+        // dim 0 has size 3; start = 4 is out of [-3, 3].
         let arr = make2d(arange(12), 3, 4);
         let err = try_slice_one_dim(arr, SliceItem::new(Some(4), None, 1)).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn resolve_rejects_start_negative_out_of_range() {
-        // axis 0 has size 3; start = -4 normalizes to -1 (out of [0, 3]).
+        // dim 0 has size 3; start = -4 normalizes to -1 (out of [0, 3]).
         let arr = make2d(arange(12), 3, 4);
         let err = try_slice_one_dim(arr, SliceItem::new(Some(-4), None, 1)).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
@@ -870,7 +870,7 @@ mod tests {
 
     #[test]
     fn resolve_accepts_negative_endpoints_within_range() {
-        // start = -3 -> 0; end = -1 -> 2 on axis 0 of size 3.
+        // start = -3 -> 0; end = -1 -> 2 on dim 0 of size 3.
         assert_eq!(
             make2d(arange(12), 3, 4).slice(((-3i64..-1i64), ..)).shape(),
             &[2, 4]
@@ -882,9 +882,9 @@ mod tests {
         fn proptest_slice((nd, za, items) in slice_strategy::<i32>()) {
             // Oracle: apply each SliceItem via ndarray's slice_axis_inplace.
             let mut expected = nd.clone();
-            for (axis, item) in items.iter().enumerate() {
+            for (dim, item) in items.iter().enumerate() {
                 expected.slice_axis_inplace(
-                    ndarray::Axis(axis),
+                    ndarray::Axis(dim),
                     ndarray::Slice {
                         start: item.start.unwrap() as isize,
                         end: item.end.map(|e| e as isize),

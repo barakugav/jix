@@ -280,7 +280,7 @@ where
         //          dst_byte_offset = sum_{unmatched new dim d} idx[d] * dst_strides[d]
         //
         //      The read targets a strided destination over `dst[dst_byte_offset..]` whose
-        //      strides (expressed in original axis order) place each matched element at
+        //      strides (expressed in original dim order) place each matched element at
         //      its C-order position in `dst`, so no temporary buffer or extra copy is
         //      needed.
         // -----------------------------------------------------------------------
@@ -356,7 +356,7 @@ where
 
         // dims that have the same logical stride in the original and new shape can be read
         // directly; the rest we read one entry at a time and place into the output buffer.
-        // Byte-strides for the inner read, in *original* axis order (so they match the read's
+        // Byte-strides for the inner read, in *original* dim order (so they match the read's
         // shape): a matched orig dim reuses its new dim's output stride; an unmatched orig dim has
         // extent 1 and is never stepped, so its stride is a dummy 0.
         let orig_strides = S::Dimension::vec(orig_ndim, |dim| match same_logical_stride_inv[dim] {

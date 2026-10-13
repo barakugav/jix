@@ -47,7 +47,7 @@ def load_rust_records(criterion_dir: Path) -> list[BenchRecord]:
     for est_path in sorted(root.glob("**/new/estimates.json")):
         # criterion nests <group>/[<function>/]<value>/new/estimates.json - 2 OR 3 levels deep.
         # Key on the full path from the criterion root (minus /new) so 3-level benches (e.g. the
-        # sum groups: <size>/<dtype>/<axis>) do not collapse onto the same (group, bench).
+        # sum groups: <size>/<dtype>/<dim>) do not collapse onto the same (group, bench).
         rel = est_path.parent.parent.relative_to(root)
         group = rel.parts[0] if len(rel.parts) > 1 else ""
         bench = "/".join(rel.parts[1:]) if len(rel.parts) > 1 else rel.parts[0]
@@ -427,8 +427,8 @@ def plot_base_vs_new_scatter(comparisons: list[Comparison], platform: str, out_d
         return None
     plt = _plt()
     suites = sorted({c.key.suite for c in comparisons})
-    fig, axes = plt.subplots(1, len(suites), figsize=(5 * len(suites), 4.5), squeeze=False)
-    for ax, suite in zip(axes[0], suites):
+    fig, ax_grid = plt.subplots(1, len(suites), figsize=(5 * len(suites), 4.5), squeeze=False)
+    for ax, suite in zip(ax_grid[0], suites):
         cs = [c for c in comparisons if c.key.suite == suite]
         xs = [c.base_mean for c in cs]
         ys = [c.new_mean for c in cs]

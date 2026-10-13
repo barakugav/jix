@@ -14,7 +14,7 @@ use crate::{DimVec, Dimension};
 #[derive(Clone)]
 pub(crate) struct NdIter<D: Dimension, E> {
     shape: D::Vec<u64>,
-    /// Positions left on each axis
+    /// Positions left on each dim
     counters: D::Vec<u64>,
     /// The index of the item to be yielded next
     current_idx: D::Vec<u64>,
@@ -77,7 +77,7 @@ where
             macro_rules! carry_ladder {
                 ($this:ident, $ndim:ident $(, $dim:literal)*) => {
                     $(
-                        if $dim < $ndim && $this.advance_axis($dim) {
+                        if $dim < $ndim && $this.advance_dim($dim) {
                             return true;
                         }
                     )*
@@ -87,7 +87,7 @@ where
         } else {
             let ndim = self.counters.as_ref().len();
             for dim in (0..ndim).rev() {
-                if self.advance_axis(dim) {
+                if self.advance_dim(dim) {
                     return true;
                 }
             }
@@ -95,9 +95,9 @@ where
         false
     }
 
-    /// Advance the iterator along a single axis, returning `false` if the axis wrapped back to `begin`.
+    /// Advance the iterator along a single dim, returning `false` if the dim wrapped back to `begin`.
     #[inline(always)]
-    fn advance_axis(&mut self, dim: usize) -> bool {
+    fn advance_dim(&mut self, dim: usize) -> bool {
         // `counters[dim]` counts the current position too, so it is >= 1 here and cannot underflow.
         debug_assert!(self.counters[dim] >= 1);
         let remaining = self.counters[dim] - 1;
@@ -110,11 +110,11 @@ where
             return true;
         }
 
-        // axis overflow, reset to begin
-        let axis_len = self.shape[dim];
-        let diff = axis_len - 1;
+        // dim overflow, reset to begin
+        let dim_len = self.shape[dim];
+        let diff = dim_len - 1;
         let begin = self.current_idx[dim] - diff;
-        self.counters[dim] = axis_len;
+        self.counters[dim] = dim_len;
         self.current_idx[dim] = begin;
         self.extensions.on_decrease(dim, begin, diff);
         false
@@ -140,11 +140,11 @@ where
         }
         let (shape, counters) = (self.shape.as_ref(), self.counters.as_ref());
         let mut remaining = 1;
-        let mut axis_volume = 1;
+        let mut dim_volume = 1;
         for dim in (0..counters.len()).rev() {
             debug_assert!(self.counters[dim] >= 1);
-            remaining += (counters[dim] - 1) * axis_volume;
-            axis_volume *= shape[dim];
+            remaining += (counters[dim] - 1) * dim_volume;
+            dim_volume *= shape[dim];
         }
         remaining
     }
@@ -193,8 +193,8 @@ pub(crate) trait NdIterExtension {
 
     /// Called when dimension `dim` moves to `after`, a change of `diff` positions.
     ///
-    /// A single step delivers its changes right to left, so the axes that wrapped back to `begin`
-    /// are reported (as decreases) before the axis that was incremented. All of a step's changes
+    /// A single step delivers its changes right to left, so the dims that wrapped back to `begin`
+    /// are reported (as decreases) before the dim that was incremented. All of a step's changes
     /// arrive before [`value`](NdIterExtension::value) is called, and the last element's step also
     /// reports the wrap that runs off the end of the walk.
     fn on_increase(&mut self, dim: usize, after: u64, diff: u64);

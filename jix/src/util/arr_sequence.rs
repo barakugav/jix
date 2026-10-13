@@ -95,13 +95,13 @@ pub trait ArraySequenceElementType: ArraySequence {
 /// Subtrait of [`ArraySequence`] for sequences whose arrays all share the same dimension.
 ///
 /// Operations such as [`stack`](crate::ops::stack) and [`concatenate`](crate::ops::concatenate)
-/// require this bound to guarantee every array has the same number of axes, which also determines
+/// require this bound to guarantee every array has the same number of dims, which also determines
 /// the dimension of the result.
 pub trait ArraySequenceDimension: ArraySequence {
     /// The dimension of all arrays in the sequence.
     ///
     /// Used in operations like `stack` and `concatenate` to ensure all arrays have the same number
-    /// of axes, and to determine the output dimension of the result.
+    /// of dims, and to determine the output dimension of the result.
     type Dimension: Dimension;
 }
 

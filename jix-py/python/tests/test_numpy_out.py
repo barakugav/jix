@@ -41,8 +41,8 @@ def make_dst(shape, dtype, layout):
         host = np.full(shape, UNTOUCHED, dtype=dtype, order="F")
         return host, host
     if layout == "gapped":
-        # Take every other element along the last axis out of a wider host, so the
-        # destination has a gap between consecutive elements in its fastest axis.
+        # Take every other element along the last dim out of a wider host, so the
+        # destination has a gap between consecutive elements in its fastest dim.
         host = np.full(shape[:-1] + (shape[-1] * 2 + 1,), UNTOUCHED, dtype=dtype)
         return host, host[..., 1::2][..., : shape[-1]]
     if layout == "transposed":
@@ -146,13 +146,13 @@ def test_out_into_a_slice_of_a_bigger_array():
 
 
 # ---------------------------------------------------------------------------
-# Dropped axes - an integer index item removes its axis from the destination,
+# Dropped dims - an integer index item removes its dim from the destination,
 # but the core still wants one stride per array dimension.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("layout", LAYOUTS)
-def test_out_with_dropped_leading_axis(layout):
+def test_out_with_dropped_leading_dim(layout):
     np_a = np.arange(1, 25, dtype=np.int32).reshape(2, 3, 4)
     a = jix.compact(np_a)
     expected = np_a[1]
@@ -162,7 +162,7 @@ def test_out_with_dropped_leading_axis(layout):
 
 
 @pytest.mark.parametrize("layout", LAYOUTS)
-def test_out_with_dropped_middle_axis(layout):
+def test_out_with_dropped_middle_dim(layout):
     np_a = np.arange(1, 25, dtype=np.int32).reshape(2, 3, 4)
     a = jix.compact(np_a)
     expected = np_a[:, 2]
@@ -171,7 +171,7 @@ def test_out_with_dropped_middle_axis(layout):
     assert_only_dst_written(host, dst, expected, layout)
 
 
-def test_out_with_all_axes_dropped():
+def test_out_with_all_dims_dropped():
     np_a = np.arange(1, 7, dtype=np.int32).reshape(2, 3)
     a = jix.compact(np_a)
     dst = np.empty((), dtype=np.int32)
@@ -197,7 +197,7 @@ def test_out_from_a_reduction():
     np_a = np.arange(1, 21, dtype=np.float64).reshape(4, 5)
     a = jix.compact(np_a)
     dst = np.empty((5,), dtype=np.float64)
-    a.sum(axis=0).numpy(out=dst)
+    a.sum(dim=0).numpy(out=dst)
     np.testing.assert_allclose(dst, np_a.sum(axis=0))
 
 
