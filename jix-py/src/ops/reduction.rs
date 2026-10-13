@@ -4,11 +4,11 @@ use pyo3::prelude::*;
 
 use crate::util::DimArray;
 
-fn keepdims_after_reduction(
+fn keepdim_after_multi_reduction(
     array: ArrayAny,
     original_reduced_dims: &[usize],
 ) -> PyResult<ArrayAny> {
-    // keepdims=true: re-insert singleton dims via insert_dim.
+    // keepdim=true: re-insert singleton dims via insert_dim.
     // insert_dim uses gap indices in the space of the array it receives, so we must
     // re-map: original sorted dim a_i -> result-space gap (a_i - i).
     let mut dims = original_reduced_dims.to_vec();
@@ -25,7 +25,7 @@ fn keepdims_after_reduction(
 
 #[inline]
 fn keepdim_after_reduction(array: ArrayAny, original_reduced_dim: usize) -> PyResult<ArrayAny> {
-    // keepdims=true: for a single-dim reduction, the result-space gap equals the
+    // keepdim=true: for a single-dim reduction, the result-space gap equals the
     // original dim index (only one dim removed, shift = 0).
     let res = jix_core::ops::InsertDim::new_array(array, &[original_reduced_dim]);
     let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
@@ -46,13 +46,13 @@ macro_rules! define_reduction_op {
             array,
             dim=None,
             *,
-            keepdims=false,
+            keepdim=false,
             $($($extra_arg=$extra_default,)+)?
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
             dim: Option<crate::util::ItemOrSequence<i32>>,
-            keepdims: bool,
+            keepdim: bool,
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
             struct DispatchArgs {
@@ -78,8 +78,8 @@ macro_rules! define_reduction_op {
                 [crate::ops::common::Operand::Array(array)],
                 DispatchArgs { dims: dims.clone(), $($($extra_arg),+)? }
             )?;
-            if keepdims {
-                res = keepdims_after_reduction(res, &dims)?;
+            if keepdim {
+                res = keepdim_after_multi_reduction(res, &dims)?;
             }
             Ok(crate::Array::from_core(res))
         }
@@ -98,12 +98,12 @@ macro_rules! define_reduction_op {
             array,
             dim=None,
             *,
-            keepdims=false,
+            keepdim=false,
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
             dim: Option<i32>,
-            keepdims: bool,
+            keepdim: bool,
         ) -> pyo3::PyResult<crate::Array> {
             struct DispatchArgs {
                 dim: usize,
@@ -125,7 +125,7 @@ macro_rules! define_reduction_op {
                 [crate::ops::common::Operand::Array(array)],
                 DispatchArgs { dim }
             )?;
-            if keepdims {
+            if keepdim {
                 res = keepdim_after_reduction(res, dim)?;
             }
             Ok(crate::Array::from_core(res))
@@ -146,10 +146,10 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
     ///         When `None`, reduces over all dims, returning a scalar.
-    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
+    ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -162,8 +162,8 @@ define_reduction_op!(
     ///     assert jix.max(a).numpy()[()] == 6
     ///     # Reduce dim 0 -> shape [3]
     ///     assert np.array_equal(jix.max(a, dim=0).numpy(), [4, 5, 6])
-    ///     # Reduce dim 0, keepdims=True -> shape [1, 3]
-    ///     assert jix.max(a, dim=0, keepdims=True).numpy().shape == (1, 3)
+    ///     # Reduce dim 0, keepdim=True -> shape [1, 3]
+    ///     assert jix.max(a, dim=0, keepdim=True).numpy().shape == (1, 3)
     ///     ```
     max,
     Max,
@@ -185,10 +185,10 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
     ///         When `None`, reduces over all dims, returning a scalar.
-    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
+    ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -225,11 +225,11 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Single dim to reduce along. Accepts negative values. For 1-D arrays,
     ///         `None` is equivalent to `dim=0`.
-    ///     keepdims: If `True`, the reduced dim is kept as a length-1 dimension. Default `False`.
+    ///     keepdim: If `True`, the reduced dim is kept as a length-1 dimension. Default `False`.
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `dim` is
-    ///         `None`, returns a scalar. When `keepdims=True`, the reduced dim is kept with size 1.
+    ///         `None`, returns a scalar. When `keepdim=True`, the reduced dim is kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -266,11 +266,11 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Single dim to reduce along. Accepts negative values. For 1-D arrays,
     ///         `None` is equivalent to `dim=0`.
-    ///     keepdims: If `True`, the reduced dim is kept as a length-1 dimension. Default `False`.
+    ///     keepdim: If `True`, the reduced dim is kept as a length-1 dimension. Default `False`.
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `dim` is
-    ///         `None`, returns a scalar. When `keepdims=True`, the reduced dim is kept with size 1.
+    ///         `None`, returns a scalar. When `keepdim=True`, the reduced dim is kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -305,10 +305,10 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
     ///         When `None`, reduces over all dims, returning a scalar.
-    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
+    ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -343,10 +343,10 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
     ///         When `None`, reduces over all dims, returning a scalar.
-    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
+    ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -378,10 +378,10 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
     ///         When `None`, reduces over all dims, returning a scalar.
-    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
+    ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -414,12 +414,12 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values. When `None`, reduces over
     ///         all dims, returning a scalar.
-    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
+    ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///     ddof: Delta degrees of freedom. Default `0.0` (population). Use `1.0` for sample
     ///         (Bessel-corrected).
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -453,12 +453,12 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values. When `None`, reduces over
     ///         all dims, returning a scalar.
-    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
+    ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///     ddof: Delta degrees of freedom. Default `0.0` (population). Use `1.0` for sample
     ///         (Bessel-corrected).
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -490,10 +490,10 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
     ///         When `None`, reduces over all dims, returning a scalar.
-    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
+    ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:
@@ -525,10 +525,10 @@ define_reduction_op!(
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
     ///         When `None`, reduces over all dims, returning a scalar.
-    ///     keepdims: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
+    ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdims=True`, reduced dims
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
     ///         are kept with size 1.
     ///
     /// Examples:

@@ -638,9 +638,9 @@ impl Array {
     ///
     /// This is especially useful when a deep or expensive view is broadcast into another operation:
     /// broadcasting reads the same logical elements many times, so each read re-evaluates the whole
-    /// view unless it is materialized first. For example, `a / a.std(dim=1, keepdims=True)`
+    /// view unless it is materialized first. For example, `a / a.std(dim=1, keepdim=True)`
     /// recomputes the standard deviation for every element it is broadcast against, whereas
-    /// `a / a.std(dim=1, keepdims=True).plain()` computes it once and reuses the stored result.
+    /// `a / a.std(dim=1, keepdim=True).plain()` computes it once and reuses the stored result.
     /// Reach for [`compact()`][jix.Array.compact] instead when you would rather compress the
     /// intermediate (e.g. it is large, or will be read many times).
     ///
@@ -658,7 +658,7 @@ impl Array {
     /// a = jix.compact([[1.0, 3.0], [4.0, 8.0]])
     /// # Dividing by the per-row std broadcasts the reduction across the columns; `.plain()`
     /// # materializes it once instead of recomputing it for every column.
-    /// normalized = a / a.std(dim=1, keepdims=True).plain()
+    /// normalized = a / a.std(dim=1, keepdim=True).plain()
     /// # normalized == [[1.0, 3.0], [2.0, 4.0]]
     /// ```
     #[pyo3(signature = (index=None))]
@@ -1017,107 +1017,107 @@ impl Array {
     // == reduction ops ==
 
     /// Reduces one or more dims with logical AND: returns `True` if all elements are truthy. See [`jix.all()`][jix.all].
-    #[pyo3(signature = (dim=None, *, keepdims=false))]
+    #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn all(
         slf: &Bound<'_, Self>,
         dim: Option<ItemOrSequence<i32>>,
-        keepdims: bool,
+        keepdim: bool,
     ) -> PyResult<Self> {
-        crate::ops::all(slf, dim, keepdims)
+        crate::ops::all(slf, dim, keepdim)
     }
 
     /// Reduces one or more dims with logical OR: returns `True` if any element is truthy. See [`jix.any()`][jix.any].
-    #[pyo3(signature = (dim=None, *, keepdims=false))]
+    #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn any(
         slf: &Bound<'_, Self>,
         dim: Option<ItemOrSequence<i32>>,
-        keepdims: bool,
+        keepdim: bool,
     ) -> PyResult<Self> {
-        crate::ops::any(slf, dim, keepdims)
+        crate::ops::any(slf, dim, keepdim)
     }
 
     /// Reduces one or more dims by taking the maximum element. See [`jix.max()`][jix.max].
-    #[pyo3(signature = (dim=None, *, keepdims=false))]
+    #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn max(
         slf: &Bound<'_, Self>,
         dim: Option<ItemOrSequence<i32>>,
-        keepdims: bool,
+        keepdim: bool,
     ) -> PyResult<Self> {
-        crate::ops::max(slf, dim, keepdims)
+        crate::ops::max(slf, dim, keepdim)
     }
 
     /// Reduces one or more dims by taking the minimum element. See [`jix.min()`][jix.min].
-    #[pyo3(signature = (dim=None, *, keepdims=false))]
+    #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn min(
         slf: &Bound<'_, Self>,
         dim: Option<ItemOrSequence<i32>>,
-        keepdims: bool,
+        keepdim: bool,
     ) -> PyResult<Self> {
-        crate::ops::min(slf, dim, keepdims)
+        crate::ops::min(slf, dim, keepdim)
     }
 
     /// Returns the index of the maximum element along a single dim. See [`jix.argmax()`][jix.argmax].
-    #[pyo3(signature = (dim=None, *, keepdims=false))]
-    pub fn argmax(slf: &Bound<'_, Self>, dim: Option<i32>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::argmax(slf, dim, keepdims)
+    #[pyo3(signature = (dim=None, *, keepdim=false))]
+    pub fn argmax(slf: &Bound<'_, Self>, dim: Option<i32>, keepdim: bool) -> PyResult<Self> {
+        crate::ops::argmax(slf, dim, keepdim)
     }
 
     /// Returns the index of the minimum element along a single dim. See [`jix.argmin()`][jix.argmin].
-    #[pyo3(signature = (dim=None, *, keepdims=false))]
-    pub fn argmin(slf: &Bound<'_, Self>, dim: Option<i32>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::argmin(slf, dim, keepdims)
+    #[pyo3(signature = (dim=None, *, keepdim=false))]
+    pub fn argmin(slf: &Bound<'_, Self>, dim: Option<i32>, keepdim: bool) -> PyResult<Self> {
+        crate::ops::argmin(slf, dim, keepdim)
     }
 
     /// Reduces one or more dims by summing all elements. See [`jix.sum()`][jix.sum].
-    #[pyo3(signature = (dim=None, *, keepdims=false))]
+    #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn sum(
         slf: &Bound<'_, Self>,
         dim: Option<ItemOrSequence<i32>>,
-        keepdims: bool,
+        keepdim: bool,
     ) -> PyResult<Self> {
-        crate::ops::sum(slf, dim, keepdims)
+        crate::ops::sum(slf, dim, keepdim)
     }
 
     /// Computes the arithmetic mean along one or more dims. See [`jix.mean()`][jix.mean].
-    #[pyo3(signature = (dim=None, *, keepdims=false))]
+    #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn mean(
         slf: &Bound<'_, Self>,
         dim: Option<ItemOrSequence<i32>>,
-        keepdims: bool,
+        keepdim: bool,
     ) -> PyResult<Self> {
-        crate::ops::mean(slf, dim, keepdims)
+        crate::ops::mean(slf, dim, keepdim)
     }
 
     /// Reduces one or more dims by multiplying all elements. See [`jix.product()`][jix.product].
-    #[pyo3(signature = (dim=None, *, keepdims=false))]
+    #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn prod(
         slf: &Bound<'_, Self>,
         dim: Option<ItemOrSequence<i32>>,
-        keepdims: bool,
+        keepdim: bool,
     ) -> PyResult<Self> {
-        crate::ops::product(slf, dim, keepdims)
+        crate::ops::product(slf, dim, keepdim)
     }
 
     /// Computes the standard deviation along one or more dims. See [`jix.std()`][jix.std].
-    #[pyo3(signature = (dim=None, *, keepdims=false, ddof=0.0))]
+    #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn std(
         slf: &Bound<'_, Self>,
         dim: Option<ItemOrSequence<i32>>,
-        keepdims: bool,
+        keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
-        crate::ops::std(slf, dim, keepdims, ddof)
+        crate::ops::std(slf, dim, keepdim, ddof)
     }
 
     /// Computes the variance along one or more dims. See [`jix.var()`][jix.var].
-    #[pyo3(signature = (dim=None, *, keepdims=false, ddof=0.0))]
+    #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn var(
         slf: &Bound<'_, Self>,
         dim: Option<ItemOrSequence<i32>>,
-        keepdims: bool,
+        keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
-        crate::ops::var(slf, dim, keepdims, ddof)
+        crate::ops::var(slf, dim, keepdim, ddof)
     }
 
     /// Casts each element of the array to a new dtype. See [`jix.cast()`][jix.cast].
