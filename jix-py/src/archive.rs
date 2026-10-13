@@ -94,7 +94,7 @@ pub fn read_array(
     offset: Option<u64>,
     len: Option<u64>,
     mmap: bool,
-    #[gen_stub(override_type(type_repr="typing.Optional[typing.Sequence[typing.Literal['minimal', 'strict']]]", imports=("typing")))]
+    #[gen_stub(override_type(type_repr="typing.Optional[typing.Literal['minimal', 'strict']]", imports=("typing")))]
     validation: Option<String>,
 ) -> PyResult<Array> {
     let params = resolve_array_params(py, params)?;
