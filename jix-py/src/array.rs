@@ -623,6 +623,35 @@ impl Array {
         Ok(np_arr)
     }
 
+    /// Returns the single element of a zero-dimensional array as a Python scalar.
+    ///
+    /// Equivalent to `self.numpy().item()`. Full reductions such as [`sum()`][jix.Array.sum]
+    /// return a zero-dimensional array, so `item()` is the way to get a plain Python number out
+    /// of them.
+    ///
+    /// Returns:
+    ///     The element as a Python scalar (`int`, `float`, `complex` or `bool`).
+    ///
+    /// Raises:
+    ///     ValueError: If the array is not zero-dimensional.
+    ///
+    /// ```python
+    /// import jix
+    ///
+    /// a = jix.compact([[1, 2], [3, 4]])
+    /// assert a.sum().item() == 10
+    /// assert isinstance(a.sum().item(), int)
+    /// ```
+    pub fn item<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        if self.ndim() != 0 {
+            return Err(PyValueError::new_err(format!(
+                "item() requires a zero-dimensional array, got an array with ndim {}",
+                self.ndim()
+            )));
+        }
+        self.numpy(py, None, None)?.call_method0("item")
+    }
+
     /// Read the array (or a sub-region of it) into a new plain (uncompressed) jix array.
     ///
     /// Identical to `numpy()`, except the decoded elements are wrapped as a plain
