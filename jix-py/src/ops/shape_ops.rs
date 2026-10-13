@@ -7,7 +7,7 @@ use pyo3::types::{PyEllipsis, PySlice, PyTuple};
 use crate::ops::{any_to_core_array, asarray_simple};
 use crate::util::{
     normalize_dim, normalize_dim_optional, normalize_dims, normalize_dims_optional, slice_unpack,
-    DimArray, IntoPyResult, ItemOrSequence,
+    DimArray, IntoPyResult, ItemOrTuple,
 };
 use crate::Array;
 
@@ -47,20 +47,20 @@ use crate::Array;
 ///
 ///     # Row vector [1, 3] -> matrix [2, 3]: every row becomes identical
 ///     a = jix.compact([[1, 2, 3]], dtype=np.int32)
-///     result = jix.broadcast(a, [2, 3])
+///     result = jix.broadcast(a, (2, 3))
 ///     assert result.numpy().shape == (2, 3)
 ///     assert np.array_equal(result.numpy()[0], result.numpy()[1])
 ///
 ///     # Column vector [3, 1] -> matrix [3, 2]: every column becomes identical
 ///     b = jix.compact([[10], [20], [30]], dtype=np.int32)
-///     result = jix.broadcast(b, [3, 2])
+///     result = jix.broadcast(b, (3, 2))
 ///     assert result.numpy()[0, 0] == result.numpy()[0, 1] == 10
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn broadcast<'py>(
     array: &Bound<'py, PyAny>,
-    shape: ItemOrSequence<i64>,
+    shape: ItemOrTuple<i64>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
@@ -382,7 +382,7 @@ pub(crate) struct ParsedBasicIndex {
 ///
 /// Args:
 ///     array: Input array.
-///     dim: Output-shape index or sequence of indices at which to place new length-1
+///     dim: Output-shape index or tuple of indices at which to place new length-1
 ///         dimensions. Negative values are resolved against the output ndim (`ndim + len(dim)`).
 ///
 /// Returns:
@@ -406,7 +406,7 @@ pub(crate) struct ParsedBasicIndex {
 #[pyfunction]
 pub fn insert_dim<'py>(
     array: &Bound<'py, PyAny>,
-    dim: ItemOrSequence<i32>,
+    dim: ItemOrTuple<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
@@ -452,7 +452,7 @@ pub fn insert_dim<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     dim: Output-shape index or sequence of indices at which to place new length-1
+///     dim: Output-shape index or tuple of indices at which to place new length-1
 ///         dimensions. Negative values are resolved against the output ndim (`ndim + len(dim)`).
 ///
 /// Returns:
@@ -461,7 +461,7 @@ pub fn insert_dim<'py>(
 #[pyfunction]
 pub fn unsqueeze<'py>(
     array: &Bound<'py, PyAny>,
-    dim: ItemOrSequence<i32>,
+    dim: ItemOrTuple<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     insert_dim(array, dim)
 }
@@ -482,7 +482,7 @@ pub fn unsqueeze<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     dim: Dim index or sequence of dim indices to remove. Each must have size 1.
+///     dim: Dim index or tuple of dim indices to remove. Each must have size 1.
 ///         Negative values are supported.
 ///
 /// Returns:
@@ -504,7 +504,7 @@ pub fn unsqueeze<'py>(
 #[pyfunction]
 pub fn remove_dim<'py>(
     array: &Bound<'py, PyAny>,
-    dim: ItemOrSequence<i32>,
+    dim: ItemOrTuple<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
@@ -546,18 +546,18 @@ pub fn remove_dim<'py>(
 ///     a = jix.compact([[[1, 2, 3]]], dtype=np.int32)  # shape [1, 1, 3]
 ///     assert jix.squeeze(a).numpy().shape == (3,)              # remove all size-1 dims
 ///     assert jix.squeeze(a, dim=0).numpy().shape == (1, 3)    # remove only dim 0
-///     assert jix.squeeze(a, dim=[0, 1]).numpy().shape == (3,) # remove dims 0 and 1
+///     assert jix.squeeze(a, dim=(0, 1)).numpy().shape == (3,) # remove dims 0 and 1
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, dim=None))]
 pub fn squeeze<'py>(
     array: &Bound<'py, PyAny>,
-    dim: Option<ItemOrSequence<i32>>,
+    dim: Option<ItemOrTuple<i32>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let dim = dim.unwrap_or_else(|| {
-        ItemOrSequence::Sequence(
+        ItemOrTuple::Sequence(
             py_arr
                 .get()
                 .arr
@@ -575,8 +575,7 @@ pub fn squeeze<'py>(
 ///
 /// The `i`-th output dim corresponds to dim `dims[i]` of the input - identical to
 /// `numpy.transpose`. `dims` must be a permutation of `0..ndim`: correct length, all values
-/// in range, no duplicates. Integer values are interpreted as unsigned dim indices (negative
-/// dims are **not** supported for `dims`).
+/// in range, no duplicates. Negative values count from the last dim, so `-1` is `ndim - 1`.
 ///
 /// When `dims=None` (the default), all dims are reversed: output dim `i` maps to input dim
 /// `ndim - 1 - i`. For 2-D arrays this is the standard matrix transpose.
@@ -587,8 +586,8 @@ pub fn squeeze<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     dims: Permutation of dim indices. When `None` (default), reverses all dims.
-///         Integer values must be unsigned (negative dims are not supported).
+///     dims: Permutation of dim indices. Supports negative values. When `None` (default),
+///         reverses all dims.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with dims reordered as specified.
@@ -606,6 +605,9 @@ pub fn squeeze<'py>(
 ///
 ///     # dims=None reverses all dims (same as numpy.transpose with no argument)
 ///     assert jix.permute_dims(a).numpy().shape == (3, 2)
+///
+///     # Negative dims count from the end
+///     assert np.array_equal(jix.permute_dims(a, [-1, 0]).numpy(), a.numpy().T)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
@@ -615,13 +617,17 @@ pub fn squeeze<'py>(
 ))]
 pub fn permute_dims<'py>(
     array: &Bound<'py, PyAny>,
-    dims: Option<Vec<usize>>,
+    dims: Option<Vec<i32>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
-    let dims = dims.unwrap_or_else(|| (0..array.ndim()).rev().collect());
-    if dims.len() == array.ndim() && dims.iter().enumerate().all(|(i, &d)| i == d) {
+    let ndim = array.ndim();
+    let dims = match dims {
+        Some(dims) => normalize_dims(&dims, ndim)?,
+        None => (0..ndim).rev().collect(),
+    };
+    if dims.len() == ndim && dims.iter().enumerate().all(|(i, &d)| i == d) {
         return Ok(py_arr); // no-op permutation
     }
     let ret = jix_core::ops::PermuteDims::new_array(array, &dims).into_py_result()?;
@@ -630,6 +636,53 @@ pub fn permute_dims<'py>(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
+}
+
+/// Swaps two dims of an array.
+///
+/// Output dim `dim0` corresponds to input dim `dim1` and vice versa; all other dims keep their
+/// position. Same as `torch.swapdims` (`torch.transpose`) and `numpy.swapaxes`. This is a
+/// special case of [`jix.permute_dims()`][jix.permute_dims], which takes a full permutation.
+///
+/// Output dtype equals the input dtype.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// Args:
+///     array: Input array.
+///     dim0: First dim to swap. Supports negative values.
+///     dim1: Second dim to swap. Supports negative values.
+///
+/// Returns:
+///     A [`jix.Array`][jix.Array] with `dim0` and `dim1` swapped.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.asarray(np.arange(24, dtype=np.int32).reshape(2, 3, 4))
+///     t = jix.swapdims(a, 0, 2)
+///     assert t.shape == (4, 3, 2)
+///     assert np.array_equal(t.numpy(), np.swapaxes(a.numpy(), 0, 2))
+///
+///     # Negative dims count from the end: swap the last two dims
+///     assert jix.swapdims(a, -1, -2).shape == (2, 4, 3)
+///     ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyfunction]
+pub fn swapdims<'py>(
+    array: &Bound<'py, PyAny>,
+    dim0: i32,
+    dim1: i32,
+) -> PyResult<Bound<'py, Array>> {
+    let py_arr = asarray_simple(array)?;
+    let ndim = py_arr.get().ndim();
+    let dim0 = normalize_dim(dim0, ndim)?;
+    let dim1 = normalize_dim(dim1, ndim)?;
+    let mut dims = (0..ndim as i32).collect::<Vec<_>>();
+    dims.swap(dim0, dim1);
+    permute_dims(py_arr.as_any(), Some(dims))
 }
 
 /// Reinterprets an array with a different shape.
@@ -662,11 +715,11 @@ pub fn permute_dims<'py>(
 ///     a = jix.asarray(np.arange(6, dtype=np.int32).reshape(2, 3))  # shape [2, 3]
 ///
 ///     # Flatten
-///     flat = jix.reshape(a, [6])
+///     flat = jix.reshape(a, 6)
 ///     assert np.array_equal(flat.numpy(), [0, 1, 2, 3, 4, 5])
 ///
 ///     # Infer one dimension with -1
-///     r = jix.reshape(a, [-1, 2])
+///     r = jix.reshape(a, (-1, 2))
 ///     assert r.numpy().shape == (3, 2)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
@@ -677,7 +730,7 @@ pub fn permute_dims<'py>(
 ))]
 pub fn reshape<'py>(
     array: &Bound<'py, PyAny>,
-    shape: ItemOrSequence<i64>,
+    shape: ItemOrTuple<i64>,
 ) -> PyResult<Bound<'py, Array>> {
     let new_shape = shape;
     let py_arr = asarray_simple(array)?;
@@ -734,7 +787,7 @@ pub fn reshape<'py>(
 
 /// Collapses an array into a single dimension.
 ///
-/// Equivalent to [`jix.reshape(array, [n])`][jix.reshape] where `n` is the total number of
+/// Equivalent to [`jix.reshape(array, n)`][jix.reshape] where `n` is the total number of
 /// elements. Output dtype equals the input dtype. Output shape is `[n]`.
 ///
 /// Like the other shape operations, the result is a lazy view; no data is copied until the array
@@ -763,7 +816,7 @@ pub fn reshape<'py>(
 pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let size = py_arr.get().arr.shape().iter().product::<u64>();
-    reshape(&py_arr, ItemOrSequence::Item(size as i64))
+    reshape(&py_arr, ItemOrTuple::Item(size as i64))
 }
 
 /// Joins a sequence of arrays along an existing dim.
@@ -975,6 +1028,7 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Array> {
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
+#[pyo3(signature = (array, repeats, dim=None))]
 pub fn repeat<'py>(
     array: &Bound<'py, PyAny>,
     repeats: u64,
@@ -998,7 +1052,7 @@ pub fn repeat<'py>(
 /// Reverses the order of elements along the given dim.
 ///
 /// Each named dim is independently reversed; non-named dims are left untouched. The shape
-/// and dtype of the output equal the input. `dim` accepts an integer, a sequence of
+/// and dtype of the output equal the input. `dim` accepts an integer, a tuple of
 /// integers, or `None` (the default) which reverses every dim. Negative indices are
 /// supported. Duplicate dims are not allowed.
 ///
@@ -1034,15 +1088,15 @@ pub fn repeat<'py>(
 ///     # 2-D: flip both dims (default behaviour with dim=None)
 ///     assert np.array_equal(jix.flip(b).numpy(), [[6, 5, 4], [3, 2, 1]])
 ///
-///     # Sequence of dims (negative indices supported)
-///     assert np.array_equal(jix.flip(b, dim=[-1]).numpy(), [[3, 2, 1], [6, 5, 4]])
+///     # Tuple of dims (negative indices supported)
+///     assert np.array_equal(jix.flip(b, dim=(-1,)).numpy(), [[3, 2, 1], [6, 5, 4]])
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, dim=None))]
 pub fn flip<'py>(
     array: &Bound<'py, PyAny>,
-    dim: Option<ItemOrSequence<i32>>,
+    dim: Option<ItemOrTuple<i32>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();

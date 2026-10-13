@@ -66,7 +66,7 @@ mod jix {
     #[pymodule_export]
     pub use crate::ops::{
         broadcast, concatenate, flatten, flip, insert_dim, permute_dims, remove_dim, repeat,
-        reshape, roll, slice, squeeze, stack, tile, unsqueeze,
+        reshape, roll, slice, squeeze, stack, swapdims, tile, unsqueeze,
     };
 
     #[pymodule_export]
@@ -96,6 +96,11 @@ mod jix {
         m.add("abs", m.getattr("absolute")?)?;
         m.add("concat", m.getattr("concatenate")?)?;
         m.add("clip", m.getattr("clamp")?)?;
+        m.add("prod", m.getattr("product")?)?;
+        m.add("sub", m.getattr("subtract")?)?;
+        m.add("mul", m.getattr("multiply")?)?;
+        m.add("div", m.getattr("divide")?)?;
+        m.add("neg", m.getattr("negative")?)?;
 
         Ok(())
     }

@@ -177,13 +177,12 @@ def test_sign_uint_concrete():
     )
 
 
-def test_sign_auto_cast_bool():
-    """sign(bool) auto-casts to int8."""
-    np_a = np.array([True, False, True], dtype=np.bool_)
-    za = jix.compact(np_a)
-    result = jix.sign(za)
-    assert result.dtype == np.int8
-    np.testing.assert_array_equal(result.numpy(), np.sign(np_a.astype(np.int8)))
+def test_sign_never_casts():
+    for dtype in (np.int8, np.uint16, np.float16):
+        assert jix.sign(jix.compact(np.array([1, 0], dtype=dtype))).dtype == dtype
+    assert jix.sign(-5).numpy() == -1  # untyped Python int -> int64
+    with pytest.raises(RuntimeError, match="sign"):
+        jix.sign(jix.compact(np.array([True, False])))
 
 
 def test_absolute_scalar_concrete():
@@ -279,6 +278,17 @@ def test_negative_auto_cast_uint(dtype, expected_dtype):
         f"negative({dtype.__name__}): got {result.dtype}, expected {expected_dtype.__name__}"
     )
     np.testing.assert_array_equal(result.numpy(), -np_a.astype(expected_dtype))
+
+
+@pytest.mark.parametrize("dtype", ints + floats + complexes + [np.uint8, np.uint64])
+def test_positive_returns_self(dtype):
+    za = jix.compact(np.array([1, 2, 3], dtype=dtype))
+    assert +za is za
+
+
+def test_positive_rejects_bool():
+    with pytest.raises(RuntimeError, match="positive"):
+        +jix.compact(np.array([True, False]))
 
 
 def test_negative_on_bool_auto_casts():

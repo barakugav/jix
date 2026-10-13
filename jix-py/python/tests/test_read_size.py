@@ -12,10 +12,9 @@ def test_read_size_accepts_scalar():
     np.testing.assert_array_equal(arr.numpy(), a)
 
 
-@pytest.mark.parametrize("seq", [(4096, 65536), [4096, 65536]])
-def test_read_size_accepts_sequence(seq):
+def test_read_size_accepts_tuple():
     a = np.arange(64, dtype=np.int32).reshape(8, 8)
-    arr = jix.compact(a, params={"read_size": seq})
+    arr = jix.compact(a, params={"read_size": (4096, 65536)})
     np.testing.assert_array_equal(arr.numpy(), a)
 
 
@@ -25,14 +24,16 @@ def test_read_size_accepts_sequence(seq):
         # Wrong arity is a value error (the elements parse, the length is wrong).
         ((1, 2, 3), ValueError),
         ((), ValueError),
-        ([], ValueError),
-        # Wrong element type / domain fails extraction and surfaces as a type error.
+        # Wrong type / domain fails extraction and surfaces as a type error. Only tuples count
+        # as sequences, so lists are rejected too.
+        ([4096, 65536], TypeError),
+        ([], TypeError),
         (4096.0, TypeError),
         (-1, TypeError),
     ],
 )
 def test_read_size_rejects_bad_input(bad, exc):
-    # Only a non-negative int or a 2-element sequence of non-negative ints is accepted;
+    # Only a non-negative int or a 2-element tuple of non-negative ints is accepted;
     # anything else must be rejected rather than silently coerced.
     a = np.arange(64, dtype=np.int32).reshape(8, 8)
     with pytest.raises(exc):

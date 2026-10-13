@@ -18,7 +18,7 @@ use crate::dtype::dtype_to_numpy;
 use crate::ops::asarray_simple;
 use crate::util::{
     dim_arr, maybe_detach, numpy_empty_ordered, strided_span_bytes, DimArray, IntoPyResult,
-    ItemOrSequence,
+    ItemOrTuple,
 };
 
 /// A multi-dimensional compressed array.
@@ -369,6 +369,19 @@ impl Array {
         Ok(*len as usize)
     }
 
+    /// Always raises: an array has no single truth value.
+    ///
+    /// Use `.any().item()` or `.all().item()` instead.
+    ///
+    /// Raises:
+    ///     ValueError: Always.
+    pub fn __bool__(&self) -> PyResult<bool> {
+        Err(PyValueError::new_err(
+            "the truth value of a jix.Array is ambiguous; use .any() or .all(), \
+             and .item() to get a Python bool",
+        ))
+    }
+
     /// The data type of the array elements, as a NumPy dtype object.
     ///
     /// Returns:
@@ -623,6 +636,35 @@ impl Array {
         Ok(np_arr)
     }
 
+    /// Returns the single element of a zero-dimensional array as a Python scalar.
+    ///
+    /// Equivalent to `self.numpy().item()`. Full reductions such as [`sum()`][jix.Array.sum]
+    /// return a zero-dimensional array, so `item()` is the way to get a plain Python number out
+    /// of them.
+    ///
+    /// Returns:
+    ///     The element as a Python scalar (`int`, `float`, `complex` or `bool`).
+    ///
+    /// Raises:
+    ///     ValueError: If the array is not zero-dimensional.
+    ///
+    /// ```python
+    /// import jix
+    ///
+    /// a = jix.compact([[1, 2], [3, 4]])
+    /// assert a.sum().item() == 10
+    /// assert isinstance(a.sum().item(), int)
+    /// ```
+    pub fn item<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        if self.ndim() != 0 {
+            return Err(PyValueError::new_err(format!(
+                "item() requires a zero-dimensional array, got an array with ndim {}",
+                self.ndim()
+            )));
+        }
+        self.numpy(py, None, None)?.call_method0("item")
+    }
+
     /// Read the array (or a sub-region of it) into a new plain (uncompressed) jix array.
     ///
     /// Identical to `numpy()`, except the decoded elements are wrapped as a plain
@@ -694,7 +736,7 @@ impl Array {
     pub fn compact<'py>(
         slf: &Bound<'py, Self>,
         params: Option<Bound<'_, PyDict>>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::compact(slf, None, params)
     }
 
@@ -772,7 +814,7 @@ impl Array {
     /// Write the array to a file or a file-like object. See [`jix.write_array()`][jix.write_array].
     #[pyo3(signature = (path_or_writer, *, append=false, params=None))]
     pub fn write_to(
-        slf: &Bound<'_, Array>,
+        slf: &Bound<'_, Self>,
         path_or_writer: &Bound<'_, PyAny>,
         append: bool,
         params: Option<Bound<'_, PyDict>>,
@@ -895,6 +937,22 @@ impl Array {
         crate::ops::negative(slf)
     }
 
+    /// Unary plus (`+a`). Returns the array itself.
+    ///
+    /// Supported dtypes: integer, float and complex scalars. Like numpy and torch, `bool` (and
+    /// struct dtypes) raise.
+    pub fn __pos__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
+        let dtype = slf.get().arr.dtype();
+        match dtype.try_to_scalar() {
+            Some(kind) if !kind.is_bool() => Ok(slf.clone()),
+            _ => Err(jix_core::Error::new(
+                jix_core::ErrorKind::UnsupportedDtype,
+                format!("Op positive does not support operands with dtypes [{dtype}]"),
+            ))
+            .into_py_result(),
+        }
+    }
+
     /// Computes the absolute value of each element. See [`jix.absolute()`][jix.absolute].
     pub fn abs(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::absolute(slf)
@@ -982,6 +1040,16 @@ impl Array {
         crate::ops::bitwise_left_shift(other, slf)
     }
 
+    /// Element-wise right shift (`a >> b`). See [`jix.bitwise_right_shift()`][jix.bitwise_right_shift].
+    pub fn __rshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_right_shift(slf, other)
+    }
+
+    /// Element-wise right shift (`a >> b`). See [`jix.bitwise_right_shift()`][jix.bitwise_right_shift].
+    pub fn __rrshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_right_shift(other, slf)
+    }
+
     // == comparison ops ==
 
     /// Element-wise less-than test (`a < b`). See [`jix.less()`][jix.less].
@@ -1020,7 +1088,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn all(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::all(slf, dim, keepdim)
@@ -1030,7 +1098,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn any(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::any(slf, dim, keepdim)
@@ -1040,7 +1108,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn max(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::max(slf, dim, keepdim)
@@ -1050,7 +1118,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn min(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::min(slf, dim, keepdim)
@@ -1072,7 +1140,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn sum(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::sum(slf, dim, keepdim)
@@ -1082,7 +1150,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn mean(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::mean(slf, dim, keepdim)
@@ -1092,7 +1160,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn prod(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::product(slf, dim, keepdim)
@@ -1102,7 +1170,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn std(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
@@ -1113,7 +1181,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn var(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
@@ -1133,7 +1201,7 @@ impl Array {
     /// Reinterprets an array with a different shape. See [`jix.reshape()`][jix.reshape].
     pub fn reshape<'py>(
         slf: &Bound<'py, Self>,
-        shape: ItemOrSequence<i64>,
+        shape: ItemOrTuple<i64>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::reshape(slf, shape)
     }
@@ -1147,9 +1215,19 @@ impl Array {
     #[pyo3(signature = (dims=None))]
     pub fn permute_dims<'py>(
         slf: &Bound<'py, Self>,
-        dims: Option<Vec<usize>>,
+        dims: Option<Vec<i32>>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::permute_dims(slf, dims)
+    }
+
+    /// Swaps two dims of an array. See [`jix.swapdims()`][jix.swapdims].
+    #[pyo3(signature = (dim0, dim1))]
+    pub fn swapdims<'py>(
+        slf: &Bound<'py, Self>,
+        dim0: i32,
+        dim1: i32,
+    ) -> PyResult<Bound<'py, Self>> {
+        crate::ops::swapdims(slf, dim0, dim1)
     }
 
     /// Reverses all dims; shorthand for `permute_dims()` with no arguments. See [`jix.permute_dims()`][jix.permute_dims].
@@ -1162,72 +1240,73 @@ impl Array {
     /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See [`jix.broadcast()`][jix.broadcast].
     #[pyo3(signature = (shape))]
     pub fn broadcast<'py>(
-        slf: &Bound<'py, Array>,
-        shape: ItemOrSequence<i64>,
-    ) -> PyResult<Bound<'py, Array>> {
+        slf: &Bound<'py, Self>,
+        shape: ItemOrTuple<i64>,
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::broadcast(slf, shape)
     }
 
     /// Selects a sub-region of the array as a lazy view. See [`jix.slice()`][jix.slice].
     pub fn slice<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         index: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::slice(slf, index)
     }
 
     /// Removes length-1 dimensions from the array's shape. See [`jix.squeeze()`][jix.squeeze].
     #[pyo3(signature = (dim=None))]
     pub fn squeeze<'py>(
-        slf: &Bound<'py, Array>,
-        dim: Option<ItemOrSequence<i32>>,
-    ) -> PyResult<Bound<'py, Array>> {
+        slf: &Bound<'py, Self>,
+        dim: Option<ItemOrTuple<i32>>,
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::squeeze(slf, dim)
     }
 
     /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
     pub fn unsqueeze<'py>(
-        slf: &Bound<'py, Array>,
-        dim: ItemOrSequence<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+        slf: &Bound<'py, Self>,
+        dim: ItemOrTuple<i32>,
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::unsqueeze(slf, dim)
     }
 
     /// Repeats each element along the given dim. See [`jix.repeat()`][jix.repeat].
+    #[pyo3(signature = (repeats, dim=None))]
     pub fn repeat<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         repeats: u64,
         dim: Option<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::repeat(slf, repeats, dim)
     }
 
     /// Reverses the order of elements along the given dim. See [`jix.flip()`][jix.flip].
     #[pyo3(signature = (dim=None))]
     pub fn flip<'py>(
-        slf: &Bound<'py, Array>,
-        dim: Option<ItemOrSequence<i32>>,
-    ) -> PyResult<Bound<'py, Array>> {
+        slf: &Bound<'py, Self>,
+        dim: Option<ItemOrTuple<i32>>,
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::flip(slf, dim)
     }
 
     /// Rolls elements along a dim, wrapping at the boundary. See [`jix.roll()`][jix.roll].
     #[pyo3(signature = (shift, dim=None))]
     pub fn roll<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         shift: i64,
         dim: Option<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::roll(slf, shift, dim)
     }
 
     /// Replicates the array along a single dim. See [`jix.tile()`][jix.tile].
     #[pyo3(signature = (repeats, dim=None))]
     pub fn tile<'py>(
-        slf: &Bound<'py, Array>,
+        slf: &Bound<'py, Self>,
         repeats: u64,
         dim: Option<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::tile(slf, repeats, dim)
     }
 
@@ -1235,13 +1314,13 @@ impl Array {
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].
     #[getter]
-    pub fn real(slf: &Bound<'_, Array>) -> PyResult<Array> {
+    pub fn real(slf: &Bound<'_, Self>) -> PyResult<Array> {
         crate::ops::real(slf)
     }
 
     /// Extracts the imaginary part of each complex element. See [`jix.imag()`][jix.imag].
     #[getter]
-    pub fn imag(slf: &Bound<'_, Array>) -> PyResult<Array> {
+    pub fn imag(slf: &Bound<'_, Self>) -> PyResult<Array> {
         crate::ops::imag(slf)
     }
 
@@ -1319,17 +1398,17 @@ impl Array {
 
     /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_dim()`][jix.insert_dim].
     pub fn insert_dim<'py>(
-        slf: &Bound<'py, Array>,
-        dim: ItemOrSequence<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+        slf: &Bound<'py, Self>,
+        dim: ItemOrTuple<i32>,
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::insert_dim(slf, dim)
     }
 
     /// Removes length-1 dimensions from the array's shape. See [`jix.remove_dim()`][jix.remove_dim].
     pub fn remove_dim<'py>(
-        slf: &Bound<'py, Array>,
-        dim: ItemOrSequence<i32>,
-    ) -> PyResult<Bound<'py, Array>> {
+        slf: &Bound<'py, Self>,
+        dim: ItemOrTuple<i32>,
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::remove_dim(slf, dim)
     }
 }
@@ -1404,7 +1483,7 @@ impl Array {
 ///             fixed. Defaults to a size chosen automatically according to the CPU cache sizes.
 ///         - `read_size`: The target byte range for a single preferred read region as
 ///             `(min, max)`, given as either a scalar `s` (treated as `(s, s)`) or a 2-element
-///             `(min, max)` sequence of non-negative ints.
+///             `(min, max)` tuple of non-negative ints.
 ///
 ///             A read region is the rectangular slab the engine pulls and decompresses in one
 ///             pass when materializing a lazy pipeline or a sub-region read. Its shape is derived
@@ -1519,7 +1598,7 @@ pub(crate) fn resolve_array_params(
     let block_shape = extract_arg!("block_shape", Vec<u32>)?;
     let block_shape_fixed_dims = extract_arg!("block_shape_fixed_dims", Vec<bool>)?;
     let block_size = extract_arg!("block_size", u64)?;
-    let read_size = extract_arg!("read_size", ItemOrSequence<u64>)?;
+    let read_size = extract_arg!("read_size", ItemOrTuple<u64>)?;
     let codec = extract_arg!("codec", String)?;
     let compression_level = extract_arg!("compression_level", i32)?;
     let filters = extract_arg!("filters", Vec<String>)?;
@@ -1543,7 +1622,7 @@ pub(crate) fn resolve_array_params(
     if let Some(read_size) = read_size {
         if read_size.len() != 1 && read_size.len() != 2 {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "read_size must be a scalar or a 2-element sequence, got {} elements",
+                "read_size must be a scalar or a 2-element tuple, got {} elements",
                 read_size.len()
             )));
         }
