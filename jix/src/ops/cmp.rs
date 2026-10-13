@@ -204,34 +204,6 @@ pub(crate) mod _traits {
         }
     );
     cmp_op2!(
-        /// Greater-than operation, as [`PartialOrd::gt`].
-        ///
-        /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
-        ///
-        /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
-        /// For **bool**: `true > false`.
-        impl Greater {
-            /// Test whether the value is greater than another value.
-            fn greater = >,
-            fn greater_bulk = simd_gt,
-            bool: |a, b| a & !b,
-        }
-    );
-    cmp_op2!(
-        /// Greater-than-or-equal operation, as [`PartialOrd::ge`].
-        ///
-        /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
-        ///
-        /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
-        /// For **bool**: `true >= false`, and both `true >= true` and `false >= false` hold.
-        impl GreaterEqual {
-            /// Test whether the value is greater than or equal to another value.
-            fn greater_equal = >=,
-            fn greater_equal_bulk = simd_ge,
-            bool: |a, b| a | !b,
-        }
-    );
-    cmp_op2!(
         /// Less-than operation, as [`PartialOrd::lt`].
         ///
         /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
@@ -448,11 +420,109 @@ define_op2!(
     crate::scalar::NotEqual::not_equal,
     simd: not_equal_bulk,
 );
-define_op2!(
+
+// Defines `$Op<S1, S2>`, a comparison evaluated as the mirrored comparison `$Inner` with the
+// operands swapped (`a > b` as `b < a`).
+macro_rules! define_swapped_cmp {
+    (
+        $(#[$meta:meta])*
+        $Op:ident = $Inner:ident($InnerKernel:ident, crate::scalar::$InnerTrait:ident),
+    ) => {
+        $(#[$meta])*
+        pub struct $Op<S1, S2>($Inner<S2, S1>);
+
+        impl<S1, S2> $Op<S1, S2>
+        where
+            S1: ArrayStorageTyped,
+            S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+            S2::Item: crate::scalar::$InnerTrait<S1::Item, Output: Dtyped>,
+        {
+            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
+            pub fn new(a: S1, b: S2) -> Result<Self> {
+                Ok(Self($Inner(Op2::new(b, a, $InnerKernel, true)?)))
+            }
+
+            #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
+            pub fn new_array(a: Array<S1>, b: Array<S2>) -> Result<Array<Self>> {
+                Self::new(a.into_storage(), b.into_storage()).map(Array::from_storage)
+            }
+        }
+
+        impl<S1, S2> ArrayStorage for $Op<S1, S2>
+        where
+            S1: ArrayStorageTyped,
+            S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+            S2::Item: crate::scalar::$InnerTrait<S1::Item, Output: Dtyped>,
+        {
+            type ElementType = Ty<<S2::Item as crate::scalar::$InnerTrait<S1::Item>>::Output>;
+            type Dimension = S1::Dimension;
+
+            #[inline(always)]
+            fn read_data<'a>(
+                &'a self,
+                index: &[Range<u64>],
+                context: &'a ReadContext,
+                out: Option<&'a mut StridedBuf<'_>>,
+            ) -> Result<StridedBuf<'a>> {
+                self.0.read_data(index, context, out)
+            }
+
+            #[allow(refining_impl_trait)]
+            #[inline(always)]
+            fn read_as_elementwise_pipeline<'a, T>(
+                &'a self,
+                index: &[Range<u64>],
+                context: &'a ReadContext,
+            ) -> Result<impl ElementwisePipeline<T> + use<'a, T, S1, S2>>
+            where
+                T: Dtyped,
+            {
+                self.0.read_as_elementwise_pipeline(index, context)
+            }
+
+            #[inline(always)]
+            fn shape(&self) -> &[u64] {
+                self.0.shape()
+            }
+
+            #[inline(always)]
+            fn dtype(&self) -> &Dtype {
+                self.0.dtype()
+            }
+
+            #[inline]
+            fn spec(&self) -> ArraySpec<'_> {
+                // The inner op bases its spec on its first operand, which is our `b`.
+                let op = &self.0 .0;
+                op.b.spec()
+                    .with_dynamic_spec(op.dynamic_spec())
+                    .with_cleared_flags()
+            }
+
+            fn info(&self) -> ArrayStorageInfo<'_> {
+                let op = &self.0 .0;
+                ArrayStorageInfo::new_deps(stringify!($Op), [&op.b, &op.a])
+            }
+
+            type DimensionChange<NewD: crate::Dimension> =
+                $Op<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
+            #[inline]
+            fn dimension_change<NewD: crate::Dimension>(
+                self,
+            ) -> Result<Self::DimensionChange<NewD>> {
+                Ok($Op(self.0.dimension_change()?))
+            }
+
+            crate::ops::impl_element_type_change_default!();
+        }
+    };
+}
+
+define_swapped_cmp!(
     /// Element-wise greater-than test (`a > b`).
     ///
-    /// See [`jix::scalar::Greater`](crate::scalar::Greater) scalar trait for the
-    /// per-element semantics.
+    /// Evaluated as `b < a`: this storage wraps a [`Less`] with the operands swapped,
+    /// see it for more detailed semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -476,16 +546,13 @@ define_op2!(
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    Greater,
-    GreaterKernel,
-    crate::scalar::Greater::greater,
-    simd: greater_bulk,
+    Greater = Less(LessKernel, crate::scalar::Less),
 );
-define_op2!(
+define_swapped_cmp!(
     /// Element-wise greater-than-or-equal test (`a >= b`).
     ///
-    /// See [`jix::scalar::GreaterEqual`](crate::scalar::GreaterEqual) scalar trait for the
-    /// per-element semantics.
+    /// Evaluated as `b <= a`: this storage wraps a [`LessEqual`] with the operands swapped,
+    /// see it for more detailed semantics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -509,10 +576,7 @@ define_op2!(
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    GreaterEqual,
-    GreaterEqualKernel,
-    crate::scalar::GreaterEqual::greater_equal,
-    simd: greater_equal_bulk,
+    GreaterEqual = LessEqual(LessEqualKernel, crate::scalar::LessEqual),
 );
 define_op2!(
     /// Element-wise less-than test (`a < b`).
@@ -736,7 +800,7 @@ where
         S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
         S2: ArrayStorageTyped<Item = S1::Item, Dimension = S1::Dimension>,
     {
-        Ok(Self(Op2::new(a, b, ApproxEqKernel { rtol, atol })?))
+        Ok(Self(Op2::new(a, b, ApproxEqKernel { rtol, atol }, false)?))
     }
 
     /// Constructs an array with [`ApproxEq`] storage. See the storage struct docs for semantics and examples.
@@ -784,8 +848,29 @@ where
 {
     define_array_op2_method!(equal: Equal, crate::scalar::Equal);
     define_array_op2_method!(not_equal: NotEqual, crate::scalar::NotEqual);
-    define_array_op2_method!(greater: Greater, crate::scalar::Greater);
-    define_array_op2_method!(greater_equal: GreaterEqual, crate::scalar::GreaterEqual);
+
+    /// Applies the [`Greater`] operation, see the op struct docs for details.
+    #[track_caller]
+    pub fn greater<S2>(self, other: Array<S2>) -> Array<Greater<S, S2>>
+    where
+        S: ArrayStorageTyped,
+        S2: ArrayStorageTyped<Dimension = S::Dimension>,
+        S2::Item: crate::scalar::Less<S::Item, Output: Dtyped>,
+    {
+        Greater::new_array(self, other).unwrap()
+    }
+
+    /// Applies the [`GreaterEqual`] operation, see the op struct docs for details.
+    #[track_caller]
+    pub fn greater_equal<S2>(self, other: Array<S2>) -> Array<GreaterEqual<S, S2>>
+    where
+        S: ArrayStorageTyped,
+        S2: ArrayStorageTyped<Dimension = S::Dimension>,
+        S2::Item: crate::scalar::LessEqual<S::Item, Output: Dtyped>,
+    {
+        GreaterEqual::new_array(self, other).unwrap()
+    }
+
     define_array_op2_method!(less: Less, crate::scalar::Less);
     define_array_op2_method!(less_equal: LessEqual, crate::scalar::LessEqual);
     define_array_op2_method!(maximum: Maximum, crate::scalar::Maximum);
@@ -825,8 +910,7 @@ mod tests {
     #[test]
     fn simd_bodies_all_levels() {
         use super::{
-            EqualKernel, GreaterEqualKernel, GreaterKernel, LessEqualKernel, LessKernel,
-            MaximumKernel, MinimumKernel, NotEqualKernel,
+            EqualKernel, LessEqualKernel, LessKernel, MaximumKernel, MinimumKernel, NotEqualKernel,
         };
         use crate::ops::op2::Op2Kernel;
         use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
@@ -863,8 +947,6 @@ mod tests {
             simd.vectorize(|| {
                 all!(EqualKernel, |x, y| x == y);
                 all!(NotEqualKernel, |x, y| x != y);
-                all!(GreaterKernel, |x, y| x > y);
-                all!(GreaterEqualKernel, |x, y| x >= y);
                 all!(LessKernel, |x, y| x < y);
                 all!(LessEqualKernel, |x, y| x <= y);
                 all!(MaximumKernel, Maximum::maximum);
@@ -963,6 +1045,80 @@ mod tests {
             .and(&bb)
             .map_collect(|&a, &b| a >= b);
         crate::util::assert_array_matches(&zba.view().greater_equal(zbb.view()), &bexp);
+    }
+
+    test_op2!(
+        greater_equal,
+        |a, b| a >= b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+    test_op2!(
+        greater_equal,
+        |a, b| a >= b,
+        [f32, f64],
+        maybe_non_finite_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+
+    // `Greater` stores its operands swapped inside a `Less`; everything that reports them must
+    // still see the caller's order.
+    #[test]
+    fn swapped_cmp_reports_operands_in_caller_order() {
+        use crate::{Array, ArrayParams, ArrayStorage};
+        use ndarray::ShapeBuilder;
+
+        let c_order = ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap();
+        let f_order = ndarray::Array::from_shape_vec([3, 4].f(), (0..12i32).collect()).unwrap();
+        let mut params = ArrayParams::default();
+        params.block_size(1 << 12);
+        let a = Array::plain_ndarray_with(c_order, params).unwrap();
+        let b = Array::plain_ndarray(f_order).unwrap();
+        assert_ne!(
+            a.storage().spec().block_size(),
+            b.storage().spec().block_size()
+        );
+
+        let check = |storage: &dyn ArrayStorage, name: &str| {
+            let info = storage.info();
+            assert_eq!(info.name(), name);
+            let [dep_a, dep_b] = info.dependencies() else {
+                panic!("expected two dependencies")
+            };
+            // `view()` wraps the storage anew, so tell the operands apart by their layout.
+            assert_eq!(dep_a.spec().read_layout_order(), &[0, 1]);
+            assert_eq!(dep_b.spec().read_layout_order(), &[1, 0]);
+        };
+        let gt = a.view().greater(b.view());
+        let ge = a.view().greater_equal(b.view());
+        check(gt.storage(), "Greater");
+        check(ge.storage(), "GreaterEqual");
+
+        // The base spec comes from `a`, and a tie in the read layout order goes to `a`: C order,
+        // where the swapped `Less` alone would pick `b`'s F order.
+        for spec in [gt.storage().spec(), ge.storage().spec()] {
+            assert_eq!(spec.block_size(), a.storage().spec().block_size());
+            assert_eq!(spec.read_layout_order(), &[0, 1]);
+        }
+        let lt = b.view().less(a.view());
+        assert_eq!(lt.storage().spec().read_layout_order(), &[1, 0]);
+    }
+
+    #[test]
+    fn swapped_cmp_shape_mismatch_names_operands_in_caller_order() {
+        use crate::ops::Greater;
+        use crate::Array;
+
+        let a = Array::compact_ndarray(&ndarray::Array2::<i32>::zeros([2, 3])).unwrap();
+        let b = Array::compact_ndarray(&ndarray::Array2::<i32>::zeros([3, 2])).unwrap();
+        let Err(err) = Greater::new_array(a, b) else {
+            panic!("expected a shape mismatch")
+        };
+        assert!(
+            err.to_string().contains("`a` [2, 3] and `b` [3, 2]"),
+            "{err}"
+        );
     }
 
     #[test]
