@@ -96,6 +96,7 @@ mod jix {
         m.add("abs", m.getattr("absolute")?)?;
         m.add("concat", m.getattr("concatenate")?)?;
         m.add("clip", m.getattr("clamp")?)?;
+        m.add("prod", m.getattr("product")?)?;
 
         Ok(())
     }

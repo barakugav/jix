@@ -288,6 +288,12 @@ def test_sum(dtype: np.dtype, data: DataObject):
 # ---------------------------------------------------------------------------
 
 
+def test_prod_is_product_alias():
+    assert jix.prod is jix.product
+    za = jix.compact(np.array([[1, 2], [3, 4]], dtype=np.int32))
+    np.testing.assert_array_equal(jix.prod(za, dim=1).numpy(), [2, 12])
+
+
 def test_product_concrete():
     # Tiny shapes keep the accumulator from overflowing. Mix of zero and non-zero, positive
     # and negative, across signed/unsigned ints, wide floats, and complex.
