@@ -59,6 +59,17 @@ def test_cast_none():
 
 
 # ---------------------------------------------------------------------------
+# numpy layouts jix cannot view
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fn", [jix.asarray, jix.compact])
+def test_negative_strides_raise_value_error(fn):
+    with pytest.raises(ValueError, match="Negative strides"):
+        fn(np.arange(4)[::-1])
+
+
+# ---------------------------------------------------------------------------
 # File-like objects that lie about how much they read or wrote
 # ---------------------------------------------------------------------------
 

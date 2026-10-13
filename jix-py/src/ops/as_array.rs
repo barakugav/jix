@@ -320,7 +320,7 @@ mod tests {
                 .unwrap();
             assert!(asarray(&val, None, None)
                 .unwrap_err()
-                .is_instance_of::<pyo3::exceptions::PyOverflowError>(py));
+                .is_instance_of::<pyo3::exceptions::PyValueError>(py));
         });
     }
 }
