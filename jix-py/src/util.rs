@@ -1,10 +1,10 @@
 use jix_core::NDIM_MAX;
 use numpy::npyffi::{npy_intp, PyArray_Dims};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
+use pyo3::exceptions::PyTypeError;
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
-use pyo3::types::{PySlice, PySliceIndices};
-use pyo3_stub_gen::impl_stub_type;
+use pyo3::types::{PySlice, PySliceIndices, PyTuple};
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 
@@ -196,21 +196,50 @@ pub(crate) fn normalize_dims_optional(
     }
 }
 
-#[derive(FromPyObject)]
-pub enum ItemOrSequence<T> {
+pub enum ItemOrTuple<T> {
     Item(T),
     Sequence(Vec<T>),
 }
-impl<T> ItemOrSequence<T> {
+impl<'py, T> FromPyObject<'_, 'py> for ItemOrTuple<T>
+where
+    T: FromPyObjectOwned<'py>,
+{
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
+        // Only tuples count as sequences, unlike pyo3's `Vec<T>`, which
+        // accepts any object with the sequence protocol: an array passed where dims are expected
+        // is rejected instead of having its elements read as dims.
+        if obj.is_instance_of::<PyTuple>() {
+            let items = obj
+                .try_iter()?
+                .map(|item| item?.extract::<T>().map_err(Into::into))
+                .collect::<PyResult<Vec<T>>>()?;
+            return Ok(Self::Sequence(items));
+        }
+        obj.extract::<T>().map(Self::Item).map_err(|err| {
+            let err: PyErr = err.into();
+            if !err.is_instance_of::<PyTypeError>(obj.py()) {
+                return err; // e.g. OverflowError for an out-of-range int
+            }
+            let type_name = obj.get_type().name().map(|n| n.to_string());
+            PyTypeError::new_err(format!(
+                "expected an int, or a tuple of ints, got {}",
+                type_name.as_deref().unwrap_or("?")
+            ))
+        })
+    }
+}
+impl<T> ItemOrTuple<T> {
     #[inline]
     pub(crate) fn into_dim_array(self) -> PyResult<DimArray<T>> {
         match self {
-            ItemOrSequence::Item(item) => {
+            ItemOrTuple::Item(item) => {
                 let mut arr = DimArray::new();
                 arr.push(item);
                 Ok(arr)
             }
-            ItemOrSequence::Sequence(seq) => {
+            ItemOrTuple::Sequence(seq) => {
                 if seq.len() > NDIM_MAX {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
                         "Number of dimensions {} exceeds the maximum supported {}",
@@ -226,8 +255,8 @@ impl<T> ItemOrSequence<T> {
     #[inline]
     pub(crate) fn len(&self) -> usize {
         match self {
-            ItemOrSequence::Item(_) => 1,
-            ItemOrSequence::Sequence(seq) => seq.len(),
+            ItemOrTuple::Item(_) => 1,
+            ItemOrTuple::Sequence(seq) => seq.len(),
         }
     }
 
@@ -236,27 +265,39 @@ impl<T> ItemOrSequence<T> {
         self.len() == 0
     }
 }
-impl<T> From<T> for ItemOrSequence<T> {
+impl<T> From<T> for ItemOrTuple<T> {
     #[inline]
     fn from(item: T) -> Self {
-        ItemOrSequence::Item(item)
+        ItemOrTuple::Item(item)
     }
 }
-impl<T> From<Vec<T>> for ItemOrSequence<T> {
+impl<T> From<Vec<T>> for ItemOrTuple<T> {
     #[inline]
     fn from(seq: Vec<T>) -> Self {
-        ItemOrSequence::Sequence(seq)
+        ItemOrTuple::Sequence(seq)
     }
 }
-impl<T, const N: usize> From<[T; N]> for ItemOrSequence<T> {
+impl<T, const N: usize> From<[T; N]> for ItemOrTuple<T> {
     #[inline]
     fn from(arr: [T; N]) -> Self {
-        ItemOrSequence::Sequence(arr.into())
+        ItemOrTuple::Sequence(arr.into())
     }
 }
-impl_stub_type!(ItemOrSequence<i32> = i32 | Vec<i32>);
-impl_stub_type!(ItemOrSequence<i64> = i64 | Vec<i64>);
-impl_stub_type!(ItemOrSequence<u64> = u64 | Vec<u64>);
+macro_rules! impl_item_or_sequence_stub_type {
+    ($($t:ty),*) => {
+        $(
+            impl pyo3_stub_gen::PyStubType for ItemOrTuple<$t> {
+                fn type_output() -> pyo3_stub_gen::TypeInfo {
+                    let mut info = <$t as pyo3_stub_gen::PyStubType>::type_input();
+                    let item = std::mem::take(&mut info.name);
+                    info.name = format!("{item} | builtins.tuple[{item}, ...]");
+                    info
+                }
+            }
+        )*
+    };
+}
+impl_item_or_sequence_stub_type!(i32, i64, u64);
 
 #[allow(unused)]
 pub(crate) struct UnsafeSend<T>(T);

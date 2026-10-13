@@ -47,14 +47,14 @@ def _reduction_shape_strategy():
 
 
 # ---------------------------------------------------------------------------
-# Dim strategies - Python-specific: int/list/tuple, positive and negative
+# Dim strategies - Python-specific: int/tuple, positive and negative
 # ---------------------------------------------------------------------------
 
 
 @st.composite
 def _dims_strategy(draw, ndim):
     """
-    Return dim as None, int, list[int], or tuple[int].
+    Return dim as None, int, or tuple[int].
     Values may be negative. None means reduce all dims.
     """
     if ndim == 0:
@@ -67,14 +67,9 @@ def _dims_strategy(draw, ndim):
     pos_dims = sorted(draw(st.lists(st.integers(0, ndim - 1), min_size=n, max_size=n, unique=True)))
     dims = [d - ndim if draw(st.booleans()) else d for d in pos_dims]
     # Vary the container type
-    if len(dims) == 1:
-        form = draw(st.integers(0, 2))
-        if form == 0:
-            return dims[0]
-        if form == 1:
-            return list(dims)
-        return tuple(dims)
-    return tuple(dims) if draw(st.booleans()) else list(dims)
+    if len(dims) == 1 and draw(st.booleans()):
+        return dims[0]
+    return tuple(dims)
 
 
 # ---------------------------------------------------------------------------
@@ -434,13 +429,14 @@ def test_dim_none_reduces_all():
     assert jix.min(za).numpy()[()] == 1
 
 
-def test_dim_list_and_tuple():
-    """dim=[0,1] and dim=(0,1) reduce multiple dims simultaneously."""
+def test_dim_tuple():
+    """dim=(0,1) reduces multiple dims simultaneously; like numpy, a list is rejected."""
     d = np.arange(24, dtype=np.int32).reshape(2, 3, 4)
     za = jix.compact(d)
-    np.testing.assert_array_equal(jix.sum(za, dim=[0, 2]).numpy(), d.sum(axis=(0, 2)))
     np.testing.assert_array_equal(jix.sum(za, dim=(0, 2)).numpy(), d.sum(axis=(0, 2)))
     np.testing.assert_array_equal(jix.max(za, dim=(1, 2)).numpy(), d.max(axis=(1, 2)))
+    with pytest.raises(TypeError, match="tuple of ints"):
+        jix.sum(za, dim=[0, 2])
 
 
 def test_keepdim():

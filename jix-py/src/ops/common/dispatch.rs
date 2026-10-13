@@ -7,7 +7,7 @@ use jix_core::{Array as CoreArray, ArrayAny, Ty};
 use pyo3::prelude::*;
 
 use crate::ops::common::{CastKind, Operand, Precision, Rank, Scalar};
-use crate::util::{IntoPyResult, ItemOrSequence, IterExt};
+use crate::util::{IntoPyResult, ItemOrTuple, IterExt};
 
 type TypedOperand<T> = CoreArray<IntoType<ArrayStorageAny, Ty<T>>>;
 
@@ -89,7 +89,7 @@ impl OpFnDescriptor<1, ()> {
 }
 impl OpFnDescriptor<2, ()> {
     pub(crate) fn new2<T1, T2>(
-        allowed_cast: impl Into<ItemOrSequence<CastKind>>,
+        allowed_cast: impl Into<ItemOrTuple<CastKind>>,
         f: impl Fn(TypedOperand<T1>, TypedOperand<T2>) -> PyResult<ArrayAny> + Send + Sync + 'static,
     ) -> Self
     where
@@ -104,8 +104,8 @@ impl OpFnDescriptor<2, ()> {
         };
 
         let allowed_cast: [CastKind; 2] = match allowed_cast.into() {
-            ItemOrSequence::Item(cast) => [cast; 2],
-            ItemOrSequence::Sequence(items) => items.try_into().unwrap(),
+            ItemOrTuple::Item(cast) => [cast; 2],
+            ItemOrTuple::Sequence(items) => items.try_into().unwrap(),
         };
         let [allowed_cast1, allowed_cast2] = allowed_cast;
         let input_desc = [

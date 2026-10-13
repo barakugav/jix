@@ -18,7 +18,7 @@ use crate::dtype::dtype_to_numpy;
 use crate::ops::asarray_simple;
 use crate::util::{
     dim_arr, maybe_detach, numpy_empty_ordered, strided_span_bytes, DimArray, IntoPyResult,
-    ItemOrSequence,
+    ItemOrTuple,
 };
 
 /// A multi-dimensional compressed array.
@@ -1088,7 +1088,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn all(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::all(slf, dim, keepdim)
@@ -1098,7 +1098,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn any(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::any(slf, dim, keepdim)
@@ -1108,7 +1108,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn max(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::max(slf, dim, keepdim)
@@ -1118,7 +1118,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn min(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::min(slf, dim, keepdim)
@@ -1140,7 +1140,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn sum(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::sum(slf, dim, keepdim)
@@ -1150,7 +1150,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn mean(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::mean(slf, dim, keepdim)
@@ -1160,7 +1160,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn prod(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::product(slf, dim, keepdim)
@@ -1170,7 +1170,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn std(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
@@ -1181,7 +1181,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn var(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
         keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
@@ -1201,7 +1201,7 @@ impl Array {
     /// Reinterprets an array with a different shape. See [`jix.reshape()`][jix.reshape].
     pub fn reshape<'py>(
         slf: &Bound<'py, Self>,
-        shape: ItemOrSequence<i64>,
+        shape: ItemOrTuple<i64>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::reshape(slf, shape)
     }
@@ -1241,7 +1241,7 @@ impl Array {
     #[pyo3(signature = (shape))]
     pub fn broadcast<'py>(
         slf: &Bound<'py, Self>,
-        shape: ItemOrSequence<i64>,
+        shape: ItemOrTuple<i64>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::broadcast(slf, shape)
     }
@@ -1258,7 +1258,7 @@ impl Array {
     #[pyo3(signature = (dim=None))]
     pub fn squeeze<'py>(
         slf: &Bound<'py, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::squeeze(slf, dim)
     }
@@ -1266,7 +1266,7 @@ impl Array {
     /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Self>,
-        dim: ItemOrSequence<i32>,
+        dim: ItemOrTuple<i32>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::unsqueeze(slf, dim)
     }
@@ -1285,7 +1285,7 @@ impl Array {
     #[pyo3(signature = (dim=None))]
     pub fn flip<'py>(
         slf: &Bound<'py, Self>,
-        dim: Option<ItemOrSequence<i32>>,
+        dim: Option<ItemOrTuple<i32>>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::flip(slf, dim)
     }
@@ -1399,7 +1399,7 @@ impl Array {
     /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_dim()`][jix.insert_dim].
     pub fn insert_dim<'py>(
         slf: &Bound<'py, Self>,
-        dim: ItemOrSequence<i32>,
+        dim: ItemOrTuple<i32>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::insert_dim(slf, dim)
     }
@@ -1407,7 +1407,7 @@ impl Array {
     /// Removes length-1 dimensions from the array's shape. See [`jix.remove_dim()`][jix.remove_dim].
     pub fn remove_dim<'py>(
         slf: &Bound<'py, Self>,
-        dim: ItemOrSequence<i32>,
+        dim: ItemOrTuple<i32>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::remove_dim(slf, dim)
     }
@@ -1483,7 +1483,7 @@ impl Array {
 ///             fixed. Defaults to a size chosen automatically according to the CPU cache sizes.
 ///         - `read_size`: The target byte range for a single preferred read region as
 ///             `(min, max)`, given as either a scalar `s` (treated as `(s, s)`) or a 2-element
-///             `(min, max)` sequence of non-negative ints.
+///             `(min, max)` tuple of non-negative ints.
 ///
 ///             A read region is the rectangular slab the engine pulls and decompresses in one
 ///             pass when materializing a lazy pipeline or a sub-region read. Its shape is derived
@@ -1598,7 +1598,7 @@ pub(crate) fn resolve_array_params(
     let block_shape = extract_arg!("block_shape", Vec<u32>)?;
     let block_shape_fixed_dims = extract_arg!("block_shape_fixed_dims", Vec<bool>)?;
     let block_size = extract_arg!("block_size", u64)?;
-    let read_size = extract_arg!("read_size", ItemOrSequence<u64>)?;
+    let read_size = extract_arg!("read_size", ItemOrTuple<u64>)?;
     let codec = extract_arg!("codec", String)?;
     let compression_level = extract_arg!("compression_level", i32)?;
     let filters = extract_arg!("filters", Vec<String>)?;
@@ -1622,7 +1622,7 @@ pub(crate) fn resolve_array_params(
     if let Some(read_size) = read_size {
         if read_size.len() != 1 && read_size.len() != 2 {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "read_size must be a scalar or a 2-element sequence, got {} elements",
+                "read_size must be a scalar or a 2-element tuple, got {} elements",
                 read_size.len()
             )));
         }

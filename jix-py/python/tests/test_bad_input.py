@@ -59,6 +59,39 @@ def test_cast_none():
 
 
 # ---------------------------------------------------------------------------
+# dims take an int or a tuple of ints; shapes also take a list
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("dim", [1, (0, 1), np.int64(1), (np.int32(0), 1)])
+def test_dims_accept_int_tuple(dim):
+    a = jix.compact(np.ones((2, 3)))
+    np.testing.assert_array_equal(jix.sum(a, dim=dim).numpy(), np.sum(np.ones((2, 3)), axis=dim))
+
+
+@pytest.mark.parametrize("dim", [[0, 1], np.array([1]), range(2), "1"])
+def test_dims_reject_other_sequences(dim):
+    with pytest.raises(TypeError, match="an int, or a tuple of ints"):
+        jix.sum(jix.compact(np.ones((2, 3))), dim=dim)
+
+
+def test_max_with_array_second_arg_is_not_read_as_dims():
+    a = jix.compact(np.ones((2, 3)))
+    with pytest.raises(TypeError, match="tuple of ints"):
+        jix.max(a, jix.asarray(np.array([1])))
+
+
+def test_shape_rejects_list():
+    with pytest.raises(TypeError, match="tuple of ints"):
+        jix.reshape(jix.compact(np.ones((2, 3))), [3, 2])
+
+
+def test_shape_rejects_ndarray():
+    with pytest.raises(TypeError, match="tuple of ints"):
+        jix.reshape(jix.compact(np.ones((2, 3))), np.array([3, 2]))
+
+
+# ---------------------------------------------------------------------------
 # numpy layouts jix cannot view
 # ---------------------------------------------------------------------------
 
