@@ -189,6 +189,7 @@ impl<'a> NdCopier<'a> {
                 aligned,
                 src_stride == size_of::<T>(),
                 dst_stride == size_of::<T>(),
+                src_stride == 0,
             );
             unsafe { inner_loop_fn(src, dst, len, src_stride, dst_stride) };
             return;
@@ -209,6 +210,7 @@ impl<'a> NdCopier<'a> {
             is_aligned,
             src_contiguous,
             dst_contiguous,
+            iter.inner_strides()[1] == 0,
         );
 
         iter.foreach_inner_1d_impl::<true>(
@@ -230,6 +232,7 @@ impl<'a> NdCopier<'a> {
         aligned: bool,
         src_contiguous: bool,
         dst_contiguous: bool,
+        src_broadcast: bool,
     ) -> InnerLoopFn<T> {
         if src_contiguous && dst_contiguous {
             // For the both-contiguous run, peel a small fixed length into a single `[T; N]` move
@@ -259,6 +262,13 @@ impl<'a> NdCopier<'a> {
                 }
                 (_, true) => Self::inner_loop::<T, true, true, true>,
                 (_, false) => Self::inner_loop::<T, false, true, true>,
+            }
+        } else if src_broadcast {
+            match (aligned, dst_contiguous) {
+                (true, true) => Self::inner_loop_broadcast::<T, true, true>,
+                (true, false) => Self::inner_loop_broadcast::<T, true, false>,
+                (false, true) => Self::inner_loop_broadcast::<T, false, true>,
+                (false, false) => Self::inner_loop_broadcast::<T, false, false>,
             }
         } else {
             match (aligned, [src_contiguous, dst_contiguous]) {
@@ -335,6 +345,30 @@ impl<'a> NdCopier<'a> {
         unsafe { dst.write_maybe_aligned::<ALIGNED>(val) };
     }
 
+    unsafe fn inner_loop_broadcast<T: Copy, const ALIGNED: bool, const DST_CONTIGUOUS: bool>(
+        src: PtrNoalias<T>,
+        dst: PtrMutNoalias<T>,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+    ) {
+        debug_assert_eq!(src_stride, 0);
+        unsafe { std::hint::assert_unchecked(DST_CONTIGUOUS == (dst_stride == size_of::<T>())) };
+
+        let dst = dst.as_mut_ptr();
+        unsafe {
+            let val = src.as_ptr().read_maybe_aligned::<ALIGNED>();
+            for i in 0..len {
+                let d = if DST_CONTIGUOUS {
+                    dst.add(i)
+                } else {
+                    dst.byte_add(i * dst_stride)
+                };
+                d.write_maybe_aligned::<ALIGNED>(val);
+            }
+        }
+    }
+
     unsafe fn inner_loop_untyped<const SRC_DST_CONTIGUOUS: bool>(
         src: PtrNoalias<u8>,
         dst: PtrMutNoalias<u8>,
@@ -359,6 +393,33 @@ impl<'a> NdCopier<'a> {
                     ptr::copy_nonoverlapping(s, d, itemsize);
                 }
             }
+        }
+    }
+
+    unsafe fn inner_loop_untyped_broadcast(
+        src: PtrNoalias<u8>,
+        dst: PtrMutNoalias<u8>,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+        itemsize: usize,
+    ) {
+        debug_assert_eq!(src_stride, 0);
+        debug_assert_eq!(dst_stride, itemsize);
+        if len == 0 {
+            return;
+        }
+        let src = src.as_ptr();
+        let dst = dst.as_mut_ptr();
+        // Write the element once, then keep doubling the filled prefix, so the run takes
+        // `log2(len)` copies rather than `len` of them.
+        let total = len * itemsize;
+        unsafe { ptr::copy_nonoverlapping(src, dst, itemsize) };
+        let mut filled = itemsize;
+        while filled < total {
+            let n = filled.min(total - filled);
+            unsafe { ptr::copy_nonoverlapping(dst, dst.add(filled), n) };
+            filled += n;
         }
     }
 
@@ -404,6 +465,8 @@ impl<'a> NdCopier<'a> {
             let dst_contiguous = dst_stride == itemsize;
             if dst_contiguous && src_stride == itemsize {
                 Self::inner_loop_untyped::<true>
+            } else if dst_contiguous && src_stride == 0 {
+                Self::inner_loop_untyped_broadcast
             } else {
                 Self::inner_loop_untyped::<false>
             }
@@ -817,6 +880,41 @@ mod tests {
     #[test]
     fn copy_dynamic_odd_itemsize() {
         check_all_dims::<[u8; 3]>();
+    }
+
+    // A zero source stride repeats one element. Along the innermost axis that is the broadcast loop;
+    // along an outer axis it only re-reads whole runs. Each layout runs aligned and misaligned, into
+    // a contiguous and a strided destination, in 1-D (the iterator-free path) and in 2-D.
+    fn check_broadcast_src<T: Dtyped>() {
+        let is = T::DTYPE.itemsize() as usize;
+        for misalign in [0, 1] {
+            for n in [1, 3, 64, 100] {
+                check::<T>(&[n], &[0], &[is], misalign);
+                check::<T>(&[n], &[0], &[2 * is], misalign);
+            }
+            // broadcast along the inner axis
+            check::<T>(&[3, 17], &[is, 0], &[17 * is, is], misalign);
+            check::<T>(&[3, 17], &[is, 0], &[34 * is, 2 * is], misalign);
+            // broadcast along every axis: one element spread over the whole region
+            check::<T>(&[3, 17], &[0, 0], &[17 * is, is], misalign);
+            check::<T>(&[3, 17], &[0, 0], &[34 * is, 2 * is], misalign);
+            // broadcast along the outer axis only: the same contiguous run, repeated
+            check::<T>(&[3, 17], &[0, is], &[17 * is, is], misalign);
+        }
+    }
+    #[test]
+    fn copy_broadcast_src() {
+        check_broadcast_src::<u8>();
+        check_broadcast_src::<u16>();
+        check_broadcast_src::<u32>();
+        check_broadcast_src::<u64>();
+        #[cfg(feature = "num-complex")]
+        check_broadcast_src::<crate::scalar::Complex<f32>>(); // (8, 4) -> [u32; 2]
+        #[cfg(feature = "num-complex")]
+        check_broadcast_src::<crate::scalar::Complex<f64>>(); // (16, 8) -> [u64; 2], via `Reg16`
+        check_broadcast_src::<StructNoPad>();
+        check_broadcast_src::<[i32; 3]>();
+        check_broadcast_src::<[u8; 3]>();
     }
 
     // Zero-length dimensions across the scalar, struct and dynamic dispatch routes.
