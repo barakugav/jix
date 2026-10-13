@@ -126,7 +126,7 @@ impl<S1, S2, F> Map2<S1, S2, F> {
         F: Fn(S1::Item, S2::Item) -> O,
         O: Dtyped,
     {
-        Ok(Self(Op2::new(a, b, map_fn)?))
+        Ok(Self(Op2::new(a, b, map_fn, false)?))
     }
 
     /// Constructs an array with [`Map2`] storage. See the storage struct docs for semantics and examples.

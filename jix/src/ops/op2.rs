@@ -29,47 +29,62 @@ pub(crate) trait Op2Kernel<T1, T2> {
     }
 }
 impl<S1, S2, K> Op2<S1, S2, K> {
-    pub(crate) fn new(a: S1, b: S2, kernel: K) -> Result<Self>
+    pub(crate) fn new(a: S1, b: S2, kernel: K, swapped_operand_order: bool) -> Result<Self>
     where
         S1: ArrayStorageTyped,
         S2: ArrayStorageTyped<Dimension = S1::Dimension>,
         K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
     {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
-        ensure!(
-            a.shape() == b.shape(),
-            InvalidArgument,
-            "Op2 shape mismatch between `a` {:?} and `b` {:?}",
-            a.shape(),
-            b.shape()
-        );
-        let a_spec = a.spec();
-        let b_spec = b.spec();
-        let (element_cost, read_shape_scale_weight, read_layout_order) =
-            combine_elementwise_hints(&[
-                (
-                    a_spec.element_cost(),
-                    a_spec.read_shape_scale_weight(),
-                    a_spec.read_layout_order(),
-                ),
-                (
-                    b_spec.element_cost(),
-                    b_spec.read_shape_scale_weight(),
-                    b_spec.read_layout_order(),
-                ),
+        {
+            let (mut a_shape, mut b_shape) = (a.shape(), b.shape());
+            if swapped_operand_order {
+                std::mem::swap(&mut a_shape, &mut b_shape);
+            }
+            ensure!(
+                a_shape == b_shape,
+                InvalidArgument,
+                "Op2 shape mismatch between `a` {:?} and `b` {:?}",
+                a_shape,
+                b_shape
+            );
+        }
+        let spec = {
+            let (mut a_spec, mut b_spec) = (a.spec(), b.spec());
+            if swapped_operand_order {
+                std::mem::swap(&mut a_spec, &mut b_spec);
+            }
+            let (element_cost, read_shape_scale_weight, read_layout_order) =
+                combine_elementwise_hints(&[
+                    (
+                        a_spec.element_cost(),
+                        a_spec.read_shape_scale_weight(),
+                        a_spec.read_layout_order(),
+                    ),
+                    (
+                        b_spec.element_cost(),
+                        b_spec.read_shape_scale_weight(),
+                        b_spec.read_layout_order(),
+                    ),
+                ]);
+            let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
+                (a_spec.block_shape(), a_spec.block_shape_fixed_dims()),
+                (b_spec.block_shape(), b_spec.block_shape_fixed_dims()),
             ]);
-        let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
-            (a_spec.block_shape(), a_spec.block_shape_fixed_dims()),
-            (b_spec.block_shape(), b_spec.block_shape_fixed_dims()),
-        ]);
-        let spec = ArraySpecDynamic::new(
-            block_shape,
-            block_shape_fixed_dims,
-            element_cost,
-            read_shape_scale_weight,
-            read_layout_order,
-        );
+            ArraySpecDynamic::new(
+                block_shape,
+                block_shape_fixed_dims,
+                element_cost,
+                read_shape_scale_weight,
+                read_layout_order,
+            )
+        };
         Ok(Self { a, b, kernel, spec })
+    }
+
+    #[inline(always)]
+    pub(crate) fn dynamic_spec(&self) -> &ArraySpecDynamic {
+        &self.spec
     }
 }
 
@@ -253,7 +268,7 @@ macro_rules! define_op2 {
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(a: S1, b: S2) -> crate::error::Result<Self> {
-                Ok(Self(crate::ops::op2::Op2::new(a, b, $Kernel)?))
+                Ok(Self(crate::ops::op2::Op2::new(a, b, $Kernel, false)?))
             }
 
             #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
