@@ -575,8 +575,7 @@ pub fn squeeze<'py>(
 ///
 /// The `i`-th output dim corresponds to dim `dims[i]` of the input - identical to
 /// `numpy.transpose`. `dims` must be a permutation of `0..ndim`: correct length, all values
-/// in range, no duplicates. Integer values are interpreted as unsigned dim indices (negative
-/// dims are **not** supported for `dims`).
+/// in range, no duplicates. Negative values count from the last dim, so `-1` is `ndim - 1`.
 ///
 /// When `dims=None` (the default), all dims are reversed: output dim `i` maps to input dim
 /// `ndim - 1 - i`. For 2-D arrays this is the standard matrix transpose.
@@ -587,8 +586,8 @@ pub fn squeeze<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     dims: Permutation of dim indices. When `None` (default), reverses all dims.
-///         Integer values must be unsigned (negative dims are not supported).
+///     dims: Permutation of dim indices. Supports negative values. When `None` (default),
+///         reverses all dims.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with dims reordered as specified.
@@ -606,6 +605,9 @@ pub fn squeeze<'py>(
 ///
 ///     # dims=None reverses all dims (same as numpy.transpose with no argument)
 ///     assert jix.permute_dims(a).numpy().shape == (3, 2)
+///
+///     # Negative dims count from the end
+///     assert np.array_equal(jix.permute_dims(a, [-1, 0]).numpy(), a.numpy().T)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
@@ -615,13 +617,17 @@ pub fn squeeze<'py>(
 ))]
 pub fn permute_dims<'py>(
     array: &Bound<'py, PyAny>,
-    dims: Option<Vec<usize>>,
+    dims: Option<Vec<i32>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
-    let dims = dims.unwrap_or_else(|| (0..array.ndim()).rev().collect());
-    if dims.len() == array.ndim() && dims.iter().enumerate().all(|(i, &d)| i == d) {
+    let ndim = array.ndim();
+    let dims = match dims {
+        Some(dims) => normalize_dims(&dims, ndim)?,
+        None => (0..ndim).rev().collect(),
+    };
+    if dims.len() == ndim && dims.iter().enumerate().all(|(i, &d)| i == d) {
         return Ok(py_arr); // no-op permutation
     }
     let ret = jix_core::ops::PermuteDims::new_array(array, &dims).into_py_result()?;
