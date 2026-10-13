@@ -630,8 +630,8 @@ fn reduce_tile_impl(
         return; // empty tile
     }
     let [_items_inner_stride, state_inner_stride, reduced_inner_stride] = iter.inner_strides();
-    let [items_contiguous, state_contiguous, _] = iter.is_contiguous();
-    let [items_strides_aligned, state_strides_aligned, _] = iter.is_aligned();
+    let [items_contiguous, state_contiguous, _] = *iter.is_contiguous();
+    let [items_strides_aligned, state_strides_aligned, _] = *iter.is_strides_aligned();
     let items_aligned = !REQUIRE_ALIGNED
         || (items_strides_aligned
             && (items_buf.as_ptr() as usize).is_multiple_of(item_layout.1.as_usize()));

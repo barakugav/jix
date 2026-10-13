@@ -23,7 +23,7 @@ use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimens
 ///      dims plus a flat inner 1-d run.
 ///
 /// [`new`](Self::new) performs steps (1) and (2) and computes the innermost-run description; the
-/// caller inspects it via [`inner_len`](Self::inner_len), [`is_aligned`](Self::is_aligned) and
+/// caller inspects it via [`inner_len`](Self::inner_len), [`is_strides_aligned`](Self::is_strides_aligned) and
 /// [`is_contiguous`](Self::is_contiguous) - each operand's inner stride equals `size` / every stride
 /// is a multiple of `alignment` - to pick a specialized inner loop, then calls
 /// [`foreach_inner_1d`](Self::foreach_inner_1d) to drive that loop once per outer position as
@@ -36,7 +36,7 @@ pub(crate) struct NdIterUnordered<const N_OPERANDS: usize> {
     /// Per-operand strides aligned with `shape`, each in its operand's own stride unit.
     strides: [DimArray<usize>; N_OPERANDS],
     /// Per-operand: every stride is a multiple of the operand's alignment.
-    is_aligned: [bool; N_OPERANDS],
+    is_strides_aligned: [bool; N_OPERANDS],
     /// Per-operand: the innermost run is contiguous (inner stride == element size).
     is_contiguous: [bool; N_OPERANDS],
 }
@@ -88,7 +88,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
                 strides: array_from_fn_inline(|i| {
                     DimArray::from_slice(&[layouts[i].0 as usize]).unwrap()
                 }),
-                is_aligned: [true; N_OPERANDS],
+                is_strides_aligned: [true; N_OPERANDS],
                 is_contiguous: [true; N_OPERANDS],
             };
         }
@@ -154,7 +154,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         debug_assert!(!shape.is_empty());
         let sizes = array_from_fn_inline::<_, N_OPERANDS>(|i| layouts[i].0 as usize);
         let ndim = shape.len();
-        let is_aligned = array_from_fn_inline::<_, N_OPERANDS>(|i| {
+        let is_strides_aligned = array_from_fn_inline::<_, N_OPERANDS>(|i| {
             let alignment = layouts[i].1.as_usize();
             strides[i].iter().all(|s| s.is_multiple_of(alignment))
         });
@@ -164,7 +164,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         Self {
             shape,
             strides,
-            is_aligned,
+            is_strides_aligned,
             is_contiguous,
         }
     }
@@ -180,7 +180,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         Self {
             shape,
             strides,
-            is_aligned: [true; N_OPERANDS],
+            is_strides_aligned: [true; N_OPERANDS],
             is_contiguous: [true; N_OPERANDS],
         }
     }
@@ -191,17 +191,15 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     }
 
     #[inline(always)]
-    pub(crate) fn is_aligned(&self) -> [bool; N_OPERANDS] {
-        self.is_aligned
+    pub(crate) fn is_strides_aligned(&self) -> &[bool; N_OPERANDS] {
+        &self.is_strides_aligned
     }
 
     #[inline(always)]
-    pub(crate) fn is_contiguous(&self) -> [bool; N_OPERANDS] {
-        self.is_contiguous
+    pub(crate) fn is_contiguous(&self) -> &[bool; N_OPERANDS] {
+        &self.is_contiguous
     }
 
-    /// Each operand's stride along the innermost run, in its own stride unit. Constant across outer
-    /// positions, so a caller can pick its inner loop once instead of per run.
     #[inline(always)]
     pub(crate) fn inner_strides(&self) -> [usize; N_OPERANDS] {
         let inner = self.shape.len() - 1;
@@ -344,7 +342,7 @@ mod tests {
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct Flags<const N: usize> {
         inner_len: usize,
-        is_aligned: [bool; N],
+        is_strides_aligned: [bool; N],
         is_contiguous: [bool; N],
     }
 
@@ -385,8 +383,8 @@ mod tests {
             NdIterUnordered::new_with(shape, strides, layouts(layouts_raw), affects_dim_order);
         let flags = Flags {
             inner_len: iter.inner_len(),
-            is_aligned: iter.is_aligned(),
-            is_contiguous: iter.is_contiguous(),
+            is_strides_aligned: *iter.is_strides_aligned(),
+            is_contiguous: *iter.is_contiguous(),
         };
         iter.foreach_inner_1d(
             |offsets: [usize; N], len: usize, inner_strides: [usize; N]| {
@@ -481,7 +479,7 @@ mod tests {
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 5);
         assert_eq!(flags.is_contiguous, [true]);
-        assert_eq!(flags.is_aligned, [true]);
+        assert_eq!(flags.is_strides_aligned, [true]);
         assert_eq!(run.inner_calls, 1);
         assert_eq!(run.visited, [[0], [1], [2], [3], [4]]);
     }
@@ -493,7 +491,7 @@ mod tests {
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 4);
         assert_eq!(flags.is_contiguous, [false]);
-        assert_eq!(flags.is_aligned, [true]); // every stride is a multiple of alignment 1
+        assert_eq!(flags.is_strides_aligned, [true]); // every stride is a multiple of alignment 1
         assert_eq!(run.visited, [[0], [2], [4], [6]]);
     }
 
@@ -558,7 +556,7 @@ mod tests {
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 1);
         assert_eq!(flags.is_contiguous, [true]);
-        assert_eq!(flags.is_aligned, [true]);
+        assert_eq!(flags.is_strides_aligned, [true]);
         assert_eq!(run.inner_calls, 1);
         assert_eq!(run.visited, [[0]]);
     }
@@ -598,14 +596,14 @@ mod tests {
         // Stride 5 is not a multiple of alignment 4 -> not aligned; 5 != size 4 -> not contiguous.
         let run = assert_visits(&[3], [&[5]], [(4, 4)]);
         let flags = run.flags.unwrap();
-        assert_eq!(flags.is_aligned, [false]);
+        assert_eq!(flags.is_strides_aligned, [false]);
         assert_eq!(flags.is_contiguous, [false]);
         assert_eq!(run.visited, [[0], [5], [10]]);
 
         // Stride 8 is a multiple of alignment 4 -> aligned; but 8 != size 4 -> still not contiguous.
         let run = assert_visits(&[3], [&[8]], [(4, 4)]);
         let flags = run.flags.unwrap();
-        assert_eq!(flags.is_aligned, [true]);
+        assert_eq!(flags.is_strides_aligned, [true]);
         assert_eq!(flags.is_contiguous, [false]);
     }
 
@@ -621,7 +619,7 @@ mod tests {
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 6);
         assert_eq!(flags.is_contiguous, [false]);
-        assert_eq!(flags.is_aligned, [true]); // 0 is a multiple of any alignment
+        assert_eq!(flags.is_strides_aligned, [true]); // 0 is a multiple of any alignment
         assert_eq!(run.visited, [[0]; 6]);
     }
 
@@ -638,7 +636,7 @@ mod tests {
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 6);
         assert_eq!(flags.is_contiguous, [true, true]);
-        assert_eq!(flags.is_aligned, [true, true]);
+        assert_eq!(flags.is_strides_aligned, [true, true]);
         assert_eq!(run.inner_calls, 1);
         assert_eq!(
             run.visited,
@@ -655,7 +653,7 @@ mod tests {
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 3);
         assert_eq!(flags.is_contiguous, [true, false]);
-        assert_eq!(flags.is_aligned, [true, true]);
+        assert_eq!(flags.is_strides_aligned, [true, true]);
         assert_eq!(run.inner_calls, 2);
     }
 
@@ -840,7 +838,7 @@ mod tests {
         let shape = [4, 5];
         let iter = NdIterUnordered::new(&shape, [&[0, 8], &[40, 8]], layouts([(8, 8); 2]));
         assert_eq!(iter.inner_strides(), [8, 8]);
-        assert_eq!(iter.is_contiguous(), [true, true]);
+        assert_eq!(*iter.is_contiguous(), [true, true]);
         assert_visits(&shape, [&[0, 8], &[40, 8]], [(8, 8); 2]);
     }
 

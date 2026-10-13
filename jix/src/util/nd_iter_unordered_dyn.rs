@@ -15,7 +15,7 @@ pub(crate) struct NdIterUnorderedDyn {
     shape: DimArray<usize>,
     /// Per-operand strides aligned with `shape`, each in its operand's own stride unit.
     strides: Vec<DimArray<usize>>,
-    is_aligned: Vec<bool>,
+    is_strides_aligned: Vec<bool>,
     is_contiguous: Vec<bool>,
 }
 
@@ -51,7 +51,7 @@ impl NdIterUnorderedDyn {
                     .iter()
                     .map(|&(size, _)| DimArray::from_slice(&[size as usize]).unwrap())
                     .collect(),
-                is_aligned: vec![true; strides.len()],
+                is_strides_aligned: vec![true; strides.len()],
                 is_contiguous: vec![true; strides.len()],
             };
         }
@@ -116,7 +116,7 @@ impl NdIterUnorderedDyn {
         // (3) Compute the innermost-run flags (length, and per-operand alignment / contiguity).
         debug_assert!(!shape.is_empty());
         let ndim = shape.len();
-        let is_aligned = strides
+        let is_strides_aligned = strides
             .iter()
             .zip(layouts)
             .map(|(s, &(_, alignment))| s.iter().all(|s| s.is_multiple_of(alignment.as_usize())))
@@ -130,7 +130,7 @@ impl NdIterUnorderedDyn {
         Self {
             shape,
             strides,
-            is_aligned,
+            is_strides_aligned,
             is_contiguous,
         }
     }
@@ -147,7 +147,7 @@ impl NdIterUnorderedDyn {
             })
             .collect::<Vec<_>>();
         Self {
-            is_aligned: vec![true; strides.len()],
+            is_strides_aligned: vec![true; strides.len()],
             is_contiguous: vec![true; strides.len()],
             shape,
             strides,
@@ -160,13 +160,19 @@ impl NdIterUnorderedDyn {
     }
 
     #[inline(always)]
-    pub(crate) fn is_aligned(&self) -> &[bool] {
-        &self.is_aligned
+    pub(crate) fn is_strides_aligned(&self) -> &[bool] {
+        &self.is_strides_aligned
     }
 
     #[inline(always)]
     pub(crate) fn is_contiguous(&self) -> &[bool] {
         &self.is_contiguous
+    }
+
+    #[inline]
+    pub(crate) fn inner_strides(&self) -> Vec<usize> {
+        let inner = self.shape.len() - 1;
+        self.strides.iter().map(|s| s[inner]).collect()
     }
 
     #[inline]
@@ -248,7 +254,7 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     struct Walk {
         inner_len: usize,
-        is_aligned: Vec<bool>,
+        is_strides_aligned: Vec<bool>,
         is_contiguous: Vec<bool>,
         visited: Vec<Vec<usize>>,
         inner_calls: usize,
@@ -286,7 +292,7 @@ mod tests {
         });
         Walk {
             inner_len: iter.inner_len(),
-            is_aligned: iter.is_aligned().to_vec(),
+            is_strides_aligned: iter.is_strides_aligned().to_vec(),
             is_contiguous: iter.is_contiguous().to_vec(),
             visited,
             inner_calls,
@@ -310,7 +316,7 @@ mod tests {
         );
         Walk {
             inner_len: iter.inner_len(),
-            is_aligned: iter.is_aligned().to_vec(),
+            is_strides_aligned: iter.is_strides_aligned().to_vec(),
             is_contiguous: iter.is_contiguous().to_vec(),
             visited,
             inner_calls,

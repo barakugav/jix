@@ -193,7 +193,7 @@ where
             ],
         );
         let aligned = !REQUIRE_ALIGNED || {
-            let [x_aligned, y_aligned, cond_aligned] = iter.is_aligned();
+            let [x_aligned, y_aligned, cond_aligned] = *iter.is_strides_aligned();
             debug_assert!(cond_aligned);
             (x_aligned && (out_buf.as_ptr() as usize).is_multiple_of(alignment))
                 && (y_aligned && (y_buf.as_ptr() as usize).is_multiple_of(alignment))
