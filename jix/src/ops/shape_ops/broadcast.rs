@@ -8,11 +8,11 @@ use crate::ops::prelude::*;
 /// the single element is repeated `shape[d]` times). Any other combination is an error.
 ///
 /// Output dtype equals the input dtype. Output shape equals `shape`. `Broadcast<S>` carries
-/// `type Dimension = S::Dimension` - broadcasting does not change the number of axes so the
+/// `type Dimension = S::Dimension` - broadcasting does not change the number of dims so the
 /// dimension type is preserved unchanged.
 ///
-/// `Broadcast` is the lazy zero-cost case of replication restricted to length-1 axes; for
-/// general element replication along an axis of any length use [`Repeat`](crate::ops::Repeat)
+/// `Broadcast` is the lazy zero-cost case of replication restricted to length-1 dims; for
+/// general element replication along a dim of any length use [`Repeat`](crate::ops::Repeat)
 /// (each element duplicated in place) or [`Tile`](crate::ops::Tile) (the whole sequence
 /// duplicated).
 ///
@@ -156,7 +156,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
                 let out_shape =
                     S::Dimension::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
                 let (src, _) = inner.data();
-                // SAFETY: `src_strides` are the inner view's strides with broadcast axes zeroed
+                // SAFETY: `src_strides` are the inner view's strides with broadcast dims zeroed
                 unsafe {
                     out.copy_from(
                         src,
@@ -248,17 +248,17 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn shape_broadcast_axis0() {
+    fn shape_broadcast_dim0() {
         assert_eq!(make(arange(4), &[1, 4]).broadcast(&[3, 4]).shape(), &[3, 4]);
     }
 
     #[test]
-    fn shape_broadcast_axis1() {
+    fn shape_broadcast_dim1() {
         assert_eq!(make(arange(3), &[3, 1]).broadcast(&[3, 4]).shape(), &[3, 4]);
     }
 
     #[test]
-    fn shape_broadcast_both_axes() {
+    fn shape_broadcast_both_dims() {
         assert_eq!(make(vec![7], &[1, 1]).broadcast(&[3, 4]).shape(), &[3, 4]);
     }
 
@@ -283,7 +283,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn full_read_broadcast_axis0() {
+    fn full_read_broadcast_dim0() {
         let got = make(arange(4), &[1, 4])
             .broadcast(&[3, 4])
             .to_ndarray()
@@ -292,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn full_read_broadcast_axis1() {
+    fn full_read_broadcast_dim1() {
         let got = make(arange(3), &[3, 1])
             .broadcast(&[3, 4])
             .to_ndarray()
@@ -341,7 +341,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn sub_read_broadcast_axis0() {
+    fn sub_read_broadcast_dim0() {
         let got = make(arange(4), &[1, 4])
             .broadcast(&[3, 4])
             .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
@@ -350,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn sub_read_broadcast_axis1() {
+    fn sub_read_broadcast_dim1() {
         let got = make(arange(3), &[3, 1])
             .broadcast(&[3, 5])
             .to_ndarray_sub(&[0..2, 2..5], &ReadContext::default())
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn error_non_unit_dim_broadcast() {
         let a = make(arange(6), &[2, 3]);
-        // axis 0 has length 2, cannot broadcast to 5
+        // dim 0 has length 2, cannot broadcast to 5
         assert!(super::Broadcast::new_array(a.view(), &[5, 3]).is_err());
     }
 
@@ -380,7 +380,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[allow(clippy::type_complexity)]
-    fn broadcast_2d_axis0_strategy() -> impl proptest::strategy::Strategy<
+    fn broadcast_2d_dim0_strategy() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<i32>,
             crate::util::TestArray<i32>,
@@ -412,8 +412,8 @@ mod tests {
         }
 
         #[test]
-        fn proptest_broadcast_2d_axis0(
-            (nd, za, n, m) in broadcast_2d_axis0_strategy()
+        fn proptest_broadcast_2d_dim0(
+            (nd, za, n, m) in broadcast_2d_dim0_strategy()
         ) {
             let expected = nd.broadcast(vec![n, m]).unwrap().to_owned();
             crate::util::assert_array_matches(&za.broadcast(&[n as u64, m as u64]), &expected);
@@ -421,7 +421,7 @@ mod tests {
 
         #[test]
         fn broadcast_generic(
-            (nd, za, broadcast_shape) in broadcast_axes_strategy::<i32>()
+            (nd, za, broadcast_shape) in broadcast_dims_strategy::<i32>()
         ) {
             let expected = nd.broadcast(broadcast_shape.clone()).unwrap().to_owned();
             let broadcast_shape = broadcast_shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
@@ -431,13 +431,13 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Concrete: [N, 1] -> [N, M] (axis 1) and [N, M] -> [N, M] (identity).
+    // Concrete: [N, 1] -> [N, M] (dim 1) and [N, M] -> [N, M] (identity).
     // Fixed inputs cover the shape edges: a trivial 1x1 array and a
     // multi-element, non-square shape, plus dtype min/max among the values.
     // -----------------------------------------------------------------------
 
     #[test]
-    fn broadcast_2d_axis1_concrete() {
+    fn broadcast_2d_dim1_concrete() {
         for (n, m, vals) in [
             (1usize, 1usize, vec![i32::MAX]),
             (4usize, 5usize, vec![i32::MIN, -7, 0, i32::MAX]),
@@ -472,7 +472,7 @@ mod tests {
     use proptest::prelude::*;
 
     #[allow(clippy::type_complexity)]
-    fn broadcast_axes_strategy<T>() -> impl proptest::strategy::Strategy<
+    fn broadcast_dims_strategy<T>() -> impl proptest::strategy::Strategy<
         Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<usize>),
     >
     where

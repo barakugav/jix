@@ -152,7 +152,7 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
             let broadcast = |d: usize| !degenerate(d) && strides[d] == 0;
             let regular = |d: usize| !degenerate(d) && !broadcast(d);
 
-            // sort "regular" axes
+            // sort "regular" dims
             let mut order = (0..ndim)
                 .filter(|&d| regular(d))
                 .map(|d| d as DimIdx)
@@ -546,15 +546,15 @@ mod tests {
     use crate::Array;
 
     // -----------------------------------------------------------------------
-    /// Reading an empty region whose start sits at the end of an axis must not compute an
+    /// Reading an empty region whose start sits at the end of a dim must not compute an
     /// out-of-bounds pointer, even though the resulting slice is empty.
     #[test]
-    fn read_empty_subrange_at_end_of_axis() {
+    fn read_empty_subrange_at_end_of_dim() {
         let nd = ndarray::Array3::<i32>::from_shape_vec((2, 3, 4), (0..24).collect()).unwrap();
         let a = Array::plain_ndarray(nd).unwrap();
         let ctx = a.read_ctx();
-        // `2..2` is the whole of axis 0, so the start offset alone runs to the end of the
-        // allocation; the non-zero start on axis 2 then pushes it past.
+        // `2..2` is the whole of dim 0, so the start offset alone runs to the end of the
+        // allocation; the non-zero start on dim 2 then pushes it past.
         let got = a.to_ndarray_sub(&[2..2, 0..3, 1..4], &ctx).unwrap();
         assert_eq!(got.shape(), &[0, 3, 3]);
         assert_eq!(got.len(), 0);

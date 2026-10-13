@@ -7,12 +7,12 @@ use crate::error::{assert_dim, check_ndim, Result};
 /// Maximum number of dimensions supported by the library for an array.
 pub const NDIM_MAX: usize = 8;
 
-/// A type-level representation of the number of axes in an array.
+/// A type-level representation of the number of dims in an array.
 ///
 /// Every [`ArrayStorage`](crate::ArrayStorage) carries an associated
-/// `type Dimension: Dimension` that records how many axes the array has. The compiler propagates
+/// `type Dimension: Dimension` that records how many dims the array has. The compiler propagates
 /// this through a chain of lazy operations, such as unary and binary operations, and shape changing
-/// operations: `insert_axis`, `remove_axis`, `reshape`, and
+/// operations: `insert_dim`, `remove_dim`, `reshape`, and
 /// reductions all adjust the dimension type of their output. When the argument type is known
 /// statically (e.g. `usize` or `[u64; N]`), the dimension change is encoded in the return type
 /// so callers can reason about shape purely in types.
@@ -22,7 +22,7 @@ pub const NDIM_MAX: usize = 8;
 /// There are exactly two types that implement `Dimension`:
 ///
 /// - **[`Dim<N>`]** - static dimension. The compiler knows `ndim == N` at compile time. The
-///   const generic `N` is the number of axes. Implemented for `N = 0..=8`.
+///   const generic `N` is the number of dims. Implemented for `N = 0..=8`.
 /// - **[`DimDyn`]** - dynamic dimension. The ndim is only known at runtime, and stored in a
 ///   stack-allocated array.
 ///
@@ -33,7 +33,7 @@ pub const NDIM_MAX: usize = 8;
 /// Shape-changing operations adjust the dimension either by using the `Smaller` / `Larger`
 /// associated types of the input dimension, or by taking an argument that determines the output
 /// dimension such as `reshape` (that accepts [`IntoDimension`] arguments) or reduction operations
-/// (that accept [`AxesArg`](crate::ops::AxesArg)).
+/// (that accept [`DimsArg`](crate::ops::DimsArg)).
 ///
 /// Because `DimDyn::Smaller = DimDyn` and `DimDyn::Larger = DimDyn`, operations on a dynamic
 /// array always return a dynamic array. Use [`Array::into_dim`](crate::Array::into_dim) to
@@ -59,8 +59,8 @@ pub const NDIM_MAX: usize = 8;
 /// // Returns Err if a.ndim() != 2.
 /// let a2d = a.into_dim::<Dim<2>>()?;
 ///
-/// // insert_axis(0): usize arg -> D::Larger = Dim<3>
-/// let a3d = a2d.insert_axis(0);
+/// // insert_dim(0): usize arg -> D::Larger = Dim<3>
+/// let a3d = a2d.insert_dim(0);
 ///
 /// // reshape([6u64]): [u64; 1] arg -> Dim<1> output
 /// let flat = a3d.reshape([6u64]);
@@ -84,7 +84,7 @@ pub trait Dimension:
     + Debug
     + 'static
 {
-    /// The number of axes, if known at compile time.
+    /// The number of dims, if known at compile time.
     ///
     /// - `Some(N)` for [`Dim<N>`]: the compiler can prove `ndim == N`.
     /// - `None` for [`DimDyn`]: ndim is determined at runtime.
@@ -93,18 +93,18 @@ pub trait Dimension:
     /// known.
     const NDIM: Option<usize>;
 
-    /// The dimension type that results from removing one axis.
+    /// The dimension type that results from removing one dim.
     ///
     /// For `Dim<N>` where `N >= 1`: `Dim<N-1>`.
     /// For `Dim<0>`: `DimDyn` (cannot represent -1 statically).
-    /// For `DimDyn`: `DimDyn` (removing an axis keeps the dimension dynamic).
+    /// For `DimDyn`: `DimDyn` (removing a dim keeps the dimension dynamic).
     type Smaller: Dimension;
 
-    /// The dimension type that results from adding one axis.
+    /// The dimension type that results from adding one dim.
     ///
     /// For `Dim<N>` where `N < 8`: `Dim<N+1>`.
     /// For `Dim<8>`: `DimDyn` (exceeds [`NDIM_MAX`], caught at construction).
-    /// For `DimDyn`: `DimDyn` (adding an axis keeps the dimension dynamic).
+    /// For `DimDyn`: `DimDyn` (adding a dim keeps the dimension dynamic).
     type Larger: Dimension;
 
     /// The type of the index pattern for this dimension.
@@ -118,13 +118,13 @@ pub trait Dimension:
     where
         Self: 'a;
 
-    /// A vec-like container that can hold one value per axis for this dimension type.
+    /// A vec-like container that can hold one value per dim for this dimension type.
     #[allow(private_bounds)]
     type Vec<T>: AsRef<[T]> + AsMut<[T]> + DimVec<T, Dimension = Self>
     where
         Self: Sized;
 
-    /// Construct a `Dimension` by calling `f(i)` for each axis index `i` in `0..ndim`.
+    /// Construct a `Dimension` by calling `f(i)` for each dim index `i` in `0..ndim`.
     ///
     /// Panics if `ndim` does not match the statically expected ndim (for `Dim<N>`)
     /// or exceeds [`NDIM_MAX`] (for `DimDyn`).
@@ -170,7 +170,7 @@ pub trait Dimension:
     /// Convert the dimension into its index pattern type.
     fn to_index(&self) -> Self::Index<'_>;
 
-    /// Build a vec-like container with one value per axis, by applying `f` to each axis index.
+    /// Build a vec-like container with one value per dim, by applying `f` to each dim index.
     fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T>;
 }
 
@@ -200,8 +200,8 @@ pub(crate) trait DimVec<T>:
 /// A dynamically-dimensioned shape whose ndim is only known at runtime.
 ///
 /// `DimDyn` stores the shape in a stack-allocated array with capacity [`NDIM_MAX`].
-/// It is the fallback when the number of axes cannot be determined at compile
-/// time: arrays loaded from files, operations that take `&[usize]` axis arguments, and
+/// It is the fallback when the number of dims cannot be determined at compile
+/// time: arrays loaded from files, operations that take `&[usize]` dim arguments, and
 /// dimension-changing operations applied to a `DimDyn` array all produce `DimDyn`.
 ///
 /// `DimDyn::Smaller = DimDyn` and `DimDyn::Larger = DimDyn`: the dimension type stays
@@ -289,11 +289,11 @@ impl<T> DimVec<T> for DimArray<T> {
     }
 }
 
-/// A statically-dimensioned shape with exactly `NDIM` axes, known at compile time.
+/// A statically-dimensioned shape with exactly `NDIM` dims, known at compile time.
 ///
-/// `Dim<N>` is the preferred dimension type when the number of axes is determined by the code
+/// `Dim<N>` is the preferred dimension type when the number of dims is determined by the code
 /// structure rather than runtime data. Passing typed arguments to shape-manipulating operations
-/// (e.g. `[u64; 2]` to `reshape`, `usize` to `insert_axis`) causes the compiler to select
+/// (e.g. `[u64; 2]` to `reshape`, `usize` to `insert_dim`) causes the compiler to select
 /// `Dim<N>` automatically, so callers rarely need to name this type explicitly.
 ///
 /// # Neighbors
@@ -301,12 +301,12 @@ impl<T> DimVec<T> for DimArray<T> {
 /// `Dim<N>::Smaller = Dim<N-1>` (for N >= 1; `Dim<0>::Smaller = DimDyn`).
 /// `Dim<N>::Larger  = Dim<N+1>` (for N <= 7; `Dim<8>::Larger  = DimDyn`).
 ///
-/// This means that N consecutive `insert_axis(0)` calls on a `Dim<M>` array produce a
+/// This means that N consecutive `insert_dim(0)` calls on a `Dim<M>` array produce a
 /// `Dim<M+N>` result, as long as `M + N <= 8`.
 #[derive(Clone)]
 pub struct Dim<const NDIM: usize>([u64; NDIM]);
 impl<const NDIM: usize> Dim<NDIM> {
-    /// Construct a `Dim<NDIM>` from a fixed-size array of axis sizes.
+    /// Construct a `Dim<NDIM>` from a fixed-size array of dim sizes.
     #[inline(always)]
     pub fn from_array(arr: [u64; NDIM]) -> Self {
         Self(arr)
@@ -580,15 +580,15 @@ impl IntoDimension for ndarray::IxDyn {
 
 /// Stack-allocated vector for per-dimension data, with capacity [`NDIM_MAX`].
 ///
-/// Used throughout the library to store shapes, strides, block shapes, and other per-axis
+/// Used throughout the library to store shapes, strides, block shapes, and other per-dim
 /// values without heap allocation. The capacity is always exactly [`NDIM_MAX`] (8), so no
 /// array with more dimensions than supported can overflow this container.
 pub(crate) type DimArray<T> = crate::util::arrayvec::ArrayVec<T, NDIM_MAX>;
 
-/// Integer type used to store an axis index inside a struct.
+/// Integer type used to store a dim index inside a struct.
 pub(crate) type DimIdx = u8;
 
-/// Build a [`DimArray`] by applying `f` to each axis index `0..ndim`.
+/// Build a [`DimArray`] by applying `f` to each dim index `0..ndim`.
 ///
 /// Panics if `ndim > NDIM_MAX`.
 #[inline(always)]
@@ -602,7 +602,7 @@ pub(crate) fn dim_arr<T>(ndim: usize, mut f: impl FnMut(usize) -> T) -> DimArray
     arr
 }
 
-/// Build a [`DimArray`] by applying a fallible `f` to each axis index `0..ndim`.
+/// Build a [`DimArray`] by applying a fallible `f` to each dim index `0..ndim`.
 ///
 /// Returns the first error encountered, or `Ok` with the full array on success.
 /// Panics if `ndim > NDIM_MAX`.

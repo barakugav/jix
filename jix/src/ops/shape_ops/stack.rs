@@ -3,25 +3,25 @@ use std::ops::Not;
 use crate::ops::prelude::*;
 use crate::util::{ArraySequence, ArraySequenceDimension, ArraySequenceElementType};
 
-/// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
+/// Joins a sequence of arrays along a new dim. See [`Stack`] for details and examples.
 ///
 /// # Panics
 ///
-/// Panics if `arrays` is empty, `axis` is out of bounds, dtypes differ, or shapes differ.
+/// Panics if `arrays` is empty, `dim` is out of bounds, dtypes differ, or shapes differ.
 #[track_caller]
-pub fn stack<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Stack<ArraysT>>
+pub fn stack<ArraysT>(arrays: ArraysT, dim: usize) -> Array<Stack<ArraysT>>
 where
     ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
-    Array::from_storage(Stack::new(arrays, axis).unwrap())
+    Array::from_storage(Stack::new(arrays, dim).unwrap())
 }
 
-/// Joins a sequence of arrays along a new axis, returned by [`stack`].
+/// Joins a sequence of arrays along a new dim, returned by [`stack`].
 ///
-/// All input arrays must have identical shapes and the same [`Dtype`]. A new axis of size equal to
-/// the number of input arrays is inserted at position `axis` in the output. The output has one more
+/// All input arrays must have identical shapes and the same [`Dtype`]. A new dim of size equal to
+/// the number of input arrays is inserted at position `dim` in the output. The output has one more
 /// dimension than the inputs - unlike
-/// [`Concatenate`](crate::ops::Concatenate), which joins along an existing axis.
+/// [`Concatenate`](crate::ops::Concatenate), which joins along an existing dim.
 ///
 /// The output dimension type `Stack<ArraysT>::Dimension` is
 /// `<ArraysT::Dimension as Dimension>::Larger` (where `ArraysT::Dimension` comes from
@@ -36,13 +36,13 @@ where
 /// use jix::Array;
 /// use ndarray::array;
 ///
-/// // Stack two 1-D arrays along a new leading axis -> shape [2, N]
+/// // Stack two 1-D arrays along a new leading dim -> shape [2, N]
 /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
 /// let b = Array::compact_ndarray(&array![4i32, 5, 6])?;
 /// let c = jix::ops::stack((a, b), 0);
 /// assert_eq!(c.shape(), &[2, 3]);
 ///
-/// // Stack along axis 1 -> shape [N, 2]
+/// // Stack along dim 1 -> shape [N, 2]
 /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
 /// let b = Array::compact_ndarray(&array![4i32, 5, 6])?;
 /// let c = jix::ops::stack((a, b), 1);
@@ -54,7 +54,7 @@ where
     ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     arrays: ArraysT,
-    stack_axis: DimIdx,
+    stack_dim: DimIdx,
 
     shape: <ArraysT::Dimension as crate::Dimension>::Larger,
     spec: ArraySpecDynamic,
@@ -64,7 +64,7 @@ where
     ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     /// Constructs a [`Stack`] storage. See the struct docs for semantics and examples.
-    pub fn new(arrays: ArraysT, axis: usize) -> Result<Self> {
+    pub fn new(arrays: ArraysT, dim: usize) -> Result<Self> {
         let narrays = arrays.narrays();
         ensure!(
             narrays > 0,
@@ -89,18 +89,18 @@ where
             );
         }
         ensure!(
-            axis <= shape0.len(),
+            dim <= shape0.len(),
             InvalidShapeOperation,
-            "axis out of bounds: axis {axis} >= array ndim {}",
+            "dim out of bounds: dim {dim} >= array ndim {}",
             shape0.len()
         );
         check_ndim::<<Self as ArrayStorage>::Dimension>(shape0.len() + 1)?;
         let mut new_shape = DimArray::from_slice(shape0).unwrap();
-        new_shape.insert(axis, narrays as u64);
+        new_shape.insert(dim, narrays as u64);
         check_shape_overflow(new_shape.as_slice(), dtype.itemsize() as _)?;
         let new_shape = <Self as ArrayStorage>::Dimension::from_slice(&new_shape);
 
-        // Combine the block layout over the (equal-shape) inputs, then insert the new stack axis:
+        // Combine the block layout over the (equal-shape) inputs, then insert the new stack dim:
         // it carries no data of its own, so its block is 1 and non-fixed.
         let (mut block_shape, mut block_shape_fixed_dims) = {
             let inputs = (0..narrays)
@@ -111,8 +111,8 @@ where
                 .collect::<Vec<_>>();
             combine_block_layout(&inputs)
         };
-        block_shape.insert(axis, 1);
-        block_shape_fixed_dims.insert(axis, false);
+        block_shape.insert(dim, 1);
+        block_shape_fixed_dims.insert(dim, false);
         let (element_cost, shared_weight, shared_layout_order) = {
             let inputs = (0..narrays)
                 .map(|i| {
@@ -128,12 +128,12 @@ where
             combine_select_hints(&inputs, &weights)
         };
         let mut read_shape_scale_weight = shared_weight;
-        read_shape_scale_weight.insert(axis, ScaleWeight::NONE);
+        read_shape_scale_weight.insert(dim, ScaleWeight::NONE);
         let mut read_layout_order = shared_layout_order
             .iter()
-            .map(|&d| if d as usize >= axis { d + 1 } else { d })
+            .map(|&d| if d as usize >= dim { d + 1 } else { d })
             .collect::<DimArray<_>>();
-        read_layout_order_insert_dont_care_dim(&mut read_layout_order, axis);
+        read_layout_order_insert_dont_care_dim(&mut read_layout_order, dim);
         let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
@@ -146,13 +146,13 @@ where
             shape: new_shape,
             spec,
             arrays,
-            stack_axis: axis as DimIdx,
+            stack_dim: dim as DimIdx,
         })
     }
 
     /// Constructs an array with [`Stack`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array(arrays: ArraysT, axis: usize) -> Result<Array<Self>> {
-        Self::new(arrays, axis).map(Array::from_storage)
+    pub fn new_array(arrays: ArraysT, dim: usize) -> Result<Array<Self>> {
+        Self::new(arrays, dim).map(Array::from_storage)
     }
 }
 impl<ArraysT> ArrayStorage for Stack<ArraysT>
@@ -185,11 +185,11 @@ where
             return Ok(out);
         }
 
-        let stack_axis = self.stack_axis as usize;
+        let stack_dim = self.stack_dim as usize;
         let arr_ndim = shape.len() - 1;
-        let arr_range = index[..stack_axis]
+        let arr_range = index[..stack_dim]
             .iter()
-            .chain(index[stack_axis + 1..].iter())
+            .chain(index[stack_dim + 1..].iter())
             .cloned()
             .collect_dim_vec::<ArraysT::Dimension>(arr_ndim);
         let arr_range_shape = ArraysT::Dimension::vec(arr_ndim, |dim| {
@@ -197,19 +197,19 @@ where
         });
         let itemsize = dtype.itemsize() as usize;
         let arr_size_bytes = arr_range_shape.as_ref().iter().product::<usize>() * itemsize;
-        let n_stack = (index[stack_axis].end - index[stack_axis].start) as usize;
+        let n_stack = (index[stack_dim].end - index[stack_dim].start) as usize;
 
         // In-place fast path (each sub-array a contiguous chunk) is valid only when the destination
-        // is contiguous and all dims before stack_axis have size <=1; else scatter.
+        // is contiguous and all dims before stack_dim have size <=1; else scatter.
         let in_place = out.is_contiguous(output_shape.as_ref(), dtype)
-            && shape.iter().take(stack_axis).all(|&s| s <= 1);
+            && shape.iter().take(stack_dim).all(|&s| s <= 1);
         let (out_buf, out_strides) = out.data_mut();
-        // Stride of the stack axis in the output (offset between consecutive sub-arrays).
-        let stack_axis_stride = out_strides[stack_axis];
-        // Per-sub-array strides = the output strides with the stack axis removed.
+        // Stride of the stack dim in the output (offset between consecutive sub-arrays).
+        let stack_dim_stride = out_strides[stack_dim];
+        // Per-sub-array strides = the output strides with the stack dim removed.
         let out_of_place_strides = in_place.not().then(|| {
             ArraysT::Dimension::vec(arr_ndim, |dim| {
-                if dim < stack_axis {
+                if dim < stack_dim {
                     out_strides[dim]
                 } else {
                     out_strides[dim + 1]
@@ -218,8 +218,8 @@ where
         });
 
         for arr_idx in 0..n_stack {
-            let buf_offset = arr_idx * stack_axis_stride;
-            let arr = index[stack_axis].start as usize + arr_idx;
+            let buf_offset = arr_idx * stack_dim_stride;
+            let arr = index[stack_dim].start as usize + arr_idx;
             let mut sub = if in_place {
                 let sub_c = default_strides(&arr_range_shape, itemsize);
                 // SAFETY: contiguous destination; array `arr` packs into this contiguous chunk.
@@ -231,7 +231,7 @@ where
                 }
             } else {
                 let strides = out_of_place_strides.as_ref().unwrap().as_ref();
-                // SAFETY: `strides` are the output strides minus the stack axis; the sub-region
+                // SAFETY: `strides` are the output strides minus the stack dim; the sub-region
                 // at `buf_offset` is within `dest`.
                 unsafe { StridedBuf::from_slice_mut(&mut out_buf[buf_offset..], strides) }
             };
@@ -279,7 +279,7 @@ mod tests {
     use crate::{DimDyn, Ty, NDIM_MAX};
 
     #[test]
-    fn test_i32_1d_axis0() {
+    fn test_i32_1d_dim0() {
         let a = array![1i32, 2, 3, 4];
         let b = array![5i32, 6, 7, 8];
         let za = Array::compact_ndarray(&a).unwrap();
@@ -290,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn test_i32_1d_axis1() {
+    fn test_i32_1d_dim1() {
         let a = array![1i32, 2, 3];
         let b = array![4i32, 5, 6];
         let za = Array::compact_ndarray(&a).unwrap();
@@ -301,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn test_i32_2d_axis0() {
+    fn test_i32_2d_dim0() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
         let b = array![[7i32, 8, 9], [10, 11, 12]];
         let za = Array::compact_ndarray(&a).unwrap();
@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn test_i32_2d_axis1() {
+    fn test_i32_2d_dim1() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
         let b = array![[7i32, 8, 9], [10, 11, 12]];
         let za = Array::compact_ndarray(&a).unwrap();
@@ -336,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn test_f32_1d_axis0() {
+    fn test_f32_1d_dim0() {
         let a = array![1.0f32, 2.0, 3.0, 4.0];
         let b = array![5.0f32, 6.0, 7.0, 8.0];
         let za = Array::compact_ndarray(&a).unwrap();
@@ -347,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn test_f32_2d_axis1() {
+    fn test_f32_2d_dim1() {
         let a = array![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];
         let b = array![[7.0f32, 8.0], [9.0, 10.0], [11.0, 12.0]];
         let za = Array::compact_ndarray(&a).unwrap();
@@ -397,7 +397,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Proptest: arbitrary ndim, arbitrary axis, arbitrary number of arrays
+    // Proptest: arbitrary ndim, arbitrary dim, arbitrary number of arrays
     // -----------------------------------------------------------------------
 
     #[allow(clippy::type_complexity)]
@@ -415,28 +415,28 @@ mod tests {
         shape_strategy()
             .prop_filter("stack needs ndim < NDIM_MAX", |s| s.len() < NDIM_MAX)
             .prop_flat_map(|shape| {
-                let axis = 0..=shape.len();
+                let dim = 0..=shape.len();
                 let n_arrays = 1usize..=5;
-                (Just(shape), axis, n_arrays)
+                (Just(shape), dim, n_arrays)
             })
-            .prop_flat_map(|(shape, axis, n_arrays)| {
+            .prop_flat_map(|(shape, dim, n_arrays)| {
                 // All arrays share the same shape; only elements and block shapes vary.
                 let per_array_strat =
                     crate::util::array_strategy_from_shape::<T>(Just(shape), T::any_strategy());
-                (prop::collection::vec(per_array_strat, n_arrays), Just(axis))
+                (prop::collection::vec(per_array_strat, n_arrays), Just(dim))
             })
-            .prop_map(|(arrays, axis)| {
+            .prop_map(|(arrays, dim)| {
                 let (nds, zas): (Vec<_>, Vec<_>) = arrays.into_iter().unzip();
-                (nds, zas, axis)
+                (nds, zas, dim)
             })
     }
 
     proptest::proptest! {
         #[test]
-        fn proptest_stack((nds, zas, axis) in stack_strategy::<i32>()) {
+        fn proptest_stack((nds, zas, dim) in stack_strategy::<i32>()) {
             let nd_views: Vec<_> = nds.iter().map(|nd| nd.view()).collect();
-            let expected = ndarray::stack(ndarray::Axis(axis), &nd_views).unwrap();
-            crate::util::assert_array_matches(&stack(zas, axis), &expected);
+            let expected = ndarray::stack(ndarray::Axis(dim), &nd_views).unwrap();
+            crate::util::assert_array_matches(&stack(zas, dim), &expected);
         }
     }
 }

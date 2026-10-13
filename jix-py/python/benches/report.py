@@ -87,7 +87,7 @@ def load_criterion_dir(root):
     for est in sorted(root.glob("**/new/estimates.json")):
         # criterion nests <group>/[<function>/]<value>/new/estimates.json - 2 OR 3 levels deep.
         # Use the full path from the criterion root (minus /new) so 3-level benches (e.g. the sum
-        # groups: <size>/<dtype>/<axis>) keep distinct identities instead of collapsing.
+        # groups: <size>/<dtype>/<dim>) keep distinct identities instead of collapsing.
         rel = est.parent.parent.relative_to(root)
         group = rel.parts[0] if len(rel.parts) > 1 else ""
         bench = "/".join(rel.parts[1:]) if len(rel.parts) > 1 else rel.parts[0]

@@ -1,5 +1,5 @@
-"""Tests for shape/axis manipulation, compact, cast, asarray, concatenate, stack, where,
-flatten, reshape, broadcast, permute_axes, squeeze/unsqueeze, insert_axis/remove_axis,
+"""Tests for shape/dim manipulation, compact, cast, asarray, concatenate, stack, where,
+flatten, reshape, broadcast, permute_dims, squeeze/unsqueeze, insert_dim/remove_dim,
 read_array/write_array."""
 
 import tempfile
@@ -229,63 +229,63 @@ def test_reshape_wrong_size_raises():
 
 
 # ---------------------------------------------------------------------------
-# insert_axis / remove_axis / squeeze / unsqueeze
+# insert_dim / remove_dim / squeeze / unsqueeze
 # ---------------------------------------------------------------------------
 
 
-def test_insert_axis_front():
+def test_insert_dim_front():
     arr = np.array([1, 2, 3], dtype=np.int32)
     za = jix.compact(arr)
-    r = jix.insert_axis(za, 0)
+    r = jix.insert_dim(za, 0)
     assert r.shape == (1, 3)
     np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, 0))
 
 
-def test_insert_axis_back():
+def test_insert_dim_back():
     arr = np.array([1, 2, 3], dtype=np.int32)
     za = jix.compact(arr)
-    # numpy expand_dims: axis indexes the output shape; 1 is the last axis of a 2-d result.
-    r = jix.insert_axis(za, 1)
+    # numpy expand_dims: dim indexes the output shape; 1 is the last dim of a 2-d result.
+    r = jix.insert_dim(za, 1)
     assert r.shape == (3, 1)
     np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, 1))
 
 
-def test_insert_axis_negative():
+def test_insert_dim_negative():
     arr = np.array([1, 2, 3], dtype=np.int32)
     za = jix.compact(arr)
     # -1 refers to the last position of the (larger) output shape, like numpy.
-    r = jix.insert_axis(za, -1)
+    r = jix.insert_dim(za, -1)
     assert r.shape == (3, 1)
     np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, -1))
 
 
-def test_insert_axis_multiple():
+def test_insert_dim_multiple():
     arr = np.arange(6, dtype=np.int32).reshape(2, 3)
     za = jix.compact(arr)
-    # numpy expand_dims semantics: axes index the output shape -> (1, 2, 1, 3)
-    r = jix.insert_axis(za, [0, 2])
+    # numpy expand_dims semantics: dims index the output shape -> (1, 2, 1, 3)
+    r = jix.insert_dim(za, [0, 2])
     assert r.shape == (1, 2, 1, 3)
     np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, (0, 2)))
 
 
-def test_insert_axis_repeated_axis_raises():
+def test_insert_dim_repeated_dim_raises():
     arr = np.arange(6, dtype=np.int32).reshape(2, 3)
     za = jix.compact(arr)
-    # like numpy.expand_dims, repeated output axes are rejected
+    # like numpy.expand_dims, repeated output dims are rejected
     with pytest.raises(Exception):
-        jix.insert_axis(za, [0, 0])
+        jix.insert_dim(za, [0, 0])
 
 
-def test_insert_axis_out_of_range_raises():
+def test_insert_dim_out_of_range_raises():
     arr = np.array([1, 2, 3], dtype=np.int32)
     za = jix.compact(arr)
-    # output ndim is 2 for a single insertion; axis 2 is out of range (valid -2..1)
+    # output ndim is 2 for a single insertion; dim 2 is out of range (valid -2..1)
     with pytest.raises(Exception):
-        jix.insert_axis(za, 2)
+        jix.insert_dim(za, 2)
 
 
 @pytest.mark.parametrize(
-    "shape, axis",
+    "shape, dim",
     [
         ((3,), 0),
         ((3,), 1),
@@ -298,29 +298,29 @@ def test_insert_axis_out_of_range_raises():
         ((2, 3, 4), [-1, -3]),
     ],
 )
-def test_insert_axis_matches_numpy_expand_dims(shape, axis):
+def test_insert_dim_matches_numpy_expand_dims(shape, dim):
     arr = np.arange(int(np.prod(shape)), dtype=np.int32).reshape(shape)
     za = jix.compact(arr)
-    np_axis = tuple(axis) if isinstance(axis, list) else axis
-    expected = np.expand_dims(arr, np_axis)
-    got = jix.insert_axis(za, axis).numpy()
+    np_dim = tuple(dim) if isinstance(dim, list) else dim
+    expected = np.expand_dims(arr, np_dim)
+    got = jix.insert_dim(za, dim).numpy()
     assert got.shape == expected.shape
     np.testing.assert_array_equal(got, expected)
 
 
-def test_remove_axis():
+def test_remove_dim():
     arr = np.array([[1, 2, 3]], dtype=np.int32)
     za = jix.compact(arr)
-    r = jix.remove_axis(za, 0)
+    r = jix.remove_dim(za, 0)
     assert r.shape == (3,)
     np.testing.assert_array_equal(r.numpy(), [1, 2, 3])
 
 
-def test_remove_axis_non_one_raises():
+def test_remove_dim_non_one_raises():
     arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
     za = jix.compact(arr)
     with pytest.raises(Exception):
-        jix.remove_axis(za, 0)
+        jix.remove_dim(za, 0)
 
 
 def test_squeeze_all():
@@ -331,10 +331,10 @@ def test_squeeze_all():
     assert r.numpy()[()] == 42
 
 
-def test_squeeze_specific_axis():
+def test_squeeze_specific_dim():
     arr = np.zeros((2, 1, 3), dtype=np.float32)
     za = jix.compact(arr)
-    r = jix.squeeze(za, axis=1)
+    r = jix.squeeze(za, dim=1)
     assert r.shape == (2, 3)
 
 
@@ -352,11 +352,11 @@ def test_unsqueeze_single():
     assert r.shape == (1, 3)
 
 
-def test_unsqueeze_same_as_insert_axis():
+def test_unsqueeze_same_as_insert_dim():
     arr = np.arange(6, dtype=np.int32).reshape(2, 3)
     za = jix.compact(arr)
     r1 = jix.unsqueeze(za, [0, 2])
-    r2 = jix.insert_axis(za, [0, 2])
+    r2 = jix.insert_dim(za, [0, 2])
     assert r1.shape == r2.shape
     np.testing.assert_array_equal(r1.numpy(), r2.numpy())
 
@@ -370,37 +370,37 @@ def test_unsqueeze_method_matches_numpy_expand_dims():
 
 
 # ---------------------------------------------------------------------------
-# permute_axes
+# permute_dims
 # ---------------------------------------------------------------------------
 
 
-def test_permute_axes_2d_transpose():
+def test_permute_dims_2d_transpose():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     za = jix.compact(arr)
-    r = jix.permute_axes(za, [1, 0])
+    r = jix.permute_dims(za, [1, 0])
     assert r.shape == (3, 2)
     np.testing.assert_array_equal(r.numpy(), arr.T)
 
 
-def test_permute_axes_3d():
+def test_permute_dims_3d():
     arr = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
     za = jix.compact(arr)
-    r = jix.permute_axes(za, [2, 0, 1])
+    r = jix.permute_dims(za, [2, 0, 1])
     assert r.shape == (4, 2, 3)
     np.testing.assert_array_equal(r.numpy(), np.transpose(arr, [2, 0, 1]))
 
 
-def test_permute_axes_identity():
+def test_permute_dims_identity():
     arr = np.arange(6, dtype=np.int32).reshape(2, 3)
     za = jix.compact(arr)
-    r = jix.permute_axes(za, [0, 1])
+    r = jix.permute_dims(za, [0, 1])
     np.testing.assert_array_equal(r.numpy(), arr)
 
 
-def test_permute_axes_none_reverses():
+def test_permute_dims_none_reverses():
     arr = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
     za = jix.compact(arr)
-    r = jix.permute_axes(za)
+    r = jix.permute_dims(za)
     assert r.shape == (4, 3, 2)
     np.testing.assert_array_equal(r.numpy(), arr.T)
 
@@ -446,37 +446,37 @@ def test_broadcast_non_one_dim_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_concatenate_axis0():
+def test_concatenate_dim0():
     a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
     b = jix.compact([[5, 6]], dtype=np.int32)
-    r = jix.concatenate([a, b], axis=0)
+    r = jix.concatenate([a, b], dim=0)
     assert r.shape == (3, 2)
     np.testing.assert_array_equal(r.numpy(), np.array([[1, 2], [3, 4], [5, 6]]))
 
 
-def test_concatenate_axis1():
+def test_concatenate_dim1():
     a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
     b = jix.compact([[5], [6]], dtype=np.int32)
-    r = jix.concatenate([a, b], axis=1)
+    r = jix.concatenate([a, b], dim=1)
     assert r.shape == (2, 3)
     np.testing.assert_array_equal(r.numpy(), np.array([[1, 2, 5], [3, 4, 6]]))
 
 
-def test_concatenate_negative_axis():
+def test_concatenate_negative_dim():
     a = jix.compact([1, 2, 3], dtype=np.int32)
     b = jix.compact([4, 5], dtype=np.int32)
-    r = jix.concatenate([a, b], axis=-1)
+    r = jix.concatenate([a, b], dim=-1)
     assert r.shape == (5,)
     np.testing.assert_array_equal(r.numpy(), [1, 2, 3, 4, 5])
 
 
 def test_concatenate_three_arrays():
     arrays = [jix.compact([i, i + 1], dtype=np.float32) for i in range(3)]
-    r = jix.concatenate(arrays, axis=0)
+    r = jix.concatenate(arrays, dim=0)
     assert r.shape == (6,)
 
 
-def test_concatenate_default_axis():
+def test_concatenate_default_dim():
     a = jix.compact([1, 2], dtype=np.int32)
     b = jix.compact([3, 4], dtype=np.int32)
     r = jix.concatenate([a, b])
@@ -495,23 +495,23 @@ def test_concatenate_dtype_mismatch_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_stack_axis0():
+def test_stack_dim0():
     a = jix.compact([1, 2, 3], dtype=np.int32)
     b = jix.compact([4, 5, 6], dtype=np.int32)
-    r = jix.stack([a, b], axis=0)
+    r = jix.stack([a, b], dim=0)
     assert r.shape == (2, 3)
     np.testing.assert_array_equal(r.numpy(), np.array([[1, 2, 3], [4, 5, 6]]))
 
 
-def test_stack_axis1():
+def test_stack_dim1():
     a = jix.compact([1, 2, 3], dtype=np.int32)
     b = jix.compact([4, 5, 6], dtype=np.int32)
-    r = jix.stack([a, b], axis=1)
+    r = jix.stack([a, b], dim=1)
     assert r.shape == (3, 2)
     np.testing.assert_array_equal(r.numpy(), np.array([[1, 4], [2, 5], [3, 6]]))
 
 
-def test_stack_default_axis():
+def test_stack_default_dim():
     a = jix.compact([1, 2], dtype=np.int32)
     b = jix.compact([3, 4], dtype=np.int32)
     r = jix.stack([a, b])
@@ -521,7 +521,7 @@ def test_stack_default_axis():
 def test_stack_2d_arrays():
     a = jix.compact(np.zeros((2, 3), dtype=np.float32))
     b = jix.compact(np.ones((2, 3), dtype=np.float32))
-    r = jix.stack([a, b], axis=0)
+    r = jix.stack([a, b], dim=0)
     assert r.shape == (2, 2, 3)
 
 
@@ -669,9 +669,9 @@ def test_broadcast_accepts_numpy_array():
     np.testing.assert_array_equal(result.numpy(), [[1, 2, 3], [1, 2, 3]])
 
 
-def test_permute_axes_accepts_numpy_array():
+def test_permute_dims_accepts_numpy_array():
     np_a = np.arange(6, dtype=np.int32).reshape(2, 3)
-    result = jix.permute_axes(np_a, [1, 0])
+    result = jix.permute_dims(np_a, [1, 0])
     assert result.shape == (3, 2)
     np.testing.assert_array_equal(result.numpy(), np_a.T)
 
@@ -683,14 +683,14 @@ def test_squeeze_accepts_numpy_array():
     np.testing.assert_array_equal(result.numpy(), [1, 2, 3])
 
 
-def test_insert_axis_accepts_python_list():
-    result = jix.insert_axis([1, 2, 3], 0)
+def test_insert_dim_accepts_python_list():
+    result = jix.insert_dim([1, 2, 3], 0)
     assert result.shape == (1, 3)
 
 
-def test_remove_axis_accepts_numpy_array():
+def test_remove_dim_accepts_numpy_array():
     np_a = np.array([[[1, 2, 3]]], dtype=np.int32)  # shape (1, 1, 3)
-    result = jix.remove_axis(np_a, 0)
+    result = jix.remove_dim(np_a, 0)
     assert result.shape == (1, 3)
 
 
@@ -701,31 +701,31 @@ def test_remove_axis_accepts_numpy_array():
 
 def test_repeat_1d():
     a = jix.compact([1, 2, 3], dtype=np.int32)
-    r = jix.repeat(a, 2, axis=0)
+    r = jix.repeat(a, 2, dim=0)
     assert r.shape == (6,)
     np.testing.assert_array_equal(r.numpy(), [1, 1, 2, 2, 3, 3])
 
 
-def test_repeat_2d_axis0():
+def test_repeat_2d_dim0():
     arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.repeat(a, 3, axis=0)
+    r = jix.repeat(a, 3, dim=0)
     assert r.shape == (6, 2)
     np.testing.assert_array_equal(r.numpy(), np.repeat(arr, 3, axis=0))
 
 
-def test_repeat_2d_axis1():
+def test_repeat_2d_dim1():
     arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.repeat(a, 3, axis=1)
+    r = jix.repeat(a, 3, dim=1)
     assert r.shape == (2, 6)
     np.testing.assert_array_equal(r.numpy(), np.repeat(arr, 3, axis=1))
 
 
-def test_repeat_negative_axis():
+def test_repeat_negative_dim():
     arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.repeat(a, 2, axis=-1)
+    r = jix.repeat(a, 2, dim=-1)
     assert r.shape == (2, 4)
     np.testing.assert_array_equal(r.numpy(), np.repeat(arr, 2, axis=-1))
 
@@ -733,39 +733,39 @@ def test_repeat_negative_axis():
 def test_repeat_identity():
     arr = np.arange(6, dtype=np.int32).reshape(2, 3)
     a = jix.compact(arr)
-    r = jix.repeat(a, 1, axis=0)
+    r = jix.repeat(a, 1, dim=0)
     np.testing.assert_array_equal(r.numpy(), arr)
 
 
 def test_repeat_zero_yields_empty():
     a = jix.compact([1, 2, 3], dtype=np.int32)
-    r = jix.repeat(a, 0, axis=0)
+    r = jix.repeat(a, 0, dim=0)
     assert r.shape == (0,)
 
 
-def test_repeat_3d_middle_axis():
+def test_repeat_3d_middle_dim():
     arr = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
     a = jix.compact(arr)
-    r = jix.repeat(a, 2, axis=1)
+    r = jix.repeat(a, 2, dim=1)
     assert r.shape == (2, 6, 4)
     np.testing.assert_array_equal(r.numpy(), np.repeat(arr, 2, axis=1))
 
 
-def test_repeat_axis_out_of_bounds_raises():
+def test_repeat_dim_out_of_bounds_raises():
     a = jix.compact([1, 2, 3], dtype=np.int32)
     with pytest.raises(Exception):
-        jix.repeat(a, 2, axis=1)
+        jix.repeat(a, 2, dim=1)
 
 
 def test_repeat_method_on_array():
     arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
     a = jix.compact(arr)
-    r = a.repeat(2, axis=0)
+    r = a.repeat(2, dim=0)
     np.testing.assert_array_equal(r.numpy(), np.repeat(arr, 2, axis=0))
 
 
 def test_repeat_accepts_python_list():
-    r = jix.repeat([1, 2, 3], 2, axis=0)
+    r = jix.repeat([1, 2, 3], 2, dim=0)
     np.testing.assert_array_equal(r.numpy(), [1, 1, 2, 2, 3, 3])
 
 
@@ -779,62 +779,62 @@ def test_flip_1d():
     np.testing.assert_array_equal(jix.flip(a).numpy(), [4, 3, 2, 1])
 
 
-def test_flip_axis_int():
+def test_flip_dim_int():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.flip(a, axis=0)
+    r = jix.flip(a, dim=0)
     np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=0))
 
 
-def test_flip_axis_list():
+def test_flip_dim_list():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.flip(a, axis=[1])
+    r = jix.flip(a, dim=[1])
     np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=1))
 
 
-def test_flip_negative_axis():
+def test_flip_negative_dim():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.flip(a, axis=-1)
+    r = jix.flip(a, dim=-1)
     np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=-1))
 
 
-def test_flip_axis_none_reverses_all():
+def test_flip_dim_none_reverses_all():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     a = jix.compact(arr)
     r = jix.flip(a)
     np.testing.assert_array_equal(r.numpy(), np.flip(arr))
 
 
-def test_flip_multiple_axes():
+def test_flip_multiple_dims():
     arr = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
     a = jix.compact(arr)
-    r = jix.flip(a, axis=[0, 2])
+    r = jix.flip(a, dim=[0, 2])
     np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=(0, 2)))
 
 
-def test_flip_duplicate_axis_raises():
+def test_flip_duplicate_dim_raises():
     a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
     with pytest.raises(Exception):
-        jix.flip(a, axis=[0, 0])
+        jix.flip(a, dim=[0, 0])
 
 
-def test_flip_out_of_bounds_axis_raises():
+def test_flip_out_of_bounds_dim_raises():
     a = jix.compact([1, 2, 3], dtype=np.int32)
     with pytest.raises(Exception):
-        jix.flip(a, axis=1)
+        jix.flip(a, dim=1)
 
 
 def test_flip_method_on_array():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     a = jix.compact(arr)
-    r = a.flip(axis=0)
+    r = a.flip(dim=0)
     np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=0))
 
 
 def test_flip_accepts_python_list():
-    r = jix.flip([1, 2, 3], axis=0)
+    r = jix.flip([1, 2, 3], dim=0)
     np.testing.assert_array_equal(r.numpy(), [3, 2, 1])
 
 
@@ -853,36 +853,36 @@ def test_roll_1d_negative():
     np.testing.assert_array_equal(jix.roll(a, -1).numpy(), [1, 2, 3, 4, 0])
 
 
-def test_roll_axis_int():
+def test_roll_dim_int():
     arr = np.arange(12, dtype=np.int32).reshape(3, 4)
     a = jix.compact(arr)
-    r = jix.roll(a, 1, axis=0)
+    r = jix.roll(a, 1, dim=0)
     np.testing.assert_array_equal(r.numpy(), np.roll(arr, 1, axis=0))
 
 
-def test_roll_negative_axis():
+def test_roll_negative_dim():
     arr = np.arange(12, dtype=np.int32).reshape(3, 4)
     a = jix.compact(arr)
-    r = jix.roll(a, 1, axis=-1)
+    r = jix.roll(a, 1, dim=-1)
     np.testing.assert_array_equal(r.numpy(), np.roll(arr, 1, axis=-1))
 
 
-def test_roll_axis_none_on_non_1d_raises():
+def test_roll_dim_none_on_non_1d_raises():
     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
     with pytest.raises(Exception):
         jix.roll(a, 1)
 
 
-def test_roll_out_of_bounds_axis_raises():
+def test_roll_out_of_bounds_dim_raises():
     a = jix.compact([1, 2, 3], dtype=np.int32)
     with pytest.raises(Exception):
-        jix.roll(a, 1, axis=1)
+        jix.roll(a, 1, dim=1)
 
 
 def test_roll_method_on_array():
     arr = np.arange(12, dtype=np.int32).reshape(3, 4)
     a = jix.compact(arr)
-    r = a.roll(1, axis=0)
+    r = a.roll(1, dim=0)
     np.testing.assert_array_equal(r.numpy(), np.roll(arr, 1, axis=0))
 
 
@@ -894,7 +894,7 @@ def test_roll_accepts_python_list():
 def test_roll_large_shift_wraps():
     arr = np.arange(5, dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.roll(a, 12, axis=0)
+    r = jix.roll(a, 12, dim=0)
     np.testing.assert_array_equal(r.numpy(), np.roll(arr, 12, axis=0))
 
 
@@ -908,37 +908,37 @@ def test_tile_1d():
     np.testing.assert_array_equal(jix.tile(a, 2).numpy(), [1, 2, 3, 1, 2, 3])
 
 
-def test_tile_axis0():
+def test_tile_dim0():
     arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.tile(a, 3, axis=0)
+    r = jix.tile(a, 3, dim=0)
     np.testing.assert_array_equal(r.numpy(), np.tile(arr, (3, 1)))
 
 
-def test_tile_axis1():
+def test_tile_dim1():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.tile(a, 2, axis=1)
+    r = jix.tile(a, 2, dim=1)
     np.testing.assert_array_equal(r.numpy(), np.tile(arr, (1, 2)))
 
 
-def test_tile_negative_axis():
+def test_tile_negative_dim():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.tile(a, 2, axis=-1)
+    r = jix.tile(a, 2, dim=-1)
     np.testing.assert_array_equal(r.numpy(), np.tile(arr, (1, 2)))
 
 
-def test_tile_axis_none_on_non_1d_raises():
+def test_tile_dim_none_on_non_1d_raises():
     a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
     with pytest.raises(Exception):
         jix.tile(a, 2)
 
 
-def test_tile_out_of_bounds_axis_raises():
+def test_tile_out_of_bounds_dim_raises():
     a = jix.compact([1, 2, 3], dtype=np.int32)
     with pytest.raises(Exception):
-        jix.tile(a, 2, axis=1)
+        jix.tile(a, 2, dim=1)
 
 
 def test_tile_reps_zero_yields_empty():
@@ -950,14 +950,14 @@ def test_tile_reps_zero_yields_empty():
 def test_tile_reps_one_is_identity():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     a = jix.compact(arr)
-    r = jix.tile(a, 1, axis=0)
+    r = jix.tile(a, 1, dim=0)
     np.testing.assert_array_equal(r.numpy(), arr)
 
 
 def test_tile_method_on_array():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     a = jix.compact(arr)
-    r = a.tile(2, axis=0)
+    r = a.tile(2, dim=0)
     np.testing.assert_array_equal(r.numpy(), np.tile(arr, (2, 1)))
 
 

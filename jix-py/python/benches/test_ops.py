@@ -74,58 +74,58 @@ SUM_DTYPES = [np.int32, np.float32]
 
 
 @pytest.mark.parametrize("library", ARRAY_IMPLS)
-@pytest.mark.parametrize("axis", [0, 1, None], ids=lambda a: "axisall" if a is None else f"axis{a}")
+@pytest.mark.parametrize("dim", [0, 1, None], ids=lambda a: "dimall" if a is None else f"dim{a}")
 @pytest.mark.parametrize("dtype", SUM_DTYPES, ids=lambda d: np.dtype(d).name)
 @pytest.mark.parametrize("size", SIZES, ids=lambda n: f"n{n}")
-def test_sum(benchmark, library, dtype, axis, size):
+def test_sum(benchmark, library, dtype, dim, size):
     arr = _build(library, size, dtype=dtype)
 
     def run():
-        """Sum reduction over `axis`, returning a NumPy array."""
+        """Sum reduction over `dim`, returning a NumPy array."""
         a = arr.raw
         match a:
             case jix.Array():
-                return np.asarray(a.sum(axis=axis).numpy())
+                return np.asarray(a.sum(dim=dim).numpy())
             case np.ndarray():
-                return np.asarray(a.sum(axis=axis))
+                return np.asarray(a.sum(axis=dim))
             case blosc2.NDArray():
-                return np.asarray(blosc2.sum(a, axis=axis))
+                return np.asarray(blosc2.sum(a, axis=dim))
             case zarr.Array():
-                return np.asarray(np.asarray(a[:]).sum(axis=axis))
+                return np.asarray(np.asarray(a[:]).sum(axis=dim))
             case _:
                 raise ValueError(f"unknown library {library!r}")
 
-    axis_str = "all" if axis is None else str(axis)
+    dim_str = "all" if dim is None else str(dim)
     dtype_str = np.dtype(dtype).name
-    case = f"sum_{dtype_str}_axis{axis_str}"
+    case = f"sum_{dtype_str}_dim{dim_str}"
     record(benchmark, case=case, library=library, size=size, dtype=dtype_str)
     out = benchmark(run)
     assert out is not None
 
 
 @pytest.mark.parametrize("library", ARRAY_IMPLS)
-@pytest.mark.parametrize("axis", [0, 1, None], ids=lambda a: "axisall" if a is None else f"axis{a}")
+@pytest.mark.parametrize("dim", [0, 1, None], ids=lambda a: "dimall" if a is None else f"dim{a}")
 @pytest.mark.parametrize("size", SIZES, ids=lambda n: f"n{n}")
-def test_std(benchmark, library, axis, size):
+def test_std(benchmark, library, dim, size):
     arr = _build(library, size)
 
     def run():
-        """Standard-deviation reduction over `axis`, returning a NumPy array."""
+        """Standard-deviation reduction over `dim`, returning a NumPy array."""
         a = arr.raw
         match a:
             case jix.Array():
-                return np.asarray(a.std(axis=axis).numpy())
+                return np.asarray(a.std(dim=dim).numpy())
             case np.ndarray():
-                return np.asarray(a.std(axis=axis))
+                return np.asarray(a.std(axis=dim))
             case blosc2.NDArray():
-                return np.asarray(blosc2.std(a, axis=axis))
+                return np.asarray(blosc2.std(a, axis=dim))
             case zarr.Array():
-                return np.asarray(np.asarray(a[:]).std(axis=axis))
+                return np.asarray(np.asarray(a[:]).std(axis=dim))
             case _:
                 raise ValueError(f"unknown library {library!r}")
 
-    axis_str = "all" if axis is None else str(axis)
-    case = f"std_axis{axis_str}"
+    dim_str = "all" if dim is None else str(dim)
+    case = f"std_dim{dim_str}"
     record(benchmark, case=case, library=library, size=size)
     out = benchmark(run)
     assert out is not None
@@ -163,11 +163,11 @@ def test_reduction_pipeline(benchmark, library, size):
     arr = _build(library, size)
 
     def run():
-        """Multi-op reduction chain `exp(a).sum(axis=0)`, returning a NumPy array."""
+        """Multi-op reduction chain `exp(a).sum(dim=0)`, returning a NumPy array."""
         a = arr.raw
         match a:
             case jix.Array():
-                return np.asarray(a.exp().sum(axis=0).numpy())
+                return np.asarray(a.exp().sum(dim=0).numpy())
             case np.ndarray():
                 return np.asarray(np.exp(a).sum(axis=0))
             case blosc2.NDArray():

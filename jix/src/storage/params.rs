@@ -63,7 +63,7 @@ impl ReadSize {
 ///   params are preserved identically by default. Arrays with lazy view storage
 ///   (e.g. from `Add`, `Reshape`, etc.) may modify the params as best as it can, trying to preserve
 ///   user-specified params where possible, but it is an approximate heuristic.
-///   Shape modifying operations (e.g. `Reshape`, `PermuteAxes`, etc.) are especially likely to
+///   Shape modifying operations (e.g. `Reshape`, `PermuteDims`, etc.) are especially likely to
 ///   change the block layout params - consider passing explicit params to `compact_with` after these
 ///   ops, or verifying the resulting block layout is reasonable for your access pattern.
 ///
@@ -87,7 +87,7 @@ impl ReadSize {
 /// let mut out_params = ArrayParams::new();
 /// out_params.block_shape(&[128, 128]);
 /// let ctx = za.read_ctx();
-/// let transposed = za.permute_axes(&[1, 0]).compact_with(out_params, &ctx)?;
+/// let transposed = za.permute_dims(&[1, 0]).compact_with(out_params, &ctx)?;
 /// # Ok::<(), jix::Error>(())
 /// ```
 #[derive(Clone, Default, Debug)]
@@ -894,7 +894,7 @@ pub(crate) mod flags {
     const IS_COMPACT: u8 = 0b0000_0001;
     /// The array read operation is a simple strided copy.
     ///
-    /// This is a hint to the caller, useful for Plain, Scalar, insert_axis, remove_axis, etc.
+    /// This is a hint to the caller, useful for Plain, Scalar, insert_dim, remove_dim, etc.
     const PLAIN_READ: u8 = 0b0000_0010;
 
     #[allow(dead_code)]
@@ -1031,7 +1031,7 @@ mod tests {
         )
         .unwrap();
         // A compact leaf reads at cost 8; broadcasting dim 1 duplicates the whole of it.
-        let bc = a.sum(1).insert_axis(1).broadcast(&[3, 4]);
+        let bc = a.sum(1).insert_dim(1).broadcast(&[3, 4]);
         let cost = bc.storage().spec().element_cost();
         assert_eq!(
             bc.storage().spec().read_shape_scale_weight(),
@@ -1092,8 +1092,8 @@ mod tests {
             assert_eq!(sp.read_shape_scale_weight(), &[ScaleWeight::NONE; 2]);
             assert_eq!(sp.read_shape_scale_order().as_slice(), &[0, 1]);
         }
-        // Reduce over axis 1 (extent 4), re-insert the axis, and broadcast back to [3, 4].
-        let bc = a.sum(1).insert_axis(1).broadcast(&[3, 4]);
+        // Reduce over dim 1 (extent 4), re-insert the dim, and broadcast back to [3, 4].
+        let bc = a.sum(1).insert_dim(1).broadcast(&[3, 4]);
         let sp = bc.storage().spec();
         // Reduction folds the whole reduced extent per output: 8 * (4 + 4) = 64.
         assert_eq!(sp.element_cost(), 64.0);
@@ -1121,7 +1121,7 @@ mod tests {
         )
         .unwrap();
         // `sum` promotes i32 -> i64, matching `plain`'s dtype for the binary op.
-        let bc = a.sum(1).insert_axis(1).broadcast(&[3, 4]);
+        let bc = a.sum(1).insert_dim(1).broadcast(&[3, 4]);
         let out = plain.maximum(bc);
         let sp = out.storage().spec();
         // element_cost = plain (8) + broadcasted reduction (64) + 1.
@@ -1150,7 +1150,7 @@ mod tests {
 
         // A broadcast makes its dim the one worth covering: highest gain, so it sorts last and is
         // grown first.
-        let bc = a.sum(1).insert_axis(1).broadcast(&[3, 4, 5]);
+        let bc = a.sum(1).insert_dim(1).broadcast(&[3, 4, 5]);
         let order = bc.storage().spec().read_shape_scale_order();
         assert_eq!(
             order.as_slice(),
@@ -1171,7 +1171,7 @@ mod tests {
 
     #[test]
     fn read_layout_order_follows_strides_for_a_plain_leaf() {
-        // An F-order ndarray: dim 0 has the smallest stride, so dim 1 is the outermost axis.
+        // An F-order ndarray: dim 0 has the smallest stride, so dim 1 is the outermost dim.
         let arr =
             ndarray::Array::from_shape_vec([3, 4].f(), (0..12i32).collect::<Vec<_>>()).unwrap();
         let a = Array::plain_ndarray(arr).unwrap();
@@ -1180,14 +1180,14 @@ mod tests {
 
     #[test]
     fn read_layout_order_keeps_a_size_one_dim_at_its_shape_position() {
-        // C-order with a size-1 axis stays exactly C-order, so readers' "already C-order" fast
+        // C-order with a size-1 dim stays exactly C-order, so readers' "already C-order" fast
         // path keeps firing.
         let c = ndarray::Array::from_shape_vec([4, 1, 5], (0..20i32).collect::<Vec<_>>()).unwrap();
         let a = Array::plain_ndarray(c).unwrap();
         assert_eq!(a.storage().spec().read_layout_order(), &[0, 1, 2]);
 
-        // F-order [4, 5, 1]: the size-1 axis carries the largest stride (20 items) but is never
-        // stepped, so it must not be mistaken for the outermost axis.
+        // F-order [4, 5, 1]: the size-1 dim carries the largest stride (20 items) but is never
+        // stepped, so it must not be mistaken for the outermost dim.
         let f =
             ndarray::Array::from_shape_vec([4, 5, 1].f(), (0..20i32).collect::<Vec<_>>()).unwrap();
         let a = Array::plain_ndarray(f).unwrap();
@@ -1196,7 +1196,7 @@ mod tests {
 
     #[test]
     fn read_layout_order_puts_a_zero_stride_dim_outermost() {
-        // A broadcast ndarray view has stride 0 on the expanded axis. Outermost is the only
+        // A broadcast ndarray view has stride 0 on the expanded dim. Outermost is the only
         // placement that leaves the copy's inner run contiguous for both operands.
         let base =
             ndarray::Array::from_shape_vec([4, 1, 5], (0..20i32).collect::<Vec<_>>()).unwrap();
@@ -1216,15 +1216,15 @@ mod tests {
     }
 
     #[test]
-    fn read_layout_order_reindexes_through_permute_axes() {
+    fn read_layout_order_reindexes_through_permute_dims() {
         let a = compact_i32([3, 4, 5]);
-        // Reversing the axes reverses the layout: the inner dim (2) becomes the outermost output
+        // Reversing the dims reverses the layout: the inner dim (2) becomes the outermost output
         // dim (0), so the outermost-first order is [2, 1, 0].
-        let t = a.view().permute_axes(&[2, 1, 0]);
+        let t = a.view().permute_dims(&[2, 1, 0]);
         assert_eq!(t.storage().spec().read_layout_order(), &[2, 1, 0]);
-        // A rotation: output dim i reads input axis axes[i], so input dim 0 (outermost) lands on
+        // A rotation: output dim i reads input dim `dims[i]`, so input dim 0 (outermost) lands on
         // output dim 1, input dim 1 on output dim 2, and input dim 2 on output dim 0.
-        let t = a.view().permute_axes(&[2, 0, 1]);
+        let t = a.view().permute_dims(&[2, 0, 1]);
         assert_eq!(t.storage().spec().read_layout_order(), &[1, 2, 0]);
     }
 
@@ -1233,7 +1233,7 @@ mod tests {
         let a = compact_i32([3, 4, 5]);
         // Layout [2, 1, 0]; reducing dim 1 leaves dims 2 and 0 in that relative order, renumbered
         // to the output's [1, 0].
-        let r = a.view().permute_axes(&[2, 1, 0]).sum(1);
+        let r = a.view().permute_dims(&[2, 1, 0]).sum(1);
         assert_eq!(r.storage().spec().read_layout_order(), &[1, 0]);
     }
 
@@ -1241,22 +1241,22 @@ mod tests {
     fn read_layout_order_drops_removed_dims() {
         let a = compact_i32([3, 1, 5]);
         // Layout [2, 1, 0]; removing the size-1 dim 1 leaves dims 2 and 0, renumbered to [1, 0].
-        let r = a.view().permute_axes(&[2, 1, 0]).remove_axis(1);
+        let r = a.view().permute_dims(&[2, 1, 0]).remove_dim(1);
         assert_eq!(r.storage().spec().read_layout_order(), &[1, 0]);
     }
 
     #[test]
-    fn read_layout_order_splices_an_inserted_axis_at_its_shape_position() {
+    fn read_layout_order_splices_an_inserted_dim_at_its_shape_position() {
         let a = Array::compact_ndarray(
             &ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect::<Vec<_>>()).unwrap(),
         )
         .unwrap();
         // A C-order input must stay exactly C-order so the readers' fast path keeps firing.
-        let i = a.view().insert_axis(1);
+        let i = a.view().insert_dim(1);
         assert_eq!(i.storage().spec().read_layout_order(), &[0, 1, 2]);
         // Transposed: old dims 0, 1 map to new 0, 2 and keep their [1, 0] relative order as
-        // [2, 0]; the new axis splices in ahead of the first higher-numbered dim.
-        let i = a.view().permute_axes(&[1, 0]).insert_axis(1);
+        // [2, 0]; the new dim splices in ahead of the first higher-numbered dim.
+        let i = a.view().permute_dims(&[1, 0]).insert_dim(1);
         assert_eq!(i.storage().spec().read_layout_order(), &[1, 2, 0]);
     }
 
@@ -1264,11 +1264,11 @@ mod tests {
     fn read_layout_order_survives_a_one_to_one_reshape_only() {
         let a = compact_i32([3, 4, 5]);
         // Every output dim maps 1:1 to a source dim, so the layout carries through.
-        let r = a.view().permute_axes(&[2, 1, 0]).reshape([5, 4, 3]);
+        let r = a.view().permute_dims(&[2, 1, 0]).reshape([5, 4, 3]);
         assert_eq!(r.storage().spec().read_layout_order(), &[2, 1, 0]);
         // Merging dims 0 and 1 has no honest layout - a reshape is defined on C-order flattening -
         // so the output falls back to C-order.
-        let r = a.view().permute_axes(&[2, 1, 0]).reshape([20, 3]);
+        let r = a.view().permute_dims(&[2, 1, 0]).reshape([20, 3]);
         assert_eq!(r.storage().spec().read_layout_order(), &[0, 1]);
     }
 
@@ -1279,10 +1279,10 @@ mod tests {
         )
         .unwrap();
         // A unary elementwise op only bumps element_cost; the layout passes straight through.
-        let n = a.view().permute_axes(&[1, 0]).map(|x: i32| x * 2);
+        let n = a.view().permute_dims(&[1, 0]).map(|x: i32| x * 2);
         assert_eq!(n.storage().spec().read_layout_order(), &[1, 0]);
         // Broadcast forwards too: a duplicated dim keeps its position.
-        let b = a.view().permute_axes(&[1, 0]).broadcast(&[4, 3]);
+        let b = a.view().permute_dims(&[1, 0]).broadcast(&[4, 3]);
         assert_eq!(b.storage().spec().read_layout_order(), &[1, 0]);
     }
 
@@ -1305,13 +1305,13 @@ mod tests {
         .unwrap();
         // A broadcast reduction over [4, 3]: C-order, and expensive at 8 * (3 + 4) = 56.
         let src = compact_2d_i32([4, 3]);
-        let costly = || src.view().sum(1).insert_axis(1).broadcast(&[4, 3]);
+        let costly = || src.view().sum(1).insert_dim(1).broadcast(&[4, 3]);
         assert_eq!(costly().storage().spec().element_cost(), 8.0 * (3.0 + 4.0));
 
         // The costlier operand supplies the layout, whichever side it sits on.
-        let out = t.view().permute_axes(&[1, 0]).maximum(costly());
+        let out = t.view().permute_dims(&[1, 0]).maximum(costly());
         assert_eq!(out.storage().spec().read_layout_order(), &[0, 1]);
-        let out = costly().maximum(t.view().permute_axes(&[1, 0]));
+        let out = costly().maximum(t.view().permute_dims(&[1, 0]));
         assert_eq!(out.storage().spec().read_layout_order(), &[0, 1]);
     }
 
@@ -1322,7 +1322,7 @@ mod tests {
         // Three maps over a transposed leaf: F-order at element_cost 8 + 3 = 11.
         let costly = src
             .view()
-            .permute_axes(&[1, 0])
+            .permute_dims(&[1, 0])
             .map(|x: i32| x)
             .map(|x: i32| x)
             .map(|x: i32| x);
@@ -1343,7 +1343,7 @@ mod tests {
         let src = compact_2d_i32([3, 4]);
         let costly = src
             .view()
-            .permute_axes(&[1, 0])
+            .permute_dims(&[1, 0])
             .map(|x: i32| x)
             .map(|x: i32| x)
             .map(|x: i32| x);
@@ -1354,14 +1354,14 @@ mod tests {
     }
 
     #[test]
-    fn read_layout_order_splices_stacks_new_axis_at_its_shape_position() {
+    fn read_layout_order_splices_stacks_new_dim_at_its_shape_position() {
         let a = compact_2d_i32([3, 4]);
-        // Both inputs are transposed [4, 3] views with layout [1, 0]. Stacking at axis 1 relabels
-        // them to [2, 0], then the new axis splices in ahead of the first higher-numbered dim.
+        // Both inputs are transposed [4, 3] views with layout [1, 0]. Stacking at dim 1 relabels
+        // them to [2, 0], then the new dim splices in ahead of the first higher-numbered dim.
         let out = crate::ops::stack(
             (
-                a.view().permute_axes(&[1, 0]),
-                a.view().permute_axes(&[1, 0]),
+                a.view().permute_dims(&[1, 0]),
+                a.view().permute_dims(&[1, 0]),
             ),
             1,
         );
@@ -1398,11 +1398,11 @@ mod tests {
         let a = mk();
         assert_eq!(a.storage().spec().block_shape()[1], 2);
 
-        // std-like: reduce axis 1, re-insert it, broadcast back.
-        let bc = mk().sum(1).insert_axis(1).broadcast(&[3, 4]);
+        // std-like: reduce dim 1, re-insert it, broadcast back.
+        let bc = mk().sum(1).insert_dim(1).broadcast(&[3, 4]);
         {
             let sp = bc.storage().spec();
-            // The reduction dropped dim 1 and `insert_axis` put back a length-1 dim, so the
+            // The reduction dropped dim 1 and `insert_dim` put back a length-1 dim, so the
             // granularity there really is 1 - and the broadcast leaves it alone instead of
             // inflating it to the full extent 4, which is what used to force the tile off the
             // block grid.
@@ -1606,7 +1606,7 @@ mod tests {
         out_params.block_shape(&[128, 128]);
         let ctx = za.read_ctx();
         let transposed = za
-            .permute_axes(&[1, 0])
+            .permute_dims(&[1, 0])
             .compact_with(out_params, &ctx)
             .unwrap();
         assert_eq!(transposed.shape(), &[1024, 1024]);
@@ -1673,7 +1673,7 @@ mod tests {
     //
     // `scale_block_shape` chooses a per-dimension block length so that the total block volume
     // (product of the lengths) stays approximately within `block_size_max` items, filling that
-    // budget greedily from the innermost (last) axis outward. `scale_dim[d] == false` marks a
+    // budget greedily from the innermost (last) dim outward. `scale_dim[d] == false` marks a
     // fixed dim that must keep its input length; scaled dims are sized by `block_len_heuristic`
     // and clamped to `[1, shape[d]]`. Because the heuristics only approximate the target, the
     // budget assertions below check "not wildly over", not a strict ceiling.

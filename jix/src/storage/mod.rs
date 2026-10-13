@@ -17,7 +17,7 @@
 //!
 //! Operations on `Array` produce lazy views whose storage wraps the original and applies
 //! the transformation at read time. These are defined in [`jix::ops`](crate::ops) and include shape
-//! operations (`Reshape`, `Slice`, `PermuteAxes`, `Broadcast`, ...), element-wise operations
+//! operations (`Reshape`, `Slice`, `PermuteDims`, `Broadcast`, ...), element-wise operations
 //! (`Neg`, `Add`, `Exp`, `Cast`, ...), reductions (`Sum`, `Mean`, ...), etc.
 //!
 //! # Element types

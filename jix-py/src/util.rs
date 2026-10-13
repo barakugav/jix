@@ -20,7 +20,7 @@ pub(crate) fn slice_unpack(slice: &Bound<'_, PySlice>, length: i64) -> PyResult<
     if unsafe { pyo3::ffi::PySlice_Unpack(slice.as_ptr(), &mut start, &mut stop, &mut step) } < 0 {
         return Err(PyErr::fetch(slice.py()));
     }
-    // An omitted forward `stop` unpacks to the max sentinel; substitute the axis length
+    // An omitted forward `stop` unpacks to the max sentinel; substitute the dim length
     // (its Python default) so it is not later mistaken for an out-of-range bound.
     if stop == pyo3::ffi::Py_ssize_t::MAX {
         stop = length as pyo3::ffi::Py_ssize_t;
@@ -87,22 +87,22 @@ pub(crate) fn numpy_empty<'py>(
     unsafe { Bound::from_owned_ptr_or_err(py, np_arr).map(|ob| ob.cast_into_unchecked()) }
 }
 
-/// Allocate an uninitialized NumPy array of `shape` whose axes are nested in `order` - outermost
-/// axis first - instead of always C-contiguous.
+/// Allocate an uninitialized NumPy array of `shape` whose dims are nested in `order` - outermost
+/// dim first - instead of always C-contiguous.
 pub(crate) fn numpy_empty_ordered<'py>(
     dtype: Bound<'py, PyArrayDescr>,
     shape: &[u64],
     order: &[usize],
 ) -> PyResult<Bound<'py, PyUntypedArray>> {
     debug_assert_eq!(order.len(), shape.len());
-    if order.iter().enumerate().all(|(axis, &d)| axis == d) {
+    if order.iter().enumerate().all(|(dim, &d)| dim == d) {
         return numpy_empty(dtype, shape);
     }
     let py = dtype.py();
     let ndim = shape.len();
     let arr = numpy_empty(dtype, dim_arr(ndim, |i| shape[order[i]]).as_slice())?;
 
-    // Axis `d` of the result is allocation axis `i`, where `order[i] == d`.
+    // Dim `d` of the result is allocation dim `i`, where `order[i] == d`.
     let mut permute = dim_arr(ndim, |_| 0 as npy_intp);
     for (i, &d) in order.iter().enumerate() {
         permute[d] = i as npy_intp;
@@ -111,7 +111,7 @@ pub(crate) fn numpy_empty_ordered<'py>(
         ptr: permute.as_mut_ptr(),
         len: ndim as std::ffi::c_int,
     };
-    // SAFETY: `arr` is a live NumPy array of `ndim` axes and `permute` is a permutation of them.
+    // SAFETY: `arr` is a live NumPy array of `ndim` dims and `permute` is a permutation of them.
     let np_arr =
         unsafe { numpy::PY_ARRAY_API.PyArray_Transpose(py, arr.as_array_ptr(), &mut permute) };
     unsafe { Bound::from_owned_ptr_or_err(py, np_arr).map(|ob| ob.cast_into_unchecked()) }
@@ -143,27 +143,27 @@ pub(crate) fn numpy_reshape<'py>(
 }
 
 #[inline]
-pub(crate) fn normalize_axis(axis: i32, ndim: usize) -> pyo3::PyResult<usize> {
+pub(crate) fn normalize_dim(dim: i32, ndim: usize) -> pyo3::PyResult<usize> {
     let ndim = ndim as i32;
-    if axis < -ndim || axis >= ndim {
+    if dim < -ndim || dim >= ndim {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "axis {axis} is out of bounds for array of dimension {ndim}"
+            "dim {dim} is out of bounds for array of dimension {ndim}"
         )));
     }
-    Ok(if axis < 0 {
-        (ndim + axis) as usize
+    Ok(if dim < 0 {
+        (ndim + dim) as usize
     } else {
-        axis as usize
+        dim as usize
     })
 }
 #[inline]
-pub(crate) fn normalize_axis_optional(axis: Option<i32>, ndim: usize) -> pyo3::PyResult<usize> {
-    match axis {
-        Some(axis) => normalize_axis(axis, ndim),
+pub(crate) fn normalize_dim_optional(dim: Option<i32>, ndim: usize) -> pyo3::PyResult<usize> {
+    match dim {
+        Some(dim) => normalize_dim(dim, ndim),
         None => {
             if ndim != 1 {
                 return Err(pyo3::exceptions::PyValueError::new_err(
-                    "axis must be specified for arrays with ndim != 1",
+                    "dim must be specified for arrays with ndim != 1",
                 ));
             }
             Ok(0)
@@ -172,17 +172,17 @@ pub(crate) fn normalize_axis_optional(axis: Option<i32>, ndim: usize) -> pyo3::P
 }
 
 #[inline]
-pub(crate) fn normalize_axes(axes: &[i32], ndim: usize) -> pyo3::PyResult<DimArray<usize>> {
+pub(crate) fn normalize_dims(dims: &[i32], ndim: usize) -> pyo3::PyResult<DimArray<usize>> {
     if ndim > NDIM_MAX {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
             "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
         )));
     }
-    axes.iter().map(|a| normalize_axis(*a, ndim)).collect()
+    dims.iter().map(|a| normalize_dim(*a, ndim)).collect()
 }
 #[inline]
-pub(crate) fn normalize_axes_optional(
-    axes: Option<&[i32]>,
+pub(crate) fn normalize_dims_optional(
+    dims: Option<&[i32]>,
     ndim: usize,
 ) -> pyo3::PyResult<DimArray<usize>> {
     if ndim > NDIM_MAX {
@@ -190,8 +190,8 @@ pub(crate) fn normalize_axes_optional(
             "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
         )));
     }
-    match axes {
-        Some(axes) => normalize_axes(axes, ndim),
+    match dims {
+        Some(dims) => normalize_dims(dims, ndim),
         None => Ok((0..ndim).collect()),
     }
 }

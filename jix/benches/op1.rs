@@ -52,7 +52,7 @@ fn bench_op1_plain_transposed(c: &mut Criterion) {
             let neg = if output_transpose {
                 neg.transpose() // transpose
             } else {
-                neg.permute_axes(&(0..shape.len()).collect::<Vec<_>>()) // no-op
+                neg.permute_dims(&(0..shape.len()).collect::<Vec<_>>()) // no-op
             };
 
             let index = neg.shape().iter().map(|&n| 0..n).collect::<Vec<_>>();

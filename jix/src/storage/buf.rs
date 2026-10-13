@@ -320,8 +320,8 @@ pub(crate) fn materialize_out_buf<'a>(
 
 /// Read a stride-remapping forwarder's inner region once, honoring the caller's `out=` mode.
 ///
-/// A forwarder like `PermuteAxes`/`InsertAxis`/`RemoveAxis` relates its output axes to its inner
-/// axes by a fixed per-axis correspondence. The inner read is the same either way; only the
+/// A forwarder like `PermuteDims`/`InsertDim`/`RemoveDim` relates its output dims to its inner
+/// dims by a fixed per-dim correspondence. The inner read is the same either way; only the
 /// direction of the stride remap differs:
 /// - pull (`out=None`): read the inner as a view and relabel its strides into output order with
 ///   `inner2outer_strides_fn(inner_strides) -> output_strides`.
