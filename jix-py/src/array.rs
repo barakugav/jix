@@ -1181,6 +1181,16 @@ impl Array {
         crate::ops::permute_dims(slf, dims)
     }
 
+    /// Swaps two dims of an array. See [`jix.swapdims()`][jix.swapdims].
+    #[pyo3(signature = (dim0, dim1))]
+    pub fn swapdims<'py>(
+        slf: &Bound<'py, Self>,
+        dim0: i32,
+        dim1: i32,
+    ) -> PyResult<Bound<'py, Self>> {
+        crate::ops::swapdims(slf, dim0, dim1)
+    }
+
     /// Reverses all dims; shorthand for `permute_dims()` with no arguments. See [`jix.permute_dims()`][jix.permute_dims].
     #[allow(non_snake_case)]
     #[getter]
