@@ -163,6 +163,36 @@ impl<'a> NdCopier<'a> {
         } = args;
         debug_assert_eq!(size_of::<T>(), dtype.itemsize() as usize);
         debug_assert_eq!(align_of::<T>(), dtype.alignment().as_usize());
+        let (src, mut dst) = (src.cast::<T>(), dst.cast::<T>());
+        let base_ptrs_aligned = dst.as_ptr().is_aligned() && src.as_ptr().is_aligned();
+
+        if shape.len() == 1 {
+            // Skip the iterator for single dim arrays
+
+            let len = shape[0];
+            if len == 1 {
+                unsafe {
+                    let value = src.as_ptr().read_unaligned();
+                    dst.as_mut_ptr().write_unaligned(value);
+                };
+                return;
+            }
+
+            let src_stride = src_strides[0];
+            let dst_stride = dst_strides[0];
+            let aligned = base_ptrs_aligned
+                && src_stride.is_multiple_of(align_of::<T>())
+                && dst_stride.is_multiple_of(align_of::<T>());
+
+            let inner_loop_fn = Self::pick_inner_loop::<T>(
+                len,
+                aligned,
+                src_stride == size_of::<T>(),
+                dst_stride == size_of::<T>(),
+            );
+            unsafe { inner_loop_fn(src, dst, len, src_stride, dst_stride) };
+            return;
+        }
 
         // Operand 0 is the destination (write; sort-primary), operand 1 the source (read). Both are
         // byte-addressed with element layout `(size_of::<T>(), align_of::<T>())`.
@@ -171,19 +201,40 @@ impl<'a> NdCopier<'a> {
             [dst_strides, src_strides],
             [(size_of::<T>() as Itemsize, Alignment::of::<T>()); 2],
         );
-        // The iterator's aligned flags only cover the strides; AND-in the base pointers so the
-        // aligned `read`/`write` path runs only when the data really is.
-        let [dst_aligned, src_aligned] = iter.is_aligned();
-        let aligned = (dst_aligned && dst.as_ptr().cast::<T>().is_aligned())
-            && (src_aligned && src.as_ptr().cast::<T>().is_aligned());
-        // Apply the element type now that the byte-level alignment check above is done.
-        let (src, mut dst) = (src.cast::<T>(), dst.cast::<T>());
-        let [dst_contiguous, src_contiguous] = iter.is_contiguous();
+        let [dst_strides_aligned, src_strides_aligned] = *iter.is_strides_aligned();
+        let is_aligned = dst_strides_aligned && src_strides_aligned && base_ptrs_aligned;
+        let [dst_contiguous, src_contiguous] = *iter.is_contiguous();
+        let inner_loop_fn = Self::pick_inner_loop::<T>(
+            iter.inner_len(),
+            is_aligned,
+            src_contiguous,
+            dst_contiguous,
+        );
 
-        // For the both-contiguous run, peel a small fixed length into a single `[T; N]` move
-        // (branchless); longer runs fall through to `copy_nonoverlapping`.
-        let inner_loop_fn = if src_contiguous && dst_contiguous {
-            match (iter.inner_len(), aligned) {
+        iter.foreach_inner_1d_impl::<true>(
+            move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
+                inner_loop_fn(
+                    src.bytes_offset(src_offset),
+                    dst.bytes_offset(dst_offset),
+                    len,
+                    src_stride,
+                    dst_stride,
+                )
+            },
+        );
+    }
+
+    #[inline(always)]
+    fn pick_inner_loop<T: Copy>(
+        inner_len: usize,
+        aligned: bool,
+        src_contiguous: bool,
+        dst_contiguous: bool,
+    ) -> InnerLoopFn<T> {
+        if src_contiguous && dst_contiguous {
+            // For the both-contiguous run, peel a small fixed length into a single `[T; N]` move
+            // (branchless); longer runs fall through to `copy_nonoverlapping`.
+            match (inner_len, aligned) {
                 (1, true) => Self::inner_loop_contiguous_const_len::<T, 1, true>,
                 (1, false) => Self::inner_loop_contiguous_const_len::<T, 1, false>,
                 (2, true) => Self::inner_loop_contiguous_const_len::<T, 2, true>,
@@ -194,16 +245,16 @@ impl<'a> NdCopier<'a> {
                 (8, false) => Self::inner_loop_contiguous_const_len::<T, 8, false>,
                 (16, true) => Self::inner_loop_contiguous_const_len::<T, 16, true>,
                 (16, false) => Self::inner_loop_contiguous_const_len::<T, 16, false>,
-                (32, true) if size_of::<T>() <= 8 => {
+                (32, true) if const { size_of::<T>() <= 16 } => {
                     Self::inner_loop_contiguous_const_len::<T, 32, true>
                 }
-                (32, false) if size_of::<T>() <= 8 => {
+                (32, false) if const { size_of::<T>() <= 16 } => {
                     Self::inner_loop_contiguous_const_len::<T, 32, false>
                 }
-                (64, true) if size_of::<T>() <= 4 => {
+                (64, true) if const { size_of::<T>() <= 8 } => {
                     Self::inner_loop_contiguous_const_len::<T, 64, true>
                 }
-                (64, false) if size_of::<T>() <= 4 => {
+                (64, false) if const { size_of::<T>() <= 8 } => {
                     Self::inner_loop_contiguous_const_len::<T, 64, false>
                 }
                 (_, true) => Self::inner_loop::<T, true, true, true>,
@@ -219,22 +270,7 @@ impl<'a> NdCopier<'a> {
                 (true, [false, false]) => Self::inner_loop::<T, true, false, false>,
                 (false, [false, false]) => Self::inner_loop::<T, false, false, false>,
             }
-        };
-
-        // `move` so the closure owns the two wrappers. Borrowing them instead would make it
-        // capture `&PtrNoalias` / `&mut PtrMutNoalias`, i.e. read the operands through an extra
-        // pointer on every inner run.
-        iter.foreach_inner_1d_impl::<true>(
-            move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
-                inner_loop_fn(
-                    src.bytes_offset(src_offset),
-                    dst.bytes_offset(dst_offset),
-                    len,
-                    src_stride,
-                    dst_stride,
-                )
-            },
-        );
+        }
     }
 
     unsafe fn inner_loop<
@@ -364,6 +400,30 @@ impl<'a> NdCopier<'a> {
             dtype,
         } = args;
         let itemsize = dtype.itemsize() as usize;
+        let pick_inner_loop = |src_stride: usize, dst_stride: usize| {
+            let dst_contiguous = dst_stride == itemsize;
+            if dst_contiguous && src_stride == itemsize {
+                Self::inner_loop_untyped::<true>
+            } else {
+                Self::inner_loop_untyped::<false>
+            }
+        };
+
+        if shape.len() == 1 {
+            // Skip the iterator for single dim arrays
+
+            let len = shape[0];
+            if len == 1 {
+                unsafe { ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), itemsize) };
+                return;
+            }
+            let src_stride = src_strides[0];
+            let dst_stride = dst_strides[0];
+
+            let inner_loop_fn = pick_inner_loop(src_stride, dst_stride);
+            unsafe { inner_loop_fn(src, dst, len, src_stride, dst_stride, itemsize) };
+            return;
+        }
 
         // Byte-wise fallback: each element is `itemsize` opaque bytes copied via `copy_nonoverlapping`
         // (always the unaligned `u8` path). Operand 0 is the destination, operand 1 the source.
@@ -372,11 +432,8 @@ impl<'a> NdCopier<'a> {
             [dst_strides, src_strides],
             [(dtype.itemsize(), Alignment::of::<u8>()); 2],
         );
-        let [dst_contiguous, src_contiguous] = iter.is_contiguous();
-        let inner_loop_fn = match dst_contiguous && src_contiguous {
-            true => Self::inner_loop_untyped::<true>,
-            false => Self::inner_loop_untyped::<false>,
-        };
+        let [dst_inner_stride, src_inner_stride] = iter.inner_strides();
+        let inner_loop_fn = pick_inner_loop(src_inner_stride, dst_inner_stride);
         // `move` for the same reason as in `scalar_fn`.
         iter.foreach_inner_1d_impl::<true>(
             move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
