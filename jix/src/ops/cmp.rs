@@ -308,35 +308,16 @@ pub(crate) mod _traits {
                     atol: &Self::AbsoluteTolerance,
                 ) -> bool {
                     // credit to https://github.com/brendanzab/approx
+                    //
+                    // The code was re-written as branchless. enabled auto-vectorization.
 
-                    // Handle same infinities
-                    if self == other {
-                        return true;
-                    }
-
-                    // Handle remaining infinities
-                    if <$T>::is_infinite(*self) || <$T>::is_infinite(*other) {
-                        return false;
-                    }
-
-                    let abs_diff = crate::scalar::Abs::abs(*self - *other);
-
-                    // For when the numbers are really close together
-                    if abs_diff <= *atol {
-                        return true;
-                    }
-
-                    let abs_self = crate::scalar::Abs::abs(*self);
-                    let abs_other = crate::scalar::Abs::abs(*other);
-
-                    let largest = if abs_other > abs_self {
-                        abs_other
-                    } else {
-                        abs_self
-                    };
-
-                    // Use a relative difference comparison
-                    abs_diff <= largest * rtol
+                    let (a, b) = (*self, *other);
+                    let diff = crate::scalar::Abs::abs(a - b);
+                    let (abs_a, abs_b) = (crate::scalar::Abs::abs(a), crate::scalar::Abs::abs(b));
+                    let largest = if abs_b > abs_a { abs_b } else { abs_a };
+                    let close = (diff <= *atol) | (diff <= largest * *rtol);
+                    let no_inf = !<$T>::is_infinite(a) & !<$T>::is_infinite(b);
+                    (a == b) | (close & no_inf)
                 }
             }
         };
@@ -362,7 +343,7 @@ pub(crate) mod _traits {
             atol: &Self::AbsoluteTolerance,
         ) -> bool {
             self.re.approx_eq(&other.re, rtol, &atol.re)
-                && self.im.approx_eq(&other.im, rtol, &atol.im)
+                & self.im.approx_eq(&other.im, rtol, &atol.im)
         }
     }
 }
@@ -1240,6 +1221,35 @@ mod tests {
         }
         let largest = if a.abs() > b.abs() { a.abs() } else { b.abs() };
         diff <= largest * rtol
+    }
+
+    /// The branch-free `approx_eq` against the reference, on every pair of edge values (infinities,
+    /// NaN, +-0, subnormals, MAX) and odd tolerances.
+    #[test]
+    fn approx_eq_edge_cases() {
+        use crate::scalar::ApproxEq;
+        use crate::util::SimdTestValues;
+        macro_rules! check {
+            ($t:ty) => {
+                let values = <$t>::edge_cases();
+                let tols = [0.0, -0.0, 1e-6, 0.1, 1.0, -0.1, <$t>::INFINITY, <$t>::NAN];
+                for &a in &values {
+                    for &b in &values {
+                        for &rtol in &tols {
+                            for &atol in &tols {
+                                assert_eq!(
+                                    a.approx_eq(&b, &rtol, &atol),
+                                    ref_approx_eq(a, b, rtol, atol),
+                                    "{a:?} {b:?} rtol={rtol:?} atol={atol:?}",
+                                );
+                            }
+                        }
+                    }
+                }
+            };
+        }
+        check!(f32);
+        check!(f64);
     }
 
     proptest::proptest! {
