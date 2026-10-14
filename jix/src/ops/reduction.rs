@@ -1,7 +1,10 @@
 use std::mem::MaybeUninit;
 use std::ops::Not;
 
+use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
+
 use crate::ops::prelude::*;
+use crate::{array2_map_inline, const_max, const_min, prev_power_of_two};
 
 pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
     kernel: K,
@@ -24,12 +27,32 @@ pub(crate) trait ReductionOpKernel<T> {
     ///
     /// The bundled index is not always `0`: a lane accumulator is seeded from an interior
     /// item, and a cell can be re-seeded partway through the stream when the reduced dim
-    /// spans several bulks. Kernels whose result depends on element position (argmax/argmin)
-    /// record it; the others ignore it.
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State;
+    /// spans several bulks. It is `Some` exactly for the kernels that
+    /// [`NEEDS_INDICES`](Self::NEEDS_INDICES) (argmax/argmin), which record it.
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State;
 
-    /// Fold `item` (at true global stream position `idx`) into `state`.
-    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State;
+    /// Fold `item` (at true global stream position `idx`, `Some` exactly for the kernels that
+    /// [`NEEDS_INDICES`](Self::NEEDS_INDICES)) into `state`.
+    fn update_state(&self, state: Self::State, item: T, idx: Option<u64>) -> Self::State;
+
+    /// [`update_state`](Self::update_state) on each lane: `items[i]` (at `indices[i]`) folded
+    /// into `states[i]`, vectorized with `simd` where the kernel has SIMD support.
+    #[inline(always)]
+    fn update_state_bulk<const N: usize, S: Simd>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        let _ = simd;
+        array2_map_inline(
+            states,
+            items,
+            #[inline(always)]
+            |i, state, item| self.update_state(state, item, indices.map(|idx| idx[i])),
+        )
+    }
 
     /// Combine two partial accumulators folded over DISJOINT subsets of the stream.
     ///
@@ -70,6 +93,14 @@ pub(crate) trait ReductionOpKernel<T> {
     /// stream is grouped - exact integer or comparison folds - so the whole run is folded in one
     /// pass and the tree is skipped entirely.
     const PREFER_TREE_MERGE: bool;
+
+    /// The lane accumulators of the one-cell fold over contiguous items, if fixed: by default
+    /// they are sized by the SIMD level's vectors.
+    const ONE_CELL_LANES: Option<usize> = None;
+
+    /// Whether the kernel reads the items' stream positions: the indices passed to it are `Some`
+    /// exactly then, and the caller does not compute them otherwise.
+    const NEEDS_INDICES: bool = true;
 }
 
 impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
@@ -570,19 +601,17 @@ where
             size_of::<K::State>() as Itemsize,
             Alignment::of::<K::State>(),
         ),
-        &|args: FoldInnerLoopArgs<'_>, flags: FoldInnerLoopFlags| match flags {
-            FoldInnerLoopFlags::OneCell { contiguous: true } => {
-                fold_run_into_one_cell_inner_loop::<T, K, true>(kernel, args)
-            }
-            FoldInnerLoopFlags::OneCell { contiguous: false } => {
-                fold_run_into_one_cell_inner_loop::<T, K, false>(kernel, args)
-            }
-            FoldInnerLoopFlags::AcrossCells { contiguous: true } => {
-                fold_run_across_cells_inner_loop::<T, K, true>(kernel, args)
-            }
-            FoldInnerLoopFlags::AcrossCells { contiguous: false } => {
-                fold_run_across_cells_inner_loop::<T, K, false>(kernel, args)
-            }
+        &|args: FoldInnerLoopArgs<'_>, flags: FoldInnerLoopFlags| {
+            let init = args.base_item_idx == 0;
+            let fold_fn = match (flags.one_cell, flags.contiguous, init) {
+                (true, true, _) => fold_one_cell::<T, K, true>,
+                (true, false, _) => fold_one_cell::<T, K, false>,
+                (false, true, true) => fold_multi_cell::<T, K, true, true>,
+                (false, true, false) => fold_multi_cell::<T, K, true, false>,
+                (false, false, true) => fold_multi_cell::<T, K, false, true>,
+                (false, false, false) => fold_multi_cell::<T, K, false, false>,
+            };
+            fold_fn(kernel, args)
         },
     );
 }
@@ -590,9 +619,9 @@ where
 type FoldInnerLoops<'a> = dyn Fn(FoldInnerLoopArgs<'_>, FoldInnerLoopFlags) + 'a;
 
 #[derive(Clone, Copy)]
-enum FoldInnerLoopFlags {
-    OneCell { contiguous: bool },
-    AcrossCells { contiguous: bool },
+struct FoldInnerLoopFlags {
+    one_cell: bool,
+    contiguous: bool,
 }
 
 #[inline(never)]
@@ -646,7 +675,8 @@ fn reduce_tile_impl(
     // The inner loop is either over (1) items for a single output cell, or (2) output cells, one
     // item each.
     let flags = if state_inner_stride == 0 {
-        FoldInnerLoopFlags::OneCell {
+        FoldInnerLoopFlags {
+            one_cell: true,
             contiguous: items_contiguous && items_aligned,
         }
     } else {
@@ -654,7 +684,8 @@ fn reduce_tile_impl(
             reduced_inner_stride == 0 || inner_len == 1,
             "a non-reduced innermost dim has no reduced-shape stride",
         );
-        FoldInnerLoopFlags::AcrossCells {
+        FoldInnerLoopFlags {
+            one_cell: false,
             contiguous: items_contiguous && items_aligned && state_contiguous,
         }
     };
@@ -683,7 +714,11 @@ fn reduce_tile_impl(
     });
 }
 
+// Number of lanes, unless SIMD is used (contiguous folds)
 const ONE_CELL_LANES: usize = 16;
+
+// Runs longer than this are split recursively in the pairwise tee fold.
+const PAIRWISE_SPLIT_THRESHOLD: usize = 2048;
 
 struct FoldInnerLoopArgs<'a> {
     inner_len: usize,
@@ -694,10 +729,8 @@ struct FoldInnerLoopArgs<'a> {
     idx_stride: usize,
     base_item_idx: u64,
 }
-fn fold_run_into_one_cell_inner_loop<T, K, const CONTIGUOUS: bool>(
-    kernel: &K,
-    args: FoldInnerLoopArgs<'_>,
-) where
+fn fold_one_cell<T, K, const CONTIGUOUS: bool>(kernel: &K, args: FoldInnerLoopArgs<'_>)
+where
     T: Dtyped,
     K: ReductionOpKernel<T>,
 {
@@ -714,7 +747,7 @@ fn fold_run_into_one_cell_inner_loop<T, K, const CONTIGUOUS: bool>(
     debug_assert_eq!(state_stride, 0);
     debug_assert!(inner_len >= 1);
 
-    let ctx = FoldRunCtx {
+    let ctx = FoldOneCellCtx {
         kernel,
         items: items.cast::<T>(),
         items_stride,
@@ -722,31 +755,15 @@ fn fold_run_into_one_cell_inner_loop<T, K, const CONTIGUOUS: bool>(
         base_item_idx,
     };
 
-    // Fold the body of the run as a pairwise tree
-    let body_len = inner_len - inner_len % ONE_CELL_LANES;
-    let mut state =
-        (body_len > 0).then(|| fold_run_pairwise::<T, K, CONTIGUOUS>(&ctx, 0, body_len));
-
-    // Fold the tail sequentially
-    let tail_len = inner_len - body_len;
-    debug_assert!(tail_len < ONE_CELL_LANES);
-    if tail_len > 0 {
-        let mut i = body_len;
-        let mut tail_state =
-            kernel.init_state(Some((ctx.read_item::<CONTIGUOUS>(i), ctx.item_idx(i))));
-        i += 1;
-        while i < inner_len {
-            tail_state =
-                kernel.update_state(tail_state, ctx.read_item::<CONTIGUOUS>(i), ctx.item_idx(i));
-            i += 1;
-        }
-        state = Some(match state {
-            Some(state) => kernel.merge_states(state, tail_state),
-            None => tail_state,
-        });
-    }
-
-    let mut state = state.unwrap();
+    let mut state = if CONTIGUOUS {
+        fearless_simd::dispatch!(SimdLevel::new(), simd => {
+            fold_one_cell_per_simd(&ctx, inner_len, simd)
+        })
+    } else {
+        crate::scalar::simd::dispatch_baseline!(simd => {
+            fold_one_cell_impl::<T, K, ONE_CELL_LANES, CONTIGUOUS, _>(&ctx, inner_len, simd)
+        })
+    };
     let state_ref = unsafe { &mut *states_buf.as_mut_ptr().cast::<MaybeUninit<K::State>>() };
     if base_item_idx > 0 {
         let prev = unsafe { state_ref.assume_init_read() };
@@ -755,15 +772,166 @@ fn fold_run_into_one_cell_inner_loop<T, K, const CONTIGUOUS: bool>(
     state_ref.write(state);
 }
 
-struct FoldRunCtx<'a, T, K> {
+#[inline(always)]
+fn fold_one_cell_per_simd<T, K, S: Simd>(
+    ctx: &FoldOneCellCtx<'_, T, K>,
+    len: usize,
+    simd: S,
+) -> K::State
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    let lanes = const {
+        let lanes = if let Some(lanes) = K::ONE_CELL_LANES {
+            lanes
+        } else {
+            let per_vector = prev_power_of_two(S::u8s::LEN / size_of::<K::State>());
+            let lanes = 8 * per_vector;
+            const_max(const_min(lanes, PAIRWISE_SPLIT_THRESHOLD / 2), 8)
+        };
+        assert!(lanes.is_power_of_two() && lanes <= 512);
+        lanes
+    };
+
+    macro_rules! dispatch_lanes {
+        ($($lanes:literal)*) => {
+            match lanes {
+                $($lanes => fold_one_cell_impl::<T, K, $lanes, true, S>(ctx, len, simd),)*
+                _ => unreachable!(),
+            }
+        };
+    }
+    dispatch_lanes!(1 2 4 8 16 32 64 128 256 512)
+}
+
+#[inline(always)]
+fn fold_one_cell_impl<T, K, const LANES: usize, const CONTIGUOUS: bool, S>(
+    ctx: &FoldOneCellCtx<'_, T, K>,
+    len: usize,
+    simd: S,
+) -> K::State
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+    S: Simd,
+{
+    debug_assert!(len >= 1);
+
+    // Fold the body of the run as a pairwise tree
+    let body_len = len - len % LANES;
+    let mut state =
+        (body_len > 0).then(|| fold_pairwise::<T, K, LANES, CONTIGUOUS, S>(ctx, 0, body_len, simd));
+
+    // Fold the tail sequentially
+    let kernel = ctx.kernel;
+    for i in body_len..len {
+        let item = ctx.read_item::<CONTIGUOUS>(i);
+        let idx = K::NEEDS_INDICES.then(|| ctx.item_idx(i));
+        state = Some(match state {
+            None => kernel.init_state(Some((item, idx))),
+            Some(state) => kernel.update_state(state, item, idx),
+        });
+    }
+    state.unwrap()
+}
+
+#[inline(never)]
+fn fold_pairwise<T, K, const LANES: usize, const CONTIGUOUS: bool, S>(
+    ctx: &FoldOneCellCtx<'_, T, K>,
+    begin: usize,
+    len: usize,
+    simd: S,
+) -> K::State
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+    S: Simd,
+{
+    const { assert!(PAIRWISE_SPLIT_THRESHOLD >= 2 * LANES) };
+    debug_assert!(len >= LANES && len.is_multiple_of(LANES));
+
+    if len <= PAIRWISE_SPLIT_THRESHOLD || !K::PREFER_TREE_MERGE {
+        let vectorize = {
+            #[inline(never)]
+            move || {
+                simd.vectorize(
+                    #[inline(always)]
+                    || fold_pairwise_leaf::<T, K, LANES, CONTIGUOUS, S>(ctx, begin, len, simd),
+                )
+            }
+        };
+        return vectorize();
+    }
+
+    let half = len / 2;
+    let left_len = half - half % LANES;
+    debug_assert!(left_len >= LANES && len - left_len >= LANES);
+    let left = fold_pairwise::<T, K, LANES, CONTIGUOUS, S>(ctx, begin, left_len, simd);
+    let right =
+        fold_pairwise::<T, K, LANES, CONTIGUOUS, S>(ctx, begin + left_len, len - left_len, simd);
+    ctx.kernel.merge_states(left, right)
+}
+
+#[inline(always)]
+fn fold_pairwise_leaf<T, K, const LANES: usize, const CONTIGUOUS: bool, S>(
+    ctx: &FoldOneCellCtx<'_, T, K>,
+    begin: usize,
+    len: usize,
+    simd: S,
+) -> K::State
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+    S: Simd,
+{
+    debug_assert!(len >= LANES && len.is_multiple_of(LANES));
+    if CONTIGUOUS {
+        unsafe { std::hint::assert_unchecked(ctx.items_stride == size_of::<T>()) };
+    }
+    let kernel = ctx.kernel;
+
+    let mut indices = K::NEEDS_INDICES.then(
+        #[inline(always)]
+        || {
+            array_from_fn_inline(
+                #[inline(always)]
+                |b| ctx.item_idx(begin + b),
+            )
+        },
+    );
+    let idx_step = (LANES * ctx.idx_stride) as u64;
+
+    let mut states = ctx
+        .read_items_bulk::<LANES, CONTIGUOUS>(begin)
+        .map_enumerate(
+            #[inline(always)]
+            |b, item| kernel.init_state(Some((item, indices.map(|idx| idx[b])))),
+        );
+
+    let mut i = begin;
+    for _ in 1..len / LANES {
+        i += LANES;
+        let items = ctx.read_items_bulk::<LANES, CONTIGUOUS>(i);
+        if let Some(indices) = &mut indices {
+            *indices = indices.map_inline(
+                #[inline(always)]
+                |idx| idx + idx_step,
+            );
+        }
+        states = kernel.update_state_bulk(states, items, indices, simd);
+    }
+    merge_states::<T, K, LANES>(kernel, states)
+}
+
+struct FoldOneCellCtx<'a, T, K> {
     kernel: &'a K,
     items: PtrNoalias<'a, T>,
     items_stride: usize,
     idx_stride: usize,
     base_item_idx: u64,
 }
-
-impl<T: Dtyped, K> FoldRunCtx<'_, T, K> {
+impl<T: Dtyped, K> FoldOneCellCtx<'_, T, K> {
     #[inline(always)]
     fn item_idx(&self, i: usize) -> u64 {
         self.base_item_idx + (i * self.idx_stride) as u64
@@ -799,64 +967,6 @@ impl<T: Dtyped, K> FoldRunCtx<'_, T, K> {
     }
 }
 
-fn fold_run_pairwise<T, K, const CONTIGUOUS: bool>(
-    ctx: &FoldRunCtx<'_, T, K>,
-    begin: usize,
-    len: usize,
-) -> K::State
-where
-    T: Dtyped,
-    K: ReductionOpKernel<T>,
-{
-    const SPLIT_THRESHOLD: usize = 512;
-    const LANES: usize = ONE_CELL_LANES;
-
-    const { assert!(SPLIT_THRESHOLD >= 2 * LANES) };
-    debug_assert!(len >= LANES && len.is_multiple_of(LANES));
-
-    if len <= SPLIT_THRESHOLD || !K::PREFER_TREE_MERGE {
-        return fold_run_leaf::<T, K, CONTIGUOUS>(ctx, begin, len);
-    }
-
-    let half = len / 2;
-    let left_len = half - (half) % LANES;
-    debug_assert!(left_len >= LANES && len - left_len >= LANES);
-    let left = fold_run_pairwise::<T, K, CONTIGUOUS>(ctx, begin, left_len);
-    let right = fold_run_pairwise::<T, K, CONTIGUOUS>(ctx, begin + left_len, len - left_len);
-    ctx.kernel.merge_states(left, right)
-}
-
-#[inline(never)]
-fn fold_run_leaf<T, K, const CONTIGUOUS: bool>(
-    ctx: &FoldRunCtx<'_, T, K>,
-    begin: usize,
-    len: usize,
-) -> K::State
-where
-    T: Dtyped,
-    K: ReductionOpKernel<T>,
-{
-    const LANES: usize = ONE_CELL_LANES;
-    debug_assert!(len >= LANES && len.is_multiple_of(LANES));
-    let kernel = ctx.kernel;
-
-    // Seed one accumulator per lane from the first LANES items, then walk the rest in
-    // LANES-sized chunks - exactly `len / LANES - 1` of them, with nothing left over.
-    let mut states = ctx
-        .read_items_bulk::<LANES, CONTIGUOUS>(begin)
-        .map_enumerate(|b, item| kernel.init_state(Some((item, ctx.item_idx(begin + b)))));
-    let end = begin + len;
-    let mut i = begin + LANES;
-    while i < end {
-        let bulk = ctx.read_items_bulk::<LANES, CONTIGUOUS>(i);
-        states = states
-            .map_enumerate(|b, state| kernel.update_state(state, bulk[b], ctx.item_idx(i + b)));
-        i += LANES;
-    }
-
-    // merge the LANES states to a single one
-    merge_states::<T, K, LANES>(kernel, states)
-}
 /// Collapse `LANES` lane accumulators into one via a bottom-up pairwise tree (dependency
 /// depth `log2(LANES)`). `LANES` must be a power of two.
 #[inline(always)]
@@ -865,8 +975,9 @@ where
     T: Dtyped,
     K: ReductionOpKernel<T>,
 {
-    // TODO: this code is not panic-safe.
-    assert!(LANES > 0 && LANES.is_power_of_two());
+    // TODO: this function is not panic-safe.
+
+    const { assert!(LANES > 0 && LANES.is_power_of_two()) };
     let mut states = states.map_inline(MaybeUninit::new);
     let mut width = LANES;
     while width > 1 {
@@ -881,7 +992,7 @@ where
 }
 
 /// Inner-loop shape for a non-reduced innermost dim: one item folded into each of the run's cells.
-fn fold_run_across_cells_inner_loop<T, K, const CONTIGUOUS: bool>(
+fn fold_multi_cell<T, K, const CONTIGUOUS: bool, const INIT: bool>(
     kernel: &K,
     args: FoldInnerLoopArgs<'_>,
 ) where
@@ -898,34 +1009,73 @@ fn fold_run_across_cells_inner_loop<T, K, const CONTIGUOUS: bool>(
         base_item_idx,
     } = args;
 
-    let items = items.as_ptr().cast::<T>();
-    let read_item = |i: usize| {
-        if CONTIGUOUS {
+    let items = items.cast::<T>();
+    let states = states.cast::<MaybeUninit<K::State>>();
+    let strides = (items_stride, state_stride);
+
+    if const { CONTIGUOUS } {
+        fold_multi_cell_contiguous::<T, K, INIT>(kernel, items, states, base_item_idx, len);
+    } else {
+        crate::scalar::simd::dispatch_baseline!(simd => fold_multi_cell_impl::<T, K, CONTIGUOUS, INIT, _>(
+            kernel, items, states, strides, base_item_idx, len, simd
+        ));
+    }
+}
+
+#[inline(never)]
+fn fold_multi_cell_contiguous<T, K, const INIT: bool>(
+    kernel: &K,
+    items: PtrNoalias<'_, T>,
+    states: PtrMutNoalias<'_, MaybeUninit<K::State>>,
+    base_item_idx: u64,
+    len: usize,
+) where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    let strides = (size_of::<T>(), size_of::<K::State>());
+    fearless_simd::dispatch!(SimdLevel::new(), simd => fold_multi_cell_impl::<T, K, true, INIT, _>(
+        kernel, items, states, strides, base_item_idx, len, simd
+    ))
+}
+
+#[inline(always)]
+fn fold_multi_cell_impl<T, K, const CONTIGUOUS: bool, const INIT: bool, S>(
+    kernel: &K,
+    items: PtrNoalias<'_, T>,
+    states: PtrMutNoalias<'_, MaybeUninit<K::State>>,
+    (items_stride, state_stride): (usize, usize),
+    base_item_idx: u64,
+    len: usize,
+    _simd: S,
+) where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    if CONTIGUOUS {
+        unsafe { std::hint::assert_unchecked(items_stride == size_of::<T>()) };
+        unsafe { std::hint::assert_unchecked(state_stride == size_of::<K::State>()) };
+    }
+
+    let items = items.as_ptr();
+    let states = states.as_mut_ptr();
+    let idx = K::NEEDS_INDICES.then_some(base_item_idx);
+    for i in 0..len {
+        let item = if CONTIGUOUS {
             unsafe { items.add(i).read_maybe_aligned::<REQUIRE_ALIGNED>() }
         } else {
             unsafe { items.byte_add(i * items_stride).read_unaligned() }
-        }
-    };
-    let states = states.as_mut_ptr().cast::<MaybeUninit<K::State>>();
-    let state_ref = |i: usize| {
-        if CONTIGUOUS {
+        };
+        let state = if CONTIGUOUS {
             unsafe { &mut *states.add(i) }
         } else {
             unsafe { &mut *states.byte_add(i * state_stride) }
-        }
-    };
-    if base_item_idx == 0 {
-        for i in 0..len {
-            let item = read_item(i);
-            let state = state_ref(i);
-            state.write(kernel.init_state(Some((item, base_item_idx))));
-        }
-    } else {
-        for i in 0..len {
-            let item = read_item(i);
-            let state = state_ref(i);
+        };
+        if INIT {
+            state.write(kernel.init_state(Some((item, idx))));
+        } else {
             let prev = unsafe { state.assume_init_read() };
-            state.write(kernel.update_state(prev, item, base_item_idx));
+            state.write(kernel.update_state(prev, item, idx));
         }
     }
 }
@@ -1013,6 +1163,46 @@ where
         len,
         full_reduction_size,
     } = args;
+
+    let contiguous = state_stride == size_of::<K::State>() && out_stride == size_of::<K::Output>();
+    if contiguous {
+        fearless_simd::dispatch!(SimdLevel::new(), simd => finalize_states_inner_loop_impl::<T, K, true, _>(
+            kernel,
+            (state, state_stride),
+            (out, out_stride),
+            full_reduction_size,
+            len,
+            simd,
+        ))
+    } else {
+        crate::scalar::simd::dispatch_baseline!(simd => finalize_states_inner_loop_impl::<T, K, false, _>(
+            kernel,
+            (state, state_stride),
+            (out, out_stride),
+            full_reduction_size,
+            len,
+            simd,
+        )
+        );
+    }
+}
+
+#[inline(always)]
+fn finalize_states_inner_loop_impl<T, K, const CONTIGUOUS: bool, S: Simd>(
+    kernel: &K,
+    (state, state_stride): (*mut u8, usize),
+    (out, out_stride): (*mut u8, usize),
+    full_reduction_size: u64,
+    len: usize,
+    _simd: S,
+) where
+    K: ReductionOpKernel<T>,
+{
+    if CONTIGUOUS {
+        unsafe { std::hint::assert_unchecked(state_stride == size_of::<K::State>()) };
+        unsafe { std::hint::assert_unchecked(out_stride == size_of::<K::Output>()) };
+    }
+
     for i in 0..len {
         // CAREFUL: state and out may alias
         let state = unsafe { state.add(i * state_stride).cast::<K::State>() };
@@ -1177,6 +1367,39 @@ pub(crate) mod _traits {
     use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    use crate::util::{array2_map_inline, ArrayExt};
+
+    macro_rules! update_bulk_simd {
+        ($Trait:ident, $Op:ident::$op_bulk:ident) => {
+            update_bulk_simd!($Trait, $Op::$op_bulk, disable_on_x86_64 = []);
+        };
+        ($Trait:ident, $Op:ident::$op_bulk:ident, disable_on_x86_64 = [$($disable_on_x86_64:ident),*]) => {
+            #[inline(always)]
+            fn update_bulk<const N: usize, S: fearless_simd::Simd>(
+                states: [Self::Output; N],
+                items: [Self; N],
+                simd: S,
+            ) -> [Self::Output; N] {
+                use crate::scalar::simd::{simd_level, SimdLevel};
+                let large_cast = size_of::<Self::Output>() >= 4 * size_of::<Self>();
+                let has_simd_cast = !matches!(simd_level(simd), SimdLevel::Sse2 | SimdLevel::Neon);
+                let inefficient_simd_cast = large_cast && !has_simd_cast;
+                let disable_on_x86_64 = (cfg!(target_arch = "x86_64")
+                    && (false $(|| simd_level(simd) == SimdLevel::$disable_on_x86_64)*));
+                if inefficient_simd_cast || disable_on_x86_64 {
+                    return states.map_enumerate(
+                        #[inline(always)]
+                        |i, state| <Self as $Trait>::update(state, items[i]),
+                    );
+                }
+                let items = items.map_inline(
+                    #[inline(always)]
+                    |x| <_ as crate::scalar::Cast<Self::Output>>::cast(x),
+                );
+                <Self::Output as crate::scalar::$Op>::$op_bulk(states, items, simd)
+            }
+        };
+    }
 
     /// Scalar kernel trait for the element-wise `sum` reduction.
     ///
@@ -1194,12 +1417,37 @@ pub(crate) mod _traits {
         fn init() -> Self::Output;
         /// Fold `item` into the running sum.
         fn update(state: Self::Output, item: Self) -> Self::Output;
+        /// [`update`](Self::update) on each lane, vectorized with `simd` where the types have
+        /// SIMD support.
+        #[inline(always)]
+        fn update_bulk<const N: usize, S: fearless_simd::Simd>(
+            states: [Self::Output; N],
+            items: [Self; N],
+            simd: S,
+        ) -> [Self::Output; N]
+        where
+            Self: Sized,
+        {
+            let _ = simd;
+            array2_map_inline(
+                states,
+                items,
+                #[inline(always)]
+                |_, state, item| Self::update(state, item),
+            )
+        }
         /// Combine two partial sums (used to merge interleaved lane accumulators).
         fn merge_states(a: Self::Output, b: Self::Output) -> Self::Output;
     }
 
     macro_rules! impl_sum {
+        ($item_ty:ty, $output_ty:ty, is_precise = $is_precise:expr, simd="enabled") => {
+            impl_sum!($item_ty, $output_ty, is_precise = $is_precise, { update_bulk_simd!(Sum, Add::add_bulk); });
+        };
         ($item_ty:ty, $output_ty:ty, is_precise = $is_precise:expr) => {
+            impl_sum!($item_ty, $output_ty, is_precise = $is_precise, {});
+        };
+        ($item_ty:ty, $output_ty:ty, is_precise = $is_precise:expr, { $($bulk:tt)* }) => {
             impl Sum for $item_ty {
                 type Output = $output_ty;
 
@@ -1213,6 +1461,7 @@ pub(crate) mod _traits {
                 fn update(state: Self::Output, item: Self) -> Self::Output {
                     state + <_ as crate::scalar::Cast<Self::Output>>::cast(item)
                 }
+                $($bulk)*
                 #[inline(always)]
                 fn merge_states(a: Self::Output, b: Self::Output) -> Self::Output {
                     a + b
@@ -1220,23 +1469,23 @@ pub(crate) mod _traits {
             }
         };
     }
-    impl_sum!(i8, i64, is_precise = true);
-    impl_sum!(i16, i64, is_precise = true);
-    impl_sum!(i32, i64, is_precise = true);
-    impl_sum!(i64, i64, is_precise = true);
-    impl_sum!(u8, u64, is_precise = true);
-    impl_sum!(u16, u64, is_precise = true);
-    impl_sum!(u32, u64, is_precise = true);
-    impl_sum!(u64, u64, is_precise = true);
+    impl_sum!(i8, i64, is_precise = true, simd = "enabled");
+    impl_sum!(i16, i64, is_precise = true, simd = "enabled");
+    impl_sum!(i32, i64, is_precise = true, simd = "enabled");
+    impl_sum!(i64, i64, is_precise = true, simd = "enabled");
+    impl_sum!(u8, u64, is_precise = true, simd = "enabled");
+    impl_sum!(u16, u64, is_precise = true, simd = "enabled");
+    impl_sum!(u32, u64, is_precise = true, simd = "enabled");
+    impl_sum!(u64, u64, is_precise = true, simd = "enabled");
     #[cfg(feature = "half")]
     impl_sum!(f16, f16, is_precise = false);
-    impl_sum!(f32, f32, is_precise = false);
-    impl_sum!(f64, f64, is_precise = false);
+    impl_sum!(f32, f32, is_precise = false, simd = "enabled");
+    impl_sum!(f64, f64, is_precise = false, simd = "enabled");
     #[cfg(feature = "num-complex")]
     impl_sum!(Complex<f32>, Complex<f32>, is_precise = false);
     #[cfg(feature = "num-complex")]
     impl_sum!(Complex<f64>, Complex<f64>, is_precise = false);
-    impl_sum!(bool, u64, is_precise = true);
+    impl_sum!(bool, u64, is_precise = true, simd = "enabled");
 
     /// Scalar kernel trait for the element-wise `product` reduction.
     ///
@@ -1250,11 +1499,41 @@ pub(crate) mod _traits {
         fn init() -> Self::Output;
         /// Fold `item` into the running product.
         fn update(state: Self::Output, item: Self) -> Self::Output;
+        /// [`update`](Self::update) on each lane, vectorized with `simd` where the types have
+        /// SIMD support.
+        #[inline(always)]
+        fn update_bulk<const N: usize, S: fearless_simd::Simd>(
+            states: [Self::Output; N],
+            items: [Self; N],
+            simd: S,
+        ) -> [Self::Output; N]
+        where
+            Self: Sized,
+        {
+            let _ = simd;
+            array2_map_inline(
+                states,
+                items,
+                #[inline(always)]
+                |_, state, item| Self::update(state, item),
+            )
+        }
         /// Combine two partial products (used to merge interleaved lane accumulators).
         fn merge_states(a: Self::Output, b: Self::Output) -> Self::Output;
     }
     macro_rules! impl_product {
+        ($item_ty:ty, $output_ty:ty, simd="enabled") => {
+            impl_product!($item_ty, $output_ty, { update_bulk_simd!(Product, Mul::mul_bulk); });
+        };
+        ($item_ty:ty, $output_ty:ty, simd=disable_on_x86_64($($disable_on_x86_64:ident),*)) => {
+            impl_product!($item_ty, $output_ty, {
+                update_bulk_simd!(Product, Mul::mul_bulk, disable_on_x86_64 = [$($disable_on_x86_64),*]);
+            });
+        };
         ($item_ty:ty, $output_ty:ty) => {
+            impl_product!($item_ty, $output_ty, {});
+        };
+        ($item_ty:ty, $output_ty:ty, { $($bulk:tt)* }) => {
             impl Product for $item_ty {
                 type Output = $output_ty;
 
@@ -1266,6 +1545,7 @@ pub(crate) mod _traits {
                 fn update(state: Self::Output, item: Self) -> Self::Output {
                     state * <_ as crate::scalar::Cast<Self::Output>>::cast(item)
                 }
+                $($bulk)*
                 #[inline(always)]
                 fn merge_states(a: Self::Output, b: Self::Output) -> Self::Output {
                     a * b
@@ -1273,18 +1553,19 @@ pub(crate) mod _traits {
             }
         };
     }
-    impl_product!(i8, i64);
-    impl_product!(i16, i64);
-    impl_product!(i32, i64);
-    impl_product!(i64, i64);
-    impl_product!(u8, u64);
-    impl_product!(u16, u64);
-    impl_product!(u32, u64);
-    impl_product!(u64, u64);
+    // static analysis showed 64-bit integer products are slower with SIMD up to AVX2
+    impl_product!(i8, i64, simd = disable_on_x86_64(Sse2, Sse4_2));
+    impl_product!(i16, i64, simd = disable_on_x86_64(Sse2, Sse4_2));
+    impl_product!(i32, i64, simd = disable_on_x86_64(Sse2, Sse4_2));
+    impl_product!(i64, i64, simd = disable_on_x86_64(Sse2, Sse4_2));
+    impl_product!(u8, u64, simd = disable_on_x86_64(Sse2, Sse4_2));
+    impl_product!(u16, u64, simd = disable_on_x86_64(Sse2, Sse4_2));
+    impl_product!(u32, u64, simd = disable_on_x86_64(Sse2, Sse4_2));
+    impl_product!(u64, u64, simd = disable_on_x86_64(Sse2, Sse4_2));
     #[cfg(feature = "half")]
     impl_product!(f16, f16);
-    impl_product!(f32, f32);
-    impl_product!(f64, f64);
+    impl_product!(f32, f32, simd = "enabled");
+    impl_product!(f64, f64, simd = "enabled");
     #[cfg(feature = "num-complex")]
     impl_product!(Complex<f32>, Complex<f32>);
     #[cfg(feature = "num-complex")]
@@ -1294,12 +1575,32 @@ pub(crate) mod _traits {
         ($Trait:ident, $what:literal) => {
             #[doc = concat!("Scalar kernel trait for the `arg", $what, "` reduction: the position of the ", $what, "imum.")]
             ///
-            /// The state is `(index, value)` of the running best. `NaN` propagates: a `NaN` item
-            /// becomes the best, and sticks (no later item beats it). On ties the earlier index
-            /// wins, as in NumPy.
-            pub trait $Trait: Copy {
+            /// The state is `(index, value)` of the running best. `NaN` propagates: the first
+            /// `NaN` is the best, beating every number and every later `NaN`. On ties the earlier
+            /// index wins. Both as in NumPy.
+            pub trait $Trait {
                 /// Fold `item`, at stream position `idx`, into `state`.
                 fn update(state: (u64, Self), item: Self, idx: u64) -> (u64, Self);
+                /// [`update`](Self::update) on each lane, vectorized with `simd` where the types
+                /// have SIMD support.
+                #[inline(always)]
+                fn update_bulk<const N: usize, S: fearless_simd::Simd>(
+                    states: [(u64, Self); N],
+                    items: [Self; N],
+                    indices: [u64; N],
+                    simd: S,
+                ) -> [(u64, Self); N]
+                where
+                    Self: Sized
+                {
+                    let _ = simd;
+                    array2_map_inline(
+                        states,
+                        items,
+                        #[inline(always)]
+                        |i, state, item| Self::update(state, item, indices[i]),
+                    )
+                }
                 /// Combine two states folded over disjoint subsets of the stream.
                 fn merge_states(a: (u64, Self), b: (u64, Self)) -> (u64, Self);
             }
@@ -1308,13 +1609,17 @@ pub(crate) mod _traits {
     define_arg_trait!(ArgMax, "max");
     define_arg_trait!(ArgMin, "min");
 
+    // `$not_better` is `>=` for the max (`<=` for the min): `x` beats `y` if `y` is not `NaN` and
+    // `!(y >= x)`, that is if `x > y` or `x` is `NaN`. Two comparisons, as many as a `NaN`-blind
+    // `x > y || x != x`; integers fold to `x > y`.
     macro_rules! impl_arg {
-        ($Trait:ident, $op:tt, [$($t:ty),*]) => {$(
-            #[allow(clippy::eq_op)]
+        ($Trait:ident, $not_better:tt, [$($t:ty),*]) => {$(
+            #[allow(clippy::eq_op, clippy::neg_cmp_op_on_partial_ord)]
             impl $Trait for $t {
                 #[inline(always)]
                 fn update(state: (u64, Self), item: Self, idx: u64) -> (u64, Self) {
-                    if item $op state.1 || /* nan check */ item != item {
+                    // Items come in stream order: a tie keeps the earlier one.
+                    if state.1 == state.1 && !(state.1 $not_better item) {
                         (idx, item)
                     } else {
                         state
@@ -1323,23 +1628,20 @@ pub(crate) mod _traits {
                 #[inline(always)]
                 fn merge_states(a: (u64, Self), b: (u64, Self)) -> (u64, Self) {
                     let ((ai, av), (bi, bv)) = (a, b);
-                    if bv $op av || bv != bv {
-                        b
-                    } else if av $op bv || /* nan check */ av != av || /* prefer lower idx */ ai <= bi {
-                        a
-                    } else {
-                        b
-                    }
+                    let b_better = av == av && !(av $not_better bv);
+                    let a_better = bv == bv && !(bv $not_better av);
+                    // Neither is better on equal values, or two `NaN`s: the lower index.
+                    if b_better || (!a_better && bi < ai) { b } else { a }
                 }
             }
         )*};
     }
-    impl_arg!(ArgMax, >, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
-    impl_arg!(ArgMin, <, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
+    impl_arg!(ArgMax, >=, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
+    impl_arg!(ArgMin, <=, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
     #[cfg(feature = "half")]
-    impl_arg!(ArgMax, >, [f16]);
+    impl_arg!(ArgMax, >=, [f16]);
     #[cfg(feature = "half")]
-    impl_arg!(ArgMin, <, [f16]);
+    impl_arg!(ArgMin, <=, [f16]);
 
     /// Scalar kernel trait for the element-wise `mean` reduction.
     ///
@@ -1360,6 +1662,15 @@ pub(crate) mod _traits {
         fn init() -> Self::State;
         /// Fold `item` into the running sum.
         fn update(state: Self::State, item: Self) -> Self::State;
+        /// [`update`](Self::update) on each lane, vectorized with `simd` where the types have
+        /// SIMD support.
+        fn update_bulk<const N: usize, S: fearless_simd::Simd>(
+            states: [Self::State; N],
+            items: [Self; N],
+            simd: S,
+        ) -> [Self::State; N]
+        where
+            Self: Sized;
         /// Combine two partial sums (used to merge interleaved lane accumulators).
         fn merge_states(a: Self::State, b: Self::State) -> Self::State;
         /// Finalize `state` into the mean. Returns `None` if `nitems == 0`; otherwise
@@ -1381,6 +1692,14 @@ pub(crate) mod _traits {
                 #[inline(always)]
                 fn update(state: Self::State, item: Self) -> Self::State {
                     <Self as Sum>::update(state, item)
+                }
+                #[inline(always)]
+                fn update_bulk<const N: usize, S: fearless_simd::Simd>(
+                    states: [Self::State; N],
+                    items: [Self; N],
+                    simd: S,
+                ) -> [Self::State; N] {
+                    <Self as Sum>::update_bulk(states, items, simd)
                 }
                 #[inline(always)]
                 fn merge_states(a: Self::State, b: Self::State) -> Self::State {
@@ -1451,6 +1770,25 @@ pub(crate) mod _traits {
         fn init() -> Self::State;
         /// Fold `item` into the running Welford accumulator.
         fn update(state: Self::State, item: Self) -> Self::State;
+        /// [`update`](Self::update) on each lane, vectorized with `simd` where the types have
+        /// SIMD support.
+        #[inline(always)]
+        fn update_bulk<const N: usize, S: fearless_simd::Simd>(
+            states: [Self::State; N],
+            items: [Self; N],
+            simd: S,
+        ) -> [Self::State; N]
+        where
+            Self: Sized,
+        {
+            let _ = simd;
+            array2_map_inline(
+                states,
+                items,
+                #[inline(always)]
+                |_, state, item| Self::update(state, item),
+            )
+        }
         /// Combine two Welford accumulators computed over disjoint subsets (Chan's parallel
         /// algorithm). Associative + commutative up to float error.
         fn merge_states(a: Self::State, b: Self::State) -> Self::State;
@@ -1483,6 +1821,49 @@ pub(crate) mod _traits {
                     let $delta2 = x - state.mean;
                     state.m2 += $m2_expr;
                     state
+                }
+                #[inline(always)]
+                fn update_bulk<const N: usize, S: fearless_simd::Simd>(
+                    states: [Self::State; N],
+                    items: [Self; N],
+                    simd: S,
+                ) -> [Self::State; N] {
+                    // `update`, a field at a time: the states interleave their fields, which
+                    // the compiler does not vectorize across.
+                    use crate::util::array_from_fn_inline;
+                    let _ = simd;
+                    let x = items.map_inline(
+                        #[inline(always)]
+                        |x| <_ as crate::scalar::Cast<$mean_ty>>::cast(x),
+                    );
+                    // let x = <_ as crate::scalar::Cast<$mean_ty>>::cast_bulk(items, simd); // TODO: is this faster?
+                    let count = states.map_inline(
+                        #[inline(always)]
+                        |s| s.count + 1,
+                    );
+                    let old_mean = states.map_inline(
+                        #[inline(always)]
+                        |s| s.mean,
+                    );
+                    let mean: [$mean_ty; N] = array_from_fn_inline(
+                        #[inline(always)]
+                        |i| old_mean[i] + (x[i] - old_mean[i]) / count[i] as f64,
+                    );
+                    let m2: [f64; N] = array_from_fn_inline(
+                        #[inline(always)]
+                        |i| {
+                            let ($delta, $delta2) = (x[i] - old_mean[i], x[i] - mean[i]);
+                            states[i].m2 + $m2_expr
+                        },
+                    );
+                    array_from_fn_inline(
+                        #[inline(always)]
+                        |i| VarianceState {
+                            mean: mean[i],
+                            m2: m2[i],
+                            count: count[i],
+                        },
+                    )
                 }
                 #[inline(always)]
                 fn merge_states(a: Self::State, b: Self::State) -> Self::State {
@@ -1592,12 +1973,22 @@ where
     type State = T;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         init_item.unwrap().0
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         state.maximum(item)
+    }
+    #[inline(always)]
+    fn update_state_bulk<const N: usize, S: Simd>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        <T as crate::scalar::Maximum>::maximum_bulk(states, items, simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -1610,6 +2001,7 @@ where
     const SUPPORTS_EMPTY: bool = false;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -1658,12 +2050,22 @@ where
     type State = T;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         init_item.unwrap().0
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         state.minimum(item)
+    }
+    #[inline(always)]
+    fn update_state_bulk<const N: usize, S: Simd>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        <T as crate::scalar::Minimum>::minimum_bulk(states, items, simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -1676,6 +2078,7 @@ where
     const SUPPORTS_EMPTY: bool = false;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -1686,8 +2089,7 @@ define_reduction_op!(
     /// Unlike [`Max`], this op accepts only a single dim. If multiple elements share
     /// the maximum value, the index of the *first* such element is returned, matching
     /// `numpy.argmax`. For **float** types, `NaN` propagates: if any element along the
-    /// reduced dim is `NaN`, the returned index is that of some `NaN` (not necessarily the
-    /// first). This differs from `numpy.argmax`, which returns the index of the *first* `NaN`.
+    /// reduced dim is `NaN`, the index of the first `NaN` is returned, as in `numpy.argmax`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -1730,13 +2132,23 @@ where
     type State = (u64, T);
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let (item, idx) = init_item.unwrap();
-        (idx, item)
+        (idx.unwrap(), item)
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
-        <T as crate::scalar::ArgMax>::update(state, item, idx)
+    fn update_state(&self, state: Self::State, item: T, idx: Option<u64>) -> Self::State {
+        <T as crate::scalar::ArgMax>::update(state, item, idx.unwrap())
+    }
+    #[inline(always)]
+    fn update_state_bulk<const N: usize, S: Simd>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        <T as crate::scalar::ArgMax>::update_bulk(states, items, indices.unwrap(), simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -1748,6 +2160,7 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const ONE_CELL_LANES: Option<usize> = Some(if cfg!(target_arch = "x86") { 8 } else { 16 });
 }
 
 define_reduction_op!(
@@ -1758,8 +2171,7 @@ define_reduction_op!(
     /// Unlike [`Min`], this op accepts only a single dim. If multiple elements share
     /// the minimum value, the index of the *first* such element is returned, matching
     /// `numpy.argmin`. For **float** types, `NaN` propagates: if any element along the
-    /// reduced dim is `NaN`, the returned index is that of some `NaN` (not necessarily the
-    /// first). This differs from `numpy.argmin`, which returns the index of the *first* `NaN`.
+    /// reduced dim is `NaN`, the index of the first `NaN` is returned, as in `numpy.argmin`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -1802,13 +2214,23 @@ where
     type State = (u64, T);
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let (item, idx) = init_item.unwrap();
-        (idx, item)
+        (idx.unwrap(), item)
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
-        <T as crate::scalar::ArgMin>::update(state, item, idx)
+    fn update_state(&self, state: Self::State, item: T, idx: Option<u64>) -> Self::State {
+        <T as crate::scalar::ArgMin>::update(state, item, idx.unwrap())
+    }
+    #[inline(always)]
+    fn update_state_bulk<const N: usize, S: Simd>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        <T as crate::scalar::ArgMin>::update_bulk(states, items, indices.unwrap(), simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -1820,6 +2242,7 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const ONE_CELL_LANES: Option<usize> = Some(if cfg!(target_arch = "x86") { 8 } else { 16 });
 }
 
 define_reduction_op!(
@@ -1881,16 +2304,26 @@ where
     type State = <T as crate::scalar::Sum>::Output;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = <T as crate::scalar::Sum>::init();
-        if let Some((item, idx)) = init_item {
-            state = self.update_state(state, item, idx);
+        if let Some((item, _idx)) = init_item {
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         <T as crate::scalar::Sum>::update(state, item)
+    }
+    #[inline(always)]
+    fn update_state_bulk<const N: usize, S: Simd>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        <T as crate::scalar::Sum>::update_bulk(states, items, simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -1903,6 +2336,7 @@ where
     const SUPPORTS_EMPTY: bool = true;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = !<T as crate::scalar::Sum>::IS_PRECISE;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -1964,16 +2398,26 @@ where
     type State = <T as crate::scalar::Product>::Output;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = <T as crate::scalar::Product>::init();
-        if let Some((item, idx)) = init_item {
-            state = self.update_state(state, item, idx);
+        if let Some((item, _idx)) = init_item {
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         <T as crate::scalar::Product>::update(state, item)
+    }
+    #[inline(always)]
+    fn update_state_bulk<const N: usize, S: Simd>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        <T as crate::scalar::Product>::update_bulk(states, items, simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -1986,6 +2430,7 @@ where
     const SUPPORTS_EMPTY: bool = true;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2036,16 +2481,26 @@ where
     type State = <T as crate::scalar::Mean>::State;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = <T as crate::scalar::Mean>::init();
-        if let Some((item, idx)) = init_item {
-            state = self.update_state(state, item, idx);
+        if let Some((item, _idx)) = init_item {
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         <T as crate::scalar::Mean>::update(state, item)
+    }
+    #[inline(always)]
+    fn update_state_bulk<const N: usize, S: Simd>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        <T as crate::scalar::Mean>::update_bulk(states, items, simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -2057,6 +2512,7 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = !<T as crate::scalar::Mean>::IS_PRECISE_SUM;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2113,16 +2569,26 @@ where
     type State = <T as crate::scalar::Variance>::State;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = <T as crate::scalar::Variance>::init();
-        if let Some((item, idx)) = init_item {
-            state = self.update_state(state, item, idx);
+        if let Some((item, _idx)) = init_item {
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         <T as crate::scalar::Variance>::update(state, item)
+    }
+    #[inline(always)]
+    fn update_state_bulk<const N: usize, S: Simd>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        <T as crate::scalar::Variance>::update_bulk(states, items, simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -2134,6 +2600,7 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2188,16 +2655,26 @@ where
     type State = <T as crate::scalar::Variance>::State;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = <T as crate::scalar::Variance>::init();
-        if let Some((item, idx)) = init_item {
-            state = self.update_state(state, item, idx);
+        if let Some((item, _idx)) = init_item {
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         <T as crate::scalar::Variance>::update(state, item)
+    }
+    #[inline(always)]
+    fn update_state_bulk<const N: usize, S: Simd>(
+        &self,
+        states: [Self::State; N],
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        <T as crate::scalar::Variance>::update_bulk(states, items, simd)
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
@@ -2210,6 +2687,7 @@ where
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2253,15 +2731,15 @@ impl ReductionOpKernel<bool> for AllKernel {
     type State = bool;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(bool, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(bool, Option<u64>)>) -> Self::State {
         let mut state = true;
-        if let Some((item, idx)) = init_item {
-            state = self.update_state(state, item, idx);
+        if let Some((item, _idx)) = init_item {
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: bool, _idx: Option<u64>) -> Self::State {
         // & instead of &&, the compiler auto vectorize it better
         state & item
     }
@@ -2276,6 +2754,7 @@ impl ReductionOpKernel<bool> for AllKernel {
     const SUPPORTS_EMPTY: bool = true;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const NEEDS_INDICES: bool = false;
 }
 
 define_reduction_op!(
@@ -2319,15 +2798,15 @@ impl ReductionOpKernel<bool> for AnyKernel {
     type State = bool;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(bool, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(bool, Option<u64>)>) -> Self::State {
         let mut state = false;
-        if let Some((item, idx)) = init_item {
-            state = self.update_state(state, item, idx);
+        if let Some((item, _idx)) = init_item {
+            state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: bool, _idx: Option<u64>) -> Self::State {
         // | instead of || the compiler auto vectorize it better
         state | item
     }
@@ -2342,6 +2821,7 @@ impl ReductionOpKernel<bool> for AnyKernel {
     const SUPPORTS_EMPTY: bool = true;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = false;
+    const NEEDS_INDICES: bool = false;
 }
 
 /// Reduces one or more dims by combining the elements along those dims with a user-supplied
@@ -2444,11 +2924,11 @@ where
     type State = T;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         init_item.unwrap().0
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         (self.0)(state, item)
     }
     #[inline(always)]
@@ -2612,7 +3092,7 @@ where
     type State = B;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+    fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         let mut state = self.init;
         if let Some((item, idx)) = init_item {
             state = self.update_state(state, item, idx);
@@ -2620,7 +3100,7 @@ where
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+    fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         (self.f)(state, item)
     }
     #[inline(always)]
@@ -2630,6 +3110,7 @@ where
     const SUPPORTS_EMPTY: bool = true;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = true;
+    const NEEDS_INDICES: bool = false;
 }
 impl<S, D, B, F> ArrayStorage for Fold<S, D, B, F>
 where
@@ -3223,8 +3704,7 @@ pub(crate) mod tests {
         // dim 1 (per row): row 0 ties col 0/col 1 at 5 -> first col (0) wins.
         crate::util::assert_array_matches(&za.view().argmax(1usize), &array![0u64, 0]);
 
-        // f32 path, same tie-break rule, negatives included. (`NaN` excluded - see
-        // `min_concrete` for why.)
+        // f32 path, same tie-break rule, negatives included. (`NaN`: `argmax_argmin_first_nan`.)
         let ndf = array![[2.5f32, 2.5, -1.0], [3.0, 3.0, 0.0]];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
         crate::util::assert_array_matches(&zaf.view().argmax(0usize), &array![1u64, 1, 1]);
@@ -3399,6 +3879,71 @@ pub(crate) mod tests {
         // col 0/col 1 tie at 2.5 vs. 3.0 -> row 0 (index 0) wins both.
         crate::util::assert_array_matches(&zaf.view().argmin(0usize), &array![0u64, 0, 0]);
         crate::util::assert_array_matches(&zaf.view().argmin(1usize), &array![2u64, 2]);
+    }
+
+    /// The first `NaN` wins, as in NumPy: whatever lane, run or tile each `NaN` lands in.
+    #[test]
+    fn argmax_argmin_first_nan() {
+        /// The index of the first `NaN`, else of the first item no other `beats`.
+        #[allow(clippy::eq_op)]
+        fn expected<T: PartialOrd>(row: ndarray::ArrayView1<T>, beats: fn(&T, &T) -> bool) -> u64 {
+            let best = (1..row.len()).fold(0, |b, i| if beats(&row[i], &row[b]) { i } else { b });
+            row.iter().position(|x| x != x).unwrap_or(best) as u64
+        }
+        macro_rules! check {
+            ($t:ty) => {{
+                for n in [1usize, 2, 3, 7, 8, 9, 16, 31, 33, 64, 65, 100, 513, 2049] {
+                    let nan_sets = [
+                        vec![],
+                        vec![0],
+                        vec![n - 1],
+                        vec![n / 2],
+                        vec![n / 3, n / 2, n - 1],
+                        vec![5, 33],
+                        vec![1, 39],
+                        vec![2, 3],
+                        vec![40, 9],
+                    ];
+                    // 1, 3 and 37 cells: fewer and more than a vector of states.
+                    for (nans, ncols) in nan_sets.iter().flat_map(|s| [(s, 1), (s, 3), (s, 37)]) {
+                        // Row `c`: values with ties, and the NaNs shifted by `c`.
+                        let rows = ndarray::Array2::from_shape_fn((ncols, n), |(c, i)| {
+                            let is_nan = nans.iter().any(|&j| j < n && (j + c) % n == i);
+                            if is_nan {
+                                <$t>::NAN
+                            } else {
+                                ((i * 7919 + c) % 13) as $t - 6.0
+                            }
+                        });
+                        let expected = |beats: fn(&$t, &$t) -> bool| -> Vec<u64> {
+                            rows.rows()
+                                .into_iter()
+                                .map(|r| expected(r, beats))
+                                .collect()
+                        };
+                        let (exp_max, exp_min) = (expected(<$t>::gt), expected(<$t>::lt));
+                        // The rows contiguous (one cell at a time), and as columns (across cells).
+                        for (nd, dim) in [(rows.clone(), 1), (rows.t().to_owned(), 0)] {
+                            for block in [[4096, 4096], [7, 5]] {
+                                let block = [block[0].min(nd.nrows()), block[1].min(nd.ncols())];
+                                let params = crate::util::arr_params(&block);
+                                let za = Array::compact_ndarray_with(&nd, params).unwrap();
+                                let what = format!(
+                                    "{} n={n} nans={nans:?} dim={dim} block={block:?}",
+                                    stringify!($t)
+                                );
+                                let got_max = za.view().argmax(dim).to_ndarray().unwrap();
+                                let got_min = za.view().argmin(dim).to_ndarray().unwrap();
+                                assert_eq!(got_max.as_slice().unwrap(), exp_max, "argmax {what}");
+                                assert_eq!(got_min.as_slice().unwrap(), exp_min, "argmin {what}");
+                            }
+                        }
+                    }
+                }
+            }};
+        }
+        check!(f32);
+        check!(f64);
     }
 
     test_reduction!(
@@ -3708,7 +4253,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sum_f32_pairwise_error_does_not_grow_with_run_length() {
-        // `fold_run_pairwise` splits a run longer than `SPLIT_THRESHOLD` in half, so a long f32 sum
+        // `fold_pairwise` splits a run longer than `PAIRWISE_SPLIT_THRESHOLD` in half, so a long f32 sum
         // accumulates in a log-deep tree rather than one linear chain per lane. One huge leading
         // value followed by ones makes the difference visible: at 2^24 an f32 cannot represent an
         // odd neighbour, so every `1.0` folded straight onto the big running total is lost. A
@@ -3723,7 +4268,7 @@ pub(crate) mod tests {
         let nd = ndarray::ArrayD::from_shape_vec(vec![N], data).unwrap();
         let mut params = crate::ArrayParams::new();
         // One block and one tile over the whole array, so the run reaches a single
-        // `fold_run_pairwise` call rather than being split across tiles and merged sequentially.
+        // `fold_pairwise` call rather than being split across tiles and merged sequentially.
         params.block_shape(&[N as u32]);
         params.read_size((1 << 19, 1 << 20));
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
@@ -3731,12 +4276,34 @@ pub(crate) mod tests {
         let got = f64::from(za.view().sum(0usize).to_ndarray().unwrap()[[]]);
         let err = (exact - got).abs();
         // Pairwise loses 7 of the ones; a 16-lane linear chain over the whole run loses 4095.
-        // The bound is loose enough to survive retuning LANES / SPLIT_THRESHOLD, tight enough that
+        // The bound is loose enough to survive retuning LANES / PAIRWISE_SPLIT_THRESHOLD, tight enough that
         // going back to a single linear pass fails it.
         assert!(
             err <= 64.0,
             "f32 sum lost {err} (got {got}, exact {exact}) - is the run still folded pairwise?",
         );
+    }
+
+    #[test]
+    fn sum_f32_long_runs_with_tails() {
+        // Runs around and past `PAIRWISE_SPLIT_THRESHOLD`, most not a multiple of the lanes: the tree folds
+        // the body, then the tail is folded after it. Small integers sum exactly in any order, so
+        // the sum checks that every item is folded exactly once.
+        for n in [1, 15, 16, 17, 2047, 2048, 2049, 4095, 4111, 8193, 20011] {
+            let data: Vec<f32> = (0..n).map(|i| (i % 7) as f32).collect();
+            let exact = (0..n).map(|i| i % 7).sum::<usize>() as f32;
+            let nd = ndarray::ArrayD::from_shape_vec(vec![n], data).unwrap();
+            let mut params = crate::ArrayParams::new();
+            // One block and one tile: the whole run is one `fold_pairwise` call.
+            params.block_shape(&[n as u32]);
+            params.read_size((1 << 19, 1 << 20));
+            let za = Array::compact_ndarray_with(&nd, params).unwrap();
+            assert_eq!(
+                za.view().sum(0usize).to_ndarray().unwrap()[[]],
+                exact,
+                "n = {n}"
+            );
+        }
     }
 
     #[test]
@@ -4291,8 +4858,14 @@ pub(crate) mod tests {
         impl super::ReductionOpKernel<i32> for ZeroSizedOutputKernel {
             type Output = [i32; 0];
             type State = ();
-            fn init_state(&self, _init_item: Option<(i32, u64)>) -> Self::State {}
-            fn update_state(&self, _state: Self::State, _item: i32, _idx: u64) -> Self::State {}
+            fn init_state(&self, _init_item: Option<(i32, Option<u64>)>) -> Self::State {}
+            fn update_state(
+                &self,
+                _state: Self::State,
+                _item: i32,
+                _idx: Option<u64>,
+            ) -> Self::State {
+            }
             fn merge_states(&self, _a: Self::State, _b: Self::State) -> Self::State {}
             fn finalize_state(&self, _state: Self::State, _nitems: u64) -> Self::Output {
                 []

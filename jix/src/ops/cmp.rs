@@ -23,7 +23,10 @@ pub(crate) mod _traits {
         ///
         /// `Maximum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
         /// the result is `NaN`. This matches `numpy.maximum` and makes NaN visible rather than
-        /// silently discarding it.
+        /// silently discarding it. The result is always the `NaN` of [`f32::NAN`] / [`f64::NAN`],
+        /// not the operand's (`numpy.maximum` keeps the operand's sign and payload).
+        ///
+        /// Of `+0.0` and `-0.0` either may be returned, as with [`f32::max`].
         ///
         /// For integer and `bool` types the implementation delegates to [`std::cmp::max`], which is
         /// equivalent. The trait therefore provides a single uniform interface usable across all
@@ -44,11 +47,14 @@ pub(crate) mod _traits {
             fn maximum = |a, b| std::cmp::max(a, b),
         }
     );
-    // NaN-propagating: `a + b` is NaN where an operand is.
+    // NaN-propagating, to the one NaN `Self::NAN` (not an operand's, which SIMD and scalar code
+    // would keep differently).
     impl_scalar_op2!(
         impl Maximum for [f32, f64] {
-            fn maximum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.max(b) },
-            fn maximum_bulk = |a, b| (/* NaN check */ a.simd_eq(a) & b.simd_eq(b)).select(a.max(b), /* NaN */ a + b),
+            // Not `f32::max`: past the NaN check, its NaN handling is dead code LLVM still emits.
+            fn maximum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else if a > b { a } else { b },
+            fn maximum_bulk = |a, b| (/* NaN check */ a.simd_ne(a) | b.simd_ne(b))
+                .select(SimdBase::splat(fearless_simd::ExtractToken::token(&a), Self::NAN), a.max(b)),
         }
     );
     #[cfg(feature = "half")]
@@ -71,7 +77,10 @@ pub(crate) mod _traits {
         ///
         /// `Minimum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
         /// the result is `NaN`. This matches `numpy.minimum` and makes NaN visible rather than
-        /// silently discarding it.
+        /// silently discarding it. The result is always the `NaN` of [`f32::NAN`] / [`f64::NAN`],
+        /// not the operand's (`numpy.minimum` keeps the operand's sign and payload).
+        ///
+        /// Of `+0.0` and `-0.0` either may be returned, as with [`f32::min`].
         ///
         /// For integer and `bool` types the implementation delegates to [`std::cmp::min`], which is
         /// equivalent. The trait therefore provides a single uniform interface usable across all
@@ -92,11 +101,14 @@ pub(crate) mod _traits {
             fn minimum = |a, b| std::cmp::min(a, b),
         }
     );
-    // NaN-propagating: `a + b` is NaN where an operand is.
+    // NaN-propagating, to the one NaN `Self::NAN` (not an operand's, which SIMD and scalar code
+    // would keep differently).
     impl_scalar_op2!(
         impl Minimum for [f32, f64] {
-            fn minimum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.min(b) },
-            fn minimum_bulk = |a, b| (/* NaN check */ a.simd_eq(a) & b.simd_eq(b)).select(a.min(b), /* NaN */ a + b),
+            // Not `f32::min`: past the NaN check, its NaN handling is dead code LLVM still emits.
+            fn minimum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else if a < b { a } else { b },
+            fn minimum_bulk = |a, b| (/* NaN check */ a.simd_ne(a) | b.simd_ne(b))
+                .select(SimdBase::splat(fearless_simd::ExtractToken::token(&a), Self::NAN), a.min(b)),
         }
     );
     #[cfg(feature = "half")]
@@ -296,35 +308,16 @@ pub(crate) mod _traits {
                     atol: &Self::AbsoluteTolerance,
                 ) -> bool {
                     // credit to https://github.com/brendanzab/approx
+                    //
+                    // The code was re-written as branchless. enabled auto-vectorization.
 
-                    // Handle same infinities
-                    if self == other {
-                        return true;
-                    }
-
-                    // Handle remaining infinities
-                    if <$T>::is_infinite(*self) || <$T>::is_infinite(*other) {
-                        return false;
-                    }
-
-                    let abs_diff = crate::scalar::Abs::abs(*self - *other);
-
-                    // For when the numbers are really close together
-                    if abs_diff <= *atol {
-                        return true;
-                    }
-
-                    let abs_self = crate::scalar::Abs::abs(*self);
-                    let abs_other = crate::scalar::Abs::abs(*other);
-
-                    let largest = if abs_other > abs_self {
-                        abs_other
-                    } else {
-                        abs_self
-                    };
-
-                    // Use a relative difference comparison
-                    abs_diff <= largest * rtol
+                    let (a, b) = (*self, *other);
+                    let diff = crate::scalar::Abs::abs(a - b);
+                    let (abs_a, abs_b) = (crate::scalar::Abs::abs(a), crate::scalar::Abs::abs(b));
+                    let largest = if abs_b > abs_a { abs_b } else { abs_a };
+                    let close = (diff <= *atol) | (diff <= largest * *rtol);
+                    let no_inf = !<$T>::is_infinite(a) & !<$T>::is_infinite(b);
+                    (a == b) | (close & no_inf)
                 }
             }
         };
@@ -350,7 +343,7 @@ pub(crate) mod _traits {
             atol: &Self::AbsoluteTolerance,
         ) -> bool {
             self.re.approx_eq(&other.re, rtol, &atol.re)
-                && self.im.approx_eq(&other.im, rtol, &atol.im)
+                & self.im.approx_eq(&other.im, rtol, &atol.im)
         }
     }
 }
@@ -951,6 +944,22 @@ mod tests {
                 all!(LessEqualKernel, |x, y| x <= y);
                 all!(MaximumKernel, Maximum::maximum);
                 all!(MinimumKernel, Minimum::minimum);
+                // Not just a NaN: the one NaN, whichever operand's it was (`-NaN` included).
+                macro_rules! nan_bits {
+                    ($kernel:ident, $t:ty) => {
+                        let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
+                        for (i, y) in $kernel.apply_bulk(a, b, simd).into_iter().enumerate() {
+                            if y.is_nan() {
+                                let what = concat!(stringify!($kernel), " ", stringify!($t));
+                                assert_eq!(y.to_bits(), <$t>::NAN.to_bits(), "{what}: element {i}");
+                            }
+                        }
+                    };
+                }
+                nan_bits!(MaximumKernel, f32);
+                nan_bits!(MaximumKernel, f64);
+                nan_bits!(MinimumKernel, f32);
+                nan_bits!(MinimumKernel, f64);
             });
         }
         for_each_simd_level!(check);
@@ -1212,6 +1221,35 @@ mod tests {
         }
         let largest = if a.abs() > b.abs() { a.abs() } else { b.abs() };
         diff <= largest * rtol
+    }
+
+    /// The branch-free `approx_eq` against the reference, on every pair of edge values (infinities,
+    /// NaN, +-0, subnormals, MAX) and odd tolerances.
+    #[test]
+    fn approx_eq_edge_cases() {
+        use crate::scalar::ApproxEq;
+        use crate::util::SimdTestValues;
+        macro_rules! check {
+            ($t:ty) => {
+                let values = <$t>::edge_cases();
+                let tols = [0.0, -0.0, 1e-6, 0.1, 1.0, -0.1, <$t>::INFINITY, <$t>::NAN];
+                for &a in &values {
+                    for &b in &values {
+                        for &rtol in &tols {
+                            for &atol in &tols {
+                                assert_eq!(
+                                    a.approx_eq(&b, &rtol, &atol),
+                                    ref_approx_eq(a, b, rtol, atol),
+                                    "{a:?} {b:?} rtol={rtol:?} atol={atol:?}",
+                                );
+                            }
+                        }
+                    }
+                }
+            };
+        }
+        check!(f32);
+        check!(f64);
     }
 
     proptest::proptest! {

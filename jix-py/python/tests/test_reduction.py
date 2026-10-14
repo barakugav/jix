@@ -213,12 +213,23 @@ def test_argmax_concrete():
     for dim in (0, 1):
         assert_array_matches(jix.argmax(zd, dim=dim), np.argmax(d_u8, axis=_np_dim(dim)).astype(np.uint64))
 
-    # float, NaN-free: jix's NaN-index semantics diverge from numpy.argmax by design (see
-    # reduction.rs docs), so NaN is intentionally excluded from this numpy cross-check.
     d_f = np.array([[-1.5, 2.5, 2.5], [2.5, 0.0, -1.5]], dtype=np.float64)
     ze = jix.compact(d_f, params={"block_shape": [1, 2]})
     for dim in (0, 1):
         assert_array_matches(jix.argmax(ze, dim=dim), np.argmax(d_f, axis=_np_dim(dim)).astype(np.uint64))
+
+    # NaN: the first NaN wins, as in numpy. Long rows put the NaNs in different SIMD lanes.
+    nan = float("nan")
+    d_n = np.array([[1.0, nan, 3.0, nan], [nan, 2.0, nan, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)
+    d_long = np.tile(np.arange(1000, dtype=np.float32) % 7, (3, 1))
+    d_long[0, [500, 40, 9]] = nan
+    d_long[1, [1, 39]] = nan
+    d_long[2, [5, 33]] = nan
+    for d in (d_n, d_long):
+        for block_shape in ([1, 2], [2, 64]):
+            zn = jix.compact(d, params={"block_shape": [min(b, n) for b, n in zip(block_shape, d.shape)]})
+            for dim in (0, 1):
+                assert_array_matches(jix.argmax(zn, dim=dim), np.argmax(d, axis=_np_dim(dim)).astype(np.uint64))
 
     d_b = np.array([[False, True, True], [True, False, False]], dtype=np.bool_)
     zf = jix.compact(d_b, params={"block_shape": [1, 1]})
@@ -251,12 +262,23 @@ def test_argmin_concrete():
     for dim in (0, 1):
         assert_array_matches(jix.argmin(zd, dim=dim), np.argmin(d_u8, axis=_np_dim(dim)).astype(np.uint64))
 
-    # float, NaN-free: jix's NaN-index semantics diverge from numpy.argmin by design (see
-    # reduction.rs docs), so NaN is intentionally excluded from this numpy cross-check.
     d_f = np.array([[-1.5, -1.5, 2.5], [2.5, 0.0, -1.5]], dtype=np.float64)
     ze = jix.compact(d_f, params={"block_shape": [1, 2]})
     for dim in (0, 1):
         assert_array_matches(jix.argmin(ze, dim=dim), np.argmin(d_f, axis=_np_dim(dim)).astype(np.uint64))
+
+    # NaN: the first NaN wins, as in numpy. Long rows put the NaNs in different SIMD lanes.
+    nan = float("nan")
+    d_n = np.array([[1.0, nan, 3.0, nan], [nan, 2.0, nan, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)
+    d_long = np.tile(np.arange(1000, dtype=np.float32) % 7, (3, 1))
+    d_long[0, [500, 40, 9]] = nan
+    d_long[1, [1, 39]] = nan
+    d_long[2, [5, 33]] = nan
+    for d in (d_n, d_long):
+        for block_shape in ([1, 2], [2, 64]):
+            zn = jix.compact(d, params={"block_shape": [min(b, n) for b, n in zip(block_shape, d.shape)]})
+            for dim in (0, 1):
+                assert_array_matches(jix.argmin(zn, dim=dim), np.argmin(d, axis=_np_dim(dim)).astype(np.uint64))
 
     d_b = np.array([[True, False, False], [False, True, True]], dtype=np.bool_)
     zf = jix.compact(d_b, params={"block_shape": [1, 1]})

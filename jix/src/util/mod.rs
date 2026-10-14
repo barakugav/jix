@@ -654,8 +654,13 @@ pub(crate) const REQUIRE_ALIGNED: bool = !cfg!(any(
 /// `noalias` is a *parameter* attribute, so it only lands on a direct reference-typed argument of
 /// a function that is not inlined away - which in practice means the `#[inline(never)]` inner
 /// loops.
-#[derive(Clone, Copy)]
 pub(crate) struct PtrNoalias<'a, T>(&'a [u8], PhantomData<T>);
+impl<T> Copy for PtrNoalias<'_, T> {}
+impl<T> Clone for PtrNoalias<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
 
 impl<'a, T> PtrNoalias<'a, T> {
     /// Wraps a pointer with a span of `span` bytes.
@@ -793,6 +798,24 @@ pub(crate) const fn prev_power_of_two(x: usize) -> usize {
         1
     } else {
         1 << x.ilog2()
+    }
+}
+
+#[inline]
+pub(crate) const fn const_min(a: usize, b: usize) -> usize {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+#[inline]
+pub(crate) const fn const_max(a: usize, b: usize) -> usize {
+    if a > b {
+        a
+    } else {
+        b
     }
 }
 
