@@ -1294,10 +1294,10 @@ pub(crate) mod _traits {
         ($Trait:ident, $what:literal) => {
             #[doc = concat!("Scalar kernel trait for the `arg", $what, "` reduction: the position of the ", $what, "imum.")]
             ///
-            /// The state is `(index, value)` of the running best. `NaN` propagates: a `NaN` item
-            /// becomes the best, and sticks (no later item beats it). On ties the earlier index
-            /// wins, as in NumPy.
-            pub trait $Trait: Copy {
+            /// The state is `(index, value)` of the running best. `NaN` propagates: the first
+            /// `NaN` is the best, beating every number and every later `NaN`. On ties the earlier
+            /// index wins. Both as in NumPy.
+            pub trait $Trait {
                 /// Fold `item`, at stream position `idx`, into `state`.
                 fn update(state: (u64, Self), item: Self, idx: u64) -> (u64, Self);
                 /// Combine two states folded over disjoint subsets of the stream.
@@ -1308,13 +1308,17 @@ pub(crate) mod _traits {
     define_arg_trait!(ArgMax, "max");
     define_arg_trait!(ArgMin, "min");
 
+    // `$not_better` is `>=` for the max (`<=` for the min): `x` beats `y` if `y` is not `NaN` and
+    // `!(y >= x)`, that is if `x > y` or `x` is `NaN`. Two comparisons, as many as a `NaN`-blind
+    // `x > y || x != x`; integers fold to `x > y`.
     macro_rules! impl_arg {
-        ($Trait:ident, $op:tt, [$($t:ty),*]) => {$(
-            #[allow(clippy::eq_op)]
+        ($Trait:ident, $not_better:tt, [$($t:ty),*]) => {$(
+            #[allow(clippy::eq_op, clippy::neg_cmp_op_on_partial_ord)]
             impl $Trait for $t {
                 #[inline(always)]
                 fn update(state: (u64, Self), item: Self, idx: u64) -> (u64, Self) {
-                    if item $op state.1 || /* nan check */ item != item {
+                    // Items come in stream order: a tie keeps the earlier one.
+                    if state.1 == state.1 && !(state.1 $not_better item) {
                         (idx, item)
                     } else {
                         state
@@ -1323,23 +1327,20 @@ pub(crate) mod _traits {
                 #[inline(always)]
                 fn merge_states(a: (u64, Self), b: (u64, Self)) -> (u64, Self) {
                     let ((ai, av), (bi, bv)) = (a, b);
-                    if bv $op av || bv != bv {
-                        b
-                    } else if av $op bv || /* nan check */ av != av || /* prefer lower idx */ ai <= bi {
-                        a
-                    } else {
-                        b
-                    }
+                    let b_better = av == av && !(av $not_better bv);
+                    let a_better = bv == bv && !(bv $not_better av);
+                    // Neither is better on equal values, or two `NaN`s: the lower index.
+                    if b_better || (!a_better && bi < ai) { b } else { a }
                 }
             }
         )*};
     }
-    impl_arg!(ArgMax, >, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
-    impl_arg!(ArgMin, <, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
+    impl_arg!(ArgMax, >=, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
+    impl_arg!(ArgMin, <=, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
     #[cfg(feature = "half")]
-    impl_arg!(ArgMax, >, [f16]);
+    impl_arg!(ArgMax, >=, [f16]);
     #[cfg(feature = "half")]
-    impl_arg!(ArgMin, <, [f16]);
+    impl_arg!(ArgMin, <=, [f16]);
 
     /// Scalar kernel trait for the element-wise `mean` reduction.
     ///
@@ -1686,8 +1687,7 @@ define_reduction_op!(
     /// Unlike [`Max`], this op accepts only a single dim. If multiple elements share
     /// the maximum value, the index of the *first* such element is returned, matching
     /// `numpy.argmax`. For **float** types, `NaN` propagates: if any element along the
-    /// reduced dim is `NaN`, the returned index is that of some `NaN` (not necessarily the
-    /// first). This differs from `numpy.argmax`, which returns the index of the *first* `NaN`.
+    /// reduced dim is `NaN`, the index of the first `NaN` is returned, as in `numpy.argmax`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -1758,8 +1758,7 @@ define_reduction_op!(
     /// Unlike [`Min`], this op accepts only a single dim. If multiple elements share
     /// the minimum value, the index of the *first* such element is returned, matching
     /// `numpy.argmin`. For **float** types, `NaN` propagates: if any element along the
-    /// reduced dim is `NaN`, the returned index is that of some `NaN` (not necessarily the
-    /// first). This differs from `numpy.argmin`, which returns the index of the *first* `NaN`.
+    /// reduced dim is `NaN`, the index of the first `NaN` is returned, as in `numpy.argmin`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -3223,8 +3222,7 @@ pub(crate) mod tests {
         // dim 1 (per row): row 0 ties col 0/col 1 at 5 -> first col (0) wins.
         crate::util::assert_array_matches(&za.view().argmax(1usize), &array![0u64, 0]);
 
-        // f32 path, same tie-break rule, negatives included. (`NaN` excluded - see
-        // `min_concrete` for why.)
+        // f32 path, same tie-break rule, negatives included. (`NaN`: `argmax_argmin_first_nan`.)
         let ndf = array![[2.5f32, 2.5, -1.0], [3.0, 3.0, 0.0]];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
         crate::util::assert_array_matches(&zaf.view().argmax(0usize), &array![1u64, 1, 1]);
@@ -3399,6 +3397,71 @@ pub(crate) mod tests {
         // col 0/col 1 tie at 2.5 vs. 3.0 -> row 0 (index 0) wins both.
         crate::util::assert_array_matches(&zaf.view().argmin(0usize), &array![0u64, 0, 0]);
         crate::util::assert_array_matches(&zaf.view().argmin(1usize), &array![2u64, 2]);
+    }
+
+    /// The first `NaN` wins, as in NumPy: whatever lane, run or tile each `NaN` lands in.
+    #[test]
+    fn argmax_argmin_first_nan() {
+        /// The index of the first `NaN`, else of the first item no other `beats`.
+        #[allow(clippy::eq_op)]
+        fn expected<T: PartialOrd>(row: ndarray::ArrayView1<T>, beats: fn(&T, &T) -> bool) -> u64 {
+            let best = (1..row.len()).fold(0, |b, i| if beats(&row[i], &row[b]) { i } else { b });
+            row.iter().position(|x| x != x).unwrap_or(best) as u64
+        }
+        macro_rules! check {
+            ($t:ty) => {{
+                for n in [1usize, 2, 3, 7, 8, 9, 16, 31, 33, 64, 65, 100, 513, 2049] {
+                    let nan_sets = [
+                        vec![],
+                        vec![0],
+                        vec![n - 1],
+                        vec![n / 2],
+                        vec![n / 3, n / 2, n - 1],
+                        vec![5, 33],
+                        vec![1, 39],
+                        vec![2, 3],
+                        vec![40, 9],
+                    ];
+                    // 1, 3 and 37 cells: fewer and more than a vector of states.
+                    for (nans, ncols) in nan_sets.iter().flat_map(|s| [(s, 1), (s, 3), (s, 37)]) {
+                        // Row `c`: values with ties, and the NaNs shifted by `c`.
+                        let rows = ndarray::Array2::from_shape_fn((ncols, n), |(c, i)| {
+                            let is_nan = nans.iter().any(|&j| j < n && (j + c) % n == i);
+                            if is_nan {
+                                <$t>::NAN
+                            } else {
+                                ((i * 7919 + c) % 13) as $t - 6.0
+                            }
+                        });
+                        let expected = |beats: fn(&$t, &$t) -> bool| -> Vec<u64> {
+                            rows.rows()
+                                .into_iter()
+                                .map(|r| expected(r, beats))
+                                .collect()
+                        };
+                        let (exp_max, exp_min) = (expected(<$t>::gt), expected(<$t>::lt));
+                        // The rows contiguous (one cell at a time), and as columns (across cells).
+                        for (nd, dim) in [(rows.clone(), 1), (rows.t().to_owned(), 0)] {
+                            for block in [[4096, 4096], [7, 5]] {
+                                let block = [block[0].min(nd.nrows()), block[1].min(nd.ncols())];
+                                let params = crate::util::arr_params(&block);
+                                let za = Array::compact_ndarray_with(&nd, params).unwrap();
+                                let what = format!(
+                                    "{} n={n} nans={nans:?} dim={dim} block={block:?}",
+                                    stringify!($t)
+                                );
+                                let got_max = za.view().argmax(dim).to_ndarray().unwrap();
+                                let got_min = za.view().argmin(dim).to_ndarray().unwrap();
+                                assert_eq!(got_max.as_slice().unwrap(), exp_max, "argmax {what}");
+                                assert_eq!(got_min.as_slice().unwrap(), exp_min, "argmin {what}");
+                            }
+                        }
+                    }
+                }
+            }};
+        }
+        check!(f32);
+        check!(f64);
     }
 
     test_reduction!(
