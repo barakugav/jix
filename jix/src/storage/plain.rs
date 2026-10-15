@@ -12,6 +12,12 @@ use crate::storage::{
 use crate::util::{strided_span_bytes, DimArray, DimIdx, SendSyncPtr};
 use crate::{Array, ArrayParams, ArrayStorage, DimBitmap, Dimension, IntoDimension};
 
+/// Plain (not-compressed) owned array (type alias).
+pub type PlainArray<T, D> = Array<Plain<Vec<T>, Ty<T>, D>>;
+
+/// Plain (not-compressed) borrowed array (type alias).
+pub type PlainArrayRef<'a, T, D> = Array<Plain<&'a (), Ty<T>, D>>;
+
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
 /// `Plain` is an adapter that allows non-compressed data to be used as the storage of an `Array`,
