@@ -71,82 +71,67 @@ pub enum ErrorKind {
     InvalidArchive,
     /// Compression/decompression failure, or invalid compression params/metadata
     CodecError,
-    /// An element-wise operation hit an [`ArithError`] (e.g. an integer division by zero) while
-    /// computing the read region, and the read context's mode for it is
-    /// [`Raise`](ArithErrorMode::Raise).
+    /// An element-wise operation hit an arithmetic error.
     Arithmetic,
 }
 
 /// An arithmetic error an element-wise operation can hit while computing its output.
-///
-/// The operation always produces a value - documented per variant - and reports the error to the
-/// [`ReadContext`](crate::ReadContext) of the read, whose [`ArithErrorMode`] for it decides whether
-/// the read fails, records a warning, or silently keeps the value. See
-/// [`ReadContext::set_arith_error_mode`](crate::ReadContext::set_arith_error_mode).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
-pub enum ArithError {
-    /// Integer division by zero. The element is `0`.
-    DivideByZero,
-}
-impl ArithError {
-    pub(crate) const ALL: [Self; 1] = [Self::DivideByZero];
-
-    fn description(self) -> &'static str {
-        match self {
-            Self::DivideByZero => "divide by zero",
-        }
-    }
+#[repr(u8)]
+pub enum ArithmeticErrorKind {
+    /// Division by zero.
+    DivideByZero = 1,
+    /// Overflow occurred during the operation.
+    Overflow = 2,
+    /// Underflow occurred during the operation.
+    Underflow = 4,
+    /// TODO
+    InvalidOperation = 8,
 }
 
-/// How a read reacts to an [`ArithError`], see
-/// [`ReadContext::set_arith_error_mode`](crate::ReadContext::set_arith_error_mode).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ArithErrorMode {
-    /// Keep the value the operation produced for the element and carry on.
+/// Setting of how to handle arithmetic errors during element-wise operations.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Default)]
+pub enum ArithmeticErrorMode {
+    /// Ignore the error, keep a default value for the result.
     Ignore,
-    /// Keep the value and record a warning, collected with
-    /// [`ReadContext::take_warnings`](crate::ReadContext::take_warnings).
+    /// Warn on the error, but keep the value for the element.
     Warn,
     /// Fail the read with an [`ErrorKind::Arithmetic`] error.
+    #[default]
     Raise,
 }
 
-/// The [`ArithError`]s an element-wise computation hit, one bit per error.
+/// The [`ArithmeticErrorKind`]s an element-wise computation hit, one bit per error.
 ///
 /// Scalar kernels that can hit an error, like [`scalar::Div`](crate::scalar::Div), take a
-/// `&mut OpStatus`: rather than panicking, they produce a fallback value for the element and set
-/// the error's bit. An array op threads a single status through its whole computation and checks
-/// it once at the end, against the modes of the [`ReadContext`](crate::ReadContext) of the read.
+/// `&mut ArithmeticOpStatus`: rather than panicking, they produce a fallback value for the element and set
+/// the error's bit. After the computation, the status is checked against the mode configured
+/// in the read context.
 ///
 /// ```
 /// use jix::scalar::Div;
-/// use jix::error::{ArithError, OpStatus};
+/// use jix::error::{ArithmeticErrorKind, ArithmeticOpStatus};
 ///
-/// let mut status = OpStatus::default();
+/// let mut status = ArithmeticOpStatus::default();
 /// assert_eq!(7i32.div(2, &mut status), 3);
 /// assert!(status.is_ok());
 /// assert_eq!(7i32.div(0, &mut status), 0);
-/// assert!(status.contains(ArithError::DivideByZero));
+/// assert!(status.contains(ArithmeticErrorKind::DivideByZero));
 /// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct OpStatus(u8);
-impl OpStatus {
+pub struct ArithmeticOpStatus(u8);
+impl ArithmeticOpStatus {
+    /// Set `error` if `cond` holds.
     #[inline(always)]
-    const fn bit(error: ArithError) -> u8 {
-        1 << error as u8
-    }
-
-    /// Set `error` if `cond` holds. Branch-free: an OR of the error's bit.
-    #[inline(always)]
-    pub fn set_if(&mut self, error: ArithError, cond: bool) {
-        self.0 |= Self::bit(error) * cond as u8;
+    pub fn set_if(&mut self, error: ArithmeticErrorKind, cond: bool) {
+        self.0 |= error as u8 * cond as u8;
     }
 
     /// Whether `error` is set.
     #[inline(always)]
-    pub fn contains(self, error: ArithError) -> bool {
-        self.0 & Self::bit(error) != 0
+    pub fn contains(self, error: ArithmeticErrorKind) -> bool {
+        (self.0 & error as u8) != 0
     }
 
     /// Whether no error is set.
@@ -154,25 +139,12 @@ impl OpStatus {
     pub fn is_ok(self) -> bool {
         self.0 == 0
     }
-
-    pub(crate) fn errors(self) -> impl Iterator<Item = ArithError> {
-        ArithError::ALL
-            .into_iter()
-            .filter(move |&e| self.contains(e))
-    }
 }
-impl std::ops::BitOrAssign for OpStatus {
+impl std::ops::BitOrAssign for ArithmeticOpStatus {
     #[inline(always)]
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0;
     }
-}
-
-pub(crate) fn arith_error(error: ArithError) -> Error {
-    Error::new(
-        ErrorKind::Arithmetic,
-        format!("{} encountered", error.description()),
-    )
 }
 
 impl fmt::Debug for Error {

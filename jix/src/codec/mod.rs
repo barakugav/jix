@@ -11,9 +11,9 @@ use std::marker::PhantomData;
 
 use crate::buf_pool::{BufferPool, PoolBuf};
 use crate::dtype::{Alignment, Dtype};
-use crate::error::{arith_error, ArithError, ArithErrorMode, Error, OpStatus};
 #[allow(unused_imports)]
 use crate::error::{ensure, error, Result};
+use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ArithmeticOpStatus, Error};
 use crate::util::arrayvec::ArrayVec;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
 use crate::util::{AlignedBytes, AlternatingBuffers};
@@ -367,14 +367,14 @@ impl<'a> Decoder<'a> {
 ///
 /// # Arithmetic errors
 ///
-/// An element-wise operation that hits an [`ArithError`] - an integer division by zero, say -
+/// An element-wise operation that hits an [`ArithmeticErrorKind`] - an integer division by zero, say -
 /// writes a fallback value for the element and reports the error to the context of the read,
-/// which reacts according to its [`ArithErrorMode`] for it: fail the read (the default),
+/// which reacts according to its [`ArithmeticErrorMode`] for it: fail the read (the default),
 /// record a warning, or ignore it.
 ///
 /// ```
 /// use jix::Array;
-/// use jix::error::{ArithError, ArithErrorMode, ErrorKind};
+/// use jix::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![6i32, 7, 8])?;
@@ -385,7 +385,7 @@ impl<'a> Decoder<'a> {
 /// assert_eq!(err.kind(), ErrorKind::Arithmetic);
 ///
 /// let mut ctx = q.read_ctx();
-/// ctx.set_arith_error_mode(ArithError::DivideByZero, ArithErrorMode::Warn);
+/// ctx.set_arith_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Warn);
 /// let out = q.to_ndarray_sub(&[0..3], &ctx)?;
 /// assert_eq!(out.as_slice().unwrap(), &[3, 0, 2]);
 /// assert_eq!(ctx.take_warnings().len(), 1);
@@ -395,8 +395,8 @@ pub struct ReadContext {
     #[cfg(not(miri))]
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     buffer_pool: BufferPool,
-    arith_error_modes: [ArithErrorMode; ArithError::ALL.len()],
-    warnings: RefCell<Vec<Error>>,
+    arith_error_modes: ArithmeticErrorModes,
+    warnings: RefCell<Option<Box<Vec<Error>>>>,
 }
 impl ReadContext {
     /// Creates a new `ReadContext` configured with the given decoder parameters.
@@ -408,30 +408,34 @@ impl ReadContext {
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
             buffer_pool: BufferPool::new(),
-            arith_error_modes: [ArithErrorMode::Raise; ArithError::ALL.len()],
-            warnings: RefCell::new(Vec::new()),
+            arith_error_modes: ArithmeticErrorModes::default(),
+            warnings: RefCell::new(None),
         })
     }
 
     /// Sets how reads with this context react to `error`. The default is
-    /// [`Raise`](ArithErrorMode::Raise) for every [`ArithError`].
+    /// [`Raise`](ArithmeticErrorMode::Raise) for every [`ArithmeticErrorKind`].
     ///
     /// See [Arithmetic errors](Self#arithmetic-errors).
-    pub fn set_arith_error_mode(&mut self, error: ArithError, mode: ArithErrorMode) {
-        self.arith_error_modes[error as usize] = mode;
+    pub fn set_arith_error_mode(&mut self, error: ArithmeticErrorKind, mode: ArithmeticErrorMode) {
+        self.arith_error_modes.set(error, mode);
     }
 
     /// How reads with this context react to `error`, see
     /// [`set_arith_error_mode`](Self::set_arith_error_mode).
-    pub fn arith_error_mode(&self, error: ArithError) -> ArithErrorMode {
-        self.arith_error_modes[error as usize]
+    pub fn arith_error_mode(&self, error: ArithmeticErrorKind) -> ArithmeticErrorMode {
+        self.arith_error_modes.get(error)
     }
 
-    /// Takes the warnings recorded by reads with this context, for the [`ArithError`]s whose mode
-    /// is [`Warn`](ArithErrorMode::Warn). Each distinct warning is recorded once until taken, no
+    /// Takes the warnings recorded by reads with this context, for the [`ArithmeticErrorKind`]s whose mode
+    /// is [`Warn`](ArithmeticErrorMode::Warn). Each distinct warning is recorded once until taken, no
     /// matter how many elements or reads hit it.
     pub fn take_warnings(&self) -> Vec<Error> {
-        self.warnings.take()
+        let mut warnings = self.warnings.borrow_mut();
+        match warnings.as_deref_mut() {
+            None => Vec::new(),
+            Some(warnings) => std::mem::take(warnings),
+        }
     }
 
     /// Reacts to the errors the kernels reported while computing a region: warns or fails per the
@@ -440,27 +444,13 @@ impl ReadContext {
     /// Called once per region by the type-erased pipeline loop. Out of line, so the loop keeps a
     /// single copy of it whatever the number of pipelines.
     #[inline(never)]
-    pub(crate) fn check_op_status(&self, status: OpStatus) -> Result<()> {
+    pub(crate) fn check_op_status(&self, status: ArithmeticOpStatus) -> Result<()> {
         if status.is_ok() {
             return Ok(());
         }
-        let mut raised = None;
-        for error in status.errors() {
-            match self.arith_error_mode(error) {
-                ArithErrorMode::Ignore => {}
-                ArithErrorMode::Warn => {
-                    let mut warnings = self.warnings.borrow_mut();
-                    let warning = arith_error(error);
-                    if !warnings.iter().any(|w| w.message() == warning.message()) {
-                        warnings.push(warning);
-                    }
-                }
-                ArithErrorMode::Raise => {
-                    raised.get_or_insert_with(|| arith_error(error));
-                }
-            }
-        }
-        raised.map_or(Ok(()), Err)
+        let mut warnings = self.warnings.borrow_mut();
+        let warnings = &mut **warnings.get_or_insert_with(|| Box::new(Vec::new()));
+        self.arith_error_modes.check_op_status(status, warnings)
     }
 
     #[inline]
@@ -481,6 +471,69 @@ const _: fn() = || {
 impl Default for ReadContext {
     fn default() -> Self {
         Self::new(&DecoderParams::default()).unwrap()
+    }
+}
+
+#[derive(Default)]
+struct ArithmeticErrorModes {
+    divide_by_zero: ArithmeticErrorMode,
+    overflow: ArithmeticErrorMode,
+    underflow: ArithmeticErrorMode,
+    invalid_operation: ArithmeticErrorMode,
+}
+impl ArithmeticErrorModes {
+    fn set(&mut self, error: ArithmeticErrorKind, mode: ArithmeticErrorMode) {
+        match error {
+            ArithmeticErrorKind::DivideByZero => self.divide_by_zero = mode,
+            ArithmeticErrorKind::Overflow => self.overflow = mode,
+            ArithmeticErrorKind::Underflow => self.underflow = mode,
+            ArithmeticErrorKind::InvalidOperation => self.invalid_operation = mode,
+        }
+    }
+
+    fn get(&self, error: ArithmeticErrorKind) -> ArithmeticErrorMode {
+        match error {
+            ArithmeticErrorKind::DivideByZero => self.divide_by_zero,
+            ArithmeticErrorKind::Overflow => self.overflow,
+            ArithmeticErrorKind::Underflow => self.underflow,
+            ArithmeticErrorKind::InvalidOperation => self.invalid_operation,
+        }
+    }
+
+    #[inline(never)]
+    fn check_op_status(&self, status: ArithmeticOpStatus, warnings: &mut Vec<Error>) -> Result<()> {
+        let mut raised = None;
+        let kinds = [
+            (ArithmeticErrorKind::DivideByZero, "divide by zero"),
+            (ArithmeticErrorKind::Overflow, "overflow"),
+            (ArithmeticErrorKind::Underflow, "underflow"),
+            (ArithmeticErrorKind::InvalidOperation, "invalid operation"),
+        ];
+        for (kind, description) in kinds {
+            if !status.contains(kind) {
+                continue;
+            }
+            match self.get(kind) {
+                ArithmeticErrorMode::Ignore => {}
+                ArithmeticErrorMode::Warn => {
+                    let warning = create_err(description);
+                    if !warnings.iter().any(|w| w.message() == warning.message()) {
+                        warnings.push(warning);
+                    }
+                }
+                ArithmeticErrorMode::Raise => {
+                    raised.get_or_insert_with(|| create_err(description));
+                }
+            }
+
+            pub(crate) fn create_err(description: &str) -> Error {
+                Error::new(
+                    crate::error::ErrorKind::Arithmetic,
+                    format!("{} encountered", description),
+                )
+            }
+        }
+        raised.map_or(Ok(()), Err)
     }
 }
 

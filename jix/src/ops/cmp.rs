@@ -764,7 +764,7 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
     type Output = bool;
 
     #[inline(always)]
-    fn apply(&self, a: T, b: T, _status: &mut crate::error::OpStatus) -> Self::Output {
+    fn apply(&self, a: T, b: T, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
         a.approx_eq(&b, &self.rtol, &self.atol)
     }
 
@@ -773,7 +773,7 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
         &self,
         a: [T; N],
         b: [T; N],
-        _status: &mut crate::error::OpStatus,
+        _status: &mut crate::error::ArithmeticOpStatus,
         simd: S,
     ) -> [Self::Output; N] {
         T::approx_eq_bulk(a, b, &self.rtol, &self.atol, simd)

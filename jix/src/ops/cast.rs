@@ -404,7 +404,7 @@ where
     type Output = T2;
 
     #[inline(always)]
-    fn apply(&self, x: T1, _status: &mut crate::error::OpStatus) -> Self::Output {
+    fn apply(&self, x: T1, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
         x.cast()
     }
 
@@ -412,7 +412,7 @@ where
     fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
         &self,
         xs: [T1; N],
-        _status: &mut crate::error::OpStatus,
+        _status: &mut crate::error::ArithmeticOpStatus,
         simd: S,
     ) -> [Self::Output; N] {
         T1::cast_bulk(xs, simd)

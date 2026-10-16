@@ -11,10 +11,10 @@ pub(crate) struct Op2<S1, S2, K> {
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
 
-    /// Apply the kernel to `a` and `b`. An [`ArithError`] is not a panic or an early return: the
+    /// Apply the kernel to `a` and `b`. An [`ArithmeticErrorKind`] is not a panic or an early return: the
     /// kernel produces a fallback value and sets the error in `status`, see
     /// [`ElementwisePipelineImpl::read_bulk`].
-    fn apply(&self, a: T1, b: T2, status: &mut OpStatus) -> Self::Output;
+    fn apply(&self, a: T1, b: T2, status: &mut ArithmeticOpStatus) -> Self::Output;
 
     /// [`apply`](Self::apply) on each pair of `a` and `b`.
     #[inline(always)]
@@ -22,7 +22,7 @@ pub(crate) trait Op2Kernel<T1, T2> {
         &self,
         a: [T1; N],
         b: [T2; N],
-        status: &mut OpStatus,
+        status: &mut ArithmeticOpStatus,
         simd: S,
     ) -> [Self::Output; N] {
         let _ = simd;
@@ -160,7 +160,7 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                status: &mut OpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [T; N] {
                 let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, status, simd) };
@@ -227,7 +227,7 @@ where
 {
     type Output = O;
     #[inline(always)]
-    fn apply(&self, a: T1, b: T2, _status: &mut OpStatus) -> Self::Output {
+    fn apply(&self, a: T1, b: T2, _status: &mut ArithmeticOpStatus) -> Self::Output {
         self(a, b)
     }
 }
@@ -251,7 +251,7 @@ macro_rules! define_op2 {
             type Output = <T1 as crate::scalar::$trait<T2>>::Output;
 
             #[inline(always)]
-            fn apply(&self, a: T1, b: T2, status: &mut crate::error::OpStatus) -> Self::Output {
+            fn apply(&self, a: T1, b: T2, status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
                 define_op2!(@apply $trait::$kernel_fn(a, b), status, $($with_status)?)
             }
 
@@ -260,7 +260,7 @@ macro_rules! define_op2 {
                 &self,
                 a: [T1; N],
                 b: [T2; N],
-                status: &mut crate::error::OpStatus,
+                status: &mut crate::error::ArithmeticOpStatus,
                 simd: S,
             ) -> [Self::Output; N] {
                 define_op2!(@bulk $trait::$bulk_fn(a, b), status, simd, $($with_status)?)
@@ -361,7 +361,7 @@ macro_rules! define_op2 {
 pub(crate) use define_op2;
 
 pub(crate) mod _traits {
-    use crate::error::{ArithError, OpStatus};
+    use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
@@ -402,10 +402,10 @@ pub(crate) mod _traits {
         bulk_fn: mul_bulk,
     );
     /// Division operation, like [`core::ops::Div`], reporting arithmetic errors to an
-    /// [`OpStatus`] instead of panicking.
+    /// [`ArithmeticOpStatus`] instead of panicking.
     ///
     /// For **integer** types the result is truncating (rounds towards zero), and `MIN / -1` wraps
-    /// to `MIN`. Dividing by zero gives `0` and sets [`ArithError::DivideByZero`] in the status.
+    /// to `MIN`. Dividing by zero gives `0` and sets [`ArithmeticErrorKind::DivideByZero`] in the status.
     /// For **float** types semantics follow `f32::div`; there is no error to report.
     /// For **complex** types this is full complex division.
     pub trait Div<Rhs = Self> {
@@ -413,7 +413,7 @@ pub(crate) mod _traits {
         type Output;
 
         /// Divide by another value, reporting an arithmetic error to `status`.
-        fn div(self, rhs: Rhs, status: &mut OpStatus) -> Self::Output;
+        fn div(self, rhs: Rhs, status: &mut ArithmeticOpStatus) -> Self::Output;
 
         /// Apply [`div`](Self::div) on each pair of `xs` and `ys`, vectorized with `simd` where the
         /// types have SIMD support.
@@ -421,7 +421,7 @@ pub(crate) mod _traits {
         fn div_bulk<const N: usize, S: fearless_simd::Simd>(
             xs: [Self; N],
             ys: [Rhs; N],
-            status: &mut OpStatus,
+            status: &mut ArithmeticOpStatus,
             simd: S,
         ) -> [Self::Output; N]
         where
@@ -499,7 +499,7 @@ pub(crate) mod _traits {
             impl Div for $t {
                 type Output = Self;
                 #[inline(always)]
-                fn div(self, rhs: Self, _status: &mut OpStatus) -> Self {
+                fn div(self, rhs: Self, _status: &mut ArithmeticOpStatus) -> Self {
                     let ($a, $b) = (self, rhs);
                     $f
                 }
@@ -509,7 +509,7 @@ pub(crate) mod _traits {
             impl Div for $t {
                 type Output = Self;
                 #[inline(always)]
-                fn div(self, rhs: Self, _status: &mut OpStatus) -> Self {
+                fn div(self, rhs: Self, _status: &mut ArithmeticOpStatus) -> Self {
                     let ($a, $b) = (self, rhs);
                     $f
                 }
@@ -518,7 +518,7 @@ pub(crate) mod _traits {
                 fn div_bulk<const N: usize, S: fearless_simd::Simd>(
                     xs: [Self; N],
                     ys: [Self; N],
-                    _status: &mut OpStatus,
+                    _status: &mut ArithmeticOpStatus,
                     simd: S,
                 ) -> [Self; N] {
                     crate::scalar::simd::map_vectors2::<Self, Self, Self, N, S>(
@@ -557,8 +557,8 @@ pub(crate) mod _traits {
     /// have a side effect, the status, or LLVM folds the call away.
     #[cold]
     #[inline(never)]
-    fn zero_divisor<T: Default>(status: &mut OpStatus) -> T {
-        status.set_if(ArithError::DivideByZero, true);
+    fn zero_divisor<T: Default>(status: &mut ArithmeticOpStatus) -> T {
+        status.set_if(ArithmeticErrorKind::DivideByZero, true);
         T::default()
     }
 
@@ -568,7 +568,7 @@ pub(crate) mod _traits {
             impl Div for $t {
                 type Output = Self;
                 #[inline(always)]
-                fn div(self, rhs: Self, status: &mut OpStatus) -> Self {
+                fn div(self, rhs: Self, status: &mut ArithmeticOpStatus) -> Self {
                     if rhs == 0 {
                         zero_divisor(status)
                     } else {
@@ -1075,7 +1075,7 @@ pub(crate) mod tests {
         }
     }
 
-    // Integer division by zero gives `0` for the element and reports `ArithError::DivideByZero`
+    // Integer division by zero gives `0` for the element and reports `ArithmeticErrorKind::DivideByZero`
     // to the read context, which raises it by default.
     macro_rules! test_div_by_zero {
         ($($t:ident),*) => {$(
@@ -1083,7 +1083,7 @@ pub(crate) mod tests {
                 #[test]
                 fn [<div_by_zero_ $t>]() {
                     use crate::Array;
-                    use crate::error::{ArithError, ArithErrorMode, ErrorKind};
+                    use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
 
                     // Zero divisors in both the bulk part of the loop and its scalar tail.
                     let n = 1000;
@@ -1109,7 +1109,7 @@ pub(crate) mod tests {
 
                     // Warn: the value, and a single warning however many elements and reads hit it.
                     let mut ctx = q.read_ctx();
-                    ctx.set_arith_error_mode(ArithError::DivideByZero, ArithErrorMode::Warn);
+                    ctx.set_arith_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Warn);
                     for _ in 0..2 {
                         assert_eq!(q.to_ndarray_sub(&full, &ctx).unwrap(), expected);
                     }
@@ -1120,7 +1120,7 @@ pub(crate) mod tests {
                     assert!(ctx.take_warnings().is_empty());
 
                     // Ignore: just the value.
-                    ctx.set_arith_error_mode(ArithError::DivideByZero, ArithErrorMode::Ignore);
+                    ctx.set_arith_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Ignore);
                     assert_eq!(q.to_ndarray_sub(&full, &ctx).unwrap(), expected);
                     assert!(ctx.take_warnings().is_empty());
                 }
@@ -1131,7 +1131,7 @@ pub(crate) mod tests {
 
     #[test]
     fn div_by_zero_strided() {
-        use crate::error::{ArithError, ArithErrorMode};
+        use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode};
         use crate::Array;
 
         // Transposed operands are read with a non-unit inner stride.
@@ -1143,7 +1143,10 @@ pub(crate) mod tests {
         assert!(q.to_ndarray().is_err());
 
         let mut ctx = q.read_ctx();
-        ctx.set_arith_error_mode(ArithError::DivideByZero, ArithErrorMode::Ignore);
+        ctx.set_arith_error_mode(
+            ArithmeticErrorKind::DivideByZero,
+            ArithmeticErrorMode::Ignore,
+        );
         let expected = ndarray::Zip::from(&nd_a.t())
             .and(&nd_b.t())
             .map_collect(|&x, &y| if y == 0 { 0 } else { x / y });
@@ -1191,16 +1194,16 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_div_status() {
-        use crate::error::{ArithError, OpStatus};
+        use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
         use crate::scalar::Div;
 
-        let mut status = OpStatus::default();
+        let mut status = ArithmeticOpStatus::default();
         assert_eq!(Div::div(7u8, 2, &mut status), 3);
         assert_eq!(Div::div(i32::MIN, -1, &mut status), i32::MIN);
         assert_eq!(Div::div(1.0f32, 0.0, &mut status), f32::INFINITY);
         assert!(status.is_ok());
         assert_eq!(Div::div(-7i64, 0, &mut status), 0);
-        assert!(status.contains(ArithError::DivideByZero));
+        assert!(status.contains(ArithmeticErrorKind::DivideByZero));
     }
 
     // Random shapes, storage backends and layouts, with zero divisors in about a third of the
@@ -1213,7 +1216,7 @@ pub(crate) mod tests {
                 <i32 as crate::util::ScalarStrategy>::comparable_strategy()
             )
         ) {
-            use crate::error::{ArithError, ArithErrorMode, ErrorKind};
+            use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
 
             let q = za / zb;
             let index = q.shape().iter().map(|&d| 0..d).collect::<Vec<_>>();
@@ -1225,7 +1228,7 @@ pub(crate) mod tests {
             }
 
             let mut ctx = q.read_ctx();
-            ctx.set_arith_error_mode(ArithError::DivideByZero, ArithErrorMode::Ignore);
+            ctx.set_arith_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Ignore);
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_b)
                 .map_collect(|&x, &y| if y == 0 { 0 } else { x / y });

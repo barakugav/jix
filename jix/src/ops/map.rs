@@ -358,7 +358,7 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                status: &mut OpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [T; N] {
                 // The iterator is consumed here and dropped before the next call, as

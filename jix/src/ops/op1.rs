@@ -9,17 +9,17 @@ pub(crate) struct Op1<S, K> {
 pub(crate) trait Op1Kernel<T> {
     type Output;
 
-    /// Apply the kernel to `x`. An [`ArithError`] is not a panic or an early return: the kernel
+    /// Apply the kernel to `x`. An [`ArithmeticErrorKind`] is not a panic or an early return: the kernel
     /// produces a fallback value and sets the error in `status`, see
     /// [`ElementwisePipelineImpl::read_bulk`].
-    fn apply(&self, x: T, status: &mut OpStatus) -> Self::Output;
+    fn apply(&self, x: T, status: &mut ArithmeticOpStatus) -> Self::Output;
 
     /// [`apply`](Self::apply) on each of `xs`.
     #[inline(always)]
     fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
         &self,
         xs: [T; N],
-        status: &mut OpStatus,
+        status: &mut ArithmeticOpStatus,
         simd: S,
     ) -> [Self::Output; N] {
         let _ = simd;
@@ -103,7 +103,7 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                status: &mut OpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [T; N] {
                 let xs = unsafe {
@@ -168,7 +168,7 @@ where
 {
     type Output = O;
     #[inline(always)]
-    fn apply(&self, x: T, _status: &mut OpStatus) -> Self::Output {
+    fn apply(&self, x: T, _status: &mut ArithmeticOpStatus) -> Self::Output {
         self(x)
     }
 }
@@ -190,7 +190,7 @@ macro_rules! define_op1 {
             type Output = <T as crate::scalar::$trait>::Output;
 
             #[inline(always)]
-            fn apply(&self, x: T, _status: &mut crate::error::OpStatus) -> Self::Output {
+            fn apply(&self, x: T, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
                 <T as crate::scalar::$trait>::$kernel_fn(x)
             }
 
@@ -198,7 +198,7 @@ macro_rules! define_op1 {
             fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
                 &self,
                 xs: [T; N],
-                _status: &mut crate::error::OpStatus,
+                _status: &mut crate::error::ArithmeticOpStatus,
                 simd: S,
             ) -> [Self::Output; N] {
                 <T as crate::scalar::$trait>::$bulk_fn(xs, simd)

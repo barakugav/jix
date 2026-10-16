@@ -10,7 +10,7 @@ use std::ffi::CString;
 
 use jix_core::ReadContext;
 
-use jix_core::error::{ArithError, ArithErrorMode};
+use jix_core::error::{ArithmeticErrorKind, ArithmeticErrorMode};
 use pyo3::exceptions::PyRuntimeWarning;
 use pyo3::prelude::*;
 
@@ -18,12 +18,12 @@ use crate::type_hint::ErrMode;
 
 #[derive(Clone, Copy)]
 struct Modes {
-    divide: ArithErrorMode,
+    divide: ArithmeticErrorMode,
 }
 impl Modes {
     /// NumPy's defaults.
     const DEFAULT: Self = Self {
-        divide: ArithErrorMode::Warn,
+        divide: ArithmeticErrorMode::Warn,
     };
 
     fn to_dict(self) -> BTreeMap<&'static str, &'static str> {
@@ -39,7 +39,7 @@ thread_local! {
 /// it.
 pub(crate) fn configure_context(context: &mut ReadContext) {
     let modes = MODES.with(Cell::get);
-    context.set_arith_error_mode(ArithError::DivideByZero, modes.divide);
+    context.set_arith_error_mode(ArithmeticErrorKind::DivideByZero, modes.divide);
     drop(context.take_warnings());
 }
 
@@ -52,15 +52,19 @@ pub(crate) fn emit_warnings(py: Python<'_>, warnings: Vec<jix_core::Error>) -> P
     Ok(())
 }
 
-fn mode_name(mode: ArithErrorMode) -> &'static str {
+fn mode_name(mode: ArithmeticErrorMode) -> &'static str {
     match mode {
-        ArithErrorMode::Ignore => "ignore",
-        ArithErrorMode::Warn => "warn",
-        ArithErrorMode::Raise => "raise",
+        ArithmeticErrorMode::Ignore => "ignore",
+        ArithmeticErrorMode::Warn => "warn",
+        ArithmeticErrorMode::Raise => "raise",
     }
 }
 
-fn apply(modes: Modes, all: Option<ArithErrorMode>, divide: Option<ArithErrorMode>) -> Modes {
+fn apply(
+    modes: Modes,
+    all: Option<ArithmeticErrorMode>,
+    divide: Option<ArithmeticErrorMode>,
+) -> Modes {
     Modes {
         divide: divide.or(all).unwrap_or(modes.divide),
     }
@@ -139,8 +143,8 @@ pub fn geterr() -> BTreeMap<&'static str, &'static str> {
 ///     ```
 #[pyclass(module = "jix", name = "errstate")]
 pub struct ErrState {
-    all: Option<ArithErrorMode>,
-    divide: Option<ArithErrorMode>,
+    all: Option<ArithmeticErrorMode>,
+    divide: Option<ArithmeticErrorMode>,
     old: Vec<Modes>,
 }
 

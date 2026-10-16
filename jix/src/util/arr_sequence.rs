@@ -4,7 +4,7 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{OpStatus, Result};
+use crate::error::{ArithmeticOpStatus, Result};
 use crate::storage::{
     max_itemsize, n_operands_mul, n_operands_sum, ArraySpec, ArrayStorageTyped,
     ElementwisePipelineImpl, Operand, StridedBuf,
@@ -164,7 +164,7 @@ pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> 
     >(
         &'s self,
         offset: usize,
-        status: &mut OpStatus,
+        status: &mut ArithmeticOpStatus,
         simd: V,
     ) -> impl Iterator<Item = ArraysT::ItemSequence<'s>> + 's;
 }
@@ -255,7 +255,7 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>;
             >(
                 &'s self,
                 offset: usize,
-                status: &mut OpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: V,
             ) -> impl Iterator<Item = [S::Item; N]> + 's {
                 let items = self.inners.each_ref().map_inline(|inner| unsafe {
@@ -355,7 +355,7 @@ impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [A
             >(
                 &'s self,
                 offset: usize,
-                status: &mut OpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: V,
             ) -> impl Iterator<Item = [S::Item; N]> + 's {
                 let items = self.inners.each_ref().map_inline(|inner| unsafe {
@@ -462,7 +462,7 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
             >(
                 &'s self,
                 offset: usize,
-                status: &mut OpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: V,
             ) -> impl Iterator<Item = &'s [S::Item]> + 's {
                 let narrays = self.inners.len();
@@ -589,7 +589,7 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
             >(
                 &'s self,
                 offset: usize,
-                status: &mut OpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: V,
             ) -> impl Iterator<Item = &'s [S::Item]> + 's {
                 let narrays = self.inners.len();
@@ -727,7 +727,7 @@ macro_rules! impl_array_sequence_for_tuple {
                     }
 
                     #[inline(always)]
-                    unsafe fn read_bulk_as_iter<'s, const N: usize, const CONTIGUOUS: bool, V: fearless_simd::Simd>(&'s self, offset: usize, status: &mut OpStatus, simd: V) -> impl Iterator<Item = ($($S::Item,)+)> + 's {
+                    unsafe fn read_bulk_as_iter<'s, const N: usize, const CONTIGUOUS: bool, V: fearless_simd::Simd>(&'s self, offset: usize, status: &mut ArithmeticOpStatus, simd: V) -> impl Iterator<Item = ($($S::Item,)+)> + 's {
                         let items = ($(
                             unsafe { self.$idx.read_bulk::<N, CONTIGUOUS, _>(offset, status, simd) },
                         )+);
