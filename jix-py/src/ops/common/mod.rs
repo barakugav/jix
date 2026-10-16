@@ -67,7 +67,6 @@ macro_rules! define_op1 {
         dispatch = { $($dispatch:tt)* }
     ) => {
         $(#[$meta])*
-        #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
@@ -173,7 +172,6 @@ macro_rules! define_op2 {
         dispatch = { $($dispatch:tt)* }
     ) => {
         $(#[$meta])*
-        #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
         pub fn $name<'py>(
             a: &pyo3::Bound<'py, pyo3::PyAny>,

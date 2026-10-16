@@ -102,7 +102,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --interpreter 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
+          args: --release --generate-stubs --out dist --interpreter 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
           manylinux: auto
           working-directory: jix-py
       - name: Upload wheels
@@ -134,7 +134,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --interpreter 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
+          args: --release --generate-stubs --out dist --interpreter 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
           manylinux: musllinux_1_2
           working-directory: jix-py
       - name: Upload wheels
@@ -189,7 +189,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --interpreter ${{ join(matrix.platform.python-version, ' ') }}
+          args: --release --generate-stubs --out dist --interpreter ${{ join(matrix.platform.python-version, ' ') }}
           working-directory: jix-py
       - name: Upload wheels
         uses: actions/upload-artifact@v7
@@ -223,7 +223,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --interpreter 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
+          args: --release --generate-stubs --out dist --interpreter 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
           working-directory: jix-py
       - name: Upload wheels
         uses: actions/upload-artifact@v7
@@ -266,7 +266,7 @@ jobs:
         run: uv pip install -e . --system
         working-directory: jix-py
       - name: Generate .pyi stubs
-        run: cargo run --bin generate_pyi
+        run: maturin generate-stubs --out python
         working-directory: jix-py
       - name: Build site
         run: mkdocs build --strict

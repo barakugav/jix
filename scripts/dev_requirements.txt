@@ -1,4 +1,4 @@
-maturin~=1.13
+maturin~=1.15
 mkdocs~=1.6
 mkdocs-material~=9.7
 mkdocstrings[python]~=1.0

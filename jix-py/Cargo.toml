@@ -13,19 +13,15 @@ categories = ["data-structures", "compression", "science"]
 
 [lib]
 name = "jix"
-crate-type = [
-    "cdylib",
-    "rlib",   # Required by generate_pyi
-]
+crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = "0.29.3"
+pyo3 = { version = "=0.30.1", features = ["experimental-inspect"] }
 jix_core = { package = "jix", path = "../jix", version = "=0.0.5", features = [
     "half",
     "num-complex",
 ] }
-numpy = { version = "0.29", features = ["half"] }
-pyo3-stub-gen = "0.23.1"
+numpy = { version = "0.30", features = ["half"] }
 arrayvec = "0.7"
 ndarray = "0.17.0"
 

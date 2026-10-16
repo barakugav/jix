@@ -45,7 +45,6 @@ use crate::Array;
 ///     y = jix.compact(np.array([7, 8, 9], dtype=np.int32))
 ///     assert np.array_equal(jix.where(cond, x, y).numpy(), [[0, 8, 0], [7, 0, 9]])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyo3::pyfunction]
 #[pyo3(name = "where")]
 pub fn r#where<'py>(
@@ -65,7 +64,7 @@ pub fn r#where<'py>(
         .into_typed::<bool>()
         .into_py_result()?;
     let x_py = x.into_py_array(py)?;
-    let np_dtype = x_py.get().dtype(py)?;
+    let np_dtype = x_py.get().numpy_dtype(py)?;
     let x = x_py.get().to_core();
     let y = y.into_array()?;
 

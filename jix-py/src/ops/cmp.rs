@@ -400,7 +400,6 @@ define_op2!(
 ///     result_f = jix.clamp(b, min=0.0, max=1.0)
 ///     assert np.allclose(result_f.numpy(), [0.0, 0.3, 1.0])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyo3::pyfunction(signature = (array, min=None, max=None))]
 pub fn clamp<'py>(
     array: &Bound<'py, PyAny>,
@@ -572,7 +571,6 @@ pub fn clamp<'py>(
 ///     result = jix.isclose(g, h, rtol=0.0, atol=complex(0.02, 0.2))
 ///     assert np.array_equal(result.numpy(), [True])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyo3::pyfunction(signature = (a, b, rtol, atol))]
 pub fn isclose<'py>(
     a: &Bound<'py, PyAny>,

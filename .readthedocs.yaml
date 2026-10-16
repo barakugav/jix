@@ -8,7 +8,7 @@ build:
   jobs:
     post_install:
       - cd jix-py && pip install -e .
-      - cd jix-py && cargo run --bin generate_pyi
+      - cd jix-py && maturin generate-stubs --out python
 
 mkdocs:
   configuration: jix-py/mkdocs.yml

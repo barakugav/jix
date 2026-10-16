@@ -291,7 +291,6 @@ define_op1!(
 ///     assert np.isneginf(result_b.numpy()[0])
 ///     assert np.isnan(result_b.numpy()[1])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyo3::pyfunction(signature = (array, base=None))]
 pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<crate::Array> {
     struct LogArgs {

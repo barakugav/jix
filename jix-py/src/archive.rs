@@ -6,6 +6,7 @@ use pyo3::types::{PyBytes, PyDict};
 
 use crate::array::resolve_array_params;
 use crate::ops::asarray;
+use crate::type_hint::ArchiveValidation;
 use crate::util::IntoPyResult;
 use crate::Array;
 
@@ -76,7 +77,6 @@ use crate::Array;
 ///     buf.seek(0)
 ///     d = jix.read_array(buf)
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (
     path_or_reader,
@@ -94,22 +94,11 @@ pub fn read_array(
     offset: Option<u64>,
     len: Option<u64>,
     mmap: bool,
-    #[gen_stub(override_type(type_repr="typing.Optional[typing.Literal['minimal', 'strict']]", imports=("typing")))]
-    validation: Option<String>,
+    validation: Option<ArchiveValidation>,
 ) -> PyResult<Array> {
     let params = resolve_array_params(py, params)?;
     let path_or_reader = PathOrReader::from_pyany(path_or_reader)?;
-    let validation = match validation.as_deref() {
-        None => jix_core::ArchiveValidation::default(),
-        Some("minimal") => jix_core::ArchiveValidation::Minimal,
-        Some("strict") => jix_core::ArchiveValidation::Strict,
-        _ => {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "invalid validation value: '{}'",
-                validation.unwrap_or_default()
-            )))
-        }
-    };
+    let validation = validation.map(|v| v.0).unwrap_or_default();
 
     match path_or_reader {
         PathOrReader::Path(path) => py.detach(|| {
@@ -202,7 +191,6 @@ pub fn read_array(
 ///     with open("modified.jix", "wb") as f:
 ///         jix.write_array(view, f)
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, path_or_writer, *, append=false, params=None))]
 pub fn write_array(
