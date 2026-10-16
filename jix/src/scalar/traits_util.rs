@@ -244,8 +244,8 @@ macro_rules! define_scalar_op2_trait {
             fn $f(self, rhs: Rhs, status: &mut crate::error::ArithmeticOpStatus) -> Self::Output;
 
             #[doc = concat!(
-                "Apply [`", stringify!($f), "`](Self::", stringify!($f), ") on each pair of `xs` and ",
-                "`ys`, vectorized with `simd` where the types have SIMD support."
+                "Apply [`", stringify!($f), "`](Self::", stringify!($f), ") on each pair of ",
+                "`xs` and `ys`, vectorized with `simd` where the types have SIMD support."
             )]
             #[inline(always)]
             fn $f_bulk<const N: usize, S: fearless_simd::Simd>(

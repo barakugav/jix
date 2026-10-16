@@ -51,13 +51,21 @@ Deferred.
 
 ## Implementation
 
-- **Scalar path**: a rare error goes to an out-of-line `#[cold]` function that sets the status
-  (e.g. integer `Div`). The opaque call also keeps LLVM from if-converting a loop that has no
-  SIMD instruction (integer division) into scalarized vector code. A check that is cheap
-  and branch-free, like `x < 0` for `Sqrt`, uses `ArithmeticOpStatus::set_if` directly, which
-  LLVM can still vectorize.
-- **SIMD path**: each vector ORs a cheap predicate into a mask; once per bulk, a non-empty mask
-  calls an out-of-line function that classifies the bulk's elements exactly. For `Sqrt`
-  the predicate is exact, so the mask sets the status directly.
-- The status lives in a register during a loop and is checked once per read, in
-  `to_buf_type_erased(_dyn)`.
+The rules below come from reading the generated assembly and A/B benchmarks against a version
+without the checks.
+
+- The status of a loop must stay in a register. Never pass `&mut status` (or a bulk's input
+  arrays) to an out-of-line function: the pointer forces the status, or the arrays, into memory
+  on every iteration. Out-of-line functions return the status bits by value instead.
+- **Scalar path.** A rare error branches to an out-of-line `#[cold]` function. For integer
+  `Div` the opaque call is required: without it LLVM if-converts the loop into vector code with
+  a scalarized division per lane, which measured up to 2x slower. A call that returns the status
+  by value is still opaque enough. A check that is cheap and
+  branch-free, like `x < 0` for `Sqrt` or the negative exponent of `Pow`, uses
+  `ArithmeticOpStatus::set_if` directly, which LLVM can still vectorize.
+- **SIMD path.** When the predicate is exact (`Sqrt`), OR it into a mask per vector and test the
+  mask once per bulk. When it is a superset (float `Div`), test it per vector and classify the
+  rare vector that has a hit out of line, from a copy of its lanes. Order the tests so the common
+  case is a single test: `!is_finite(r)` first, and only then the NaN-operand filter, so NaN
+  inputs do not reach the out-of-line classification.
+- The status is checked once per read, in `to_buf_type_erased(_dyn)`.

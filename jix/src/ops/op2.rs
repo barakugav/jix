@@ -458,18 +458,20 @@ pub(crate) mod _traits {
     /// Out of line on purpose. Besides keeping the rare path out of the loop, the opaque call
     /// keeps LLVM from if-converting the loop to vector code: integer division has no SIMD
     /// instruction, so it would scalarize each division with lane extracts and inserts and a
-    /// branch per lane, which measured up to 2x slower (`i16`) than this scalar loop. It must
-    /// have a side effect, the status, or LLVM folds the call away.
+    /// branch per lane, which measured up to 2x slower (`i16`) than this scalar loop. The status
+    /// is returned rather than set through a pointer, which would take the caller's status out of
+    /// a register for the whole loop (measured up to 15% slower on strided reads).
     #[cold]
     #[inline(never)]
-    fn int_div_error<T: Default + PartialEq>(lhs: T, rhs: T, status: &mut ArithmeticOpStatus) -> T {
+    fn int_div_error<T: Default + PartialEq>(lhs: T, rhs: T) -> (T, ArithmeticOpStatus) {
+        let mut status = ArithmeticOpStatus::default();
         if rhs == T::default() {
             status.set_if(ArithmeticErrorKind::DivideByZero, true);
-            T::default()
+            (T::default(), status)
         } else {
             // `MIN / -1`: `MIN`, as numpy.
             status.set_if(ArithmeticErrorKind::Overflow, true);
-            lhs
+            (lhs, status)
         }
     }
 
@@ -482,7 +484,11 @@ pub(crate) mod _traits {
                 fn div(self, rhs: Self, status: &mut ArithmeticOpStatus) -> Self {
                     match self.checked_div(rhs) {
                         Some(q) => q,
-                        None => int_div_error(self, rhs, status),
+                        None => {
+                            let (q, error) = int_div_error(self, rhs);
+                            *status |= error;
+                            q
+                        }
                     }
                 }
             }
@@ -490,16 +496,16 @@ pub(crate) mod _traits {
     }
     impl_int_div!(i8, i16, i32, i64, u8, u16, u32, u64);
 
-    /// The error of a float division `a / b` whose result is not finite, if any, as numpy:
-    /// `x / 0` with a finite non-zero `x` is a division by zero, `0 / 0` and `inf / inf` are
-    /// invalid, and an infinite result (`r_is_inf`, in the operands' type) of finite operands is
-    /// an overflow. NaN operands propagate silently, and so do infinite operands otherwise.
-    #[cold]
-    #[inline(never)]
-    fn float_div_error(a: f64, b: f64, r_is_inf: bool, status: &mut ArithmeticOpStatus) {
+    /// The error of a float division `a / b`, if any, as numpy: `x / 0` with a finite non-zero
+    /// `x` is a division by zero, `0 / 0` and `inf / inf` are invalid, and an infinite result
+    /// (`r_is_inf`, in the operands' type) of finite operands is an overflow. NaN operands
+    /// propagate silently, and so do infinite operands otherwise.
+    #[inline(always)]
+    fn float_div_error(a: f64, b: f64, r_is_inf: bool) -> ArithmeticOpStatus {
         use ArithmeticErrorKind::*;
+        let mut status = ArithmeticOpStatus::default();
         if a.is_nan() || b.is_nan() {
-            return;
+            return status;
         }
         let error = if b == 0.0 {
             if a == 0.0 {
@@ -515,19 +521,32 @@ pub(crate) mod _traits {
         if let Some(error) = error {
             status.set_if(error, true);
         }
+        status
     }
 
-    /// [`float_div_error`] of each pair of `xs` and `ys`, the cold path of a SIMD bulk.
+    /// [`float_div_error`] out of line, the cold path of a scalar division.
+    ///
+    /// The status is returned rather than set through a pointer: a pointer would take the
+    /// caller's status out of a register for the whole loop.
     #[cold]
     #[inline(never)]
-    fn float_div_errors<T>(xs: &[T], ys: &[T], status: &mut ArithmeticOpStatus)
+    fn float_div_error_cold(a: f64, b: f64, r_is_inf: bool) -> ArithmeticOpStatus {
+        float_div_error(a, b, r_is_inf)
+    }
+
+    /// [`float_div_error`] of each pair of `xs` and `ys`, the cold path of a SIMD vector.
+    #[cold]
+    #[inline(never)]
+    fn float_div_errors<T>(xs: &[T], ys: &[T]) -> ArithmeticOpStatus
     where
         T: Copy + Into<f64> + core::ops::Div<Output = T>,
     {
+        let mut status = ArithmeticOpStatus::default();
         for (&a, &b) in xs.iter().zip(ys) {
             let r: f64 = (a / b).into();
-            float_div_error(a.into(), b.into(), r.is_infinite(), status);
+            status |= float_div_error(a.into(), b.into(), r.is_infinite());
         }
+        status
     }
 
     macro_rules! impl_float_div {
@@ -537,9 +556,10 @@ pub(crate) mod _traits {
                 #[inline(always)]
                 fn div(self, rhs: Self, status: &mut ArithmeticOpStatus) -> Self {
                     let r = self / rhs;
-                    // Errors give non-finite results, and NaN operands are never one.
-                    if !r.is_finite() & !self.is_nan() & !rhs.is_nan() {
-                        float_div_error(self.into(), rhs.into(), r.is_infinite(), status);
+                    // Errors give non-finite results, and NaN operands are never one. The
+                    // finiteness test first: the common no-error case is a single test.
+                    if !r.is_finite() && !self.is_nan() && !rhs.is_nan() {
+                        *status |= float_div_error_cold(self.into(), rhs.into(), r.is_infinite());
                     }
                     r
                 }
@@ -552,11 +572,7 @@ pub(crate) mod _traits {
                     simd: S,
                 ) -> [Self; N] {
                     use fearless_simd::{SimdBase, SimdFloat, SimdMask};
-                    type Mask<S> =
-                        <<$t as crate::scalar::simd::SimdElementExt>::V<S> as SimdBase<S>>::Mask;
-                    // The lanes that may hold an error, as in `div`. A single mask OR per
-                    // vector, and the rare bulk that has one is classified out of line.
-                    let mut maybe_error = Mask::<S>::splat(simd, false);
+                    let mut errors = ArithmeticOpStatus::default();
                     let zs = crate::scalar::simd::map_vectors2::<Self, Self, Self, N, S>(
                         xs,
                         ys,
@@ -565,14 +581,24 @@ pub(crate) mod _traits {
                         #[inline(always)]
                         |a, b| {
                             let r = a / b;
-                            maybe_error |= !r.is_finite() & !(a.is_nan() | b.is_nan());
+                            // Errors give non-finite results: a single test per vector. A
+                            // vector that has one, rare, is checked for lanes with non-NaN
+                            // operands, which are classified out of line and from a copy, so
+                            // the operands stay in registers. NaN operands are not errors.
+                            if (!r.is_finite()).to_bitmask() != 0 {
+                                let maybe_error = !r.is_finite() & a.simd_eq(a) & b.simd_eq(b);
+                                if maybe_error.to_bitmask() != 0 {
+                                    errors |= float_div_errors(
+                                        a.to_array().as_ref(),
+                                        b.to_array().as_ref(),
+                                    );
+                                }
+                            }
                             r
                         },
                         simd,
                     );
-                    if maybe_error.to_bitmask() != 0 {
-                        float_div_errors(&xs, &ys, status);
-                    }
+                    *status |= errors;
                     zs
                 }
             }
@@ -591,13 +617,14 @@ pub(crate) mod _traits {
             let r = f16::from_f32(self.to_f32() / rhs.to_f32());
             #[cfg(all(target_arch = "aarch64", target_feature = "fp16"))]
             let r = self / rhs;
-            if !r.is_finite() & !self.is_nan() & !rhs.is_nan() {
-                float_div_error(self.into(), rhs.into(), r.is_infinite(), status);
+            if !r.is_finite() && !self.is_nan() && !rhs.is_nan() {
+                *status |= float_div_error_cold(self.into(), rhs.into(), r.is_infinite());
             }
             r
         }
     }
 
+    #[cfg(feature = "num-complex")]
     macro_rules! impl_complex_div {
         ($($t:ty),*) => {$(
             impl Div for $t {
@@ -629,30 +656,24 @@ pub(crate) mod _traits {
         with_status,
     );
 
-    /// A negative exponent of an integer base: `0`, and an invalid operation. Out of line, as
-    /// [`int_div_error`].
-    #[cold]
-    #[inline(never)]
-    fn int_negative_exponent<T: Default>(status: &mut ArithmeticOpStatus) -> T {
-        status.set_if(ArithmeticErrorKind::InvalidOperation, true);
-        T::default()
-    }
-
     macro_rules! impl_int_pow {
         ($($t:ty),*) => {$(
             impl_int_pow!(@impl $t, [u8, u16, u32], |a, b, _status| a.wrapping_pow(b as u32));
+            // A negative exponent gives `0`, and an invalid operation. Branch-free: a power has no
+            // SIMD instruction to be if-converted into, unlike a division.
             impl_int_pow!(@impl $t, [i8, i16, i32], |a, b, status| {
-                if b < 0 {
-                    int_negative_exponent(status)
-                } else {
-                    a.wrapping_pow(b as u32)
-                }
+                let negative = b < 0;
+                status.set_if(ArithmeticErrorKind::InvalidOperation, negative);
+                let r = a.wrapping_pow(if negative { 0 } else { b as u32 });
+                if negative { 0 } else { r }
             });
             impl_int_pow!(@impl $t, [i64], |a, b, status| {
-                if b < 0 {
-                    int_negative_exponent(status)
-                } else if let Ok(b) = u32::try_from(b) {
+                let negative = b < 0;
+                status.set_if(ArithmeticErrorKind::InvalidOperation, negative);
+                let r = if let Ok(b) = u32::try_from(b) {
                     a.wrapping_pow(b)
+                } else if negative {
+                    1
                 } else {
                     // `wrapping_pow` by squaring, for an exponent beyond `u32`.
                     let (mut acc, mut base, mut exp) = (1 as $t, a, b as u64);
@@ -664,7 +685,8 @@ pub(crate) mod _traits {
                         exp >>= 1;
                     }
                     acc
-                }
+                };
+                if negative { 0 } else { r }
             });
         )*};
         (@impl $t:ty, [$($rhs:ty),*], |$a:ident, $b:ident, $status:ident| $f:expr) => {$(
@@ -1262,7 +1284,10 @@ pub(crate) mod tests {
                 assert!(ctx.take_warnings().is_empty());
 
                 let mut ctx = q.read_ctx();
-                ctx.set_arithmetic_error_mode(ArithmeticErrorKind::Overflow, ArithmeticErrorMode::Error);
+                ctx.set_arithmetic_error_mode(
+                    ArithmeticErrorKind::Overflow,
+                    ArithmeticErrorMode::Error,
+                );
                 let err = q.to_ndarray_sub::<ndarray::Ix1>(&[0..3], &ctx).unwrap_err();
                 assert_eq!(err.kind(), ErrorKind::Arithmetic);
             )*};
@@ -1477,8 +1502,10 @@ pub(crate) mod tests {
                     ] {
                         // In the bulk part of the loop, and in its scalar tail.
                         for i in [300, n - 1] {
-                            let mut nd_a = ndarray::Array1::from_shape_fn(n, |i| c((i % 100) as f64));
-                            let mut nd_b = ndarray::Array1::from_shape_fn(n, |i| c((i % 7 + 1) as f64));
+                            let mut nd_a =
+                                ndarray::Array1::from_shape_fn(n, |i| c((i % 100) as f64));
+                            let mut nd_b =
+                                ndarray::Array1::from_shape_fn(n, |i| c((i % 7 + 1) as f64));
                             (nd_a[i], nd_b[i]) = (x, y);
                             let q = Array::compact_ndarray(&nd_a).unwrap()
                                 / Array::compact_ndarray(&nd_b).unwrap();
@@ -1508,9 +1535,13 @@ pub(crate) mod tests {
 
                             // Ignored: the IEEE values.
                             ctx.set_arithmetic_error_mode(error, ArithmeticErrorMode::Ignore);
-                            let res = q.to_ndarray_sub::<ndarray::Ix1>(&[0..n as u64], &ctx).unwrap();
-                            let expected = ndarray::Zip::from(&nd_a).and(&nd_b).map_collect(|&x, &y| x / y);
-                            assert!(res.iter().zip(&expected).all(|(r, e)| r == e || r.is_nan() && e.is_nan()), "{what}");
+                            let res = q
+                                .to_ndarray_sub::<ndarray::Ix1>(&[0..n as u64], &ctx)
+                                .unwrap();
+                            let expected =
+                                ndarray::Zip::from(&nd_a).and(&nd_b).map_collect(|&x, &y| x / y);
+                            let same = |(r, e): (&$t, &$t)| r == e || r.is_nan() && e.is_nan();
+                            assert!(res.iter().zip(&expected).all(same), "{what}");
                         }
                     }
                 }

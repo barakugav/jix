@@ -790,16 +790,23 @@ define_op1!(
     /// # Examples
     /// ```
     /// use jix::Array;
+    /// use jix::error::{ArithmeticErrorKind, ArithmeticErrorMode};
     /// use ndarray::{array, Ix1};
     ///
     /// let a = Array::compact_ndarray(&array![4.0f32, 9.0, 16.0])?;
     /// let result = a.sqrt().to_ndarray()?;
     /// assert_eq!(result, array![2.0, 3.0, 4.0]);
     ///
-    /// // Negative input produces NaN.
-    /// let b = Array::compact_ndarray(&array![-1.0f32])?;
-    /// let result = b.sqrt().to_ndarray::<Ix1>()?;
-    /// assert!(result[[0]].is_nan());
+    /// // A negative input is an invalid operation, which fails the read by default.
+    /// let b = Array::compact_ndarray(&array![-1.0f32])?.sqrt();
+    /// assert!(b.to_ndarray::<Ix1>().is_err());
+    /// // Ignored, it produces NaN.
+    /// let mut ctx = b.read_ctx();
+    /// ctx.set_arithmetic_error_mode(
+    ///     ArithmeticErrorKind::InvalidOperation,
+    ///     ArithmeticErrorMode::Ignore,
+    /// );
+    /// assert!(b.to_ndarray_sub::<Ix1>(&[0..1], &ctx)?[[0]].is_nan());
     /// # Ok::<(), jix::Error>(())
     /// ```
     Sqrt,
@@ -1667,7 +1674,9 @@ pub(crate) mod tests {
                                 ArithmeticErrorKind::InvalidOperation,
                                 ArithmeticErrorMode::Ignore,
                             );
-                            let res = r.to_ndarray_sub::<ndarray::Ix1>(&[0..n as u64], &ctx).unwrap();
+                            let res = r
+                                .to_ndarray_sub::<ndarray::Ix1>(&[0..n as u64], &ctx)
+                                .unwrap();
                             assert!(res[i].is_nan(), "{what}");
                         }
                     }
