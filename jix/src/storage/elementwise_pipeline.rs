@@ -461,7 +461,7 @@ fn compute_need_staging(
 /// A temporary buffer used to stage a chunk of an operand data during a pipeline run.
 struct Staging<'a> {
     buf: PoolBuf<'a>,
-    copier: NdCopier<'a>,
+    copier: NdCopier,
 
     // last (src, n, stride) used to fill the buffer
     filled_with: Option<(*const u8, usize, usize)>,

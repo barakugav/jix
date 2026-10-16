@@ -1,6 +1,5 @@
 use std::ptr;
 
-use crate::arrayvec::ArrayVec;
 use crate::dtype::{Alignment, Dtype, Itemsize};
 use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 
@@ -13,19 +12,10 @@ use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 /// byte-wise fallback for everything else. Each [`copy`](Self::copy) then moves one region by
 /// driving an [`NdIterUnordered`] over `shape` (which sorts, coalesces and walks the dims) and
 /// copying one contiguous-or-strided inner loop at each visited position.
-pub(crate) struct NdCopier<'a>(NdCopierInner<'a>);
+pub(crate) struct NdCopier(NdCopyFn);
 
-enum NdCopierInner<'a> {
-    Simple(NdCopyFn),
-    Struct(NdCopierStruct<'a>),
-}
 type NdCopyFn = unsafe fn(NdCopyArgs);
 type InnerLoopFn<T> = unsafe fn(PtrNoalias<'_, T>, PtrMutNoalias<'_, T>, usize, usize, usize);
-struct NdCopierStruct<'a> {
-    scalar_fns: ArrayVec<NdCopyFn, 4>,
-    offsets: ArrayVec<Itemsize, 4>,
-    dtypes: ArrayVec<&'a Dtype, 4>,
-}
 struct NdCopyArgs<'a> {
     src: PtrNoalias<'a, u8>,
     dst: PtrMutNoalias<'a, u8>,
@@ -35,64 +25,17 @@ struct NdCopyArgs<'a> {
     dtype: &'a Dtype,
 }
 
-impl<'a> NdCopier<'a> {
-    #[inline(always)]
-    pub(crate) fn new(dtype: &'a Dtype) -> Self {
-        match Self::create_scalar_fn(dtype) {
-            Some(f) => Self(NdCopierInner::Simple(f)),
-            None => Self::new_slow(dtype),
-        }
-    }
-
-    fn new_slow(dtype: &'a Dtype) -> Self {
-        #[inline]
-        fn collect_struct_fields<'a>(
-            mut copier: NdCopierStruct<'a>,
-            offset: Itemsize,
-            dtype: &'a Dtype,
-        ) -> Option<NdCopierStruct<'a>> {
-            if dtype.try_to_scalar().is_some() {
-                if copier.scalar_fns.is_full() {
-                    return None;
-                }
-                let scalar_fn = NdCopier::create_scalar_fn(dtype).unwrap();
-                copier.scalar_fns.push(scalar_fn);
-                copier.offsets.push(offset);
-                copier.dtypes.push(dtype);
-                Some(copier)
-            } else if !dtype.shape().is_empty() {
-                None
-            } else if let Some(fields) = dtype.fields() {
-                #[inline(never)] // make collect_struct_fields inlinable
-                fn collect_struct_fields_inner<'a>(
-                    copier: NdCopierStruct<'a>,
-                    offset: Itemsize,
-                    dtype: &'a Dtype,
-                ) -> Option<NdCopierStruct<'a>> {
-                    collect_struct_fields(copier, offset, dtype)
-                }
-
-                for (_f_name, field_offset, field_dtype) in fields {
-                    let field_offset = offset + field_offset;
-                    copier = collect_struct_fields_inner(copier, field_offset, field_dtype)?;
-                }
-                Some(copier)
-            } else {
-                None
-            }
-        }
-
-        let struct_copier = NdCopierStruct {
-            scalar_fns: ArrayVec::new(),
-            offsets: ArrayVec::new(),
-            dtypes: ArrayVec::new(),
-        };
-        let struct_copier = collect_struct_fields(struct_copier, 0, dtype);
-
-        Self(if let Some(struct_copier) = struct_copier {
-            NdCopierInner::Struct(struct_copier)
-        } else {
-            NdCopierInner::Simple(Self::copy_untyped)
+impl NdCopier {
+    #[inline]
+    pub(crate) const fn new(dtype: &Dtype) -> Self {
+        Self(match (dtype.itemsize(), dtype.alignment().as_usize()) {
+            (1, 1) => Self::scalar_fn::<u8>,
+            (2, 2) => Self::scalar_fn::<u16>,
+            (4, 4) => Self::scalar_fn::<u32>,
+            (8, 4) => Self::scalar_fn::<[u32; 2]>,
+            (8, 8) => Self::scalar_fn::<u64>,
+            (16, 8) => Self::scalar_fn::<[u64; 2]>,
+            _ => Self::copy_untyped,
         })
     }
 
@@ -131,25 +74,7 @@ impl<'a> NdCopier<'a> {
             dst_strides,
             dtype,
         };
-        match &self.0 {
-            NdCopierInner::Simple(f) => unsafe { f(args) },
-            NdCopierInner::Struct(struct_copier) => unsafe {
-                Self::copy_struct(struct_copier, args)
-            },
-        }
-    }
-
-    #[inline]
-    const fn create_scalar_fn(dtype: &Dtype) -> Option<unsafe fn(NdCopyArgs)> {
-        Some(match (dtype.itemsize(), dtype.alignment().as_usize()) {
-            (1, 1) => Self::scalar_fn::<u8>,
-            (2, 2) => Self::scalar_fn::<u16>,
-            (4, 4) => Self::scalar_fn::<u32>,
-            (8, 4) => Self::scalar_fn::<[u32; 2]>,
-            (8, 8) => Self::scalar_fn::<u64>,
-            (16, 8) => Self::scalar_fn::<[u64; 2]>,
-            _ => return None,
-        })
+        unsafe { (self.0)(args) }
     }
 
     unsafe fn scalar_fn<T: Copy + 'static>(args: NdCopyArgs) {
@@ -420,34 +345,6 @@ impl<'a> NdCopier<'a> {
             let n = filled.min(total - filled);
             unsafe { ptr::copy_nonoverlapping(dst, dst.add(filled), n) };
             filled += n;
-        }
-    }
-
-    #[inline(never)]
-    unsafe fn copy_struct(struct_copier: &NdCopierStruct, args: NdCopyArgs) {
-        let NdCopyArgs {
-            src,
-            mut dst,
-            shape,
-            src_strides,
-            dst_strides,
-            dtype: _,
-        } = args;
-        for ((f, &offset), field_dtype) in struct_copier
-            .scalar_fns
-            .iter()
-            .zip(struct_copier.offsets.iter())
-            .zip(struct_copier.dtypes.iter())
-        {
-            let field_args = NdCopyArgs {
-                src: unsafe { src.bytes_offset(offset as usize) },
-                dst: unsafe { dst.bytes_offset(offset as usize) },
-                shape,
-                src_strides,
-                dst_strides,
-                dtype: field_dtype,
-            };
-            unsafe { f(field_args) }
         }
     }
 
