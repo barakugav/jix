@@ -49,6 +49,8 @@
 //! - [`Plain`] - adapter for non-compressed data.
 
 use std::ops::Range;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::dtype::Dtyped;
 use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
@@ -134,6 +136,91 @@ impl<'a, S> Clone for View<'a, S> {
         Self(self.0)
     }
 }
+
+macro_rules! impl_array_storage_smart_ptr {
+    ($ptr:ident) => {
+        impl_array_storage_smart_ptr!($ptr, {
+            crate::ops::impl_dimension_change_default!();
+            crate::ops::impl_element_type_change_default!();
+        });
+    };
+    ($ptr:ident, { $($change_items:tt)* }) => {
+        impl<S: ArrayStorage> ArrayStorage for $ptr<S> {
+            type ElementType = S::ElementType;
+            type Dimension = S::Dimension;
+
+            #[inline(always)]
+            fn read_data<'a>(
+                &'a self,
+                index: &[Range<u64>],
+                context: &'a crate::codec::ReadContext,
+                out: Option<&'a mut StridedBuf<'_>>,
+            ) -> crate::error::Result<StridedBuf<'a>> {
+                (**self).read_data(index, context, out)
+            }
+
+            #[allow(refining_impl_trait)]
+            #[inline(always)]
+            fn read_as_elementwise_pipeline<'a, T>(
+                &'a self,
+                index: &[Range<u64>],
+                context: &'a crate::codec::ReadContext,
+            ) -> crate::error::Result<impl ElementwisePipeline<T> + use<'a, T, S>>
+            where
+                T: Dtyped,
+            {
+                (**self).read_as_elementwise_pipeline(index, context)
+            }
+
+            #[inline(always)]
+            fn shape(&self) -> &[u64] {
+                (**self).shape()
+            }
+
+            #[inline(always)]
+            fn dtype(&self) -> &crate::dtype::Dtype {
+                (**self).dtype()
+            }
+
+            #[inline]
+            fn spec(&self) -> ArraySpec<'_> {
+                (**self).spec()
+            }
+
+            fn info(&self) -> ArrayStorageInfo<'_> {
+                (**self).info()
+            }
+
+            #[inline]
+            fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn, crate::DimDyn>> {
+                (**self).as_compact()
+            }
+
+            $($change_items)*
+        }
+    };
+}
+impl_array_storage_smart_ptr!(Box, {
+    type DimensionChange<NewD: crate::Dimension> = Box<S::DimensionChange<NewD>>;
+
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        (*self).dimension_change().map(Box::new)
+    }
+
+    type ElementTypeChange<NewET: ElementType> = Box<S::ElementTypeChange<NewET>>;
+
+    #[inline]
+    fn element_type_change<NewET: ElementType>(
+        self,
+    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+        (*self).element_type_change().map(Box::new)
+    }
+});
+impl_array_storage_smart_ptr!(Rc);
+impl_array_storage_smart_ptr!(Arc);
 
 impl ArrayStorage for &dyn ArrayStorage {
     type ElementType = crate::TypeDyn;
@@ -227,3 +314,47 @@ macro_rules! impl_array_storage_forward {
     };
 }
 pub(crate) use impl_array_storage_forward;
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use ndarray::array;
+
+    use crate::Array;
+
+    #[test]
+    fn smart_ptr_storage() {
+        let nd = array![[1.0f32, -2.0, 3.0], [4.0, 5.0, -6.0]];
+        let compact = || Array::compact_ndarray(&nd).unwrap().into_storage();
+        let expected = &nd + &nd.mapv(|x| -x * 2.0);
+
+        let boxed = Array::from_storage(Box::new(compact()));
+        let rc = Array::from_storage(Rc::new(compact()));
+        let arc = Array::from_storage(Arc::new(compact()));
+
+        assert_eq!(boxed.to_ndarray().unwrap(), nd);
+        assert_eq!(rc.to_ndarray().unwrap(), nd);
+        assert_eq!(arc.to_ndarray().unwrap(), nd);
+
+        let res = (boxed + (-rc).map(|x| x * 2.0f32)).to_ndarray().unwrap();
+        assert_eq!(res, expected);
+        assert_eq!(arc.into_dim::<crate::DimDyn>().unwrap().shape(), &[2, 3]);
+
+        let boxed: Array<Box<crate::storage::Compact<crate::TypeDyn, crate::DimDyn>>> =
+            Array::from_storage(Box::new(compact()))
+                .into_dim::<crate::DimDyn>()
+                .unwrap()
+                .into_type_dyn();
+        let typed = boxed
+            .into_typed::<f32>()
+            .unwrap()
+            .into_dim::<crate::Dim<2>>()
+            .unwrap();
+        assert_eq!(typed.to_ndarray().unwrap(), nd);
+        assert!(Array::from_storage(Box::new(compact()))
+            .into_dim::<crate::Dim<3>>()
+            .is_err());
+    }
+}
