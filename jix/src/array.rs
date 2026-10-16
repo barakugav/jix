@@ -809,7 +809,7 @@ impl<S: ArrayStorage> Array<S> {
                 ))
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides.as_ref()) };
-            self.to_ndarray_buf(index, context, Some(&mut out))?;
+            self.to_ndarray_buf_checked(index, context, Some(&mut out))?;
         }
         Ok(unsafe { array.assume_init() })
     }
@@ -863,7 +863,7 @@ impl<S: ArrayStorage> Array<S> {
         let read_shape = S::Dimension::vec(index.len(), |dim| index[dim].end - index[dim].start);
         let strides = default_strides(&read_shape, dtype.itemsize() as usize);
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides.as_ref()) };
-        self.to_ndarray_buf(index, context, Some(&mut out))?;
+        self.to_ndarray_buf_checked(index, context, Some(&mut out))?;
         Ok(())
     }
 
@@ -955,9 +955,21 @@ impl<S: ArrayStorage> Array<S> {
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
+        check_get_range(self.shape(), index)?;
+        self.to_ndarray_buf_checked(index, context, out)
+    }
+
+    // like `to_ndarray_buf` for an `index` the caller already validated against
+    #[inline]
+    fn to_ndarray_buf_checked<'a>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         let shape = self.shape();
         let dtype = self.dtype();
-        check_get_range(shape, index)?;
+        debug_assert!(check_get_range(shape, index).is_ok());
         check_out_buf(out.as_deref(), shape)?;
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
 
