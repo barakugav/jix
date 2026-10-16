@@ -92,7 +92,7 @@ pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
 
 macro_rules! error {
     ($kind:ident, $($arg:tt)*) => {
-        crate::Error::new(crate::ErrorKind::$kind, format!($($arg)*))
+        crate::Error::new(crate::error::ErrorKind::$kind, format!($($arg)*))
     };
 }
 macro_rules! bail {

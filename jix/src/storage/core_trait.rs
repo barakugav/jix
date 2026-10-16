@@ -162,7 +162,7 @@ pub trait ArrayStorage {
     /// Consume `self`, validate the new element type against the runtime dtype, and return the
     /// re-tagged storage.
     ///
-    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
+    /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
     /// `NewET = Ty<T>` and the runtime dtype does not equal `T::DTYPE`. Always succeeds for
     /// `NewET = TypeDyn`.
     #[doc(hidden)]

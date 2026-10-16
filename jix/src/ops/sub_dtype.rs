@@ -338,7 +338,7 @@ mod tests {
         let err = crate::ops::SubDtype::<_, TypeDyn>::new_array(za.view(), "nothing")
             .map(|_| ())
             .unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+        assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
 
         // The sibling field of a real size is still fine.
         let values = za

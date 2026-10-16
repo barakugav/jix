@@ -4847,6 +4847,6 @@ pub(crate) mod tests {
         )
         .map(|_| ())
         .unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+        assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
     }
 }

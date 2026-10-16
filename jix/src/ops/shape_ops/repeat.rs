@@ -338,7 +338,7 @@ mod tests {
     fn error_dim_out_of_bounds() {
         let a = make(arange(12), [3u64, 4]);
         let err = super::Repeat::new_array(a.view(), 2, 2).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
     }
 
     #[test]
@@ -349,7 +349,7 @@ mod tests {
         let a = make(arange(1), shape);
         assert_eq!(a.shape().len(), NDIM_MAX);
         let err = super::Repeat::new_array(a.view(), 2, 0).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
     }
 
     #[test]
@@ -357,7 +357,7 @@ mod tests {
         // shape[0] * repeats overflows u64
         let a = make(arange(2), [2u64]);
         let err = super::Repeat::new_array(a.view(), u64::MAX, 0).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
     }
 
     // -----------------------------------------------------------------------

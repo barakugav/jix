@@ -934,7 +934,7 @@ impl Array {
         match dtype.try_to_scalar() {
             Some(kind) if !kind.is_bool() => Ok(slf.clone()),
             _ => Err(jix_core::Error::new(
-                jix_core::ErrorKind::UnsupportedDtype,
+                jix_core::error::ErrorKind::UnsupportedDtype,
                 format!("Op positive does not support operands with dtypes [{dtype}]"),
             ))
             .into_py_result(),

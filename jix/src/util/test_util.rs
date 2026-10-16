@@ -1362,12 +1362,13 @@ pub(crate) fn assert_same_elements<T: PartialEq + Debug, const N: usize>(
 }
 
 /// Assert `storage.read_data` rejects an index with the wrong number of dims, a range past the end
-/// of a dim, and a reversed range with [`InvalidIndex`](crate::ErrorKind::InvalidIndex), in both
-/// pull and push mode, rather than panicking or reading.
+/// of a dim, and a reversed range with [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex), in
+/// both pull and push mode, rather than panicking or reading.
 #[track_caller]
 pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
+    use crate::error::ErrorKind;
     use crate::storage::StridedBuf;
-    use crate::{ErrorKind, ReadContext};
+    use crate::ReadContext;
 
     let shape = storage.shape().to_vec();
     let ndim = shape.len();

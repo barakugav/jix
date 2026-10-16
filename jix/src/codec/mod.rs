@@ -405,7 +405,7 @@ impl Default for ReadContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ErrorKind;
+    use crate::error::ErrorKind;
 
     #[test]
     fn level_out_of_i8_range_errors() {
