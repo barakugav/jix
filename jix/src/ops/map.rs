@@ -297,10 +297,8 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        let out = self
-            .read_as_elementwise_pipeline::<O>(index, context)?
-            .to_buf(index, context, out);
-        Ok(out)
+        self.read_as_elementwise_pipeline::<O>(index, context)?
+            .to_buf(index, context, out)
     }
 
     #[inline]
@@ -340,13 +338,14 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
+                status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [T; N] {
                 // The iterator is consumed here and dropped before the next call, as
                 // `read_bulk_as_iter` requires.
                 let mut items = unsafe {
                     self.inner
-                        .read_bulk_as_iter::<N, CONTIGUOUS, _>(offset, simd)
+                        .read_bulk_as_iter::<N, CONTIGUOUS, _>(offset, status, simd)
                 };
                 array_from_fn_inline(|_| {
                     let x = (self.f)(items.next().unwrap());
@@ -765,7 +764,7 @@ mod tests {
         let err = Map::new_array(za, |_: i32| -> [i32; 0] { [] })
             .map(|_| ())
             .unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+        assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
     }
 
     #[test]
@@ -777,7 +776,7 @@ mod tests {
         let err = Map2::new_array(a, b, |_: i32, _: i32| -> [i32; 0] { [] })
             .map(|_| ())
             .unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+        assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
     }
 
     #[test]
@@ -789,7 +788,7 @@ mod tests {
         let err = MapMultiple::new((a, b), |_| -> [i32; 0] { [] })
             .map(|_| ())
             .unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+        assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
     }
 
     #[test]

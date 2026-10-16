@@ -251,7 +251,7 @@ fn unsupported_dtype_error(name: &str, inputs: &[Operand]) -> PyErr {
         .collect::<Vec<_>>()
         .join(", ");
     let err: Result<(), _> = Err(jix_core::Error::new(
-        jix_core::ErrorKind::UnsupportedDtype,
+        jix_core::error::ErrorKind::UnsupportedDtype,
         format!("Op {name} does not support operands with dtypes [{operands}]"),
     ));
     err.into_py_result().unwrap_err()

@@ -224,7 +224,7 @@ mod tests {
     fn error_dim_out_of_bounds() {
         let a = make(arange(12), [3u64, 4]);
         let err = super::Roll::new_array(a.view(), 1, 2).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
     }
 
     // -----------------------------------------------------------------------

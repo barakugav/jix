@@ -10,13 +10,15 @@ pub(crate) struct Op2<S1, S2, K> {
 }
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
-    fn apply(&self, a: T1, b: T2) -> Self::Output;
+
+    fn apply(&self, a: T1, b: T2, status: &mut ArithmeticOpStatus) -> Self::Output;
 
     #[inline(always)]
     fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
         &self,
         a: [T1; N],
         b: [T2; N],
+        status: &mut ArithmeticOpStatus,
         simd: S,
     ) -> [Self::Output; N] {
         let _ = simd;
@@ -24,7 +26,7 @@ pub(crate) trait Op2Kernel<T1, T2> {
             a,
             b,
             #[inline(always)]
-            |_, x, y| self.apply(x, y),
+            |_, x, y| self.apply(x, y, status),
         )
     }
 }
@@ -104,10 +106,8 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        let out = self
-            .read_as_elementwise_pipeline::<K::Output>(index, context)?
-            .to_buf(index, context, out);
-        Ok(out)
+        self.read_as_elementwise_pipeline::<K::Output>(index, context)?
+            .to_buf(index, context, out)
     }
 
     #[inline]
@@ -155,11 +155,12 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
+                status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [T; N] {
-                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, simd) };
-                let b = unsafe { self.b.read_bulk::<N, CONTIGUOUS, S>(offset, simd) };
-                let ys = self.kernel.apply_bulk(a, b, simd);
+                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, status, simd) };
+                let b = unsafe { self.b.read_bulk::<N, CONTIGUOUS, S>(offset, status, simd) };
+                let ys = self.kernel.apply_bulk(a, b, status, simd);
 
                 const { assert!(size_of::<K::Output>() == size_of::<T>()) };
                 // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
@@ -207,7 +208,7 @@ where
 {
     type Output = O;
     #[inline(always)]
-    fn apply(&self, a: T1, b: T2) -> Self::Output {
+    fn apply(&self, a: T1, b: T2, _status: &mut ArithmeticOpStatus) -> Self::Output {
         self(a, b)
     }
 }
@@ -229,7 +230,7 @@ macro_rules! define_op2 {
         {
             type Output = <T1 as crate::scalar::$trait<T2>>::Output;
             #[inline(always)]
-            fn apply(&self, a: T1, b: T2) -> Self::Output {
+            fn apply(&self, a: T1, b: T2, _status: &mut ArithmeticOpStatus) -> Self::Output {
                 <T1 as crate::scalar::$trait<T2>>::$kernel_fn(a, b)
             }
 
@@ -238,6 +239,7 @@ macro_rules! define_op2 {
                 &self,
                 a: [T1; N],
                 b: [T2; N],
+                _status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [Self::Output; N] {
                 <T1 as crate::scalar::$trait<T2>>::$bulk_fn(a, b, simd)
@@ -623,7 +625,11 @@ pub(crate) mod tests {
                 ($kernel:ident, $t:ty, $f:expr) => {
                     let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
                     let what = concat!(stringify!($kernel), " ", stringify!($t));
-                    assert_same_elements($kernel.apply_bulk(a, b, simd), |i| $f(a[i], b[i]), what);
+                    assert_same_elements(
+                        $kernel.apply_bulk(a, b, &mut Default::default(), simd),
+                        |i| $f(a[i], b[i]),
+                        what,
+                    );
                 };
             }
             macro_rules! ints {
@@ -657,7 +663,10 @@ pub(crate) mod tests {
                 case!(DivKernel, f32, |x, y| x / y);
                 case!(DivKernel, f64, |x, y| x / y);
                 // Not a multiple of the vector length: scalar.
-                assert_eq!(AddKernel.apply_bulk([1.5f32], [2.0], simd), [3.5]);
+                assert_eq!(
+                    AddKernel.apply_bulk([1.5f32], [2.0], &mut Default::default(), simd),
+                    [3.5]
+                );
             });
         }
         for_each_simd_level!(check);

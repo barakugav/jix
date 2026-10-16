@@ -157,16 +157,19 @@ impl Array {
     ///
     /// The context is taken out of the cache for the lifetime of the returned guard and
     /// returned to it on drop, so successive reads of the same array reuse the same
-    /// decompressor state instead of re-initializing it on every call.
+    /// decompressor state instead of re-initializing it on every call. It is configured with the
+    /// calling thread's arithmetic error modes (see `jix.errstate`); the warnings of the read are
+    /// collected with [`ContextGuard::take_warnings`].
     pub(crate) fn read_ctx(&self) -> PyResult<ContextGuard<'_>> {
         let mut cache = self
             .cache
             .lock()
             .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))?;
-        let context = cache
+        let mut context = cache
             .context
             .take()
             .unwrap_or_else(|| Box::new(self.arr.read_ctx()));
+        crate::error::configure_context_error_modes(&mut context);
         Ok(ContextGuard {
             array: self,
             context: Some(context),
@@ -606,9 +609,9 @@ impl Array {
 
         let should_detach =
             !self.arr.storage().spec().flags().plain_read() || nitems * itemsize > 4096;
-        maybe_detach(py, should_detach, || {
-            let context = self.read_ctx()?;
-            let context = context.as_ref();
+        let warnings = maybe_detach(py, should_detach, || {
+            let context_guard = self.read_ctx()?;
+            let context = context_guard.as_ref();
 
             let mut out = unsafe {
                 StridedBuf::from_raw_parts_mut(
@@ -620,9 +623,10 @@ impl Array {
             };
             self.arr
                 .to_ndarray_buf(&index, context, Some(&mut out))
-                .map(|_| ())
-                .into_py_result()
+                .into_py_result()?;
+            Ok::<_, PyErr>(context_guard.take_warnings())
         })?;
+        crate::error::emit_warnings(py, warnings)?;
 
         Ok(NdArray(np_arr))
     }
@@ -934,7 +938,7 @@ impl Array {
         match dtype.try_to_scalar() {
             Some(kind) if !kind.is_bool() => Ok(slf.clone()),
             _ => Err(jix_core::Error::new(
-                jix_core::ErrorKind::UnsupportedDtype,
+                jix_core::error::ErrorKind::UnsupportedDtype,
                 format!("Op positive does not support operands with dtypes [{dtype}]"),
             ))
             .into_py_result(),
@@ -1545,13 +1549,15 @@ pub fn compact<'py>(
     let params = resolve_array_params(py, params)?;
 
     let array = array.get();
-    let compacted = py.detach(|| {
+    let (compacted, warnings) = py.detach(|| {
         let context = array.read_ctx()?;
-        array
+        let compacted = array
             .arr
             .compact_with(params, context.as_ref())
-            .into_py_result()
+            .into_py_result()?;
+        Ok::<_, PyErr>((compacted, context.take_warnings()))
     })?;
+    crate::error::emit_warnings(py, warnings)?;
 
     Bound::new(py, Array::from_core(compacted.into_any()))
 }
@@ -1670,6 +1676,12 @@ impl Drop for ContextGuard<'_> {
 impl ContextGuard<'_> {
     pub(crate) fn as_ref(&self) -> &ReadContext {
         self.context.as_ref().unwrap()
+    }
+
+    /// The warnings of the reads made with this context, to emit with
+    /// `crate::error::emit_warnings` once the GIL is held.
+    pub(crate) fn take_warnings(&self) -> Vec<jix_core::Error> {
+        self.as_ref().take_warnings()
     }
 }
 

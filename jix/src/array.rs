@@ -187,9 +187,9 @@ impl<T> Array<Compact<Ty<T>>> {
     ///
     /// # Errors
     ///
-    /// - [`TooManyDimensions`](crate::ErrorKind::TooManyDimensions) - `array.ndim()` exceeds
+    /// - [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) - `array.ndim()` exceeds
     ///   [`NDIM_MAX`](crate::NDIM_MAX).
-    /// - [`CodecError`](crate::ErrorKind::CodecError) - compression fails.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - compression fails.
     ///
     /// # Examples
     ///
@@ -589,7 +589,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
     ///
@@ -684,9 +684,9 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`InvalidIndex`](crate::ErrorKind::InvalidIndex) - `index` is out of bounds or
+    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` is out of bounds or
     ///   has a different number of dimensions than the array.
-    /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
     ///
@@ -814,9 +814,9 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`InvalidBufferSize`](crate::ErrorKind::InvalidBufferSize) - `buf` has the wrong
+    /// - [`InvalidBufferSize`](crate::error::ErrorKind::InvalidBufferSize) - `buf` has the wrong
     ///   length for the requested range and dtype.
-    /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
     ///
@@ -883,11 +883,11 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`InvalidIndex`](crate::ErrorKind::InvalidIndex) - `index` has the wrong number of ranges,
-    ///   or a range starts after it ends or reaches past the array shape.
-    /// - [`InvalidArgument`](crate::ErrorKind::InvalidArgument) - `out` is a read-only view, or has
-    ///   a number of strides that does not match the array's dimensions.
-    /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
+    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` has the wrong number
+    ///   of ranges, or a range starts after it ends or reaches past the array shape.
+    /// - [`InvalidArgument`](crate::error::ErrorKind::InvalidArgument) - `out` is a read-only
+    ///   view, or has a number of strides that does not match the array's dimensions.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
     ///
@@ -1089,7 +1089,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
     ///
@@ -1145,7 +1145,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`CodecError`](crate::ErrorKind::CodecError) - compression or decompression fails.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - compression or decompression fails.
     ///
     /// # Examples
     ///
@@ -1173,7 +1173,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`CodecError`](crate::ErrorKind::CodecError) - compression or decompression fails.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - compression or decompression fails.
     ///
     /// ```
     /// use jix::{Array, ArrayParams};
@@ -1668,7 +1668,7 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
+    /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
     /// `NewET = Ty<T>` and `self.dtype() != T::DTYPE`. Always succeeds for `NewET = TypeDyn`.
     #[inline]
     pub fn into_type<NewET>(self) -> Result<Array<S::ElementTypeChange<NewET>>>
@@ -1686,7 +1686,7 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
+    /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
     /// `self.dtype() != T::DTYPE`.
     #[inline]
     pub fn into_typed<T>(self) -> Result<Array<S::ElementTypeChange<Ty<T>>>>
@@ -1723,10 +1723,11 @@ mod tests {
     use crate::array::{ArrayBlockTableStorageBase, Compact};
     use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
+    use crate::error::ErrorKind;
     use crate::storage::block::{BlockSize, BlockTable};
     use crate::storage::StridedBuf;
     use crate::util::{arr_params, cast_slice, DimArray};
-    use crate::{ArrayParams, ArrayStorage, Dimension, ErrorKind, IntoDimension, Ty};
+    use crate::{ArrayParams, ArrayStorage, Dimension, IntoDimension, Ty};
 
     // -----------------------------------------------------------------------
     // compact_ndarray roundtrip helper

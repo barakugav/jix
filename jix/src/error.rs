@@ -71,6 +71,8 @@ pub enum ErrorKind {
     InvalidArchive,
     /// Compression/decompression failure, or invalid compression params/metadata
     CodecError,
+    /// An element-wise operation hit an arithmetic error.
+    Arithmetic,
 }
 
 impl fmt::Debug for Error {
@@ -92,7 +94,7 @@ pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
 
 macro_rules! error {
     ($kind:ident, $($arg:tt)*) => {
-        crate::Error::new(crate::ErrorKind::$kind, format!($($arg)*))
+        crate::Error::new(crate::error::ErrorKind::$kind, format!($($arg)*))
     };
 }
 macro_rules! bail {
@@ -262,6 +264,141 @@ pub(crate) fn check_get_buffer_size(
         return buffer_size_fail(buf_len, required_size, index, dtype);
     }
     Ok(nitems)
+}
+
+/// An arithmetic error an element-wise operation can hit while computing its output.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum ArithmeticErrorKind {
+    /// Division by zero.
+    DivideByZero = 1,
+    /// Overflow occurred during the operation.
+    Overflow = 2,
+    /// Underflow occurred during the operation.
+    Underflow = 4,
+    /// An invalid operation, like NumPy's `invalid` (e.g. a NaN result from non-NaN operands).
+    InvalidOperation = 8,
+}
+
+/// Setting of how to handle arithmetic errors during element-wise operations.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ArithmeticErrorMode {
+    /// Ignore the error, keep a default value for the result.
+    Ignore,
+    /// Warn on the error, but keep the value for the element.
+    Warn,
+    /// Fail the read with an [`ErrorKind::Arithmetic`] error.
+    Error,
+}
+
+pub(crate) struct ArithmeticErrorModes {
+    divide_by_zero: ArithmeticErrorMode,
+    overflow: ArithmeticErrorMode,
+    underflow: ArithmeticErrorMode,
+    invalid_operation: ArithmeticErrorMode,
+}
+impl ArithmeticErrorModes {
+    pub(crate) fn set(&mut self, error: ArithmeticErrorKind, mode: ArithmeticErrorMode) {
+        match error {
+            ArithmeticErrorKind::DivideByZero => self.divide_by_zero = mode,
+            ArithmeticErrorKind::Overflow => self.overflow = mode,
+            ArithmeticErrorKind::Underflow => self.underflow = mode,
+            ArithmeticErrorKind::InvalidOperation => self.invalid_operation = mode,
+        }
+    }
+
+    pub(crate) fn get(&self, error: ArithmeticErrorKind) -> ArithmeticErrorMode {
+        match error {
+            ArithmeticErrorKind::DivideByZero => self.divide_by_zero,
+            ArithmeticErrorKind::Overflow => self.overflow,
+            ArithmeticErrorKind::Underflow => self.underflow,
+            ArithmeticErrorKind::InvalidOperation => self.invalid_operation,
+        }
+    }
+
+    pub(crate) fn check_op_status(
+        &self,
+        status: ArithmeticOpStatus,
+        warnings: &mut Vec<Error>,
+    ) -> Result<()> {
+        let mut raised = None;
+        let kinds = [
+            (ArithmeticErrorKind::DivideByZero, "divide by zero"),
+            (ArithmeticErrorKind::Overflow, "overflow"),
+            (ArithmeticErrorKind::Underflow, "underflow"),
+            (ArithmeticErrorKind::InvalidOperation, "invalid operation"),
+        ];
+        for (kind, description) in kinds {
+            if !status.contains(kind) {
+                continue;
+            }
+            match self.get(kind) {
+                ArithmeticErrorMode::Ignore => {}
+                ArithmeticErrorMode::Warn => {
+                    let warning = create_err(description);
+                    if !warnings.iter().any(|w| w.message() == warning.message()) {
+                        warnings.push(warning);
+                    }
+                }
+                ArithmeticErrorMode::Error => {
+                    raised.get_or_insert_with(|| create_err(description));
+                }
+            }
+
+            fn create_err(description: &str) -> Error {
+                Error::new(
+                    crate::error::ErrorKind::Arithmetic,
+                    format!("{} encountered", description),
+                )
+            }
+        }
+        raised.map_or(Ok(()), Err)
+    }
+}
+impl Default for ArithmeticErrorModes {
+    fn default() -> Self {
+        Self {
+            divide_by_zero: ArithmeticErrorMode::Error,
+            overflow: ArithmeticErrorMode::Warn,
+            underflow: ArithmeticErrorMode::Warn,
+            invalid_operation: ArithmeticErrorMode::Error,
+        }
+    }
+}
+
+/// The [`ArithmeticErrorKind`]s an element-wise computation hit, one bit per error.
+///
+/// Scalar kernels that can hit an error, like [`scalar::Div`](crate::scalar::Div), take a
+/// `&mut ArithmeticOpStatus`: rather than panicking, they produce a fallback value for the element and set
+/// the error's bit. After the computation, the status is checked against the mode configured
+/// in the read context.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ArithmeticOpStatus(u8);
+impl ArithmeticOpStatus {
+    /// Set `error` if `cond` holds.
+    #[inline(always)]
+    pub fn set_if(&mut self, error: ArithmeticErrorKind, cond: bool) {
+        self.0 |= error as u8 * cond as u8;
+    }
+
+    /// Whether `error` is set.
+    #[inline(always)]
+    pub fn contains(self, error: ArithmeticErrorKind) -> bool {
+        (self.0 & error as u8) != 0
+    }
+
+    /// Whether no error is set.
+    #[inline(always)]
+    pub fn is_ok(self) -> bool {
+        self.0 == 0
+    }
+}
+impl std::ops::BitOrAssign for ArithmeticOpStatus {
+    #[inline(always)]
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
 }
 
 #[cfg(test)]
