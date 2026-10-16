@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::ptr::NonNull;
 
 use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 use std::cmp::Reverse;
@@ -464,7 +465,7 @@ struct Staging<'a> {
     copier: NdCopier,
 
     // last (src, n, stride) used to fill the buffer
-    filled_with: Option<(*const u8, usize, usize)>,
+    filled_with: Option<(NonNull<u8>, usize, usize)>,
 }
 
 impl<'a> Staging<'a> {
@@ -489,12 +490,13 @@ impl<'a> Staging<'a> {
     unsafe fn fill_from(&mut self, src: *const u8, n: usize, stride: usize, dtype: &Dtype) {
         #[allow(clippy::collapsible_if)]
         if let Some((prev_src, prev_n, prev_stride)) = self.filled_with {
-            if prev_src == src && prev_n >= n && prev_stride == stride {
+            if prev_src.as_ptr().cast_const() == src && prev_n >= n && prev_stride == stride {
                 return;
             }
         }
         let filled_with_n = if stride > 0 { n } else { usize::MAX };
-        self.filled_with = Some((src, filled_with_n, stride));
+        let src_non_null = NonNull::new(src as *mut u8).unwrap();
+        self.filled_with = Some((src_non_null, filled_with_n, stride));
 
         let itemsize = dtype.itemsize() as usize;
         if stride == 0 {
