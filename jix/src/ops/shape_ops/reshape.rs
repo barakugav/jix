@@ -8,18 +8,8 @@ use crate::IntoDimension;
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// # Dimension tracking
-///
-/// `Reshape<S, D>` is generic over `D: Dimension`, determined by the shape argument type.
-/// Statically-sized arguments encode the output ndim in the type; slice arguments yield
-/// [`DimDyn`](crate::DimDyn):
-///
-/// | Argument type | Output `D` |
-/// |---|---|
-/// | `u64` | `Dim<1>` |
-/// | `[u64; N]` / `&[u64; N]` | `Dim<N>` |
-/// | `(u64, u64, ...)` N-tuple | `Dim<N>` |
-/// | `&[u64]` / `&Vec<u64>` | `DimDyn` |
+/// The new shape can be given as any [`IntoDimension`] argument: a `u64`, an array or tuple of
+/// `u64`, or a slice.
 ///
 /// # Performance
 ///
@@ -34,46 +24,34 @@ use crate::IntoDimension;
 ///
 /// # Examples
 ///
-/// Different argument types select both the new shape and the output dimension type:
-///
 /// ```
-/// use jix::{Array, Dim};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?; // shape [2, 3]
 ///
-/// // [u64; 1] -> output D = Dim<1>: compiler knows the result is 1-D
 /// assert_eq!(a.view().reshape([6u64]).shape(), &[6]);
-///
-/// // (u64, u64) -> output D = Dim<2>: compiler knows the result is 2-D
 /// assert_eq!(a.view().reshape((3u64, 2u64)).shape(), &[3, 2]);
-///
-/// // &[u64] -> output D = DimDyn: ndim only known at runtime
 /// let new_shape = vec![6u64];
 /// assert_eq!(a.view().reshape(new_shape.as_slice()).shape(), &[6]);
 ///
 /// // Elements are the same regardless of argument style
-/// assert_eq!(
-///     a.reshape([6u64]).to_ndarray()?.as_slice().unwrap(),
-///     &[1, 2, 3, 4, 5, 6]
-/// );
+/// assert_eq!(a.reshape([6u64]).to_ndarray()?, array![1, 2, 3, 4, 5, 6]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Reshape<S, D> {
+pub struct Reshape<S> {
     array: S,
 
-    new_shape: D,
+    new_shape: DimDyn,
     spec: ArraySpecDynamic,
 }
-impl<S, D> Reshape<S, D> {
+impl<S> Reshape<S> {
     /// Constructs a [`Reshape`] storage. See the struct docs for semantics and examples.
-    pub fn new<Sh>(array: S, shape: Sh) -> Result<Self>
+    pub fn new(array: S, shape: impl IntoDimension) -> Result<Self>
     where
         S: ArrayStorage,
-        D: Dimension,
-        Sh: IntoDimension<Dimension = D>,
     {
-        let new_shape_raw = shape.into_dimension()?;
+        let new_shape_raw = DimDyn::from_slice(shape.into_dimension()?.as_slice());
         let new_shape = DimArray::from_slice(new_shape_raw.as_slice()).unwrap();
         let orig_shape = DimArray::from_slice(array.shape()).unwrap();
         let nitems = orig_shape.iter().cloned().try_product().unwrap();
@@ -172,22 +150,18 @@ impl<S, D> Reshape<S, D> {
     }
 
     /// Constructs an array with [`Reshape`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Sh>(array: Array<S>, shape: Sh) -> Result<Array<Self>>
+    pub fn new_array(array: Array<S>, shape: impl IntoDimension) -> Result<Array<Self>>
     where
         S: ArrayStorage,
-        D: Dimension,
-        Sh: IntoDimension<Dimension = D>,
     {
         Self::new(array.into_storage(), shape).map(Array::from_storage)
     }
 }
-impl<S, D> ArrayStorage for Reshape<S, D>
+impl<S> ArrayStorage for Reshape<S>
 where
     S: ArrayStorage,
-    D: Dimension,
 {
     type ElementType = S::ElementType;
-    type Dimension = D;
 
     fn read_data<'a>(
         &'a self,
@@ -287,8 +261,7 @@ where
         check_get_range(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
         let dtype = self.dtype();
-        let out_shape =
-            Self::Dimension::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let mut out = materialize_out_buf(
             out,
             context,
@@ -302,18 +275,18 @@ where
         // Gather each matched-dims block into its unmatched-dims byte offset in the destination.
         let (out_buf, out_strides) = out.data_mut();
 
-        let orig_shape = S::Dimension::from_slice(self.array.shape());
+        let orig_shape = DimDyn::from_slice(self.array.shape());
         let new_shape = self.new_shape.as_slice();
         let ndim = new_shape.len();
         let orig_ndim = orig_shape.ndim();
 
-        let orig_logical_strides = default_strides_from_iter::<S::Dimension, _>(
+        let orig_logical_strides = default_strides_from_iter::<DimDyn, _>(
             orig_ndim,
             orig_shape.as_slice().iter().cloned(),
             1,
         );
         let new_logical_strides =
-            default_strides_from_iter::<D, _>(ndim, new_shape.iter().cloned(), 1);
+            default_strides_from_iter::<DimDyn, _>(ndim, new_shape.iter().cloned(), 1);
         let same_logical_stride = (0..new_shape.len())
             .scan(0, |orig_dim_idx, new_dim_idx| {
                 Some(loop {
@@ -334,7 +307,7 @@ where
             })
             .collect::<DimArray<_>>();
         let same_logical_stride_inv = {
-            let mut inv = S::Dimension::vec(orig_ndim, |_| None);
+            let mut inv = dim_arr(orig_ndim, |_| None);
             for (new_dim, &orig_dim) in same_logical_stride.iter().enumerate() {
                 if let Some(orig_dim) = orig_dim {
                     inv[orig_dim as usize] = Some(new_dim as DimIdx);
@@ -359,13 +332,13 @@ where
         // Byte-strides for the inner read, in *original* dim order (so they match the read's
         // shape): a matched orig dim reuses its new dim's output stride; an unmatched orig dim has
         // extent 1 and is never stepped, so its stride is a dummy 0.
-        let orig_strides = S::Dimension::vec(orig_ndim, |dim| match same_logical_stride_inv[dim] {
+        let orig_strides = dim_arr(orig_ndim, |dim| match same_logical_stride_inv[dim] {
             Some(new_dim) => out_strides[new_dim as usize],
             None => 0,
         });
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
-        let iteration_shape = D::vec(ndim, |dim| {
+        let iteration_shape = dim_arr(ndim, |dim| {
             if same_logical_stride[dim].is_some() {
                 1
             } else {
@@ -374,7 +347,7 @@ where
         });
         let iter = NdIter::builder(iteration_shape).build();
         for (idx, ()) in iter {
-            let read_range = S::Dimension::vec(orig_ndim, |dim| {
+            let read_range = dim_arr(orig_ndim, |dim| {
                 if let Some(new_dim) = same_logical_stride_inv[dim] {
                     debug_assert_eq!(idx[new_dim as usize], 0);
                     index[new_dim as usize].clone()
@@ -423,22 +396,7 @@ where
         ArrayStorageInfo::new_deps("Reshape", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = Reshape<S, NewD>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        check_ndim::<NewD>(self.shape().len())?;
-        let new_shape = NewD::from_slice(self.shape());
-
-        Ok(Reshape {
-            array: self.array,
-            new_shape,
-            spec: self.spec,
-        })
-    }
-
-    type ElementTypeChange<NewET: crate::ElementType> = Reshape<S::ElementTypeChange<NewET>, D>;
+    type ElementTypeChange<NewET: crate::ElementType> = Reshape<S::ElementTypeChange<NewET>>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
         self,
@@ -460,17 +418,14 @@ mod tests {
     use crate::array::Array;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{DimDyn, Ty};
+    use crate::Ty;
 
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
     /// Create a 1-D Array<Compact> from `vals` with the given block size.
-    fn make1d<T: crate::dtype::Dtyped>(
-        vals: Vec<T>,
-        block_size: usize,
-    ) -> Array<Compact<Ty<T>, DimDyn>> {
+    fn make1d<T: crate::dtype::Dtyped>(vals: Vec<T>, block_size: usize) -> Array<Compact<Ty<T>>> {
         let nd = ndarray::Array::from_shape_vec(vec![vals.len()], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[block_size])).unwrap()
     }
@@ -481,7 +436,7 @@ mod tests {
         rows: usize,
         cols: usize,
         block_shape: &[usize],
-    ) -> Array<Compact<Ty<T>, DimDyn>> {
+    ) -> Array<Compact<Ty<T>>> {
         let nd = ndarray::Array::from_shape_vec(vec![rows, cols], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(block_shape)).unwrap()
     }
@@ -493,7 +448,7 @@ mod tests {
         d1: usize,
         d2: usize,
         block_shape: &[usize],
-    ) -> Array<Compact<Ty<T>, DimDyn>> {
+    ) -> Array<Compact<Ty<T>>> {
         let nd = ndarray::Array::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(block_shape)).unwrap()
     }
@@ -547,7 +502,7 @@ mod tests {
     #[test]
     fn reshape_wrong_size_errors() {
         let a = make1d(u8s(12), 12);
-        assert!(super::Reshape::new_array(a, &[3, 5]).is_err());
+        assert!(super::Reshape::new_array(a, [3, 5]).is_err());
     }
 
     // -----------------------------------------------------------------------

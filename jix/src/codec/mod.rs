@@ -342,7 +342,7 @@ impl<'a> Decoder<'a> {
 /// // read_ctx() inherits the decoder config from the array.
 /// let ctx = za.read_ctx();
 /// let out = za.to_ndarray_sub(&[1..3], &ctx)?;
-/// assert_eq!(out.as_slice().unwrap(), &[2, 3]);
+/// assert_eq!(out, array![2, 3]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
@@ -355,7 +355,7 @@ impl<'a> Decoder<'a> {
 ///
 /// let za = Array::compact_ndarray(&array![42i32, 17, 6, 99, 51])?;
 /// let out = za.to_ndarray_sub(&[0..3], &ReadContext::default())?;
-/// assert_eq!(out.as_slice().unwrap(), &[42, 17, 6]);
+/// assert_eq!(out, array![42, 17, 6]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///

@@ -7,67 +7,34 @@ use crate::error::{assert_dim, check_ndim, Result};
 /// Maximum number of dimensions supported by the library for an array.
 pub const NDIM_MAX: usize = 8;
 
-/// A type-level representation of the number of dims in an array.
+/// A shape or index value whose number of dims may be known at compile time.
 ///
-/// Every [`ArrayStorage`](crate::ArrayStorage) carries an associated
-/// `type Dimension: Dimension` that records how many dims the array has. The compiler propagates
-/// this through a chain of lazy operations, such as unary and binary operations, and shape changing
-/// operations: `insert_dim`, `remove_dim`, `reshape`, and
-/// reductions all adjust the dimension type of their output. When the argument type is known
-/// statically (e.g. `usize` or `[u64; N]`), the dimension change is encoded in the return type
-/// so callers can reason about shape purely in types.
+/// Arrays always track their number of dims at runtime (see [`Array::shape`](crate::Array::shape)).
+/// `Dimension` only appears in arguments: shapes passed to constructors and shape operations go
+/// through [`IntoDimension`], so they can be given as a `u64`, an array or tuple of `u64`, or a
+/// slice. [`Array::compact_fn`](crate::Array::compact_fn) also uses it to pick the index pattern
+/// its callback receives: a tuple for a tuple shape, `&[u64]` for a slice shape.
 ///
 /// # Two implementors
 ///
-/// There are exactly two types that implement `Dimension`:
+/// - **[`Dim<N>`]** - the ndim is known at compile time. Implemented for `N = 0..=8`.
+/// - **[`DimDyn`]** - the ndim is only known at runtime, stored in a stack-allocated array.
 ///
-/// - **[`Dim<N>`]** - static dimension. The compiler knows `ndim == N` at compile time. The
-///   const generic `N` is the number of dims. Implemented for `N = 0..=8`.
-/// - **[`DimDyn`]** - dynamic dimension. The ndim is only known at runtime, and stored in a
-///   stack-allocated array.
-///
-/// # How operations propagate dimension
-///
-/// Element wise operations (e.g. `+`, `*`, casts) do not change the dimension, so the output
-/// dimension is the same as the input dimension.
-/// Shape-changing operations adjust the dimension either by using the `Smaller` / `Larger`
-/// associated types of the input dimension, or by taking an argument that determines the output
-/// dimension such as `reshape` (that accepts [`IntoDimension`] arguments) or reduction operations
-/// (that accept [`DimsArg`](crate::ops::DimsArg)).
-///
-/// Because `DimDyn::Smaller = DimDyn` and `DimDyn::Larger = DimDyn`, operations on a dynamic
-/// array always return a dynamic array. Use [`Array::into_dim`](crate::Array::into_dim) to
-/// recover static tracking once the ndim becomes known.
-///
-/// # Boundary cases
-///
-/// - `Dim<0>::Smaller = DimDyn` - reducing below zero dimensions has no static representation.
-/// - `Dim<8>::Larger = DimDyn` - exceeding [`NDIM_MAX`] is caught at construction time and
-///   returns an error; the type maps to `DimDyn` to keep the trait implementable.
-///
-/// # Example: static vs dynamic dimension tracking
+/// # Example
 ///
 /// ```
-/// use jix::{Array, Dim};
+/// use jix::Array;
+/// use ndarray::array;
 ///
-/// // Passing a dynamically-dimensioned ndarray produces Array<Compact<DimDyn>>.
-/// // Arrays loaded from files via Array::read_from_file also carry DimDyn.
-/// let a = Array::compact_ndarray(&ndarray::ArrayD::<i32>::zeros(vec![2, 3]))?;
-/// // a: Array<Compact<DimDyn>>
+/// // A tuple shape: the callback receives a `(u64, u64)` index.
+/// let a = Array::compact_fn((2, 3), |(i, j)| i * 10 + j)?;
 ///
-/// // Asserting "I know this is 2-D" converts to static Dim<2>.
-/// // Returns Err if a.ndim() != 2.
-/// let a2d = a.into_dim::<Dim<2>>()?;
+/// // A slice shape: the callback receives a `&[u64]` index.
+/// let b = Array::compact_fn([2u64, 3].as_slice(), |i: &[u64]| i[0] * 10 + i[1])?;
 ///
-/// // insert_dim(0): usize arg -> D::Larger = Dim<3>
-/// let a3d = a2d.insert_dim(0);
-///
-/// // reshape([6u64]): [u64; 1] arg -> Dim<1> output
-/// let flat = a3d.reshape([6u64]);
-///
-/// // reshape(&shape[..]): &[u64] arg -> DimDyn output
-/// let flat_dyn = flat.reshape(&[6u64][..]);
-/// assert_eq!(flat_dyn.shape(), &[6]);
+/// let expected = array![[0, 1, 2], [10, 11, 12]];
+/// assert_eq!(a.to_ndarray()?, expected);
+/// assert_eq!(b.to_ndarray()?, expected);
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
@@ -92,20 +59,6 @@ pub trait Dimension:
     /// This constant is used internally to skip runtime length checks when the ndim is statically
     /// known.
     const NDIM: Option<usize>;
-
-    /// The dimension type that results from removing one dim.
-    ///
-    /// For `Dim<N>` where `N >= 1`: `Dim<N-1>`.
-    /// For `Dim<0>`: `DimDyn` (cannot represent -1 statically).
-    /// For `DimDyn`: `DimDyn` (removing a dim keeps the dimension dynamic).
-    type Smaller: Dimension;
-
-    /// The dimension type that results from adding one dim.
-    ///
-    /// For `Dim<N>` where `N < 8`: `Dim<N+1>`.
-    /// For `Dim<8>`: `DimDyn` (exceeds [`NDIM_MAX`], caught at construction).
-    /// For `DimDyn`: `DimDyn` (adding a dim keeps the dimension dynamic).
-    type Larger: Dimension;
 
     /// The type of the index pattern for this dimension.
     ///
@@ -197,23 +150,14 @@ pub(crate) trait DimVec<T>:
         T: Clone;
 }
 
-/// A dynamically-dimensioned shape whose ndim is only known at runtime.
+/// A shape whose ndim is only known at runtime.
 ///
-/// `DimDyn` stores the shape in a stack-allocated array with capacity [`NDIM_MAX`].
-/// It is the fallback when the number of dims cannot be determined at compile
-/// time: arrays loaded from files, operations that take `&[usize]` dim arguments, and
-/// dimension-changing operations applied to a `DimDyn` array all produce `DimDyn`.
-///
-/// `DimDyn::Smaller = DimDyn` and `DimDyn::Larger = DimDyn`: the dimension type stays
-/// dynamic through any chain of shape-changing operations. Use
-/// [`Array::into_dim`](crate::Array::into_dim) to recover a static [`Dim<N>`] when the ndim
-/// becomes known.
+/// `DimDyn` stores the shape in a stack-allocated array with capacity [`NDIM_MAX`]. It is what a
+/// slice shape argument (`&[u64]`, `&Vec<u64>`) converts to.
 #[derive(Clone)]
 pub struct DimDyn(DimArray<u64>);
 impl Dimension for DimDyn {
     const NDIM: Option<usize> = None;
-    type Smaller = Self;
-    type Larger = Self;
     type Index<'a> = &'a [u64];
     type Vec<T> = DimArray<T>;
 
@@ -289,20 +233,10 @@ impl<T> DimVec<T> for DimArray<T> {
     }
 }
 
-/// A statically-dimensioned shape with exactly `NDIM` dims, known at compile time.
+/// A shape with exactly `NDIM` dims, known at compile time.
 ///
-/// `Dim<N>` is the preferred dimension type when the number of dims is determined by the code
-/// structure rather than runtime data. Passing typed arguments to shape-manipulating operations
-/// (e.g. `[u64; 2]` to `reshape`, `usize` to `insert_dim`) causes the compiler to select
-/// `Dim<N>` automatically, so callers rarely need to name this type explicitly.
-///
-/// # Neighbors
-///
-/// `Dim<N>::Smaller = Dim<N-1>` (for N >= 1; `Dim<0>::Smaller = DimDyn`).
-/// `Dim<N>::Larger  = Dim<N+1>` (for N <= 7; `Dim<8>::Larger  = DimDyn`).
-///
-/// This means that N consecutive `insert_dim(0)` calls on a `Dim<M>` array produce a
-/// `Dim<M+N>` result, as long as `M + N <= 8`.
+/// It is what fixed-size shape arguments (`u64`, `[u64; N]`, tuples of `u64`) convert to, so
+/// callers rarely need to name this type explicitly.
 #[derive(Clone)]
 pub struct Dim<const NDIM: usize>([u64; NDIM]);
 impl<const NDIM: usize> Dim<NDIM> {
@@ -316,14 +250,10 @@ macro_rules! impl_dim {
     (
         $dim:literal,
         $(nd_dim = $nd_dim:ty,)?
-        $(smaller = $smaller:ty,)?
-        $(larger = $larger:ty,)?
         index = { $index:ty, |$to_index_in:ident| $to_index:expr }
     ) => {
         impl Dimension for Dim<$dim> {
             const NDIM: Option<usize> = Some($dim);
-            type Smaller = crate::util::or_else!($({ $smaller })? or { Dim<{ $dim - 1 }> });
-            type Larger = crate::util::or_else!($({ $larger })? or { Dim<{ $dim + 1 }> });
             type Index<'a> = $index;
             type Vec<T> = [T; $dim];
 
@@ -398,7 +328,7 @@ macro_rules! impl_dim {
         }
     };
 }
-impl_dim!(0, smaller = DimDyn, larger = Dim<1>, index = { (), |i| () });
+impl_dim!(0, index = { (), |i| () });
 impl_dim!(1, index = { u64, |i| i[0] });
 impl_dim!(2, index = { (u64, u64), |i| (i[0], i[1]) });
 impl_dim!(3, index = { (u64, u64, u64), |i| (i[0], i[1], i[2]) });
@@ -406,7 +336,7 @@ impl_dim!(4, index = { (u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3]) });
 impl_dim!(5, index = { (u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4]) });
 impl_dim!(6, index = { (u64, u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4], i[5]) });
 impl_dim!(7, nd_dim = ndarray::IxDyn, index = { (u64, u64, u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4], i[5], i[6]) });
-impl_dim!(8, nd_dim = ndarray::IxDyn, smaller = Dim<7>, larger = DimDyn, index = { (u64, u64, u64, u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7]) });
+impl_dim!(8, nd_dim = ndarray::IxDyn, index = { (u64, u64, u64, u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7]) });
 
 /// Conversion into a [`Dimension`] value, encoding the ndim in the type.
 ///
@@ -467,7 +397,7 @@ impl IntoDimension for &[u64] {
 
     #[inline(always)]
     fn into_dimension(self) -> Result<Self::Dimension> {
-        check_ndim::<DimDyn>(self.len())?;
+        check_ndim(self.len())?;
         Ok(DimDyn::from_slice(self))
     }
 }
@@ -573,7 +503,7 @@ impl IntoDimension for ndarray::IxDyn {
     fn into_dimension(self) -> Result<Self::Dimension> {
         let dim = <Self as ndarray::Dimension>::as_array_view(&self);
         let dim = dim.as_slice().unwrap();
-        check_ndim::<DimDyn>(dim.len())?;
+        check_ndim(dim.len())?;
         Ok(DimDyn::from_fn(dim.len(), |i| dim[i] as u64))
     }
 }

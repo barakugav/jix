@@ -4,6 +4,7 @@ use std::ops::Neg;
 
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion};
 use jix::{storage::ArrayStorageTyped, Array};
+use ndarray::Ix2;
 
 use crate::common::{create_data, Profile};
 
@@ -31,7 +32,7 @@ fn bench_op1_impl<S: ArrayStorageTyped<Item = i32>>(
             let array = create_array(data);
             b.iter_batched(
                 || {},
-                |_| array.view().neg().to_ndarray().unwrap().shape().to_vec(),
+                |_| array.view().neg().to_ndarray::<Ix2>().unwrap(),
                 criterion::BatchSize::LargeInput,
             );
         });

@@ -2,24 +2,23 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, check_get_range, check_ndim, Result};
+use crate::error::{check_dtype, check_get_range, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, ElementwisePipeline,
     ElementwisePipelineImpl, Operand, StridedBuf, Ty,
 };
+use crate::util::dim_arr;
 use crate::{
-    cast_slice, cast_slice_mut, ArrayParams, DimBitmap, Dimension, ElementType, IntoDimension,
+    cast_slice, cast_slice_mut, ArrayParams, DimBitmap, DimDyn, Dimension, ElementType,
+    IntoDimension,
 };
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
-/// Every element read from a `Scalar<T, D>` array returns the same value regardless
+/// Every element read from a `Scalar<T>` array returns the same value regardless
 /// of position, making it a zero-copy way to represent constant or filled arrays.
 /// A 0-D `Scalar` (empty `shape`) represents a plain scalar value.
-///
-/// `D: Dimension` tracks the ndim at the type level and follows the same semantics as
-/// [`Compact<ET, D>`](crate::storage::Compact): `D` is inferred from the shape argument type.
 ///
 /// # Examples
 ///
@@ -35,13 +34,13 @@ use crate::{
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Scalar<T, D> {
+pub struct Scalar<T> {
     data: T,
-    shape: D,
+    shape: DimDyn,
     element_type: Ty<T>,
     spec: ArraySpecOwned,
 }
-impl<T, D> Scalar<T, D> {
+impl<T> Scalar<T> {
     /// Create a `Scalar` storage that broadcasts `data` across `shape`.
     ///
     /// `shape` may be empty (producing a 0-D scalar) or any non-empty slice
@@ -51,20 +50,18 @@ impl<T, D> Scalar<T, D> {
     ///
     /// Returns an error if `shape.len()` exceeds the maximum supported number
     /// of dimensions.
-    pub fn new<Sh>(data: T, shape: Sh, mut params: ArrayParams) -> Result<Self>
+    pub fn new(data: T, shape: impl IntoDimension, mut params: ArrayParams) -> Result<Self>
     where
         T: Dtyped,
-        D: Dimension,
-        Sh: IntoDimension<Dimension = D>,
     {
-        let shape = shape.into_dimension()?;
+        let shape = DimDyn::from_slice(shape.into_dimension()?.as_slice());
         let ndim = shape.ndim();
 
         if params.block_shape_fixed_dims.is_none() {
             // A scalar broadcasts over every dimension, so none of them are fixed.
             params.block_shape_fixed_dims = Some(DimBitmap::filled(ndim, false));
             if params.block_shape.is_none() {
-                params.block_shape(D::vec(ndim, |_| 1).as_ref());
+                params.block_shape(dim_arr(ndim, |_| 1).as_ref());
             }
         }
         let mut spec = params.into_spec(
@@ -90,13 +87,11 @@ impl<T, D> Scalar<T, D> {
     }
 }
 
-impl<T, D> ArrayStorage for Scalar<T, D>
+impl<T> ArrayStorage for Scalar<T>
 where
     T: Dtyped,
-    D: Dimension,
 {
     type ElementType = Ty<T>;
-    type Dimension = D;
 
     #[inline]
     fn read_data<'a>(
@@ -114,13 +109,10 @@ where
             // Lend a single-element view with all-zero strides: every position reads the same byte.
             None => {
                 let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
-                Ok(unsafe {
-                    StridedBuf::from_slice(src, Self::Dimension::vec(ndim, |_| 0usize).as_ref())
-                })
+                Ok(unsafe { StridedBuf::from_slice(src, dim_arr(ndim, |_| 0usize).as_ref()) })
             }
             Some(out) => {
-                let read_shape =
-                    Self::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
+                let read_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
                 if out.is_contiguous_aligned(read_shape.as_ref(), &dtype) {
                     // Fill the region in one tight loop.
                     let region_len = read_shape.as_ref().iter().product::<usize>() * size_of::<T>();
@@ -131,7 +123,7 @@ where
                 } else {
                     // Write the scalar to each strided output position
                     let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
-                    let src_strides = Self::Dimension::vec(ndim, |_| 0usize);
+                    let src_strides = dim_arr(ndim, |_| 0usize);
                     unsafe {
                         out.copy_from(src, src_strides.as_ref(), read_shape.as_ref(), &dtype)
                     };
@@ -146,7 +138,7 @@ where
         &'a self,
         index: &[Range<u64>],
         _context: &'a ReadContext,
-    ) -> Result<impl ElementwisePipeline<T2> + use<'a, T2, T, D>>
+    ) -> Result<impl ElementwisePipeline<T2> + use<'a, T2, T>>
     where
         T2: Dtyped,
     {
@@ -196,19 +188,6 @@ where
         ArrayStorageInfo::new("Scalar")
     }
 
-    type DimensionChange<NewD: Dimension> = Scalar<T, NewD>;
-    #[inline]
-    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        check_ndim::<NewD>(self.shape().len())?;
-        let shape = NewD::from_slice(self.shape());
-        Ok(Scalar {
-            data: self.data,
-            shape,
-            element_type: self.element_type,
-            spec: self.spec,
-        })
-    }
-
     crate::ops::impl_element_type_change_default!();
 }
 
@@ -222,10 +201,9 @@ mod tests {
     use crate::error::Result;
     use crate::{Array, ArrayParams, IntoDimension};
 
-    pub fn plain_scalar<T, Sh>(value: T, shape: Sh) -> Result<Array<Scalar<T, Sh::Dimension>>>
+    pub fn plain_scalar<T>(value: T, shape: impl IntoDimension) -> Result<Array<Scalar<T>>>
     where
         T: Dtyped,
-        Sh: IntoDimension,
     {
         Ok(Array::from_storage(Scalar::new(
             value,
@@ -241,7 +219,7 @@ mod tests {
         use crate::storage::StridedBuf;
         use crate::ArrayStorage;
 
-        let a = plain_scalar(5i32, &[3, 4]).unwrap();
+        let a = plain_scalar(5i32, [3, 4]).unwrap();
         let mut dst = [-1i32; 12];
         {
             let bytes = unsafe { crate::cast_slice_mut::<i32, u8>(&mut dst) };
@@ -271,31 +249,31 @@ mod tests {
 
     #[test]
     fn broadcast_1d_shape() {
-        let a = plain_scalar(5i32, &[4]).unwrap();
+        let a = plain_scalar(5i32, [4]).unwrap();
         assert_eq!(a.shape(), &[4u64]);
     }
 
     #[test]
     fn broadcast_1d_read_i32() {
-        let got = plain_scalar(5i32, &[4]).unwrap().to_ndarray().unwrap();
+        let got = plain_scalar(5i32, [4]).unwrap().to_ndarray().unwrap();
         assert_eq!(got, array![5i32, 5, 5, 5]);
     }
 
     #[test]
     fn broadcast_2d_shape() {
-        let a = plain_scalar(1u8, &[3, 4]).unwrap();
+        let a = plain_scalar(1u8, [3, 4]).unwrap();
         assert_eq!(a.shape(), &[3u64, 4]);
     }
 
     #[test]
     fn broadcast_2d_read_u8() {
-        let got = plain_scalar(9u8, &[2, 3]).unwrap().to_ndarray().unwrap();
+        let got = plain_scalar(9u8, [2, 3]).unwrap().to_ndarray().unwrap();
         assert_eq!(got, array![[9u8, 9, 9], [9, 9, 9]]);
     }
 
     #[test]
     fn broadcast_2d_subregion_read() {
-        let got = plain_scalar(42i32, &[5, 5])
+        let got = plain_scalar(42i32, [5, 5])
             .unwrap()
             .to_ndarray_sub(&[1..3, 2..4], &ReadContext::default())
             .unwrap();
@@ -304,7 +282,7 @@ mod tests {
 
     #[test]
     fn broadcast_3d_read_f32() {
-        let got = plain_scalar(1.5f32, &[2, 3, 4])
+        let got = plain_scalar(1.5f32, [2, 3, 4])
             .unwrap()
             .to_ndarray()
             .unwrap();
@@ -321,7 +299,7 @@ mod tests {
     #[test]
     fn max_of_broadcast_scalar() {
         // max of a constant array is the constant itself
-        let got = plain_scalar(7.0f64, &[3, 4])
+        let got = plain_scalar(7.0f64, [3, 4])
             .unwrap()
             .max(0)
             .to_ndarray()
@@ -332,7 +310,7 @@ mod tests {
     #[test]
     fn sum_of_broadcast_scalar_i32() {
         // sum of [2,2,2] (3 rows, broadcast) over dim 0 = [6,6,6,6] as i64
-        let got = plain_scalar(2i32, &[3, 4])
+        let got = plain_scalar(2i32, [3, 4])
             .unwrap()
             .sum(0)
             .to_ndarray()

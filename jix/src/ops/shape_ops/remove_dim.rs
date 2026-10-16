@@ -12,18 +12,6 @@ use crate::ops::prelude::*;
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// # Dimension tracking
-///
-/// `RemoveDim<S, D>` is generic over `D: Dimension`, determined by the dim argument type.
-/// Statically-sized arguments encode the output ndim in the type:
-///
-/// | Argument type | Output `D` |
-/// |---|---|
-/// | `usize` | `S::Dimension::Smaller` |
-/// | `[usize; N]` / `(usize, ...)` N-tuple | `Smaller` applied N times |
-/// | `[usize; 0]` / `()` | `S::Dimension` (unchanged) |
-/// | `&[usize]` / `&Vec<usize>` | `DimDyn` |
-///
 /// # Examples
 ///
 /// ```text
@@ -33,43 +21,36 @@ use crate::ops::prelude::*;
 /// [1, N, 1, M, 1] dim: [0, 2, 4] -> [N, M]
 /// ```
 ///
-/// Different argument types select both the removed dims and the output dimension type:
+/// The dims can be given as any [`DimsArg`](crate::ops::DimsArg): a single `usize`, an array or tuple of `usize`, or a
+/// slice:
 ///
 /// ```
-/// use jix::{Array, Dim};
+/// use jix::Array;
 /// use ndarray::array;
 ///
-/// let a = Array::compact_ndarray(&array![[[1i32, 2, 3]]])?; // shape [1, 1, 3], Dim<3>
+/// let a = Array::compact_ndarray(&array![[[1i32, 2, 3]]])?; // shape [1, 1, 3]
 ///
-/// // usize -> output D = Dim<2> (one fewer than input Dim<3>)
 /// assert_eq!(a.view().remove_dim(0).shape(), &[1, 3]);
-///
-/// // [usize; 2] -> output D = Dim<1> (two fewer than input Dim<3>)
 /// assert_eq!(a.view().remove_dim([0, 1]).shape(), &[3]);
 ///
-/// // &[usize] -> output D = DimDyn
 /// let dims = vec![0, 1];
 /// assert_eq!(a.remove_dim(dims.as_slice()).shape(), &[3]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct RemoveDim<S, D: Dimension> {
+pub struct RemoveDim<S> {
     array: S,
-    dims_mapping: D::Vec<DimIdx>,
+    dims_mapping: DimArray<DimIdx>,
 
-    shape: D,
+    shape: DimDyn,
     spec: ArraySpecDynamic,
 }
 
-impl<S, D> RemoveDim<S, D>
+impl<S> RemoveDim<S>
 where
     S: ArrayStorage,
-    D: Dimension,
 {
     /// Constructs a [`RemoveDim`] storage. See the struct docs for semantics and examples.
-    pub fn new<Dims>(array: S, dim: Dims) -> Result<Self>
-    where
-        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
-    {
+    pub fn new(array: S, dim: impl DimsArg) -> Result<Self> {
         let input_ndim = array.shape().len();
 
         // Validate dim indices and check for duplicates.
@@ -107,8 +88,8 @@ where
                 block_shape.push(inner_block_shape[input_dim]);
             }
         }
-        let shape = D::from_slice(&shape);
-        let dims_mapping = D::vec(dims_mapping.len(), |d| dims_mapping[d]);
+        let shape = DimDyn::from_slice(&shape);
+        let dims_mapping = dim_arr(dims_mapping.len(), |d| dims_mapping[d]);
 
         let block_shape_fixed_dims = inner_spec
             .block_shape_fixed_dims()
@@ -146,22 +127,16 @@ where
     }
 
     /// Constructs an array with [`RemoveDim`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Dims>(array: Array<S>, dim: Dims) -> Result<Array<Self>>
-    where
-        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
-    {
+    pub fn new_array(array: Array<S>, dim: impl DimsArg) -> Result<Array<Self>> {
         Self::new(array.into_storage(), dim).map(Array::from_storage)
     }
 
     #[inline(always)]
-    fn transform_index(
-        &self,
-        index: &[Range<u64>],
-    ) -> Result<<S::Dimension as Dimension>::Vec<Range<u64>>> {
+    fn transform_index(&self, index: &[Range<u64>]) -> Result<DimArray<Range<u64>>> {
         check_get_range_ndim(self.shape(), index)?;
 
         let inner_ndim = self.array.shape().len();
-        let mut inner_index = S::Dimension::vec(inner_ndim, |_| 0..1);
+        let mut inner_index = dim_arr(inner_ndim, |_| 0..1);
         for (index, &dim) in index.iter().zip(self.dims_mapping.as_ref()) {
             inner_index[dim as usize] = index.clone();
         }
@@ -169,13 +144,11 @@ where
     }
 }
 
-impl<S, D> ArrayStorage for RemoveDim<S, D>
+impl<S> ArrayStorage for RemoveDim<S>
 where
     S: ArrayStorage,
-    D: Dimension,
 {
     type ElementType = S::ElementType;
-    type Dimension = D;
 
     #[inline]
     fn read_data<'a>(
@@ -226,24 +199,7 @@ where
         ArrayStorageInfo::new_deps("RemoveDim", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = RemoveDim<S, NewD>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let ndim = self.shape().len();
-        check_ndim::<NewD>(ndim)?;
-        let shape = NewD::from_slice(self.shape());
-        let dims_mapping = NewD::vec(ndim, |d| self.dims_mapping[d]);
-        Ok(RemoveDim {
-            array: self.array,
-            dims_mapping,
-            shape,
-            spec: self.spec,
-        })
-    }
-
-    type ElementTypeChange<NewET: crate::ElementType> = RemoveDim<S::ElementTypeChange<NewET>, D>;
+    type ElementTypeChange<NewET: crate::ElementType> = RemoveDim<S::ElementTypeChange<NewET>>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
         self,
@@ -267,7 +223,7 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{Dim, Ty, NDIM_MAX};
+    use crate::{Ty, NDIM_MAX};
 
     #[test]
     fn rejects_invalid_index() {
@@ -278,17 +234,17 @@ mod tests {
         crate::util::assert_read_rejects_invalid_index(plain.remove_dim(1).storage());
     }
 
-    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, Dim<1>>> {
+    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>>> {
         let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, Dim<2>>> {
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>>> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, Dim<3>>> {
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>>> {
         let nd = ndarray::Array::from_shape_vec([d0, d1, d2], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
@@ -303,37 +259,37 @@ mod tests {
 
     #[test]
     fn shape_remove_leading() {
-        let a = make1d(arange(6), 6).insert_dim(&[0]);
-        assert_eq!(a.remove_dim(&[0]).shape(), &[6]);
+        let a = make1d(arange(6), 6).insert_dim([0]);
+        assert_eq!(a.remove_dim([0]).shape(), &[6]);
     }
 
     #[test]
     fn shape_remove_trailing() {
-        let a = make1d(arange(6), 6).insert_dim(&[1]);
-        assert_eq!(a.remove_dim(&[1]).shape(), &[6]);
+        let a = make1d(arange(6), 6).insert_dim([1]);
+        assert_eq!(a.remove_dim([1]).shape(), &[6]);
     }
 
     #[test]
     fn shape_remove_middle() {
-        let a = make2d(arange(12), 3, 4).insert_dim(&[1]);
-        assert_eq!(a.remove_dim(&[1]).shape(), &[3, 4]);
+        let a = make2d(arange(12), 3, 4).insert_dim([1]);
+        assert_eq!(a.remove_dim([1]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_remove_multiple() {
-        let a = make2d(arange(6), 2, 3).insert_dim(&[0, 1, 2]);
-        assert_eq!(a.remove_dim(&[0, 2, 4]).shape(), &[2, 3]);
+        let a = make2d(arange(6), 2, 3).insert_dim([0, 1, 2]);
+        assert_eq!(a.remove_dim([0, 2, 4]).shape(), &[2, 3]);
     }
 
     #[test]
     fn shape_remove_empty_dims_is_identity() {
-        assert_eq!(make2d(arange(12), 3, 4).remove_dim(&[]).shape(), &[3, 4]);
+        assert_eq!(make2d(arange(12), 3, 4).remove_dim([]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_remove_unsorted_dims_same_result() {
-        let a1 = make3d(arange(6), 1, 2, 3).remove_dim(&[0]);
-        let a2 = make3d(arange(6), 1, 2, 3).remove_dim(&[0]);
+        let a1 = make3d(arange(6), 1, 2, 3).remove_dim([0]);
+        let a2 = make3d(arange(6), 1, 2, 3).remove_dim([0]);
         assert_eq!(a1.shape(), a2.shape());
     }
 
@@ -344,8 +300,8 @@ mod tests {
     #[test]
     fn full_read_remove_leading() {
         let got = make1d(arange(6), 6)
-            .insert_dim(&[0])
-            .remove_dim(&[0])
+            .insert_dim([0])
+            .remove_dim([0])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ndarray::Array::from_shape_vec([6], arange(6)).unwrap());
@@ -354,8 +310,8 @@ mod tests {
     #[test]
     fn full_read_remove_trailing() {
         let got = make1d(arange(6), 6)
-            .insert_dim(&[1])
-            .remove_dim(&[1])
+            .insert_dim([1])
+            .remove_dim([1])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ndarray::Array::from_shape_vec([6], arange(6)).unwrap());
@@ -364,8 +320,8 @@ mod tests {
     #[test]
     fn full_read_remove_middle() {
         let got = make2d(arange(12), 3, 4)
-            .insert_dim(&[1])
-            .remove_dim(&[1])
+            .insert_dim([1])
+            .remove_dim([1])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -377,8 +333,8 @@ mod tests {
     #[test]
     fn full_read_remove_multiple() {
         let got = make2d(arange(6), 2, 3)
-            .insert_dim(&[0, 1, 2])
-            .remove_dim(&[0, 2, 4])
+            .insert_dim([0, 1, 2])
+            .remove_dim([0, 2, 4])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -390,7 +346,7 @@ mod tests {
     #[test]
     fn full_read_identity_empty_dims() {
         let got = make2d(arange(12), 3, 4)
-            .remove_dim(&[])
+            .remove_dim([])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -406,8 +362,8 @@ mod tests {
     #[test]
     fn sub_read_after_remove_leading() {
         let got = make1d(arange(6), 6)
-            .insert_dim(&[0])
-            .remove_dim(&[0])
+            .insert_dim([0])
+            .remove_dim([0])
             .to_ndarray_sub(&[2..5], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![2, 3, 4]);
@@ -416,8 +372,8 @@ mod tests {
     #[test]
     fn sub_read_after_remove_middle() {
         let got = make2d(arange(12), 3, 4)
-            .insert_dim(&[1])
-            .remove_dim(&[1])
+            .insert_dim([1])
+            .remove_dim([1])
             .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![[4, 5], [8, 9]]);
@@ -431,20 +387,20 @@ mod tests {
     fn error_dim_out_of_bounds() {
         let a = make2d(arange(4), 2, 2);
         // ndim=2, valid dims are 0..2; dim 3 is out of bounds
-        assert!(super::RemoveDim::new_array(a, &[3]).is_err());
+        assert!(super::RemoveDim::new_array(a, [3]).is_err());
     }
 
     #[test]
     fn error_dim_not_size_one() {
         let a = make2d(arange(12), 3, 4);
         // dim 0 has size 3, cannot remove
-        assert!(super::RemoveDim::new_array(a, &[0]).is_err());
+        assert!(super::RemoveDim::new_array(a, [0]).is_err());
     }
 
     #[test]
     fn error_duplicate_dim() {
         let a = make3d(arange(6), 1, 2, 3);
-        assert!(super::RemoveDim::new_array(a, &[0, 0]).is_err());
+        assert!(super::RemoveDim::new_array(a, [0, 0]).is_err());
     }
 
     #[allow(clippy::type_complexity)]

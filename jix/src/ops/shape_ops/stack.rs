@@ -1,7 +1,7 @@
 use std::ops::Not;
 
 use crate::ops::prelude::*;
-use crate::util::{ArraySequence, ArraySequenceDimension, ArraySequenceElementType};
+use crate::util::{ArraySequence, ArraySequenceElementType};
 
 /// Joins a sequence of arrays along a new dim. See [`Stack`] for details and examples.
 ///
@@ -11,7 +11,7 @@ use crate::util::{ArraySequence, ArraySequenceDimension, ArraySequenceElementTyp
 #[track_caller]
 pub fn stack<ArraysT>(arrays: ArraysT, dim: usize) -> Array<Stack<ArraysT>>
 where
-    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
+    ArraysT: ArraySequence + ArraySequenceElementType,
 {
     Array::from_storage(Stack::new(arrays, dim).unwrap())
 }
@@ -22,11 +22,6 @@ where
 /// the number of input arrays is inserted at position `dim` in the output. The output has one more
 /// dimension than the inputs - unlike
 /// [`Concatenate`](crate::ops::Concatenate), which joins along an existing dim.
-///
-/// The output dimension type `Stack<ArraysT>::Dimension` is
-/// `<ArraysT::Dimension as Dimension>::Larger` (where `ArraysT::Dimension` comes from
-/// [`ArraySequenceDimension`]) - one dimension wider than the inputs. This means a static dimension
-/// is propagated when all input arrays share a known `Dim<N>`, producing `Dim<N+1>` for the output.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -51,17 +46,17 @@ where
 /// ```
 pub struct Stack<ArraysT>
 where
-    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
+    ArraysT: ArraySequence + ArraySequenceElementType,
 {
     arrays: ArraysT,
     stack_dim: DimIdx,
 
-    shape: <ArraysT::Dimension as crate::Dimension>::Larger,
+    shape: DimDyn,
     spec: ArraySpecDynamic,
 }
 impl<ArraysT> Stack<ArraysT>
 where
-    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
+    ArraysT: ArraySequence + ArraySequenceElementType,
 {
     /// Constructs a [`Stack`] storage. See the struct docs for semantics and examples.
     pub fn new(arrays: ArraysT, dim: usize) -> Result<Self> {
@@ -94,11 +89,11 @@ where
             "dim out of bounds: dim {dim} >= array ndim {}",
             shape0.len()
         );
-        check_ndim::<<Self as ArrayStorage>::Dimension>(shape0.len() + 1)?;
+        check_ndim(shape0.len() + 1)?;
         let mut new_shape = DimArray::from_slice(shape0).unwrap();
         new_shape.insert(dim, narrays as u64);
         check_shape_overflow(new_shape.as_slice(), dtype.itemsize() as _)?;
-        let new_shape = <Self as ArrayStorage>::Dimension::from_slice(&new_shape);
+        let new_shape = DimDyn::from_slice(&new_shape);
 
         // Combine the block layout over the (equal-shape) inputs, then insert the new stack dim:
         // it carries no data of its own, so its block is 1 and non-fixed.
@@ -157,10 +152,9 @@ where
 }
 impl<ArraysT> ArrayStorage for Stack<ArraysT>
 where
-    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
+    ArraysT: ArraySequence + ArraySequenceElementType,
 {
     type ElementType = ArraysT::ElementType;
-    type Dimension = <ArraysT::Dimension as crate::Dimension>::Larger;
 
     fn read_data<'a>(
         &'a self,
@@ -172,8 +166,7 @@ where
         let dtype = self.dtype();
         check_get_range(shape, index)?;
         check_out_buf(out.as_deref(), shape)?;
-        let output_shape =
-            Self::Dimension::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let output_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let mut out = materialize_out_buf(
             out,
             context,
@@ -191,8 +184,8 @@ where
             .iter()
             .chain(index[stack_dim + 1..].iter())
             .cloned()
-            .collect_dim_vec::<ArraysT::Dimension>(arr_ndim);
-        let arr_range_shape = ArraysT::Dimension::vec(arr_ndim, |dim| {
+            .collect_dim_vec::<DimDyn>(arr_ndim);
+        let arr_range_shape = dim_arr(arr_ndim, |dim| {
             (arr_range[dim].end - arr_range[dim].start) as usize
         });
         let itemsize = dtype.itemsize() as usize;
@@ -208,7 +201,7 @@ where
         let stack_dim_stride = out_strides[stack_dim];
         // Per-sub-array strides = the output strides with the stack dim removed.
         let out_of_place_strides = in_place.not().then(|| {
-            ArraysT::Dimension::vec(arr_ndim, |dim| {
+            dim_arr(arr_ndim, |dim| {
                 if dim < stack_dim {
                     out_strides[dim]
                 } else {
@@ -263,7 +256,6 @@ where
         ArrayStorageInfo::new_deps_dyn("Stack", deps)
     }
 
-    crate::ops::impl_dimension_change_default!();
     crate::ops::impl_element_type_change_default!();
 }
 
@@ -276,7 +268,7 @@ mod tests {
     use crate::ops::stack;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{DimDyn, Ty, NDIM_MAX};
+    use crate::{Ty, NDIM_MAX};
 
     #[test]
     fn test_i32_1d_dim0() {
@@ -393,7 +385,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_empty_panics() {
-        let _ = stack(Vec::<Array<Compact<Ty<i64>, DimDyn>>>::new(), 0);
+        let _ = stack(Vec::<Array<Compact<Ty<i64>>>>::new(), 0);
     }
 
     // -----------------------------------------------------------------------

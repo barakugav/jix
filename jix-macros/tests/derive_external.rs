@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 use jix_core::dtype::{Dtype, Dtyped};
+use ndarray::Ix1;
 
 // ---- #[repr(C)] structs with named fields ----
 
@@ -211,7 +212,7 @@ fn derived_struct_round_trips_through_an_array() {
     let arr = jix_core::Array::compact_ndarray(&pixels).unwrap();
     assert_eq!(arr.dtype(), &Pixel::DTYPE);
 
-    let out = arr.to_ndarray().unwrap();
+    let out = arr.to_ndarray::<Ix1>().unwrap();
     assert_eq!(out.len(), 3);
     for (a, b) in out.iter().zip(pixels.iter()) {
         assert_eq!((a.r, a.g, a.b), (b.r, b.g, b.b));
@@ -222,6 +223,6 @@ fn derived_struct_round_trips_through_an_array() {
 fn derived_struct_field_can_be_read_as_a_sub_array() {
     let pixels = ndarray::array![Pixel { r: 1, g: 2, b: 3 }, Pixel { r: 4, g: 5, b: 6 }];
     let arr = jix_core::Array::compact_ndarray(&pixels).unwrap();
-    let greens = arr.dtype_sub_field::<u8>("g").to_ndarray().unwrap();
+    let greens = arr.dtype_sub_field::<u8>("g").to_ndarray::<Ix1>().unwrap();
     assert_eq!(greens.as_slice().unwrap(), &[2, 5]);
 }

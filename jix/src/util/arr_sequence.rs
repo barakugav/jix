@@ -9,14 +9,14 @@ use crate::storage::{
     max_itemsize, n_operands_mul, n_operands_sum, ArraySpec, ArrayStorageTyped,
     ElementwisePipelineImpl, Operand, StridedBuf,
 };
-use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, Dimension, ElementType};
+use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, ElementType};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
 /// and [`concatenate`](crate::ops::concatenate).
 ///
-/// Arrays in the sequence may have different element types or dimensions, both runtime and compile-time.
-/// The sub traits [`ArraySequenceElementType`] and [`ArraySequenceDimension`] are used to
-/// constrain operations to sequences where all arrays share the same element type and dimension.
+/// Arrays in the sequence may have different element types, both runtime and compile-time.
+/// The sub trait [`ArraySequenceElementType`] is used to constrain operations to sequences where
+/// all arrays share the same element type.
 ///
 /// This is a sealed trait - it cannot be implemented outside this crate. It is implemented for the
 /// following collection types, covering both homogeneous and heterogeneous cases:
@@ -90,19 +90,6 @@ pub trait ArraySequenceElementType: ArraySequence {
     /// Used in operations like `stack` and `concatenate` to ensure all arrays have the same
     /// element type, and to determine the output element type of the result.
     type ElementType: ElementType;
-}
-
-/// Subtrait of [`ArraySequence`] for sequences whose arrays all share the same dimension.
-///
-/// Operations such as [`stack`](crate::ops::stack) and [`concatenate`](crate::ops::concatenate)
-/// require this bound to guarantee every array has the same number of dims, which also determines
-/// the dimension of the result.
-pub trait ArraySequenceDimension: ArraySequence {
-    /// The dimension of all arrays in the sequence.
-    ///
-    /// Used in operations like `stack` and `concatenate` to ensure all arrays have the same number
-    /// of dims, and to determine the output dimension of the result.
-    type Dimension: Dimension;
 }
 
 /// Subtrait of [`ArraySequence`] for sequences whose arrays all have a statically-known element
@@ -212,9 +199,6 @@ where
 impl<S: ArrayStorage, const N: usize> ArraySequenceElementType for [Array<S>; N] {
     type ElementType = S::ElementType;
 }
-impl<S: ArrayStorage, const N: usize> ArraySequenceDimension for [Array<S>; N] {
-    type Dimension = S::Dimension;
-}
 impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTyped for [Array<S>; N] {
     type ItemSequence<'a> = [S::Item; N];
 }
@@ -311,9 +295,6 @@ where
 impl<S: ArrayStorage, const N: usize> ArraySequenceElementType for &[Array<S>; N] {
     type ElementType = S::ElementType;
 }
-impl<S: ArrayStorage, const N: usize> ArraySequenceDimension for &[Array<S>; N] {
-    type Dimension = S::Dimension;
-}
 impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTyped for &[Array<S>; N] {
     type ItemSequence<'a> = [S::Item; N];
 }
@@ -408,9 +389,6 @@ where
 }
 impl<S: ArrayStorage> ArraySequenceElementType for Vec<Array<S>> {
     type ElementType = S::ElementType;
-}
-impl<S: ArrayStorage> ArraySequenceDimension for Vec<Array<S>> {
-    type Dimension = S::Dimension;
 }
 impl<S: ArrayStorageTyped> ArraySequenceTyped for Vec<Array<S>> {
     type ItemSequence<'a> = &'a [S::Item];
@@ -533,9 +511,6 @@ where
 }
 impl<S: ArrayStorage> ArraySequenceElementType for &[Array<S>] {
     type ElementType = S::ElementType;
-}
-impl<S: ArrayStorage> ArraySequenceDimension for &[Array<S>] {
-    type Dimension = S::Dimension;
 }
 impl<S: ArrayStorageTyped> ArraySequenceTyped for &[Array<S>] {
     type ItemSequence<'a> = &'a [S::Item];
@@ -680,13 +655,6 @@ macro_rules! impl_array_sequence_for_tuple {
             ET: ElementType,
         {
             type ElementType = ET;
-        }
-        impl<$($S),+, D> ArraySequenceDimension for ($(Array<$S>,)+)
-        where
-            $($S: ArrayStorage<Dimension = D>,)+
-            D: Dimension,
-        {
-            type Dimension = D;
         }
         impl<$($S),+> ArraySequenceTyped for ($(Array<$S>,)+)
         where

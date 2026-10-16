@@ -7,9 +7,7 @@ use crate::ops::prelude::*;
 /// either `shape[d] == input_shape[d]` (kept as-is) or `input_shape[d] == 1` (broadcast:
 /// the single element is repeated `shape[d]` times). Any other combination is an error.
 ///
-/// Output dtype equals the input dtype. Output shape equals `shape`. `Broadcast<S>` carries
-/// `type Dimension = S::Dimension` - broadcasting does not change the number of dims so the
-/// dimension type is preserved unchanged.
+/// Output dtype equals the input dtype. Output shape equals `shape`.
 ///
 /// `Broadcast` is the lazy zero-cost case of replication restricted to length-1 dims; for
 /// general element replication along a dim of any length use [`Repeat`](crate::ops::Repeat)
@@ -22,17 +20,17 @@ use crate::ops::prelude::*;
 ///
 /// ```
 /// use jix::Array;
-/// use ndarray::array;
+/// use ndarray::{array, Ix2};
 ///
 /// // Row vector [1, 3] -> matrix [2, 3]: every row is identical
 /// let a = Array::compact_ndarray(&array![[1i32, 2, 3]])?;
-/// let result = a.broadcast(&[2, 3]).to_ndarray()?;
+/// let result = a.broadcast(&[2, 3]).to_ndarray::<Ix2>()?;
 /// assert_eq!(result[[0, 0]], result[[1, 0]]);
 /// assert_eq!(result[[0, 2]], result[[1, 2]]);
 ///
 /// // Column vector [3, 1] -> matrix [3, 2]: every column is identical
 /// let b = Array::compact_ndarray(&array![[10i32], [20], [30]])?;
-/// let result = b.broadcast(&[3, 2]).to_ndarray()?;
+/// let result = b.broadcast(&[3, 2]).to_ndarray::<Ix2>()?;
 /// assert_eq!(result[[0, 0]], 10);
 /// assert_eq!(result[[0, 1]], 10);
 /// assert_eq!(result[[2, 0]], 30);
@@ -42,9 +40,9 @@ use crate::ops::prelude::*;
 pub struct Broadcast<S: ArrayStorage> {
     array: S,
     /// `is_broadcast[d]` is `true` when output dim `d` was expanded from length 1.
-    is_broadcast: <S::Dimension as Dimension>::Vec<bool>,
+    is_broadcast: DimArray<bool>,
 
-    new_shape: S::Dimension,
+    new_shape: DimDyn,
     spec: ArraySpecDynamic,
 }
 
@@ -66,7 +64,7 @@ where
         );
         check_shape_overflow(new_shape, array.dtype().itemsize() as _)?;
 
-        let mut is_broadcast = S::Dimension::vec(ndim, |_| false);
+        let mut is_broadcast = dim_arr(ndim, |_| false);
         for dim in 0..ndim {
             if new_shape[dim] == input_shape[dim] {
                 is_broadcast[dim] = false;
@@ -82,7 +80,7 @@ where
             }
         }
 
-        let new_shape = S::Dimension::from_slice(new_shape);
+        let new_shape = DimDyn::from_slice(new_shape);
 
         let inner_spec = array.spec();
         let block_shape = <_ as Clone>::clone(inner_spec.block_shape());
@@ -119,7 +117,6 @@ where
 
 impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     type ElementType = S::ElementType;
-    type Dimension = S::Dimension;
 
     #[inline]
     fn read_data<'a>(
@@ -132,7 +129,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         check_out_buf(out.as_deref(), self.shape())?;
         let ndim = self.is_broadcast.as_ref().len();
 
-        let inner_index = S::Dimension::vec(ndim, |dim| {
+        let inner_index = dim_arr(ndim, |dim| {
             if self.is_broadcast[dim] {
                 0..1
             } else {
@@ -142,7 +139,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         let inner = self.array.read_data(inner_index.as_ref(), context, None)?;
 
         let inner_strides = inner.strides();
-        let broadcasted_strides = S::Dimension::vec(ndim, |dim| {
+        let broadcasted_strides = dim_arr(ndim, |dim| {
             if self.is_broadcast[dim] {
                 0
             } else {
@@ -153,8 +150,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         match out {
             None => Ok(unsafe { inner.with_strides(broadcasted_strides.as_ref()) }),
             Some(out) => {
-                let out_shape =
-                    S::Dimension::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+                let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
                 let (src, _) = inner.data();
                 // SAFETY: `src_strides` are the inner view's strides with broadcast dims zeroed
                 unsafe {
@@ -189,24 +185,6 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         ArrayStorageInfo::new_deps("Broadcast", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = Broadcast<S::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let ndim = self.shape().len();
-        check_ndim::<NewD>(ndim)?;
-        let new_shape = NewD::from_slice(self.shape());
-        let is_broadcast = NewD::vec(ndim, |dim| self.is_broadcast[dim]);
-
-        Ok(Broadcast {
-            array: self.array.dimension_change()?,
-            is_broadcast,
-            new_shape,
-            spec: self.spec,
-        })
-    }
-
     type ElementTypeChange<NewET: crate::ElementType> = Broadcast<S::ElementTypeChange<NewET>>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
@@ -230,13 +208,10 @@ mod tests {
     use crate::util::{shape_strategy, ScalarStrategy};
     use crate::{Array, IntoDimension, Ty, NDIM_MAX};
 
-    fn make<Sh>(vals: Vec<i32>, shape: Sh) -> Array<Compact<Ty<i32>, Sh::Dimension>>
-    where
-        Sh: IntoDimension,
-    {
+    fn make(vals: Vec<i32>, shape: impl IntoDimension) -> Array<Compact<Ty<i32>>> {
         let shape = shape.into_dimension().unwrap();
         let nd = ndarray::Array::from_shape_vec(shape, vals).unwrap();
-        Array::compact_ndarray(&nd).unwrap().into_dim().unwrap()
+        Array::compact_ndarray(&nd).unwrap()
     }
 
     fn arange(n: usize) -> Vec<i32> {
@@ -249,31 +224,28 @@ mod tests {
 
     #[test]
     fn shape_broadcast_dim0() {
-        assert_eq!(make(arange(4), &[1, 4]).broadcast(&[3, 4]).shape(), &[3, 4]);
+        assert_eq!(make(arange(4), [1, 4]).broadcast(&[3, 4]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_broadcast_dim1() {
-        assert_eq!(make(arange(3), &[3, 1]).broadcast(&[3, 4]).shape(), &[3, 4]);
+        assert_eq!(make(arange(3), [3, 1]).broadcast(&[3, 4]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_broadcast_both_dims() {
-        assert_eq!(make(vec![7], &[1, 1]).broadcast(&[3, 4]).shape(), &[3, 4]);
+        assert_eq!(make(vec![7], [1, 1]).broadcast(&[3, 4]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_no_broadcast_is_identity() {
-        assert_eq!(
-            make(arange(12), &[3, 4]).broadcast(&[3, 4]).shape(),
-            &[3, 4]
-        );
+        assert_eq!(make(arange(12), [3, 4]).broadcast(&[3, 4]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_broadcast_3d_middle() {
         assert_eq!(
-            make(arange(8), &[2, 1, 4]).broadcast(&[2, 3, 4]).shape(),
+            make(arange(8), [2, 1, 4]).broadcast(&[2, 3, 4]).shape(),
             &[2, 3, 4]
         );
     }
@@ -284,7 +256,7 @@ mod tests {
 
     #[test]
     fn full_read_broadcast_dim0() {
-        let got = make(arange(4), &[1, 4])
+        let got = make(arange(4), [1, 4])
             .broadcast(&[3, 4])
             .to_ndarray()
             .unwrap();
@@ -293,7 +265,7 @@ mod tests {
 
     #[test]
     fn full_read_broadcast_dim1() {
-        let got = make(arange(3), &[3, 1])
+        let got = make(arange(3), [3, 1])
             .broadcast(&[3, 4])
             .to_ndarray()
             .unwrap();
@@ -302,7 +274,7 @@ mod tests {
 
     #[test]
     fn full_read_broadcast_both() {
-        let got = make(vec![7], &[1, 1])
+        let got = make(vec![7], [1, 1])
             .broadcast(&[2, 3])
             .to_ndarray()
             .unwrap();
@@ -311,7 +283,7 @@ mod tests {
 
     #[test]
     fn full_read_no_broadcast() {
-        let got = make(arange(12), &[3, 4])
+        let got = make(arange(12), [3, 4])
             .broadcast(&[3, 4])
             .to_ndarray()
             .unwrap();
@@ -323,7 +295,7 @@ mod tests {
 
     #[test]
     fn full_read_broadcast_3d_middle() {
-        let got = make(arange(6), &[2, 1, 3])
+        let got = make(arange(6), [2, 1, 3])
             .broadcast(&[2, 4, 3])
             .to_ndarray()
             .unwrap();
@@ -342,7 +314,7 @@ mod tests {
 
     #[test]
     fn sub_read_broadcast_dim0() {
-        let got = make(arange(4), &[1, 4])
+        let got = make(arange(4), [1, 4])
             .broadcast(&[3, 4])
             .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
             .unwrap();
@@ -351,7 +323,7 @@ mod tests {
 
     #[test]
     fn sub_read_broadcast_dim1() {
-        let got = make(arange(3), &[3, 1])
+        let got = make(arange(3), [3, 1])
             .broadcast(&[3, 5])
             .to_ndarray_sub(&[0..2, 2..5], &ReadContext::default())
             .unwrap();
@@ -364,13 +336,13 @@ mod tests {
 
     #[test]
     fn error_ndim_mismatch() {
-        let a = make(arange(6), &[2, 3]);
+        let a = make(arange(6), [2, 3]);
         assert!(super::Broadcast::new_array(a.view(), &[2, 3, 1]).is_err());
     }
 
     #[test]
     fn error_non_unit_dim_broadcast() {
-        let a = make(arange(6), &[2, 3]);
+        let a = make(arange(6), [2, 3]);
         // dim 0 has length 2, cannot broadcast to 5
         assert!(super::Broadcast::new_array(a.view(), &[5, 3]).is_err());
     }
@@ -443,7 +415,7 @@ mod tests {
             (4usize, 5usize, vec![i32::MIN, -7, 0, i32::MAX]),
         ] {
             let nd = ndarray::Array::from_shape_vec([n, 1], vals.clone()).unwrap();
-            let za = make(vals, &[n as u64, 1]);
+            let za = make(vals, [n as u64, 1]);
             let expected = nd.broadcast(vec![n, m]).unwrap().to_owned();
             crate::util::assert_array_matches(&za.broadcast(&[n as u64, m as u64]), &expected);
         }
@@ -462,7 +434,7 @@ mod tests {
             }),
         ] {
             let nd = ndarray::Array::from_shape_vec([n, m], vals.clone()).unwrap();
-            let za = make(vals, &[n as u64, m as u64]);
+            let za = make(vals, [n as u64, m as u64]);
             let shape: Vec<u64> = nd.shape().iter().map(|&s| s as u64).collect();
             let expected = nd.clone();
             crate::util::assert_array_matches(&za.broadcast(&shape), &expected);

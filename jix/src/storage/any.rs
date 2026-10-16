@@ -45,7 +45,6 @@ impl ArrayStorageAny {
 }
 impl ArrayStorage for ArrayStorageAny {
     type ElementType = TypeDyn;
-    type Dimension = DimDyn;
 
     #[inline(always)]
     fn read_data<'a>(
@@ -82,11 +81,10 @@ impl ArrayStorage for ArrayStorageAny {
     }
 
     #[inline]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn, DimDyn>> {
+    fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
         self.inner.storage().as_compact()
     }
 
-    crate::ops::impl_dimension_change_default!();
     crate::ops::impl_element_type_change_default!();
 }
 

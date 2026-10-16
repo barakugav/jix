@@ -109,29 +109,19 @@ macro_rules! ensure {
 }
 pub(crate) use {bail, ensure, error};
 
+/// Check that `ndim` does not exceed [`NDIM_MAX`].
 #[inline]
-pub(crate) fn check_ndim<D: Dimension>(ndim: usize) -> Result<()> {
+pub(crate) fn check_ndim(ndim: usize) -> Result<()> {
     #[cold]
     #[inline(never)]
-    fn check_dim_fail<D: Dimension>(ndim: usize) -> Result<()> {
-        if let Some(expected) = D::NDIM {
-            bail!(
-                TooManyDimensions,
-                "ndim {ndim} does not match expected {expected} for this dimension type"
-            );
-        } else {
-            bail!(
-                TooManyDimensions,
-                "Too many dimensions: {ndim} (max={NDIM_MAX})"
-            );
-        }
+    fn check_ndim_fail(ndim: usize) -> Result<()> {
+        bail!(
+            TooManyDimensions,
+            "Too many dimensions: {ndim} (max={NDIM_MAX})"
+        );
     }
-    if let Some(expected) = D::NDIM {
-        if ndim != expected {
-            return check_dim_fail::<D>(ndim);
-        }
-    } else if ndim > NDIM_MAX {
-        return check_dim_fail::<D>(ndim);
+    if ndim > NDIM_MAX {
+        return check_ndim_fail(ndim);
     }
     Ok(())
 }
@@ -281,12 +271,10 @@ mod tests {
     use crate::{Dim, DimDyn};
 
     #[test]
-    fn check_ndim_rejects_mismatch() {
-        assert!(check_ndim::<Dim<2>>(2).is_ok());
-        assert!(check_ndim::<DimDyn>(NDIM_MAX).is_ok());
-        let static_mismatch = check_ndim::<Dim<2>>(3).unwrap_err();
-        assert_eq!(static_mismatch.kind(), ErrorKind::TooManyDimensions);
-        let too_many = check_ndim::<DimDyn>(NDIM_MAX + 1).unwrap_err();
+    fn check_ndim_rejects_too_many() {
+        assert!(check_ndim(0).is_ok());
+        assert!(check_ndim(NDIM_MAX).is_ok());
+        let too_many = check_ndim(NDIM_MAX + 1).unwrap_err();
         assert_eq!(too_many.kind(), ErrorKind::TooManyDimensions);
     }
 

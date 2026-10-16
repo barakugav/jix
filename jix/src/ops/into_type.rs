@@ -24,15 +24,15 @@ use crate::util::assert_unchecked_eq;
 /// ```
 /// use jix::dtype::Dtyped;
 /// use jix::Array;
-/// use ndarray::array;
+/// use ndarray::{array, Ix1};
 ///
 /// // compact_ndarray infers Ty<f32> from the ndarray input type.
 /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
-/// // a: Array<Compact<Ty<f32>, Dim<1>>>
+/// // a: Array<Compact<Ty<f32>>>
 ///
 /// // Erase the static element type - always succeeds.
 /// let dyn_a = a.view().into_type_dyn();
-/// // dyn_a: Array<IntoType<AsRef<Compact<Ty<f32>, Dim<1>>>, TypeDyn>>
+/// // dyn_a: Array<IntoType<AsRef<Compact<Ty<f32>>>, TypeDyn>>
 /// // dyn_a: Array<Storage::ElementType = TypeDyn>
 /// assert_eq!(dyn_a.dtype(), &f32::DTYPE);
 ///
@@ -42,7 +42,7 @@ use crate::util::assert_unchecked_eq;
 /// // typed_a: Array<Storage::ElementType = Ty<f32>>
 ///
 /// // Element-wise operations are available again.
-/// let result = typed_a.exp().to_ndarray()?;
+/// let result = typed_a.exp().to_ndarray::<Ix1>()?;
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct IntoType<S, ET> {
@@ -76,7 +76,6 @@ where
     ET: ElementType,
 {
     type ElementType = ET;
-    type Dimension = S::Dimension;
 
     #[inline(always)]
     fn read_data<'a>(
@@ -124,19 +123,8 @@ where
         ArrayStorageInfo::new_deps("IntoType", [&self.inner])
     }
     #[inline]
-    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn, DimDyn>> {
+    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn>> {
         self.inner.as_compact()
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = IntoType<S::DimensionChange<NewD>, ET>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(IntoType {
-            inner: self.inner.dimension_change()?,
-            element_type: PhantomData,
-        })
     }
 
     type ElementTypeChange<NewET: ElementType> = IntoType<S, NewET>;

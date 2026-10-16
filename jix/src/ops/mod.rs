@@ -63,22 +63,21 @@
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
-//! Arrays loaded from disk carry [`TypeDyn`](crate::TypeDyn) and [`DimDyn`](crate::DimDyn) because
-//! the element type and shape are only known at runtime.
-//! Use [`Array::into_typed`](crate::Array::into_typed) and [`Array::into_dim`](crate::Array::into_dim)
-//! to assert the expected element type and dimension and recover compile-time tracking:
+//! Arrays loaded from disk carry [`TypeDyn`](crate::TypeDyn) because the element type is only
+//! known at runtime. Use [`Array::into_typed`](crate::Array::into_typed) to assert the expected
+//! element type and recover compile-time tracking:
 //!
 //! ```no_run
 //! use std::path::Path;
 //!
-//! use jix::{Array, ArrayParams, Dim};
+//! use jix::{Array, ArrayParams};
 //!
 //! let src = Array::read_from_file(Path::new("data.jix"), ArrayParams::default())?;
-//! // src is Array<Compact<TypeDyn, DimDyn>> - ops not yet available
+//! // src is Array<Compact<TypeDyn>> - ops not yet available
 //!
-//! // validates dtype and ndim at runtime
-//! let typed = src.into_typed::<f32>()?.into_dim::<Dim<2>>()?;
-//! // typed is Array<Compact<Ty<f32>, Dim<2>>> - ops available
+//! // validates the dtype at runtime
+//! let typed = src.into_typed::<f32>()?;
+//! // typed is Array<Compact<Ty<f32>>> - ops available
 //! let result = typed.exp().cast::<f64>().compact()?;
 //! # Ok::<(), jix::Error>(())
 //! ```
@@ -154,9 +153,6 @@ pub(crate) mod _traits {
 
 mod into_type;
 pub use into_type::*;
-
-mod into_dim;
-pub use into_dim::*;
 
 pub(crate) mod prelude {
     pub(crate) use std::ops::Range;

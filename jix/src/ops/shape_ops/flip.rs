@@ -32,7 +32,7 @@ use crate::ops::prelude::*;
 /// ```
 pub struct Flip<S: ArrayStorage> {
     array: S,
-    is_flipped: <S::Dimension as Dimension>::Vec<bool>,
+    is_flipped: DimArray<bool>,
 }
 
 impl<S: ArrayStorage> Flip<S> {
@@ -41,7 +41,7 @@ impl<S: ArrayStorage> Flip<S> {
         let input_shape = array.shape();
         let ndim = input_shape.len();
 
-        let mut is_flipped = S::Dimension::vec(ndim, |_| false);
+        let mut is_flipped = dim_arr(ndim, |_| false);
         for i in 0..dim.len() {
             let d = dim.get(i);
             ensure!(
@@ -67,7 +67,6 @@ impl<S: ArrayStorage> Flip<S> {
 
 impl<S: ArrayStorage> ArrayStorage for Flip<S> {
     type ElementType = S::ElementType;
-    type Dimension = S::Dimension;
 
     fn read_data<'a>(
         &'a self,
@@ -80,12 +79,12 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
         let ndim = index.len();
         let dtype = self.dtype();
-        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
+        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
 
         let shape = self.shape();
         // For each flipped dim d with requested output range [s, e), the inner range is
         // [shape[d]-e, shape[d]-s) (same length, reversed position). Non-flipped dims pass through.
-        let inner_index = S::Dimension::vec(ndim, |d| {
+        let inner_index = dim_arr(ndim, |d| {
             if self.is_flipped[d] {
                 (shape[d] - index[d].end)..(shape[d] - index[d].start)
             } else {
@@ -110,18 +109,17 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
         // Iterate one slab at a time. Each slab is a single combination of indices on the
         // flipped dims; non-flipped dims are copied contiguously via nd_copy per slab.
-        let iter_shape = S::Dimension::vec(ndim, |d| {
+        let iter_shape = dim_arr(ndim, |d| {
             if self.is_flipped[d] {
                 out_shape[d] as u64
             } else {
                 1
             }
         });
-        let slab_shape =
-            S::Dimension::vec(ndim, |d| if self.is_flipped[d] { 1 } else { out_shape[d] });
+        let slab_shape = dim_arr(ndim, |d| if self.is_flipped[d] { 1 } else { out_shape[d] });
 
         // Step src through the inner view on flipped dims; 0 on non-flipped (iter_shape=1 there).
-        let src_ptr_strides = S::Dimension::vec(ndim, |d| {
+        let src_ptr_strides = dim_arr(ndim, |d| {
             if self.is_flipped[d] {
                 src_strides[d]
             } else {
@@ -173,17 +171,6 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         ArrayStorageInfo::new_deps("Flip", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = Flip<S::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let ndim = self.shape().len();
-        let array = self.array.dimension_change()?;
-        let is_flipped = NewD::vec(ndim, |d| self.is_flipped[d]);
-        Ok(Flip { array, is_flipped })
-    }
-
     type ElementTypeChange<NewET: crate::ElementType> = Flip<S::ElementTypeChange<NewET>>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
@@ -199,7 +186,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use ndarray::array;
+    use ndarray::{array, Ix2};
 
     use crate::codec::ReadContext;
     use crate::storage::Compact;
@@ -209,13 +196,10 @@ mod tests {
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn make<Sh>(vals: Vec<i32>, shape: Sh) -> Array<Compact<Ty<i32>, Sh::Dimension>>
-    where
-        Sh: IntoDimension,
-    {
+    fn make(vals: Vec<i32>, shape: impl IntoDimension) -> Array<Compact<Ty<i32>>> {
         let shape = shape.into_dimension().unwrap();
         let nd = ndarray::Array::from_shape_vec(shape, vals).unwrap();
-        Array::compact_ndarray(&nd).unwrap().into_dim().unwrap()
+        Array::compact_ndarray(&nd).unwrap()
     }
 
     fn arange(n: usize) -> Vec<i32> {
@@ -228,20 +212,20 @@ mod tests {
 
     #[test]
     fn shape_preserved_single_dim() {
-        assert_eq!(make(arange(12), &[3u64, 4]).flip(0).shape(), &[3, 4]);
+        assert_eq!(make(arange(12), [3u64, 4]).flip(0).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_preserved_all_dims() {
         assert_eq!(
-            make(arange(24), &[2u64, 3, 4]).flip([0, 1, 2]).shape(),
+            make(arange(24), [2u64, 3, 4]).flip([0, 1, 2]).shape(),
             &[2, 3, 4]
         );
     }
 
     #[test]
     fn shape_preserved_empty_dims() {
-        assert_eq!(make(arange(12), &[3u64, 4]).flip([]).shape(), &[3, 4]);
+        assert_eq!(make(arange(12), [3u64, 4]).flip([]).shape(), &[3, 4]);
     }
 
     // -----------------------------------------------------------------------
@@ -250,13 +234,13 @@ mod tests {
 
     #[test]
     fn input_form_single_usize() {
-        let got = make(arange(6), &[3u64, 2]).flip(0).to_ndarray().unwrap();
+        let got = make(arange(6), [3u64, 2]).flip(0).to_ndarray().unwrap();
         assert_eq!(got, array![[4, 5], [2, 3], [0, 1]]);
     }
 
     #[test]
     fn input_form_array_two_dims() {
-        let got = make(arange(6), &[3u64, 2])
+        let got = make(arange(6), [3u64, 2])
             .flip([0, 1])
             .to_ndarray()
             .unwrap();
@@ -265,7 +249,7 @@ mod tests {
 
     #[test]
     fn input_form_tuple_two_dims() {
-        let got = make(arange(6), &[3u64, 2])
+        let got = make(arange(6), [3u64, 2])
             .flip((0, 1))
             .to_ndarray()
             .unwrap();
@@ -275,7 +259,7 @@ mod tests {
     #[test]
     fn input_form_slice_dynamic() {
         let dims = vec![0, 1];
-        let got = make(arange(6), &[3u64, 2])
+        let got = make(arange(6), [3u64, 2])
             .flip(dims.as_slice())
             .to_ndarray()
             .unwrap();
@@ -288,14 +272,14 @@ mod tests {
 
     #[test]
     fn error_dim_out_of_bounds() {
-        let a = make(arange(12), &[3u64, 4]);
+        let a = make(arange(12), [3u64, 4]);
         let err = super::Flip::new_array(a.view(), 2).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
 
     #[test]
     fn error_duplicate_dim() {
-        let a = make(arange(12), &[3u64, 4]);
+        let a = make(arange(12), [3u64, 4]);
         let err = super::Flip::new_array(a.view(), [1, 1]).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
@@ -307,7 +291,7 @@ mod tests {
     #[test]
     fn identity_empty_dims_full_read() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
-        let got = make(arange(12), &[3u64, 4]).flip([]).to_ndarray().unwrap();
+        let got = make(arange(12), [3u64, 4]).flip([]).to_ndarray().unwrap();
         assert_eq!(got, nd);
     }
 
@@ -315,14 +299,17 @@ mod tests {
     fn identity_size_one_flipped_dim() {
         // Flipping a size-1 dim is a no-op.
         let nd = ndarray::Array::from_shape_vec((1, 4), arange(4)).unwrap();
-        let got = make(arange(4), &[1u64, 4]).flip([0]).to_ndarray().unwrap();
+        let got = make(arange(4), [1u64, 4]).flip([0]).to_ndarray().unwrap();
         assert_eq!(got, nd);
     }
 
     #[test]
     fn identity_empty_array() {
         // Flipping a dim of size 0 is a no-op (no data to move).
-        let got = make(vec![], &[0u64, 4]).flip([0]).to_ndarray().unwrap();
+        let got = make(vec![], [0u64, 4])
+            .flip([0])
+            .to_ndarray::<Ix2>()
+            .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
 
@@ -332,7 +319,7 @@ mod tests {
 
     #[test]
     fn full_read_1d_single_dim() {
-        let got = make(vec![10, 20, 30, 40], &[4u64])
+        let got = make(vec![10, 20, 30, 40], [4u64])
             .flip([0])
             .to_ndarray()
             .unwrap();
@@ -341,19 +328,19 @@ mod tests {
 
     #[test]
     fn full_read_2d_dim0() {
-        let got = make(arange(8), &[2u64, 4]).flip([0]).to_ndarray().unwrap();
+        let got = make(arange(8), [2u64, 4]).flip([0]).to_ndarray().unwrap();
         assert_eq!(got, array![[4, 5, 6, 7], [0, 1, 2, 3]]);
     }
 
     #[test]
     fn full_read_2d_dim1() {
-        let got = make(arange(8), &[2u64, 4]).flip([1]).to_ndarray().unwrap();
+        let got = make(arange(8), [2u64, 4]).flip([1]).to_ndarray().unwrap();
         assert_eq!(got, array![[3, 2, 1, 0], [7, 6, 5, 4]]);
     }
 
     #[test]
     fn full_read_2d_both_dims() {
-        let got = make(arange(8), &[2u64, 4])
+        let got = make(arange(8), [2u64, 4])
             .flip([0, 1])
             .to_ndarray()
             .unwrap();
@@ -373,7 +360,7 @@ mod tests {
                 }
             }
         }
-        let got = make(arange(12), &[2u64, 3, 2])
+        let got = make(arange(12), [2u64, 3, 2])
             .flip([1])
             .to_ndarray()
             .unwrap();
@@ -386,7 +373,7 @@ mod tests {
 
     #[test]
     fn sub_read_1d_partial() {
-        let got = make(vec![10, 20, 30, 40, 50], &[5u64])
+        let got = make(vec![10, 20, 30, 40, 50], [5u64])
             .flip([0])
             .to_ndarray_sub(&[1..4], &ReadContext::default())
             .unwrap();
@@ -395,7 +382,7 @@ mod tests {
 
     #[test]
     fn sub_read_2d_dim0_partial_rows() {
-        let got = make(arange(9), &[3u64, 3])
+        let got = make(arange(9), [3u64, 3])
             .flip([0])
             .to_ndarray_sub(&[0..2, 0..3], &ReadContext::default())
             .unwrap();
@@ -404,7 +391,7 @@ mod tests {
 
     #[test]
     fn sub_read_2d_both_dims_corner() {
-        let got = make(arange(12), &[3u64, 4])
+        let got = make(arange(12), [3u64, 4])
             .flip([0, 1])
             .to_ndarray_sub(&[0..2, 1..3], &ReadContext::default())
             .unwrap();
@@ -413,9 +400,9 @@ mod tests {
 
     #[test]
     fn sub_read_empty_range() {
-        let got = make(arange(8), &[2u64, 4])
+        let got = make(arange(8), [2u64, 4])
             .flip([0])
-            .to_ndarray_sub(&[1..1, 0..4], &ReadContext::default())
+            .to_ndarray_sub::<Ix2>(&[1..1, 0..4], &ReadContext::default())
             .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
@@ -423,7 +410,7 @@ mod tests {
     #[test]
     fn sub_read_single_element() {
         // Single-element read still goes through the flip path.
-        let got = make(arange(5), &[5u64])
+        let got = make(arange(5), [5u64])
             .flip([0])
             .to_ndarray_sub(&[0..1], &ReadContext::default())
             .unwrap();
@@ -436,7 +423,7 @@ mod tests {
 
     #[test]
     fn compose_flip_then_compact() {
-        let got = make(arange(6), &[2u64, 3])
+        let got = make(arange(6), [2u64, 3])
             .flip([0])
             .compact()
             .unwrap()
@@ -447,7 +434,7 @@ mod tests {
 
     #[test]
     fn compose_flip_then_slice() {
-        let got = make(arange(9), &[3u64, 3])
+        let got = make(arange(9), [3u64, 3])
             .flip([0])
             .slice((1..3, ..))
             .to_ndarray()
@@ -457,7 +444,7 @@ mod tests {
 
     #[test]
     fn compose_flip_then_cast() {
-        let got = make(vec![1, 2, 3], &[3u64])
+        let got = make(vec![1, 2, 3], [3u64])
             .flip([0])
             .cast::<f32>()
             .to_ndarray()
@@ -467,7 +454,7 @@ mod tests {
 
     #[test]
     fn compose_permute_then_flip() {
-        let got = make(arange(6), &[2u64, 3])
+        let got = make(arange(6), [2u64, 3])
             .permute_dims(&[1, 0])
             .flip([0])
             .to_ndarray()
@@ -478,7 +465,7 @@ mod tests {
     #[test]
     fn compose_flip_then_flip_same_dim_is_identity() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
-        let got = make(arange(12), &[3u64, 4])
+        let got = make(arange(12), [3u64, 4])
             .flip([0])
             .flip([0])
             .to_ndarray()
@@ -487,20 +474,12 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Dimension and element type preservation
+    // Element type preservation
     // -----------------------------------------------------------------------
 
     #[test]
-    fn dim_change_into_dim_dyn() {
-        let a = make(arange(12), &[3u64, 4]); // Compact<Ty<i32>, Dim<2>>
-        let f = a.flip([0]); // Array<Flip<...Dim<2>>>
-        let dyn_arr = f.into_dim_dyn();
-        assert_eq!(dyn_arr.shape(), &[3, 4]);
-    }
-
-    #[test]
     fn element_type_change_into_type_dyn() {
-        let a = make(arange(6), &[2u64, 3]);
+        let a = make(arange(6), [2u64, 3]);
         let f = a.flip([1]);
         let dyn_et = f.into_type_dyn();
         assert_eq!(dyn_et.dtype(), &<i32 as crate::dtype::Dtyped>::DTYPE);
