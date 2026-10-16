@@ -485,11 +485,27 @@ def test_power_promotes_uint64_exponent_to_float64():
 
 
 def test_power_signed_scalar_exponent_promotes_to_float():
-    """A plain Python int exponent is signed (no precision tag), so it can't fill the unsigned
-    exponent slot: power(int32_array, 3) promotes to f64. Passing np.uint32(3) keeps int32."""
+    """A plain Python int is signed (no precision tag), so it can't fill the unsigned exponent
+    slot: power(int32_array, 3) promotes to f64. Passing np.uint32(3) keeps int32."""
     a = jix.compact(np.array([2, 3, 4], dtype=np.int32))
     assert jix.power(a, 3).dtype == np.float64
+    assert jix.power(a, np.int32(3)).dtype == np.float64
+    assert jix.power(a, -1).dtype == np.float64
     assert jix.power(a, np.uint32(3)).dtype == np.int32
+
+
+def test_power_signed_array_exponent_promotes_to_float():
+    """Same for a signed *array* exponent - it can't reach the unsigned slot either."""
+    a = jix.compact(np.array([2, 3, 4], dtype=np.int32))
+    b = jix.compact(np.array([3, 3, 3], dtype=np.int32))
+    assert jix.power(a, b).dtype == np.float64
+
+
+def test_power_scalar_exponent_keeps_float_base_narrow():
+    """A float base prefers the signed (f32, i32) slot, so a scalar exponent must not widen it."""
+    a = jix.compact(np.array([2.0, 3.0, 4.0], dtype=np.float32))
+    assert jix.power(a, 3).dtype == np.float32
+    assert jix.power(a, np.int32(3)).dtype == np.float32
 
 
 def test_power_rejects_complex():

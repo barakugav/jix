@@ -414,8 +414,8 @@ def test_power_custom_inputs():
     def check(result, expected):
         np.testing.assert_array_equal(result.numpy(), expected)
 
-    # int32 base: an unsigned-typed scalar exponent keeps the base dtype, but a plain
-    # Python int (signed) promotes to float (it can't fill the unsigned exponent slot).
+    # int32 base: an unsigned-typed scalar exponent keeps the base dtype, but a plain Python int
+    # (signed) promotes to float - it can't fill the unsigned exponent slot.
     di32 = np.array([2, 3, 4], dtype=np.int32)
     zai32 = jix.compact(di32)
     r = jix.power(zai32, np.uint32(3))
@@ -426,6 +426,7 @@ def test_power_custom_inputs():
         di32 ** np.array([1, 2, 3]),
     )
     assert jix.power(zai32, 3).dtype == np.float64  # plain Python int exponent -> float
+    assert jix.power(zai32, np.array([3, 3, 3], dtype=np.int32)).dtype == np.float64
 
     # Broadcasting: (2, 1) base ** (1, 3) exponent -> (2, 3)
     base_2d = jix.compact(np.array([[2], [3]], dtype=np.int32))
@@ -450,6 +451,144 @@ def test_power_custom_inputs():
     check(jix.power(2.0, zaf64), 2.0**df64)  # scalar first
     check(jix.power(zaf64, [3.0, 2.0, 0.5]), df64 ** [3.0, 2.0, 0.5])
     check(jix.power(zaf64, (3.0, 2.0, 0.5)), df64 ** (3.0, 2.0, 0.5))
+
+
+# A scalar exponent of exactly 2 or 0.5 is served by square / sqrt instead of the general power
+# kernel. The shortcut dispatch tables mirror power's own (base, exponent) pairs, so the exponent
+# still takes part in dispatch and the result dtype is whatever the general path would produce.
+# With a plain Python scalar exponent, `** 2`, `** 2.0` and `** 0.5` all land on the same dtype.
+_POWER_SHORTCUT_DTYPES = [
+    (np.bool_, np.float32),
+    (np.uint8, np.float32),
+    (np.int8, np.float32),
+    (np.uint16, np.float32),
+    (np.int16, np.float32),
+    (np.uint32, np.float64),
+    (np.int32, np.float64),
+    (np.uint64, np.float64),
+    (np.int64, np.float64),
+    (np.float16, np.float32),
+    (np.float32, np.float32),
+    (np.float64, np.float64),
+]
+
+# (shortcut exponent, a non-shortcut exponent of the same dtype). The result dtype must be decided
+# by the operands' dtypes alone, so each pair must agree.
+_POWER_SHORTCUT_VS_GENERAL = [
+    (2, 3),
+    (2.0, 3.0),
+    (0.5, 0.4),
+    (np.uint32(2), np.uint32(3)),
+    (np.uint64(2), np.uint64(3)),
+    (np.int32(2), np.int32(3)),
+    (np.float32(2.0), np.float32(3.0)),
+    (np.float64(2.0), np.float64(3.0)),
+    (np.float64(0.5), np.float64(0.4)),
+]
+
+
+@pytest.mark.parametrize("base_dtype,expected_dtype", _POWER_SHORTCUT_DTYPES)
+def test_power_shortcut_dtypes(base_dtype, expected_dtype):
+    """`** 2` (square) and `** 0.5` (sqrt) promote exactly like the generic power path."""
+    za = jix.compact(np.array([0, 1, 4, 9], dtype=base_dtype))
+    assert jix.power(za, 2).dtype == np.dtype(expected_dtype)
+    assert jix.power(za, 2.0).dtype == np.dtype(expected_dtype)
+    assert jix.power(za, 0.5).dtype == np.dtype(expected_dtype)
+
+
+@pytest.mark.parametrize("base_dtype,expected_dtype", _POWER_SHORTCUT_DTYPES)
+def test_power_shortcut_values(base_dtype, expected_dtype):
+    """The shortcuts agree with square/sqrt on the same promoted base."""
+    np_a = np.array([0, 1, 4, 9], dtype=base_dtype)
+    za = jix.compact(np_a)
+    promoted = np_a.astype(expected_dtype)
+    np.testing.assert_array_equal(jix.power(za, 2).numpy(), np.square(promoted))
+    np.testing.assert_array_equal(jix.power(za, 2.0).numpy(), np.square(promoted))
+    np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), np.sqrt(promoted))
+
+
+@pytest.mark.parametrize("base_dtype", [base for base, _ in _POWER_SHORTCUT_DTYPES])
+@pytest.mark.parametrize("shortcut_exp,general_exp", _POWER_SHORTCUT_VS_GENERAL)
+def test_power_shortcut_dtype_is_value_independent(base_dtype, shortcut_exp, general_exp):
+    """Taking the shortcut must never change the result dtype.
+
+    Regression test: handing the base straight to jix.square / jix.sqrt dropped the exponent from
+    dispatch, because those ops have their own dtype tables. u8 ** np.uint32(2) then narrowed to
+    u8 (and overflowed) while u8 ** np.uint32(3) widened to u32, and u8 ** 0.5 was computed in f16
+    while u8 ** 0.4 used f32.
+    """
+    za = jix.compact(np.array([0, 1, 4, 9], dtype=base_dtype))
+    assert jix.power(za, shortcut_exp).dtype == jix.power(za, general_exp).dtype
+
+
+def test_power_shortcut_keeps_exponent_dtype_no_overflow():
+    """u8 ** np.uint32(2) widens to u32 just like u8 ** np.uint32(3) - squaring in u8 would
+    overflow 255."""
+    za = jix.compact(np.array([16, 20], dtype=np.uint8))
+    result = jix.power(za, np.uint32(2))
+    assert result.dtype == np.uint32
+    np.testing.assert_array_equal(result.numpy(), np.array([256, 400], dtype=np.uint32))
+
+
+def test_power_shortcut_sqrt_does_not_narrow_to_f16():
+    """u8 ** 0.5 is computed in f32. sqrt's own table would pick f16 (u8 -> f16 is a safe cast),
+    which loses ~3 decimal digits."""
+    za = jix.compact(np.array([200], dtype=np.uint8))
+    result = jix.power(za, 0.5)
+    assert result.dtype == np.float32
+    np.testing.assert_array_equal(result.numpy(), np.sqrt(np.array([200], dtype=np.float32)))
+
+
+def test_power_shortcut_accepts_bool_base():
+    """bool ** 2 reaches the (f32, i32) pair, same as bool ** 3. square's own table has no bool."""
+    za = jix.compact(np.array([True, False]))
+    assert jix.power(za, 2).dtype == np.float32
+    np.testing.assert_array_equal(jix.power(za, 2).numpy(), np.array([1.0, 0.0], dtype=np.float32))
+
+
+def test_power_shortcut_rejects_complex_base():
+    """power has no complex impl; the shortcut must not quietly add one for exponent 2 (square's
+    own table does support complex)."""
+    za = jix.compact(np.array([1 + 2j, 3 + 4j], dtype=np.complex64))
+    for exponent in (2, 2.0, 0.5, 3):
+        with pytest.raises(Exception):
+            _ = jix.power(za, exponent).numpy()
+
+
+def test_power_shortcut_matches_general_path():
+    """For ordinary inputs the shortcut and the general (array-exponent) path agree."""
+    np_a = np.array([0.25, 1.0, 2.0, 3.0, 4.0, 1e30], dtype=np.float64)
+    za = jix.compact(np_a)
+    for exponent in (2.0, 0.5):
+        shortcut = jix.power(za, exponent).numpy()
+        general = jix.power(za, jix.compact(np.full(np_a.shape, exponent))).numpy()
+        np.testing.assert_array_equal(shortcut, general)
+
+
+def test_power_shortcut_edge_cases_follow_sqrt():
+    """Like numpy, a scalar `** 0.5` inherits sqrt's answers for -inf and -0.0, which differ from
+    the general pow path (`pow(-inf, 0.5) == +inf`, `pow(-0.0, 0.5) == +0.0`)."""
+    np_a = np.array([-np.inf, -0.0, -1.0, 4.0], dtype=np.float64)
+    za = jix.compact(np_a)
+    np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), jix.sqrt(za).numpy())
+    with np.errstate(invalid="ignore"):
+        np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), np.power(np_a, 0.5))
+
+
+def test_power_shortcut_not_taken_for_array_exponent():
+    """An all-2 array exponent is not a scalar, so it keeps the general path (and its dtypes)."""
+    za = jix.compact(np.array([2, 3, 4], dtype=np.int32))
+    zb = jix.compact(np.array([2, 2, 2], dtype=np.int32))
+    assert jix.power(za, zb).dtype == np.float64
+
+
+def test_power_shortcut_respects_broadcasting():
+    """The shortcut keeps the base's shape, including a 0-d base."""
+    base_2d = jix.compact(np.array([[2], [3]], dtype=np.int32))
+    assert jix.power(base_2d, 2).shape == (2, 1)
+    np.testing.assert_array_equal(jix.power(base_2d, 2).numpy(), np.array([[4.0], [9.0]]))
+    assert jix.power(9.0, 0.5).numpy() == 3.0
+    assert jix.power(3.0, 2).numpy() == 9.0
 
 
 # ---------------------------------------------------------------------------
