@@ -30,6 +30,41 @@ macro_rules! define_scalar_op1_trait {
             }
         }
     };
+    // An op that can hit an arithmetic error: it reports it to `status`, see
+    // `ArithmeticOpStatus`.
+    (
+        $(#[$trait_meta:meta])* $Trait:ident,
+        $(#[$fn_meta:meta])* $f:ident,
+        bulk_fn: $f_bulk:ident,
+        with_status,
+    ) => {
+        $(#[$trait_meta])*
+        pub trait $Trait {
+            /// The output element type.
+            type Output;
+
+            $(#[$fn_meta])*
+            #[allow(clippy::wrong_self_convention)]
+            fn $f(self, status: &mut crate::error::ArithmeticOpStatus) -> Self::Output;
+
+            #[doc = concat!(
+                "Apply [`", stringify!($f), "`](Self::", stringify!($f), ") on each of `xs`, ",
+                "vectorized with `simd` where the type has SIMD support."
+            )]
+            #[inline(always)]
+            fn $f_bulk<const N: usize, S: fearless_simd::Simd>(
+                xs: [Self; N],
+                status: &mut crate::error::ArithmeticOpStatus,
+                simd: S,
+            ) -> [Self::Output; N]
+            where
+                Self: Sized,
+            {
+                let _ = simd;
+                crate::util::ArrayExt::map_inline(xs, #[inline(always)] |x| Self::$f(x, status))
+            }
+        }
+    };
 }
 
 macro_rules! impl_scalar_op1 {
@@ -189,6 +224,45 @@ macro_rules! define_scalar_op2_trait {
             {
                 let _ = simd;
                 crate::util::array2_map_inline(xs, ys, #[inline(always)] |_, x, y| Self::$f(x, y))
+            }
+        }
+    };
+    // An op that can hit an arithmetic error: it reports it to `status`, see
+    // `ArithmeticOpStatus`.
+    (
+        $(#[$trait_meta:meta])* $Trait:ident,
+        $(#[$fn_meta:meta])* $f:ident,
+        bulk_fn: $f_bulk:ident,
+        with_status,
+    ) => {
+        $(#[$trait_meta])*
+        pub trait $Trait<Rhs = Self> {
+            /// The output element type.
+            type Output;
+
+            $(#[$fn_meta])*
+            fn $f(self, rhs: Rhs, status: &mut crate::error::ArithmeticOpStatus) -> Self::Output;
+
+            #[doc = concat!(
+                "Apply [`", stringify!($f), "`](Self::", stringify!($f), ") on each pair of `xs` and ",
+                "`ys`, vectorized with `simd` where the types have SIMD support."
+            )]
+            #[inline(always)]
+            fn $f_bulk<const N: usize, S: fearless_simd::Simd>(
+                xs: [Self; N],
+                ys: [Rhs; N],
+                status: &mut crate::error::ArithmeticOpStatus,
+                simd: S,
+            ) -> [Self::Output; N]
+            where
+                Self: Sized
+            {
+                let _ = simd;
+                crate::util::array2_map_inline(
+                    xs,
+                    ys,
+                    #[inline(always)] |_, x, y| Self::$f(x, y, status),
+                )
             }
         }
     };

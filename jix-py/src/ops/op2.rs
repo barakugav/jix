@@ -244,25 +244,23 @@ define_op2!(
 /// Element-wise exponentiation (`a` raised to the power `b`).
 ///
 /// Supported base dtypes: `u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`,
-/// `f32`, `f64`. For an **integer** base the exponent must be a non-negative
-/// integer (it is cast to an unsigned type); for a **float** base the exponent
-/// may be an integer or a float. Complex dtypes are not supported yet.
+/// `f32`, `f64`. For an **integer** base the exponent must be an integer; for a
+/// **float** base it may be an integer or a float. Complex dtypes are not supported
+/// yet.
 ///
 /// For a directly supported `(base, exponent)` pair the output dtype equals the
-/// base dtype - e.g. `u8 ** u8 -> u8`, `i32 ** u32 -> i32`, `f32 ** i32 -> f32`,
-/// `f64 ** f64 -> f64`. Integer results wrap on overflow (two's complement).
+/// base dtype - e.g. `u8 ** u8 -> u8`, `i32 ** i32 -> i32`, `f32 ** i32 -> f32`,
+/// `f64 ** f64 -> f64`. Integer results wrap on overflow (two's complement), as in
+/// numpy.
 ///
-/// Negative base with a non-integer exponent produces `NaN`.
+/// A negative exponent of an integer base gives `0` and is reported as `invalid`
+/// according to [`jix.errstate()`][jix.errstate] (numpy raises a `ValueError`
+/// instead). Negative base with a non-integer exponent produces `NaN`.
 ///
 /// **Type promotion**: when `a` and `b` do not directly match a supported pair,
 /// both operands are cast under Safe casting rules and the first matching pair
-/// is used. Two consequences are worth noting:
-/// - A **signed** exponent cannot fill the unsigned-exponent slot, so an integer
-///   base with a signed exponent promotes to float: `i8 ** i8 -> f32`,
-///   `i32 ** i32 -> f64`. (A plain Python `int` is signed, so `power(int_array, 3)`
-///   is float; pass `np.uint32(3)` to keep an integer result.)
-/// - The widest exponent slot is 32-bit, so a 64-bit exponent also promotes the
-///   result to float: `u8 ** u64 -> f64`.
+/// is used, e.g. `u8 ** i8 -> i16`. A `u64` base or exponent with a signed one
+/// promotes to float: `u64 ** i64 -> f64`.
 ///
 /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
 ///
@@ -288,9 +286,9 @@ define_op2!(
 ///     result2 = jix.power(a, np.float32(2.0))
 ///     assert np.array_equal(result2.numpy(), [4.0, 9.0, 16.0])
 ///
-///     # Integer base with an unsigned integer exponent keeps the base dtype.
+///     # An integer base and exponent keep the base dtype.
 ///     ai = jix.compact([2, 3, 4], dtype=np.int32)
-///     result3 = jix.power(ai, np.uint32(3))
+///     result3 = jix.power(ai, np.int32(3))
 ///     assert result3.dtype == np.dtype("int32")
 ///     assert np.array_equal(result3.numpy(), [8, 27, 64])
 ///     ```
@@ -307,7 +305,7 @@ pub fn power<'py>(
             define_op2_desc!(
                 Pow,
                 [
-                    // integers, exponent must be unsigned
+                    // integers, unsigned exponents first so they keep matching first
                     (u8, u8),
                     (i8, u8),
                     (u16, u16),
@@ -316,6 +314,10 @@ pub fn power<'py>(
                     (i32, u32),
                     (u64, u32),
                     (i64, u32),
+                    (i8, i8),
+                    (i16, i16),
+                    (i32, i32),
+                    (i64, i64),
                     // floats
                     (f32, i32),
                     (f32, f32),
@@ -359,6 +361,10 @@ pub fn power<'py>(
                     (i32, u32),
                     (u64, u32),
                     (i64, u32),
+                    (i8, i8),
+                    (i16, i16),
+                    (i32, i32),
+                    (i64, i64),
                     (f32, i32),
                     (f32, f32),
                     (f64, i32),

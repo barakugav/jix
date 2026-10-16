@@ -167,6 +167,7 @@ macro_rules! define_op1 {
         $Kernel:ident,
         crate::scalar::$trait:ident::$kernel_fn:ident,
         simd: $bulk_fn:ident,
+        $(with_status: $with_status:tt,)?
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -177,18 +178,18 @@ macro_rules! define_op1 {
             type Output = <T as crate::scalar::$trait>::Output;
 
             #[inline(always)]
-            fn apply(&self, x: T, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
-                <T as crate::scalar::$trait>::$kernel_fn(x)
+            fn apply(&self, x: T, status: &mut ArithmeticOpStatus) -> Self::Output {
+                define_op1!(@apply $trait::$kernel_fn(x), status, $($with_status)?)
             }
 
             #[inline(always)]
             fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
                 &self,
                 xs: [T; N],
-                _status: &mut crate::error::ArithmeticOpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [Self::Output; N] {
-                <T as crate::scalar::$trait>::$bulk_fn(xs, simd)
+                define_op1!(@bulk $trait::$bulk_fn(xs), status, simd, $($with_status)?)
             }
         }
         $(#[$meta])*
@@ -230,6 +231,22 @@ macro_rules! define_op1 {
         );
     };
 
+    // Calls of the scalar functions, passing `status` if the scalar trait takes one.
+    (@apply $trait:ident::$f:ident($x:ident), $status:ident,) => {{
+        let _ = $status;
+        <T as crate::scalar::$trait>::$f($x)
+    }};
+    (@apply $trait:ident::$f:ident($x:ident), $status:ident, true) => {
+        <T as crate::scalar::$trait>::$f($x, $status)
+    };
+    (@bulk $trait:ident::$f:ident($xs:ident), $status:ident, $simd:ident,) => {{
+        let _ = $status;
+        <T as crate::scalar::$trait>::$f($xs, $simd)
+    }};
+    (@bulk $trait:ident::$f:ident($xs:ident), $status:ident, $simd:ident, true) => {
+        <T as crate::scalar::$trait>::$f($xs, $status, $simd)
+    };
+
     (
         @define_core
         impl $Op:ident,
@@ -259,6 +276,7 @@ macro_rules! define_op1 {
 pub(crate) use define_op1;
 
 pub(crate) mod _traits {
+    use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
@@ -498,16 +516,69 @@ pub(crate) mod _traits {
         ceil_bulk,
         simd = "enabled"
     );
-    float_op1!(
+    define_scalar_op1_trait!(
         /// Square root operation, as [`f32::sqrt`].
         ///
-        /// Negative inputs produce `NaN`.
+        /// A negative input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`],
+        /// as numpy. `-0.0` gives `-0.0`, and `NaN` propagates, without an error.
         Sqrt,
-        /// Compute the square root.
+        /// Compute the square root, reporting an arithmetic error to `status`.
         sqrt,
-        sqrt_bulk,
-        simd = "enabled"
+        bulk_fn: sqrt_bulk,
+        with_status,
     );
+    macro_rules! impl_sqrt {
+        ($($t:ty),*) => {$(
+            impl Sqrt for $t {
+                type Output = Self;
+                #[inline(always)]
+                fn sqrt(self, status: &mut ArithmeticOpStatus) -> Self {
+                    status.set_if(ArithmeticErrorKind::InvalidOperation, self < 0.0);
+                    <$t>::sqrt(self)
+                }
+
+                #[inline(always)]
+                fn sqrt_bulk<const N: usize, S: fearless_simd::Simd>(
+                    xs: [Self; N],
+                    status: &mut ArithmeticOpStatus,
+                    simd: S,
+                ) -> [Self; N] {
+                    use fearless_simd::{SimdBase, SimdFloat, SimdMask};
+                    type V<S> = <$t as crate::scalar::simd::SimdElementExt>::V<S>;
+                    let zero = V::<S>::splat(simd, 0.0);
+                    // A single mask OR per vector, tested once per bulk.
+                    let mut negative = <V<S> as SimdBase<S>>::Mask::splat(simd, false);
+                    let ys = crate::scalar::simd::map_vectors::<Self, Self, N, S>(
+                        xs,
+                        #[inline(always)]
+                        |x| <Self as Sqrt>::sqrt(x, status),
+                        #[inline(always)]
+                        |v| {
+                            negative |= v.simd_lt(zero);
+                            v.sqrt()
+                        },
+                        simd,
+                    );
+                    status.set_if(
+                        ArithmeticErrorKind::InvalidOperation,
+                        negative.to_bitmask() != 0,
+                    );
+                    ys
+                }
+            }
+        )*};
+    }
+    impl_sqrt!(f32, f64);
+    #[cfg(feature = "half")]
+    impl Sqrt for f16 {
+        type Output = Self;
+        #[inline(always)]
+        fn sqrt(self, status: &mut ArithmeticOpStatus) -> Self {
+            let x = self.to_f32();
+            status.set_if(ArithmeticErrorKind::InvalidOperation, x < 0.0);
+            f16::from_f32(x.sqrt())
+        }
+    }
     float_op1!(
         /// Rounding operation, as [`f32::round`].
         ///
@@ -735,6 +806,7 @@ define_op1!(
     SqrtKernel,
     crate::scalar::Sqrt::sqrt,
     simd: sqrt_bulk,
+    with_status: true,
 );
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
@@ -1515,4 +1587,95 @@ pub(crate) mod tests {
         test_op1_dtype!(abs, |a| a.re.hypot(a.im), complex_f32, op_safe_strategy);
         test_op1_dtype!(abs, |a| a.re.hypot(a.im), complex_f64, op_safe_strategy);
     }
+
+    /// The status of the SIMD bodies against the scalar functions', on every SIMD level: each
+    /// edge case in one lane of a bulk of ordinary values.
+    #[test]
+    fn simd_bodies_status_all_levels() {
+        use super::{Op1Kernel, SqrtKernel};
+        use crate::error::ArithmeticOpStatus;
+        use crate::util::{for_each_simd_level, SimdTestValues, SIMD_TEST_N};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $t:ty) => {
+                    for &x in &<$t>::edge_cases() {
+                        let mut scalar = ArithmeticOpStatus::default();
+                        $kernel.apply(x, &mut scalar);
+                        for lane in [0, 9, 40, SIMD_TEST_N - 1] {
+                            let mut xs = [1.5 as $t; SIMD_TEST_N];
+                            xs[lane] = x;
+                            let mut bulk = ArithmeticOpStatus::default();
+                            $kernel.apply_bulk(xs, &mut bulk, simd);
+                            assert_eq!(
+                                bulk,
+                                scalar,
+                                "{} {}: {x} in lane {lane}",
+                                stringify!($kernel),
+                                stringify!($t)
+                            );
+                        }
+                    }
+                };
+            }
+            simd.vectorize(|| {
+                case!(SqrtKernel, f32);
+                case!(SqrtKernel, f64);
+            });
+        }
+        for_each_simd_level!(check);
+    }
+
+    macro_rules! test_sqrt_invalid {
+        ($($t:ident),*) => {$(
+            paste::paste! {
+                #[test]
+                fn [<sqrt_invalid_ $t>]() {
+                    use crate::Array;
+                    use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
+                    #[allow(unused_imports)]
+                    use crate::scalar::f16;
+
+                    let c = |x: f64| <f64 as crate::scalar::Cast<$t>>::cast(x);
+                    let n = 1000;
+                    for (x, invalid) in [
+                        (-2.0, true),
+                        (f64::NEG_INFINITY, true),
+                        (-0.25, true),
+                        (-0.0, false),
+                        (f64::NAN, false),
+                        (f64::INFINITY, false),
+                    ] {
+                        // In the bulk part of the loop, and in its scalar tail.
+                        for i in [300, n - 1] {
+                            let mut nd = ndarray::Array1::from_shape_fn(n, |i| c(i as f64 * 0.5));
+                            nd[i] = c(x);
+                            let r = Array::compact_ndarray(&nd).unwrap().sqrt();
+                            let what = format!("sqrt({x}) at {i}");
+                            let res = r.to_ndarray::<ndarray::Ix1>();
+                            if !invalid {
+                                res.expect(&what);
+                                continue;
+                            }
+                            let err = res.expect_err(&what);
+                            assert_eq!(err.kind(), ErrorKind::Arithmetic);
+                            assert_eq!(err.message(), "invalid operation encountered");
+
+                            let mut ctx = r.read_ctx();
+                            ctx.set_arithmetic_error_mode(
+                                ArithmeticErrorKind::InvalidOperation,
+                                ArithmeticErrorMode::Ignore,
+                            );
+                            let res = r.to_ndarray_sub::<ndarray::Ix1>(&[0..n as u64], &ctx).unwrap();
+                            assert!(res[i].is_nan(), "{what}");
+                        }
+                    }
+                }
+            }
+        )*};
+    }
+    test_sqrt_invalid!(f32, f64);
+    #[cfg(feature = "half")]
+    test_sqrt_invalid!(f16);
 }

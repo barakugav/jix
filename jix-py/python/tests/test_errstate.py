@@ -1,6 +1,6 @@
 """
-Arithmetic error handling: integer division by zero under jix.errstate.
-Mirrors the div-by-zero tests in jix/src/ops/op2.rs.
+Arithmetic error handling under jix.errstate: integer and float division, sqrt and integer power.
+Mirrors the tests in jix/src/ops/op1.rs and jix/src/ops/op2.rs.
 """
 
 import threading
@@ -78,14 +78,19 @@ def test_divide_by_zero_ignore(dtype):
 
 
 @pytest.mark.parametrize("dtype", ints)
-def test_min_floor_divide_minus_one_wraps(dtype):
+def test_min_floor_divide_minus_one_overflows(dtype):
+    # `MIN`, and an overflow, as numpy.
     info = np.iinfo(dtype)
     a = np.array([info.min, 7, info.max], dtype=dtype)
     b = np.array([-1, -1, -1], dtype=dtype)
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        result = (jix.compact(a) // jix.compact(b)).numpy()
+    q = jix.compact(a) // jix.compact(b)
+    with pytest.warns(RuntimeWarning, match="overflow encountered"):
+        result = q.numpy()
     np.testing.assert_array_equal(result, np.array([info.min, -7, -info.max], dtype=dtype))
+    with pytest.warns(RuntimeWarning, match="overflow encountered in floor_divide"):
+        np.testing.assert_array_equal(a // b, result)
+    with jix.errstate(over="raise"), pytest.raises(FloatingPointError, match="overflow encountered"):
+        q.numpy()
 
 
 def test_compact_and_write_array_report(tmp_path):
@@ -183,3 +188,99 @@ def test_divide_by_zero_random(dtype, data: DataObject):
                 (za // zb).numpy()
         else:
             np.testing.assert_array_equal((za // zb).numpy(), expected)
+
+
+# Operands for the float error tests: every pair of these.
+_FLOAT_EDGES = [0.0, -0.0, 1.0, -2.5, 1e30, -1e-30, np.inf, -np.inf, np.nan, "max", "-max", "tiny"]
+_KINDS = {"divide by zero": "divide", "overflow": "over", "invalid": "invalid"}
+
+
+def _float_edges(dtype):
+    info = np.finfo(dtype)
+    special = {"max": info.max, "-max": -info.max, "tiny": info.smallest_subnormal}
+    with np.errstate(over="ignore"):
+        return np.array([special.get(x, x) for x in _FLOAT_EDGES], dtype=dtype)
+
+
+def _error_kind(f, *args):
+    """The kind of the `FloatingPointError` `f(*args)` raises, or None."""
+    try:
+        f(*args)
+    except FloatingPointError as e:
+        return next(kind for word, kind in _KINDS.items() if word in str(e))
+    return None
+
+
+def _errors_match_numpy(jix_op, np_op, *operands):
+    """Each operand tuple in one element of an array of ordinary values, in the SIMD bulk part of
+    the loop and in its scalar tail: jix reports the error numpy reports, ignoring underflow,
+    which jix does not detect."""
+    n = 1000
+    for i in [300, n - 1]:
+        arrays = []
+        for x, fill in zip(operands, [1.5, 3.0]):
+            a = np.full(n, fill, dtype=x.dtype)
+            a[i] = x
+            arrays.append(a)
+        with np.errstate(all="raise", under="ignore"):
+            expected = _error_kind(np_op, *arrays)
+        with jix.errstate(all="raise"):
+            actual = _error_kind(lambda *a: jix_op(*map(jix.compact, a)).numpy(), *arrays)
+        assert actual == expected, (operands, i)
+
+
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+def test_float_divide_errors_match_numpy(dtype):
+    edges = _float_edges(dtype)
+    for x in edges:
+        for y in edges:
+            _errors_match_numpy(lambda a, b: a / b, np.divide, x, y)
+
+
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+def test_sqrt_errors_match_numpy(dtype):
+    for x in _float_edges(dtype):
+        _errors_match_numpy(jix.sqrt, np.sqrt, x)
+
+
+def test_float_divide_modes():
+    a = jix.compact(np.array([1.0, 0.0, 6.0]))
+    b = jix.compact(np.array([0.0, 0.0, 3.0]))
+    q = a / b
+    with pytest.raises(FloatingPointError, match=MESSAGE):
+        q.numpy()
+    with jix.errstate(divide="ignore"), pytest.raises(FloatingPointError, match="invalid"):
+        q.numpy()
+    with jix.errstate(divide="warn", invalid="warn"), warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        result = q.numpy()
+    assert sorted(str(x.message) for x in w) == [MESSAGE, "invalid operation encountered"]
+    np.testing.assert_array_equal(result, [np.inf, np.nan, 2.0])
+
+
+@pytest.mark.parametrize("dtype", ints)
+def test_power_negative_exponent(dtype):
+    a = np.array([2, 3, 4, -5], dtype=dtype)
+    b = np.array([3, -1, 0, 3], dtype=dtype)
+    q = jix.power(jix.compact(a), jix.compact(b))
+    assert q.dtype == dtype
+    # numpy raises a ValueError whatever its modes, jix follows `invalid`.
+    with pytest.raises(ValueError, match="negative integer powers"):
+        np.power(a, b)
+    with pytest.raises(FloatingPointError, match="invalid operation encountered"):
+        q.numpy()
+    with jix.errstate(invalid="ignore"):
+        np.testing.assert_array_equal(q.numpy(), [8, 0, 1, -125])
+    with jix.errstate(invalid="warn"), pytest.warns(RuntimeWarning, match="invalid operation encountered"):
+        q.numpy()
+
+
+@pytest.mark.parametrize("dtype", ints + uints)
+def test_power_wraps_like_numpy(dtype):
+    signed = np.issubdtype(dtype, np.signedinteger)
+    a = (np.arange(-50, 50) if signed else np.arange(100)).astype(dtype)
+    b = (np.arange(100) % 70).astype(dtype if signed else np.uint8)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = jix.power(jix.compact(a), jix.compact(b)).numpy()
+    np.testing.assert_array_equal(result, np.power(a, b))

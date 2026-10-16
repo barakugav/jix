@@ -2683,7 +2683,8 @@ where
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
         let var = <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems);
-        crate::scalar::Sqrt::sqrt(var)
+        // A variance is never negative: no error to report.
+        crate::scalar::Sqrt::sqrt(var, &mut Default::default())
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;

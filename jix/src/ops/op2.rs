@@ -377,42 +377,6 @@ pub(crate) mod _traits {
         mul,
         bulk_fn: mul_bulk,
     );
-    /// Division operation, like [`core::ops::Div`], reporting arithmetic errors to an
-    /// [`ArithmeticOpStatus`] instead of panicking.
-    ///
-    /// For **integer** types the result is truncating (rounds towards zero), and `MIN / -1` wraps
-    /// to `MIN`. Dividing by zero gives `0` and sets [`ArithmeticErrorKind::DivideByZero`] in the status.
-    /// For **float** types semantics follow `f32::div`; there is no error to report.
-    /// For **complex** types this is full complex division.
-    pub trait Div<Rhs = Self> {
-        /// The output element type.
-        type Output;
-
-        /// Divide by another value, reporting an arithmetic error to `status`.
-        fn div(self, rhs: Rhs, status: &mut ArithmeticOpStatus) -> Self::Output;
-
-        /// Apply [`div`](Self::div) on each pair of `xs` and `ys`, vectorized with `simd` where the
-        /// types have SIMD support.
-        #[inline(always)]
-        fn div_bulk<const N: usize, S: fearless_simd::Simd>(
-            xs: [Self; N],
-            ys: [Rhs; N],
-            status: &mut ArithmeticOpStatus,
-            simd: S,
-        ) -> [Self::Output; N]
-        where
-            Self: Sized,
-        {
-            let _ = simd;
-            crate::util::array2_map_inline(
-                xs,
-                ys,
-                #[inline(always)]
-                |_, x, y| Self::div(x, y, status),
-            )
-        }
-    }
-
     macro_rules! impl_arith {
         (
             $Trait:ident::$f:ident, $op:tt, [$($scalar:ty),*],
@@ -469,62 +433,27 @@ pub(crate) mod _traits {
         Mul::mul, *, [i8], // i8 auto-vectorized scalar is faster
         simd: mul_bulk, [f32, f64, i16, i32, i64, u8, u16, u32, u64]
     );
-    // Types whose division has no error to report.
-    macro_rules! impl_div {
-        ([$($t:ty),*], |$a:ident, $b:ident| $f:expr) => {$(
-            impl Div for $t {
-                type Output = Self;
-                #[inline(always)]
-                fn div(self, rhs: Self, _status: &mut ArithmeticOpStatus) -> Self {
-                    let ($a, $b) = (self, rhs);
-                    $f
-                }
-            }
-        )*};
-        ([$($t:ty),*], |$a:ident, $b:ident| $f:expr, simd: |$va:ident, $vb:ident| $f_simd:expr) => {$(
-            impl Div for $t {
-                type Output = Self;
-                #[inline(always)]
-                fn div(self, rhs: Self, _status: &mut ArithmeticOpStatus) -> Self {
-                    let ($a, $b) = (self, rhs);
-                    $f
-                }
+    define_scalar_op2_trait!(
+        /// Division operation, like [`core::ops::Div`], reporting arithmetic errors to an
+        /// [`ArithmeticOpStatus`] instead of panicking.
+        ///
+        /// For **integer** types the result is truncating (rounds towards zero). Dividing by zero
+        /// gives `0` and sets [`ArithmeticErrorKind::DivideByZero`], and `MIN / -1` gives `MIN`
+        /// and sets [`ArithmeticErrorKind::Overflow`].
+        /// For **float** types the result is the IEEE 754 one, and the errors are those of numpy:
+        /// a finite non-zero value divided by zero sets [`ArithmeticErrorKind::DivideByZero`],
+        /// `0 / 0` and `inf / inf` set [`ArithmeticErrorKind::InvalidOperation`], and an infinite
+        /// result of finite operands sets [`ArithmeticErrorKind::Overflow`]. NaN operands
+        /// propagate without an error.
+        /// For **complex** types this is full complex division; errors are not reported yet.
+        Div,
+        /// Divide by another value, reporting an arithmetic error to `status`.
+        div,
+        bulk_fn: div_bulk,
+        with_status,
+    );
 
-                #[inline(always)]
-                fn div_bulk<const N: usize, S: fearless_simd::Simd>(
-                    xs: [Self; N],
-                    ys: [Self; N],
-                    _status: &mut ArithmeticOpStatus,
-                    simd: S,
-                ) -> [Self; N] {
-                    crate::scalar::simd::map_vectors2::<Self, Self, Self, N, S>(
-                        xs,
-                        ys,
-                        #[inline(always)]
-                        |$a, $b| $f,
-                        #[inline(always)]
-                        |$va, $vb| $f_simd,
-                        simd,
-                    )
-                }
-            }
-        )*};
-    }
-    impl_div!([f32, f64], |a, b| a / b, simd: |a, b| a / b);
-    // In f32 without FP16, as half's operators do, but inlined: theirs call a software fallback.
-    #[cfg(all(
-        feature = "half",
-        not(all(target_arch = "aarch64", target_feature = "fp16"))
-    ))]
-    impl_div!([f16], |a, b| f16::from_f32(a.to_f32() / b.to_f32()));
-    #[cfg(all(feature = "half", target_arch = "aarch64", target_feature = "fp16"))]
-    impl_div!([f16], |a, b| a / b);
-    #[cfg(feature = "num-complex")]
-    impl_div!([Complex<f32>, Complex<f64>], |a, b| a / b);
-    #[cfg(all(feature = "half", feature = "num-complex"))]
-    impl_div!([Complex<f16>], |a, b| a / b);
-
-    /// The zero-divisor path of integer division: reports the error and gives `0`.
+    /// The error path of integer division `lhs / rhs`, for a zero `rhs` or `MIN / -1`.
     ///
     /// Out of line on purpose. Besides keeping the rare path out of the loop, the opaque call
     /// keeps LLVM from if-converting the loop to vector code: integer division has no SIMD
@@ -533,9 +462,15 @@ pub(crate) mod _traits {
     /// have a side effect, the status, or LLVM folds the call away.
     #[cold]
     #[inline(never)]
-    fn zero_divisor<T: Default>(status: &mut ArithmeticOpStatus) -> T {
-        status.set_if(ArithmeticErrorKind::DivideByZero, true);
-        T::default()
+    fn int_div_error<T: Default + PartialEq>(lhs: T, rhs: T, status: &mut ArithmeticOpStatus) -> T {
+        if rhs == T::default() {
+            status.set_if(ArithmeticErrorKind::DivideByZero, true);
+            T::default()
+        } else {
+            // `MIN / -1`: `MIN`, as numpy.
+            status.set_if(ArithmeticErrorKind::Overflow, true);
+            lhs
+        }
     }
 
     // Integers have no SIMD division: the default `div_bulk` maps `div`.
@@ -545,11 +480,9 @@ pub(crate) mod _traits {
                 type Output = Self;
                 #[inline(always)]
                 fn div(self, rhs: Self, status: &mut ArithmeticOpStatus) -> Self {
-                    if rhs == 0 {
-                        zero_divisor(status)
-                    } else {
-                        // `MIN / -1` wraps to `MIN`, like the other integer ops.
-                        self.wrapping_div(rhs)
+                    match self.checked_div(rhs) {
+                        Some(q) => q,
+                        None => int_div_error(self, rhs, status),
                     }
                 }
             }
@@ -557,37 +490,213 @@ pub(crate) mod _traits {
     }
     impl_int_div!(i8, i16, i32, i64, u8, u16, u32, u64);
 
+    /// The error of a float division `a / b` whose result is not finite, if any, as numpy:
+    /// `x / 0` with a finite non-zero `x` is a division by zero, `0 / 0` and `inf / inf` are
+    /// invalid, and an infinite result (`r_is_inf`, in the operands' type) of finite operands is
+    /// an overflow. NaN operands propagate silently, and so do infinite operands otherwise.
+    #[cold]
+    #[inline(never)]
+    fn float_div_error(a: f64, b: f64, r_is_inf: bool, status: &mut ArithmeticOpStatus) {
+        use ArithmeticErrorKind::*;
+        if a.is_nan() || b.is_nan() {
+            return;
+        }
+        let error = if b == 0.0 {
+            if a == 0.0 {
+                Some(InvalidOperation)
+            } else {
+                a.is_finite().then_some(DivideByZero)
+            }
+        } else if a.is_infinite() {
+            b.is_infinite().then_some(InvalidOperation)
+        } else {
+            r_is_inf.then_some(Overflow)
+        };
+        if let Some(error) = error {
+            status.set_if(error, true);
+        }
+    }
+
+    /// [`float_div_error`] of each pair of `xs` and `ys`, the cold path of a SIMD bulk.
+    #[cold]
+    #[inline(never)]
+    fn float_div_errors<T>(xs: &[T], ys: &[T], status: &mut ArithmeticOpStatus)
+    where
+        T: Copy + Into<f64> + core::ops::Div<Output = T>,
+    {
+        for (&a, &b) in xs.iter().zip(ys) {
+            let r: f64 = (a / b).into();
+            float_div_error(a.into(), b.into(), r.is_infinite(), status);
+        }
+    }
+
+    macro_rules! impl_float_div {
+        ($($t:ty),*) => {$(
+            impl Div for $t {
+                type Output = Self;
+                #[inline(always)]
+                fn div(self, rhs: Self, status: &mut ArithmeticOpStatus) -> Self {
+                    let r = self / rhs;
+                    // Errors give non-finite results, and NaN operands are never one.
+                    if !r.is_finite() & !self.is_nan() & !rhs.is_nan() {
+                        float_div_error(self.into(), rhs.into(), r.is_infinite(), status);
+                    }
+                    r
+                }
+
+                #[inline(always)]
+                fn div_bulk<const N: usize, S: fearless_simd::Simd>(
+                    xs: [Self; N],
+                    ys: [Self; N],
+                    status: &mut ArithmeticOpStatus,
+                    simd: S,
+                ) -> [Self; N] {
+                    use fearless_simd::{SimdBase, SimdFloat, SimdMask};
+                    type Mask<S> =
+                        <<$t as crate::scalar::simd::SimdElementExt>::V<S> as SimdBase<S>>::Mask;
+                    // The lanes that may hold an error, as in `div`. A single mask OR per
+                    // vector, and the rare bulk that has one is classified out of line.
+                    let mut maybe_error = Mask::<S>::splat(simd, false);
+                    let zs = crate::scalar::simd::map_vectors2::<Self, Self, Self, N, S>(
+                        xs,
+                        ys,
+                        #[inline(always)]
+                        |a, b| Self::div(a, b, status),
+                        #[inline(always)]
+                        |a, b| {
+                            let r = a / b;
+                            maybe_error |= !r.is_finite() & !(a.is_nan() | b.is_nan());
+                            r
+                        },
+                        simd,
+                    );
+                    if maybe_error.to_bitmask() != 0 {
+                        float_div_errors(&xs, &ys, status);
+                    }
+                    zs
+                }
+            }
+        )*};
+    }
+    impl_float_div!(f32, f64);
+
+    #[cfg(feature = "half")]
+    impl Div for f16 {
+        type Output = Self;
+        #[inline(always)]
+        fn div(self, rhs: Self, status: &mut ArithmeticOpStatus) -> Self {
+            // In f32 without FP16, as half's operators do, but inlined: theirs call a software
+            // fallback.
+            #[cfg(not(all(target_arch = "aarch64", target_feature = "fp16")))]
+            let r = f16::from_f32(self.to_f32() / rhs.to_f32());
+            #[cfg(all(target_arch = "aarch64", target_feature = "fp16"))]
+            let r = self / rhs;
+            if !r.is_finite() & !self.is_nan() & !rhs.is_nan() {
+                float_div_error(self.into(), rhs.into(), r.is_infinite(), status);
+            }
+            r
+        }
+    }
+
+    macro_rules! impl_complex_div {
+        ($($t:ty),*) => {$(
+            impl Div for $t {
+                type Output = Self;
+                #[inline(always)]
+                fn div(self, rhs: Self, _status: &mut ArithmeticOpStatus) -> Self {
+                    self / rhs
+                }
+            }
+        )*};
+    }
+    #[cfg(feature = "num-complex")]
+    impl_complex_div!(Complex<f32>, Complex<f64>);
+    #[cfg(all(feature = "half", feature = "num-complex"))]
+    impl_complex_div!(Complex<f16>);
+
     define_scalar_op2_trait!(
-        /// Exponentiation operation: as [`i32::pow`] for integers (unsigned exponents),
-        /// [`f32::powi`] and [`f32::powf`] for floats.
+        /// Exponentiation operation: as [`i32::wrapping_pow`] for integers, [`f32::powi`] and
+        /// [`f32::powf`] for floats.
         ///
-        /// A negative base with a non-integer exponent produces `NaN`.
-        /// Semantics follow [`f32::powf`].
+        /// Integer results wrap on overflow. A negative exponent of an integer base gives `0`
+        /// and sets [`ArithmeticErrorKind::InvalidOperation`].
+        /// A negative float base with a non-integer exponent produces `NaN`; float errors are not
+        /// reported yet. Semantics follow [`f32::powf`].
         Pow,
-        /// Raise to the power of another value.
+        /// Raise to the power of another value, reporting an arithmetic error to `status`.
         pow,
         bulk_fn: pow_bulk,
+        with_status,
     );
-    impl_scalar_op2!(
-        impl Pow for [i8, i16, i32, i64, u8, u16, u32, u64] x [u8, u16, u32] {
-            fn pow = |a, b| a.pow(b as u32),
-        }
-    );
-    impl_scalar_op2!(
-        impl Pow for [f32, f64] x [i8, u8, i16, u16, i32] {
-            fn pow = |a, b| a.powi(b as i32),
-        }
-    );
-    impl_scalar_op2!(
-        impl Pow for [f32, f64] {
-            fn pow = |a, b| a.powf(b),
-        }
-    );
-    impl_scalar_op2!(
-        impl Pow for [f64] x [f32] {
-            fn pow = |a, b| a.powf(b as f64),
-        }
-    );
+
+    /// A negative exponent of an integer base: `0`, and an invalid operation. Out of line, as
+    /// [`int_div_error`].
+    #[cold]
+    #[inline(never)]
+    fn int_negative_exponent<T: Default>(status: &mut ArithmeticOpStatus) -> T {
+        status.set_if(ArithmeticErrorKind::InvalidOperation, true);
+        T::default()
+    }
+
+    macro_rules! impl_int_pow {
+        ($($t:ty),*) => {$(
+            impl_int_pow!(@impl $t, [u8, u16, u32], |a, b, _status| a.wrapping_pow(b as u32));
+            impl_int_pow!(@impl $t, [i8, i16, i32], |a, b, status| {
+                if b < 0 {
+                    int_negative_exponent(status)
+                } else {
+                    a.wrapping_pow(b as u32)
+                }
+            });
+            impl_int_pow!(@impl $t, [i64], |a, b, status| {
+                if b < 0 {
+                    int_negative_exponent(status)
+                } else if let Ok(b) = u32::try_from(b) {
+                    a.wrapping_pow(b)
+                } else {
+                    // `wrapping_pow` by squaring, for an exponent beyond `u32`.
+                    let (mut acc, mut base, mut exp) = (1 as $t, a, b as u64);
+                    while exp > 0 {
+                        if exp & 1 == 1 {
+                            acc = acc.wrapping_mul(base);
+                        }
+                        base = base.wrapping_mul(base);
+                        exp >>= 1;
+                    }
+                    acc
+                }
+            });
+        )*};
+        (@impl $t:ty, [$($rhs:ty),*], |$a:ident, $b:ident, $status:ident| $f:expr) => {$(
+            impl Pow<$rhs> for $t {
+                type Output = $t;
+                #[inline(always)]
+                fn pow(self, rhs: $rhs, status: &mut ArithmeticOpStatus) -> $t {
+                    let ($a, $b, $status) = (self, rhs, status);
+                    $f
+                }
+            }
+        )*};
+    }
+    impl_int_pow!(i8, i16, i32, i64, u8, u16, u32, u64);
+
+    macro_rules! impl_float_pow {
+        ($t:ty, [$($rhs:ty),*], |$a:ident, $b:ident| $f:expr) => {$(
+            impl Pow<$rhs> for $t {
+                type Output = $t;
+                #[inline(always)]
+                fn pow(self, rhs: $rhs, _status: &mut ArithmeticOpStatus) -> $t {
+                    let ($a, $b) = (self, rhs);
+                    $f
+                }
+            }
+        )*};
+    }
+    impl_float_pow!(f32, [i8, u8, i16, u16, i32], |a, b| a.powi(b as i32));
+    impl_float_pow!(f64, [i8, u8, i16, u16, i32], |a, b| a.powi(b as i32));
+    impl_float_pow!(f32, [f32], |a, b| a.powf(b));
+    impl_float_pow!(f64, [f32], |a, b| a.powf(b as f64));
+    impl_float_pow!(f64, [f64], |a, b| a.powf(b));
 }
 
 define_op2!(
@@ -730,6 +839,7 @@ define_op2!(
     PowKernel,
     crate::scalar::Pow::pow,
     simd: pow_bulk,
+    with_status: true,
 );
 
 impl<S> Array<S>
@@ -1131,15 +1241,30 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn div_min_by_minus_one_wraps() {
+    fn div_min_by_minus_one_overflows() {
+        use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
         use crate::Array;
 
         macro_rules! check {
             ($($t:ident),*) => {$(
                 let a = Array::compact_ndarray(&ndarray::array![$t::MIN, 7, $t::MAX]).unwrap();
                 let b = Array::compact_ndarray(&ndarray::array![-1 as $t, -1, -1]).unwrap();
-                let q = (a / b).to_ndarray().unwrap();
-                assert_eq!(q, ndarray::array![$t::MIN, -7, -$t::MAX], stringify!($t));
+                let q = a / b;
+                // Warn, the default for overflow: `MIN`, as numpy.
+                let ctx = q.read_ctx();
+                let res = q.to_ndarray_sub::<ndarray::Ix1>(&[0..3], &ctx).unwrap();
+                assert_eq!(res, ndarray::array![$t::MIN, -7, -$t::MAX], stringify!($t));
+                let warnings = ctx.take_warnings();
+                assert_eq!(warnings.len(), 1);
+                assert_eq!(warnings[0].message(), "overflow encountered");
+                // Without `MIN`, no error.
+                q.to_ndarray_sub::<ndarray::Ix1>(&[1..3], &ctx).unwrap();
+                assert!(ctx.take_warnings().is_empty());
+
+                let mut ctx = q.read_ctx();
+                ctx.set_arithmetic_error_mode(ArithmeticErrorKind::Overflow, ArithmeticErrorMode::Error);
+                let err = q.to_ndarray_sub::<ndarray::Ix1>(&[0..3], &ctx).unwrap_err();
+                assert_eq!(err.kind(), ErrorKind::Arithmetic);
             )*};
         }
         check!(i8, i16, i32, i64);
@@ -1162,11 +1287,14 @@ pub(crate) mod tests {
             assert_eq!(err.message(), "divide by zero encountered");
         }
 
-        // Float division by zero is IEEE: no error.
-        let fa = Array::compact_ndarray(&ndarray::array![1.0f32, 0.0]).unwrap();
-        let fb = Array::compact_ndarray(&ndarray::array![0.0f32, 0.0]).unwrap();
-        let q = (fa / fb).to_ndarray::<Ix1>().unwrap();
-        assert!(q[0].is_infinite() && q[1].is_nan());
+        // Float division too.
+        let fa = Array::compact_ndarray(&ndarray::array![1.0f32, 2.0]).unwrap();
+        let fb = Array::compact_ndarray(&ndarray::array![0.0f32, 1.0]).unwrap();
+        let err = (fa / fb)
+            .map(|x: f32| x * 2.0)
+            .to_ndarray::<Ix1>()
+            .unwrap_err();
+        assert_eq!(err.message(), "divide by zero encountered");
     }
 
     #[test]
@@ -1176,11 +1304,14 @@ pub(crate) mod tests {
 
         let mut status = ArithmeticOpStatus::default();
         assert_eq!(Div::div(7u8, 2, &mut status), 3);
-        assert_eq!(Div::div(i32::MIN, -1, &mut status), i32::MIN);
-        assert_eq!(Div::div(1.0f32, 0.0, &mut status), f32::INFINITY);
+        assert_eq!(Div::div(-7i32, 2, &mut status), -3);
+        assert_eq!(Div::div(1.0f32, 4.0, &mut status), 0.25);
         assert!(status.is_ok());
         assert_eq!(Div::div(-7i64, 0, &mut status), 0);
         assert!(status.contains(ArithmeticErrorKind::DivideByZero));
+        assert!(!status.contains(ArithmeticErrorKind::Overflow));
+        assert_eq!(Div::div(i32::MIN, -1, &mut status), i32::MIN);
+        assert!(status.contains(ArithmeticErrorKind::Overflow));
     }
 
     // Random shapes, storage backends and layouts, with zero divisors in about a third of the
@@ -1210,6 +1341,283 @@ pub(crate) mod tests {
                 .and(&nd_b)
                 .map_collect(|&x, &y| if y == 0 { 0 } else { x / y });
             proptest::prop_assert_eq!(q.to_ndarray_sub(&index, &ctx).unwrap(), expected);
+        }
+    }
+
+    /// The float division errors, as numpy, for every pair of edge-case operands, against a
+    /// reference from the IEEE value of the result.
+    #[test]
+    fn float_div_errors() {
+        use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+        use crate::scalar::Div;
+        use crate::util::SimdTestValues;
+
+        macro_rules! check {
+            ($($t:ty),*) => {$(
+                let values = <$t>::edge_cases();
+                for &a in &values {
+                    for &b in &values {
+                        let mut status = ArithmeticOpStatus::default();
+                        let r = Div::div(a, b, &mut status);
+                        assert!(r.to_bits() == (a / b).to_bits() || r.is_nan() && (a / b).is_nan());
+                        let ordered = !a.is_nan() && !b.is_nan();
+                        let finite = a.is_finite() && b.is_finite();
+                        for (kind, expected) in [
+                            (
+                                ArithmeticErrorKind::DivideByZero,
+                                ordered && b == 0.0 && a.is_finite() && a != 0.0,
+                            ),
+                            (ArithmeticErrorKind::InvalidOperation, ordered && r.is_nan()),
+                            (ArithmeticErrorKind::Overflow, finite && b != 0.0 && r.is_infinite()),
+                        ] {
+                            assert_eq!(status.contains(kind), expected, "{a} / {b}: {kind:?}");
+                        }
+                    }
+                }
+            )*};
+        }
+        check!(f32, f64);
+    }
+
+    #[cfg(feature = "half")]
+    #[test]
+    fn float_div_errors_f16() {
+        use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+        use crate::scalar::{f16, Div};
+
+        let f = f16::from_f32;
+        for (a, b, error) in [
+            (f(1.0), f(4.0), None),
+            (f(-3.0), f(0.0), Some(ArithmeticErrorKind::DivideByZero)),
+            (f(0.0), f(-0.0), Some(ArithmeticErrorKind::InvalidOperation)),
+            (
+                f16::INFINITY,
+                f16::NEG_INFINITY,
+                Some(ArithmeticErrorKind::InvalidOperation),
+            ),
+            // Overflows f16, not the f32 it is computed in.
+            (f(60000.0), f(0.5), Some(ArithmeticErrorKind::Overflow)),
+            (f16::INFINITY, f(0.0), None),
+            (f16::NAN, f(0.0), None),
+            (f(1.0), f16::INFINITY, None),
+        ] {
+            let mut status = ArithmeticOpStatus::default();
+            Div::div(a, b, &mut status);
+            assert_eq!(status.is_ok(), error.is_none(), "{a} / {b}");
+            if let Some(error) = error {
+                assert!(status.contains(error), "{a} / {b}");
+            }
+        }
+    }
+
+    /// The status of the SIMD bodies against the scalar functions', on every SIMD level: each
+    /// pair of edge-case operands, in one lane of a bulk of ordinary ones.
+    #[test]
+    fn simd_bodies_status_all_levels() {
+        use super::{DivKernel, Op2Kernel};
+        use crate::error::ArithmeticOpStatus;
+        use crate::util::{for_each_simd_level, SimdTestValues, SIMD_TEST_N};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $t:ty) => {
+                    let values = <$t>::edge_cases();
+                    for &x in &values {
+                        for &y in &values {
+                            let mut scalar = ArithmeticOpStatus::default();
+                            $kernel.apply(x, y, &mut scalar);
+                            for lane in [0, 9, 40, SIMD_TEST_N - 1] {
+                                let mut a = [1.5 as $t; SIMD_TEST_N];
+                                let mut b = [3.0 as $t; SIMD_TEST_N];
+                                (a[lane], b[lane]) = (x, y);
+                                let mut bulk = ArithmeticOpStatus::default();
+                                $kernel.apply_bulk(a, b, &mut bulk, simd);
+                                assert_eq!(
+                                    bulk,
+                                    scalar,
+                                    "{} {}: {x} / {y} in lane {lane}",
+                                    stringify!($kernel),
+                                    stringify!($t)
+                                );
+                            }
+                        }
+                    }
+                };
+            }
+            simd.vectorize(|| {
+                case!(DivKernel, f32);
+                case!(DivKernel, f64);
+            });
+        }
+        for_each_simd_level!(check);
+    }
+
+    macro_rules! test_float_div_errors {
+        ($($t:ident),*) => {$(
+            paste::paste! {
+                #[test]
+                fn [<float_div_errors_read_ $t>]() {
+                    use crate::Array;
+                    use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
+                    #[allow(unused_imports)]
+                    use crate::scalar::f16;
+
+                    let c = |x: f64| <f64 as crate::scalar::Cast<$t>>::cast(x);
+                    let n = 1000;
+                    let inf = f64::INFINITY;
+                    for (x, y, error) in [
+                        (c(5.0), c(0.0), Some(ArithmeticErrorKind::DivideByZero)),
+                        (c(0.0), c(0.0), Some(ArithmeticErrorKind::InvalidOperation)),
+                        (c(inf), c(inf), Some(ArithmeticErrorKind::InvalidOperation)),
+                        ($t::MAX, c(0.25), Some(ArithmeticErrorKind::Overflow)),
+                        (c(f64::NAN), c(0.0), None),
+                        (c(inf), c(0.0), None),
+                        (c(-1.0), c(inf), None),
+                    ] {
+                        // In the bulk part of the loop, and in its scalar tail.
+                        for i in [300, n - 1] {
+                            let mut nd_a = ndarray::Array1::from_shape_fn(n, |i| c((i % 100) as f64));
+                            let mut nd_b = ndarray::Array1::from_shape_fn(n, |i| c((i % 7 + 1) as f64));
+                            (nd_a[i], nd_b[i]) = (x, y);
+                            let q = Array::compact_ndarray(&nd_a).unwrap()
+                                / Array::compact_ndarray(&nd_b).unwrap();
+                            let what = format!("{x} / {y} at {i}");
+
+                            let mut ctx = q.read_ctx();
+                            for kind in [
+                                ArithmeticErrorKind::DivideByZero,
+                                ArithmeticErrorKind::Overflow,
+                                ArithmeticErrorKind::InvalidOperation,
+                            ] {
+                                ctx.set_arithmetic_error_mode(kind, ArithmeticErrorMode::Error);
+                            }
+                            let res = q.to_ndarray_sub::<ndarray::Ix1>(&[0..n as u64], &ctx);
+                            let Some(error) = error else {
+                                res.expect(&what);
+                                continue;
+                            };
+                            let err = res.expect_err(&what);
+                            assert_eq!(err.kind(), ErrorKind::Arithmetic);
+                            let message = match error {
+                                ArithmeticErrorKind::DivideByZero => "divide by zero encountered",
+                                ArithmeticErrorKind::Overflow => "overflow encountered",
+                                _ => "invalid operation encountered",
+                            };
+                            assert_eq!(err.message(), message, "{what}");
+
+                            // Ignored: the IEEE values.
+                            ctx.set_arithmetic_error_mode(error, ArithmeticErrorMode::Ignore);
+                            let res = q.to_ndarray_sub::<ndarray::Ix1>(&[0..n as u64], &ctx).unwrap();
+                            let expected = ndarray::Zip::from(&nd_a).and(&nd_b).map_collect(|&x, &y| x / y);
+                            assert!(res.iter().zip(&expected).all(|(r, e)| r == e || r.is_nan() && e.is_nan()), "{what}");
+                        }
+                    }
+                }
+            }
+        )*};
+    }
+    test_float_div_errors!(f32, f64);
+    #[cfg(feature = "half")]
+    test_float_div_errors!(f16);
+
+    #[test]
+    fn float_div_errors_strided() {
+        use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode};
+        use crate::Array;
+
+        // Transposed operands are read with a non-unit inner stride, by the scalar path.
+        let nd_a = ndarray::Array2::from_shape_fn((40, 30), |(i, j)| (i * 30 + j) as f32 - 600.0);
+        let nd_b = ndarray::Array2::from_shape_fn((40, 30), |(i, j)| ((i + j) % 5) as f32 - 2.0);
+        let za = Array::compact_ndarray_with(&nd_a, crate::util::arr_params(&[8, 8])).unwrap();
+        let zb = Array::compact_ndarray_with(&nd_b, crate::util::arr_params(&[8, 8])).unwrap();
+        let q = za.transpose() / zb.transpose();
+        let err = q.to_ndarray::<Ix2>().unwrap_err();
+        assert_eq!(err.message(), "divide by zero encountered");
+
+        let mut ctx = q.read_ctx();
+        ctx.set_arithmetic_error_mode(
+            ArithmeticErrorKind::DivideByZero,
+            ArithmeticErrorMode::Ignore,
+        );
+        let expected = ndarray::Zip::from(&nd_a.t())
+            .and(&nd_b.t())
+            .map_collect(|&x, &y| x / y);
+        assert_eq!(q.to_ndarray_sub(&[0..30, 0..40], &ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn int_pow() {
+        use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+        use crate::scalar::Pow;
+
+        let mut status = ArithmeticOpStatus::default();
+        // Wraps on overflow, as numpy.
+        assert_eq!(Pow::pow(3i32, 40u32, &mut status), 689956897);
+        assert_eq!(Pow::pow(3u8, 9u8, &mut status), 227);
+        assert_eq!(Pow::pow(-2i8, 7i8, &mut status), -128);
+        assert_eq!(Pow::pow(-3i64, 0i64, &mut status), 1);
+        assert_eq!(Pow::pow(0u16, 0i16, &mut status), 1);
+        // Exponents beyond `u32`.
+        assert_eq!(Pow::pow(1i32, i64::MAX, &mut status), 1);
+        assert_eq!(Pow::pow(-1i32, (1i64 << 40) + 1, &mut status), -1);
+        assert_eq!(Pow::pow(2u64, 1i64 << 33, &mut status), 0);
+        let mut squared = 3u32;
+        for _ in 0..33 {
+            squared = squared.wrapping_mul(squared);
+        }
+        assert_eq!(Pow::pow(3u32, 1i64 << 33, &mut status), squared);
+        assert!(status.is_ok());
+
+        // A negative exponent: `0`, and an invalid operation.
+        assert_eq!(Pow::pow(2i32, -1i32, &mut status), 0);
+        assert!(status.contains(ArithmeticErrorKind::InvalidOperation));
+        let mut status = ArithmeticOpStatus::default();
+        assert_eq!(Pow::pow(1u8, i64::MIN, &mut status), 0);
+        assert!(status.contains(ArithmeticErrorKind::InvalidOperation));
+    }
+
+    #[test]
+    fn int_pow_negative_exponent_read() {
+        use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
+        use crate::Array;
+
+        let a = Array::compact_ndarray(&ndarray::array![2i32, 3, 4, -5]).unwrap();
+        let b = Array::compact_ndarray(&ndarray::array![3i32, -1, 0, 3]).unwrap();
+        let q = a.pow(b);
+        let err = q.to_ndarray::<Ix1>().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Arithmetic);
+        assert_eq!(err.message(), "invalid operation encountered");
+        let mut ctx = q.read_ctx();
+        ctx.set_arithmetic_error_mode(
+            ArithmeticErrorKind::InvalidOperation,
+            ArithmeticErrorMode::Ignore,
+        );
+        assert_eq!(
+            q.to_ndarray_sub(&[0..4], &ctx).unwrap(),
+            ndarray::array![8, 0, 1, -125]
+        );
+    }
+
+    // Integer powers against repeated wrapping multiplication.
+    proptest::proptest! {
+        #[test]
+        fn int_pow_random(a in proptest::num::i32::ANY, b in -3i64..100) {
+            use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+            use crate::scalar::Pow;
+
+            let mut status = ArithmeticOpStatus::default();
+            let res = Pow::pow(a, b, &mut status);
+            if b < 0 {
+                proptest::prop_assert_eq!(res, 0);
+                proptest::prop_assert!(status.contains(ArithmeticErrorKind::InvalidOperation));
+            } else {
+                proptest::prop_assert_eq!(res, (0..b).fold(1i32, |acc, _| acc.wrapping_mul(a)));
+                proptest::prop_assert!(status.is_ok());
+                let mut status = ArithmeticOpStatus::default();
+                proptest::prop_assert_eq!(res, Pow::pow(a, b as i32, &mut status));
+                proptest::prop_assert_eq!(res, Pow::pow(a, b as u32, &mut status));
+            }
         }
     }
 }

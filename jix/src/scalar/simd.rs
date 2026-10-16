@@ -138,8 +138,8 @@ impl_simd_element_ext!(
 #[inline(always)]
 pub(crate) fn map_vectors<T, U, const N: usize, S>(
     xs: [T; N],
-    f_scalar: impl Fn(T) -> U,
-    f_simd: impl Fn(T::V<S>) -> U::V<S>,
+    f_scalar: impl FnMut(T) -> U,
+    mut f_simd: impl FnMut(T::V<S>) -> U::V<S>,
     simd: S,
 ) -> [U; N]
 where
@@ -166,8 +166,8 @@ pub(crate) fn map_vectors_different_width<
     S,
 >(
     xs: [T; N],
-    f_scalar: impl Fn(T) -> U,
-    f_simd: impl Fn([T::V<S>; KT]) -> [U::V<S>; KU],
+    f_scalar: impl FnMut(T) -> U,
+    mut f_simd: impl FnMut([T::V<S>; KT]) -> [U::V<S>; KU],
     simd: S,
 ) -> [U; N]
 where
@@ -206,8 +206,8 @@ where
 pub(crate) fn map_vectors2<T1, T2, U, const N: usize, S>(
     xs: [T1; N],
     ys: [T2; N],
-    f_scalar: impl Fn(T1, T2) -> U,
-    f_simd: impl Fn(T1::V<S>, T2::V<S>) -> U::V<S>,
+    mut f_scalar: impl FnMut(T1, T2) -> U,
+    mut f_simd: impl FnMut(T1::V<S>, T2::V<S>) -> U::V<S>,
     simd: S,
 ) -> [U; N]
 where
