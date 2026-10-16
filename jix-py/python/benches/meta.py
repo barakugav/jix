@@ -3,7 +3,7 @@ import json
 import os
 import platform
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib import metadata
 from pathlib import Path
 
@@ -65,7 +65,7 @@ def collect(sha: str, ref: str | None):
     """
     return {
         "schema_version": 1,
-        "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sha": sha,
         "ref": ref,
         "platform": {
