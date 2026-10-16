@@ -9,25 +9,23 @@ pub(crate) struct Op1<S, K> {
 pub(crate) trait Op1Kernel<T> {
     type Output;
 
-    /// The op's name, for the errors of a pipeline the op runs.
-    const NAME: &'static str;
+    /// Apply the kernel to `x`. An [`ArithError`] is not a panic or an early return: the kernel
+    /// produces a fallback value and sets the error in `status`, see
+    /// [`ElementwisePipelineImpl::read_bulk`].
+    fn apply(&self, x: T, status: &mut OpStatus) -> Self::Output;
 
-    fn apply(&self, x: T) -> Self::Output;
-
-    /// [`apply`](Self::apply) on each of `xs`. An [`ArithError`] is not a
-    /// panic or an early return: the kernel writes its fallback value and ORs a flag into
-    /// `status`, see [`ElementwisePipelineImpl::read_bulk`].
+    /// [`apply`](Self::apply) on each of `xs`.
     #[inline(always)]
     fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
         &self,
         xs: [T; N],
-        simd: S,
         status: &mut OpStatus,
+        simd: S,
     ) -> [Self::Output; N] {
-        let _ = (simd, status);
+        let _ = simd;
         xs.map_inline(
             #[inline(always)]
-            |x| self.apply(x),
+            |x| self.apply(x, status),
         )
     }
 }
@@ -65,7 +63,7 @@ where
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
         self.read_as_elementwise_pipeline::<K::Output>(index, context)?
-            .to_buf(index, context, out, K::NAME)
+            .to_buf(index, context, out)
     }
 
     #[inline]
@@ -105,14 +103,14 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                simd: S,
                 status: &mut OpStatus,
+                simd: S,
             ) -> [T; N] {
                 let xs = unsafe {
                     self.inner
-                        .read_bulk::<N, CONTIGUOUS, S>(offset, simd, status)
+                        .read_bulk::<N, CONTIGUOUS, S>(offset, status, simd)
                 };
-                let ys = self.kernel.apply_bulk(xs, simd, status);
+                let ys = self.kernel.apply_bulk(xs, status, simd);
 
                 const { assert!(size_of::<K::Output>() == size_of::<T>()) };
                 // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
@@ -169,9 +167,8 @@ where
     F: Fn(T) -> O,
 {
     type Output = O;
-    const NAME: &'static str = "Map";
     #[inline(always)]
-    fn apply(&self, x: T) -> Self::Output {
+    fn apply(&self, x: T, _status: &mut OpStatus) -> Self::Output {
         self(x)
     }
 }
@@ -191,10 +188,9 @@ macro_rules! define_op1 {
             T: crate::scalar::$trait + Copy + 'static,
         {
             type Output = <T as crate::scalar::$trait>::Output;
-            const NAME: &'static str = stringify!($Op);
 
             #[inline(always)]
-            fn apply(&self, x: T) -> Self::Output {
+            fn apply(&self, x: T, _status: &mut crate::error::OpStatus) -> Self::Output {
                 <T as crate::scalar::$trait>::$kernel_fn(x)
             }
 
@@ -202,8 +198,8 @@ macro_rules! define_op1 {
             fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
                 &self,
                 xs: [T; N],
-                simd: S,
                 _status: &mut crate::error::OpStatus,
+                simd: S,
             ) -> [Self::Output; N] {
                 <T as crate::scalar::$trait>::$bulk_fn(xs, simd)
             }
@@ -1168,7 +1164,7 @@ pub(crate) mod tests {
                     let xs = <$t>::simd_test_values(0);
                     let what = concat!(stringify!($kernel), " ", stringify!($t));
                     assert_same_elements(
-                        $kernel.apply_bulk(xs, simd, &mut Default::default()),
+                        $kernel.apply_bulk(xs, &mut Default::default(), simd),
                         |i| $f(xs[i]),
                         what,
                     );
@@ -1206,11 +1202,11 @@ pub(crate) mod tests {
                 case!(SquareKernel, u64, |x: u64| x.wrapping_mul(x));
                 // Not a multiple of the vector length, and a type without a SIMD body: scalar.
                 assert_eq!(
-                    NegKernel.apply_bulk([1.5f32], simd, &mut Default::default()),
+                    NegKernel.apply_bulk([1.5f32], &mut Default::default(), simd),
                     [-1.5]
                 );
                 assert_eq!(
-                    FloorKernel.apply_bulk([1.5f32, 2.5], simd, &mut Default::default()),
+                    FloorKernel.apply_bulk([1.5f32, 2.5], &mut Default::default(), simd),
                     [1.0, 2.0]
                 );
             });

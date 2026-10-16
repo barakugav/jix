@@ -154,20 +154,17 @@ macro_rules! define_scalar_op2_trait {
         $(#[$trait_meta:meta])* $Trait:ident,
         $(#[$fn_meta:meta])* $f:ident,
         bulk_fn: $f_bulk:ident,
-        $(status_bulk_fn: $f_status:ident,)?
     ) => {
         crate::scalar::traits_util::define_scalar_op2_trait!(
             $(#[$trait_meta])* $Trait<Rhs = Self>,
             $(#[$fn_meta])* $f,
             bulk_fn: $f_bulk,
-            $(status_bulk_fn: $f_status,)?
         );
     };
     (
         $(#[$trait_meta:meta])* $Trait:ident<Rhs = $Rhs:ty>,
         $(#[$fn_meta:meta])* $f:ident,
         bulk_fn: $f_bulk:ident,
-        $(status_bulk_fn: $f_status:ident,)?
     ) => {
         $(#[$trait_meta])*
         pub trait $Trait<Rhs = $Rhs> {
@@ -193,27 +190,6 @@ macro_rules! define_scalar_op2_trait {
                 let _ = simd;
                 crate::util::array2_map_inline(xs, ys, #[inline(always)] |_, x, y| Self::$f(x, y))
             }
-
-            $(
-                #[doc(hidden)]
-                /// Like the bulk function, but an arithmetic error (e.g. an integer division by
-                /// zero) is not a panic: the element gets a fallback value and the error is ORed
-                /// into `status`. This is what the array op calls.
-                #[inline(always)]
-                #[allow(private_interfaces)]
-                fn $f_status<const N: usize, S: fearless_simd::Simd>(
-                    xs: [Self; N],
-                    ys: [Rhs; N],
-                    simd: S,
-                    status: &mut crate::error::OpStatus,
-                ) -> [Self::Output; N]
-                where
-                    Self: Sized
-                {
-                    let _ = status;
-                    Self::$f_bulk(xs, ys, simd)
-                }
-            )?
         }
     };
 }

@@ -393,15 +393,15 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                simd: S,
                 status: &mut OpStatus,
+                simd: S,
             ) -> [T; N] {
                 let condition = unsafe {
                     self.condition
-                        .read_bulk::<N, CONTIGUOUS, _>(offset, simd, status)
+                        .read_bulk::<N, CONTIGUOUS, _>(offset, status, simd)
                 };
-                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS, _>(offset, simd, status) };
-                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS, _>(offset, simd, status) };
+                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS, _>(offset, status, simd) };
+                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS, _>(offset, status, simd) };
                 array_from_fn_inline(|i| if condition[i] { x[i] } else { y[i] })
             }
         }

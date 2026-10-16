@@ -112,36 +112,53 @@ pub enum ArithErrorMode {
     Raise,
 }
 
-/// The [`ArithError`]s an element-wise kernel hit, one bit per error.
+/// The [`ArithError`]s an element-wise computation hit, one bit per error.
 ///
-/// A `&mut OpStatus` is threaded through the pipeline's
-/// [`read_bulk`](crate::storage::ElementwisePipelineImpl::read_bulk) calls: a kernel never panics
-/// or returns early, it writes its fallback value and ORs a flag in. The op running the loop checks
-/// the status once it is done, see [`crate::ReadContext::check_op_status`].
+/// Scalar kernels that can hit an error, like [`scalar::Div`](crate::scalar::Div), take a
+/// `&mut OpStatus`: rather than panicking, they produce a fallback value for the element and set
+/// the error's bit. An array op threads a single status through its whole computation and checks
+/// it once at the end, against the modes of the [`ReadContext`](crate::ReadContext) of the read.
+///
+/// ```
+/// use jix::scalar::Div;
+/// use jix::{ArithError, OpStatus};
+///
+/// let mut status = OpStatus::default();
+/// assert_eq!(7i32.div(2, &mut status), 3);
+/// assert!(status.is_ok());
+/// assert_eq!(7i32.div(0, &mut status), 0);
+/// assert!(status.contains(ArithError::DivideByZero));
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct OpStatus(u8);
+pub struct OpStatus(u8);
 impl OpStatus {
-    pub(crate) const DIVIDE_BY_ZERO: Self = Self::flag(ArithError::DivideByZero);
-
-    const fn flag(error: ArithError) -> Self {
-        Self(1 << error as u8)
+    #[inline(always)]
+    const fn bit(error: ArithError) -> u8 {
+        1 << error as u8
     }
 
-    /// OR `flag` in if `cond` holds, without branching.
+    /// Set `error` if `cond` holds. Branch-free: an OR of the error's bit.
     #[inline(always)]
-    pub(crate) fn set_if(&mut self, flag: Self, cond: bool) {
-        self.0 |= flag.0 * cond as u8;
+    pub fn set_if(&mut self, error: ArithError, cond: bool) {
+        self.0 |= Self::bit(error) * cond as u8;
     }
 
+    /// Whether `error` is set.
     #[inline(always)]
-    pub(crate) fn is_ok(self) -> bool {
+    pub fn contains(self, error: ArithError) -> bool {
+        self.0 & Self::bit(error) != 0
+    }
+
+    /// Whether no error is set.
+    #[inline(always)]
+    pub fn is_ok(self) -> bool {
         self.0 == 0
     }
 
     pub(crate) fn errors(self) -> impl Iterator<Item = ArithError> {
         ArithError::ALL
             .into_iter()
-            .filter(move |&e| self.0 & Self::flag(e).0 != 0)
+            .filter(move |&e| self.contains(e))
     }
 }
 impl std::ops::BitOrAssign for OpStatus {
@@ -151,10 +168,10 @@ impl std::ops::BitOrAssign for OpStatus {
     }
 }
 
-pub(crate) fn arith_error(error: ArithError, op_name: &str) -> Error {
+pub(crate) fn arith_error(error: ArithError) -> Error {
     Error::new(
         ErrorKind::Arithmetic,
-        format!("{} encountered in {op_name}", error.description()),
+        format!("{} encountered", error.description()),
     )
 }
 

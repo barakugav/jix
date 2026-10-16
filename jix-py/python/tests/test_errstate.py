@@ -15,7 +15,7 @@ from tests_util import carrays2_mixed_strategy, comparable_element_strategy, int
 
 import jix
 
-MESSAGE = "divide by zero encountered in Div"
+MESSAGE = "divide by zero encountered"
 
 
 def _trunc_div_ref(np_a, np_b):

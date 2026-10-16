@@ -762,10 +762,9 @@ struct ApproxEqKernel<T: crate::scalar::ApproxEq> {
 }
 impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
     type Output = bool;
-    const NAME: &'static str = "ApproxEq";
 
     #[inline(always)]
-    fn apply(&self, a: T, b: T) -> Self::Output {
+    fn apply(&self, a: T, b: T, _status: &mut crate::error::OpStatus) -> Self::Output {
         a.approx_eq(&b, &self.rtol, &self.atol)
     }
 
@@ -774,8 +773,8 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
         &self,
         a: [T; N],
         b: [T; N],
-        simd: S,
         _status: &mut crate::error::OpStatus,
+        simd: S,
     ) -> [Self::Output; N] {
         T::approx_eq_bulk(a, b, &self.rtol, &self.atol, simd)
     }
@@ -923,7 +922,7 @@ mod tests {
                         stringify!($tb)
                     );
                     assert_same_elements(
-                        $kernel.apply_bulk(a, b, simd, &mut Default::default()),
+                        $kernel.apply_bulk(a, b, &mut Default::default(), simd),
                         |i| $f(a[i], b[i]),
                         what,
                     );
@@ -955,7 +954,7 @@ mod tests {
                     ($kernel:ident, $t:ty) => {
                         let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
                         for (i, y) in $kernel
-                            .apply_bulk(a, b, simd, &mut Default::default())
+                            .apply_bulk(a, b, &mut Default::default(), simd)
                             .into_iter()
                             .enumerate()
                         {

@@ -11,28 +11,26 @@ pub(crate) struct Op2<S1, S2, K> {
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
 
-    /// The op's name, for the errors of a pipeline the op runs.
-    const NAME: &'static str;
-
-    fn apply(&self, a: T1, b: T2) -> Self::Output;
-
-    /// [`apply`](Self::apply) on each pair of `a` and `b`. An [`ArithError`] is not a panic or an
-    /// early return: the kernel writes its fallback value and ORs a flag into `status`, see
+    /// Apply the kernel to `a` and `b`. An [`ArithError`] is not a panic or an early return: the
+    /// kernel produces a fallback value and sets the error in `status`, see
     /// [`ElementwisePipelineImpl::read_bulk`].
+    fn apply(&self, a: T1, b: T2, status: &mut OpStatus) -> Self::Output;
+
+    /// [`apply`](Self::apply) on each pair of `a` and `b`.
     #[inline(always)]
     fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
         &self,
         a: [T1; N],
         b: [T2; N],
-        simd: S,
         status: &mut OpStatus,
+        simd: S,
     ) -> [Self::Output; N] {
-        let _ = (simd, status);
+        let _ = simd;
         crate::util::array2_map_inline(
             a,
             b,
             #[inline(always)]
-            |_, x, y| self.apply(x, y),
+            |_, x, y| self.apply(x, y, status),
         )
     }
 }
@@ -114,7 +112,7 @@ where
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
         self.read_as_elementwise_pipeline::<K::Output>(index, context)?
-            .to_buf(index, context, out, K::NAME)
+            .to_buf(index, context, out)
     }
 
     #[inline]
@@ -162,12 +160,12 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                simd: S,
                 status: &mut OpStatus,
+                simd: S,
             ) -> [T; N] {
-                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, simd, status) };
-                let b = unsafe { self.b.read_bulk::<N, CONTIGUOUS, S>(offset, simd, status) };
-                let ys = self.kernel.apply_bulk(a, b, simd, status);
+                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, status, simd) };
+                let b = unsafe { self.b.read_bulk::<N, CONTIGUOUS, S>(offset, status, simd) };
+                let ys = self.kernel.apply_bulk(a, b, status, simd);
 
                 const { assert!(size_of::<K::Output>() == size_of::<T>()) };
                 // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
@@ -228,9 +226,8 @@ where
     F: Fn(T1, T2) -> O,
 {
     type Output = O;
-    const NAME: &'static str = "Map2";
     #[inline(always)]
-    fn apply(&self, a: T1, b: T2) -> Self::Output {
+    fn apply(&self, a: T1, b: T2, _status: &mut OpStatus) -> Self::Output {
         self(a, b)
     }
 }
@@ -242,7 +239,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         crate::scalar::$trait:ident::$kernel_fn:ident,
         simd: $bulk_fn:ident,
-        $(status_bulk: $status_bulk_fn:ident,)?
+        $(with_status: $with_status:tt,)?
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -252,11 +249,10 @@ macro_rules! define_op2 {
             T2: Copy + 'static,
         {
             type Output = <T1 as crate::scalar::$trait<T2>>::Output;
-            const NAME: &'static str = stringify!($Op);
 
             #[inline(always)]
-            fn apply(&self, a: T1, b: T2) -> Self::Output {
-                <T1 as crate::scalar::$trait<T2>>::$kernel_fn(a, b)
+            fn apply(&self, a: T1, b: T2, status: &mut crate::error::OpStatus) -> Self::Output {
+                define_op2!(@apply $trait::$kernel_fn(a, b), status, $($with_status)?)
             }
 
             #[inline(always)]
@@ -264,10 +260,10 @@ macro_rules! define_op2 {
                 &self,
                 a: [T1; N],
                 b: [T2; N],
-                simd: S,
                 status: &mut crate::error::OpStatus,
+                simd: S,
             ) -> [Self::Output; N] {
-                define_op2!(@bulk $trait, a, b, simd, status, $bulk_fn, $($status_bulk_fn)?)
+                define_op2!(@bulk $trait::$bulk_fn(a, b), status, simd, $($with_status)?)
             }
         }
         $(#[$meta])*
@@ -319,15 +315,20 @@ macro_rules! define_op2 {
         );
     };
 
-    (@bulk $trait:ident, $a:ident, $b:ident, $simd:ident, $status:ident, $bulk_fn:ident,) => {{
+    // Calls of the scalar functions, passing `status` if the scalar trait takes one.
+    (@apply $trait:ident::$f:ident($a:ident, $b:ident), $status:ident,) => {{
         let _ = $status;
-        <T1 as crate::scalar::$trait<T2>>::$bulk_fn($a, $b, $simd)
+        <T1 as crate::scalar::$trait<T2>>::$f($a, $b)
     }};
-    (
-        @bulk $trait:ident, $a:ident, $b:ident, $simd:ident, $status:ident, $bulk_fn:ident,
-        $status_bulk_fn:ident
-    ) => {
-        <T1 as crate::scalar::$trait<T2>>::$status_bulk_fn($a, $b, $simd, $status)
+    (@apply $trait:ident::$f:ident($a:ident, $b:ident), $status:ident, true) => {
+        <T1 as crate::scalar::$trait<T2>>::$f($a, $b, $status)
+    };
+    (@bulk $trait:ident::$f:ident($a:ident, $b:ident), $status:ident, $simd:ident,) => {{
+        let _ = $status;
+        <T1 as crate::scalar::$trait<T2>>::$f($a, $b, $simd)
+    }};
+    (@bulk $trait:ident::$f:ident($a:ident, $b:ident), $status:ident, $simd:ident, true) => {
+        <T1 as crate::scalar::$trait<T2>>::$f($a, $b, $status, $simd)
     };
 
     (
@@ -360,7 +361,7 @@ macro_rules! define_op2 {
 pub(crate) use define_op2;
 
 pub(crate) mod _traits {
-    use crate::error::OpStatus;
+    use crate::error::{ArithError, OpStatus};
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
@@ -400,21 +401,41 @@ pub(crate) mod _traits {
         mul,
         bulk_fn: mul_bulk,
     );
-    define_scalar_op2_trait!(
-        /// Division operation, like [`core::ops::Div`].
-        ///
-        /// For **integer** types the result is truncating (rounds towards zero), and
-        /// `MIN / -1` wraps to `MIN`. Dividing by zero panics in both debug and release builds
-        /// here, at the scalar level; the array op [`crate::ops::Div`] gives `0` and reports an
-        /// [`ArithError::DivideByZero`](crate::ArithError::DivideByZero) instead.
-        /// For **float** types semantics follow `f32::div`.
-        /// For **complex** types this is full complex division.
-        Div,
-        /// Divide by another value.
-        div,
-        bulk_fn: div_bulk,
-        status_bulk_fn: div_bulk_status,
-    );
+    /// Division operation, like [`core::ops::Div`], reporting arithmetic errors to an
+    /// [`OpStatus`] instead of panicking.
+    ///
+    /// For **integer** types the result is truncating (rounds towards zero), and `MIN / -1` wraps
+    /// to `MIN`. Dividing by zero gives `0` and sets [`ArithError::DivideByZero`] in the status.
+    /// For **float** types semantics follow `f32::div`; there is no error to report.
+    /// For **complex** types this is full complex division.
+    pub trait Div<Rhs = Self> {
+        /// The output element type.
+        type Output;
+
+        /// Divide by another value, reporting an arithmetic error to `status`.
+        fn div(self, rhs: Rhs, status: &mut OpStatus) -> Self::Output;
+
+        /// Apply [`div`](Self::div) on each pair of `xs` and `ys`, vectorized with `simd` where the
+        /// types have SIMD support.
+        #[inline(always)]
+        fn div_bulk<const N: usize, S: fearless_simd::Simd>(
+            xs: [Self; N],
+            ys: [Rhs; N],
+            status: &mut OpStatus,
+            simd: S,
+        ) -> [Self::Output; N]
+        where
+            Self: Sized,
+        {
+            let _ = simd;
+            crate::util::array2_map_inline(
+                xs,
+                ys,
+                #[inline(always)]
+                |_, x, y| Self::div(x, y, status),
+            )
+        }
+    }
 
     macro_rules! impl_arith {
         (
@@ -472,59 +493,88 @@ pub(crate) mod _traits {
         Mul::mul, *, [i8], // i8 auto-vectorized scalar is faster
         simd: mul_bulk, [f32, f64, i16, i32, i64, u8, u16, u32, u64]
     );
-    impl_arith!(
-        Div::div, /, [],
-        simd: div_bulk, [f32, f64]
-    );
+    // Types whose division has no error to report.
+    macro_rules! impl_div {
+        ([$($t:ty),*], |$a:ident, $b:ident| $f:expr) => {$(
+            impl Div for $t {
+                type Output = Self;
+                #[inline(always)]
+                fn div(self, rhs: Self, _status: &mut OpStatus) -> Self {
+                    let ($a, $b) = (self, rhs);
+                    $f
+                }
+            }
+        )*};
+        ([$($t:ty),*], |$a:ident, $b:ident| $f:expr, simd: |$va:ident, $vb:ident| $f_simd:expr) => {$(
+            impl Div for $t {
+                type Output = Self;
+                #[inline(always)]
+                fn div(self, rhs: Self, _status: &mut OpStatus) -> Self {
+                    let ($a, $b) = (self, rhs);
+                    $f
+                }
 
-    /// The zero-divisor path of the integer division kernels: flags the error and gives `0`.
+                #[inline(always)]
+                fn div_bulk<const N: usize, S: fearless_simd::Simd>(
+                    xs: [Self; N],
+                    ys: [Self; N],
+                    _status: &mut OpStatus,
+                    simd: S,
+                ) -> [Self; N] {
+                    crate::scalar::simd::map_vectors2::<Self, Self, Self, N, S>(
+                        xs,
+                        ys,
+                        #[inline(always)]
+                        |$a, $b| $f,
+                        #[inline(always)]
+                        |$va, $vb| $f_simd,
+                        simd,
+                    )
+                }
+            }
+        )*};
+    }
+    impl_div!([f32, f64], |a, b| a / b, simd: |a, b| a / b);
+    // In f32 without FP16, as half's operators do, but inlined: theirs call a software fallback.
+    #[cfg(all(
+        feature = "half",
+        not(all(target_arch = "aarch64", target_feature = "fp16"))
+    ))]
+    impl_div!([f16], |a, b| f16::from_f32(a.to_f32() / b.to_f32()));
+    #[cfg(all(feature = "half", target_arch = "aarch64", target_feature = "fp16"))]
+    impl_div!([f16], |a, b| a / b);
+    #[cfg(feature = "num-complex")]
+    impl_div!([Complex<f32>, Complex<f64>], |a, b| a / b);
+    #[cfg(all(feature = "half", feature = "num-complex"))]
+    impl_div!([Complex<f16>], |a, b| a / b);
+
+    /// The zero-divisor path of integer division: reports the error and gives `0`.
     ///
     /// Out of line on purpose. Besides keeping the rare path out of the loop, the opaque call
     /// keeps LLVM from if-converting the loop to vector code: integer division has no SIMD
     /// instruction, so it would scalarize each division with lane extracts and inserts and a
     /// branch per lane, which measured up to 2x slower (`i16`) than this scalar loop. It must
-    /// have a side effect, the flag, or LLVM folds the call away.
+    /// have a side effect, the status, or LLVM folds the call away.
     #[cold]
     #[inline(never)]
-    fn zero_divisor<T: Default>(div_by_zero: &mut bool) -> T {
-        *div_by_zero = true;
+    fn zero_divisor<T: Default>(status: &mut OpStatus) -> T {
+        status.set_if(ArithError::DivideByZero, true);
         T::default()
     }
 
-    // Integers have no SIMD division.
+    // Integers have no SIMD division: the default `div_bulk` maps `div`.
     macro_rules! impl_int_div {
         ($($t:ty),*) => {$(
             impl Div for $t {
                 type Output = Self;
                 #[inline(always)]
-                fn div(self, rhs: Self) -> Self {
-                    self / rhs
-                }
-
-                #[inline(always)]
-                #[allow(private_interfaces)]
-                fn div_bulk_status<const N: usize, S: fearless_simd::Simd>(
-                    xs: [Self; N],
-                    ys: [Self; N],
-                    _simd: S,
-                    status: &mut OpStatus,
-                ) -> [Self; N] {
-                    let mut div_by_zero = false;
-                    let out = crate::util::array2_map_inline(
-                        xs,
-                        ys,
-                        #[inline(always)]
-                        |_, x, y| {
-                            if y == 0 {
-                                zero_divisor(&mut div_by_zero)
-                            } else {
-                                // `MIN / -1` wraps to `MIN`, like the other integer ops.
-                                x.wrapping_div(y)
-                            }
-                        },
-                    );
-                    status.set_if(OpStatus::DIVIDE_BY_ZERO, div_by_zero);
-                    out
+                fn div(self, rhs: Self, status: &mut OpStatus) -> Self {
+                    if rhs == 0 {
+                        zero_divisor(status)
+                    } else {
+                        // `MIN / -1` wraps to `MIN`, like the other integer ops.
+                        self.wrapping_div(rhs)
+                    }
                 }
             }
         )*};
@@ -671,7 +721,7 @@ define_op2!(
     DivKernel,
     crate::scalar::Div::div,
     simd: div_bulk,
-    status_bulk: div_bulk_status,
+    with_status: true,
     core_op: core::ops::Div::div,
 );
 define_op2!(
@@ -730,7 +780,7 @@ pub(crate) mod tests {
                     let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
                     let what = concat!(stringify!($kernel), " ", stringify!($t));
                     assert_same_elements(
-                        $kernel.apply_bulk(a, b, simd, &mut Default::default()),
+                        $kernel.apply_bulk(a, b, &mut Default::default(), simd),
                         |i| $f(a[i], b[i]),
                         what,
                     );
@@ -768,7 +818,7 @@ pub(crate) mod tests {
                 case!(DivKernel, f64, |x, y| x / y);
                 // Not a multiple of the vector length: scalar.
                 assert_eq!(
-                    AddKernel.apply_bulk([1.5f32], [2.0], simd, &mut Default::default()),
+                    AddKernel.apply_bulk([1.5f32], [2.0], &mut Default::default(), simd),
                     [3.5]
                 );
             });
@@ -1050,7 +1100,7 @@ pub(crate) mod tests {
                     // Raise, the default: the read fails.
                     let err = q.to_ndarray().unwrap_err();
                     assert_eq!(err.kind(), ErrorKind::Arithmetic);
-                    assert_eq!(err.message(), "divide by zero encountered in Div");
+                    assert_eq!(err.message(), "divide by zero encountered");
                     // Only the elements read count.
                     let ctx = q.read_ctx();
                     let head = q.to_ndarray_sub(&[0..300], &ctx).unwrap();
@@ -1065,7 +1115,7 @@ pub(crate) mod tests {
                     let warnings = ctx.take_warnings();
                     assert_eq!(warnings.len(), 1);
                     assert_eq!(warnings[0].kind(), ErrorKind::Arithmetic);
-                    assert_eq!(warnings[0].message(), "divide by zero encountered in Div");
+                    assert_eq!(warnings[0].message(), "divide by zero encountered");
                     assert!(ctx.take_warnings().is_empty());
 
                     // Ignore: just the value.
@@ -1114,25 +1164,40 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn div_by_zero_reported_by_outer_op() {
+    fn div_by_zero_in_fused_chain() {
         use crate::{Array, ErrorKind};
 
-        // A fused chain runs as a single pipeline; the op that runs it reports the error.
+        // A fused chain runs as a single pipeline, whichever op runs it reports the error.
         let a = || Array::compact_ndarray(&ndarray::array![6i32, 7, 8]).unwrap();
         let b = || Array::compact_ndarray(&ndarray::array![2i32, 0, 4]).unwrap();
-        let err = (-(a() / b())).to_ndarray().unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::Arithmetic);
-        assert_eq!(err.message(), "divide by zero encountered in Neg");
-        let err = (a() / b()).cast::<f64>().to_ndarray().unwrap_err();
-        assert_eq!(err.message(), "divide by zero encountered in Cast");
-        let err = ((a() / b()) + a()).to_ndarray().unwrap_err();
-        assert_eq!(err.message(), "divide by zero encountered in Add");
+        for err in [
+            (-(a() / b())).to_ndarray().unwrap_err(),
+            (a() / b()).cast::<f64>().to_ndarray().unwrap_err(),
+            ((a() / b()) + a()).to_ndarray().unwrap_err(),
+        ] {
+            assert_eq!(err.kind(), ErrorKind::Arithmetic);
+            assert_eq!(err.message(), "divide by zero encountered");
+        }
 
         // Float division by zero is IEEE: no error.
         let fa = Array::compact_ndarray(&ndarray::array![1.0f32, 0.0]).unwrap();
         let fb = Array::compact_ndarray(&ndarray::array![0.0f32, 0.0]).unwrap();
         let q = (fa / fb).to_ndarray().unwrap();
         assert!(q[0].is_infinite() && q[1].is_nan());
+    }
+
+    #[test]
+    fn scalar_div_status() {
+        use crate::scalar::Div;
+        use crate::{ArithError, OpStatus};
+
+        let mut status = OpStatus::default();
+        assert_eq!(Div::div(7u8, 2, &mut status), 3);
+        assert_eq!(Div::div(i32::MIN, -1, &mut status), i32::MIN);
+        assert_eq!(Div::div(1.0f32, 0.0, &mut status), f32::INFINITY);
+        assert!(status.is_ok());
+        assert_eq!(Div::div(-7i64, 0, &mut status), 0);
+        assert!(status.contains(ArithError::DivideByZero));
     }
 
     // Random shapes, storage backends and layouts, with zero divisors in about a third of the

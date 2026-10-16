@@ -433,40 +433,33 @@ impl ReadContext {
         self.warnings.take()
     }
 
-    /// Reacts to the errors an op's kernels reported while computing a region, once per region:
-    /// warns or fails per the configured modes. `op_name` names the op in the message.
-    #[inline]
-    pub(crate) fn check_op_status(&self, status: OpStatus, op_name: &'static str) -> Result<()> {
+    /// Reacts to the errors the kernels reported while computing a region: warns or fails per the
+    /// configured modes.
+    ///
+    /// Called once per region by the type-erased pipeline loop. Out of line, so the loop keeps a
+    /// single copy of it whatever the number of pipelines.
+    #[inline(never)]
+    pub(crate) fn check_op_status(&self, status: OpStatus) -> Result<()> {
         if status.is_ok() {
             return Ok(());
         }
-
-        #[cold]
-        #[inline(never)]
-        fn check_op_status_fail(
-            ctx: &ReadContext,
-            status: OpStatus,
-            op_name: &'static str,
-        ) -> Result<()> {
-            let mut raised = None;
-            for error in status.errors() {
-                match ctx.arith_error_mode(error) {
-                    ArithErrorMode::Ignore => {}
-                    ArithErrorMode::Warn => {
-                        let warning = arith_error(error, op_name);
-                        let mut warnings = ctx.warnings.borrow_mut();
-                        if !warnings.iter().any(|w| w.message() == warning.message()) {
-                            warnings.push(warning);
-                        }
-                    }
-                    ArithErrorMode::Raise => {
-                        raised.get_or_insert_with(|| arith_error(error, op_name));
+        let mut raised = None;
+        for error in status.errors() {
+            match self.arith_error_mode(error) {
+                ArithErrorMode::Ignore => {}
+                ArithErrorMode::Warn => {
+                    let mut warnings = self.warnings.borrow_mut();
+                    let warning = arith_error(error);
+                    if !warnings.iter().any(|w| w.message() == warning.message()) {
+                        warnings.push(warning);
                     }
                 }
+                ArithErrorMode::Raise => {
+                    raised.get_or_insert_with(|| arith_error(error));
+                }
             }
-            raised.map_or(Ok(()), Err)
         }
-        check_op_status_fail(self, status, op_name)
+        raised.map_or(Ok(()), Err)
     }
 
     #[inline]

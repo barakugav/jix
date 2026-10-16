@@ -318,7 +318,7 @@ where
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
         self.read_as_elementwise_pipeline::<O>(index, context)?
-            .to_buf(index, context, out, "MapMultiple")
+            .to_buf(index, context, out)
     }
 
     #[inline]
@@ -358,14 +358,14 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                simd: S,
                 status: &mut OpStatus,
+                simd: S,
             ) -> [T; N] {
                 // The iterator is consumed here and dropped before the next call, as
                 // `read_bulk_as_iter` requires.
                 let mut items = unsafe {
                     self.inner
-                        .read_bulk_as_iter::<N, CONTIGUOUS, _>(offset, simd, status)
+                        .read_bulk_as_iter::<N, CONTIGUOUS, _>(offset, status, simd)
                 };
                 array_from_fn_inline(|_| {
                     let x = (self.f)(items.next().unwrap());

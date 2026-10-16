@@ -795,7 +795,7 @@ mod tests {
                         stringify!($tb)
                     );
                     assert_same_elements(
-                        $kernel.apply_bulk(a, b, simd, &mut Default::default()),
+                        $kernel.apply_bulk(a, b, &mut Default::default(), simd),
                         |i| $f(a[i], b[i]),
                         what,
                     );
@@ -806,7 +806,7 @@ mod tests {
                     let xs = <$t>::simd_test_values(0);
                     let what = concat!(stringify!($kernel), " ", stringify!($t));
                     assert_same_elements(
-                        $kernel.apply_bulk(xs, simd, &mut Default::default()),
+                        $kernel.apply_bulk(xs, &mut Default::default(), simd),
                         |i| $f(xs[i]),
                         what,
                     );

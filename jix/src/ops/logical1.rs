@@ -197,7 +197,7 @@ mod tests {
                     let xs = <$t>::simd_test_values(0);
                     let what = concat!(stringify!($kernel), " ", stringify!($t));
                     assert_same_elements(
-                        $kernel.apply_bulk(xs, simd, &mut Default::default()),
+                        $kernel.apply_bulk(xs, &mut Default::default(), simd),
                         |i| $f(xs[i]),
                         what,
                     );
