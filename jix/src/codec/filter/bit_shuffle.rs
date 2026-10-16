@@ -119,7 +119,7 @@ impl FilterImpl for BitShuffleFilter {
         let full_bytes = n_full * typesize;
 
         let mut tmp = buf_pool.get(full_bytes, 16.try_into().unwrap());
-        let tmp = tmp.as_mut_slice();
+        let tmp = &mut tmp.as_mut_slice()[..full_bytes];
 
         // Pass 1: byte shuffle, `(N, B) -> (B, N)`. After this, `dst` holds per
         // byte-plane a contiguous run of N bytes (one byte per element).
@@ -158,7 +158,7 @@ impl FilterImpl for BitShuffleFilter {
         let full_bytes = n_full * typesize;
 
         let mut tmp = buf_pool.get(full_bytes, 16.try_into().unwrap());
-        let tmp = tmp.as_mut_slice();
+        let tmp = &mut tmp.as_mut_slice()[..full_bytes];
 
         // Pass 1: invert encode pass 3. `(B, 8, G) -> (8, B, G)`. Length-`G`
         // runs are moved; no bit-level work.

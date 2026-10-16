@@ -1,8 +1,9 @@
 use std::cell::UnsafeCell;
+use std::mem::ManuallyDrop;
 
 use crate::cpu_cache::CACHE_LINE_SIZE;
 use crate::dtype::Alignment;
-use crate::AlignedBytes;
+use crate::RawAlignedBytes;
 
 /// A pool of aligned bytes buffers.
 ///
@@ -12,14 +13,15 @@ use crate::AlignedBytes;
 /// buffers when possible.
 ///
 /// Buffers are vended as [`PoolBuf`] RAII guards. When a `PoolBuf` is dropped, its underlying
-/// allocation is cleared and pushed back into the pool for reuse.
+/// allocation is pushed back into the pool for reuse. The pool keeps bare allocations (pointer and
+/// capacity): the contents are scratch, so there is no length to track or bytes to preserve.
 ///
 /// The pool is not thread-safe, it is intended to be owned and used by a single thread.
 pub(crate) struct BufferPool {
     /// Free list for alignments <= CACHE_LINE_SIZE; all buffers are allocated at CACHE_LINE_SIZE-byte alignment.
-    align_standard: UnsafeCell<Vec<AlignedBytes>>,
+    align_standard: UnsafeCell<Vec<RawAlignedBytes>>,
     /// Free lists for alignments > CACHE_LINE_SIZE, sorted by alignment value.
-    align_other: UnsafeCell<Vec<(Alignment, Vec<AlignedBytes>)>>,
+    align_other: UnsafeCell<Vec<(Alignment, Vec<RawAlignedBytes>)>>,
 }
 impl BufferPool {
     pub(crate) fn new() -> Self {
@@ -31,27 +33,25 @@ impl BufferPool {
 
     /// Borrows a buffer of `size` bytes with at least `alignment` byte alignment.
     ///
-    /// Returns a [`PoolBuf`] guard whose contents are initialized to `size` uninitialized bytes.
-    /// The buffer is popped from the free list when one is available; otherwise a fresh allocation
-    /// is made. The allocation is returned to the pool when the `PoolBuf` is dropped.
+    /// Returns a [`PoolBuf`] guard over at least `size` uninitialized bytes. The buffer is popped
+    /// from the free list when one is available and large enough; otherwise a fresh allocation is
+    /// made (a popped buffer that is too small is freed, not grown, so its stale bytes are never
+    /// copied). The allocation is returned to the pool when the `PoolBuf` is dropped.
     pub(crate) fn get(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
         let (pool, pool_align) = self.get_pool(alignment);
         let pool = unsafe { &mut *pool };
-        let tmp_buf = pool
-            .pop()
-            .unwrap_or_else(|| AlignedBytes::with_capacity_exact(pool_align.as_usize(), size));
-        let mut buf = PoolBuf {
-            buf: tmp_buf,
-            buffers: self,
+        let buf = match pool.pop() {
+            Some(buf) if buf.capacity() >= size => buf,
+            _ => unsafe { RawAlignedBytes::with_capacity_unchecked(size, pool_align.as_usize()) },
         };
-        buf.set_len(size);
-        buf
+        PoolBuf {
+            buf: ManuallyDrop::new(buf),
+            buffers: self,
+        }
     }
 
-    /// Returns `buf` to the appropriate free list after clearing its length.
-    fn return_buf(&self, mut buf: AlignedBytes) {
-        buf.clear();
-        let (pool, _) = self.get_pool(buf.alignment().try_into().unwrap());
+    fn return_buf(&self, buf: RawAlignedBytes) {
+        let (pool, _) = self.get_pool(buf.align().try_into().unwrap());
         let pool = unsafe { &mut *pool };
         pool.push(buf);
     }
@@ -62,7 +62,7 @@ impl BufferPool {
     /// Alignments <= `CACHE_LINE_SIZE` are folded into the single `align_standard` list
     /// (allocated at `CACHE_LINE_SIZE`-byte alignment). Larger alignments are looked up (or
     /// inserted) in the sorted `align_other` list.
-    fn get_pool(&self, alignment: Alignment) -> (*mut Vec<AlignedBytes>, Alignment) {
+    fn get_pool(&self, alignment: Alignment) -> (*mut Vec<RawAlignedBytes>, Alignment) {
         let standard_alignment = Alignment::new(CACHE_LINE_SIZE).unwrap();
         let alignment = alignment.max(standard_alignment);
 
@@ -94,38 +94,34 @@ impl BufferPool {
 
 /// An RAII guard for a temporary scratch buffer borrowed from a [`BufferPool`].
 ///
-/// Obtained via [`BufferPool::get`] (or [`ReadContext::tmp_buf`]). The buffer is
-/// pre-sized to the requested length on creation. When `PoolBuf` is dropped, the underlying
-/// allocation is cleared and returned to the pool for reuse.
+/// Obtained via [`BufferPool::get`] (or [`ReadContext::tmp_buf`]). The slices it hands out cover
+/// the whole allocation, which may be larger than the size asked for: slice them to that size
+/// wherever the length matters. When `PoolBuf` is dropped, the underlying allocation is returned to
+/// the pool for reuse.
 pub(crate) struct PoolBuf<'a> {
-    buf: AlignedBytes,
+    /// Taken back into the pool on drop.
+    buf: ManuallyDrop<RawAlignedBytes>,
     buffers: &'a BufferPool,
 }
 impl PoolBuf<'_> {
-    /// Resizes the buffer to `new_len` bytes. The new contents are uninitialized.
-    #[inline]
-    pub(crate) fn set_len(&mut self, new_len: usize) {
-        self.buf.clear();
-        self.buf.reserve(new_len);
-        unsafe { self.buf.set_len(new_len) };
-    }
-
+    /// The whole allocation, at least the size requested from [`BufferPool::get`].
     #[inline(always)]
     pub(crate) fn as_slice(&self) -> &[u8] {
-        self.buf.as_slice()
+        // SAFETY: the allocation holds `capacity` bytes.
+        unsafe { std::slice::from_raw_parts(self.buf.as_ptr(), self.buf.capacity()) }
     }
 
+    /// The whole allocation, at least the size requested from [`BufferPool::get`].
     #[inline(always)]
     pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
-        self.buf.as_mut_slice()
+        // SAFETY: the allocation holds `capacity` bytes.
+        unsafe { std::slice::from_raw_parts_mut(self.buf.as_mut_ptr(), self.buf.capacity()) }
     }
 }
 impl Drop for PoolBuf<'_> {
     fn drop(&mut self) {
-        // Swap out self.buf so we can pass ownership to return_buf.
-        let mut buf = AlignedBytes::new_exact(self.buf.alignment());
-        std::mem::swap(&mut self.buf, &mut buf);
-
+        // SAFETY: `buf` is not touched again after being taken.
+        let buf = unsafe { ManuallyDrop::take(&mut self.buf) };
         self.buffers.return_buf(buf);
     }
 }
@@ -139,12 +135,36 @@ mod tests {
         let pool = BufferPool::new();
         for alignment in [1usize, 8, CACHE_LINE_SIZE] {
             let buf = pool.get(64, Alignment::new(alignment).unwrap());
-            assert_eq!(buf.as_slice().len(), 64);
+            assert!(buf.as_slice().len() >= 64);
             assert!((buf.as_slice().as_ptr() as usize).is_multiple_of(CACHE_LINE_SIZE));
         }
         // Each buffer was returned before the next request, so one allocation served all three.
         assert!(unsafe { &*pool.align_other.get() }.is_empty());
         assert_eq!(unsafe { &*pool.align_standard.get() }.len(), 1);
+    }
+
+    #[test]
+    fn reuses_a_large_enough_buffer_and_replaces_a_small_one() {
+        let pool = BufferPool::new();
+        let align = Alignment::new(8).unwrap();
+        let first = pool.get(256, align);
+        let first_ptr = first.as_slice().as_ptr();
+        drop(first);
+
+        // Smaller request: the pooled allocation is reused whole.
+        let smaller = pool.get(100, align);
+        assert_eq!(smaller.as_slice().as_ptr(), first_ptr);
+        assert_eq!(smaller.as_slice().len(), 256);
+        drop(smaller);
+
+        // Larger request: the pooled allocation is too small and is replaced, not grown.
+        let mut larger = pool.get(4096, align);
+        assert!(larger.as_mut_slice().len() >= 4096);
+        larger.as_mut_slice()[..4096].fill(7);
+        drop(larger);
+        let free = unsafe { &*pool.align_standard.get() };
+        assert_eq!(free.len(), 1);
+        assert!(free[0].capacity() >= 4096);
     }
 
     #[test]

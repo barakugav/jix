@@ -1,5 +1,5 @@
 mod aligned_vec;
-pub(crate) use aligned_vec::AlignedBytes;
+pub(crate) use aligned_vec::{AlignedBytes, RawAlignedBytes};
 
 mod arr_sequence;
 pub use arr_sequence::*;

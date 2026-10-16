@@ -9,7 +9,7 @@ use core::fmt::Debug;
 use core::mem::ManuallyDrop;
 use core::ops::{Deref, DerefMut};
 
-use raw::RawAlignedBytes;
+pub(crate) use raw::RawAlignedBytes;
 
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
 
@@ -450,9 +450,6 @@ impl Clone for AlignedBytes {
         Self::from_slice(self.alignment(), self.deref())
     }
 }
-
-unsafe impl Sync for AlignedBytes {}
-unsafe impl Send for AlignedBytes {}
 
 #[cfg(test)]
 mod tests {

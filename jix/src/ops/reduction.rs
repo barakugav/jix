@@ -463,10 +463,10 @@ where
         let state_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_buf_len) };
         (state_buf, DimArray::from_slice(out_strides).unwrap())
     } else {
-        tmp_state_buf =
-            context.allocate_buf(out_nitems * kernel_state_sizeof, kernel_state_alignof);
+        let state_buf_len = out_nitems * kernel_state_sizeof;
+        tmp_state_buf = context.allocate_buf(state_buf_len, kernel_state_alignof);
         (
-            tmp_state_buf.as_mut_slice(),
+            &mut tmp_state_buf.as_mut_slice()[..state_buf_len],
             default_strides(&out_shape, kernel_state_sizeof),
         )
     };
