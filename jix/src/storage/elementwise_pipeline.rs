@@ -15,7 +15,7 @@ use crate::util::default_strides_slice;
 use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
 use crate::{
     array_from_fn_inline, const_min, dim_arr, prev_power_of_two, strided_span_bytes, ArrayExt,
-    DimArray, DimBitmap, DimDyn, DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
+    DimArray, DimBitmap, DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn,
 };
 
 /// A lazy pipeline of element-wise operations over a rectangular region.
@@ -693,7 +693,7 @@ enum OperandData<'a> {
     Output {
         // we hold here a raw pointer rather than `StridedBuf` due to some Miri restrictions
         base_ptr: *mut u8,
-        strides: DimArray<usize>,
+        strides: &'a [usize],
     },
 }
 
@@ -705,8 +705,11 @@ impl<'a> Operand<'a> {
 
     #[inline(never)]
     pub(crate) fn new_output(out: &'a mut StridedBuf<'_>, dtype: &'a Dtype) -> Self {
-        let strides = out.strides().to_dim_vec::<DimDyn>();
         let base_ptr = out.data_ptr_mut().unwrap();
+        // The data is only reached through `base_ptr` from here on, so the rest of `out` can be
+        // shared, its ok to borrow the strides here.
+        let out: &'a StridedBuf<'_> = out;
+        let strides = out.strides();
         Self::new_impl(OperandData::Output { base_ptr, strides }, dtype)
     }
 
@@ -726,7 +729,7 @@ impl<'a> Operand<'a> {
     fn strides(&self) -> &[usize] {
         match &self.data {
             OperandData::Input(data) => data.strides(),
-            OperandData::Output { strides, .. } => strides.as_ref(),
+            OperandData::Output { strides, .. } => strides,
         }
     }
 
