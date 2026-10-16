@@ -326,21 +326,21 @@ pub fn power<'py>(
     });
 
     macro_rules! pow_shortcut_desc {
-    ($core_op:ident, [$(($a_ty:ty, $b_ty:ty)),* $(,)?]) => {
-        vec![
-            $(
-                crate::ops::common::OpFnDescriptor::new2::<$a_ty, $b_ty>(
-                    crate::ops::common::CastKind::Safe,
-                    |a, _exponent| {
-                        let res = jix_core::ops::$core_op::new_array(a)
-                            .map(|res| res.into_any());
-                        <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
-                    },
-                ),
-            )*
-        ]
-    };
-}
+        ($core_op:ident, [$(($a_ty:ty, $b_ty:ty)),* $(,)?]) => {
+            vec![
+                $(
+                    crate::ops::common::OpFnDescriptor::new2::<$a_ty, $b_ty>(
+                        crate::ops::common::CastKind::Safe,
+                        |a, _exponent| {
+                            let res = jix_core::ops::$core_op::new_array(a)
+                                .map(|res| res.into_any());
+                            <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
+                        },
+                    ),
+                )*
+            ]
+        };
+    }
 
     // `x ** 2`. Same pairs as `DISPATCH_TABLE`, so the promotion is identical.
     static SQUARE_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
