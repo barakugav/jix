@@ -111,8 +111,10 @@ jobs:
 
       ############ Docs ############
       - name: jix docs
-        run: cargo doc
+        run: cargo doc --all-features
         working-directory: jix
+        env:
+          RUSTDOCFLAGS: "-D warnings"
       - name: jix-py docs pyi
         run: cargo run --bin generate_pyi
         working-directory: jix-py
