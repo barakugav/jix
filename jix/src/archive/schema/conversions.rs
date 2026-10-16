@@ -4,7 +4,6 @@ use crate::archive::schema;
 use crate::dtype::{Alignment, Itemsize};
 use crate::error::{bail, check_ndim, ensure, error, Result};
 use crate::util::{DimArray, IterExt};
-use crate::DimDyn;
 
 impl crate::dtype::Dtype {
     pub(crate) fn from_proto(dtype: &schema::Dtype) -> Result<Self> {
@@ -20,7 +19,7 @@ impl crate::dtype::Dtype {
                 "dtype itemsize exceeds maximum supported itemsize: {}", dtype.itemsize
             )
         })?;
-        check_ndim::<DimDyn>(dtype.shape.len())?;
+        check_ndim(dtype.shape.len())?;
         let shape = dtype
             .shape
             .iter()

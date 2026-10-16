@@ -28,7 +28,7 @@ pub struct Repeat<S: ArrayStorage> {
     array: S,
     dim: DimIdx,
     repeats: u64,
-    new_shape: S::Dimension,
+    new_shape: DimDyn,
     spec: ArraySpecDynamic,
 }
 
@@ -59,8 +59,7 @@ impl<S: ArrayStorage> Repeat<S> {
             )
         })?;
 
-        let new_shape =
-            S::Dimension::from_fn(ndim, |d| if d == dim { new_len } else { input_shape[d] });
+        let new_shape = DimDyn::from_fn(ndim, |d| if d == dim { new_len } else { input_shape[d] });
         check_shape_overflow(new_shape.as_slice(), array.dtype().itemsize() as _)?;
 
         let inner_spec = array.spec();
@@ -97,7 +96,6 @@ impl<S: ArrayStorage> Repeat<S> {
 
 impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
     type ElementType = S::ElementType;
-    type Dimension = S::Dimension;
 
     fn read_data<'a>(
         &'a self,
@@ -110,7 +108,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
         let ndim = self.new_shape.ndim();
         let dtype = self.dtype();
-        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
+        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
 
         // Empty output (any zero-length range, including repeats == 0) is a no-op.
         if out_shape.as_ref().contains(&0) {
@@ -131,7 +129,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         let g_end = calc_block_end(s, e, n);
 
         // Read the inner sub-region with dim k collapsed to [g_start..g_end) as a view.
-        let inner_index = S::Dimension::vec(ndim, |d| {
+        let inner_index = dim_arr(ndim, |d| {
             if d == k {
                 g_start..g_end
             } else {
@@ -163,7 +161,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
             // (ndim + 1)-D shape: original dims, but dim k is split into
             // (g_len, p_len) at positions k and k+1.
-            let mut copy_shape = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
+            let mut copy_shape = dim_arr(ndim + 1, |_| 0);
             copy_shape[..k].copy_from_slice(&out_shape[..k]);
             copy_shape[k] = g_len as usize;
             copy_shape[k + 1] = p_len as usize;
@@ -171,14 +169,14 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
             // src strides: itemsize-strides over inner_shape, with the within-group
             // (p) dim stride = 0 (the repeat trick).
-            let mut src_strides = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
+            let mut src_strides = dim_arr(ndim + 1, |_| 0);
             src_strides[..k + 1].copy_from_slice(&inner_strides[..k + 1]);
             src_strides[k + 1] = 0;
             src_strides[k + 2..].copy_from_slice(&inner_strides[k + 1..]);
 
             // dst strides: from `dst_strides`, with dim k split into
             // (n * dst_strides[k], dst_strides[k]).
-            let mut dst_strides_split = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
+            let mut dst_strides_split = dim_arr(ndim + 1, |_| 0);
             dst_strides_split[..k].copy_from_slice(&out_strides[..k]);
             dst_strides_split[k] = out_strides[k] * n as usize;
             dst_strides_split[k + 1..].copy_from_slice(&out_strides[k..]);
@@ -258,23 +256,6 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         ArrayStorageInfo::new_deps("Repeat", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = Repeat<S::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        check_ndim::<NewD>(self.shape().len())?;
-        let new_shape = NewD::from_slice(self.shape());
-
-        Ok(Repeat {
-            array: self.array.dimension_change()?,
-            dim: self.dim,
-            repeats: self.repeats,
-            new_shape,
-            spec: self.spec,
-        })
-    }
-
     type ElementTypeChange<NewET: crate::ElementType> = Repeat<S::ElementTypeChange<NewET>>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
@@ -293,7 +274,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use ndarray::array;
+    use ndarray::{array, Ix2};
 
     use crate::codec::ReadContext;
     use crate::storage::Compact;
@@ -303,13 +284,10 @@ mod tests {
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn make<Sh>(vals: Vec<i32>, shape: Sh) -> Array<Compact<Ty<i32>, Sh::Dimension>>
-    where
-        Sh: IntoDimension,
-    {
+    fn make(vals: Vec<i32>, shape: impl IntoDimension) -> Array<Compact<Ty<i32>>> {
         let shape = shape.into_dimension().unwrap();
         let nd = ndarray::Array::from_shape_vec(shape, vals).unwrap();
-        Array::compact_ndarray(&nd).unwrap().into_dim().unwrap()
+        Array::compact_ndarray(&nd).unwrap()
     }
 
     fn arange(n: usize) -> Vec<i32> {
@@ -322,30 +300,30 @@ mod tests {
 
     #[test]
     fn shape_repeat_dim0() {
-        assert_eq!(make(arange(12), &[3u64, 4]).repeat(2, 0).shape(), &[6, 4]);
+        assert_eq!(make(arange(12), [3u64, 4]).repeat(2, 0).shape(), &[6, 4]);
     }
 
     #[test]
     fn shape_repeat_dim_last() {
-        assert_eq!(make(arange(12), &[3u64, 4]).repeat(3, 1).shape(), &[3, 12]);
+        assert_eq!(make(arange(12), [3u64, 4]).repeat(3, 1).shape(), &[3, 12]);
     }
 
     #[test]
     fn shape_repeat_3d_middle() {
         assert_eq!(
-            make(arange(24), &[2u64, 3, 4]).repeat(5, 1).shape(),
+            make(arange(24), [2u64, 3, 4]).repeat(5, 1).shape(),
             &[2, 15, 4]
         );
     }
 
     #[test]
     fn shape_repeats_zero() {
-        assert_eq!(make(arange(12), &[3u64, 4]).repeat(0, 0).shape(), &[0, 4]);
+        assert_eq!(make(arange(12), [3u64, 4]).repeat(0, 0).shape(), &[0, 4]);
     }
 
     #[test]
     fn shape_repeats_one_is_identity() {
-        let a = make(arange(12), &[3u64, 4]);
+        let a = make(arange(12), [3u64, 4]);
         let r = super::Repeat::new_array(a.view(), 1, 0)
             .unwrap()
             .into_storage();
@@ -358,7 +336,7 @@ mod tests {
 
     #[test]
     fn error_dim_out_of_bounds() {
-        let a = make(arange(12), &[3u64, 4]);
+        let a = make(arange(12), [3u64, 4]);
         let err = super::Repeat::new_array(a.view(), 2, 2).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
@@ -368,7 +346,7 @@ mod tests {
         // Build an ndim == NDIM_MAX array of all-1s shape so it stays tiny.
         // NDIM_MAX == 8, so use a fixed-size array of length 8.
         let shape: [u64; 8] = [1; 8];
-        let a = make(arange(1), &shape);
+        let a = make(arange(1), shape);
         assert_eq!(a.shape().len(), NDIM_MAX);
         let err = super::Repeat::new_array(a.view(), 2, 0).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
@@ -377,7 +355,7 @@ mod tests {
     #[test]
     fn error_repeats_overflow() {
         // shape[0] * repeats overflows u64
-        let a = make(arange(2), &[2u64]);
+        let a = make(arange(2), [2u64]);
         let err = super::Repeat::new_array(a.view(), u64::MAX, 0).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
@@ -389,7 +367,7 @@ mod tests {
     #[test]
     fn identity_full_read_returns_input() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
-        let got = make(arange(12), &[3u64, 4])
+        let got = make(arange(12), [3u64, 4])
             .repeat(1, 0)
             .to_ndarray()
             .unwrap();
@@ -398,7 +376,7 @@ mod tests {
 
     #[test]
     fn identity_sub_read_correct() {
-        let got = make(arange(12), &[3u64, 4])
+        let got = make(arange(12), [3u64, 4])
             .repeat(1, 1)
             .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
             .unwrap();
@@ -408,9 +386,9 @@ mod tests {
 
     #[test]
     fn zero_repeats_full_read_is_empty() {
-        let got = make(arange(12), &[3u64, 4])
+        let got = make(arange(12), [3u64, 4])
             .repeat(0, 0)
-            .to_ndarray()
+            .to_ndarray::<Ix2>()
             .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
         assert_eq!(got.len(), 0);
@@ -419,9 +397,9 @@ mod tests {
     #[test]
     fn empty_subrange_returns_ok() {
         // Even with repeats > 1, an empty output sub-range short-circuits.
-        let got = make(arange(12), &[3u64, 4])
+        let got = make(arange(12), [3u64, 4])
             .repeat(2, 0)
-            .to_ndarray_sub(&[2..2, 0..4], &ReadContext::default())
+            .to_ndarray_sub::<Ix2>(&[2..2, 0..4], &ReadContext::default())
             .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
@@ -432,13 +410,13 @@ mod tests {
 
     #[test]
     fn full_read_1d() {
-        let got = make(arange(3), &[3u64]).repeat(2, 0).to_ndarray().unwrap();
+        let got = make(arange(3), [3u64]).repeat(2, 0).to_ndarray().unwrap();
         assert_eq!(got, array![0, 0, 1, 1, 2, 2]);
     }
 
     #[test]
     fn full_read_2d_dim0() {
-        let got = make(arange(8), &[2u64, 4])
+        let got = make(arange(8), [2u64, 4])
             .repeat(2, 0)
             .to_ndarray()
             .unwrap();
@@ -450,7 +428,7 @@ mod tests {
 
     #[test]
     fn full_read_2d_dim1() {
-        let got = make(arange(6), &[2u64, 3])
+        let got = make(arange(6), [2u64, 3])
             .repeat(3, 1)
             .to_ndarray()
             .unwrap();
@@ -462,7 +440,7 @@ mod tests {
 
     #[test]
     fn full_read_3d_middle_dim() {
-        let got = make(arange(8), &[2u64, 2, 2])
+        let got = make(arange(8), [2u64, 2, 2])
             .repeat(2, 1)
             .to_ndarray()
             .unwrap();
@@ -482,8 +460,8 @@ mod tests {
     // Reference layout for these tests:
     //   input = [10, 20, 30, 40], repeats=3, dim=0
     //   output = [10,10,10, 20,20,20, 30,30,30, 40,40,40] (length 12)
-    fn make_1d_repeat3() -> Array<Compact<Ty<i32>, crate::Dim<1>>> {
-        make(vec![10, 20, 30, 40], &[4u64])
+    fn make_1d_repeat3() -> Array<Compact<Ty<i32>>> {
+        make(vec![10, 20, 30, 40], [4u64])
     }
 
     #[test]
@@ -560,7 +538,7 @@ mod tests {
     fn sub_read_2d_dim1_head_only() {
         // [[1,2],[3,4]] repeat 4 dim 1 -> [[1,1,1,1, 2,2,2,2],[3,3,3,3, 4,4,4,4]]
         // sub-region cols 2..3 -> still within group 0 (the "1" or "3" group), single column.
-        let got = make(vec![1, 2, 3, 4], &[2u64, 2])
+        let got = make(vec![1, 2, 3, 4], [2u64, 2])
             .repeat(4, 1)
             .to_ndarray_sub(&[0..2, 2..3], &ReadContext::default())
             .unwrap();
@@ -573,7 +551,7 @@ mod tests {
 
     #[test]
     fn compose_repeat_then_compact() {
-        let got = make(arange(6), &[2u64, 3])
+        let got = make(arange(6), [2u64, 3])
             .repeat(2, 0)
             .compact()
             .unwrap()
@@ -584,7 +562,7 @@ mod tests {
 
     #[test]
     fn compose_repeat_then_slice() {
-        let got = make(arange(6), &[2u64, 3])
+        let got = make(arange(6), [2u64, 3])
             .repeat(2, 0)
             .slice((1..3, ..))
             .to_ndarray()
@@ -595,7 +573,7 @@ mod tests {
 
     #[test]
     fn compose_repeat_then_cast() {
-        let got = make(arange(3), &[3u64])
+        let got = make(arange(3), [3u64])
             .repeat(2, 0)
             .cast::<f32>()
             .to_ndarray()
@@ -608,7 +586,7 @@ mod tests {
         // [[0,1,2],[3,4,5]] (shape [2,3]) permute dims -> shape [3,2] with values
         //   [[0,3],[1,4],[2,5]]
         // then repeat dim 1 by 2 -> [[0,0,3,3],[1,1,4,4],[2,2,5,5]] (shape [3,4])
-        let got = make(arange(6), &[2u64, 3])
+        let got = make(arange(6), [2u64, 3])
             .permute_dims(&[1, 0])
             .repeat(2, 1)
             .to_ndarray()
@@ -617,21 +595,12 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Dimension and element type preservation
+    // Element type preservation
     // -----------------------------------------------------------------------
 
     #[test]
-    fn dim_change_into_dim_dyn() {
-        // Static Dim<2> -> Repeat<...> -> into_dim_dyn -> DimDyn-typed.
-        let a = make(arange(12), &[3u64, 4]); // Compact<Ty<i32>, Dim<2>>
-        let rep = a.repeat(2, 0); // Array<Repeat<Compact<Ty<i32>, Dim<2>>>>
-        let dyn_arr = rep.into_dim_dyn(); // shape (6, 4) under DimDyn
-        assert_eq!(dyn_arr.shape(), &[6, 4]);
-    }
-
-    #[test]
     fn element_type_change_into_type_dyn() {
-        let a = make(arange(6), &[2u64, 3]);
+        let a = make(arange(6), [2u64, 3]);
         let rep = a.repeat(3, 1);
         let dyn_et = rep.into_type_dyn();
         // dtype preserved at runtime.

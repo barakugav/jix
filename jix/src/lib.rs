@@ -23,7 +23,7 @@
 //! ```
 //! use jix::dtype::Dtyped;
 //! use jix::Array;
-//! use ndarray::array;
+//! use ndarray::{array, Ix2};
 //!
 //! // Compress a 2-D f32 ndarray into a block-compressed Array<Compact>.
 //! let a = Array::compact_ndarray(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
@@ -31,7 +31,7 @@
 //! assert_eq!(a.dtype(), &f32::DTYPE);
 //!
 //! // Decompress into a regular `ndarray::Array<f32>` array.
-//! let decompressed = a.to_ndarray()?;
+//! let decompressed = a.to_ndarray::<Ix2>()?;
 //! assert_eq!(decompressed[[0, 0]], 1.5);
 //!
 //! // Build a lazy operation pipeline - no data is read yet.
@@ -48,7 +48,7 @@
 //! // e.g. to reuse an intermediate view that would otherwise be recomputed on every read)
 //! let result_plain = result.to_plain()?;
 //! // or alternatively, materialize into an uncompressed ndarray::Array
-//! let result_decompressed = result.to_ndarray()?;
+//! let result_decompressed = result.to_ndarray::<Ix2>()?;
 //! // or alternatively, materialize directly to disk without ever holding the
 //! // full result in memory - blocks are decompressed, transformed, re-compressed
 //! // and written one at a time.
@@ -190,11 +190,11 @@
 //!
 //! - [`Ty<T>`](Ty) - the scalar element type `T` is known at compile time.
 //!   Arrays constructed from typed sources carry this automatically (e.g.
-//!   `Array::compact_ndarray(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>, Dim<1>>>`).
+//!   `Array::compact_ndarray(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>>>`).
 //!   Most of the element-wise operations require `Ty<T>`, as they are bounded by scalar trait of `T`.
 //!
 //! - [`TypeDyn`] - the element type is only known at runtime. Arrays loaded
-//!   from disk start with this (`Array<Compact<TypeDyn, DimDyn>>`). Call
+//!   from disk start with this (`Array<Compact<TypeDyn>>`). Call
 //!   [`Array::into_typed::<T>()`](Array::into_typed) to assert the expected element type (checked
 //!   against the file header at runtime) and unlock element-wise operations:
 //!
@@ -204,7 +204,7 @@
 //! use jix::{Array, ArrayParams};
 //!
 //! let src = Array::read_from_file(Path::new("data.jix"), ArrayParams::default())?;
-//! // src: Array<Compact<TypeDyn, DimDyn>> - element type unknown at compile time
+//! // src: Array<Compact<TypeDyn>> - element type unknown at compile time
 //! // src: Array<S::ElementType = TypeDyn>
 //!
 //! let typed = src.into_typed::<f32>()?; // runtime check: dtype must be f32
@@ -214,15 +214,13 @@
 //! ```
 //!
 //!
-//! # Dimension types
+//! # Number of dims
 //!
-//! Every [`ArrayStorage`] carries an associated `type Dimension:
-//! Dimension` that records the number of dims at the type level. When the ndim is known
-//! statically, it is [`Dim<N>`]: the const generic `N` is the dim count and is visible to the
-//! compiler. When the ndim is only known at runtime (e.g. arrays loaded from files), it is
-//! [`DimDyn`]: a stack-allocated array of sizes with capacity [`NDIM_MAX`].
-//! The dimension type propagates through every shape-changing operation automatically.
-//! See [`Dimension`] for details.
+//! The number of dims of an array is a runtime property, read from [`Array::shape`] and limited to
+//! [`NDIM_MAX`]. Shape arguments accept any [`IntoDimension`] value - a `u64`, an array or tuple of
+//! `u64`, or a slice - and [`Array::to_ndarray`] returns an ndarray of whichever dimension type
+//! the caller asks for (checked at runtime), e.g. `to_ndarray::<ndarray::Ix2>()` or
+//! `to_ndarray::<ndarray::IxDyn>()`.
 //!
 //!
 //! # Codec pipeline
@@ -263,6 +261,7 @@
 //!
 //! ```
 //! use jix::{Array, ArrayParams};
+//! use ndarray::Ix2;
 //!
 //! let data = ndarray::Array2::<f32>::zeros((512, 512));
 //!
@@ -276,7 +275,7 @@
 //!     for tile_col in 0..7 {
 //!         let row_range = (tile_row * 64)..((tile_row + 2) * 64);
 //!         let col_range = (tile_col * 64)..((tile_col + 2) * 64);
-//!         let tile = array.to_ndarray_sub(&[row_range, col_range], &context)?;
+//!         let tile = array.to_ndarray_sub::<Ix2>(&[row_range, col_range], &context)?;
 //!         println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
 //!     }
 //! }

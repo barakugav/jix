@@ -1,11 +1,13 @@
 use std::fmt::Debug;
 use std::ops::Range;
 
+use ndarray::IxDyn;
+
 use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
 use crate::storage::Compact;
 use crate::util::AlignedBytes;
-use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Ty, TypeDyn};
+use crate::{Array, ArrayParams, ArrayStorage, Ty, TypeDyn};
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper
@@ -601,7 +603,7 @@ where
 /// Always [`Compact`] storage, row-major. Only for tests that need real compact storage -
 /// `as_compact()` and the archive's compact write path. Prefer [`array_strategy_any`] otherwise.
 pub(crate) fn carray_strategy_any<T>(
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -611,7 +613,7 @@ where
 pub(crate) fn carray_strategy_from_shape<T>(
     shape: impl Strategy<Value = Vec<usize>>,
     element: impl Strategy<Value = T> + Clone,
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -620,7 +622,7 @@ where
 
 pub(crate) fn carray_strategy_from_data<T>(
     data: impl Strategy<Value = ndarray::ArrayD<T>>,
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -832,13 +834,7 @@ fn build_test_array<T: Dtyped>(
         // `Compact` re-blocks and compresses, so the layout shapes only the one read that copies
         // the data in - which is the ingest path worth exercising. `buf` outlives the call.
         TestArrayKind::Compact => unsafe {
-            Array::<Compact<TypeDyn, DimDyn>>::compact_nd_ptr(
-                data,
-                &shape,
-                &strides,
-                T::DTYPE,
-                params,
-            )
+            Array::<Compact<TypeDyn>>::compact_nd_ptr(data, &shape, &strides, T::DTYPE, params)
         }
         .unwrap()
         .into_any(),
@@ -846,7 +842,7 @@ fn build_test_array<T: Dtyped>(
         // this alignment. `Plain::new` takes the allocation by value, so the buffer travels along.
         TestArrayKind::Plain => {
             let storage = unsafe {
-                crate::storage::Plain::<AlignedBytes, TypeDyn, DimDyn>::new(
+                crate::storage::Plain::<AlignedBytes, TypeDyn>::new(
                     buf,
                     data,
                     &shape,
@@ -962,7 +958,7 @@ fn assert_array_matches_dyn<T>(
     assert!(spec.read_size().min > 0);
 
     let actual = actual.view().into_typed::<T>().unwrap();
-    let full = actual.to_ndarray().unwrap().into_dyn();
+    let full = actual.to_ndarray::<IxDyn>().unwrap();
     if let Err(msg) = elementwise_eq(full.view(), expected.view(), eq) {
         unreachable!("full array mismatch: {msg}");
     }
@@ -977,14 +973,14 @@ fn assert_array_matches_dyn<T>(
     runner
         .run(&sub_range_strategy(shape), |ranges| {
             let actual_sub = actual
-                .to_ndarray_sub(&ranges, &ctx)
+                .to_ndarray_sub::<IxDyn>(&ranges, &ctx)
                 .map_err(|e| TestCaseError::fail(e.to_string()))?;
             let ranges_usize: Vec<Range<usize>> = ranges
                 .iter()
                 .map(|r| r.start as usize..r.end as usize)
                 .collect();
             let expected_sub = ndarray_slice(&expected, &ranges_usize);
-            elementwise_eq(actual_sub.into_dyn().view(), expected_sub.view(), eq)
+            elementwise_eq(actual_sub.view(), expected_sub.view(), eq)
                 .map_err(TestCaseError::fail)?;
             Ok(())
         })

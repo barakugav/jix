@@ -15,8 +15,8 @@ pub fn where_condition<SC, SX, SY>(
 ) -> Array<Where<SC, SX, SY>>
 where
     SC: ArrayStorageTyped<Item = bool>,
-    SX: ArrayStorage<Dimension = SC::Dimension>,
-    SY: ArrayStorage<ElementType = SX::ElementType, Dimension = SC::Dimension>,
+    SX: ArrayStorage,
+    SY: ArrayStorage<ElementType = SX::ElementType>,
 {
     Where::new_array(condition, x, y).unwrap()
 }
@@ -39,19 +39,19 @@ where
 /// ```
 /// use jix::ops::where_condition;
 /// use jix::Array;
-/// use ndarray::array;
+/// use ndarray::{array, Ix2};
 ///
 /// let cond = Array::compact_ndarray(&array![true, false, true, false])?;
 /// let x = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 /// let y = Array::compact_ndarray(&array![10i32, 20, 30, 40])?;
 /// let result = where_condition(cond, x, y).to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[1, 20, 3, 40]);
+/// assert_eq!(result, array![1, 20, 3, 40]);
 ///
 /// // 2-D arrays
 /// let cond = Array::compact_ndarray(&array![[true, false], [false, true]])?;
 /// let x = Array::compact_ndarray(&array![[1.0f64, 2.0], [3.0, 4.0]])?;
 /// let y = Array::compact_ndarray(&array![[10.0f64, 20.0], [30.0, 40.0]])?;
-/// let result = where_condition(cond, x, y).to_ndarray()?;
+/// let result = where_condition(cond, x, y).to_ndarray::<Ix2>()?;
 /// assert_eq!(result[[0, 0]], 1.0);
 /// assert_eq!(result[[0, 1]], 20.0);
 /// assert_eq!(result[[1, 0]], 30.0);
@@ -67,8 +67,8 @@ pub struct Where<SC, SX, SY> {
 impl<SC, SX, SY> Where<SC, SX, SY>
 where
     SC: ArrayStorageTyped<Item = bool>,
-    SX: ArrayStorage<Dimension = SC::Dimension>,
-    SY: ArrayStorage<ElementType = SX::ElementType, Dimension = SC::Dimension>,
+    SX: ArrayStorage,
+    SY: ArrayStorage<ElementType = SX::ElementType>,
 {
     /// Constructs a [`Where`] storage. See the struct docs for semantics and examples.
     pub fn new(condition: SC, x: SX, y: SY) -> Result<Self> {
@@ -145,11 +145,10 @@ where
 impl<SC, SX, SY> ArrayStorage for Where<SC, SX, SY>
 where
     SC: ArrayStorageTyped<Item = bool>,
-    SX: ArrayStorage<Dimension = SC::Dimension>,
-    SY: ArrayStorage<ElementType = SX::ElementType, Dimension = SC::Dimension>,
+    SX: ArrayStorage,
+    SY: ArrayStorage<ElementType = SX::ElementType>,
 {
     type ElementType = SX::ElementType;
-    type Dimension = SC::Dimension;
 
     #[inline]
     fn read_data<'a>(
@@ -165,9 +164,7 @@ where
 
         let condition_view = self.condition.read_data(index, context, None)?;
         let y_view = self.y.read_data(index, context, None)?;
-        let out_shape = <Self::Dimension as Dimension>::vec(index.len(), |d| {
-            (index[d].end - index[d].start) as usize
-        });
+        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let mut out = materialize_out_buf(
             out,
             context,
@@ -425,20 +422,6 @@ where
         ArrayStorageInfo::new_deps("Where", [&self.condition, &self.x, &self.y])
     }
 
-    type DimensionChange<NewD: crate::Dimension> =
-        Where<SC::DimensionChange<NewD>, SX::DimensionChange<NewD>, SY::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Where {
-            condition: self.condition.dimension_change()?,
-            x: self.x.dimension_change()?,
-            y: self.y.dimension_change()?,
-            spec: self.spec,
-        })
-    }
-
     type ElementTypeChange<NewET: crate::ElementType> =
         Where<SC, SX::ElementTypeChange<NewET>, SY::ElementTypeChange<NewET>>;
     #[inline]
@@ -461,7 +444,7 @@ where
 mod tests {
     use std::fmt::Debug;
 
-    use ndarray::array;
+    use ndarray::{array, Ix1};
     use proptest::prelude::*;
 
     use super::{where_condition, Where};
@@ -537,7 +520,7 @@ mod tests {
         block_shape: Option<&[usize]>,
     ) where
         T: Dtyped + Copy + Debug + PartialEq,
-        InD: ndarray::Dimension + crate::IntoDimension,
+        InD: ndarray::Dimension,
     {
         let za_cond = match block_shape {
             Some(bs) => Array::compact_ndarray_with(cond, crate::util::arr_params(bs)).unwrap(),
@@ -798,7 +781,7 @@ mod tests {
         base_offset: usize,
     ) where
         T: Dtyped + Copy + Debug + PartialEq,
-        InD: ndarray::Dimension + crate::IntoDimension,
+        InD: ndarray::Dimension,
     {
         use crate::storage::StridedBuf;
         use crate::ArrayStorage;
@@ -1021,7 +1004,7 @@ mod tests {
         let x = Array::compact_ndarray(&array![1i32, 2, 3, 4]).unwrap();
         let y = Array::compact_ndarray(&array![10i32, 20, 30, 40]).unwrap();
         let result = where_condition(cond, x, y).to_ndarray().unwrap();
-        assert_eq!(result.as_slice().unwrap(), &[1, 2, 3, 4]);
+        assert_eq!(result, array![1, 2, 3, 4]);
     }
 
     #[test]
@@ -1030,7 +1013,7 @@ mod tests {
         let x = Array::compact_ndarray(&array![1i32, 2, 3, 4]).unwrap();
         let y = Array::compact_ndarray(&array![10i32, 20, 30, 40]).unwrap();
         let result = where_condition(cond, x, y).to_ndarray().unwrap();
-        assert_eq!(result.as_slice().unwrap(), &[10, 20, 30, 40]);
+        assert_eq!(result, array![10, 20, 30, 40]);
     }
 
     // Exercises the fallback byte-copy path in where_impl for struct dtypes.
@@ -1057,7 +1040,7 @@ mod tests {
             Pair { a: 50, b: 60 }
         ])
         .unwrap();
-        let result = where_condition(cond, x, y).to_ndarray().unwrap();
+        let result = where_condition(cond, x, y).to_ndarray::<Ix1>().unwrap();
         assert_eq!(result[0], Pair { a: 1, b: 2 }); // cond=true  -> x
         assert_eq!(result[1], Pair { a: 30, b: 40 }); // cond=false -> y
         assert_eq!(result[2], Pair { a: 5, b: 6 }); // cond=true  -> x

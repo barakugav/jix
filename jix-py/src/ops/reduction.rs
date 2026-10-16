@@ -27,7 +27,7 @@ fn keepdim_after_multi_reduction(
 fn keepdim_after_reduction(array: ArrayAny, original_reduced_dim: usize) -> PyResult<ArrayAny> {
     // keepdim=true: for a single-dim reduction, the result-space gap equals the
     // original dim index (only one dim removed, shift = 0).
-    let res = jix_core::ops::InsertDim::new_array(array, &[original_reduced_dim]);
+    let res = jix_core::ops::InsertDim::new_array(array, [original_reduced_dim]);
     let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
     Ok(ret.into_any())
 }

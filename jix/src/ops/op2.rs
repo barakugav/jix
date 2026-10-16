@@ -32,7 +32,7 @@ impl<S1, S2, K> Op2<S1, S2, K> {
     pub(crate) fn new(a: S1, b: S2, kernel: K, swapped_operand_order: bool) -> Result<Self>
     where
         S1: ArrayStorageTyped,
-        S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+        S2: ArrayStorageTyped,
         K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
     {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
@@ -91,11 +91,10 @@ impl<S1, S2, K> Op2<S1, S2, K> {
 impl<S1, S2, K> ArrayStorage for Op2<S1, S2, K>
 where
     S1: ArrayStorageTyped,
-    S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+    S2: ArrayStorageTyped,
     K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
 {
     type ElementType = Ty<K::Output>;
-    type Dimension = S1::Dimension;
 
     #[inline]
     fn read_data<'a>(
@@ -199,20 +198,6 @@ where
         ArrayStorageInfo::new_deps("Op2", [&self.a, &self.b])
     }
 
-    type DimensionChange<NewD: crate::Dimension> =
-        Op2<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>, K>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Op2 {
-            a: self.a.dimension_change()?,
-            b: self.b.dimension_change()?,
-            kernel: self.kernel,
-            spec: self.spec,
-        })
-    }
-
     crate::ops::impl_element_type_change_default!();
 }
 
@@ -263,7 +248,7 @@ macro_rules! define_op2 {
         impl<S1, S2> $Op<S1, S2>
         where
             S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
+            S2: crate::storage::ArrayStorageTyped,
             S1::Item: crate::scalar::$trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
@@ -279,23 +264,14 @@ macro_rules! define_op2 {
         impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
             S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
+            S2: crate::storage::ArrayStorageTyped,
             S1::Item: crate::scalar::$trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
             type ElementType = crate::Ty<<S1::Item as crate::scalar::$trait<S2::Item>>::Output>;
-            type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
 
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
                 crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.a, &self.0.b])
-            }
-
-            type DimensionChange<NewD: crate::Dimension> = $Op<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
-            #[inline]
-            fn dimension_change<NewD: crate::Dimension>(
-                self,
-            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-                Ok($Op(self.0.dimension_change()?))
             }
 
             crate::ops::impl_element_type_change_default!();
@@ -321,7 +297,7 @@ macro_rules! define_op2 {
         impl<S1, S2> core::ops::$core_op_trait<Array<S2>> for Array<S1>
         where
             S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
+            S2: crate::storage::ArrayStorageTyped,
             S1::Item: crate::scalar::$trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S1, S2>>;
@@ -501,7 +477,7 @@ define_op2!(
     /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
     /// let b = Array::compact_ndarray(&array![10i32, 20, 30])?;
     /// let result = (a + b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[11, 22, 33]);
+    /// assert_eq!(result, array![11, 22, 33]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Add,
@@ -528,7 +504,7 @@ define_op2!(
     /// let a = Array::compact_ndarray(&array![10i32, 20, 30])?;
     /// let b = Array::compact_ndarray(&array![1i32, 2, 3])?;
     /// let result = (a - b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[9, 18, 27]);
+    /// assert_eq!(result, array![9, 18, 27]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Sub,
@@ -555,7 +531,7 @@ define_op2!(
     /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
     /// let b = Array::compact_ndarray(&array![4i32, 5, 6])?;
     /// let result = (a * b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[4, 10, 18]);
+    /// assert_eq!(result, array![4, 10, 18]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Mul,
@@ -583,7 +559,7 @@ define_op2!(
     /// let a = Array::compact_ndarray(&array![10i32, 20, 30])?;
     /// let b = Array::compact_ndarray(&array![2i32, 4, 5])?;
     /// let result = (a / b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[5, 5, 6]);
+    /// assert_eq!(result, array![5, 5, 6]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Div,
@@ -610,12 +586,12 @@ define_op2!(
     /// let a = Array::compact_ndarray(&array![2.0f32, 3.0, 4.0])?;
     /// let b = Array::compact_ndarray(&array![3.0f32, 2.0, 0.5])?;
     /// let result = a.pow(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[8.0, 9.0, 2.0]);
+    /// assert_eq!(result, array![8.0, 9.0, 2.0]);
     ///
     /// // Raise each element to a constant exponent.
     /// let a = Array::compact_ndarray(&array![2.0f32, 3.0, 4.0])?;
     /// let result = a.map(|x| x.powf(2.0)).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[4.0, 9.0, 16.0]);
+    /// assert_eq!(result, array![4.0, 9.0, 16.0]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Pow,

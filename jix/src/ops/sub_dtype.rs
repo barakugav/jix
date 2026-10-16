@@ -59,7 +59,7 @@ where
 /// ];
 /// let za = Array::compact_ndarray(&pts)?;
 /// let xs = za.dtype_sub_field::<i32>("x").to_ndarray()?;
-/// assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
+/// assert_eq!(xs, array![1, 2, 3]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct SubDtype<S, ET> {
@@ -111,7 +111,6 @@ where
     ET: ElementType,
 {
     type ElementType = ET;
-    type Dimension = S::Dimension;
 
     #[inline]
     fn read_data<'a>(
@@ -126,7 +125,7 @@ where
 
         let tmp = self.array.read_data(index, context, None)?;
         let ndim = index.len();
-        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
+        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
 
         let empty_read = out_shape.as_ref().contains(&0);
         if out.is_none() {
@@ -180,18 +179,6 @@ where
         ArrayStorageInfo::new_deps("SubDtype", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = SubDtype<S::DimensionChange<NewD>, ET>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(SubDtype {
-            array: self.array.dimension_change()?,
-            dst_type: self.dst_type,
-            sub_field_offset: self.sub_field_offset,
-        })
-    }
-
     type ElementTypeChange<NewET: ElementType> = SubDtype<S, NewET>;
     #[inline]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
@@ -205,6 +192,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use ndarray::array;
+
     use crate::dtype::Dtyped;
     use crate::{Array, TypeDyn};
 
@@ -242,8 +231,8 @@ mod tests {
         let za = Array::compact_ndarray(&pts).unwrap();
         let xs = za.view().dtype_sub_field::<i32>("x").to_ndarray().unwrap();
         let ys = za.view().dtype_sub_field::<i32>("y").to_ndarray().unwrap();
-        assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
-        assert_eq!(ys.as_slice().unwrap(), &[10, 20, 30]);
+        assert_eq!(xs, array![1, 2, 3]);
+        assert_eq!(ys, array![10, 20, 30]);
     }
 
     #[test]
@@ -357,6 +346,6 @@ mod tests {
             .dtype_sub_field::<i32>("value")
             .to_ndarray()
             .unwrap();
-        assert_eq!(values.as_slice().unwrap(), &[1, 2]);
+        assert_eq!(values, array![1, 2]);
     }
 }

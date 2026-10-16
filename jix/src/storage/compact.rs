@@ -13,8 +13,9 @@
 use std::ops::Range;
 
 use crate::codec::ReadContext;
+use crate::dimension::dim_arr;
 use crate::dtype::Dtype;
-use crate::error::{check_get_range, check_ndim, Result};
+use crate::error::{check_get_range, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ElementType, StridedBuf};
@@ -28,19 +29,11 @@ use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dim
 /// compressed. All compressed bytes are held in a heap-allocated buffer owned by
 /// this struct.
 ///
-/// `Compact<ET, D>` has two type parameters:
-///
-/// - **`ET: ElementType`** - compile-time element type, either [`Ty<T>`](crate::Ty)
-///   (element type known at compile time) or [`TypeDyn`](crate::TypeDyn) (runtime only).
-///   Arrays constructed from typed sources carry `Ty<_>` automatically; arrays loaded from disk
-///   carry `TypeDyn`.
-///
-/// - **`D: Dimension`** - compile-time dimension, either [`Dim<N>`](crate::Dim) (statically known
-///   ndim) or [`DimDyn`](crate::DimDyn) (runtime only).
-///
-/// Use [`Array::into_dim`](crate::Array::into_dim) to convert between `D` variants in-place, or
-/// [`Array::into_typed`](crate::Array::into_typed) to assert a concrete element type and go from
-/// `TypeDyn` to `Ty<T>`.
+/// The type parameter **`ET: ElementType`** is the compile-time element type, either
+/// [`Ty<T>`](crate::Ty) (element type known at compile time) or [`TypeDyn`](crate::TypeDyn)
+/// (runtime only). Arrays constructed from typed sources carry `Ty<_>` automatically; arrays
+/// loaded from disk carry `TypeDyn`. Use [`Array::into_typed`](crate::Array::into_typed) to assert
+/// a concrete element type and go from `TypeDyn` to `Ty<T>`.
 ///
 /// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray), [`Array::compact`](crate::Array::compact)
 /// and their variants or by deserializing an archive file. The memory-mapped equivalent is [`CompactMmap`].
@@ -87,42 +80,36 @@ use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dim
 /// buffers. Create one per thread and pass it to every read call to amortize initialization overhead
 /// across many block reads. The preferred way to obtain one is
 /// [`Array::read_ctx()`](crate::Array::read_ctx).
-pub struct Compact<ET, D>(
-    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned, ET, D>,
-);
+pub struct Compact<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned, ET>);
 
 /// Borrowed, block-compressed nd-array storage.
 ///
 /// Same layout as [`Compact`] but borrows its compressed bytes from an existing byte slice
 /// instead of owning them. Used internally when constructing temporary views into a
 /// pre-encoded buffer.
-pub struct CompactBorrowed<'a, ET, D>(
-    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>, ET, D>,
+pub struct CompactBorrowed<'a, ET>(
+    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>, ET>,
 );
 
 /// Memory-mapped, block-compressed nd-array storage.
 ///
 /// Same layout as [`Compact`] but the compressed bytes are served from a memory-mapped file.
 /// The OS pages data into memory on demand, avoiding a full file read at open time.
-/// Arrays loaded via mmap always start as `CompactMmap<TypeDyn, DimDyn>` because both the
-/// element type and ndim are read from the file header at runtime. The `T` and `D` parameters
-/// carry the same semantics as in [`Compact<ET, D>`](Compact).
+/// Arrays loaded via mmap always start as `CompactMmap<TypeDyn>` because the element type is read
+/// from the file header at runtime. The `ET` parameter carries the same semantics as in
+/// [`Compact<ET>`](Compact).
 ///
 /// Created by [`Array::read_from_file_mmap`](crate::Array::read_from_file_mmap).
 ///
 /// See [`Compact`] for more details.
-pub struct CompactMmap<ET, D>(
-    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, ET, D>,
-);
+pub struct CompactMmap<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, ET>);
 macro_rules! impl_array_storage {
-    ($ty:ident < $($lt:lifetime,)? ET, D >) => {
-        impl<$($lt,)? ET, D> ArrayStorage for $ty<$($lt,)? ET, D>
+    ($ty:ident < $($lt:lifetime,)? ET >) => {
+        impl<$($lt,)? ET> ArrayStorage for $ty<$($lt,)? ET>
         where
             ET: crate::ElementType,
-            D: crate::Dimension,
         {
             type ElementType = ET;
-            type Dimension = D;
 
             #[inline(always)]
             fn read_data<'rd>(
@@ -152,7 +139,7 @@ macro_rules! impl_array_storage {
                 crate::storage::ArrayStorageInfo::new("Compact")
             }
 
-            fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn, DimDyn>> {
+            fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
                 Some(CompactBorrowed(ArrayBlockTableStorageBase {
                     // Re-tagging to `TypeDyn` never fails
                     blocks: self.0.blocks.as_ref().element_type_change().ok()?,
@@ -161,13 +148,7 @@ macro_rules! impl_array_storage {
                 }))
             }
 
-            type DimensionChange<NewD: Dimension> = $ty<$($lt,)? ET, NewD>;
-            #[inline]
-            fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-                Ok($ty(self.0.dimension_change()?))
-            }
-
-            type ElementTypeChange<NewET: ElementType> = $ty<$($lt,)? NewET, D>;
+            type ElementTypeChange<NewET: ElementType> = $ty<$($lt,)? NewET>;
             #[inline]
             fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
                 Ok($ty(self.0.element_type_change()?))
@@ -175,9 +156,9 @@ macro_rules! impl_array_storage {
         }
     };
 }
-impl_array_storage!(Compact<ET, D>);
-impl_array_storage!(CompactBorrowed<'a, ET, D>);
-impl_array_storage!(CompactMmap<ET, D>);
+impl_array_storage!(Compact<ET>);
+impl_array_storage!(CompactBorrowed<'a, ET>);
+impl_array_storage!(CompactMmap<ET>);
 
 /// Nd-array layer on top of [`BlockTable<S>`](crate::storage::block::BlockTable).
 ///
@@ -193,16 +174,16 @@ impl_array_storage!(CompactMmap<ET, D>);
 ///
 /// `encoder_params` and `decoder_params` are kept here - not in `BlockTable` - so that
 /// `ArrayStorage::spec` can propagate them through lazy view operations and `compact_with`.
-pub(crate) struct ArrayBlockTableStorageBase<S, ET, D>
+pub(crate) struct ArrayBlockTableStorageBase<S, ET>
 where
     S: BlockTableStorage,
 {
     pub(crate) blocks: BlockTable<S, ET>,
-    shape: D,
+    shape: DimDyn,
 
     spec: ArraySpecOwned,
 }
-impl<S, ET, D> ArrayBlockTableStorageBase<S, ET, D>
+impl<S, ET> ArrayBlockTableStorageBase<S, ET>
 where
     S: BlockTableStorage,
 {
@@ -210,10 +191,9 @@ where
     ///
     /// `blocks_layout.block_shape_hint` must match the block geometry already encoded in
     /// `blocks`. `block_grid_shape` is derived from `shape` and the block shape.
-    pub(crate) fn new(blocks: BlockTable<S, ET>, shape: D, params: ArrayParams) -> Result<Self>
+    pub(crate) fn new(blocks: BlockTable<S, ET>, shape: DimDyn, params: ArrayParams) -> Result<Self>
     where
         ET: ElementType,
-        D: Dimension,
     {
         let shape_slice = shape.as_slice();
         let mut spec = params.into_spec(
@@ -237,10 +217,7 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn shape(&self) -> &[u64]
-    where
-        D: Dimension,
-    {
+    pub(crate) fn shape(&self) -> &[u64] {
         self.shape.as_slice()
     }
 
@@ -295,13 +272,12 @@ where
     ) -> Result<StridedBuf<'rd>>
     where
         ET: ElementType,
-        D: Dimension,
     {
         let shape = self.shape();
         check_get_range(shape, index)?;
         check_out_buf(out.as_deref(), shape)?;
         let dtype = self.blocks.dtype();
-        let out_shape = D::vec(shape.len(), |d| (index[d].end - index[d].start) as usize);
+        let out_shape = dim_arr(shape.len(), |d| (index[d].end - index[d].start) as usize);
         let nitems = out_shape.as_ref().iter().product::<usize>();
         let mut out = materialize_out_buf(
             out,
@@ -319,7 +295,7 @@ where
         let block_shape = self.block_shape();
         assert_eq!(ndim, block_shape.len());
 
-        let mut b_range = D::vec(ndim, |_| 0..0);
+        let mut b_range = dim_arr(ndim, |_| 0..0);
         let mut is_single_block = true; // every dimension touches exactly one block.
         let mut is_block_aligned = true; // the requested region starts and ends on block boundaries in every dimension.
         for dim in 0..ndim {
@@ -350,16 +326,12 @@ where
             return Ok(out);
         }
 
-        let read_fn = if const { D::NDIM.is_some() } {
-            read_data_slow::<D>
-        } else {
-            match self.shape().len() {
-                1 => read_data_slow::<Dim<1>>,
-                2 => read_data_slow::<Dim<2>>,
-                3 => read_data_slow::<Dim<3>>,
-                4 => read_data_slow::<Dim<4>>,
-                _ => read_data_slow::<DimDyn>,
-            }
+        let read_fn = match self.shape().len() {
+            1 => read_data_slow::<Dim<1>>,
+            2 => read_data_slow::<Dim<2>>,
+            3 => read_data_slow::<Dim<3>>,
+            4 => read_data_slow::<Dim<4>>,
+            _ => read_data_slow::<DimDyn>,
         };
         read_fn(
             &DynStorage {
@@ -380,29 +352,13 @@ where
     #[inline]
     pub(crate) fn element_type_change<NewET: ElementType>(
         self,
-    ) -> Result<ArrayBlockTableStorageBase<S, NewET, D>>
+    ) -> Result<ArrayBlockTableStorageBase<S, NewET>>
     where
         ET: ElementType,
     {
         Ok(ArrayBlockTableStorageBase {
             blocks: self.blocks.element_type_change()?,
             shape: self.shape,
-            spec: self.spec,
-        })
-    }
-
-    #[inline]
-    pub(crate) fn dimension_change<NewD: Dimension>(
-        self,
-    ) -> Result<ArrayBlockTableStorageBase<S, ET, NewD>>
-    where
-        D: Dimension,
-    {
-        check_ndim::<NewD>(self.shape().len())?;
-        let shape = NewD::from_slice(self.shape());
-        Ok(ArrayBlockTableStorageBase {
-            blocks: self.blocks,
-            shape,
             spec: self.spec,
         })
     }

@@ -87,14 +87,12 @@ define_op1!(
     ///
     /// let a = Array::compact_ndarray(&array![f32::NAN, 1.0f32, f32::INFINITY, -1.0f32])?;
     /// let result = a.is_nan().to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, false, false, false]);
+    /// assert_eq!(result, array![true, false, false, false]);
     ///
     /// // Shape is preserved for 2-D input.
     /// let b = Array::compact_ndarray(&array![[f32::NAN, 1.0f32], [2.0f32, f32::NAN]])?;
     /// let result = b.is_nan().to_ndarray()?;
-    /// assert_eq!(result.shape(), &[2, 2]);
-    /// assert_eq!(result[[0, 0]], true);
-    /// assert_eq!(result[[1, 1]], true);
+    /// assert_eq!(result, array![[true, false], [false, true]]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     IsNan,
@@ -120,14 +118,12 @@ define_op1!(
     ///
     /// let a = Array::compact_ndarray(&array![1.0f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY])?;
     /// let result = a.is_finite().to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, false, false, false]);
+    /// assert_eq!(result, array![true, false, false, false]);
     ///
     /// // Shape is preserved for 2-D input.
     /// let b = Array::compact_ndarray(&array![[1.0f32, f32::INFINITY], [f32::NAN, -2.0f32]])?;
     /// let result = b.is_finite().to_ndarray()?;
-    /// assert_eq!(result.shape(), &[2, 2]);
-    /// assert_eq!(result[[0, 0]], true);
-    /// assert_eq!(result[[0, 1]], false);
+    /// assert_eq!(result, array![[true, false], [false, true]]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     IsFinite,
@@ -153,14 +149,12 @@ define_op1!(
     ///
     /// let a = Array::compact_ndarray(&array![f32::INFINITY, f32::NEG_INFINITY, f32::NAN, 1.0f32])?;
     /// let result = a.is_infinite().to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, true, false, false]);
+    /// assert_eq!(result, array![true, true, false, false]);
     ///
     /// // Shape is preserved for 2-D input.
     /// let b = Array::compact_ndarray(&array![[f32::INFINITY, 0.0f32], [-1.0f32, f32::NEG_INFINITY]])?;
     /// let result = b.is_infinite().to_ndarray()?;
-    /// assert_eq!(result.shape(), &[2, 2]);
-    /// assert_eq!(result[[0, 0]], true);
-    /// assert_eq!(result[[1, 1]], true);
+    /// assert_eq!(result, array![[true, false], [false, true]]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     IsInfinite,

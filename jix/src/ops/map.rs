@@ -1,6 +1,6 @@
 use crate::ops::prelude::*;
 use crate::ops::{Op1, Op2};
-use crate::{ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ElementwisePipelineTuple};
+use crate::{ArraySequence, ArraySequenceTyped, ElementwisePipelineTuple};
 
 impl<S> Array<S>
 where
@@ -40,12 +40,12 @@ where
 ///
 /// let a = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 /// let result = a.map(|x: i32| x * x).to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[1, 4, 9, 16]);
+/// assert_eq!(result, array![1, 4, 9, 16]);
 ///
 /// // Change element type in the mapping function
 /// let b = Array::compact_ndarray(&array![0.0f32, 1.5, -2.0])?;
 /// let result = b.map(|x: f32| x > 0.0).to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
+/// assert_eq!(result, array![false, true, false]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct Map<S, F>(Op1<S, F>);
@@ -77,19 +77,10 @@ where
     F: Fn(S::Item) -> O,
 {
     type ElementType = Ty<O>;
-    type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!(<S, O, F>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Map", [&self.0])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = Map<S::DimensionChange<NewD>, F>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Map(self.0.dimension_change()?))
     }
 
     crate::ops::impl_element_type_change_default!();
@@ -122,7 +113,7 @@ impl<S1, S2, F> Map2<S1, S2, F> {
     pub fn new<O>(a: S1, b: S2, map_fn: F) -> Result<Self>
     where
         S1: ArrayStorageTyped,
-        S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+        S2: ArrayStorageTyped,
         F: Fn(S1::Item, S2::Item) -> O,
         O: Dtyped,
     {
@@ -133,7 +124,7 @@ impl<S1, S2, F> Map2<S1, S2, F> {
     pub fn new_array<O>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Result<Array<Self>>
     where
         S1: ArrayStorageTyped,
-        S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+        S2: ArrayStorageTyped,
         F: Fn(S1::Item, S2::Item) -> O,
         O: Dtyped,
     {
@@ -143,25 +134,15 @@ impl<S1, S2, F> Map2<S1, S2, F> {
 impl<S1, S2, O, F> ArrayStorage for Map2<S1, S2, F>
 where
     S1: ArrayStorageTyped,
-    S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+    S2: ArrayStorageTyped,
     O: Dtyped,
     F: Fn(S1::Item, S2::Item) -> O,
 {
     type ElementType = Ty<O>;
-    type Dimension = S1::Dimension;
     crate::storage::impl_array_storage_forward!(<S1, S2, O, F>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Map2", [&self.0.a, &self.0.b])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> =
-        Map2<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>, F>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Map2(self.0.dimension_change()?))
     }
 
     crate::ops::impl_element_type_change_default!();
@@ -172,7 +153,7 @@ where
 pub fn map2<S1, S2, O, F>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Array<Map2<S1, S2, F>>
 where
     S1: ArrayStorageTyped,
-    S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+    S2: ArrayStorageTyped,
     O: Dtyped,
     F: Fn(S1::Item, S2::Item) -> O,
 {
@@ -249,7 +230,7 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
     /// Constructs a [`MapMultiple`] storage. See the struct docs for semantics and examples.
     pub fn new<O>(arrays: ArraysT, map_fn: F) -> Result<Self>
     where
-        ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
+        ArraysT: ArraySequence + ArraySequenceTyped,
         F: Fn(ArraysT::ItemSequence<'_>) -> O,
         O: Dtyped,
     {
@@ -302,12 +283,11 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
 }
 impl<ArraysT, O, F> ArrayStorage for MapMultiple<ArraysT, F>
 where
-    ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
+    ArraysT: ArraySequence + ArraySequenceTyped,
     F: Fn(ArraysT::ItemSequence<'_>) -> O,
     O: Dtyped,
 {
     type ElementType = Ty<O>;
-    type Dimension = ArraysT::Dimension;
 
     #[inline]
     fn read_data<'a>(
@@ -342,7 +322,7 @@ where
         }
         impl<ArraysT, F, O, T, D> ElementwisePipelineImpl<T> for MapMultiplePipeline<'_, ArraysT, D, F>
         where
-            ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
+            ArraysT: ArraySequence + ArraySequenceTyped,
             F: Fn(ArraysT::ItemSequence<'_>) -> O,
             O: Dtyped,
             T: Dtyped,
@@ -410,7 +390,6 @@ where
         ArrayStorageInfo::new_deps_dyn("MapMultiple", deps)
     }
 
-    crate::ops::impl_dimension_change_default!();
     crate::ops::impl_element_type_change_default!();
 }
 
@@ -423,7 +402,7 @@ where
 #[track_caller]
 pub fn map_multiple<ArraysT, O, F>(arrays: ArraysT, map_fn: F) -> Array<MapMultiple<ArraysT, F>>
 where
-    ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
+    ArraysT: ArraySequence + ArraySequenceTyped,
     O: Dtyped,
     F: Fn(ArraysT::ItemSequence<'_>) -> O,
 {

@@ -61,7 +61,10 @@ where
 /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, -0.5])?;
 /// // View the f32 bits as u32 (both 4-byte elements) - no conversion.
 /// let bits = unsafe { a.transmute_elements::<u32>() };
-/// assert_eq!(bits.to_ndarray()?[0], 1.0f32.to_bits());
+/// assert_eq!(
+///     bits.to_ndarray()?,
+///     array![1.0f32.to_bits(), 2.0f32.to_bits(), (-0.5f32).to_bits()]
+/// );
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct Transmute<S, ET> {
@@ -109,7 +112,6 @@ where
     ET: ElementType,
 {
     type ElementType = ET;
-    type Dimension = S::Dimension;
 
     #[inline(always)]
     fn read_data<'a>(
@@ -137,17 +139,6 @@ where
         ArrayStorageInfo::new_deps("Transmute", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = Transmute<S::DimensionChange<NewD>, ET>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Transmute {
-            array: self.array.dimension_change()?,
-            element_type: self.element_type,
-        })
-    }
-
     type ElementTypeChange<NewET: ElementType> = Transmute<S, NewET>;
     #[inline]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
@@ -160,6 +151,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use ndarray::Ix1;
+
     use super::Transmute;
     use crate::codec::ReadContext;
     use crate::dtype::Dtyped;
@@ -396,6 +389,6 @@ mod tests {
         let t = unsafe { arr.transmute_elements::<f32>() };
         let ctx = t.read_ctx();
 
-        assert_eq!(t.to_ndarray_sub(&[1..1], &ctx).unwrap().len(), 0);
+        assert_eq!(t.to_ndarray_sub::<Ix1>(&[1..1], &ctx).unwrap().len(), 0);
     }
 }

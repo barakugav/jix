@@ -6,7 +6,7 @@ use crate::error::{check_dtype, Result};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, CompactBorrowed, ElementwisePipeline, OperandTyped, StridedBuf,
 };
-use crate::{DimDyn, Dimension, ElementType, TypeDyn};
+use crate::{ElementType, TypeDyn};
 
 /// The backing data source of an [`Array<S>`](crate::Array).
 ///
@@ -64,23 +64,6 @@ pub trait ArrayStorage {
     /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
     /// type and re-enable those operations.
     type ElementType: ElementType
-    where
-        Self: Sized;
-
-    /// The compile-time dimension of arrays backed by this storage.
-    ///
-    /// This associated type lets the compiler track how many dims an array has through a chain
-    /// of lazy operations. When the dimension is known statically (e.g. arrays created from a
-    /// statically-dimensioned ndarray, or after calling
-    /// [`Array::into_dim::<Dim<N>>`](crate::Array::into_dim)), it is [`Dim<N>`](crate::Dim);
-    /// when it is only known at runtime (e.g. for arrays loaded from a file or created with
-    /// slice-based shape arguments) it is [`DimDyn`](crate::DimDyn).
-    ///
-    /// Operations that change the number of dims determine the output dimension by either using
-    /// the input dimension's associated type (e.g. `S::Dimension::Smaller` or `S::Dimension::Larger`)
-    /// or by accepting an explicit dimension argument from the caller
-    /// (e.g. `reshape()` accepts IntoDimension, `max()` accepts `DimsArg`).
-    type Dimension: Dimension
     where
         Self: Sized;
 
@@ -167,35 +150,12 @@ pub trait ArrayStorage {
     /// If this storage is a compact block-compressed backend, return a borrowed view of itself.
     #[doc(hidden)]
     #[inline(always)]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn, DimDyn>> {
+    fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
         None
     }
 
-    /// The concrete storage type after swapping the dimension to `NewD`.
-    type DimensionChange<NewD: Dimension>: ArrayStorage<
-        ElementType = Self::ElementType,
-        Dimension = NewD,
-    >
-    where
-        Self: Sized;
-
-    /// Consume `self`, validate the new dimension against the runtime ndim, and return the
-    /// re-tagged storage.
-    ///
-    /// Returns an error if `NewD = Dim<N>` and the runtime ndim does not equal `N`; the
-    /// concrete [`ErrorKind`](crate::ErrorKind) is backend-dependent
-    /// ([`TooManyDimensions`](crate::ErrorKind::TooManyDimensions) for the concrete storage
-    /// backends). Always succeeds for `NewD = DimDyn`.
-    #[doc(hidden)]
-    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>>
-    where
-        Self: Sized;
-
     /// The concrete storage type after swapping the element type to `NewET`.
-    type ElementTypeChange<NewET: ElementType>: ArrayStorage<
-        ElementType = NewET,
-        Dimension = Self::Dimension,
-    >
+    type ElementTypeChange<NewET: ElementType>: ArrayStorage<ElementType = NewET>
     where
         Self: Sized;
 

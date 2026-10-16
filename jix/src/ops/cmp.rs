@@ -366,13 +366,13 @@ define_op2!(
     /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
     /// let b = Array::compact_ndarray(&array![1i32, 0, 3])?;
     /// let result = a.equal(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, false, true]);
+    /// assert_eq!(result, array![true, false, true]);
     ///
     /// // NaN != NaN per IEEE 754.
     /// let c = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
     /// let d = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
     /// let result = c.equal(d).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[false, true]);
+    /// assert_eq!(result, array![false, true]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Equal,
@@ -399,13 +399,13 @@ define_op2!(
     /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
     /// let b = Array::compact_ndarray(&array![1i32, 0, 3])?;
     /// let result = a.not_equal(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
+    /// assert_eq!(result, array![false, true, false]);
     ///
     /// // NaN != NaN is true per IEEE 754.
     /// let c = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
     /// let d = Array::compact_ndarray(&array![f32::NAN, 2.0f32])?;
     /// let result = c.not_equal(d).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, true]);
+    /// assert_eq!(result, array![true, true]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     NotEqual,
@@ -427,7 +427,7 @@ macro_rules! define_swapped_cmp {
         impl<S1, S2> $Op<S1, S2>
         where
             S1: ArrayStorageTyped,
-            S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+            S2: ArrayStorageTyped,
             S2::Item: crate::scalar::$InnerTrait<S1::Item, Output: Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
@@ -444,11 +444,10 @@ macro_rules! define_swapped_cmp {
         impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
             S1: ArrayStorageTyped,
-            S2: ArrayStorageTyped<Dimension = S1::Dimension>,
+            S2: ArrayStorageTyped,
             S2::Item: crate::scalar::$InnerTrait<S1::Item, Output: Dtyped>,
         {
             type ElementType = Ty<<S2::Item as crate::scalar::$InnerTrait<S1::Item>>::Output>;
-            type Dimension = S1::Dimension;
 
             #[inline(always)]
             fn read_data<'a>(
@@ -497,15 +496,6 @@ macro_rules! define_swapped_cmp {
                 ArrayStorageInfo::new_deps(stringify!($Op), [&op.b, &op.a])
             }
 
-            type DimensionChange<NewD: crate::Dimension> =
-                $Op<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
-            #[inline]
-            fn dimension_change<NewD: crate::Dimension>(
-                self,
-            ) -> Result<Self::DimensionChange<NewD>> {
-                Ok($Op(self.0.dimension_change()?))
-            }
-
             crate::ops::impl_element_type_change_default!();
         }
     };
@@ -530,13 +520,13 @@ define_swapped_cmp!(
     /// let a = Array::compact_ndarray(&array![3i32, 1, 2])?;
     /// let b = Array::compact_ndarray(&array![1i32, 1, 3])?;
     /// let result = a.greater(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
+    /// assert_eq!(result, array![true, false, false]);
     ///
     /// // true > false for bool dtype.
     /// let c = Array::compact_ndarray(&array![true, false, true])?;
     /// let d = Array::compact_ndarray(&array![false, false, true])?;
     /// let result = c.greater(d).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
+    /// assert_eq!(result, array![true, false, false]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Greater = Less(LessKernel, crate::scalar::Less),
@@ -560,13 +550,13 @@ define_swapped_cmp!(
     /// let a = Array::compact_ndarray(&array![3i32, 1, 2])?;
     /// let b = Array::compact_ndarray(&array![1i32, 1, 3])?;
     /// let result = a.greater_equal(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
+    /// assert_eq!(result, array![true, true, false]);
     ///
     /// // true >= false and false >= false hold.
     /// let c = Array::compact_ndarray(&array![true, false, true])?;
     /// let d = Array::compact_ndarray(&array![false, false, true])?;
     /// let result = c.greater_equal(d).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
+    /// assert_eq!(result, array![true, true, true]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     GreaterEqual = LessEqual(LessEqualKernel, crate::scalar::LessEqual),
@@ -589,13 +579,13 @@ define_op2!(
     /// let a = Array::compact_ndarray(&array![1i32, 1, 3])?;
     /// let b = Array::compact_ndarray(&array![3i32, 1, 2])?;
     /// let result = a.less(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
+    /// assert_eq!(result, array![true, false, false]);
     ///
     /// // false < true for bool dtype.
     /// let c = Array::compact_ndarray(&array![false, false, true])?;
     /// let d = Array::compact_ndarray(&array![true, false, true])?;
     /// let result = c.less(d).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
+    /// assert_eq!(result, array![true, false, false]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Less,
@@ -622,13 +612,13 @@ define_op2!(
     /// let a = Array::compact_ndarray(&array![1i32, 1, 3])?;
     /// let b = Array::compact_ndarray(&array![3i32, 1, 2])?;
     /// let result = a.less_equal(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
+    /// assert_eq!(result, array![true, true, false]);
     ///
     /// // false <= true and true <= true hold.
     /// let c = Array::compact_ndarray(&array![false, false, true])?;
     /// let d = Array::compact_ndarray(&array![true, false, true])?;
     /// let result = c.less_equal(d).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
+    /// assert_eq!(result, array![true, true, true]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     LessEqual,
@@ -651,17 +641,17 @@ define_op2!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix1};
     ///
     /// let a = Array::compact_ndarray(&array![1i32, 5, 3])?;
     /// let b = Array::compact_ndarray(&array![4i32, 2, 3])?;
     /// let result = a.maximum(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[4, 5, 3]);
+    /// assert_eq!(result, array![4, 5, 3]);
     ///
     /// // NaN is propagated: if either operand is NaN the result is NaN.
     /// let c = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
     /// let d = Array::compact_ndarray(&array![2.0f32, 3.0f32])?;
-    /// let result = c.maximum(d).to_ndarray()?;
+    /// let result = c.maximum(d).to_ndarray::<Ix1>()?;
     /// assert!(result[[0]].is_nan());
     /// assert_eq!(result[[1]], 3.0);
     /// # Ok::<(), jix::Error>(())
@@ -685,17 +675,17 @@ define_op2!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix1};
     ///
     /// let a = Array::compact_ndarray(&array![1i32, 5, 3])?;
     /// let b = Array::compact_ndarray(&array![4i32, 2, 3])?;
     /// let result = a.minimum(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
+    /// assert_eq!(result, array![1, 2, 3]);
     ///
     /// // NaN is propagated: if either operand is NaN the result is NaN.
     /// let c = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
     /// let d = Array::compact_ndarray(&array![2.0f32, 3.0f32])?;
-    /// let result = c.minimum(d).to_ndarray()?;
+    /// let result = c.minimum(d).to_ndarray::<Ix1>()?;
     /// assert!(result[[0]].is_nan());
     /// assert_eq!(result[[1]], 1.0);
     /// # Ok::<(), jix::Error>(())
@@ -732,25 +722,25 @@ define_op2!(
 /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
 /// let b = Array::compact_ndarray(&array![1.0f32, 2.01, 4.0])?;
 /// let result = a.approx_equal(b, 0.0, 0.02).to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
+/// assert_eq!(result, array![true, true, false]);
 ///
 /// // rtol=0.1 accepts a ~9 % relative difference but rejects an ~11 % one.
 /// let c = Array::compact_ndarray(&array![100.0f32, 1.0])?;
 /// let d = Array::compact_ndarray(&array![109.0f32, 1.12])?;
 /// let result = c.approx_equal(d, 0.1, 0.0).to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[true, false]);
+/// assert_eq!(result, array![true, false]);
 ///
 /// // NaN inputs always produce false.
 /// let e = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
 /// let f = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
 /// let result = e.approx_equal(f, 0.0, 0.0).to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[false, true]);
+/// assert_eq!(result, array![false, true]);
 ///
 /// // Same infinities are equal; opposite signs are not.
 /// let g = Array::compact_ndarray(&array![f32::INFINITY, f32::NEG_INFINITY])?;
 /// let h = Array::compact_ndarray(&array![f32::INFINITY, f32::INFINITY])?;
 /// let result = g.approx_equal(h, 0.0, 0.0).to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[true, false]);
+/// assert_eq!(result, array![true, false]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct ApproxEq<S1, S2>(Op2<S1, S2, ApproxEqKernel<S1::Item>>)
@@ -791,7 +781,7 @@ where
     ) -> Result<Self>
     where
         S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-        S2: ArrayStorageTyped<Item = S1::Item, Dimension = S1::Dimension>,
+        S2: ArrayStorageTyped<Item = S1::Item>,
     {
         Ok(Self(Op2::new(a, b, ApproxEqKernel { rtol, atol }, false)?))
     }
@@ -805,7 +795,7 @@ where
     ) -> Result<Array<Self>>
     where
         S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-        S2: ArrayStorageTyped<Item = S1::Item, Dimension = S1::Dimension>,
+        S2: ArrayStorageTyped<Item = S1::Item>,
     {
         Self::new(a.into_storage(), b.into_storage(), rtol, atol).map(Array::from_storage)
     }
@@ -813,23 +803,13 @@ where
 impl<S1, S2> ArrayStorage for ApproxEq<S1, S2>
 where
     S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-    S2: ArrayStorageTyped<Item = S1::Item, Dimension = S1::Dimension>,
+    S2: ArrayStorageTyped<Item = S1::Item>,
 {
     type ElementType = Ty<bool>;
-    type Dimension = S1::Dimension;
     crate::storage::impl_array_storage_forward!(<S1, S2>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("ApproxEq", [&self.0.a, &self.0.b])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> =
-        ApproxEq<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(ApproxEq(self.0.dimension_change()?))
     }
 
     crate::ops::impl_element_type_change_default!();
@@ -847,7 +827,7 @@ where
     pub fn greater<S2>(self, other: Array<S2>) -> Array<Greater<S, S2>>
     where
         S: ArrayStorageTyped,
-        S2: ArrayStorageTyped<Dimension = S::Dimension>,
+        S2: ArrayStorageTyped,
         S2::Item: crate::scalar::Less<S::Item, Output: Dtyped>,
     {
         Greater::new_array(self, other).unwrap()
@@ -858,7 +838,7 @@ where
     pub fn greater_equal<S2>(self, other: Array<S2>) -> Array<GreaterEqual<S, S2>>
     where
         S: ArrayStorageTyped,
-        S2: ArrayStorageTyped<Dimension = S::Dimension>,
+        S2: ArrayStorageTyped,
         S2::Item: crate::scalar::LessEqual<S::Item, Output: Dtyped>,
     {
         GreaterEqual::new_array(self, other).unwrap()
@@ -879,7 +859,7 @@ where
     ) -> crate::Array<ApproxEq<S, S2>>
     where
         S: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-        S2: ArrayStorageTyped<Item = S::Item, Dimension = S::Dimension>,
+        S2: ArrayStorageTyped<Item = S::Item>,
     {
         ApproxEq::new_array(self, other, rtol, atol).unwrap()
     }
@@ -887,6 +867,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use ndarray::Ix1;
+
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::{Maximum, Minimum};
@@ -1416,7 +1398,7 @@ mod tests {
         let nb = ndarray::array![2.0f32, f32::NAN];
         let zna = Array::compact_ndarray(&na).unwrap();
         let znb = Array::compact_ndarray(&nb).unwrap();
-        let result = zna.view().minimum(znb.view()).to_ndarray().unwrap();
+        let result = zna.view().minimum(znb.view()).to_ndarray::<Ix1>().unwrap();
         assert!(result[[0]].is_nan());
         assert!(result[[1]].is_nan());
     }
