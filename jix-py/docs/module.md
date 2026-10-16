@@ -153,6 +153,20 @@ out = result.numpy()
 ```
 <!-- fmt:on -->
 
+## Arithmetic errors
+
+An operation that hits an arithmetic error still produces a value for the element - an integer
+division by zero gives `0`, as in NumPy - and the error is reported when the array is read,
+according to [`jix.seterr()`][jix.seterr]: a `RuntimeWarning` by default, a `FloatingPointError`
+under `'raise'`, nothing under `'ignore'`. Like NumPy's, the modes are per thread and also
+settable for a block with [`jix.errstate`][jix.errstate]. Since operations are lazy, the modes
+in effect when the array is *read* apply, not those in effect when the operation was built.
+
+```python
+with jix.errstate(divide="raise"):
+    out = (a // b).numpy()  # FloatingPointError if `b` has a zero
+```
+
 
 # Persistence
 

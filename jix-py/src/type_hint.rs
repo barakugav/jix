@@ -91,3 +91,34 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
         }
     }
 }
+
+/// An arithmetic error mode of [`crate::errstate::seterr`].
+pub struct ErrMode(pub jix_core::ArithErrorMode);
+
+impl<'a, 'py> FromPyObject<'a, 'py> for ErrMode {
+    type Error = PyErr;
+
+    const INPUT_TYPE: PyStaticExpr = type_hint_subscript!(
+        type_hint_identifier!("typing", "Literal"),
+        PyStaticExpr::Constant {
+            value: PyStaticConstant::Str("ignore")
+        },
+        PyStaticExpr::Constant {
+            value: PyStaticConstant::Str("warn")
+        },
+        PyStaticExpr::Constant {
+            value: PyStaticConstant::Str("raise")
+        }
+    );
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        match obj.extract::<&str>()? {
+            "ignore" => Ok(Self(jix_core::ArithErrorMode::Ignore)),
+            "warn" => Ok(Self(jix_core::ArithErrorMode::Warn)),
+            "raise" => Ok(Self(jix_core::ArithErrorMode::Raise)),
+            other => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "invalid error mode '{other}', expected one of 'ignore', 'warn', 'raise'"
+            ))),
+        }
+    }
+}

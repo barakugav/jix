@@ -201,8 +201,11 @@ define_op2!(
     /// The result truncates toward zero (matching Rust's `/` on integers), so for
     /// signed operands with a negative quotient this differs from numpy's
     /// `floor_divide`, which rounds toward negative infinity (e.g. `-7 // 2` is `-3`
-    /// here, but `-4` in numpy). For unsigned operands the two agree. Dividing by
-    /// zero raises an error.
+    /// here, but `-4` in numpy). For unsigned operands the two agree.
+    ///
+    /// Dividing by zero gives `0`, as in numpy, and is reported according to
+    /// [`jix.seterr()`][jix.seterr]: a `RuntimeWarning` by default, or a
+    /// `FloatingPointError` under `divide='raise'`. `MIN // -1` wraps to `MIN`.
     ///
     /// Available via the `//` operator on arrays.
     ///
