@@ -387,12 +387,12 @@ pub(crate) mod _traits {
 ///
 /// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 /// let result = za.cast::<f64>().to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[1.0f64, 2.0, 3.0, 4.0]);
+/// assert_eq!(result, array![1.0f64, 2.0, 3.0, 4.0]);
 ///
 /// // Zero -> false, non-zero -> true
 /// let zb = Array::compact_ndarray(&array![0i32, 1, -2, 0])?;
 /// let result = zb.cast::<bool>().to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[false, true, true, false]);
+/// assert_eq!(result, array![false, true, true, false]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct Cast<S, T>(crate::ops::op1::Op1<S, CastKernel<T>>);
@@ -442,19 +442,10 @@ where
     T: Dtyped,
 {
     type ElementType = crate::Ty<T>;
-    type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Cast", [&self.0.array])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = Cast<S::DimensionChange<NewD>, T>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Cast(self.0.dimension_change()?))
     }
 
     crate::ops::impl_element_type_change_default!();

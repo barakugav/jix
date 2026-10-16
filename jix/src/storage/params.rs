@@ -118,7 +118,7 @@ impl ArrayParams {
     /// [`block_shape_fixed_dims`](Self::block_shape_fixed_dims) is also used, meaning the shape will
     /// be preserved as-is if this `ArrayParams` is later used as a propagation source.
     pub fn block_shape(&mut self, block_shape: &[BlockSize]) -> &mut Self {
-        check_ndim::<DimDyn>(block_shape.len()).unwrap();
+        check_ndim(block_shape.len()).unwrap();
         self.block_shape = Some(DimArray::from_slice(block_shape).unwrap());
         self
     }
@@ -137,7 +137,7 @@ impl ArrayParams {
     /// on the block shape: an explicitly-set [`block_shape`](Self::block_shape) is all-fixed
     /// (preserved exactly), while an auto-computed block shape is all-non-fixed.
     pub fn block_shape_fixed_dims(&mut self, fixed: &[bool]) -> &mut Self {
-        check_ndim::<DimDyn>(fixed.len()).unwrap();
+        check_ndim(fixed.len()).unwrap();
         self.block_shape_fixed_dims = Some(fixed.iter().copied().collect());
         self
     }
@@ -302,7 +302,7 @@ impl ArrayParams {
         let mut block_size = self.block_size;
 
         let ndim = shape.len();
-        check_ndim::<DimDyn>(ndim)?;
+        check_ndim(ndim)?;
         let itemsize = dtype.itemsize() as u64;
         check_dtype_size_nonzero(dtype)?;
 
@@ -1205,9 +1205,7 @@ mod tests {
         assert_eq!(a.storage().spec().read_layout_order(), &[1, 0, 2]);
     }
 
-    fn compact_i32(
-        shape: [usize; 3],
-    ) -> Array<crate::storage::Compact<crate::Ty<i32>, crate::Dim<3>>> {
+    fn compact_i32(shape: [usize; 3]) -> Array<crate::storage::Compact<crate::Ty<i32>>> {
         let n = shape.iter().product::<usize>() as i32;
         Array::compact_ndarray(
             &ndarray::Array::from_shape_vec(shape, (0..n).collect::<Vec<_>>()).unwrap(),
@@ -1286,9 +1284,7 @@ mod tests {
         assert_eq!(b.storage().spec().read_layout_order(), &[1, 0]);
     }
 
-    fn compact_2d_i32(
-        shape: [usize; 2],
-    ) -> Array<crate::storage::Compact<crate::Ty<i32>, crate::Dim<2>>> {
+    fn compact_2d_i32(shape: [usize; 2]) -> Array<crate::storage::Compact<crate::Ty<i32>>> {
         let n = shape.iter().product::<usize>() as i32;
         Array::compact_ndarray(
             &ndarray::Array::from_shape_vec(shape, (0..n).collect::<Vec<_>>()).unwrap(),
@@ -1868,7 +1864,7 @@ mod tests {
     fn compact_nd_ptr_rejects_zero_itemsize() {
         let buf = [0u8; 8];
         let result = unsafe {
-            Array::<crate::storage::Compact<crate::TypeDyn, crate::Dim<1>>>::compact_nd_ptr(
+            Array::<crate::storage::Compact<crate::TypeDyn>>::compact_nd_ptr(
                 buf.as_ptr(),
                 [4u64],
                 &[0usize],
@@ -1886,7 +1882,7 @@ mod tests {
     fn plain_ndarray_ptr_rejects_zero_itemsize() {
         let buf = [0u8; 8];
         let result = unsafe {
-            Array::<crate::storage::Plain<&(), crate::TypeDyn, crate::Dim<1>>>::plain_ndarray_ptr(
+            Array::<crate::storage::Plain<&(), crate::TypeDyn>>::plain_ndarray_ptr(
                 buf.as_ptr(),
                 [4u64],
                 &[0usize],
@@ -1905,10 +1901,7 @@ mod tests {
     #[test]
     fn compact_fn_rejects_zero_itemsize_element() {
         let result =
-            Array::<crate::storage::Compact<crate::Ty<[i32; 0]>, crate::Dim<1>>>::compact_fn(
-                [4u64],
-                |_| [],
-            );
+            Array::<crate::storage::Compact<crate::Ty<[i32; 0]>>>::compact_fn([4u64], |_| []);
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::UnsupportedDtype

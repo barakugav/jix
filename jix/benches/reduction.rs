@@ -2,6 +2,7 @@ mod common;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use jix::Array;
+use ndarray::{Ix0, Ix1, Ix2};
 
 use crate::common::{create_data, Profile};
 
@@ -12,41 +13,41 @@ fn bench_sum_plain(c: &mut Criterion) {
         group.sample_size(20);
 
         let base = create_data::<i32>(Profile::Smooth, &shape, 0x2c4f558960d6c384)
-            .into_dimensionality::<ndarray::Ix2>()
+            .into_dimensionality::<Ix2>()
             .unwrap();
 
         let arr_i32 = Array::plain_ndarray_ref(&base).unwrap();
         group.bench_function(BenchmarkId::new("i32", "dim=1 (contiguous)"), |b| {
-            b.iter(|| arr_i32.view().sum(1).to_ndarray().unwrap());
+            b.iter(|| arr_i32.view().sum(1).to_ndarray::<Ix1>().unwrap());
         });
         group.bench_function(BenchmarkId::new("i32", "dim=0 (strided)"), |b| {
-            b.iter(|| arr_i32.view().sum(0).to_ndarray().unwrap());
+            b.iter(|| arr_i32.view().sum(0).to_ndarray::<Ix1>().unwrap());
         });
         group.bench_function(BenchmarkId::new("i32", "all"), |b| {
-            b.iter(|| arr_i32.view().sum((0, 1)).to_ndarray().unwrap());
+            b.iter(|| arr_i32.view().sum((0, 1)).to_ndarray::<Ix0>().unwrap());
         });
 
         if all_dtypes {
             let arr_i64 = Array::plain_ndarray(base.mapv(|x| x as i64)).unwrap();
             group.bench_function(BenchmarkId::new("i64", "dim=1 (contiguous)"), |b| {
-                b.iter(|| arr_i64.view().sum(1).to_ndarray().unwrap());
+                b.iter(|| arr_i64.view().sum(1).to_ndarray::<Ix1>().unwrap());
             });
             group.bench_function(BenchmarkId::new("i64", "dim=0 (strided)"), |b| {
-                b.iter(|| arr_i64.view().sum(0).to_ndarray().unwrap());
+                b.iter(|| arr_i64.view().sum(0).to_ndarray::<Ix1>().unwrap());
             });
             let arr_f32 = Array::plain_ndarray(base.mapv(|x| x as f32)).unwrap();
             group.bench_function(BenchmarkId::new("f32", "dim=1 (contiguous)"), |b| {
-                b.iter(|| arr_f32.view().sum(1).to_ndarray().unwrap());
+                b.iter(|| arr_f32.view().sum(1).to_ndarray::<Ix1>().unwrap());
             });
             group.bench_function(BenchmarkId::new("f32", "dim=0 (strided)"), |b| {
-                b.iter(|| arr_f32.view().sum(0).to_ndarray().unwrap());
+                b.iter(|| arr_f32.view().sum(0).to_ndarray::<Ix1>().unwrap());
             });
             let arr_f64 = Array::plain_ndarray(base.mapv(|x| x as f64)).unwrap();
             group.bench_function(BenchmarkId::new("f64", "dim=1 (contiguous)"), |b| {
-                b.iter(|| arr_f64.view().sum(1).to_ndarray().unwrap());
+                b.iter(|| arr_f64.view().sum(1).to_ndarray::<Ix1>().unwrap());
             });
             group.bench_function(BenchmarkId::new("f64", "dim=0 (strided)"), |b| {
-                b.iter(|| arr_f64.view().sum(0).to_ndarray().unwrap());
+                b.iter(|| arr_f64.view().sum(0).to_ndarray::<Ix1>().unwrap());
             });
         }
 
@@ -64,18 +65,18 @@ fn bench_sum_compact(c: &mut Criterion) {
         group.sample_size(20);
 
         let data = create_data::<i32>(Profile::Smooth, &shape, 0xddd8f5ce716490be)
-            .into_dimensionality::<ndarray::Ix2>()
+            .into_dimensionality::<Ix2>()
             .unwrap();
 
         let array = Array::compact_ndarray(&data).unwrap();
         group.bench_function(BenchmarkId::new("i32", "dim=1 (contiguous)"), |b| {
-            b.iter(|| array.view().sum(1).to_ndarray().unwrap());
+            b.iter(|| array.view().sum(1).to_ndarray::<Ix1>().unwrap());
         });
         group.bench_function(BenchmarkId::new("i32", "dim=0 (strided)"), |b| {
-            b.iter(|| array.view().sum(0).to_ndarray().unwrap());
+            b.iter(|| array.view().sum(0).to_ndarray::<Ix1>().unwrap());
         });
         group.bench_function(BenchmarkId::new("i32", "all"), |b| {
-            b.iter(|| array.view().sum((0, 1)).to_ndarray().unwrap());
+            b.iter(|| array.view().sum((0, 1)).to_ndarray::<Ix0>().unwrap());
         });
 
         group.finish();

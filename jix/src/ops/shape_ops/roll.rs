@@ -69,7 +69,6 @@ impl<S: ArrayStorage> Roll<S> {
 
 impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     type ElementType = S::ElementType;
-    type Dimension = S::Dimension;
 
     fn read_data<'a>(
         &'a self,
@@ -93,7 +92,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         // range. The shape of that read is exactly `out_shape`, so we read straight into buf.
         if s >= shift || e <= shift {
             let j_start = if s >= shift { s - shift } else { s + l - shift };
-            let inner_index = S::Dimension::vec(ndim, |d| {
+            let inner_index = dim_arr(ndim, |d| {
                 if d == k {
                     j_start..(j_start + (e - s))
                 } else {
@@ -128,7 +127,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             Ok(())
         };
 
-        let inner_index_r1 = S::Dimension::vec(ndim, |d| {
+        let inner_index_r1 = dim_arr(ndim, |d| {
             if d == k {
                 (s + l - shift)..l
             } else {
@@ -137,8 +136,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         });
         read_region(inner_index_r1.as_ref(), 0)?;
 
-        let inner_index_r2 =
-            S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
+        let inner_index_r2 = dim_arr(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
         read_region(inner_index_r2.as_ref(), len1)?;
 
         Ok(out)
@@ -162,18 +160,6 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         ArrayStorageInfo::new_deps("Roll", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = Roll<S::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Roll {
-            array: self.array.dimension_change()?,
-            dim: self.dim,
-            shift: self.shift,
-        })
-    }
-
     type ElementTypeChange<NewET: crate::ElementType> = Roll<S::ElementTypeChange<NewET>>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
@@ -190,7 +176,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use ndarray::array;
+    use ndarray::{array, Ix2};
 
     use crate::codec::ReadContext;
     use crate::storage::Compact;
@@ -200,13 +186,10 @@ mod tests {
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn make<Sh>(vals: Vec<i32>, shape: Sh) -> Array<Compact<Ty<i32>, Sh::Dimension>>
-    where
-        Sh: IntoDimension,
-    {
+    fn make(vals: Vec<i32>, shape: impl IntoDimension) -> Array<Compact<Ty<i32>>> {
         let shape = shape.into_dimension().unwrap();
         let nd = ndarray::Array::from_shape_vec(shape, vals).unwrap();
-        Array::compact_ndarray(&nd).unwrap().into_dim().unwrap()
+        Array::compact_ndarray(&nd).unwrap()
     }
 
     fn arange(n: usize) -> Vec<i32> {
@@ -219,18 +202,18 @@ mod tests {
 
     #[test]
     fn shape_preserved_positive_shift() {
-        assert_eq!(make(arange(12), &[3u64, 4]).roll(1, 0).shape(), &[3, 4]);
+        assert_eq!(make(arange(12), [3u64, 4]).roll(1, 0).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_preserved_negative_shift() {
-        assert_eq!(make(arange(12), &[3u64, 4]).roll(-2, 1).shape(), &[3, 4]);
+        assert_eq!(make(arange(12), [3u64, 4]).roll(-2, 1).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_preserved_large_shift() {
         // shift larger than the dim length is reduced mod L.
-        assert_eq!(make(arange(12), &[3u64, 4]).roll(100, 0).shape(), &[3, 4]);
+        assert_eq!(make(arange(12), [3u64, 4]).roll(100, 0).shape(), &[3, 4]);
     }
 
     // -----------------------------------------------------------------------
@@ -239,7 +222,7 @@ mod tests {
 
     #[test]
     fn error_dim_out_of_bounds() {
-        let a = make(arange(12), &[3u64, 4]);
+        let a = make(arange(12), [3u64, 4]);
         let err = super::Roll::new_array(a.view(), 1, 2).unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
     }
@@ -251,27 +234,21 @@ mod tests {
     #[test]
     fn identity_zero_shift_full_read() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
-        let got = make(arange(12), &[3u64, 4])
-            .roll(0, 0)
-            .to_ndarray()
-            .unwrap();
+        let got = make(arange(12), [3u64, 4]).roll(0, 0).to_ndarray().unwrap();
         assert_eq!(got, nd);
     }
 
     #[test]
     fn identity_shift_equals_dim_len() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
-        let got = make(arange(12), &[3u64, 4])
-            .roll(3, 0)
-            .to_ndarray()
-            .unwrap();
+        let got = make(arange(12), [3u64, 4]).roll(3, 0).to_ndarray().unwrap();
         assert_eq!(got, nd);
     }
 
     #[test]
     fn identity_shift_negative_multiple_of_len() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
-        let got = make(arange(12), &[3u64, 4])
+        let got = make(arange(12), [3u64, 4])
             .roll(-6, 0)
             .to_ndarray()
             .unwrap();
@@ -282,14 +259,17 @@ mod tests {
     fn identity_size_one_dim() {
         // Rolling a size-1 dim is a no-op for any shift.
         let nd = ndarray::Array::from_shape_vec((1, 4), arange(4)).unwrap();
-        let got = make(arange(4), &[1u64, 4]).roll(7, 0).to_ndarray().unwrap();
+        let got = make(arange(4), [1u64, 4]).roll(7, 0).to_ndarray().unwrap();
         assert_eq!(got, nd);
     }
 
     #[test]
     fn identity_empty_array() {
         // Rolling a dim of size 0 is a no-op (no data to move).
-        let got = make(vec![], &[0u64, 4]).roll(3, 0).to_ndarray().unwrap();
+        let got = make(vec![], [0u64, 4])
+            .roll(3, 0)
+            .to_ndarray::<Ix2>()
+            .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
 
@@ -299,25 +279,25 @@ mod tests {
 
     #[test]
     fn full_read_1d_positive_shift() {
-        let got = make(arange(5), &[5u64]).roll(2, 0).to_ndarray().unwrap();
+        let got = make(arange(5), [5u64]).roll(2, 0).to_ndarray().unwrap();
         assert_eq!(got, array![3, 4, 0, 1, 2]);
     }
 
     #[test]
     fn full_read_1d_negative_shift() {
-        let got = make(arange(5), &[5u64]).roll(-1, 0).to_ndarray().unwrap();
+        let got = make(arange(5), [5u64]).roll(-1, 0).to_ndarray().unwrap();
         assert_eq!(got, array![1, 2, 3, 4, 0]);
     }
 
     #[test]
     fn full_read_2d_dim0() {
-        let got = make(arange(8), &[2u64, 4]).roll(1, 0).to_ndarray().unwrap();
+        let got = make(arange(8), [2u64, 4]).roll(1, 0).to_ndarray().unwrap();
         assert_eq!(got, array![[4, 5, 6, 7], [0, 1, 2, 3]]);
     }
 
     #[test]
     fn full_read_2d_dim1() {
-        let got = make(arange(6), &[2u64, 3]).roll(1, 1).to_ndarray().unwrap();
+        let got = make(arange(6), [2u64, 3]).roll(1, 1).to_ndarray().unwrap();
         assert_eq!(got, array![[2, 0, 1], [5, 3, 4]]);
     }
 
@@ -334,7 +314,7 @@ mod tests {
                 }
             }
         }
-        let got = make(arange(12), &[2u64, 3, 2])
+        let got = make(arange(12), [2u64, 3, 2])
             .roll(1, 1)
             .to_ndarray()
             .unwrap();
@@ -348,7 +328,7 @@ mod tests {
     #[test]
     fn sub_read_1d_nonwrap_after_shift() {
         // [0,1,2,3,4] roll +2 -> [3, 4, 0, 1, 2]. Output [2..5) = [0, 1, 2] (no wrap).
-        let got = make(arange(5), &[5u64])
+        let got = make(arange(5), [5u64])
             .roll(2, 0)
             .to_ndarray_sub(&[2..5], &ReadContext::default())
             .unwrap();
@@ -358,7 +338,7 @@ mod tests {
     #[test]
     fn sub_read_1d_nonwrap_before_shift() {
         // [0,1,2,3,4] roll +2 -> [3, 4, 0, 1, 2]. Output [0..2) = [3, 4] (no wrap).
-        let got = make(arange(5), &[5u64])
+        let got = make(arange(5), [5u64])
             .roll(2, 0)
             .to_ndarray_sub(&[0..2], &ReadContext::default())
             .unwrap();
@@ -368,7 +348,7 @@ mod tests {
     #[test]
     fn sub_read_1d_wrap_across_shift() {
         // [0,1,2,3,4] roll +2 -> [3, 4, 0, 1, 2]. Output [1..4) = [4, 0, 1] (wraps at i=2).
-        let got = make(arange(5), &[5u64])
+        let got = make(arange(5), [5u64])
             .roll(2, 0)
             .to_ndarray_sub(&[1..4], &ReadContext::default())
             .unwrap();
@@ -379,7 +359,7 @@ mod tests {
     fn sub_read_2d_dim0_wrap() {
         // [[0,1,2],[3,4,5],[6,7,8]] roll +1 dim 0 -> [[6,7,8],[0,1,2],[3,4,5]]
         // Sub rows [0..2), cols [0..3) -> [[6,7,8],[0,1,2]]. Wraps at i=1.
-        let got = make(arange(9), &[3u64, 3])
+        let got = make(arange(9), [3u64, 3])
             .roll(1, 0)
             .to_ndarray_sub(&[0..2, 0..3], &ReadContext::default())
             .unwrap();
@@ -390,7 +370,7 @@ mod tests {
     fn sub_read_2d_dim1_wrap() {
         // [[0,1,2,3],[4,5,6,7]] roll +1 dim 1 -> [[3,0,1,2],[7,4,5,6]]
         // Sub rows [0..2), cols [0..3) -> [[3,0,1],[7,4,5]]. Wraps at i=1 on dim 1.
-        let got = make(arange(8), &[2u64, 4])
+        let got = make(arange(8), [2u64, 4])
             .roll(1, 1)
             .to_ndarray_sub(&[0..2, 0..3], &ReadContext::default())
             .unwrap();
@@ -399,9 +379,9 @@ mod tests {
 
     #[test]
     fn sub_read_empty_range() {
-        let got = make(arange(8), &[2u64, 4])
+        let got = make(arange(8), [2u64, 4])
             .roll(1, 0)
-            .to_ndarray_sub(&[1..1, 0..4], &ReadContext::default())
+            .to_ndarray_sub::<Ix2>(&[1..1, 0..4], &ReadContext::default())
             .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
@@ -409,7 +389,7 @@ mod tests {
     #[test]
     fn sub_read_single_element_wrap_point() {
         // [10,20,30,40,50] roll +2 -> [40, 50, 10, 20, 30]. Position 1 == 50.
-        let got = make(vec![10, 20, 30, 40, 50], &[5u64])
+        let got = make(vec![10, 20, 30, 40, 50], [5u64])
             .roll(2, 0)
             .to_ndarray_sub(&[1..2], &ReadContext::default())
             .unwrap();
@@ -422,7 +402,7 @@ mod tests {
 
     #[test]
     fn compose_roll_then_compact() {
-        let got = make(arange(6), &[2u64, 3])
+        let got = make(arange(6), [2u64, 3])
             .roll(1, 0)
             .compact()
             .unwrap()
@@ -433,7 +413,7 @@ mod tests {
 
     #[test]
     fn compose_roll_then_slice() {
-        let got = make(arange(9), &[3u64, 3])
+        let got = make(arange(9), [3u64, 3])
             .roll(1, 0)
             .slice((1..3, ..))
             .to_ndarray()
@@ -444,7 +424,7 @@ mod tests {
 
     #[test]
     fn compose_roll_then_cast() {
-        let got = make(arange(3), &[3u64])
+        let got = make(arange(3), [3u64])
             .roll(1, 0)
             .cast::<f32>()
             .to_ndarray()
@@ -455,7 +435,7 @@ mod tests {
     #[test]
     fn compose_permute_then_roll() {
         // [[0,1,2],[3,4,5]] permute -> [[0,3],[1,4],[2,5]]; roll +1 dim 0 -> [[2,5],[0,3],[1,4]]
-        let got = make(arange(6), &[2u64, 3])
+        let got = make(arange(6), [2u64, 3])
             .permute_dims(&[1, 0])
             .roll(1, 0)
             .to_ndarray()
@@ -466,19 +446,20 @@ mod tests {
     #[test]
     fn compose_roll_then_roll_same_dim_combines() {
         // Two rolls on the same dim are equivalent to one roll with the sum of shifts.
-        let nd1 = make(arange(5), &[5u64])
+        let nd1 = make(arange(5), [5u64])
             .roll(2, 0)
             .roll(1, 0)
             .to_ndarray()
             .unwrap();
-        let nd2 = make(arange(5), &[5u64]).roll(3, 0).to_ndarray().unwrap();
+        let nd2 = make(arange(5), [5u64]).roll(3, 0).to_ndarray().unwrap();
         assert_eq!(nd1, nd2);
+        assert_eq!(nd1, array![2, 3, 4, 0, 1]);
     }
 
     #[test]
     fn compose_roll_inverse_is_identity() {
         let nd = ndarray::Array::from_shape_vec((5,), arange(5)).unwrap();
-        let got = make(arange(5), &[5u64])
+        let got = make(arange(5), [5u64])
             .roll(3, 0)
             .roll(-3, 0)
             .to_ndarray()
@@ -487,20 +468,12 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Dimension and element type preservation
+    // Element type preservation
     // -----------------------------------------------------------------------
 
     #[test]
-    fn dim_change_into_dim_dyn() {
-        let a = make(arange(12), &[3u64, 4]); // Compact<Ty<i32>, Dim<2>>
-        let r = a.roll(1, 0);
-        let dyn_arr = r.into_dim_dyn();
-        assert_eq!(dyn_arr.shape(), &[3, 4]);
-    }
-
-    #[test]
     fn element_type_change_into_type_dyn() {
-        let a = make(arange(6), &[2u64, 3]);
+        let a = make(arange(6), [2u64, 3]);
         let r = a.roll(1, 1);
         let dyn_et = r.into_type_dyn();
         assert_eq!(dyn_et.dtype(), &<i32 as crate::dtype::Dtyped>::DTYPE);

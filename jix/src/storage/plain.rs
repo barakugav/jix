@@ -9,14 +9,14 @@ use crate::storage::params::{
 use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
 };
-use crate::util::{strided_span_bytes, DimArray, DimIdx, SendSyncPtr};
-use crate::{Array, ArrayParams, ArrayStorage, DimBitmap, Dimension, IntoDimension};
+use crate::util::{dim_arr, strided_span_bytes, DimArray, DimIdx, SendSyncPtr};
+use crate::{Array, ArrayParams, ArrayStorage, DimBitmap, DimDyn, Dimension, IntoDimension};
 
 /// Plain (not-compressed) owned array (type alias).
-pub type PlainArray<T, D> = Array<Plain<Vec<T>, Ty<T>, D>>;
+pub type PlainArray<T> = Array<Plain<Vec<T>, Ty<T>>>;
 
 /// Plain (not-compressed) borrowed array (type alias).
-pub type PlainArrayRef<'a, T, D> = Array<Plain<&'a (), Ty<T>, D>>;
+pub type PlainArrayRef<'a, T> = Array<Plain<&'a (), Ty<T>>>;
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -40,10 +40,7 @@ pub type PlainArrayRef<'a, T, D> = Array<Plain<&'a (), Ty<T>, D>>;
 ///   (see [`Array::plain_ndarray_ref`]).
 ///
 /// `ET: ElementType` tracks the element type at the type level and follows the same semantics as
-/// [`Compact<ET, D>`](crate::storage::Compact): `ET` is inferred from the dtype argument type.
-///
-/// `D: Dimension` tracks the ndim at the type level and follows the same semantics as
-/// [`Compact<ET, D>`](crate::storage::Compact): `D` is inferred from the shape argument type.
+/// [`Compact<ET>`](crate::storage::Compact): `ET` is inferred from the dtype argument type.
 ///
 /// # Examples
 ///
@@ -64,17 +61,17 @@ pub type PlainArrayRef<'a, T, D> = Array<Plain<&'a (), Ty<T>, D>>;
 /// assert_eq!(result, array![[11.0f32, 22.0], [33.0, 44.0]]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Plain<A, ET, D: Dimension> {
+pub struct Plain<A, ET> {
     #[allow(unused)]
     allocation: A,
 
     data: SendSyncPtr<u8>,
-    shape: D,
-    strides: D::Vec<usize>, // in bytes
+    shape: DimDyn,
+    strides: DimArray<usize>, // in bytes
     element_type: ET,
     spec: ArraySpecOwned,
 }
-impl<A, D: Dimension> Plain<A, TypeDyn, D> {
+impl<A> Plain<A, TypeDyn> {
     /// Construct a `Plain` storage from a raw pointer, shape, and byte strides.
     ///
     /// `allocation` is any value that owns (or keeps alive) the memory pointed to
@@ -116,19 +113,15 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
     /// * The memory region reachable via `data` and `strides` is valid to
     ///   read for all index combinations in `0..shape[d]` on each dimension
     ///   `d`.
-    pub unsafe fn new<Sh>(
+    pub unsafe fn new(
         allocation: A,
         data: *const u8,
-        shape: Sh,
+        shape: impl IntoDimension,
         strides: &[usize], // in bytes
         dtype: Dtype,
         mut params: ArrayParams,
-    ) -> Result<Self>
-    where
-        D: Dimension,
-        Sh: IntoDimension<Dimension = D>,
-    {
-        let shape = shape.into_dimension()?;
+    ) -> Result<Self> {
+        let shape = DimDyn::from_slice(shape.into_dimension()?.as_slice());
         let ndim = shape.ndim();
 
         ensure!(
@@ -137,13 +130,13 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
             "Strides length {} does not match number of dimensions {ndim}",
             strides.len()
         );
-        let strides = D::vec(ndim, |d| strides[d]);
+        let strides = dim_arr(ndim, |d| strides[d]);
 
         if params.block_shape_fixed_dims.is_none() {
             // A plain view is a strided copy, so no dimension is a fixed block boundary.
             params.block_shape_fixed_dims = Some(DimBitmap::filled(ndim, false));
             if params.block_shape.is_none() {
-                params.block_shape(D::vec(ndim, |_| 1).as_ref());
+                params.block_shape(dim_arr(ndim, |_| 1).as_ref());
             }
         }
         let mut spec = params.into_spec(
@@ -200,7 +193,7 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
     }
 }
 
-impl<T, D: Dimension> Array<Plain<Vec<T>, Ty<T>, D>> {
+impl<T> Array<Plain<Vec<T>, Ty<T>>> {
     /// Create a [`Plain`] array that takes ownership of an `ndarray` array.
     ///
     /// The ndarray's allocation is moved into the returned `Array`; no element
@@ -222,8 +215,7 @@ impl<T, D: Dimension> Array<Plain<Vec<T>, Ty<T>, D>> {
     pub fn plain_ndarray<D2>(arr: ndarray::Array<T, D2>) -> Result<Self>
     where
         T: Dtyped,
-        D: Dimension,
-        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        D2: ndarray::Dimension,
     {
         Self::plain_ndarray_with(arr, ArrayParams::default())
     }
@@ -246,10 +238,9 @@ impl<T, D: Dimension> Array<Plain<Vec<T>, Ty<T>, D>> {
     pub fn plain_ndarray_with<D2>(arr: ndarray::Array<T, D2>, params: ArrayParams) -> Result<Self>
     where
         T: Dtyped,
-        D: Dimension,
-        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        D2: ndarray::Dimension,
     {
-        let shape = arr.raw_dim().into_dimension()?;
+        let shape = shape_from_ndarray(arr.shape())?;
 
         let strides = arr
             .strides()
@@ -272,7 +263,7 @@ impl<T, D: Dimension> Array<Plain<Vec<T>, Ty<T>, D>> {
     }
 }
 
-impl<'a, T, D: Dimension> Array<Plain<&'a (), Ty<T>, D>> {
+impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     /// Internal implementation for creating a `Plain` array that borrows from an ndarray view.
     ///
     /// Note this function does not have any lifetime bounds on the input array.
@@ -287,11 +278,10 @@ impl<'a, T, D: Dimension> Array<Plain<&'a (), Ty<T>, D>> {
     ) -> Result<Self>
     where
         S: ndarray::Data<Elem = T>,
-        D: Dimension,
-        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        D2: ndarray::Dimension,
         T: Dtyped,
     {
-        let shape = arr.raw_dim().into_dimension()?;
+        let shape = shape_from_ndarray(arr.shape())?;
 
         let strides = arr
             .strides()
@@ -325,8 +315,7 @@ impl<'a, T, D: Dimension> Array<Plain<&'a (), Ty<T>, D>> {
     pub fn plain_ndarray_ref<S, D2>(arr: &'a ndarray::ArrayBase<S, D2>) -> Result<Self>
     where
         S: ndarray::Data<Elem = T>,
-        D: Dimension,
-        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        D2: ndarray::Dimension,
         T: Dtyped,
     {
         Self::plain_ndarray_ref_with(arr, ArrayParams::default())
@@ -353,8 +342,7 @@ impl<'a, T, D: Dimension> Array<Plain<&'a (), Ty<T>, D>> {
     ) -> Result<Self>
     where
         S: ndarray::Data<Elem = T>,
-        D: Dimension,
-        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        D2: ndarray::Dimension,
         T: Dtyped,
     {
         // SAFETY: `arr` is 'a, so the returned `Plain` will not outlive the data in `arr`.
@@ -371,8 +359,7 @@ impl<'a, T, D: Dimension> Array<Plain<&'a (), Ty<T>, D>> {
     /// [`plain_ndarray_view_with`](Self::plain_ndarray_view_with).
     pub fn plain_ndarray_view<D2>(arr: ndarray::ArrayView<'a, T, D2>) -> Result<Self>
     where
-        D: Dimension,
-        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        D2: ndarray::Dimension,
         T: Dtyped,
     {
         Self::plain_ndarray_view_with(arr, ArrayParams::default())
@@ -394,15 +381,14 @@ impl<'a, T, D: Dimension> Array<Plain<&'a (), Ty<T>, D>> {
         params: ArrayParams,
     ) -> Result<Self>
     where
-        D: Dimension,
-        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        D2: ndarray::Dimension,
         T: Dtyped,
     {
         // SAFETY: `arr` *data* is 'a, so the returned `Plain` will not outlive the data in `arr`.
         unsafe { Self::plain_ndarray_ref_impl(&arr, params) }
     }
 }
-impl<ET, D: Dimension> Array<Plain<&(), ET, D>> {
+impl<ET> Array<Plain<&(), ET>> {
     /// Create a [`Plain`] array from a raw pointer, shape, and byte strides, borrowing from an external
     /// allocation.
     ///
@@ -433,17 +419,15 @@ impl<ET, D: Dimension> Array<Plain<&(), ET, D>> {
     /// * The memory region reachable via `data_ptr` and `strides` is valid to read for all index combinations in
     ///   `0..shape[d]` on each dimension `d`.
     /// * Elements accessed by the data pointer must be valid for the specified `dtype`.
-    pub unsafe fn plain_ndarray_ptr<Sh>(
+    pub unsafe fn plain_ndarray_ptr(
         data_ptr: *const u8,
-        shape: Sh,
+        shape: impl IntoDimension,
         strides: &[usize],
         dtype: Dtype,
         params: ArrayParams,
     ) -> Result<Self>
     where
         ET: ElementType,
-        D: Dimension,
-        Sh: IntoDimension<Dimension = D>,
     {
         let allocation = &();
         let storage = unsafe { Plain::new(allocation, data_ptr, shape, strides, dtype, params) }?;
@@ -453,13 +437,11 @@ impl<ET, D: Dimension> Array<Plain<&(), ET, D>> {
     }
 }
 
-impl<A, ET, D> ArrayStorage for Plain<A, ET, D>
+impl<A, ET> ArrayStorage for Plain<A, ET>
 where
     ET: ElementType,
-    D: Dimension,
 {
     type ElementType = ET;
-    type Dimension = D;
 
     #[inline]
     fn read_data<'a>(
@@ -473,7 +455,7 @@ where
         check_out_buf(out.as_deref(), self.shape())?;
 
         let ndim = self.shape.ndim();
-        let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
 
         let itemsize = dtype.itemsize() as usize;
         let src_span = strided_span_bytes(out_shape.as_ref(), self.strides.as_ref(), itemsize);
@@ -514,23 +496,7 @@ where
         ArrayStorageInfo::new("Plain")
     }
 
-    type DimensionChange<NewD: Dimension> = Plain<A, ET, NewD>;
-    #[inline]
-    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        check_ndim::<NewD>(self.shape().len())?;
-        let shape = NewD::from_slice(self.shape());
-        let strides = NewD::vec(shape.ndim(), |d| self.strides[d]);
-        Ok(Plain {
-            allocation: self.allocation,
-            data: self.data,
-            shape,
-            strides,
-            element_type: self.element_type,
-            spec: self.spec,
-        })
-    }
-
-    type ElementTypeChange<NewET: ElementType> = Plain<A, NewET, D>;
+    type ElementTypeChange<NewET: ElementType> = Plain<A, NewET>;
     #[inline]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
         Ok(Plain {
@@ -544,9 +510,15 @@ where
     }
 }
 
+#[inline]
+fn shape_from_ndarray(shape: &[usize]) -> Result<DimDyn> {
+    check_ndim(shape.len())?;
+    Ok(DimDyn::from_fn(shape.len(), |i| shape[i] as u64))
+}
+
 #[cfg(test)]
 mod tests {
-    use ndarray::{array, s, ArrayD};
+    use ndarray::{array, s, ArrayD, Ix3};
 
     use crate::codec::ReadContext;
     use crate::Array;
@@ -561,7 +533,7 @@ mod tests {
         let ctx = a.read_ctx();
         // `2..2` is the whole of dim 0, so the start offset alone runs to the end of the
         // allocation; the non-zero start on dim 2 then pushes it past.
-        let got = a.to_ndarray_sub(&[2..2, 0..3, 1..4], &ctx).unwrap();
+        let got = a.to_ndarray_sub::<Ix3>(&[2..2, 0..3, 1..4], &ctx).unwrap();
         assert_eq!(got.shape(), &[0, 3, 3]);
         assert_eq!(got.len(), 0);
     }
@@ -784,14 +756,14 @@ mod tests {
         let make = || unsafe {
             Array::plain_ndarray_ptr(
                 base.cast_const(),
-                &[rows as u64, cols as u64],
+                [rows as u64, cols as u64],
                 &strides,
                 <i32 as crate::dtype::Dtyped>::DTYPE,
                 crate::ArrayParams::default(),
             )
             .unwrap()
         };
-        fn as_vec<D: ndarray::Dimension>(nd: ndarray::Array<i32, D>) -> Vec<i32> {
+        fn as_vec(nd: ndarray::Array2<i32>) -> Vec<i32> {
             nd.iter().copied().collect()
         }
         /// The `rows x cols` sub-block of a row-major `all`, in row-major order.
@@ -843,14 +815,8 @@ mod tests {
             })
             .collect::<Vec<i64>>();
         assert_eq!(
-            make()
-                .sum(1)
-                .to_ndarray()
-                .unwrap()
-                .iter()
-                .copied()
-                .collect::<Vec<i64>>(),
-            row_sums
+            make().sum(1).to_ndarray().unwrap(),
+            ndarray::Array1::from(row_sums)
         );
 
         // And compressing it, which reads the view chunk by chunk into aligned block buffers.

@@ -4,15 +4,15 @@ use std::ops::Not;
 use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 
 use crate::ops::prelude::*;
-use crate::{array2_map_inline, const_max, const_min, prev_power_of_two};
+use crate::{array2_map_inline, const_max, const_min, prev_power_of_two, Dim};
 
-pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
+pub(crate) struct ReductionOp<S: ArrayStorage, K> {
     kernel: K,
 
     array: S,
-    is_reduced: <S::Dimension as Dimension>::Vec<bool>,
+    is_reduced: DimArray<bool>,
 
-    shape: D,
+    shape: DimDyn,
     spec: ArraySpecDynamic,
 }
 pub(crate) trait ReductionOpKernel<T> {
@@ -103,17 +103,15 @@ pub(crate) trait ReductionOpKernel<T> {
     const NEEDS_INDICES: bool = true;
 }
 
-impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
-    pub(crate) fn new<Dims>(array: S, kernel: K, dims: Dims) -> Result<Self>
+impl<S: ArrayStorage, K> ReductionOp<S, K> {
+    pub(crate) fn new(array: S, kernel: K, dims: impl DimsArg) -> Result<Self>
     where
         S: ArrayStorageTyped,
         K: ReductionOpKernel<S::Item, Output: Dtyped>,
-        D: Dimension,
-        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
         let input_ndim = array.shape().len();
-        let mut is_reduced = S::Dimension::vec(input_ndim, |_| false);
+        let mut is_reduced = dim_arr(input_ndim, |_| false);
         for i in 0..dims.len() {
             let d = dims.get(i);
             ensure!(
@@ -149,7 +147,7 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             .iter()
             .map(|&dim| array.shape()[dim])
             .collect::<DimArray<_>>();
-        let shape = D::from_slice(&shape);
+        let shape = DimDyn::from_slice(&shape);
 
         let spec = array.spec();
         let reduced_prod = (0..input_ndim)
@@ -195,14 +193,12 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
     }
 }
 
-impl<S, K, D> ArrayStorage for ReductionOp<S, K, D>
+impl<S, K> ArrayStorage for ReductionOp<S, K>
 where
     S: ArrayStorageTyped,
     K: ReductionOpKernel<S::Item, Output: Dtyped>,
-    D: Dimension,
 {
     type ElementType = Ty<K::Output>;
-    type Dimension = D;
 
     #[inline]
     fn read_data<'a>(
@@ -211,7 +207,7 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        read_data_impl::<S::Dimension>(
+        read_data_dispatch(
             &self.array,
             self.shape(),
             self.dtype(),
@@ -250,25 +246,50 @@ where
         ArrayStorageInfo::new_deps("ReductionOp", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let shape = self.shape.as_slice();
-        check_ndim::<NewD>(shape.len())?;
-        let shape = NewD::from_slice(shape);
-
-        Ok(ReductionOp {
-            kernel: self.kernel,
-            array: self.array,
-            is_reduced: self.is_reduced,
-            shape,
-            spec: self.spec,
-        })
-    }
-
     crate::ops::impl_element_type_change_default!();
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn read_data_dispatch<'a>(
+    inner_array: &dyn ArrayStorage,
+    outer_shape: &[u64],
+    output_dtype: &Dtype,
+    kernel_state_sizeof: usize,
+    kernel_state_alignof: Alignment,
+    is_reduced: &[bool],
+    needs_finalize: bool,
+    reduce_tile_fn: &dyn Fn(ReduceTileArgs<'_>),
+    finalize_state_fn: &dyn Fn(Finalize1DArgs),
+    finalize_state_empty_fn: &dyn Fn(*mut u8, usize, usize),
+    index: &[Range<u64>],
+    context: &'a ReadContext,
+    out: Option<&'a mut StridedBuf<'_>>,
+    read_layout_order: &[DimIdx],
+) -> Result<StridedBuf<'a>> {
+    let read_data_fn = match is_reduced.len() {
+        1 => read_data_impl::<Dim<1>>,
+        2 => read_data_impl::<Dim<2>>,
+        3 => read_data_impl::<Dim<3>>,
+        4 => read_data_impl::<Dim<4>>,
+        _ => read_data_impl::<DimDyn>,
+    };
+    read_data_fn(
+        inner_array,
+        outer_shape,
+        output_dtype,
+        kernel_state_sizeof,
+        kernel_state_alignof,
+        is_reduced,
+        needs_finalize,
+        reduce_tile_fn,
+        finalize_state_fn,
+        finalize_state_empty_fn,
+        index,
+        context,
+        out,
+        read_layout_order,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -279,7 +300,7 @@ fn read_data_impl<'a, InnerD>(
     output_dtype: &Dtype,
     kernel_state_sizeof: usize,
     kernel_state_alignof: Alignment,
-    is_reduced: &InnerD::Vec<bool>,
+    is_reduced: &[bool],
     needs_finalize: bool,
     reduce_tile_fn: &dyn Fn(ReduceTileArgs<'_>),
     finalize_state_fn: &dyn Fn(Finalize1DArgs),
@@ -1224,7 +1245,7 @@ where
     }
 }
 
-/// Emits the wrapper storage struct (`$Op<S, D>` or `$Op<S>`), its `ArrayStorage` impl,
+/// Emits the wrapper storage struct (`$Op<S>`), its `ArrayStorage` impl,
 /// and the kernel struct declaration (`pub(crate) struct $Kernel;` - with fields if
 /// `extra_args` were declared). The `ReductionOpKernel` impl for the kernel is still
 /// written by hand next to the macro invocation.
@@ -1252,9 +1273,7 @@ macro_rules! define_reduction_op {
         struct $Kernel { $($($extra_arg: $extra_ty),+)? }
 
         $(#[$meta])*
-        pub struct $Op<S>(
-            crate::ops::reduction::ReductionOp<S, $Kernel, <S::Dimension as crate::Dimension>::Smaller>,
-        )
+        pub struct $Op<S>(crate::ops::reduction::ReductionOp<S, $Kernel>)
         where
             S: crate::ArrayStorage;
 
@@ -1279,13 +1298,11 @@ macro_rules! define_reduction_op {
             $($where_)+
         {
             type ElementType = crate::Ty<$output_ty>;
-            type Dimension = <S::Dimension as crate::Dimension>::Smaller;
             crate::storage::impl_array_storage_forward!(<S>);
 
             fn info(&self) -> ArrayStorageInfo<'_> {
                 ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
             }
-            crate::ops::impl_dimension_change_default!();
             crate::ops::impl_element_type_change_default!();
         }
     };
@@ -1301,50 +1318,33 @@ macro_rules! define_reduction_op {
         struct $Kernel { $($($extra_arg: $extra_ty),+)? }
 
         $(#[$meta])*
-        pub struct $Op<S: crate::ArrayStorage, D>(crate::ops::reduction::ReductionOp<S, $Kernel, D>);
+        pub struct $Op<S: crate::ArrayStorage>(crate::ops::reduction::ReductionOp<S, $Kernel>);
 
-        impl<S, D> $Op<S, D>
+        impl<S> $Op<S>
         where
             $($where_)+
-            D: crate::Dimension,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new<Dims>(array: S, dims: Dims $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<Self>
-            where
-                Dims: crate::ops::DimsArg<ReducedDimension<S::Dimension> = D>,
-            {
+            pub fn new(array: S, dims: impl crate::ops::DimsArg $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<Self> {
                 let kernel = $Kernel { $($($extra_arg,)+)? };
                 Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, dims)?))
             }
 
             #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
-            pub fn new_array<Dims>(array: crate::Array<S>, dims: Dims $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>>
-            where
-                Dims: crate::ops::DimsArg<ReducedDimension<S::Dimension> = D>,
-            {
+            pub fn new_array(array: crate::Array<S>, dims: impl crate::ops::DimsArg $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>> {
                 Self::new(array.into_storage(), dims $($(, $extra_arg)+)?).map(crate::Array::from_storage)
             }
         }
 
-        impl<S, D> crate::ArrayStorage for $Op<S, D>
+        impl<S> crate::ArrayStorage for $Op<S>
         where
             $($where_)+
-            D: crate::Dimension,
         {
             type ElementType = crate::Ty<$output_ty>;
-            type Dimension = D;
-            crate::storage::impl_array_storage_forward!(<S, D>);
+            crate::storage::impl_array_storage_forward!(<S>);
 
             fn info(&self) -> ArrayStorageInfo<'_> {
                 ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
-            }
-
-            type DimensionChange<NewD: crate::Dimension> = $Op<S, NewD>;
-            #[inline]
-            fn dimension_change<NewD: crate::Dimension>(
-                self,
-            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-                Ok($Op(self.0.dimension_change()?))
             }
 
             crate::ops::impl_element_type_change_default!();
@@ -1942,19 +1942,19 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix0};
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Reduce all dims -> scalar
     /// let scalar = Array::compact_ndarray(&nd)?
-    ///     .max((0, 1)).to_ndarray()?;
+    ///     .max((0, 1)).to_ndarray::<Ix0>()?;
     /// assert_eq!(scalar[[]], 6);
     ///
     /// // Reduce dim 0 -> shape [3]
     /// let col_max = Array::compact_ndarray(&nd)?
     ///     .max(0).to_ndarray()?;
-    /// assert_eq!(col_max.as_slice().unwrap(), &[4, 5, 6]);
+    /// assert_eq!(col_max, array![4, 5, 6]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Max,
@@ -2019,19 +2019,19 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix0};
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Reduce all dims -> scalar
     /// let scalar = Array::compact_ndarray(&nd)?
-    ///     .min((0, 1)).to_ndarray()?;
+    ///     .min((0, 1)).to_ndarray::<Ix0>()?;
     /// assert_eq!(scalar[[]], 1);
     ///
     /// // Reduce dim 0 -> shape [3]
     /// let col_min = Array::compact_ndarray(&nd)?
     ///     .min(0).to_ndarray()?;
-    /// assert_eq!(col_min.as_slice().unwrap(), &[1, 2, 3]);
+    /// assert_eq!(col_min, array![1, 2, 3]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Min,
@@ -2106,12 +2106,12 @@ define_reduction_op!(
     /// // Index of max along dim 1 (per row) -> shape [2]
     /// let idx = Array::compact_ndarray(&nd)?
     ///     .argmax(1).to_ndarray()?;
-    /// assert_eq!(idx.as_slice().unwrap(), &[1, 2]); // max of row 0 at col 1, row 1 at col 2
+    /// assert_eq!(idx, array![1, 2]); // max of row 0 at col 1, row 1 at col 2
     ///
     /// // Index of max along dim 0 (per column) -> shape [3]
     /// let col_idx = Array::compact_ndarray(&nd)?
     ///     .argmax(0).to_ndarray()?;
-    /// assert_eq!(col_idx.as_slice().unwrap(), &[1, 0, 1]); // max of col 0 at row 1, col 1 at row 0, col 2 at row 1
+    /// assert_eq!(col_idx, array![1, 0, 1]); // max of col 0 at row 1, col 1 at row 0, col 2 at row 1
     /// # Ok::<(), jix::Error>(())
     /// ```
     ArgMax,
@@ -2188,12 +2188,12 @@ define_reduction_op!(
     /// // Index of min along dim 1 (per row) -> shape [2]
     /// let idx = Array::compact_ndarray(&nd)?
     ///     .argmin(1).to_ndarray()?;
-    /// assert_eq!(idx.as_slice().unwrap(), &[0, 1]); // min of row 0 at col 0, row 1 at col 1
+    /// assert_eq!(idx, array![0, 1]); // min of row 0 at col 0, row 1 at col 1
     ///
     /// // Index of min along dim 0 (per column) -> shape [3]
     /// let col_idx = Array::compact_ndarray(&nd)?
     ///     .argmin(0).to_ndarray()?;
-    /// assert_eq!(col_idx.as_slice().unwrap(), &[0, 1, 0]); // min of col 0 at row 0, col 1 at row 1, col 2 at row 0
+    /// assert_eq!(col_idx, array![0, 1, 0]); // min of col 0 at row 0, col 1 at row 1, col 2 at row 0
     /// # Ok::<(), jix::Error>(())
     /// ```
     ArgMin,
@@ -2273,19 +2273,19 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix0};
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Sum all elements -> i64
     /// let total = Array::compact_ndarray(&nd)?
-    ///     .sum((0, 1)).to_ndarray()?;
+    ///     .sum((0, 1)).to_ndarray::<Ix0>()?;
     /// assert_eq!(total[[]], 21);
     ///
     /// // Sum along dim 0 -> shape [3]
     /// let col_sums = Array::compact_ndarray(&nd)?
     ///     .sum(0).to_ndarray()?;
-    /// assert_eq!(col_sums.as_slice().unwrap(), &[5, 7, 9]);
+    /// assert_eq!(col_sums, array![5, 7, 9]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Sum,
@@ -2367,19 +2367,19 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix0};
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Product of all elements -> i64
     /// let total = Array::compact_ndarray(&nd)?
-    ///     .product((0, 1)).to_ndarray()?;
+    ///     .product((0, 1)).to_ndarray::<Ix0>()?;
     /// assert_eq!(total[[]], 720);
     ///
     /// // Product along dim 0 -> shape [3]
     /// let col_products = Array::compact_ndarray(&nd)?
     ///     .product(0).to_ndarray()?;
-    /// assert_eq!(col_products.as_slice().unwrap(), &[4, 10, 18]);
+    /// assert_eq!(col_products, array![4, 10, 18]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Product,
@@ -2450,19 +2450,19 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix0};
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Mean of all elements -> f64
     /// let total = Array::compact_ndarray(&nd)?
-    ///     .mean((0, 1)).to_ndarray()?;
+    ///     .mean((0, 1)).to_ndarray::<Ix0>()?;
     /// assert_eq!(total[[]], 3.5);
     ///
     /// // Mean along dim 0 -> shape [3]
     /// let col_means = Array::compact_ndarray(&nd)?
     ///     .mean(0).to_ndarray()?;
-    /// assert_eq!(col_means.as_slice().unwrap(), &[2.5, 3.5, 4.5]);
+    /// assert_eq!(col_means, array![2.5, 3.5, 4.5]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Mean,
@@ -2538,19 +2538,19 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix0};
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Population variance (ddof=0) of all elements -> f64
     /// let var_all = Array::compact_ndarray(&nd)?
-    ///     .var((0, 1), 0.0).to_ndarray()?;
+    ///     .var((0, 1), 0.0).to_ndarray::<Ix0>()?;
     /// assert!((var_all[[]] - 2.9167).abs() < 0.001);
     ///
     /// // Sample variance (ddof=1) along dim 0 -> shape [3]
     /// let col_vars = Array::compact_ndarray(&nd)?
     ///     .var(0, 1.0).to_ndarray()?;
-    /// assert_eq!(col_vars.as_slice().unwrap(), &[4.5, 4.5, 4.5]);
+    /// assert_eq!(col_vars, array![4.5, 4.5, 4.5]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Variance,
@@ -2622,18 +2622,18 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix0, Ix1};
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Population std (ddof=0) of all elements -> f64
     /// let std_all = Array::compact_ndarray(&nd)?
-    ///     .std((0, 1), 0.0).to_ndarray()?;
+    ///     .std((0, 1), 0.0).to_ndarray::<Ix0>()?;
     /// assert!((std_all[[]] - 1.7078).abs() < 0.001);
     ///
     /// // Sample std (ddof=1) along dim 0 -> shape [3]
     /// let col_stds = Array::compact_ndarray(&nd)?
-    ///     .std(0, 1.0).to_ndarray()?;
+    ///     .std(0, 1.0).to_ndarray::<Ix1>()?;
     /// assert!((col_stds[[0]] - 2.1213).abs() < 0.001);
     /// # Ok::<(), jix::Error>(())
     /// ```
@@ -2704,19 +2704,19 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix0};
     ///
     /// let nd = array![[true, false, true], [true, true, true]];
     ///
     /// // All elements true? -> false (contains false)
     /// let all_true = Array::compact_ndarray(&nd)?
-    ///     .all((0, 1)).to_ndarray()?;
+    ///     .all((0, 1)).to_ndarray::<Ix0>()?;
     /// assert_eq!(all_true[[]], false);
     ///
     /// // All true along dim 0 (per column) -> shape [3]
     /// let col_all = Array::compact_ndarray(&nd)?
     ///     .all(0).to_ndarray()?;
-    /// assert_eq!(col_all.as_slice().unwrap(), &[true, false, true]);
+    /// assert_eq!(col_all, array![true, false, true]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     All,
@@ -2771,19 +2771,19 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use jix::Array;
-    /// use ndarray::array;
+    /// use ndarray::{array, Ix0};
     ///
     /// let nd = array![[false, false, false], [true, true, true]];
     ///
     /// // Any element true? -> true
     /// let any_true = Array::compact_ndarray(&nd)?
-    ///     .any((0, 1)).to_ndarray()?;
+    ///     .any((0, 1)).to_ndarray::<Ix0>()?;
     /// assert_eq!(any_true[[]], true);
     ///
     /// // Any true along dim 0 (per column) -> shape [3]
     /// let col_any = Array::compact_ndarray(&nd)?
     ///     .any(0).to_ndarray()?;
-    /// assert_eq!(col_any.as_slice().unwrap(), &[true, true, true]);
+    /// assert_eq!(col_any, array![true, true, true]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Any,
@@ -2875,42 +2875,38 @@ impl ReductionOpKernel<bool> for AnyKernel {
 /// let row_max = Array::compact_ndarray(&nd)?
 ///     .reduce_unordered(1, |a, b| if a > b { a } else { b })
 ///     .to_ndarray()?;
-/// assert_eq!(row_max.as_slice().unwrap(), &[5, 6]);
+/// assert_eq!(row_max, array![5, 6]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
 /// Multi-dim reduction with a closure that has no built-in equivalent:
 /// ```
 /// use jix::Array;
-/// use ndarray::array;
+/// use ndarray::{array, Ix0};
 ///
 /// let nd = array![[0b0011u8, 0b0101], [0b1001, 0b0001]];
 /// let xor = Array::compact_ndarray(&nd)?
 ///     .reduce_unordered((0, 1), |a, b| a ^ b)
-///     .to_ndarray()?;
+///     .to_ndarray::<Ix0>()?;
 /// assert_eq!(xor[[]], 0b1110);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Reduce<S: ArrayStorage, D, F>(ReductionOp<S, ReduceKernel<F>, D>);
-impl<S: ArrayStorage, D, F> Reduce<S, D, F> {
+pub struct Reduce<S: ArrayStorage, F>(ReductionOp<S, ReduceKernel<F>>);
+impl<S: ArrayStorage, F> Reduce<S, F> {
     /// Constructs a [`Reduce`] storage. See the struct docs for semantics and examples.
-    pub fn new<Dims>(array: S, dims: Dims, f: F) -> Result<Self>
+    pub fn new(array: S, dims: impl DimsArg, f: F) -> Result<Self>
     where
         S: ArrayStorageTyped,
-        D: Dimension,
         F: Fn(S::Item, S::Item) -> S::Item,
-        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         Ok(Self(ReductionOp::new(array, ReduceKernel(f), dims)?))
     }
 
     /// Constructs an array with [`Reduce`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Dims>(array: Array<S>, dims: Dims, f: F) -> Result<Array<Reduce<S, D, F>>>
+    pub fn new_array(array: Array<S>, dims: impl DimsArg, f: F) -> Result<Array<Reduce<S, F>>>
     where
         S: ArrayStorageTyped,
-        D: Dimension,
         F: Fn(S::Item, S::Item) -> S::Item,
-        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         Self::new(array.into_storage(), dims, f).map(Array::from_storage)
     }
@@ -2943,26 +2939,16 @@ where
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = true;
 }
-impl<S, D, F> ArrayStorage for Reduce<S, D, F>
+impl<S, F> ArrayStorage for Reduce<S, F>
 where
     S: ArrayStorageTyped,
-    D: Dimension,
     F: Fn(S::Item, S::Item) -> S::Item,
 {
     type ElementType = Ty<S::Item>;
-    type Dimension = D;
-    crate::storage::impl_array_storage_forward!(<S, D, F>);
+    crate::storage::impl_array_storage_forward!(<S, F>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Reduce", [&self.0.array])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = Reduce<S, NewD, F>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Reduce(self.0.dimension_change::<NewD>()?))
     }
 
     crate::ops::impl_element_type_change_default!();
@@ -3044,16 +3030,14 @@ where
 /// assert_eq!(counts.as_slice().unwrap(), &[2, 2]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Fold<S: ArrayStorage, D, B, F>(ReductionOp<S, VanillaFoldKernel<B, F>, D>);
-impl<S: ArrayStorage, D, B, F> Fold<S, D, B, F> {
+pub struct Fold<S: ArrayStorage, B, F>(ReductionOp<S, VanillaFoldKernel<B, F>>);
+impl<S: ArrayStorage, B, F> Fold<S, B, F> {
     /// Constructs a [`Fold`] storage. See the struct docs for semantics and examples.
-    pub fn new<Dims>(array: S, dims: Dims, init: B, f: F) -> Result<Self>
+    pub fn new(array: S, dims: impl DimsArg, init: B, f: F) -> Result<Self>
     where
         S: ArrayStorageTyped,
-        D: Dimension,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         Ok(Self(ReductionOp::new(
             array,
@@ -3063,18 +3047,16 @@ impl<S: ArrayStorage, D, B, F> Fold<S, D, B, F> {
     }
 
     /// Constructs an array with [`Fold`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Dims>(
+    pub fn new_array(
         array: Array<S>,
-        dims: Dims,
+        dims: impl DimsArg,
         init: B,
         f: F,
-    ) -> Result<Array<Fold<S, D, B, F>>>
+    ) -> Result<Array<Fold<S, B, F>>>
     where
         S: ArrayStorageTyped,
-        D: Dimension,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        Dims: DimsArg<ReducedDimension<S::Dimension> = D>,
     {
         Self::new(array.into_storage(), dims, init, f).map(Array::from_storage)
     }
@@ -3112,27 +3094,17 @@ where
     const PREFER_TREE_MERGE: bool = true;
     const NEEDS_INDICES: bool = false;
 }
-impl<S, D, B, F> ArrayStorage for Fold<S, D, B, F>
+impl<S, B, F> ArrayStorage for Fold<S, B, F>
 where
     S: ArrayStorageTyped,
-    D: Dimension,
     B: Dtyped,
     F: Fn(B, S::Item) -> B,
 {
     type ElementType = Ty<B>;
-    type Dimension = D;
-    crate::storage::impl_array_storage_forward!(<S, D, B, F>);
+    crate::storage::impl_array_storage_forward!(<S, B, F>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Fold", [&self.0.array])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = Fold<S, NewD, B, F>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Fold(self.0.dimension_change::<NewD>()?))
     }
 
     crate::ops::impl_element_type_change_default!();
@@ -3168,10 +3140,9 @@ macro_rules! define_array_reduction_method {
     ) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $method<Dims>(self, dim: Dims $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Dims::ReducedDimension<S::Dimension>>>
+        pub fn $method(self, dim: impl DimsArg $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S>>
         where
             $($where_)+
-            Dims: DimsArg,
         {
             $Op::new_array(self, dim $($(, $extra_arg)*)?).unwrap()
         }
@@ -3267,15 +3238,10 @@ where
     /// `f` MUST be associative and commutative: the elements are visited in an unspecified
     /// order, and `f` combines partial accumulators as well as single elements.
     #[track_caller]
-    pub fn reduce_unordered<F, Dims>(
-        self,
-        dims: Dims,
-        f: F,
-    ) -> Array<Reduce<S, Dims::ReducedDimension<S::Dimension>, F>>
+    pub fn reduce_unordered<F>(self, dims: impl DimsArg, f: F) -> Array<Reduce<S, F>>
     where
         S: ArrayStorageTyped,
         F: Fn(S::Item, S::Item) -> S::Item,
-        Dims: DimsArg,
     {
         Reduce::new_array(self, dims, f).unwrap()
     }
@@ -3284,17 +3250,16 @@ where
     /// Applies the [`Fold`] operation, see the op struct docs for details.
     #[track_caller]
     #[allow(clippy::type_complexity)]
-    pub fn fold<F, B, Dims>(
+    pub fn fold<F, B>(
         self,
-        dims: Dims,
+        dims: impl DimsArg,
         init: B,
         f: F,
-    ) -> Array<Fold<S, Dims::ReducedDimension<S::Dimension>, B, F>>
+    ) -> Array<Fold<S, B, F>>
     where
         S: ArrayStorageTyped,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        Dims: DimsArg,
     {
         Fold::new_array(self, dims, init, f).unwrap()
     }
@@ -3305,7 +3270,7 @@ where
 pub(crate) mod tests {
     use std::rc::Rc;
 
-    use ndarray::{array, ArrayD};
+    use ndarray::{array, ArrayD, Ix0, Ix1, IxDyn};
 
     #[cfg(feature = "half")]
     use crate::scalar::f16;
@@ -3452,7 +3417,7 @@ pub(crate) mod tests {
 
     // pub(crate) fn carray_strategy_for_reduction_single_dim<T: crate::util::ScalarStrategy>(
     //     elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    // ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>, DimDyn>>>, usize)>
+    // ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>>>>, usize)>
     // {
     //     let shape = reduction_shape_strategy();
     //     let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
@@ -3714,7 +3679,7 @@ pub(crate) mod tests {
 
     #[test]
     fn multi_dim_argmax_reports_the_true_stream_position() {
-        use crate::{Array, DimDyn};
+        use crate::Array;
 
         // `ArgMax` is `single_dim`, so a multi-dim argmax is only reachable by building the
         // `ReductionOp` directly. Argmax is the one kernel whose result depends on an element's
@@ -3731,7 +3696,7 @@ pub(crate) mod tests {
         params.read_size((256, 1024));
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
 
-        let op = super::ReductionOp::<_, _, DimDyn>::new(
+        let op = super::ReductionOp::<_, _>::new(
             za.into_storage(),
             super::ArgMaxKernel {},
             [0usize, 1].as_slice(),
@@ -3743,7 +3708,7 @@ pub(crate) mod tests {
 
     #[test]
     fn reduction_over_plain_with_hand_picked_strides() {
-        use crate::{Array, ArrayParams, DimDyn, Ty};
+        use crate::{Array, ArrayParams, Ty};
 
         // The reduction reads its source in pull mode, and `Plain::read_data` in pull mode hands
         // back a zero-copy view with exactly the strides it was built with. So a `Plain` array
@@ -3791,7 +3756,7 @@ pub(crate) mod tests {
                 if let Some(w) = window {
                     params.read_size(w);
                 }
-                let arr: Array<crate::storage::Plain<_, Ty<i32>, DimDyn>> = unsafe {
+                let arr: Array<crate::storage::Plain<_, Ty<i32>>> = unsafe {
                     // SAFETY: `backing` outlives `arr`, and every index combination stays in bounds.
                     Array::plain_ndarray_ptr(
                         backing.as_ptr().add(base),
@@ -3932,8 +3897,8 @@ pub(crate) mod tests {
                                     "{} n={n} nans={nans:?} dim={dim} block={block:?}",
                                     stringify!($t)
                                 );
-                                let got_max = za.view().argmax(dim).to_ndarray().unwrap();
-                                let got_min = za.view().argmin(dim).to_ndarray().unwrap();
+                                let got_max = za.view().argmax(dim).to_ndarray::<IxDyn>().unwrap();
+                                let got_min = za.view().argmin(dim).to_ndarray::<IxDyn>().unwrap();
                                 assert_eq!(got_max.as_slice().unwrap(), exp_max, "argmax {what}");
                                 assert_eq!(got_min.as_slice().unwrap(), exp_min, "argmin {what}");
                             }
@@ -4076,21 +4041,21 @@ pub(crate) mod tests {
     #[test]
     fn variance() {
         let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
-        let var_all = a.view().var((0, 1), 0.0).to_ndarray().unwrap();
+        let var_all = a.view().var((0, 1), 0.0).to_ndarray::<Ix0>().unwrap();
         assert!((var_all[[]] - 2.9166).abs() < 0.001);
-        let var_col = a.view().var(0, 0.0).to_ndarray().unwrap();
+        let var_col = a.view().var(0, 0.0).to_ndarray::<Ix1>().unwrap();
         assert!((var_col[[0]] - 2.25).abs() < 0.001);
-        let var_row = a.view().var(1, 0.0).to_ndarray().unwrap();
+        let var_row = a.view().var(1, 0.0).to_ndarray::<Ix1>().unwrap();
         assert!((var_row[[0]] - 0.6666).abs() < 0.001);
     }
     #[test]
     fn std() {
         let a = Array::compact_ndarray(&array![[7i32, 8, 9], [4, 5, 6]]).unwrap();
-        let std_all = a.view().std((0, 1), 0.0).to_ndarray().unwrap();
+        let std_all = a.view().std((0, 1), 0.0).to_ndarray::<Ix0>().unwrap();
         assert!((std_all[[]] - 1.7078).abs() < 0.001);
-        let std_col = a.view().std(0, 0.0).to_ndarray().unwrap();
+        let std_col = a.view().std(0, 0.0).to_ndarray::<Ix1>().unwrap();
         assert!((std_col[[0]] - 1.5).abs() < 0.001);
-        let std_row = a.view().std(1, 0.0).to_ndarray().unwrap();
+        let std_row = a.view().std(1, 0.0).to_ndarray::<Ix1>().unwrap();
         assert!((std_row[[0]] - 0.8164).abs() < 0.001);
     }
 
@@ -4225,7 +4190,7 @@ pub(crate) mod tests {
         let reduced = za.view().max(1usize); // output shape [5]
         let ctx = reduced.read_ctx();
         // An empty sub-range along the (sole) output dim.
-        let got = reduced.to_ndarray_sub(&[1..1], &ctx).unwrap();
+        let got = reduced.to_ndarray_sub::<Ix1>(&[1..1], &ctx).unwrap();
         assert_eq!(got.shape(), &[0]);
     }
 
@@ -4273,7 +4238,7 @@ pub(crate) mod tests {
         params.read_size((1 << 19, 1 << 20));
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
 
-        let got = f64::from(za.view().sum(0usize).to_ndarray().unwrap()[[]]);
+        let got = f64::from(za.view().sum(0usize).to_ndarray::<Ix0>().unwrap()[[]]);
         let err = (exact - got).abs();
         // Pairwise loses 7 of the ones; a 16-lane linear chain over the whole run loses 4095.
         // The bound is loose enough to survive retuning LANES / PAIRWISE_SPLIT_THRESHOLD, tight enough that
@@ -4299,7 +4264,7 @@ pub(crate) mod tests {
             params.read_size((1 << 19, 1 << 20));
             let za = Array::compact_ndarray_with(&nd, params).unwrap();
             assert_eq!(
-                za.view().sum(0usize).to_ndarray().unwrap()[[]],
+                za.view().sum(0usize).to_ndarray::<Ix0>().unwrap()[[]],
                 exact,
                 "n = {n}"
             );
@@ -4520,7 +4485,7 @@ pub(crate) mod tests {
         let a = Array::compact_ndarray(&array![1i8, 2, 3]).unwrap();
         let r = a.view().reduce_unordered(0usize, |a, b| a.wrapping_add(b));
         assert_eq!(r.dtype(), &<i8 as Dtyped>::DTYPE);
-        assert_eq!(r.to_ndarray().unwrap()[[]], 6i8);
+        assert_eq!(r.to_ndarray::<Ix0>().unwrap()[[]], 6i8);
     }
 
     #[test]
@@ -4542,7 +4507,7 @@ pub(crate) mod tests {
         let r = a
             .view()
             .reduce_unordered(1usize, |a, b| a + b)
-            .to_ndarray()
+            .to_ndarray::<Ix1>()
             .unwrap();
         assert_eq!(r.shape(), &[0]);
     }
@@ -4846,7 +4811,7 @@ pub(crate) mod tests {
 
     #[test]
     fn reduction_rejects_zero_itemsize_kernel_output() {
-        use crate::{Array, DimDyn};
+        use crate::Array;
 
         // A reduction kernel picks its own output type, so it is another way a fresh dtype reaches an
         // array without passing through `ArrayParams::tune` (a lazy view never re-tunes). `[i32; 0]`
@@ -4875,7 +4840,7 @@ pub(crate) mod tests {
         }
 
         let za = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
-        let err = super::ReductionOp::<_, _, DimDyn>::new(
+        let err = super::ReductionOp::<_, _>::new(
             za.into_storage(),
             ZeroSizedOutputKernel,
             [0usize].as_slice(),

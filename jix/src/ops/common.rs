@@ -1,5 +1,4 @@
 use crate::dtype::Dtyped;
-use crate::{DimDyn, Dimension};
 
 macro_rules! define_array_op1_method {
     ($method:ident : $Op:ident, $($trait:ident)::+) => {
@@ -21,7 +20,7 @@ macro_rules! define_array_op2_method {
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
             S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Dimension = S::Dimension>,
+            S2: crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, other).unwrap()
@@ -33,7 +32,7 @@ macro_rules! define_array_op2_method {
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
             S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Item = $lhs_type, Dimension = S::Dimension>,
+            S2: crate::storage::ArrayStorageTyped<Item = $lhs_type>,
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, other).unwrap()
@@ -56,65 +55,30 @@ impl<T: Dtyped> LanesInfo for T {
     };
 }
 
-/// An argument that specifies a set of dim indices, encoding the dimension change in the type.
+/// An argument that specifies a set of dim indices.
 ///
 /// Operations that add or remove dims - `insert_dim`, `remove_dim`, `sum`, `max`, etc. - are
-/// generic over `Dims: DimsArg`. The associated types `ReducedDimension` and `ExpandedDimension`
-/// compute the output dimension purely from the input dimension `D` and the concrete type of the
-/// dim argument. This means the compiler knows the output ndim without any runtime information.
-///
-/// # Dimension rules by argument type
-///
-/// | `Dims` type | `ReducedDimension<D>` | `ExpandedDimension<D>` |
-/// |---|---|---|
-/// | `usize` | `D::Smaller` | `D::Larger` |
-/// | `[usize; 0]` / `()` | `D` | `D` |
-/// | `[usize; N]` / `(usize, ...)` (N >= 1) | `D::Smaller` repeated N times | `D::Larger` repeated N times |
-/// | `&[usize]` / `&Vec<usize>` | `DimDyn` | `DimDyn` |
-///
-/// When the argument is a slice reference (`&[usize]`), the ndim of the result is only known at
-/// runtime, so both associated types resolve to [`DimDyn`](crate::DimDyn). Using a typed array
-/// argument (`[usize; N]` or a tuple) preserves static dimension information.
+/// generic over `Dims: DimsArg`, so a single dim (`usize`), a fixed set (`[usize; N]` or a tuple of
+/// `usize`) or a runtime list (`&[usize]`, `Vec<usize>`) can be passed.
 ///
 /// # Examples
 ///
 /// ```rust
-/// use jix::{Array, Dim};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]])?;
 ///
-/// // usize: one dim removed/added - statically one smaller/larger
-/// let b = a.view().sum(0);               // D::Smaller when a: Dim<N> -> Dim<N-1>
-/// let c = a.view().insert_dim(0);       // D::Larger  when a: Dim<N> -> Dim<N+1>
-///
-/// // [usize; 2]: two dims removed - statically two smaller
-/// let b = a.view().sum([0, 1]);          // Dim<N-2>
-/// let c = a.view().insert_dim([0, 1]);  // Dim<N+2>
-///
-/// // &[usize]: dynamic count -> DimDyn regardless of input dimension
+/// let b = a.view().sum(0);
+/// let c = a.view().insert_dim(0);
+/// let d = a.view().sum([0, 1]);
+/// let e = a.view().insert_dim((0, 1));
 /// let dims = vec![0, 1];
-/// let b = a.view().sum(dims.as_slice()); // DimDyn
+/// let f = a.view().sum(dims.as_slice());
 /// # Ok::<(), jix::Error>(())
 /// ```
 #[allow(clippy::len_without_is_empty)]
 pub trait DimsArg {
-    /// The dimension type of an array produced by a *reducing* operation (e.g. `sum`, `max`,
-    /// `remove_dim`) that removes the dims described by `self` from an input of dimension `D`.
-    ///
-    /// For a single-dim arg (`usize`), this is `D::Smaller`.
-    /// For an N-element fixed arg (`[usize; N]` or N-tuple), this is `D::Smaller` applied N times.
-    /// For a slice arg (`&[usize]`), this is `DimDyn`.
-    type ReducedDimension<D: Dimension>: Dimension;
-
-    /// The dimension type of an array produced by an *expanding* operation (e.g. `insert_dim`)
-    /// that inserts the dims described by `self` into an input of dimension `D`.
-    ///
-    /// For a single-dim arg (`usize`), this is `D::Larger`.
-    /// For an N-element fixed arg (`[usize; N]` or N-tuple), this is `D::Larger` applied N times.
-    /// For a slice arg (`&[usize]`), this is `DimDyn`.
-    type ExpandedDimension<D: Dimension>: Dimension;
-
     /// The number of dims described by this argument.
     fn len(&self) -> usize;
 
@@ -125,9 +89,6 @@ pub trait DimsArg {
 }
 
 impl DimsArg for usize {
-    type ReducedDimension<D: Dimension> = D::Smaller;
-    type ExpandedDimension<D: Dimension> = D::Larger;
-
     #[inline(always)]
     fn len(&self) -> usize {
         1
@@ -142,9 +103,6 @@ impl DimsArg for usize {
     }
 }
 impl DimsArg for &[usize] {
-    type ReducedDimension<D: Dimension> = DimDyn;
-    type ExpandedDimension<D: Dimension> = DimDyn;
-
     #[inline(always)]
     fn len(&self) -> usize {
         <[_]>::len(self)
@@ -155,9 +113,6 @@ impl DimsArg for &[usize] {
     }
 }
 impl DimsArg for Vec<usize> {
-    type ReducedDimension<D: Dimension> = DimDyn;
-    type ExpandedDimension<D: Dimension> = DimDyn;
-
     #[inline(always)]
     fn len(&self) -> usize {
         <Vec<_>>::len(self)
@@ -169,9 +124,6 @@ impl DimsArg for Vec<usize> {
     }
 }
 impl DimsArg for &Vec<usize> {
-    type ReducedDimension<D: Dimension> = DimDyn;
-    type ExpandedDimension<D: Dimension> = DimDyn;
-
     #[inline(always)]
     fn len(&self) -> usize {
         <Vec<_>>::len(self)
@@ -182,96 +134,32 @@ impl DimsArg for &Vec<usize> {
         self[idx]
     }
 }
-
-macro_rules! impl_dims_array {
-    ($($idx:tt),+ $(,)?) => {
-        impl DimsArg for [usize; impl_dims_array!(@count $($idx)*)] {
-            type ReducedDimension<D: Dimension> = impl_dims_array!(@shrink D, $($idx),+);
-            type ExpandedDimension<D: Dimension> = impl_dims_array!(@expand D, $($idx),+);
-
-            #[inline(always)]
-            fn len(&self) -> usize {
-                impl_dims_array!(@count $($idx)*)
-            }
-
-            #[inline(always)]
-            fn get(&self, idx: usize) -> usize {
-                self[idx]
-            }
-        }
-        impl DimsArg for &[usize; impl_dims_array!(@count $($idx)*)] {
-            type ReducedDimension<D: Dimension> = impl_dims_array!(@shrink D, $($idx),+);
-            type ExpandedDimension<D: Dimension> = impl_dims_array!(@expand D, $($idx),+);
-
-            #[inline(always)]
-            fn len(&self) -> usize {
-                impl_dims_array!(@count $($idx)*)
-            }
-
-            #[inline(always)]
-            fn get(&self, idx: usize) -> usize {
-                self[idx]
-            }
-        }
-    };
-
-    (@shrink $D:ty, $head:tt $(, $tail:tt)*) => {
-        <impl_dims_array!(@shrink $D, $($tail),*) as Dimension>::Smaller
-    };
-    (@shrink $D:ty,) => { $D };
-
-    (@expand $D:ty, $head:tt $(, $tail:tt)*) => {
-        <impl_dims_array!(@expand $D, $($tail),*) as Dimension>::Larger
-    };
-    (@expand $D:ty,) => { $D };
-
-    (@count ) => { 0 };
-    (@count $head:tt $($tail:tt)*) => { 1 + impl_dims_array!(@count $($tail)*) };
-}
-
-impl DimsArg for [usize; 0] {
-    type ReducedDimension<D: Dimension> = D;
-    type ExpandedDimension<D: Dimension> = D;
-
+impl<const N: usize> DimsArg for [usize; N] {
     #[inline(always)]
     fn len(&self) -> usize {
-        0
+        N
     }
 
     #[inline(always)]
-    fn get(&self, _idx: usize) -> usize {
-        unreachable!()
+    fn get(&self, idx: usize) -> usize {
+        self[idx]
     }
 }
-impl DimsArg for &[usize; 0] {
-    type ReducedDimension<D: Dimension> = D;
-    type ExpandedDimension<D: Dimension> = D;
-
+impl<const N: usize> DimsArg for &[usize; N] {
     #[inline(always)]
     fn len(&self) -> usize {
-        0
+        N
     }
 
     #[inline(always)]
-    fn get(&self, _idx: usize) -> usize {
-        unreachable!()
+    fn get(&self, idx: usize) -> usize {
+        self[idx]
     }
 }
-impl_dims_array!(0);
-impl_dims_array!(0, 1);
-impl_dims_array!(0, 1, 2);
-impl_dims_array!(0, 1, 2, 3);
-impl_dims_array!(0, 1, 2, 3, 4);
-impl_dims_array!(0, 1, 2, 3, 4, 5);
-impl_dims_array!(0, 1, 2, 3, 4, 5, 6);
-impl_dims_array!(0, 1, 2, 3, 4, 5, 6, 7);
 
 macro_rules! impl_dims_tuple {
     ($($idx:tt),+ $(,)?) => {
         impl DimsArg for ($(impl_dims_tuple!(@replace $idx usize),)+) {
-            type ReducedDimension<D: Dimension> = impl_dims_tuple!(@shrink D, $($idx),+);
-            type ExpandedDimension<D: Dimension> = impl_dims_tuple!(@expand D, $($idx),+);
-
             #[inline(always)]
             fn len(&self) -> usize {
                 impl_dims_tuple!(@count $($idx)*)
@@ -287,24 +175,11 @@ macro_rules! impl_dims_tuple {
         }
     };
 
-    (@shrink $D:ty, $head:tt $(, $tail:tt)*) => {
-        <impl_dims_tuple!(@shrink $D, $($tail),*) as Dimension>::Smaller
-    };
-    (@shrink $D:ty,) => { $D };
-
-    (@expand $D:ty, $head:tt $(, $tail:tt)*) => {
-        <impl_dims_tuple!(@expand $D, $($tail),*) as Dimension>::Larger
-    };
-    (@expand $D:ty,) => { $D };
-
     (@replace $_t:tt $sub:ty) => { $sub };
     (@count ) => { 0 };
     (@count $head:tt $($tail:tt)*) => { 1 + impl_dims_tuple!(@count $($tail)*) };
 }
 impl DimsArg for () {
-    type ReducedDimension<D: Dimension> = D;
-    type ExpandedDimension<D: Dimension> = D;
-
     #[inline(always)]
     fn len(&self) -> usize {
         0

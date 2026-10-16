@@ -1089,7 +1089,7 @@ mod tests {
         let [dst, lhs, rhs] = &mut bufs;
 
         let shape_u64 = shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
-        let lhs_array: Array<crate::storage::Plain<_, Ty<T>, _>> = unsafe {
+        let lhs_array: Array<crate::storage::Plain<_, Ty<T>>> = unsafe {
             Array::plain_ndarray_ptr(
                 lhs.ptr(),
                 &shape_u64,
@@ -1099,7 +1099,7 @@ mod tests {
             )
             .unwrap()
         };
-        let rhs_array: Array<crate::storage::Plain<_, Ty<T>, _>> = unsafe {
+        let rhs_array: Array<crate::storage::Plain<_, Ty<T>>> = unsafe {
             Array::plain_ndarray_ptr(
                 rhs.ptr(),
                 &shape_u64,
@@ -1732,7 +1732,7 @@ mod tests {
     }
 
     /// An `Array` broadcasting one `f32` across a 4x5 region.
-    fn scalar_4x5(value: f32) -> crate::Array<crate::storage::scalar::Scalar<f32, crate::Dim<2>>> {
+    fn scalar_4x5(value: f32) -> crate::Array<crate::storage::scalar::Scalar<f32>> {
         crate::Array::from_storage(
             crate::storage::scalar::Scalar::new(value, [4u64, 5], crate::ArrayParams::default())
                 .unwrap(),
@@ -1903,9 +1903,9 @@ mod tests {
     }
 
     #[test]
-    fn into_dim_and_into_type_forward_the_pipeline() {
-        // Both are pure re-tags, so they must hand the inner pipeline through untouched rather than
-        // fall back to buffering it into one operand.
+    fn into_type_forwards_the_pipeline() {
+        // A pure re-tag, so it must hand the inner pipeline through untouched rather than fall back
+        // to buffering it into one operand.
         use core::ops::Add;
 
         let nd_a = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as f32);
@@ -1916,14 +1916,7 @@ mod tests {
         let index = full_index(sum.storage.shape());
         let expected = read_data_elements::<_, f32>(&sum.storage, &index);
 
-        let re_dimmed = crate::ops::IntoDim::<_, crate::DimDyn>::new_array(sum).unwrap();
-        assert_eq!(operand_count::<_, f32>(&re_dimmed.storage, &index), 2);
-        assert_eq!(
-            pipeline_elements::<_, f32>(&re_dimmed.storage, &index),
-            expected
-        );
-
-        let re_typed = crate::ops::IntoType::<_, crate::TypeDyn>::new_array(re_dimmed).unwrap();
+        let re_typed = crate::ops::IntoType::<_, crate::TypeDyn>::new_array(sum).unwrap();
         assert_eq!(operand_count::<_, f32>(&re_typed.storage, &index), 2);
         assert_eq!(
             pipeline_elements::<_, f32>(&re_typed.storage, &index),
@@ -1936,7 +1929,7 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     /// Three 4x5 `Compact` arrays with distinct contents.
-    fn three_arrays() -> [crate::Array<crate::storage::Compact<crate::Ty<i32>, crate::Dim<2>>>; 3] {
+    fn three_arrays() -> [crate::Array<crate::storage::Compact<crate::Ty<i32>>>; 3] {
         std::array::from_fn(|k| {
             let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| {
                 (i * 5 + j) as i32 * (k as i32 + 1)
@@ -2186,8 +2179,7 @@ mod tests {
         // sixteen (the destination included) and hands anything wider to `to_buf_impl_dyn`. Both
         // sides of that boundary are reachable with a count known at compile time, so walk each:
         // fifteen leaves plus the destination is the last const-generic arm, sixteen overflows it.
-        fn leaves<const N: usize>(
-        ) -> [crate::Array<crate::storage::Compact<crate::Ty<i32>, crate::Dim<1>>>; N] {
+        fn leaves<const N: usize>() -> [crate::Array<crate::storage::Compact<crate::Ty<i32>>>; N] {
             std::array::from_fn(|k| {
                 let nd = ndarray::Array1::from_shape_fn(6, |i| (i + k) as i32);
                 crate::Array::compact_ndarray(&nd).unwrap()
@@ -2208,8 +2200,10 @@ mod tests {
             operand_counts::<_, i32>(&mapped.storage, &index),
             (Some(15), 15)
         );
-        let out = mapped.to_ndarray().unwrap();
-        assert_eq!(out.iter().copied().collect::<Vec<i32>>(), expected(15));
+        assert_eq!(
+            mapped.to_ndarray().unwrap(),
+            ndarray::Array1::from(expected(15))
+        );
 
         // 16 + 1 output = 17: past the table, so the runtime-count walk runs even though
         // `N_OPERANDS` is `Some`.
@@ -2219,8 +2213,10 @@ mod tests {
             operand_counts::<_, i32>(&mapped.storage, &index),
             (Some(16), 16)
         );
-        let out = mapped.to_ndarray().unwrap();
-        assert_eq!(out.iter().copied().collect::<Vec<i32>>(), expected(16));
+        assert_eq!(
+            mapped.to_ndarray().unwrap(),
+            ndarray::Array1::from(expected(16))
+        );
     }
 
     #[test]
@@ -2251,7 +2247,7 @@ mod tests {
             let backings =
                 gaps.map_inline(|gap| (0..LEN * gap.max(1)).map(|i| i as T).collect::<Vec<T>>());
             let arrays = array_from_fn_inline::<_, N_IN>(|k| {
-                let arr: Array<crate::storage::Plain<_, Ty<T>, _>> = unsafe {
+                let arr: Array<crate::storage::Plain<_, Ty<T>>> = unsafe {
                     Array::plain_ndarray_ptr(
                         backings[k].as_ptr().cast::<u8>(),
                         &[LEN as u64][..],
@@ -2268,10 +2264,9 @@ mod tests {
                 .collect::<Vec<T>>();
 
             let summed = crate::ops::map_multiple(arrays, |xs: [T; N_IN]| xs.iter().sum::<T>());
-            let got = summed.to_ndarray().unwrap();
             assert_eq!(
-                got.iter().copied().collect::<Vec<T>>(),
-                expected,
+                summed.to_ndarray().unwrap(),
+                ndarray::Array1::from(expected),
                 "odd_gap={odd_gap}"
             );
         }
@@ -2292,11 +2287,10 @@ mod tests {
         let index = full_index(mapped.storage.shape());
         assert_eq!(operand_counts::<_, i32>(&mapped.storage, &index), (None, n));
 
-        let out = mapped.to_ndarray().unwrap();
         // Array `k` holds `i + k`, so element `i` sums to `100 * i + 4950`.
         assert_eq!(
-            out.iter().copied().collect::<Vec<i32>>(),
-            (0..6).map(|i| 100 * i + 4950).collect::<Vec<i32>>()
+            mapped.to_ndarray().unwrap(),
+            ndarray::Array1::from_iter((0..6).map(|i| 100 * i + 4950))
         );
     }
 

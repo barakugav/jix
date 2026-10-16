@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::sync::Mutex;
 
 use jix_core::storage::StridedBuf;
-use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, Dim, DimDyn, Dimension, ReadContext};
+use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
@@ -613,24 +613,6 @@ impl Array {
             let context_guard = self.read_ctx()?;
             let context = context_guard.as_ref();
 
-            fn to_ndarray_impl<S: ArrayStorage, D: Dimension>(
-                arr: jix_core::Array<S>,
-                index: &[std::ops::Range<u64>],
-                out: &mut StridedBuf<'_>,
-                context: &ReadContext,
-            ) -> Result<(), jix_core::Error> {
-                let arr = arr.into_dim::<D>().unwrap();
-                arr.to_ndarray_buf(index, context, Some(out))?;
-                Ok(())
-            }
-            let to_ndarray_fn = match self.arr.ndim() {
-                1 => to_ndarray_impl::<_, Dim<1>>,
-                2 => to_ndarray_impl::<_, Dim<2>>,
-                3 => to_ndarray_impl::<_, Dim<3>>,
-                4 => to_ndarray_impl::<_, Dim<4>>,
-                _ => to_ndarray_impl::<_, DimDyn>,
-            };
-
             let mut out = unsafe {
                 StridedBuf::from_raw_parts_mut(
                     data.as_mut_ptr(),
@@ -639,7 +621,9 @@ impl Array {
                     itemsize,
                 )
             };
-            to_ndarray_fn(self.arr.view(), &index, &mut out, context).into_py_result()?;
+            self.arr
+                .to_ndarray_buf(&index, context, Some(&mut out))
+                .into_py_result()?;
             Ok::<_, PyErr>(context_guard.take_warnings())
         })?;
         crate::errstate::emit_warnings(py, warnings)?;
@@ -1704,7 +1688,7 @@ impl ContextGuard<'_> {
 #[cfg(test)]
 mod tests {
     use jix_core::dtype::Dtyped;
-    use jix_core::{Array as CoreArray, IntoDimension};
+    use jix_core::Array as CoreArray;
     use ndarray::{array, ArrayD};
     use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
     use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
@@ -1718,7 +1702,7 @@ mod tests {
         ndarray: &ndarray::Array<T, D>,
     ) -> Bound<'py, Array>
     where
-        D: ndarray::Dimension + IntoDimension<Dimension: 'static>,
+        D: ndarray::Dimension,
     {
         let core = CoreArray::compact_ndarray(ndarray).unwrap();
         Bound::new(py, Array::from_core(core.into_any())).unwrap()
@@ -1727,7 +1711,7 @@ mod tests {
     fn roundtrip<T, D>(original: &ndarray::Array<T, D>) -> ndarray::Array<T, D>
     where
         T: Dtyped + numpy::Element + Copy,
-        D: ndarray::Dimension + IntoDimension<Dimension: 'static>,
+        D: ndarray::Dimension,
     {
         // ndarray::Array -> jix_core::Array -> jix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {

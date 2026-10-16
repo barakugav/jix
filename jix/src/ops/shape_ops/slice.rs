@@ -28,8 +28,7 @@ use crate::ops::prelude::*;
 /// Standard Rust ranges convert to [`SliceItem`] automatically; negative-integer range
 /// literals work for Python-style end-relative indexing.
 ///
-/// `Slice<S>` carries `type Dimension = S::Dimension` - slicing does not change the number of
-/// dims so the dimension type is preserved unchanged.
+/// Slicing does not change the number of dims.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -43,25 +42,22 @@ use crate::ops::prelude::*;
 ///
 /// // First two rows, last two columns
 /// let result = a.slice((0..2, 1..)).to_ndarray()?;
-/// assert_eq!(result.shape(), &[2, 2]);
-/// assert_eq!(result[[0, 0]], 2);
-/// assert_eq!(result[[1, 1]], 6);
+/// assert_eq!(result, array![[2, 3], [5, 6]]);
 ///
 /// // Negative index: last row only
 /// let b = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
 /// let result = b.slice(((-1i64..), ..)).to_ndarray()?;
-/// assert_eq!(result.shape(), &[1, 3]);
-/// assert_eq!(result[[0, 1]], 8);
+/// assert_eq!(result, array![[7, 8, 9]]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct Slice<S: ArrayStorage> {
     array: S,
     /// Resolved slice for each dimension.
-    slice: <S::Dimension as Dimension>::Vec<DimSlice>,
+    slice: DimArray<DimSlice>,
     /// `true` when every dimension has `step == 1`. Enables a cheaper read path.
     no_steps: bool,
 
-    shape: S::Dimension,
+    shape: DimDyn,
     spec: ArraySpecDynamic,
 }
 
@@ -83,8 +79,8 @@ impl<S: ArrayStorage> Slice<S> {
         })?;
         let no_steps = slice.iter().all(|ds| ds.step == 1);
 
-        let slice = S::Dimension::vec(ndim, |dim| slice[dim].clone());
-        let shape = S::Dimension::from_fn(ndim, |dim| slice[dim].len());
+        let slice = dim_arr(ndim, |dim| slice[dim].clone());
+        let shape = DimDyn::from_fn(ndim, |dim| slice[dim].len());
 
         let inner_spec = array.spec();
         let mut block_shape = <_ as Clone>::clone(inner_spec.block_shape());
@@ -123,7 +119,6 @@ impl<S: ArrayStorage> Slice<S> {
 
 impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     type ElementType = S::ElementType;
-    type Dimension = S::Dimension;
 
     fn read_data<'a>(
         &'a self,
@@ -137,28 +132,28 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
 
         // Fast path: all dims have step == 1. Map index [a, b) to inner [start + a, start + b) and forward.
         if self.no_steps {
-            let inner_index = S::Dimension::vec(ndim, |dim| {
+            let inner_index = dim_arr(ndim, |dim| {
                 let offset = self.slice[dim].start;
                 (index[dim].start + offset)..(index[dim].end + offset)
             });
             return self.array.read_data(inner_index.as_ref(), context, out);
         }
 
-        let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
+        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
 
         // Fast path: inner array is plain, read a contiguous bounding box and create a strided view over it.
         if out.is_none()
             && self.array.spec().flags().plain_read()
             && !out_shape.as_ref().contains(&0)
         {
-            let inner_box = S::Dimension::vec(ndim, |dim| {
+            let inner_box = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
                 let first = ds.start + index[dim].start * ds.step;
                 let last = ds.start + (index[dim].end - 1) * ds.step;
                 first..(last + 1)
             });
             let inner = self.array.read_data(inner_box.as_ref(), context, None)?;
-            let out_strides = S::Dimension::vec(ndim, |dim| {
+            let out_strides = dim_arr(ndim, |dim| {
                 inner.strides()[dim] * self.slice[dim].step as usize
             });
             return Ok(unsafe { inner.with_strides(out_strides.as_ref()) });
@@ -167,7 +162,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // General path: one or more dims have step > 1. nd-iter over the strided dims, and read
         // each sub-region from the inner array.
         let dtype = self.dtype();
-        let out_shape_usize = S::Dimension::vec(ndim, |dim| out_shape[dim] as usize);
+        let out_shape_usize = dim_arr(ndim, |dim| out_shape[dim] as usize);
         let mut out = materialize_out_buf(
             out,
             context,
@@ -179,7 +174,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             return Ok(out);
         }
         let (out_buf, out_strides) = out.data_mut();
-        let iter_shape = S::Dimension::vec(ndim, |dim| {
+        let iter_shape = dim_arr(ndim, |dim| {
             if self.slice[dim].step == 1 {
                 1
             } else {
@@ -187,10 +182,10 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             }
         });
         let iter = NdIter::builder(iter_shape)
-            .with_strides_offset_ext(out_strides.to_dim_vec::<S::Dimension>(), 0)
+            .with_strides_offset_ext(out_strides.to_dim_vec::<DimDyn>(), 0)
             .build();
         for (idx, dst_byte_offset) in iter {
-            let inner_index = S::Dimension::vec(ndim, |dim| {
+            let inner_index = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
                 if ds.step == 1 {
                     (ds.start + index[dim].start)..(ds.start + index[dim].end)
@@ -224,24 +219,6 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Slice", [&self.array])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = Slice<S::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let ndim = self.shape().len();
-        check_ndim::<NewD>(ndim)?;
-        let shape = NewD::from_slice(self.shape());
-        let slice = NewD::vec(ndim, |dim| self.slice[dim].clone());
-        Ok(Slice {
-            array: self.array.dimension_change()?,
-            slice,
-            no_steps: self.no_steps,
-            shape,
-            spec: self.spec,
-        })
     }
 
     type ElementTypeChange<NewET: crate::ElementType> = Slice<S::ElementTypeChange<NewET>>;
@@ -437,14 +414,14 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{Dim, Ty};
+    use crate::Ty;
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, Dim<2>>> {
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>>> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, Dim<3>>> {
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>>> {
         let nd = ndarray::Array::from_shape_vec([d0, d1, d2], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
@@ -554,7 +531,7 @@ mod tests {
         assert_eq!(got, array![[0, 1, 2, 3], [8, 9, 10, 11], [16, 17, 18, 19]]);
     }
 
-    fn plain6x4() -> Array<crate::storage::Plain<Vec<i32>, Ty<i32>, Dim<2>>> {
+    fn plain6x4() -> Array<crate::storage::Plain<Vec<i32>, Ty<i32>>> {
         Array::plain_ndarray(ndarray::Array::from_shape_vec((6, 4), arange(24)).unwrap()).unwrap()
     }
 
@@ -803,10 +780,7 @@ mod tests {
     // Bound checks in DimSlice::resolve.
     // -----------------------------------------------------------------------
 
-    fn try_slice_one_dim(
-        arr: Array<Compact<Ty<i32>, Dim<2>>>,
-        item: SliceItem,
-    ) -> super::Result<()> {
+    fn try_slice_one_dim(arr: Array<Compact<Ty<i32>>>, item: SliceItem) -> super::Result<()> {
         super::Slice::new_array(
             arr,
             super::SliceSpec::new(&[item, SliceItem::new(None, None, 1)]),

@@ -80,19 +80,25 @@ jobs:
     strategy:
       matrix:
         platform:
+          # Free-threaded Python on 32-bit platforms is only supported from 3.15+
           - runner: ubuntu-22.04
             target: x86_64
+            interpreter: 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
           - runner: ubuntu-22.04
             target: x86
+            interpreter: 3.11 3.12 3.13 3.14 3.15 3.15t
           - runner: ubuntu-22.04
             target: aarch64
+            interpreter: 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
           - runner: ubuntu-22.04
             target: armv7
+            interpreter: 3.11 3.12 3.13 3.14 3.15 3.15t
           # Big endian not supported
           # - runner: ubuntu-22.04
           #   target: s390x
           - runner: ubuntu-22.04
             target: ppc64le
+            interpreter: 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -102,7 +108,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --generate-stubs --out dist --interpreter 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
+          args: --release --generate-stubs --out dist --interpreter ${{ matrix.platform.interpreter }}
           manylinux: auto
           working-directory: jix-py
       - name: Upload wheels
@@ -117,14 +123,19 @@ jobs:
     strategy:
       matrix:
         platform:
+          # Free-threaded Python on 32-bit platforms is only supported from 3.15+
           - runner: ubuntu-22.04
             target: x86_64
+            interpreter: 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
           - runner: ubuntu-22.04
             target: x86
+            interpreter: 3.11 3.12 3.13 3.14 3.15 3.15t
           - runner: ubuntu-22.04
             target: aarch64
+            interpreter: 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
           - runner: ubuntu-22.04
             target: armv7
+            interpreter: 3.11 3.12 3.13 3.14 3.15 3.15t
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -134,7 +145,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --generate-stubs --out dist --interpreter 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
+          args: --release --generate-stubs --out dist --interpreter ${{ matrix.platform.interpreter }}
           manylinux: musllinux_1_2
           working-directory: jix-py
       - name: Upload wheels
@@ -167,7 +178,8 @@ jobs:
           - runner: windows-latest
             target: x86
             python_arch: x86
-            python-version: ["3.14t", "3.15t"]
+            # Free-threaded Python on 32-bit platforms is only supported from 3.15+
+            python-version: ["3.15t"]
             artifact-suffix: "-freethreaded"
           - runner: windows-11-arm
             target: aarch64

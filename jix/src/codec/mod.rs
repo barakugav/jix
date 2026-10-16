@@ -345,7 +345,7 @@ impl<'a> Decoder<'a> {
 /// // read_ctx() inherits the decoder config from the array.
 /// let ctx = za.read_ctx();
 /// let out = za.to_ndarray_sub(&[1..3], &ctx)?;
-/// assert_eq!(out.as_slice().unwrap(), &[2, 3]);
+/// assert_eq!(out, array![2, 3]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
@@ -358,7 +358,7 @@ impl<'a> Decoder<'a> {
 ///
 /// let za = Array::compact_ndarray(&array![42i32, 17, 6, 99, 51])?;
 /// let out = za.to_ndarray_sub(&[0..3], &ReadContext::default())?;
-/// assert_eq!(out.as_slice().unwrap(), &[42, 17, 6]);
+/// assert_eq!(out, array![42, 17, 6]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
@@ -377,19 +377,18 @@ impl<'a> Decoder<'a> {
 /// ```
 /// use jix::Array;
 /// use jix::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
-/// use ndarray::array;
+/// use ndarray::{array, Ix1};
 ///
 /// let a = Array::compact_ndarray(&array![6i32, 7, 8])?;
 /// let b = Array::compact_ndarray(&array![2i32, 0, 4])?;
 /// let q = a / b;
 ///
-/// let err = q.to_ndarray().unwrap_err();
+/// let err = q.to_ndarray::<Ix1>().unwrap_err();
 /// assert_eq!(err.kind(), ErrorKind::Arithmetic);
 ///
 /// let mut ctx = q.read_ctx();
 /// ctx.set_arithmetic_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Warn);
-/// let out = q.to_ndarray_sub(&[0..3], &ctx)?;
-/// assert_eq!(out.as_slice().unwrap(), &[3, 0, 2]);
+/// assert_eq!(q.to_ndarray_sub(&[0..3], &ctx)?, array![3, 0, 2]);
 /// assert_eq!(ctx.take_warnings().len(), 1);
 /// # Ok::<(), jix::Error>(())
 /// ```

@@ -9,8 +9,7 @@ use crate::ops::prelude::*;
 /// `dims` must be a permutation of `0..ndim`: correct length, all values in range, no
 /// duplicates.
 ///
-/// Output dtype equals the input dtype. `PermuteDims<S>` carries `type Dimension = S::Dimension`
-/// - permutation does not change the number of dims so the dimension type is preserved unchanged.
+/// Output dtype equals the input dtype, and the number of dims is unchanged.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -18,13 +17,13 @@ use crate::ops::prelude::*;
 ///
 /// ```
 /// use jix::Array;
-/// use ndarray::array;
+/// use ndarray::{array, Ix2};
 ///
 /// // 2-D transpose: [2, 3] -> [3, 2]
 /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?;
 /// let t = a.permute_dims(&[1, 0]);
 /// assert_eq!(t.shape(), &[3, 2]);
-/// let result = t.to_ndarray()?;
+/// let result = t.to_ndarray::<Ix2>()?;
 /// assert_eq!(result[[0, 0]], 1);
 /// assert_eq!(result[[0, 1]], 4);
 /// assert_eq!(result[[2, 1]], 6);
@@ -39,11 +38,11 @@ use crate::ops::prelude::*;
 pub struct PermuteDims<S: ArrayStorage> {
     array: S,
     /// `dims[i]` = index of the input dimension that maps to output dimension `i`.
-    dims: <S::Dimension as Dimension>::Vec<DimIdx>,
+    dims: DimArray<DimIdx>,
     /// `inv_dims[d]` = index of the output dimension that maps from input dimension `d`.
-    inv_dims: <S::Dimension as Dimension>::Vec<DimIdx>,
+    inv_dims: DimArray<DimIdx>,
 
-    shape: S::Dimension,
+    shape: DimDyn,
     spec: ArraySpecDynamic,
 }
 
@@ -57,7 +56,7 @@ impl<S: ArrayStorage> PermuteDims<S> {
             "dims length {} does not match array ndim {ndim}",
             dims.len()
         );
-        let mut seen = S::Dimension::vec(ndim, |_| false);
+        let mut seen = dim_arr(ndim, |_| false);
         for &d in dims.as_ref().iter() {
             ensure!(
                 d < ndim,
@@ -71,13 +70,13 @@ impl<S: ArrayStorage> PermuteDims<S> {
             );
             seen[d] = true;
         }
-        let mut inv_dims = S::Dimension::vec(ndim, |_| DimIdx::default());
+        let mut inv_dims = dim_arr(ndim, |_| DimIdx::default());
         for (i, &d) in dims.as_ref().iter().enumerate() {
             inv_dims[d] = i as DimIdx;
         }
 
         let input_shape = array.shape();
-        let shape = S::Dimension::from_fn(ndim, |i| input_shape[dims[i]]);
+        let shape = DimDyn::from_fn(ndim, |i| input_shape[dims[i]]);
 
         let inner_spec = array.spec();
         let block_shape = dim_arr(ndim, |i| inner_spec.block_shape()[dims[i]]);
@@ -95,7 +94,7 @@ impl<S: ArrayStorage> PermuteDims<S> {
                 .map(|&old| inv_dims[old as usize])
                 .collect(),
         );
-        let dims = S::Dimension::vec(ndim, |i| dims[i] as DimIdx);
+        let dims = dim_arr(ndim, |i| dims[i] as DimIdx);
         Ok(Self {
             shape,
             spec,
@@ -113,7 +112,6 @@ impl<S: ArrayStorage> PermuteDims<S> {
 
 impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
     type ElementType = S::ElementType;
-    type Dimension = S::Dimension;
 
     #[inline]
     fn read_data<'a>(
@@ -128,7 +126,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
         unsafe {
             read_data_and_map_strides(
                 &self.array,
-                S::Dimension::vec(ndim, |d| index[self.inv_dims[d] as usize].clone()).as_ref(),
+                dim_arr(ndim, |d| index[self.inv_dims[d] as usize].clone()).as_ref(),
                 context,
                 out,
                 |inner_strides| dim_arr(ndim, |i| inner_strides[self.dims[i] as usize]),
@@ -154,26 +152,6 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("PermuteDims", [&self.array])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = PermuteDims<S::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let ndim = self.shape().len();
-        check_ndim::<NewD>(ndim)?;
-        let shape = NewD::from_slice(self.shape());
-        let dims = NewD::vec(ndim, |i| self.dims[i]);
-        let inv_dims = NewD::vec(ndim, |i| self.inv_dims[i]);
-        let array = self.array.dimension_change::<NewD>()?;
-        Ok(PermuteDims {
-            shape,
-            array,
-            dims,
-            inv_dims,
-            spec: self.spec,
-        })
     }
 
     type ElementTypeChange<NewET: crate::ElementType> = PermuteDims<S::ElementTypeChange<NewET>>;

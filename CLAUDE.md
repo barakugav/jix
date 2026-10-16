@@ -100,13 +100,19 @@ allocation in pull mode.
 heuristic that cuts an oversized request into cache-sized pieces read one at a time.
 `Array::to_ndarray_slice(index, buf, ctx)` is the shorthand for a packed row-major destination.
 
-Storage carries two pieces of compile-time info as associated types:
-- **`ElementType`** - either `Ty<T>` (scalar type `T` known at compile time) or `TypeDyn`
-  (runtime-only; arrays loaded from disk start here). `ArrayStorageTyped` is the supertrait
-  shorthand for `ArrayStorage<ElementType = Ty<T>>`, and **all element-wise ops require it**. Recover
-  a typed array from a `TypeDyn` one with `Array::into_typed::<T>()` (runtime-checked against the
-  header).
-- **`Dimension`** - either `Dim<N>` (ndim known statically) or `DimDyn` (runtime only).
+Storage carries one piece of compile-time info as an associated type, **`ElementType`** - either
+`Ty<T>` (scalar type `T` known at compile time) or `TypeDyn` (runtime-only; arrays loaded from disk
+start here). `ArrayStorageTyped` is the supertrait shorthand for `ArrayStorage<ElementType = Ty<T>>`,
+and **all element-wise ops require it**. Recover a typed array from a `TypeDyn` one with
+`Array::into_typed::<T>()` (runtime-checked against the header).
+
+The number of dims is always a runtime property (`shape().len()`); internally per-dim data lives in
+`DimArray<T>` (a stack `ArrayVec` of capacity `NDIM_MAX`). `Dimension` (`Dim<N>` / `DimDyn`) and
+`IntoDimension` survive only as argument types: shapes are passed as tuples/arrays/slices, and
+`compact_fn` uses the shape's `Dimension` to pick its callback's index pattern. `to_ndarray::<D>()`
+/ `to_ndarray_sub::<D>()` return an ndarray of the caller's `D: ndarray::Dimension` (runtime ndim
+check). In tests and examples let the comparison pin `D` (`assert_eq!(a.to_ndarray()?, array![..])`);
+otherwise annotate it with an imported type (`use ndarray::Ix2;` ... `to_ndarray::<Ix2>()`).
 
 ### Lazy evaluation via the type system
 

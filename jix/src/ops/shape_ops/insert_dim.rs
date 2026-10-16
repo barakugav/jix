@@ -25,18 +25,6 @@ use crate::ops::prelude::*;
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// # Dimension tracking
-///
-/// `InsertDim<S, D>` is generic over `D: Dimension`, determined by the dim argument type.
-/// Statically-sized arguments encode the output ndim in the type:
-///
-/// | Argument type | Output `D` |
-/// |---|---|
-/// | `usize` | `S::Dimension::Larger` |
-/// | `[usize; N]` / `(usize, ...)` N-tuple | `Larger` applied N times |
-/// | `[usize; 0]` / `()` | `S::Dimension` (unchanged) |
-/// | `&[usize]` / `&Vec<usize>` | `DimDyn` |
-///
 /// # Examples
 ///
 /// ```text
@@ -46,22 +34,19 @@ use crate::ops::prelude::*;
 /// [N, M]    dim: [0, 2]  -> [1, N, M, 1]
 /// ```
 ///
-/// Different argument types select both the insertion positions and the output dimension type:
+/// The dims can be given as any [`DimsArg`](crate::ops::DimsArg): a single `usize`, an array or tuple of `usize`, or a
+/// slice:
 ///
 /// ```
-/// use jix::{Array, Dim};
+/// use jix::Array;
 /// use ndarray::array;
 ///
-/// let a = Array::compact_ndarray(&array![1i32, 2, 3])?; // shape [3], Dim<1>
+/// let a = Array::compact_ndarray(&array![1i32, 2, 3])?; // shape [3]
 ///
-/// // usize -> output D = Dim<2> (one more than input Dim<1>)
 /// assert_eq!(a.view().insert_dim(0).shape(), &[1, 3]);
 /// assert_eq!(a.view().insert_dim(1).shape(), &[3, 1]);
-///
-/// // [usize; 2] -> output D = Dim<3> (two more than input Dim<1>)
 /// assert_eq!(a.view().insert_dim([0, 1]).shape(), &[1, 3, 1]);
 ///
-/// // &[usize] -> output D = DimDyn
 /// let gaps = vec![0, 1];
 /// assert_eq!(a.view().insert_dim(gaps.as_slice()).shape(), &[1, 3, 1]);
 ///
@@ -69,27 +54,23 @@ use crate::ops::prelude::*;
 /// assert_eq!(a.view().insert_dim([0, 0, 1, 1]).shape(), &[1, 1, 3, 1, 1]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct InsertDim<S: ArrayStorage, D> {
+pub struct InsertDim<S: ArrayStorage> {
     array: S,
-    original_dims: <S::Dimension as Dimension>::Vec<DimIdx>,
+    original_dims: DimArray<DimIdx>,
 
-    shape: D,
+    shape: DimDyn,
     spec: ArraySpecDynamic,
 }
 
-impl<S, D> InsertDim<S, D>
+impl<S> InsertDim<S>
 where
     S: ArrayStorage,
-    D: Dimension,
 {
     /// Constructs an [`InsertDim`] storage. See the struct docs for semantics and examples.
-    pub fn new<Dims>(array: S, dim: Dims) -> Result<Self>
-    where
-        Dims: DimsArg<ExpandedDimension<S::Dimension> = D>,
-    {
+    pub fn new(array: S, dim: impl DimsArg) -> Result<Self> {
         let orig_ndim = array.shape().len();
         let new_ndim = orig_ndim + dim.len();
-        check_ndim::<D>(new_ndim)?;
+        check_ndim(new_ndim)?;
 
         // Each value in `dims` is a gap index in the *input* shape: 0 means "before input dim 0",
         // 1 means "before input dim 1" (i.e. between dims 0 and 1), ..., orig_ndim means "after
@@ -119,12 +100,12 @@ where
             block_shape.insert(insert_pos, 1);
             block_shape_fixed_dims.insert(insert_pos, false);
         }
-        let shape = D::from_slice(&shape);
+        let shape = DimDyn::from_slice(&shape);
         let original_dims = is_inserted
             .iter()
             .enumerate()
             .filter_map(|(d, inserted)| (!inserted).then_some(d as DimIdx))
-            .collect_dim_vec::<S::Dimension>(array.shape().len());
+            .collect_dim_vec::<DimDyn>(array.shape().len());
         let mut read_shape_scale_weight =
             orig_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>();
         for (d, inserted) in is_inserted.iter().enumerate() {
@@ -159,18 +140,12 @@ where
     }
 
     /// Constructs an array with [`InsertDim`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array<Dims>(array: Array<S>, dim: Dims) -> Result<Array<Self>>
-    where
-        Dims: DimsArg<ExpandedDimension<S::Dimension> = D>,
-    {
+    pub fn new_array(array: Array<S>, dim: impl DimsArg) -> Result<Array<Self>> {
         Self::new(array.into_storage(), dim).map(Array::from_storage)
     }
 
     #[inline(always)]
-    fn transform_index(
-        &self,
-        index: &[Range<u64>],
-    ) -> Result<Option<<S::Dimension as Dimension>::Vec<Range<u64>>>> {
+    fn transform_index(&self, index: &[Range<u64>]) -> Result<Option<DimArray<Range<u64>>>> {
         check_get_range(self.shape(), index)?;
 
         for index in index.iter() {
@@ -178,20 +153,17 @@ where
                 return Ok(None);
             }
         }
-        Ok(Some(S::Dimension::vec(
-            self.original_dims.as_ref().len(),
-            |dim| index[self.original_dims[dim] as usize].clone(),
-        )))
+        Ok(Some(dim_arr(self.original_dims.as_ref().len(), |dim| {
+            index[self.original_dims[dim] as usize].clone()
+        })))
     }
 }
 
-impl<S, D> ArrayStorage for InsertDim<S, D>
+impl<S> ArrayStorage for InsertDim<S>
 where
     S: ArrayStorage,
-    D: Dimension,
 {
     type ElementType = S::ElementType;
-    type Dimension = D;
 
     #[inline]
     fn read_data<'a>(
@@ -204,7 +176,7 @@ where
         let dtype = self.dtype();
         let Some(inner_index) = self.transform_index(index)? else {
             // Empty read
-            let out_shape = D::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+            let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
             return Ok(materialize_out_buf(
                 out,
                 context,
@@ -254,22 +226,7 @@ where
         ArrayStorageInfo::new_deps("InsertDim", [&self.array])
     }
 
-    type DimensionChange<NewD: crate::Dimension> = InsertDim<S, NewD>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        check_ndim::<NewD>(self.shape().len())?;
-        let shape = NewD::from_slice(self.shape());
-        Ok(InsertDim {
-            array: self.array,
-            original_dims: self.original_dims,
-            shape,
-            spec: self.spec,
-        })
-    }
-
-    type ElementTypeChange<NewET: crate::ElementType> = InsertDim<S::ElementTypeChange<NewET>, D>;
+    type ElementTypeChange<NewET: crate::ElementType> = InsertDim<S::ElementTypeChange<NewET>>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
         self,
@@ -292,19 +249,19 @@ mod tests {
     use crate::ops::InsertDim;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{Array, Dim, Ty, NDIM_MAX};
+    use crate::{Array, Ty, NDIM_MAX};
 
-    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, Dim<1>>> {
+    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>>> {
         let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, Dim<2>>> {
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>>> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, Dim<3>>> {
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>>> {
         let nd = ndarray::Array::from_shape_vec([d0, d1, d2], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
@@ -319,31 +276,28 @@ mod tests {
 
     #[test]
     fn shape_insert_before_first_dim() {
-        assert_eq!(make1d(arange(6), 6).insert_dim(&[0]).shape(), &[1, 6]);
+        assert_eq!(make1d(arange(6), 6).insert_dim([0]).shape(), &[1, 6]);
     }
 
     #[test]
     fn shape_insert_after_last_dim() {
-        assert_eq!(make1d(arange(6), 6).insert_dim(&[1]).shape(), &[6, 1]);
+        assert_eq!(make1d(arange(6), 6).insert_dim([1]).shape(), &[6, 1]);
     }
 
     #[test]
     fn shape_insert_between_dims() {
-        assert_eq!(
-            make2d(arange(12), 3, 4).insert_dim(&[1]).shape(),
-            &[3, 1, 4]
-        );
+        assert_eq!(make2d(arange(12), 3, 4).insert_dim([1]).shape(), &[3, 1, 4]);
     }
 
     #[test]
     fn shape_insert_front_and_back() {
-        assert_eq!(make1d(arange(6), 6).insert_dim(&[0, 1]).shape(), &[1, 6, 1]);
+        assert_eq!(make1d(arange(6), 6).insert_dim([0, 1]).shape(), &[1, 6, 1]);
     }
 
     #[test]
     fn shape_insert_duplicates_same_gap() {
         assert_eq!(
-            make2d(arange(12), 3, 4).insert_dim(&[0, 0]).shape(),
+            make2d(arange(12), 3, 4).insert_dim([0, 0]).shape(),
             &[1, 1, 3, 4]
         );
     }
@@ -352,7 +306,7 @@ mod tests {
     fn shape_insert_user_example() {
         let a = make3d(arange(24), 2, 3, 4);
         assert_eq!(
-            a.insert_dim(&[0, 1, 1, 1, 3]).shape(),
+            a.insert_dim([0, 1, 1, 1, 3]).shape(),
             &[1, 2, 1, 1, 1, 3, 4, 1]
         );
     }
@@ -360,14 +314,14 @@ mod tests {
     #[test]
     fn shape_insert_unsorted_dims_same_result() {
         // Order of dims values should not matter; only the multiset matters.
-        let a1 = make3d(arange(24), 2, 3, 4).insert_dim(&[0, 1, 1, 1, 3]);
-        let a2 = make3d(arange(24), 2, 3, 4).insert_dim(&[3, 1, 0, 1, 1]);
+        let a1 = make3d(arange(24), 2, 3, 4).insert_dim([0, 1, 1, 1, 3]);
+        let a2 = make3d(arange(24), 2, 3, 4).insert_dim([3, 1, 0, 1, 1]);
         assert_eq!(a1.shape(), a2.shape());
     }
 
     #[test]
     fn shape_empty_dims_is_identity() {
-        assert_eq!(make2d(arange(12), 3, 4).insert_dim(&[]).shape(), &[3, 4]);
+        assert_eq!(make2d(arange(12), 3, 4).insert_dim([]).shape(), &[3, 4]);
     }
 
     // -----------------------------------------------------------------------
@@ -376,7 +330,7 @@ mod tests {
 
     #[test]
     fn full_read_insert_before_first() {
-        let got = make1d(arange(6), 6).insert_dim(&[0]).to_ndarray().unwrap();
+        let got = make1d(arange(6), 6).insert_dim([0]).to_ndarray().unwrap();
         assert_eq!(
             got,
             ndarray::Array::from_shape_vec([1, 6], arange(6)).unwrap()
@@ -385,7 +339,7 @@ mod tests {
 
     #[test]
     fn full_read_insert_after_last() {
-        let got = make1d(arange(6), 6).insert_dim(&[1]).to_ndarray().unwrap();
+        let got = make1d(arange(6), 6).insert_dim([1]).to_ndarray().unwrap();
         assert_eq!(
             got,
             ndarray::Array::from_shape_vec([6, 1], arange(6)).unwrap()
@@ -395,7 +349,7 @@ mod tests {
     #[test]
     fn full_read_insert_between_dims() {
         let got = make2d(arange(12), 3, 4)
-            .insert_dim(&[1])
+            .insert_dim([1])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -407,7 +361,7 @@ mod tests {
     #[test]
     fn full_read_insert_front_and_back() {
         let got = make1d(arange(6), 6)
-            .insert_dim(&[0, 1])
+            .insert_dim([0, 1])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -419,7 +373,7 @@ mod tests {
     #[test]
     fn full_read_insert_user_example() {
         let got = make3d(arange(24), 2, 3, 4)
-            .insert_dim(&[0, 1, 1, 1, 3])
+            .insert_dim([0, 1, 1, 1, 3])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -431,7 +385,7 @@ mod tests {
     #[test]
     fn full_read_identity_empty_dims() {
         let got = make2d(arange(12), 3, 4)
-            .insert_dim(&[])
+            .insert_dim([])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -447,7 +401,7 @@ mod tests {
     #[test]
     fn sub_read_inserted_dim_is_stripped() {
         let got = make1d(arange(6), 6)
-            .insert_dim(&[0])
+            .insert_dim([0])
             .to_ndarray_sub(&[0..1, 2..5], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![[2, 3, 4]]);
@@ -456,7 +410,7 @@ mod tests {
     #[test]
     fn sub_read_2d_with_inserted_middle() {
         let got = make2d(arange(12), 3, 4)
-            .insert_dim(&[1])
+            .insert_dim([1])
             .to_ndarray_sub(&[1..3, 0..1, 0..2], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![[[4, 5]], [[8, 9]]]);
@@ -470,7 +424,7 @@ mod tests {
     fn error_dim_out_of_bounds() {
         let a = make1d(arange(4), 4);
         // orig_ndim=1, valid gaps are 0..=1; dim 2 is out of bounds
-        assert!(InsertDim::new_array(a, &[2]).is_err());
+        assert!(InsertDim::new_array(a, [2]).is_err());
     }
 
     // -----------------------------------------------------------------------

@@ -1,7 +1,7 @@
 use crate::ops::prelude::*;
 
 use crate::util::ArraySequence;
-use crate::{ArraySequenceDimension, ArraySequenceElementType};
+use crate::ArraySequenceElementType;
 
 /// Joins a sequence of arrays along an existing dim. See [`Concatenate`] for details and examples.
 ///
@@ -12,7 +12,7 @@ use crate::{ArraySequenceDimension, ArraySequenceElementType};
 #[track_caller]
 pub fn concatenate<ArraysT>(arrays: ArraysT, dim: usize) -> Array<Concatenate<ArraysT>>
 where
-    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
+    ArraysT: ArraySequence + ArraySequenceElementType,
 {
     Array::from_storage(Concatenate::new(arrays, dim).unwrap())
 }
@@ -23,10 +23,6 @@ where
 /// *except* the concatenation dim, along which their sizes may differ. All arrays must share the
 /// same [`Dtype`]. The output has the same number of dimensions as the inputs - unlike
 /// [`Stack`](crate::ops::Stack), which introduces a new dim.
-///
-/// The output dimension type `Concatenate<ArraysT>::Dimension` equals `ArraysT::Dimension` (from
-/// [`ArraySequenceDimension`]) - the common dimension shared by every array in the sequence. This
-/// means the static dimension is propagated when all input arrays share a known `Dim<N>`.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -57,18 +53,18 @@ where
 /// ```
 pub struct Concatenate<ArraysT>
 where
-    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
+    ArraysT: ArraySequence + ArraySequenceElementType,
 {
     arrays: ArraysT,
     concat_dim: DimIdx,
     borders: Vec<u64>,
 
-    shape: ArraysT::Dimension,
+    shape: DimDyn,
     spec: ArraySpecDynamic,
 }
 impl<ArraysT> Concatenate<ArraysT>
 where
-    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
+    ArraysT: ArraySequence + ArraySequenceElementType,
 {
     /// Constructs a [`Concatenate`] storage. See the struct docs for semantics and examples.
     pub fn new(arrays: ArraysT, dim: usize) -> Result<Self> {
@@ -152,7 +148,7 @@ where
             read_layout_order,
         );
 
-        let shape = ArraysT::Dimension::from_slice(&shape);
+        let shape = DimDyn::from_slice(&shape);
         Ok(Self {
             shape,
             arrays,
@@ -169,10 +165,9 @@ where
 }
 impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
 where
-    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
+    ArraysT: ArraySequence + ArraySequenceElementType,
 {
     type ElementType = ArraysT::ElementType;
-    type Dimension = ArraysT::Dimension;
 
     /// Fills `buf` with the slice of the concatenated array described by `index`.
     ///
@@ -200,7 +195,7 @@ where
         check_out_buf(out.as_deref(), self.shape())?;
 
         let itemsize = dtype.itemsize() as usize;
-        let output_shape = Self::Dimension::vec(index.len(), |dim| {
+        let output_shape = dim_arr(index.len(), |dim| {
             (index[dim].end - index[dim].start) as usize
         });
         let mut out = materialize_out_buf(
@@ -253,14 +248,14 @@ where
             let buf_concat_offset = (overlap_start - req_start) as usize;
 
             // Sub-index into array `arr`: same as `index` but concat dim uses local coords.
-            let sub_index = Self::Dimension::vec(index.len(), |dim| {
+            let sub_index = dim_arr(index.len(), |dim| {
                 if dim == concat_dim {
                     local_start..local_end
                 } else {
                     index[dim].clone()
                 }
             });
-            let sub_shape = Self::Dimension::vec(index.len(), |dim| {
+            let sub_shape = dim_arr(index.len(), |dim| {
                 (sub_index[dim].end - sub_index[dim].start) as usize
             });
             let buf_offset = buf_concat_offset * concat_stride;
@@ -308,7 +303,6 @@ where
         ArrayStorageInfo::new_deps_dyn("Concatenate", deps)
     }
 
-    crate::ops::impl_dimension_change_default!();
     crate::ops::impl_element_type_change_default!();
 }
 
@@ -423,12 +417,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_shape_mismatch_panics() {
-        let a = Array::compact_ndarray(&array![1i32, 2])
-            .unwrap()
-            .into_dim_dyn();
-        let b = Array::compact_ndarray(&array![[1i32, 2]])
-            .unwrap()
-            .into_dim_dyn();
+        let a = Array::compact_ndarray(&array![1i32, 2]).unwrap();
+        let b = Array::compact_ndarray(&array![[1i32, 2]]).unwrap();
         let _ = concatenate((a, b), 0);
     }
 

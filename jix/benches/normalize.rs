@@ -2,13 +2,14 @@ mod common;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use jix::storage::Compact;
-use jix::{Array, ArrayParams, DimDyn, Ty};
+use jix::{Array, ArrayParams, Ty};
+use ndarray::Ix2;
 
 use crate::common::{create_data, Profile};
 
 const SIZES: [(u64, u64); 4] = [(4_000, 200), (40_000, 200), (200_000, 64), (20_000, 2_000)];
 
-fn compact_f32(shape: &[u64], seed: u64) -> Array<Compact<Ty<f32>, DimDyn>> {
+fn compact_f32(shape: &[u64], seed: u64) -> Array<Compact<Ty<f32>>> {
     let data = create_data::<f32>(Profile::Smooth, shape, seed);
     Array::compact_ndarray_with(&data, ArrayParams::new()).unwrap()
 }
@@ -23,7 +24,7 @@ fn bench_normalize(c: &mut Criterion) {
             group.bench_function(BenchmarkId::from_parameter(format!("{shape:?}")), |b| {
                 b.iter(|| {
                     let d = a.view() / a.view().std(dim, 0.0).insert_dim(dim).broadcast(&shape);
-                    d.to_ndarray().unwrap()
+                    d.to_ndarray::<Ix2>().unwrap()
                 });
             });
         }

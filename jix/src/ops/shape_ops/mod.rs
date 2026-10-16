@@ -35,7 +35,8 @@ mod tile;
 pub use tile::*;
 
 use crate::ops::DimsArg;
-use crate::{Array, ArrayStorage, Dimension, IntoDimension};
+use crate::util::dim_arr;
+use crate::{Array, ArrayStorage, IntoDimension};
 
 impl<S> Array<S>
 where
@@ -55,10 +56,7 @@ where
     ///
     /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
     #[track_caller]
-    pub fn reshape<Sh>(self, shape: Sh) -> Array<Reshape<S, Sh::Dimension>>
-    where
-        Sh: IntoDimension,
-    {
+    pub fn reshape(self, shape: impl IntoDimension) -> Array<Reshape<S>> {
         Reshape::new_array(self, shape).unwrap()
     }
 
@@ -93,7 +91,7 @@ where
     #[track_caller]
     pub fn transpose(self) -> Array<PermuteDims<S>> {
         let ndim = self.ndim();
-        let dims = S::Dimension::vec(ndim, |i| ndim - 1 - i);
+        let dims = dim_arr(ndim, |i| ndim - 1 - i);
         PermuteDims::new_array(self, dims.as_ref()).unwrap()
     }
 
@@ -173,13 +171,7 @@ where
     ///
     /// Panics if any dim is out of bounds, duplicated, or has length != 1.
     #[track_caller]
-    pub fn remove_dim<Dims>(
-        self,
-        dim: Dims,
-    ) -> Array<RemoveDim<S, Dims::ReducedDimension<S::Dimension>>>
-    where
-        Dims: DimsArg,
-    {
+    pub fn remove_dim(self, dim: impl DimsArg) -> Array<RemoveDim<S>> {
         RemoveDim::new_array(self, dim).unwrap()
     }
 
@@ -193,13 +185,7 @@ where
     ///
     /// Panics if any value in `dim` is > `self.ndim()` or the resulting ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
     #[track_caller]
-    pub fn insert_dim<Dims>(
-        self,
-        dim: Dims,
-    ) -> Array<InsertDim<S, Dims::ExpandedDimension<S::Dimension>>>
-    where
-        Dims: DimsArg,
-    {
+    pub fn insert_dim(self, dim: impl DimsArg) -> Array<InsertDim<S>> {
         InsertDim::new_array(self, dim).unwrap()
     }
 }

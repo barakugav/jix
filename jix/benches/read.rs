@@ -4,6 +4,7 @@ use std::ops::Range;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use fastrand::Rng;
+use ndarray::Ix2;
 
 use crate::common::create_compact;
 
@@ -97,7 +98,7 @@ fn bench_compact_read_region(c: &mut Criterion) {
                             let region: [_; 2] = region.try_into().unwrap();
                             region
                         },
-                        |region| array.to_ndarray_sub(&region, &ctx).unwrap(),
+                        |region| array.to_ndarray_sub::<Ix2>(&region, &ctx).unwrap(),
                         criterion::BatchSize::SmallInput,
                     );
                 },
@@ -142,7 +143,7 @@ fn bench_compact_read_full(c: &mut Criterion) {
                 move |b| {
                     b.iter_batched(
                         || (),
-                        |_| array.to_ndarray().unwrap(),
+                        |_| array.to_ndarray::<Ix2>().unwrap(),
                         criterion::BatchSize::SmallInput,
                     );
                 },
@@ -174,7 +175,7 @@ fn bench_compact_read_transposed(c: &mut Criterion) {
 
         group.bench_function(BenchmarkId::new("hinted", &param), |b| {
             let ctx = t.read_ctx();
-            b.iter(|| t.to_ndarray_sub(&full, &ctx).unwrap());
+            b.iter(|| t.to_ndarray_sub::<Ix2>(&full, &ctx).unwrap());
         });
         // The pre-hint baseline: allocate a packed row-major destination per read (exactly what
         // `to_ndarray_sub` used to do) and push into it, paying a transposing copy. Allocating
@@ -184,10 +185,8 @@ fn bench_compact_read_transposed(c: &mut Criterion) {
             let ctx = t.read_ctx();
             let nitems = (shape[0] * shape[1]) as usize;
             b.iter(|| {
-                let mut arr = ndarray::Array::<i32, _>::uninit(ndarray::IxDyn(&[
-                    shape[1] as usize,
-                    shape[0] as usize,
-                ]));
+                let mut arr =
+                    ndarray::Array::<i32, Ix2>::uninit((shape[1] as usize, shape[0] as usize));
                 let buf = unsafe {
                     std::slice::from_raw_parts_mut(
                         arr.as_mut_ptr().cast::<u8>(),

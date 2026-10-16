@@ -14,7 +14,7 @@ use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
 use crate::util::{dim_arr, Idx, IterExt};
 use crate::{ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, TypeDyn};
 
-impl Array<Compact<TypeDyn, DimDyn>> {
+impl Array<Compact<TypeDyn>> {
     /// Load a compressed array from a `.jix` file, allocating storage on the heap.
     ///
     /// This is the most common way to read an array that was previously saved with
@@ -161,7 +161,7 @@ impl Array<Compact<TypeDyn, DimDyn>> {
     }
 }
 
-impl Array<CompactMmap<TypeDyn, DimDyn>> {
+impl Array<CompactMmap<TypeDyn>> {
     /// Load a compressed array from a file using memory mapping (zero-copy).
     ///
     /// Instead of copying the file's bytes into heap memory, this maps the file into virtual
@@ -429,7 +429,7 @@ where
     }
 }
 
-impl<S> ArrayBlockTableStorageBase<S, TypeDyn, DimDyn>
+impl<S> ArrayBlockTableStorageBase<S, TypeDyn>
 where
     S: BlockTableStorage,
 {
@@ -457,7 +457,7 @@ where
             .read_message::<schema::ArrayHeader>()
             .map_err(Error::io)?;
         let ndim = header.shape.len();
-        check_ndim::<DimDyn>(ndim)?;
+        check_ndim(ndim)?;
         let shape = DimDyn::from_slice(header.shape.as_slice());
         ensure!(
             header.block_shape.len() == ndim,
@@ -550,14 +550,13 @@ mod tests {
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn compact<T, Sh>(
+    fn compact<T>(
         vals: Vec<T>,
-        shape: Sh,
+        shape: impl IntoDimension,
         block_shape: &[usize],
-    ) -> Array<Compact<Ty<T>, Sh::Dimension>>
+    ) -> Array<Compact<Ty<T>>>
     where
         T: Dtyped,
-        Sh: IntoDimension,
     {
         let shape = shape.into_dimension().unwrap();
         let shape_usize = shape
@@ -565,17 +564,13 @@ mod tests {
             .iter()
             .map(|d| *d as usize)
             .collect::<Vec<_>>();
-        let src = ArrayD::from_shape_vec(shape_usize, vals)
-            .unwrap()
-            .into_dimensionality::<<Sh::Dimension as ndarray::IntoDimension>::Dim>()
-            .unwrap();
-        let array = Array::compact_ndarray_with(&src, arr_params(block_shape)).unwrap();
-        array.into_dim().unwrap()
+        let src = ArrayD::from_shape_vec(shape_usize, vals).unwrap();
+        Array::compact_ndarray_with(&src, arr_params(block_shape)).unwrap()
     }
 
-    fn write_read<T: Dtyped, D: Dimension>(
-        a: &Array<Compact<Ty<T>, D>>,
-    ) -> ndarray::Array<T, <D as ndarray::IntoDimension>::Dim> {
+    fn write_read<T: Dtyped, D: ndarray::Dimension>(
+        a: &Array<Compact<Ty<T>>>,
+    ) -> ndarray::Array<T, D> {
         let mut buf = Cursor::new(Vec::new());
         a.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
@@ -586,13 +581,7 @@ mod tests {
             ArchiveValidation::default(),
         )
         .unwrap();
-        array
-            .into_typed::<T>()
-            .unwrap()
-            .into_dim::<D>()
-            .unwrap()
-            .to_ndarray()
-            .unwrap()
+        array.into_typed::<T>().unwrap().to_ndarray().unwrap()
     }
 
     // -----------------------------------------------------------------------
@@ -635,19 +624,19 @@ mod tests {
         // 1D single block: no padding.
         let vals = vec![i32::MIN, -1, 0, 1, i32::MAX];
         let src = ndarray::Array::from_shape_vec([5], vals.clone()).unwrap();
-        let a = compact(vals, &[5], &[5]);
+        let a = compact(vals, [5], &[5]);
         assert_eq!(write_read(&a), src);
 
         // 1D multi-block: shape 7, block 3 -> blocks of 3, 3, 1 (padded last block).
         let vals = vec![i32::MIN, -2, -1, 0, 1, 2, i32::MAX];
         let src = ndarray::Array::from_shape_vec([7], vals.clone()).unwrap();
-        let a = compact(vals, &[7], &[3]);
+        let a = compact(vals, [7], &[3]);
         assert_eq!(write_read(&a), src);
 
         // 2D multi-block: shape [5, 3], block [2, 2] -> padding in both dims.
         let vals: Vec<i32> = (0..15).map(|x| x - 7).collect();
         let src = ndarray::Array::from_shape_vec([5, 3], vals.clone()).unwrap();
-        let a = compact(vals, &[5, 3], &[2, 2]);
+        let a = compact(vals, [5, 3], &[2, 2]);
         assert_eq!(write_read(&a), src);
     }
 
@@ -656,19 +645,19 @@ mod tests {
         // 1D single block: no padding.
         let vals = vec![f32::MIN, -1.5, 0.0, 1.5, f32::MAX];
         let src = ndarray::Array::from_shape_vec([5], vals.clone()).unwrap();
-        let a = compact(vals, &[5], &[5]);
+        let a = compact(vals, [5], &[5]);
         assert_eq!(write_read(&a), src);
 
         // 1D multi-block: shape 7, block 3 -> blocks of 3, 3, 1 (padded last block).
         let vals = vec![f32::MIN, -2.5, -1.0, 0.0, 1.0, 2.5, f32::MAX];
         let src = ndarray::Array::from_shape_vec([7], vals.clone()).unwrap();
-        let a = compact(vals, &[7], &[3]);
+        let a = compact(vals, [7], &[3]);
         assert_eq!(write_read(&a), src);
 
         // 2D multi-block: shape [5, 3], block [2, 2] -> padding in both dims.
         let vals: Vec<f32> = (0..15).map(|x| (x - 7) as f32 * 0.5).collect();
         let src = ndarray::Array::from_shape_vec([5, 3], vals.clone()).unwrap();
-        let a = compact(vals, &[5, 3], &[2, 2]);
+        let a = compact(vals, [5, 3], &[2, 2]);
         assert_eq!(write_read(&a), src);
     }
 
@@ -681,7 +670,7 @@ mod tests {
         // 630 items, block 5 -> 126 blocks
         let vals = (0..630i32).collect::<Vec<_>>();
         let src = ndarray::Array::from_shape_vec([630], vals.clone()).unwrap();
-        let a = compact(vals, &[630], &[5]);
+        let a = compact(vals, [630], &[5]);
         assert_eq!(write_read(&a), src);
     }
 
@@ -690,7 +679,7 @@ mod tests {
         // shape [60, 24], block [4, 3] -> 15*8 = 120 blocks
         let vals: Vec<f64> = (0..60 * 24).map(|x: i32| x as f64).collect();
         let src = ndarray::Array::from_shape_vec([60, 24], vals.clone()).unwrap();
-        let a = compact(vals, &[60, 24], &[4, 3]);
+        let a = compact(vals, [60, 24], &[4, 3]);
         assert_eq!(write_read(&a), src);
     }
 
@@ -703,7 +692,7 @@ mod tests {
         // shape [10, 11, 12], block [2, 3, 4] -> 5*4*3 = 60 blocks
         let vals: Vec<f32> = (0..10 * 11 * 12).map(|x: i32| x as f32).collect();
         let src = ndarray::Array::from_shape_vec([10, 11, 12], vals.clone()).unwrap();
-        let a = compact(vals, &[10, 11, 12], &[2, 3, 4]);
+        let a = compact(vals, [10, 11, 12], &[2, 3, 4]);
         let got = write_read(&a);
         assert_eq!(got.shape(), &[10, 11, 12]);
         assert_eq!(got, src);
@@ -714,7 +703,7 @@ mod tests {
         // shape [5, 7, 11], block [3, 4, 5] - every dimension needs padding
         let vals: Vec<i64> = (0..5 * 7 * 11_i64).collect();
         let src = ndarray::Array::from_shape_vec([5, 7, 11], vals.clone()).unwrap();
-        let a = compact(vals, &[5, 7, 11], &[3, 4, 5]);
+        let a = compact(vals, [5, 7, 11], &[3, 4, 5]);
         let got = write_read(&a);
         assert_eq!(got.shape(), &[5, 7, 11]);
         assert_eq!(got, src);
@@ -743,20 +732,20 @@ mod tests {
 
         let mut buf = Cursor::new(Vec::<u8>::new());
 
-        let a0 = compact(src0.iter().cloned().collect(), &[6], &[3]);
+        let a0 = compact(src0.iter().cloned().collect(), [6], &[3]);
         a0.write_to(&mut buf).unwrap();
         let end0 = buf.stream_position().unwrap();
         buf.write_all(&[0u8; PAD]).unwrap();
         let start1 = buf.stream_position().unwrap();
 
-        let a1 = compact(src1.iter().cloned().collect(), &[3, 4], &[2, 2]);
+        let a1 = compact(src1.iter().cloned().collect(), [3, 4], &[2, 2]);
         a1.write_to(&mut buf).unwrap();
         let end1 = buf.stream_position().unwrap();
         let len1 = end1 - start1;
         buf.write_all(&[0u8; PAD]).unwrap();
         let start2 = buf.stream_position().unwrap();
 
-        let a2 = compact(src2.iter().cloned().collect(), &[2, 3, 5], &[1, 2, 3]);
+        let a2 = compact(src2.iter().cloned().collect(), [2, 3, 5], &[1, 2, 3]);
         a2.write_to(&mut buf).unwrap();
         let end2 = buf.stream_position().unwrap();
         let len2 = end2 - start2;
@@ -814,7 +803,7 @@ mod tests {
         let vals: Vec<i32> = (1..=12i32).collect();
         let src = ndarray::Array::from_shape_vec([3, 4], vals.clone()).unwrap();
         let expected = -&src;
-        let a = compact(vals, &[3, 4], &[2, 2]);
+        let a = compact(vals, [3, 4], &[2, 2]);
         let ctx = a.read_ctx();
 
         let view = -a.view();
@@ -838,7 +827,7 @@ mod tests {
         // 3-D array, double negation (identity), written via a lazy op chain.
         let vals: Vec<i32> = (1..=3 * 4 * 5i32).collect();
         let src = ndarray::Array::from_shape_vec([3, 4, 5], vals.clone()).unwrap();
-        let a = compact(vals, &[3, 4, 5], &[2, 2, 3]);
+        let a = compact(vals, [3, 4, 5], &[2, 2, 3]);
         let ctx = a.read_ctx();
 
         let view = -(-a.view()); // neg * neg = identity
@@ -864,7 +853,7 @@ mod tests {
         let vals: Vec<f32> = (0..24).map(|x: i32| x as f32).collect();
         let src = ndarray::Array::from_shape_vec([4, 6], vals.clone()).unwrap();
         let expected = &src + &src;
-        let a = compact(vals, &[4, 6], &[2, 3]);
+        let a = compact(vals, [4, 6], &[2, 3]);
         let ctx = a.read_ctx();
 
         let view = a.view() + a.view();
@@ -889,7 +878,7 @@ mod tests {
         // bytes regardless of the params passed - the compressed blocks are
         // streamed directly.
         let vals: Vec<i32> = (0..16i32).collect();
-        let a = compact(vals, &[16], &[4]);
+        let a = compact(vals, [16], &[4]);
         let ctx = a.read_ctx();
 
         let mut plain = Cursor::new(Vec::new());
@@ -911,7 +900,7 @@ mod tests {
     fn write_to_file_and_read_from_file_u8() {
         let vals: Vec<u8> = (0..24u8).collect();
         let src = ndarray::Array::from_shape_vec([4, 6], vals.clone()).unwrap();
-        let a = compact(vals, &[4, 6], &[2, 3]);
+        let a = compact(vals, [4, 6], &[2, 3]);
 
         // Use a path that does not yet exist so create_new succeeds.
         let tmp_dir = tempfile::tempdir().unwrap();
@@ -932,7 +921,7 @@ mod tests {
     #[test]
     fn write_to_file_fails_if_already_exists() {
         let vals: Vec<i32> = (0..4i32).collect();
-        let a = compact(vals, &[4], &[4]);
+        let a = compact(vals, [4], &[4]);
         // NamedTempFile creates the file; write_to_file (create_new) must fail.
         let tmp = tempfile::NamedTempFile::new().unwrap();
         assert!(a.write_to_file(tmp.path()).is_err());
@@ -951,11 +940,11 @@ mod tests {
         let path = tmp.path().to_path_buf();
 
         let mut f = std::fs::File::create(&path).unwrap();
-        compact(src0.iter().cloned().collect(), &[6], &[3])
+        compact(src0.iter().cloned().collect(), [6], &[3])
             .write_to(&mut f)
             .unwrap();
         let off1 = f.metadata().unwrap().len();
-        compact(src1.iter().cloned().collect(), &[4, 5], &[2, 3])
+        compact(src1.iter().cloned().collect(), [4, 5], &[2, 3])
             .write_to(&mut f)
             .unwrap();
         let total = f.metadata().unwrap().len();
@@ -995,7 +984,7 @@ mod tests {
         let vals: Vec<i64> = (0..24i64).collect();
         let src = ndarray::Array::from_shape_vec([4, 6], vals.clone()).unwrap();
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        compact(vals, &[4, 6], &[2, 3])
+        compact(vals, [4, 6], &[2, 3])
             .write_to(std::fs::File::create(tmp.path()).unwrap())
             .unwrap();
         let len = std::fs::metadata(tmp.path()).unwrap().len();
@@ -1029,11 +1018,11 @@ mod tests {
         let path = tmp.path().to_path_buf();
         let mut f = std::fs::File::create(&path).unwrap();
         // Pad with an unrelated array first.
-        compact((0..4u8).collect(), &[4], &[4])
+        compact((0..4u8).collect(), [4], &[4])
             .write_to(&mut f)
             .unwrap();
         let offset = f.metadata().unwrap().len();
-        compact(src1.iter().cloned().collect(), &[2, 3, 4], &[1, 2, 2])
+        compact(src1.iter().cloned().collect(), [2, 3, 4], &[1, 2, 2])
             .write_to(&mut f)
             .unwrap();
         let len = f.metadata().unwrap().len() - offset;
@@ -1063,7 +1052,7 @@ mod tests {
         let vals: Vec<i32> = (0..10 * 11 * 12i32).collect();
         let src = ndarray::Array::from_shape_vec([10, 11, 12], vals.clone()).unwrap();
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        compact(vals, &[10, 11, 12], &[2, 3, 4])
+        compact(vals, [10, 11, 12], &[2, 3, 4])
             .write_to(std::fs::File::create(tmp.path()).unwrap())
             .unwrap();
         let len = std::fs::metadata(tmp.path()).unwrap().len();
@@ -1095,7 +1084,7 @@ mod tests {
         let expected = -&src;
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        compact(vals, &[4, 5, 6], &[2, 2, 3])
+        compact(vals, [4, 5, 6], &[2, 2, 3])
             .write_to(std::fs::File::create(tmp.path()).unwrap())
             .unwrap();
         let len = std::fs::metadata(tmp.path()).unwrap().len();
@@ -1134,8 +1123,6 @@ mod tests {
     /// ignored.
     #[test]
     fn write_compact_behind_wrappers_copies_blocks() {
-        use crate::DimDyn;
-
         fn write<S: crate::ArrayStorage>(a: &Array<S>) -> Vec<u8> {
             let mut buf = Cursor::new(Vec::new());
             // A block shape different from the source's, ignored when the source is compact.
@@ -1143,7 +1130,7 @@ mod tests {
                 .unwrap();
             buf.into_inner()
         }
-        let make = || compact::<i32, _>((0..64).collect(), [8, 8], &[4, 4]);
+        let make = || compact::<i32>((0..64).collect(), [8, 8], &[4, 4]);
         let mut expected = Cursor::new(Vec::new());
         make().write_to(&mut expected).unwrap();
         let expected = expected.into_inner();
@@ -1151,10 +1138,6 @@ mod tests {
         assert_eq!(write(&make()), expected);
         assert_eq!(write(&make().view()), expected);
         assert_eq!(write(&make().view().into_type_dyn()), expected);
-        assert_eq!(
-            write(&make().view().into_dim::<DimDyn>().unwrap()),
-            expected
-        );
         assert_eq!(write(&make().into_any()), expected);
         assert_eq!(write(&make().into_any().into_any()), expected);
         assert_eq!(

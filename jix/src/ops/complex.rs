@@ -22,7 +22,7 @@ use crate::scalar::Complex;
 ///     Complex { re: 3.0, im: -4.0 },
 /// ])?;
 /// let result = a.real().to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[1.0f32, 3.0]);
+/// assert_eq!(result, array![1.0f32, 3.0]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct Real<S, T>(crate::ops::op1::Op1<S, RealKernel<T>>);
@@ -59,19 +59,10 @@ where
     T: Dtyped,
 {
     type ElementType = crate::Ty<T>;
-    type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Real", [&self.0.array])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = Real<S::DimensionChange<NewD>, T>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Real(self.0.dimension_change()?))
     }
 
     crate::ops::impl_element_type_change_default!();
@@ -98,7 +89,7 @@ where
 ///     Complex { re: 3.0, im: -4.0 },
 /// ])?;
 /// let result = a.imag().to_ndarray()?;
-/// assert_eq!(result.as_slice().unwrap(), &[2.0f32, -4.0]);
+/// assert_eq!(result, array![2.0f32, -4.0]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct Imaginary<S, T>(crate::ops::op1::Op1<S, ImaginaryKernel<T>>);
@@ -135,19 +126,10 @@ where
     T: Dtyped,
 {
     type ElementType = crate::Ty<T>;
-    type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Imaginary", [&self.0.array])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = Imaginary<S::DimensionChange<NewD>, T>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(Imaginary(self.0.dimension_change()?))
     }
 
     crate::ops::impl_element_type_change_default!();
@@ -191,7 +173,7 @@ mod tests {
         ])
         .unwrap();
         let result = a.real().to_ndarray().unwrap();
-        assert_eq!(result.as_slice().unwrap(), &[1.0f32, 3.0, -5.0]);
+        assert_eq!(result, array![1.0f32, 3.0, -5.0]);
     }
 
     #[test]
@@ -205,7 +187,7 @@ mod tests {
         ])
         .unwrap();
         let result = a.real().to_ndarray().unwrap();
-        assert_eq!(result.as_slice().unwrap(), &[1.0f64, 3.0]);
+        assert_eq!(result, array![1.0f64, 3.0]);
     }
 
     #[test]
@@ -220,7 +202,7 @@ mod tests {
         ])
         .unwrap();
         let result = a.imag().to_ndarray().unwrap();
-        assert_eq!(result.as_slice().unwrap(), &[2.0f32, -4.0, 6.0]);
+        assert_eq!(result, array![2.0f32, -4.0, 6.0]);
     }
 
     #[test]
@@ -234,7 +216,7 @@ mod tests {
         ])
         .unwrap();
         let result = a.imag().to_ndarray().unwrap();
-        assert_eq!(result.as_slice().unwrap(), &[2.0f64, -4.0]);
+        assert_eq!(result, array![2.0f64, -4.0]);
     }
 
     #[test]
@@ -263,8 +245,8 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(
-            a.imag().to_ndarray().unwrap().as_slice().unwrap(),
-            &[10.0f32, 20.0, 30.0, 40.0]
+            a.imag().to_ndarray().unwrap(),
+            array![[10.0f32, 20.0], [30.0, 40.0]]
         );
     }
 }

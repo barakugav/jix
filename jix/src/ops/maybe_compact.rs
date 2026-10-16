@@ -14,7 +14,7 @@ use crate::ArrayParams;
 ///
 /// In both cases all [`ArrayStorage`] methods delegate to the inner variant,
 /// and the storage is guaranteed to be a materialized compact storage, not a view.
-/// The dimension type `S::Dimension` is preserved in both paths.
+/// The element type `S::ElementType` is preserved in both paths.
 pub struct MaybeCompact<S: ArrayStorage>(pub(crate) ToCompactInner<S>);
 
 /// The two internal states of an [`MaybeCompact<S>`] storage.
@@ -23,7 +23,7 @@ pub(crate) enum ToCompactInner<S: ArrayStorage> {
     /// The source was already compact; the original storage is kept as-is.
     Original(S),
     /// The source was not compact; it was materialized into a new `Compact`.
-    Compact(Compact<S::ElementType, S::Dimension>),
+    Compact(Compact<S::ElementType>),
 }
 impl<S> MaybeCompact<S>
 where
@@ -56,7 +56,6 @@ where
     S: ArrayStorage,
 {
     type ElementType = S::ElementType;
-    type Dimension = S::Dimension;
 
     #[inline]
     fn read_data<'a>(
@@ -99,21 +98,12 @@ where
         };
         ArrayStorageInfo::new_deps("MaybeCompact", [inner])
     }
-    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn, DimDyn>> {
+    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn>> {
         let compact = match &self.0 {
             ToCompactInner::Original(s) => s.as_compact(),
             ToCompactInner::Compact(c) => c.as_compact(),
         };
         Some(compact.unwrap())
-    }
-
-    type DimensionChange<NewD: Dimension> = MaybeCompact<S::DimensionChange<NewD>>;
-    #[inline]
-    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        Ok(MaybeCompact(match self.0 {
-            ToCompactInner::Original(s) => ToCompactInner::Original(s.dimension_change()?),
-            ToCompactInner::Compact(c) => ToCompactInner::Compact(c.dimension_change()?),
-        }))
     }
 
     type ElementTypeChange<NewET: ElementType> = MaybeCompact<S::ElementTypeChange<NewET>>;
@@ -136,7 +126,7 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, Ty};
+    use crate::{Array, ArrayParams, ArrayStorage, ElementType, Ty};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -146,12 +136,12 @@ mod tests {
         vals: Vec<T>,
         shape: &[usize],
         block_shape: &[usize],
-    ) -> Array<Compact<Ty<T>, DimDyn>> {
+    ) -> Array<Compact<Ty<T>>> {
         let src = ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
         Array::compact_ndarray_with(&src, arr_params(block_shape)).unwrap()
     }
 
-    fn to_bytes<ET: ElementType, D: Dimension>(a: &Array<Compact<ET, D>>) -> Vec<u8> {
+    fn to_bytes<ET: ElementType>(a: &Array<Compact<ET>>) -> Vec<u8> {
         let mut buf = Cursor::new(Vec::new());
         a.write_to(&mut buf).unwrap();
         buf.into_inner()
