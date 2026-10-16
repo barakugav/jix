@@ -236,7 +236,7 @@ macro_rules! define_op2 {
             type Output = <T1 as crate::scalar::$trait<T2>>::Output;
 
             #[inline(always)]
-            fn apply(&self, a: T1, b: T2, status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
+            fn apply(&self, a: T1, b: T2, status: &mut ArithmeticOpStatus) -> Self::Output {
                 define_op2!(@apply $trait::$kernel_fn(a, b), status, $($with_status)?)
             }
 
@@ -245,7 +245,7 @@ macro_rules! define_op2 {
                 &self,
                 a: [T1; N],
                 b: [T2; N],
-                status: &mut crate::error::ArithmeticOpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [Self::Output; N] {
                 define_op2!(@bulk $trait::$bulk_fn(a, b), status, simd, $($with_status)?)

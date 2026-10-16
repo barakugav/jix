@@ -397,6 +397,7 @@ pub struct ReadContext {
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     buffer_pool: BufferPool,
     arith_error_modes: ArithmeticErrorModes,
+    #[allow(clippy::box_collection)] // reduce the stack size when there are no warnings
     warnings: RefCell<Option<Box<Vec<Error>>>>,
 }
 impl ReadContext {
