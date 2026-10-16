@@ -373,7 +373,8 @@ impl<'a> Decoder<'a> {
 /// record a warning, or ignore it.
 ///
 /// ```
-/// use jix::{Array, ArithError, ArithErrorMode, ErrorKind};
+/// use jix::Array;
+/// use jix::error::{ArithError, ArithErrorMode, ErrorKind};
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![6i32, 7, 8])?;
@@ -486,7 +487,7 @@ impl Default for ReadContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ErrorKind;
+    use crate::error::ErrorKind;
 
     #[test]
     fn level_out_of_i8_range_errors() {

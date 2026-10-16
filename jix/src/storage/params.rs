@@ -1850,7 +1850,7 @@ mod tests {
     fn tune_rejects_zero_itemsize() {
         let mut params = ArrayParams::new();
         let err = params.tune(&[8], &zero_itemsize_dtype()).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+        assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
     }
 
     #[test]
@@ -1859,7 +1859,7 @@ mod tests {
             .into_spec(&[8], &zero_itemsize_dtype(), ArraySpecFlags::default())
             .map(|_| ())
             .unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+        assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
     }
 
     // The leaf storages, through their public entry points.
@@ -1878,7 +1878,7 @@ mod tests {
         };
         assert_eq!(
             result.unwrap_err().kind(),
-            crate::ErrorKind::UnsupportedDtype
+            crate::error::ErrorKind::UnsupportedDtype
         );
     }
 
@@ -1896,7 +1896,7 @@ mod tests {
         };
         assert_eq!(
             result.unwrap_err().kind(),
-            crate::ErrorKind::UnsupportedDtype
+            crate::error::ErrorKind::UnsupportedDtype
         );
     }
 
@@ -1911,7 +1911,7 @@ mod tests {
             );
         assert_eq!(
             result.unwrap_err().kind(),
-            crate::ErrorKind::UnsupportedDtype
+            crate::error::ErrorKind::UnsupportedDtype
         );
     }
 }

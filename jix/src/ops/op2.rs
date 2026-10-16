@@ -1082,7 +1082,8 @@ pub(crate) mod tests {
             paste::paste! {
                 #[test]
                 fn [<div_by_zero_ $t>]() {
-                    use crate::{Array, ArithError, ArithErrorMode, ErrorKind};
+                    use crate::Array;
+                    use crate::error::{ArithError, ArithErrorMode, ErrorKind};
 
                     // Zero divisors in both the bulk part of the loop and its scalar tail.
                     let n = 1000;
@@ -1130,7 +1131,8 @@ pub(crate) mod tests {
 
     #[test]
     fn div_by_zero_strided() {
-        use crate::{ArithError, ArithErrorMode, Array};
+        use crate::error::{ArithError, ArithErrorMode};
+        use crate::Array;
 
         // Transposed operands are read with a non-unit inner stride.
         let nd_a = ndarray::Array2::from_shape_fn((40, 30), |(i, j)| (i * 30 + j) as i32 - 600);
@@ -1165,7 +1167,8 @@ pub(crate) mod tests {
 
     #[test]
     fn div_by_zero_in_fused_chain() {
-        use crate::{Array, ErrorKind};
+        use crate::error::ErrorKind;
+        use crate::Array;
 
         // A fused chain runs as a single pipeline, whichever op runs it reports the error.
         let a = || Array::compact_ndarray(&ndarray::array![6i32, 7, 8]).unwrap();
@@ -1188,8 +1191,8 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_div_status() {
+        use crate::error::{ArithError, OpStatus};
         use crate::scalar::Div;
-        use crate::{ArithError, OpStatus};
 
         let mut status = OpStatus::default();
         assert_eq!(Div::div(7u8, 2, &mut status), 3);
@@ -1210,7 +1213,7 @@ pub(crate) mod tests {
                 <i32 as crate::util::ScalarStrategy>::comparable_strategy()
             )
         ) {
-            use crate::{ArithError, ArithErrorMode, ErrorKind};
+            use crate::error::{ArithError, ArithErrorMode, ErrorKind};
 
             let q = za / zb;
             let index = q.shape().iter().map(|&d| 0..d).collect::<Vec<_>>();

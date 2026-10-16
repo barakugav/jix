@@ -1,4 +1,4 @@
-use jix_core::ErrorKind;
+use jix_core::error::ErrorKind;
 use jix_core::{ops::Broadcast, NDIM_MAX};
 use pyo3::prelude::*;
 

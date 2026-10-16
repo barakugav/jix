@@ -819,7 +819,7 @@ mod tests {
         // dim 0 has size 3; start = 4 is out of [-3, 3].
         let arr = make2d(arange(12), 3, 4);
         let err = try_slice_one_dim(arr, SliceItem::new(Some(4), None, 1)).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidIndex);
     }
 
     #[test]
@@ -827,28 +827,28 @@ mod tests {
         // dim 0 has size 3; start = -4 normalizes to -1 (out of [0, 3]).
         let arr = make2d(arange(12), 3, 4);
         let err = try_slice_one_dim(arr, SliceItem::new(Some(-4), None, 1)).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidIndex);
     }
 
     #[test]
     fn resolve_rejects_end_positive_out_of_range() {
         let arr = make2d(arange(12), 3, 4);
         let err = try_slice_one_dim(arr, SliceItem::new(None, Some(4), 1)).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidIndex);
     }
 
     #[test]
     fn resolve_rejects_end_negative_out_of_range() {
         let arr = make2d(arange(12), 3, 4);
         let err = try_slice_one_dim(arr, SliceItem::new(None, Some(-4), 1)).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidIndex);
     }
 
     #[test]
     fn resolve_rejects_start_greater_than_end() {
         let arr = make2d(arange(12), 3, 4);
         let err = try_slice_one_dim(arr, SliceItem::new(Some(2), Some(1), 1)).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidIndex);
     }
 
     #[test]

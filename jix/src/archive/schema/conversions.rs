@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn from_proto_rejects_malformed_headers() {
-        use crate::ErrorKind;
+        use crate::error::ErrorKind;
 
         let kind = schema::ScalarKind::I32;
         assert!(Dtype::from_proto(&make_scalar_proto(kind, 4, 4, vec![])).is_ok());

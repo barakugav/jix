@@ -1210,7 +1210,7 @@ mod tests {
         assert!(Alignment::new(1 << 16).is_none());
         assert!(Alignment::new(64).is_some());
         let err = Alignment::try_from(3usize).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::InvalidArgument);
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArgument);
     }
 
     #[test]

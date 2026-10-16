@@ -8,7 +8,9 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::ffi::CString;
 
-use jix_core::{ArithError, ArithErrorMode, ReadContext};
+use jix_core::ReadContext;
+
+use jix_core::error::{ArithError, ArithErrorMode};
 use pyo3::exceptions::PyRuntimeWarning;
 use pyo3::prelude::*;
 

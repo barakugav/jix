@@ -121,7 +121,7 @@ pub enum ArithErrorMode {
 ///
 /// ```
 /// use jix::scalar::Div;
-/// use jix::{ArithError, OpStatus};
+/// use jix::error::{ArithError, OpStatus};
 ///
 /// let mut status = OpStatus::default();
 /// assert_eq!(7i32.div(2, &mut status), 3);
@@ -194,7 +194,7 @@ pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
 
 macro_rules! error {
     ($kind:ident, $($arg:tt)*) => {
-        crate::Error::new(crate::ErrorKind::$kind, format!($($arg)*))
+        crate::Error::new(crate::error::ErrorKind::$kind, format!($($arg)*))
     };
 }
 macro_rules! bail {

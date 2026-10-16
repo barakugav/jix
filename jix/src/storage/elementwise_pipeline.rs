@@ -46,8 +46,8 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// `CONTIGUOUS` promises `inner_stride == dtype.itemsize()` for every operand the pipeline
     /// reads, letting the step fold into a compile-time constant.
     ///
-    /// A kernel that hits an [`ArithError`](crate::ArithError) writes its fallback value for the
-    /// element and ORs the error's flag into `status`; it never panics or returns early. Nodes
+    /// A kernel that hits an [`ArithError`](crate::error::ArithError) writes its fallback value for
+    /// the element and ORs the error's flag into `status`; it never panics or returns early. Nodes
     /// pass `status` down to their children as is.
     ///
     /// # Safety

@@ -183,8 +183,8 @@ pub trait ArrayStorage {
     /// re-tagged storage.
     ///
     /// Returns an error if `NewD = Dim<N>` and the runtime ndim does not equal `N`; the
-    /// concrete [`ErrorKind`](crate::ErrorKind) is backend-dependent
-    /// ([`TooManyDimensions`](crate::ErrorKind::TooManyDimensions) for the concrete storage
+    /// concrete [`ErrorKind`](crate::error::ErrorKind) is backend-dependent
+    /// ([`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) for the concrete storage
     /// backends). Always succeeds for `NewD = DimDyn`.
     #[doc(hidden)]
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>>
@@ -202,7 +202,7 @@ pub trait ArrayStorage {
     /// Consume `self`, validate the new element type against the runtime dtype, and return the
     /// re-tagged storage.
     ///
-    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
+    /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
     /// `NewET = Ty<T>` and the runtime dtype does not equal `T::DTYPE`. Always succeeds for
     /// `NewET = TypeDyn`.
     #[doc(hidden)]

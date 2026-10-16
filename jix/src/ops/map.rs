@@ -785,7 +785,7 @@ mod tests {
         let err = Map::new_array(za, |_: i32| -> [i32; 0] { [] })
             .map(|_| ())
             .unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+        assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
     }
 
     #[test]
@@ -797,7 +797,7 @@ mod tests {
         let err = Map2::new_array(a, b, |_: i32, _: i32| -> [i32; 0] { [] })
             .map(|_| ())
             .unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+        assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
     }
 
     #[test]
@@ -809,7 +809,7 @@ mod tests {
         let err = MapMultiple::new((a, b), |_| -> [i32; 0] { [] })
             .map(|_| ())
             .unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+        assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
     }
 
     #[test]
