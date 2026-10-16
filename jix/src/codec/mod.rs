@@ -273,7 +273,7 @@ impl<'a> Decoder<'a> {
             tmp_buf = self
                 .context
                 .allocate_buf(dst.len(), Alignment::new(CACHE_LINE_SIZE).unwrap());
-            let tmp_buf = tmp_buf.as_mut_slice();
+            let tmp_buf = &mut tmp_buf.as_mut_slice()[..dst.len()];
 
             let dst_ptr = dst.as_mut_ptr();
             let dst_buf_odd = self.filters.len().is_multiple_of(2);
@@ -391,6 +391,11 @@ impl ReadContext {
         self.buffer_pool.get(size, alignment)
     }
 }
+const _: fn() = || {
+    fn assert_send<T: Send>() {}
+    assert_send::<ReadContext>();
+};
+
 impl Default for ReadContext {
     fn default() -> Self {
         Self::new(&DecoderParams::default()).unwrap()

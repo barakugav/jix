@@ -122,9 +122,10 @@ where
                 let read_shape =
                     Self::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
                 if out.is_contiguous_aligned(read_shape.as_ref(), &dtype) {
-                    // Fill the whole buffer in one tight loop.
+                    // Fill the region in one tight loop.
+                    let region_len = read_shape.as_ref().iter().product::<usize>() * size_of::<T>();
                     let (out_buf, _) = out.data_mut();
-                    for item in unsafe { cast_slice_mut::<u8, T>(out_buf) } {
+                    for item in unsafe { cast_slice_mut::<u8, T>(&mut out_buf[..region_len]) } {
                         *item = self.data;
                     }
                 } else {
@@ -231,6 +232,37 @@ mod tests {
             shape,
             ArrayParams::default(),
         )?))
+    }
+
+    #[test]
+    fn push_fills_only_the_region() {
+        // A destination whose bytes run past the region (a sub-view of a larger buffer, like the
+        // ones ops hand to inner reads): the bytes after the region must stay untouched.
+        use crate::storage::StridedBuf;
+        use crate::ArrayStorage;
+
+        let a = plain_scalar(5i32, &[3, 4]).unwrap();
+        let mut dst = [-1i32; 12];
+        {
+            let bytes = unsafe { crate::cast_slice_mut::<i32, u8>(&mut dst) };
+            // Rows 1..3 of a 3x4 row-major buffer, starting at row 1.
+            let mut out = unsafe { StridedBuf::from_slice_mut(&mut bytes[16..], &[16, 4]) };
+            a.storage()
+                .read_data(&[0..2, 0..4], &ReadContext::default(), Some(&mut out))
+                .unwrap();
+        }
+        assert_eq!(dst, [-1, -1, -1, -1, 5, 5, 5, 5, 5, 5, 5, 5]);
+
+        let mut dst = [-1i32; 12];
+        {
+            let bytes = unsafe { crate::cast_slice_mut::<i32, u8>(&mut dst) };
+            // Row 0 only, in a destination spanning all three rows.
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &[16, 4]) };
+            a.storage()
+                .read_data(&[0..1, 0..4], &ReadContext::default(), Some(&mut out))
+                .unwrap();
+        }
+        assert_eq!(dst, [5, 5, 5, 5, -1, -1, -1, -1, -1, -1, -1, -1]);
     }
 
     // -----------------------------------------------------------------------

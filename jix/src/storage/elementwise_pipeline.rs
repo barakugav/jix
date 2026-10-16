@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::ptr::NonNull;
 
 use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 use std::cmp::Reverse;
@@ -14,7 +15,7 @@ use crate::util::default_strides_slice;
 use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
 use crate::{
     array_from_fn_inline, const_min, dim_arr, prev_power_of_two, strided_span_bytes, ArrayExt,
-    DimArray, DimBitmap, DimDyn, DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
+    DimArray, DimBitmap, DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn,
 };
 
 /// A lazy pipeline of element-wise operations over a rectangular region.
@@ -461,10 +462,10 @@ fn compute_need_staging(
 /// A temporary buffer used to stage a chunk of an operand data during a pipeline run.
 struct Staging<'a> {
     buf: PoolBuf<'a>,
-    copier: NdCopier<'a>,
+    copier: NdCopier,
 
     // last (src, n, stride) used to fill the buffer
-    filled_with: Option<(*const u8, usize, usize)>,
+    filled_with: Option<(NonNull<u8>, usize, usize)>,
 }
 
 impl<'a> Staging<'a> {
@@ -489,12 +490,13 @@ impl<'a> Staging<'a> {
     unsafe fn fill_from(&mut self, src: *const u8, n: usize, stride: usize, dtype: &Dtype) {
         #[allow(clippy::collapsible_if)]
         if let Some((prev_src, prev_n, prev_stride)) = self.filled_with {
-            if prev_src == src && prev_n >= n && prev_stride == stride {
+            if prev_src.as_ptr().cast_const() == src && prev_n >= n && prev_stride == stride {
                 return;
             }
         }
         let filled_with_n = if stride > 0 { n } else { usize::MAX };
-        self.filled_with = Some((src, filled_with_n, stride));
+        let src_non_null = NonNull::new(src as *mut u8).unwrap();
+        self.filled_with = Some((src_non_null, filled_with_n, stride));
 
         let itemsize = dtype.itemsize() as usize;
         if stride == 0 {
@@ -691,7 +693,7 @@ enum OperandData<'a> {
     Output {
         // we hold here a raw pointer rather than `StridedBuf` due to some Miri restrictions
         base_ptr: *mut u8,
-        strides: DimArray<usize>,
+        strides: &'a [usize],
     },
 }
 
@@ -703,8 +705,11 @@ impl<'a> Operand<'a> {
 
     #[inline(never)]
     pub(crate) fn new_output(out: &'a mut StridedBuf<'_>, dtype: &'a Dtype) -> Self {
-        let strides = out.strides().to_dim_vec::<DimDyn>();
         let base_ptr = out.data_ptr_mut().unwrap();
+        // The data is only reached through `base_ptr` from here on, so the rest of `out` can be
+        // shared, its ok to borrow the strides here.
+        let out: &'a StridedBuf<'_> = out;
+        let strides = out.strides();
         Self::new_impl(OperandData::Output { base_ptr, strides }, dtype)
     }
 
@@ -724,7 +729,7 @@ impl<'a> Operand<'a> {
     fn strides(&self) -> &[usize] {
         match &self.data {
             OperandData::Input(data) => data.strides(),
-            OperandData::Output { strides, .. } => strides.as_ref(),
+            OperandData::Output { strides, .. } => strides,
         }
     }
 

@@ -120,13 +120,13 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_get_range(self.shape(), index)?;
+        check_get_range_ndim(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
         let dst_dtype = self.dtype();
-        let ndim = index.len();
-        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
 
         let tmp = self.array.read_data(index, context, None)?;
+        let ndim = index.len();
+        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
 
         let empty_read = out_shape.as_ref().contains(&0);
         if out.is_none() {
@@ -214,6 +214,22 @@ mod tests {
     struct Pair {
         x: i32,
         y: i32,
+    }
+
+    #[test]
+    fn rejects_invalid_index() {
+        let pts = ndarray::Array2::from_shape_fn((2, 3), |(i, j)| Pair {
+            x: i as i32,
+            y: j as i32,
+        });
+        let compact = Array::compact_ndarray(&pts).unwrap();
+        let plain = Array::plain_ndarray_ref(&pts).unwrap();
+        crate::util::assert_read_rejects_invalid_index(
+            compact.view().dtype_sub_field::<i32>("y").storage(),
+        );
+        crate::util::assert_read_rejects_invalid_index(
+            plain.view().dtype_sub_field::<i32>("x").storage(),
+        );
     }
 
     #[test]

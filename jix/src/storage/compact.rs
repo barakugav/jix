@@ -438,7 +438,7 @@ fn read_data_slow<ActualD: Dimension>(
     let full_buf_len =
         block_shape_u64.as_ref().iter().copied().product::<u64>() as usize * itemsize;
     let mut tmp_buf = context.allocate_buf(full_buf_len, dtype.alignment());
-    let tmp_buf = tmp_buf.as_mut_slice();
+    let tmp_buf = &mut tmp_buf.as_mut_slice()[..full_buf_len];
 
     // Fast path for (unaligned) single-block read
     if let Some(single_block_idx) = single_block_idx {

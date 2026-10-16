@@ -158,7 +158,7 @@ where
         &self,
         index: &[Range<u64>],
     ) -> Result<<S::Dimension as Dimension>::Vec<Range<u64>>> {
-        check_get_range(self.shape(), index)?;
+        check_get_range_ndim(self.shape(), index)?;
 
         let inner_ndim = self.array.shape().len();
         let mut inner_index = S::Dimension::vec(inner_ndim, |_| 0..1);
@@ -268,6 +268,15 @@ mod tests {
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::{Dim, Ty, NDIM_MAX};
+
+    #[test]
+    fn rejects_invalid_index() {
+        let nd = ndarray::Array3::from_shape_fn((3, 1, 4), |(i, _, k)| (i * 10 + k) as i32);
+        let compact = Array::compact_ndarray(&nd).unwrap();
+        let plain = Array::plain_ndarray_ref(&nd).unwrap();
+        crate::util::assert_read_rejects_invalid_index(compact.remove_dim(1).storage());
+        crate::util::assert_read_rejects_invalid_index(plain.remove_dim(1).storage());
+    }
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, Dim<1>>> {
         let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();

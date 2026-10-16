@@ -1364,3 +1364,58 @@ pub(crate) fn assert_same_elements<T: PartialEq + Debug, const N: usize>(
         assert!(same_value(a, &e), "{what}: element {i}: {a:?} != {e:?}");
     }
 }
+
+/// Assert `storage.read_data` rejects an index with the wrong number of dims, a range past the end
+/// of a dim, and a reversed range with [`InvalidIndex`](crate::ErrorKind::InvalidIndex), in both
+/// pull and push mode, rather than panicking or reading.
+#[track_caller]
+pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
+    use crate::storage::StridedBuf;
+    use crate::{ErrorKind, ReadContext};
+
+    let shape = storage.shape().to_vec();
+    let ndim = shape.len();
+    let full = shape.iter().map(|&len| 0..len).collect::<Vec<_>>();
+    let mut invalid = vec![full.iter().cloned().chain([0..1]).collect::<Vec<_>>()];
+    for d in 0..ndim {
+        let mut past_end = full.clone();
+        past_end[d] = 0..shape[d] + 1;
+        invalid.push(past_end);
+        let mut reversed = full.clone();
+        reversed[d] = 1..0;
+        invalid.push(reversed);
+    }
+
+    // A destination large enough for one extra element in every dim, in case a read writes before
+    // it validates.
+    let itemsize = storage.dtype().itemsize() as usize;
+    let dst_shape = shape
+        .iter()
+        .map(|&len| len as usize + 1)
+        .collect::<Vec<_>>();
+    let mut dst_strides = vec![itemsize; ndim];
+    for d in (0..ndim.saturating_sub(1)).rev() {
+        dst_strides[d] = dst_strides[d + 1] * dst_shape[d + 1];
+    }
+    let mut dst = vec![0u8; dst_shape.iter().product::<usize>() * itemsize];
+
+    let ctx = ReadContext::default();
+    for index in invalid {
+        let err = storage.read_data(&index, &ctx, None).err();
+        let err = err.unwrap_or_else(|| panic!("pull read of {index:?} for {shape:?} succeeded"));
+        assert_eq!(
+            err.kind(),
+            ErrorKind::InvalidIndex,
+            "pull {index:?} for {shape:?}: {err}"
+        );
+
+        let mut out = unsafe { StridedBuf::from_slice_mut(&mut dst, &dst_strides) };
+        let err = storage.read_data(&index, &ctx, Some(&mut out)).err();
+        let err = err.unwrap_or_else(|| panic!("push read of {index:?} for {shape:?} succeeded"));
+        assert_eq!(
+            err.kind(),
+            ErrorKind::InvalidIndex,
+            "push {index:?} for {shape:?}: {err}"
+        );
+    }
+}

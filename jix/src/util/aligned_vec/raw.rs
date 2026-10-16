@@ -9,6 +9,11 @@ pub struct RawAlignedBytes {
     pub align: RuntimeAlign,
 }
 
+// SAFETY: `RawAlignedBytes` uniquely owns a plain byte allocation, like `Box<[u8]>`.
+unsafe impl Send for RawAlignedBytes {}
+// SAFETY: as above; shared access only reads through `&self`.
+unsafe impl Sync for RawAlignedBytes {}
+
 impl Drop for RawAlignedBytes {
     #[inline]
     fn drop(&mut self) {
