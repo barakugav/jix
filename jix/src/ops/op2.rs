@@ -10,16 +10,24 @@ pub(crate) struct Op2<S1, S2, K> {
 }
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
+
+    /// The op's name, for the errors of a pipeline the op runs.
+    const NAME: &'static str;
+
     fn apply(&self, a: T1, b: T2) -> Self::Output;
 
+    /// [`apply`](Self::apply) on each pair of `a` and `b`. An [`ArithError`] is not a panic or an
+    /// early return: the kernel writes its fallback value and ORs a flag into `status`, see
+    /// [`ElementwisePipelineImpl::read_bulk`].
     #[inline(always)]
     fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
         &self,
         a: [T1; N],
         b: [T2; N],
         simd: S,
+        status: &mut OpStatus,
     ) -> [Self::Output; N] {
-        let _ = simd;
+        let _ = (simd, status);
         crate::util::array2_map_inline(
             a,
             b,
@@ -105,10 +113,8 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        let out = self
-            .read_as_elementwise_pipeline::<K::Output>(index, context)?
-            .to_buf(index, context, out);
-        Ok(out)
+        self.read_as_elementwise_pipeline::<K::Output>(index, context)?
+            .to_buf(index, context, out, K::NAME)
     }
 
     #[inline]
@@ -157,10 +163,11 @@ where
                 &self,
                 offset: usize,
                 simd: S,
+                status: &mut OpStatus,
             ) -> [T; N] {
-                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, simd) };
-                let b = unsafe { self.b.read_bulk::<N, CONTIGUOUS, S>(offset, simd) };
-                let ys = self.kernel.apply_bulk(a, b, simd);
+                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, simd, status) };
+                let b = unsafe { self.b.read_bulk::<N, CONTIGUOUS, S>(offset, simd, status) };
+                let ys = self.kernel.apply_bulk(a, b, simd, status);
 
                 const { assert!(size_of::<K::Output>() == size_of::<T>()) };
                 // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
@@ -221,6 +228,7 @@ where
     F: Fn(T1, T2) -> O,
 {
     type Output = O;
+    const NAME: &'static str = "Map2";
     #[inline(always)]
     fn apply(&self, a: T1, b: T2) -> Self::Output {
         self(a, b)
@@ -234,6 +242,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         crate::scalar::$trait:ident::$kernel_fn:ident,
         simd: $bulk_fn:ident,
+        $(status_bulk: $status_bulk_fn:ident,)?
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -243,6 +252,8 @@ macro_rules! define_op2 {
             T2: Copy + 'static,
         {
             type Output = <T1 as crate::scalar::$trait<T2>>::Output;
+            const NAME: &'static str = stringify!($Op);
+
             #[inline(always)]
             fn apply(&self, a: T1, b: T2) -> Self::Output {
                 <T1 as crate::scalar::$trait<T2>>::$kernel_fn(a, b)
@@ -254,8 +265,9 @@ macro_rules! define_op2 {
                 a: [T1; N],
                 b: [T2; N],
                 simd: S,
+                status: &mut crate::error::OpStatus,
             ) -> [Self::Output; N] {
-                <T1 as crate::scalar::$trait<T2>>::$bulk_fn(a, b, simd)
+                define_op2!(@bulk $trait, a, b, simd, status, $bulk_fn, $($status_bulk_fn)?)
             }
         }
         $(#[$meta])*
@@ -307,6 +319,17 @@ macro_rules! define_op2 {
         );
     };
 
+    (@bulk $trait:ident, $a:ident, $b:ident, $simd:ident, $status:ident, $bulk_fn:ident,) => {{
+        let _ = $status;
+        <T1 as crate::scalar::$trait<T2>>::$bulk_fn($a, $b, $simd)
+    }};
+    (
+        @bulk $trait:ident, $a:ident, $b:ident, $simd:ident, $status:ident, $bulk_fn:ident,
+        $status_bulk_fn:ident
+    ) => {
+        <T1 as crate::scalar::$trait<T2>>::$status_bulk_fn($a, $b, $simd, $status)
+    };
+
     (
         @define_core
         impl $Op:ident,
@@ -337,6 +360,7 @@ macro_rules! define_op2 {
 pub(crate) use define_op2;
 
 pub(crate) mod _traits {
+    use crate::error::OpStatus;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
@@ -379,14 +403,17 @@ pub(crate) mod _traits {
     define_scalar_op2_trait!(
         /// Division operation, like [`core::ops::Div`].
         ///
-        /// For **integer** types the result is truncating (rounds towards zero); dividing
-        /// by zero panics in both debug and release builds.
+        /// For **integer** types the result is truncating (rounds towards zero), and
+        /// `MIN / -1` wraps to `MIN`. Dividing by zero panics in both debug and release builds
+        /// here, at the scalar level; the array op [`crate::ops::Div`] gives `0` and reports an
+        /// [`ArithError::DivideByZero`](crate::ArithError::DivideByZero) instead.
         /// For **float** types semantics follow `f32::div`.
         /// For **complex** types this is full complex division.
         Div,
         /// Divide by another value.
         div,
         bulk_fn: div_bulk,
+        status_bulk_fn: div_bulk_status,
     );
 
     macro_rules! impl_arith {
@@ -446,9 +473,63 @@ pub(crate) mod _traits {
         simd: mul_bulk, [f32, f64, i16, i32, i64, u8, u16, u32, u64]
     );
     impl_arith!(
-        Div::div, /, [i8, i16, i32, i64, u8, u16, u32, u64], // integers have no SIMD division
+        Div::div, /, [],
         simd: div_bulk, [f32, f64]
     );
+
+    /// The zero-divisor path of the integer division kernels: flags the error and gives `0`.
+    ///
+    /// Out of line on purpose. Besides keeping the rare path out of the loop, the opaque call
+    /// keeps LLVM from if-converting the loop to vector code: integer division has no SIMD
+    /// instruction, so it would scalarize each division with lane extracts and inserts and a
+    /// branch per lane, which measured up to 2x slower (`i16`) than this scalar loop. It must
+    /// have a side effect, the flag, or LLVM folds the call away.
+    #[cold]
+    #[inline(never)]
+    fn zero_divisor<T: Default>(div_by_zero: &mut bool) -> T {
+        *div_by_zero = true;
+        T::default()
+    }
+
+    // Integers have no SIMD division.
+    macro_rules! impl_int_div {
+        ($($t:ty),*) => {$(
+            impl Div for $t {
+                type Output = Self;
+                #[inline(always)]
+                fn div(self, rhs: Self) -> Self {
+                    self / rhs
+                }
+
+                #[inline(always)]
+                #[allow(private_interfaces)]
+                fn div_bulk_status<const N: usize, S: fearless_simd::Simd>(
+                    xs: [Self; N],
+                    ys: [Self; N],
+                    _simd: S,
+                    status: &mut OpStatus,
+                ) -> [Self; N] {
+                    let mut div_by_zero = false;
+                    let out = crate::util::array2_map_inline(
+                        xs,
+                        ys,
+                        #[inline(always)]
+                        |_, x, y| {
+                            if y == 0 {
+                                zero_divisor(&mut div_by_zero)
+                            } else {
+                                // `MIN / -1` wraps to `MIN`, like the other integer ops.
+                                x.wrapping_div(y)
+                            }
+                        },
+                    );
+                    status.set_if(OpStatus::DIVIDE_BY_ZERO, div_by_zero);
+                    out
+                }
+            }
+        )*};
+    }
+    impl_int_div!(i8, i16, i32, i64, u8, u16, u32, u64);
 
     define_scalar_op2_trait!(
         /// Exponentiation operation: as [`i32::pow`] for integers (unsigned exponents),
@@ -590,6 +671,7 @@ define_op2!(
     DivKernel,
     crate::scalar::Div::div,
     simd: div_bulk,
+    status_bulk: div_bulk_status,
     core_op: core::ops::Div::div,
 );
 define_op2!(
@@ -647,7 +729,11 @@ pub(crate) mod tests {
                 ($kernel:ident, $t:ty, $f:expr) => {
                     let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
                     let what = concat!(stringify!($kernel), " ", stringify!($t));
-                    assert_same_elements($kernel.apply_bulk(a, b, simd), |i| $f(a[i], b[i]), what);
+                    assert_same_elements(
+                        $kernel.apply_bulk(a, b, simd, &mut Default::default()),
+                        |i| $f(a[i], b[i]),
+                        what,
+                    );
                 };
             }
             macro_rules! ints {
@@ -681,7 +767,10 @@ pub(crate) mod tests {
                 case!(DivKernel, f32, |x, y| x / y);
                 case!(DivKernel, f64, |x, y| x / y);
                 // Not a multiple of the vector length: scalar.
-                assert_eq!(AddKernel.apply_bulk([1.5f32], [2.0], simd), [3.5]);
+                assert_eq!(
+                    AddKernel.apply_bulk([1.5f32], [2.0], simd, &mut Default::default()),
+                    [3.5]
+                );
             });
         }
         for_each_simd_level!(check);
@@ -933,6 +1022,146 @@ pub(crate) mod tests {
             let result = (za + zb) * zc;
             let expected = (&nd_a + &nd_b) * &nd_c;
             crate::util::assert_array_matches(&result, &expected);
+        }
+    }
+
+    // Integer division by zero gives `0` for the element and reports `ArithError::DivideByZero`
+    // to the read context, which raises it by default.
+    macro_rules! test_div_by_zero {
+        ($($t:ident),*) => {$(
+            paste::paste! {
+                #[test]
+                fn [<div_by_zero_ $t>]() {
+                    use crate::{Array, ArithError, ArithErrorMode, ErrorKind};
+
+                    // Zero divisors in both the bulk part of the loop and its scalar tail.
+                    let n = 1000;
+                    let nd_a = ndarray::Array1::from_shape_fn(n, |i| (i % 100) as $t);
+                    let mut nd_b = ndarray::Array1::from_shape_fn(n, |i| (i % 7 + 1) as $t);
+                    nd_b[300] = 0;
+                    nd_b[n - 1] = 0;
+                    let expected = ndarray::Zip::from(&nd_a)
+                        .and(&nd_b)
+                        .map_collect(|&x, &y| if y == 0 { 0 } else { x / y });
+                    let q = Array::compact_ndarray(&nd_a).unwrap()
+                        / Array::compact_ndarray(&nd_b).unwrap();
+                    let full = [0..n as u64];
+
+                    // Raise, the default: the read fails.
+                    let err = q.to_ndarray().unwrap_err();
+                    assert_eq!(err.kind(), ErrorKind::Arithmetic);
+                    assert_eq!(err.message(), "divide by zero encountered in Div");
+                    // Only the elements read count.
+                    let ctx = q.read_ctx();
+                    let head = q.to_ndarray_sub(&[0..300], &ctx).unwrap();
+                    assert_eq!(head, expected.slice(ndarray::s![0..300]));
+
+                    // Warn: the value, and a single warning however many elements and reads hit it.
+                    let mut ctx = q.read_ctx();
+                    ctx.set_arith_error_mode(ArithError::DivideByZero, ArithErrorMode::Warn);
+                    for _ in 0..2 {
+                        assert_eq!(q.to_ndarray_sub(&full, &ctx).unwrap(), expected);
+                    }
+                    let warnings = ctx.take_warnings();
+                    assert_eq!(warnings.len(), 1);
+                    assert_eq!(warnings[0].kind(), ErrorKind::Arithmetic);
+                    assert_eq!(warnings[0].message(), "divide by zero encountered in Div");
+                    assert!(ctx.take_warnings().is_empty());
+
+                    // Ignore: just the value.
+                    ctx.set_arith_error_mode(ArithError::DivideByZero, ArithErrorMode::Ignore);
+                    assert_eq!(q.to_ndarray_sub(&full, &ctx).unwrap(), expected);
+                    assert!(ctx.take_warnings().is_empty());
+                }
+            }
+        )*};
+    }
+    test_div_by_zero!(i8, i16, i32, i64, u8, u16, u32, u64);
+
+    #[test]
+    fn div_by_zero_strided() {
+        use crate::{ArithError, ArithErrorMode, Array};
+
+        // Transposed operands are read with a non-unit inner stride.
+        let nd_a = ndarray::Array2::from_shape_fn((40, 30), |(i, j)| (i * 30 + j) as i32 - 600);
+        let nd_b = ndarray::Array2::from_shape_fn((40, 30), |(i, j)| ((i + j) % 5) as i32 - 2);
+        let za = Array::compact_ndarray_with(&nd_a, crate::util::arr_params(&[8, 8])).unwrap();
+        let zb = Array::compact_ndarray_with(&nd_b, crate::util::arr_params(&[8, 8])).unwrap();
+        let q = za.transpose() / zb.transpose();
+        assert!(q.to_ndarray().is_err());
+
+        let mut ctx = q.read_ctx();
+        ctx.set_arith_error_mode(ArithError::DivideByZero, ArithErrorMode::Ignore);
+        let expected = ndarray::Zip::from(&nd_a.t())
+            .and(&nd_b.t())
+            .map_collect(|&x, &y| if y == 0 { 0 } else { x / y });
+        assert_eq!(q.to_ndarray_sub(&[0..30, 0..40], &ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn div_min_by_minus_one_wraps() {
+        use crate::Array;
+
+        macro_rules! check {
+            ($($t:ident),*) => {$(
+                let a = Array::compact_ndarray(&ndarray::array![$t::MIN, 7, $t::MAX]).unwrap();
+                let b = Array::compact_ndarray(&ndarray::array![-1 as $t, -1, -1]).unwrap();
+                let q = (a / b).to_ndarray().unwrap();
+                assert_eq!(q, ndarray::array![$t::MIN, -7, -$t::MAX], stringify!($t));
+            )*};
+        }
+        check!(i8, i16, i32, i64);
+    }
+
+    #[test]
+    fn div_by_zero_reported_by_outer_op() {
+        use crate::{Array, ErrorKind};
+
+        // A fused chain runs as a single pipeline; the op that runs it reports the error.
+        let a = || Array::compact_ndarray(&ndarray::array![6i32, 7, 8]).unwrap();
+        let b = || Array::compact_ndarray(&ndarray::array![2i32, 0, 4]).unwrap();
+        let err = (-(a() / b())).to_ndarray().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Arithmetic);
+        assert_eq!(err.message(), "divide by zero encountered in Neg");
+        let err = (a() / b()).cast::<f64>().to_ndarray().unwrap_err();
+        assert_eq!(err.message(), "divide by zero encountered in Cast");
+        let err = ((a() / b()) + a()).to_ndarray().unwrap_err();
+        assert_eq!(err.message(), "divide by zero encountered in Add");
+
+        // Float division by zero is IEEE: no error.
+        let fa = Array::compact_ndarray(&ndarray::array![1.0f32, 0.0]).unwrap();
+        let fb = Array::compact_ndarray(&ndarray::array![0.0f32, 0.0]).unwrap();
+        let q = (fa / fb).to_ndarray().unwrap();
+        assert!(q[0].is_infinite() && q[1].is_nan());
+    }
+
+    // Random shapes, storage backends and layouts, with zero divisors in about a third of the
+    // elements: an error iff some divisor is zero, and with errors ignored, the reference values.
+    proptest::proptest! {
+        #[test]
+        fn div_by_zero_random(
+            ((nd_a, za), (nd_b, zb)) in crate::util::arrays2_strategy_generic::<i32>(
+                crate::util::shape_strategy(),
+                <i32 as crate::util::ScalarStrategy>::comparable_strategy()
+            )
+        ) {
+            use crate::{ArithError, ArithErrorMode, ErrorKind};
+
+            let q = za / zb;
+            let index = q.shape().iter().map(|&d| 0..d).collect::<Vec<_>>();
+            let has_zero = nd_b.iter().any(|&y| y == 0);
+            let res = q.to_ndarray_sub(&index, &q.read_ctx());
+            proptest::prop_assert_eq!(res.is_err(), has_zero);
+            if let Err(err) = res {
+                proptest::prop_assert_eq!(err.kind(), ErrorKind::Arithmetic);
+            }
+
+            let mut ctx = q.read_ctx();
+            ctx.set_arith_error_mode(ArithError::DivideByZero, ArithErrorMode::Ignore);
+            let expected = ndarray::Zip::from(&nd_a)
+                .and(&nd_b)
+                .map_collect(|&x, &y| if y == 0 { 0 } else { x / y });
+            proptest::prop_assert_eq!(q.to_ndarray_sub(&index, &ctx).unwrap(), expected);
         }
     }
 }

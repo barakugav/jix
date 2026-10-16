@@ -408,7 +408,7 @@ mod util;
 pub use util::*;
 
 mod error;
-pub use error::{Error, ErrorKind};
+pub use error::{ArithError, ArithErrorMode, Error, ErrorKind};
 
 /// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn ArrayStorage>`.
 ///

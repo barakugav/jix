@@ -196,7 +196,11 @@ mod tests {
                 ($kernel:ident, $t:ty, $f:expr) => {
                     let xs = <$t>::simd_test_values(0);
                     let what = concat!(stringify!($kernel), " ", stringify!($t));
-                    assert_same_elements($kernel.apply_bulk(xs, simd), |i| $f(xs[i]), what);
+                    assert_same_elements(
+                        $kernel.apply_bulk(xs, simd, &mut Default::default()),
+                        |i| $f(xs[i]),
+                        what,
+                    );
                 };
             }
             simd.vectorize(|| {

@@ -171,6 +171,7 @@ where
                 &self,
                 _offset: usize,
                 _simd: S,
+                _status: &mut crate::error::OpStatus,
             ) -> [T; N] {
                 [self.0; N]
             }

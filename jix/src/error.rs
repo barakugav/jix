@@ -71,6 +71,91 @@ pub enum ErrorKind {
     InvalidArchive,
     /// Compression/decompression failure, or invalid compression params/metadata
     CodecError,
+    /// An element-wise operation hit an [`ArithError`] (e.g. an integer division by zero) while
+    /// computing the read region, and the read context's mode for it is
+    /// [`Raise`](ArithErrorMode::Raise).
+    Arithmetic,
+}
+
+/// An arithmetic error an element-wise operation can hit while computing its output.
+///
+/// The operation always produces a value - documented per variant - and reports the error to the
+/// [`ReadContext`](crate::ReadContext) of the read, whose [`ArithErrorMode`] for it decides whether
+/// the read fails, records a warning, or silently keeps the value. See
+/// [`ReadContext::set_arith_error_mode`](crate::ReadContext::set_arith_error_mode).
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum ArithError {
+    /// Integer division by zero. The element is `0`.
+    DivideByZero,
+}
+impl ArithError {
+    pub(crate) const ALL: [Self; 1] = [Self::DivideByZero];
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::DivideByZero => "divide by zero",
+        }
+    }
+}
+
+/// How a read reacts to an [`ArithError`], see
+/// [`ReadContext::set_arith_error_mode`](crate::ReadContext::set_arith_error_mode).
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ArithErrorMode {
+    /// Keep the value the operation produced for the element and carry on.
+    Ignore,
+    /// Keep the value and record a warning, collected with
+    /// [`ReadContext::take_warnings`](crate::ReadContext::take_warnings).
+    Warn,
+    /// Fail the read with an [`ErrorKind::Arithmetic`] error.
+    Raise,
+}
+
+/// The [`ArithError`]s an element-wise kernel hit, one bit per error.
+///
+/// A `&mut OpStatus` is threaded through the pipeline's
+/// [`read_bulk`](crate::storage::ElementwisePipelineImpl::read_bulk) calls: a kernel never panics
+/// or returns early, it writes its fallback value and ORs a flag in. The op running the loop checks
+/// the status once it is done, see [`crate::ReadContext::check_op_status`].
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct OpStatus(u8);
+impl OpStatus {
+    pub(crate) const DIVIDE_BY_ZERO: Self = Self::flag(ArithError::DivideByZero);
+
+    const fn flag(error: ArithError) -> Self {
+        Self(1 << error as u8)
+    }
+
+    /// OR `flag` in if `cond` holds, without branching.
+    #[inline(always)]
+    pub(crate) fn set_if(&mut self, flag: Self, cond: bool) {
+        self.0 |= flag.0 * cond as u8;
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_ok(self) -> bool {
+        self.0 == 0
+    }
+
+    pub(crate) fn errors(self) -> impl Iterator<Item = ArithError> {
+        ArithError::ALL
+            .into_iter()
+            .filter(move |&e| self.0 & Self::flag(e).0 != 0)
+    }
+}
+impl std::ops::BitOrAssign for OpStatus {
+    #[inline(always)]
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+pub(crate) fn arith_error(error: ArithError, op_name: &str) -> Error {
+    Error::new(
+        ErrorKind::Arithmetic,
+        format!("{} encountered in {op_name}", error.description()),
+    )
 }
 
 impl fmt::Debug for Error {

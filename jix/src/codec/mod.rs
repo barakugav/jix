@@ -6,11 +6,12 @@
 mod filter;
 pub use filter::*;
 
-use std::cell::UnsafeCell;
+use std::cell::{RefCell, UnsafeCell};
 use std::marker::PhantomData;
 
 use crate::buf_pool::{BufferPool, PoolBuf};
 use crate::dtype::{Alignment, Dtype};
+use crate::error::{arith_error, ArithError, ArithErrorMode, Error, OpStatus};
 #[allow(unused_imports)]
 use crate::error::{ensure, error, Result};
 use crate::util::arrayvec::ArrayVec;
@@ -363,10 +364,38 @@ impl<'a> Decoder<'a> {
 ///
 /// A single `ReadContext` can be passed to multiple successive reads. Reusing it avoids
 /// reinitializing the decompressor and keeps the scratch buffer allocations warm:
+///
+/// # Arithmetic errors
+///
+/// An element-wise operation that hits an [`ArithError`] - an integer division by zero, say -
+/// writes a fallback value for the element and reports the error to the context of the read,
+/// which reacts according to its [`ArithErrorMode`] for it: fail the read (the default),
+/// record a warning, or ignore it.
+///
+/// ```
+/// use jix::{Array, ArithError, ArithErrorMode, ErrorKind};
+/// use ndarray::array;
+///
+/// let a = Array::compact_ndarray(&array![6i32, 7, 8])?;
+/// let b = Array::compact_ndarray(&array![2i32, 0, 4])?;
+/// let q = a / b;
+///
+/// let err = q.to_ndarray().unwrap_err();
+/// assert_eq!(err.kind(), ErrorKind::Arithmetic);
+///
+/// let mut ctx = q.read_ctx();
+/// ctx.set_arith_error_mode(ArithError::DivideByZero, ArithErrorMode::Warn);
+/// let out = q.to_ndarray_sub(&[0..3], &ctx)?;
+/// assert_eq!(out.as_slice().unwrap(), &[3, 0, 2]);
+/// assert_eq!(ctx.take_warnings().len(), 1);
+/// # Ok::<(), jix::Error>(())
+/// ```
 pub struct ReadContext {
     #[cfg(not(miri))]
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     buffer_pool: BufferPool,
+    arith_error_modes: [ArithErrorMode; ArithError::ALL.len()],
+    warnings: RefCell<Vec<Error>>,
 }
 impl ReadContext {
     /// Creates a new `ReadContext` configured with the given decoder parameters.
@@ -378,7 +407,66 @@ impl ReadContext {
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
             buffer_pool: BufferPool::new(),
+            arith_error_modes: [ArithErrorMode::Raise; ArithError::ALL.len()],
+            warnings: RefCell::new(Vec::new()),
         })
+    }
+
+    /// Sets how reads with this context react to `error`. The default is
+    /// [`Raise`](ArithErrorMode::Raise) for every [`ArithError`].
+    ///
+    /// See [Arithmetic errors](Self#arithmetic-errors).
+    pub fn set_arith_error_mode(&mut self, error: ArithError, mode: ArithErrorMode) {
+        self.arith_error_modes[error as usize] = mode;
+    }
+
+    /// How reads with this context react to `error`, see
+    /// [`set_arith_error_mode`](Self::set_arith_error_mode).
+    pub fn arith_error_mode(&self, error: ArithError) -> ArithErrorMode {
+        self.arith_error_modes[error as usize]
+    }
+
+    /// Takes the warnings recorded by reads with this context, for the [`ArithError`]s whose mode
+    /// is [`Warn`](ArithErrorMode::Warn). Each distinct warning is recorded once until taken, no
+    /// matter how many elements or reads hit it.
+    pub fn take_warnings(&self) -> Vec<Error> {
+        self.warnings.take()
+    }
+
+    /// Reacts to the errors an op's kernels reported while computing a region, once per region:
+    /// warns or fails per the configured modes. `op_name` names the op in the message.
+    #[inline]
+    pub(crate) fn check_op_status(&self, status: OpStatus, op_name: &'static str) -> Result<()> {
+        if status.is_ok() {
+            return Ok(());
+        }
+
+        #[cold]
+        #[inline(never)]
+        fn check_op_status_fail(
+            ctx: &ReadContext,
+            status: OpStatus,
+            op_name: &'static str,
+        ) -> Result<()> {
+            let mut raised = None;
+            for error in status.errors() {
+                match ctx.arith_error_mode(error) {
+                    ArithErrorMode::Ignore => {}
+                    ArithErrorMode::Warn => {
+                        let warning = arith_error(error, op_name);
+                        let mut warnings = ctx.warnings.borrow_mut();
+                        if !warnings.iter().any(|w| w.message() == warning.message()) {
+                            warnings.push(warning);
+                        }
+                    }
+                    ArithErrorMode::Raise => {
+                        raised.get_or_insert_with(|| arith_error(error, op_name));
+                    }
+                }
+            }
+            raised.map_or(Ok(()), Err)
+        }
+        check_op_status_fail(self, status, op_name)
     }
 
     #[inline]

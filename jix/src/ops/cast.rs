@@ -402,6 +402,8 @@ where
     T1: crate::scalar::Cast<T2>,
 {
     type Output = T2;
+    const NAME: &'static str = "Cast";
+
     #[inline(always)]
     fn apply(&self, x: T1) -> Self::Output {
         x.cast()
@@ -412,6 +414,7 @@ where
         &self,
         xs: [T1; N],
         simd: S,
+        _status: &mut crate::error::OpStatus,
     ) -> [Self::Output; N] {
         T1::cast_bulk(xs, simd)
     }

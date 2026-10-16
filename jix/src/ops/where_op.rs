@@ -394,11 +394,14 @@ where
                 &self,
                 offset: usize,
                 simd: S,
+                status: &mut OpStatus,
             ) -> [T; N] {
-                let condition =
-                    unsafe { self.condition.read_bulk::<N, CONTIGUOUS, _>(offset, simd) };
-                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS, _>(offset, simd) };
-                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS, _>(offset, simd) };
+                let condition = unsafe {
+                    self.condition
+                        .read_bulk::<N, CONTIGUOUS, _>(offset, simd, status)
+                };
+                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS, _>(offset, simd, status) };
+                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS, _>(offset, simd, status) };
                 array_from_fn_inline(|i| if condition[i] { x[i] } else { y[i] })
             }
         }

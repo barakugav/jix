@@ -317,10 +317,8 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        let out = self
-            .read_as_elementwise_pipeline::<O>(index, context)?
-            .to_buf(index, context, out);
-        Ok(out)
+        self.read_as_elementwise_pipeline::<O>(index, context)?
+            .to_buf(index, context, out, "MapMultiple")
     }
 
     #[inline]
@@ -361,12 +359,13 @@ where
                 &self,
                 offset: usize,
                 simd: S,
+                status: &mut OpStatus,
             ) -> [T; N] {
                 // The iterator is consumed here and dropped before the next call, as
                 // `read_bulk_as_iter` requires.
                 let mut items = unsafe {
                     self.inner
-                        .read_bulk_as_iter::<N, CONTIGUOUS, _>(offset, simd)
+                        .read_bulk_as_iter::<N, CONTIGUOUS, _>(offset, simd, status)
                 };
                 array_from_fn_inline(|_| {
                     let x = (self.f)(items.next().unwrap());

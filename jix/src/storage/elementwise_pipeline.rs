@@ -9,6 +9,7 @@ use std::ops::Range;
 use crate::buf_pool::PoolBuf;
 use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
+use crate::error::{OpStatus, Result};
 use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
@@ -45,6 +46,10 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// `CONTIGUOUS` promises `inner_stride == dtype.itemsize()` for every operand the pipeline
     /// reads, letting the step fold into a compile-time constant.
     ///
+    /// A kernel that hits an [`ArithError`](crate::ArithError) writes its fallback value for the
+    /// element and ORs the error's flag into `status`; it never panics or returns early. Nodes
+    /// pass `status` down to their children as is.
+    ///
     /// # Safety
     ///
     /// Every operand's `current_ptr` must be aligned for its dtype when [`REQUIRE_ALIGNED`] is
@@ -54,14 +59,20 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         &self,
         offset: usize,
         simd: S,
+        status: &mut OpStatus,
     ) -> [T; N];
 
+    /// Compute the pipeline over `index` into `out` (or a pooled buffer).
+    ///
+    /// The errors the kernels report are checked once the whole region is computed, against the
+    /// modes of `context`; an error is attributed to `op_name`, the op running the pipeline.
     fn to_buf<'b>(
         &mut self,
         index: &[Range<u64>],
         context: &'b ReadContext,
         out: Option<&'b mut StridedBuf<'_>>,
-    ) -> StridedBuf<'b>
+        op_name: &'static str,
+    ) -> Result<StridedBuf<'b>>
     where
         T: Dtyped,
         Self: Sized,
@@ -77,7 +88,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         let to_buf_fn = const {
             #[allow(clippy::type_complexity)]
             let mut to_buf_fn: Option<
-                fn(&Self, &[Range<u64>], &mut StridedBuf<'_>, &ReadContext),
+                fn(&Self, &[Range<u64>], &mut StridedBuf<'_>, &ReadContext, &mut OpStatus),
             > = None;
 
             if let Some(n_operands) = Self::N_OPERANDS {
@@ -109,9 +120,11 @@ pub(crate) trait ElementwisePipelineImpl<T> {
             }
         };
 
-        to_buf_fn(self, index, &mut out, context);
+        let mut status = OpStatus::default();
+        to_buf_fn(self, index, &mut out, context, &mut status);
+        context.check_op_status(status, op_name)?;
 
-        out
+        Ok(out)
     }
 }
 impl<P, T> ElementwisePipeline<T> for P where P: ElementwisePipelineImpl<T> {}
@@ -121,6 +134,7 @@ fn to_buf_impl<T, const N_OPERANDS: usize>(
     index: &[Range<u64>],
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
+    status: &mut OpStatus,
 ) where
     T: Dtyped,
 {
@@ -132,16 +146,22 @@ fn to_buf_impl<T, const N_OPERANDS: usize>(
         operands
     };
 
-    to_buf_type_erased(operands, index, context, &|dst, dst_stride, len, flags| {
-        let dst = dst.cast();
-        let inner_loop_fn = match (flags.inputs_contiguous, flags.output_contiguous) {
-            (true, true) => inner_loop::<_, _, true, true>,
-            (true, false) => inner_loop::<_, _, true, false>,
-            (false, true) => inner_loop::<_, _, false, true>,
-            (false, false) => inner_loop::<_, _, false, false>,
-        };
-        inner_loop_fn(pipeline, dst, dst_stride, len)
-    });
+    to_buf_type_erased(
+        operands,
+        index,
+        context,
+        status,
+        &|dst, dst_stride, len, flags, status| {
+            let dst = dst.cast();
+            let inner_loop_fn = match (flags.inputs_contiguous, flags.output_contiguous) {
+                (true, true) => inner_loop::<_, _, true, true>,
+                (true, false) => inner_loop::<_, _, true, false>,
+                (false, true) => inner_loop::<_, _, false, true>,
+                (false, false) => inner_loop::<_, _, false, false>,
+            };
+            inner_loop_fn(pipeline, dst, dst_stride, len, status)
+        },
+    );
 }
 
 // like `to_buf_impl`, but the number of operands is not known at compile time.
@@ -150,6 +170,7 @@ fn to_buf_impl_dyn<T>(
     index: &[Range<u64>],
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
+    status: &mut OpStatus,
 ) where
     T: Dtyped,
 {
@@ -158,16 +179,22 @@ fn to_buf_impl_dyn<T>(
         .chain(pipeline.operands())
         .collect::<Vec<_>>();
 
-    to_buf_type_erased_dyn(&operands, index, context, &|dst, dst_stride, len, flags| {
-        let dst = dst.cast();
-        let inner_loop_fn = match (flags.inputs_contiguous, flags.output_contiguous) {
-            (true, true) => inner_loop::<_, _, true, true>,
-            (true, false) => inner_loop::<_, _, true, false>,
-            (false, true) => inner_loop::<_, _, false, true>,
-            (false, false) => inner_loop::<_, _, false, false>,
-        };
-        inner_loop_fn(pipeline, dst, dst_stride, len);
-    });
+    to_buf_type_erased_dyn(
+        &operands,
+        index,
+        context,
+        status,
+        &|dst, dst_stride, len, flags, status| {
+            let dst = dst.cast();
+            let inner_loop_fn = match (flags.inputs_contiguous, flags.output_contiguous) {
+                (true, true) => inner_loop::<_, _, true, true>,
+                (true, false) => inner_loop::<_, _, true, false>,
+                (false, true) => inner_loop::<_, _, false, true>,
+                (false, false) => inner_loop::<_, _, false, false>,
+            };
+            inner_loop_fn(pipeline, dst, dst_stride, len, status);
+        },
+    );
 }
 
 #[inline(never)]
@@ -175,6 +202,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
     operands: [&Operand<'_>; N_OPERANDS],
     index: &[Range<u64>],
     context: &ReadContext,
+    status: &mut OpStatus,
     inner_loop: &InnerLoop<'_>,
 ) {
     let strides = operands.map_inline_ref(|operand| operand.strides());
@@ -263,7 +291,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            inner_loop(dst, dst_stride, chunk_len, inner_loop_flags);
+            inner_loop(dst, dst_stride, chunk_len, inner_loop_flags, status);
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -287,6 +315,7 @@ fn to_buf_type_erased_dyn(
     operands: &[&Operand<'_>],
     index: &[Range<u64>],
     context: &ReadContext,
+    status: &mut OpStatus,
     inner_loop: &InnerLoop<'_>,
 ) {
     let strides = operands
@@ -385,7 +414,7 @@ fn to_buf_type_erased_dyn(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            inner_loop(dst, dst_stride, chunk_len, inner_loop_flags);
+            inner_loop(dst, dst_stride, chunk_len, inner_loop_flags, status);
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -561,6 +590,7 @@ fn inner_loop_impl<
     dst_stride: usize,
     len: usize,
     simd: S,
+    status: &mut OpStatus,
 ) where
     T: Dtyped,
 {
@@ -570,10 +600,15 @@ fn inner_loop_impl<
         debug_assert!(dst.is_aligned());
     }
 
+    // The kernels OR into a local rather than into `status`: its address never escapes the
+    // inlined loop, so the flags stay in a register instead of going to memory every iteration.
+    let mut loop_status = OpStatus::default();
+
     let body_limit = len - len % LANES;
     let mut i = 0;
     while i < body_limit {
-        let chunk = unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS, _>(i, simd) };
+        let chunk =
+            unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS, _>(i, simd, &mut loop_status) };
         if OUT_CONTIGUOUS {
             unsafe {
                 dst.add(i)
@@ -592,7 +627,7 @@ fn inner_loop_impl<
         i += LANES;
     }
     while i < len {
-        let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS, _>(i, simd) };
+        let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS, _>(i, simd, &mut loop_status) };
         if OUT_CONTIGUOUS {
             unsafe { dst.add(i).write_maybe_aligned::<REQUIRE_ALIGNED>(val) };
         } else {
@@ -603,6 +638,7 @@ fn inner_loop_impl<
         }
         i += 1;
     }
+    *status |= loop_status;
 }
 
 #[inline(never)]
@@ -611,14 +647,15 @@ fn inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
     dst: PtrMutNoalias<T>,
     dst_stride: usize,
     len: usize,
+    status: &mut OpStatus,
 ) where
     T: Dtyped,
     P: ElementwisePipelineImpl<T>,
 {
     if const { IN_CONTIGUOUS && OUT_CONTIGUOUS } {
-        fearless_simd::dispatch!(SimdLevel::new(), simd => inner_loop_per_level::<_, _, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(pipeline, dst, dst_stride, len, simd));
+        fearless_simd::dispatch!(SimdLevel::new(), simd => inner_loop_per_level::<_, _, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(pipeline, dst, dst_stride, len, simd, status));
     } else {
-        crate::scalar::simd::dispatch_baseline!(simd => inner_loop_per_level::<_, _, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(pipeline, dst, dst_stride, len, simd));
+        crate::scalar::simd::dispatch_baseline!(simd => inner_loop_per_level::<_, _, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(pipeline, dst, dst_stride, len, simd, status));
     }
 }
 
@@ -635,6 +672,7 @@ fn inner_loop_per_level<
     dst_stride: usize,
     len: usize,
     simd: S,
+    status: &mut OpStatus,
 ) {
     let lanes = const {
         let lanes = if IN_CONTIGUOUS && OUT_CONTIGUOUS {
@@ -657,6 +695,7 @@ fn inner_loop_per_level<
                     dst_stride,
                     len,
                     simd,
+                    status,
                 ),)*
                 _ => unreachable!(),
             }
@@ -670,7 +709,8 @@ struct InnerLoopFlags {
     inputs_contiguous: bool,
     output_contiguous: bool,
 }
-type InnerLoop<'a> = dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, InnerLoopFlags) + 'a;
+type InnerLoop<'a> =
+    dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, InnerLoopFlags, &mut OpStatus) + 'a;
 
 /// One region a pipeline reads - or writes - plus the cursor it is walked through.
 ///
@@ -783,6 +823,7 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
         &self,
         offset: usize,
         _simd: S,
+        _status: &mut OpStatus,
     ) -> [T; N] {
         let base = self.operand.current_ptr.get().cast::<T>();
         debug_assert!(!base.is_null());
@@ -1093,9 +1134,10 @@ mod tests {
                 &self,
                 offset: usize,
                 simd: S,
+                status: &mut OpStatus,
             ) -> [T; N] {
-                let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS, _>(offset, simd) };
-                let rhs = unsafe { self.rhs.read_bulk::<N, CONTIGUOUS, _>(offset, simd) };
+                let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS, _>(offset, simd, status) };
+                let rhs = unsafe { self.rhs.read_bulk::<N, CONTIGUOUS, _>(offset, simd, status) };
                 array_from_fn_inline(|i| lhs[i] + rhs[i])
             }
         }
@@ -1109,14 +1151,15 @@ mod tests {
                 let mut out = unsafe {
                     StridedBuf::from_raw_parts_mut(dst.ptr_mut(), shape, &strides[0], itemsize)
                 };
-                node.to_buf(&index, &context, Some(&mut out));
+                node.to_buf(&index, &context, Some(&mut out), "AddNode")
+                    .unwrap();
             }
             let got = (0..nitems)
                 .map(|k| dst.get::<T>(offs[0][k]))
                 .collect::<Vec<T>>();
             assert_eq!(got, expected, "shape={shape:?} strides={strides:?}");
         } else {
-            let buf = node.to_buf(&index, &context, None);
+            let buf = node.to_buf(&index, &context, None, "AddNode").unwrap();
             // The buffer picks its own layout, so walk it by its own strides.
             let got = offsets(shape, buf.strides())
                 .into_iter()
@@ -1468,7 +1511,8 @@ mod tests {
             let buf = storage
                 .read_as_elementwise_pipeline::<T>(index, &context)
                 .unwrap()
-                .to_buf(index, &context, None);
+                .to_buf(index, &context, None, "test")
+                .unwrap();
             offsets(&shape, buf.strides())
                 .into_iter()
                 .map(|off| unsafe { buf.data_ptr().add(off).cast::<T>().read_unaligned() })
@@ -1487,7 +1531,8 @@ mod tests {
             storage
                 .read_as_elementwise_pipeline::<T>(index, &context)
                 .unwrap()
-                .to_buf(index, &context, Some(&mut out));
+                .to_buf(index, &context, Some(&mut out), "test")
+                .unwrap();
         }
         let pushed = offsets(&shape, &dst_strides)
             .into_iter()

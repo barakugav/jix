@@ -762,6 +762,7 @@ struct ApproxEqKernel<T: crate::scalar::ApproxEq> {
 }
 impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
     type Output = bool;
+    const NAME: &'static str = "ApproxEq";
 
     #[inline(always)]
     fn apply(&self, a: T, b: T) -> Self::Output {
@@ -774,6 +775,7 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
         a: [T; N],
         b: [T; N],
         simd: S,
+        _status: &mut crate::error::OpStatus,
     ) -> [Self::Output; N] {
         T::approx_eq_bulk(a, b, &self.rtol, &self.atol, simd)
     }
@@ -920,7 +922,11 @@ mod tests {
                         " ",
                         stringify!($tb)
                     );
-                    assert_same_elements($kernel.apply_bulk(a, b, simd), |i| $f(a[i], b[i]), what);
+                    assert_same_elements(
+                        $kernel.apply_bulk(a, b, simd, &mut Default::default()),
+                        |i| $f(a[i], b[i]),
+                        what,
+                    );
                 };
             }
             macro_rules! all {
@@ -948,7 +954,11 @@ mod tests {
                 macro_rules! nan_bits {
                     ($kernel:ident, $t:ty) => {
                         let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
-                        for (i, y) in $kernel.apply_bulk(a, b, simd).into_iter().enumerate() {
+                        for (i, y) in $kernel
+                            .apply_bulk(a, b, simd, &mut Default::default())
+                            .into_iter()
+                            .enumerate()
+                        {
                             if y.is_nan() {
                                 let what = concat!(stringify!($kernel), " ", stringify!($t));
                                 assert_eq!(y.to_bits(), <$t>::NAN.to_bits(), "{what}: element {i}");
