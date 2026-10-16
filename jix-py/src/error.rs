@@ -32,51 +32,47 @@ impl ArithmeticErrorModes {
         divide_by_zero: ArithmeticErrorMode::Error,
         overflow: ArithmeticErrorMode::Warn,
         underflow: ArithmeticErrorMode::Warn,
-        invalid_operation: ArithmeticErrorMode::Warn,
+        invalid_operation: ArithmeticErrorMode::Error,
     };
 }
-impl Default for ArithmeticErrorModes {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 /// Sets how element-wise operations treat arithmetic errors, like `numpy.errstate`.
 ///
-/// This function can be used as regular function call that sets and change the error modes,
-/// or as a context manager using the `with` statement, in which case the previous error modes
-/// are restored on exit.
+/// An operation that hits an error still produces a value for the element - `0` for an integer
+/// division by zero - and the mode decides what else happens when the array is read: `'ignore'`
+/// does nothing, `'warn'` emits a `RuntimeWarning` and `'raise'` raises a `FloatingPointError`.
+///
+/// The new modes take effect as soon as `errstate` is called, so it can be used as a plain
+/// function call that changes the modes for good, or as a context manager with the `with`
+/// statement, which restores the previous modes on exit.
+///
+/// The modes are per thread, and since operations are lazy, the modes in effect when the array
+/// is *read* apply, not those in effect when the operation was built.
+///
+/// The defaults are `'raise'` for `divide` and `invalid`, and `'warn'` for `over` and `under`.
 ///
 /// Args:
-///     - `all`: Sets the mode for all error kinds.
-///     - `divide`: Sets the mode for divide-by-zero errors.
-///     - `over`: Sets the mode for overflow errors.
-///     - `under`: Sets the mode for underflow errors.
-///     - `invalid`: Sets the mode for invalid operation errors.
+///     all: Mode for every error kind. A kind given explicitly takes precedence.
+///     divide: Mode for division by zero.
+///     over: Mode for overflow.
+///     under: Mode for underflow.
+///     invalid: Mode for invalid operations.
 ///
 /// Returns:
-///     An context manager that can be used with the `with` statement.
+///     A context manager that can be used with the `with` statement and restores the previous modes
+///     on exit.
 ///
 /// Examples:
 ///     ```python
 ///     import jix
 ///     import numpy as np
-///     import pytest
 ///
 ///     a = jix.compact(np.array([6, 7], dtype=np.int32))
 ///     b = jix.compact(np.array([2, 0], dtype=np.int32))
 ///
 ///     with jix.errstate(divide="ignore"):
-///         (a // b).numpy()  # division by zero ignored
-///     with jix.errstate(divide="raise"):
-///         with pytest.raises(FloatingPointError):
-///             (a // b).numpy()
+///         assert np.array_equal((a // b).numpy(), [3, 0])
 ///
-///     jix.errstate(divide="ignore")
-///     (a // b).numpy()  # division by zero ignored
-///     jix.errstate(divide="raise")
-///     with pytest.raises(FloatingPointError):
-///         (a // b).numpy()
+///     jix.errstate(divide="warn")  # changes the modes until changed again
 ///     ```
 #[pyfunction]
 #[pyo3(signature = (
@@ -147,7 +143,7 @@ impl ErrState {
 
 /// Get how element-wise operations treat arithmetic errors, like `numpy.geterr`.
 ///
-/// See [`jix.seterr()`][jix.seterr].
+/// See [`jix.errstate()`][jix.errstate].
 ///
 /// Returns:
 ///     A dict from error kind to mode.
@@ -176,7 +172,7 @@ pub fn geterr() -> BTreeMap<&'static str, &'static str> {
 
 pub(crate) fn configure_context_error_modes(context: &mut ReadContext) {
     let modes = MODES.with(Cell::get);
-    let ccc = [
+    let kind_modes = [
         (ArithmeticErrorKind::DivideByZero, modes.divide_by_zero),
         (ArithmeticErrorKind::Overflow, modes.overflow),
         (ArithmeticErrorKind::Underflow, modes.underflow),
@@ -185,7 +181,7 @@ pub(crate) fn configure_context_error_modes(context: &mut ReadContext) {
             modes.invalid_operation,
         ),
     ];
-    for (kind, mode) in ccc {
+    for (kind, mode) in kind_modes {
         context.set_arithmetic_error_mode(kind, mode);
     }
     drop(context.take_warnings());

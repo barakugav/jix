@@ -158,7 +158,7 @@ impl Array {
     /// The context is taken out of the cache for the lifetime of the returned guard and
     /// returned to it on drop, so successive reads of the same array reuse the same
     /// decompressor state instead of re-initializing it on every call. It is configured with the
-    /// calling thread's arithmetic error modes (see `jix.seterr`); the warnings of the read are
+    /// calling thread's arithmetic error modes (see `jix.errstate`); the warnings of the read are
     /// collected with [`ContextGuard::take_warnings`].
     pub(crate) fn read_ctx(&self) -> PyResult<ContextGuard<'_>> {
         let mut cache = self
@@ -1679,7 +1679,7 @@ impl ContextGuard<'_> {
     }
 
     /// The warnings of the reads made with this context, to emit with
-    /// `crate::errstate::emit_warnings` once the GIL is held.
+    /// `crate::error::emit_warnings` once the GIL is held.
     pub(crate) fn take_warnings(&self) -> Vec<jix_core::Error> {
         self.as_ref().take_warnings()
     }

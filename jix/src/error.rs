@@ -277,7 +277,7 @@ pub enum ArithmeticErrorKind {
     Overflow = 2,
     /// Underflow occurred during the operation.
     Underflow = 4,
-    /// TODO
+    /// An invalid operation, like NumPy's `invalid` (e.g. a NaN result from non-NaN operands).
     InvalidOperation = 8,
 }
 
@@ -362,7 +362,7 @@ impl Default for ArithmeticErrorModes {
             divide_by_zero: ArithmeticErrorMode::Error,
             overflow: ArithmeticErrorMode::Warn,
             underflow: ArithmeticErrorMode::Warn,
-            invalid_operation: ArithmeticErrorMode::Warn,
+            invalid_operation: ArithmeticErrorMode::Error,
         }
     }
 }

@@ -204,8 +204,8 @@ define_op2!(
     /// here, but `-4` in numpy). For unsigned operands the two agree.
     ///
     /// Dividing by zero gives `0`, as in numpy, and is reported according to
-    /// [`jix.seterr()`][jix.seterr]: a `RuntimeWarning` by default, or a
-    /// `FloatingPointError` under `divide='raise'`. `MIN // -1` wraps to `MIN`.
+    /// [`jix.errstate()`][jix.errstate]: a `FloatingPointError` by default, or a
+    /// `RuntimeWarning` under `divide='warn'`. `MIN // -1` wraps to `MIN`.
     ///
     /// Available via the `//` operator on arrays.
     ///

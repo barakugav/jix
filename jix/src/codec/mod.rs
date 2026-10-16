@@ -414,7 +414,10 @@ impl ReadContext {
         })
     }
 
-    /// Set how arithmetic errors are handled. Default is 'Raise'.
+    /// Set how arithmetic errors of kind `error` are handled. The default is
+    /// [`ArithmeticErrorMode::Error`] for [`ArithmeticErrorKind::DivideByZero`] and
+    /// [`ArithmeticErrorKind::InvalidOperation`], and [`ArithmeticErrorMode::Warn`] for
+    /// [`ArithmeticErrorKind::Overflow`] and [`ArithmeticErrorKind::Underflow`].
     pub fn set_arithmetic_error_mode(
         &mut self,
         error: ArithmeticErrorKind,

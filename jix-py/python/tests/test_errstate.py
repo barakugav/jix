@@ -1,5 +1,5 @@
 """
-Arithmetic error handling: integer division by zero under jix.seterr / jix.errstate.
+Arithmetic error handling: integer division by zero under jix.errstate.
 Mirrors the div-by-zero tests in jix/src/ops/op2.rs.
 """
 
@@ -16,6 +16,11 @@ from tests_util import carrays2_mixed_strategy, comparable_element_strategy, int
 import jix
 
 MESSAGE = "divide by zero encountered"
+DEFAULT_MODES = {"divide": "raise", "over": "warn", "under": "warn", "invalid": "raise"}
+
+
+def _modes(**kinds):
+    return {**DEFAULT_MODES, **kinds}
 
 
 def _trunc_div_ref(np_a, np_b):
@@ -39,11 +44,10 @@ def _arrays(dtype):
 
 
 @pytest.mark.parametrize("dtype", ints + uints)
-def test_divide_by_zero_warns_by_default(dtype):
+def test_divide_by_zero_warn(dtype):
     a, b = _arrays(dtype)
     za, zb = jix.compact(a), jix.compact(b)
-    assert jix.geterr() == {"divide": "warn"}
-    with warnings.catch_warnings(record=True) as w:
+    with jix.errstate(divide="warn"), warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         result = (za // zb).numpy()
     np.testing.assert_array_equal(result, _trunc_div_ref(a, b))
@@ -52,14 +56,16 @@ def test_divide_by_zero_warns_by_default(dtype):
 
 
 @pytest.mark.parametrize("dtype", ints + uints)
-def test_divide_by_zero_raise(dtype):
+def test_divide_by_zero_raises_by_default(dtype):
     a, b = _arrays(dtype)
     za, zb = jix.compact(a), jix.compact(b)
-    with jix.errstate(divide="raise"):
-        with pytest.raises(FloatingPointError, match=MESSAGE):
-            (za // zb).numpy()
-        # Only the elements read count.
-        np.testing.assert_array_equal((za // zb)[:300], _trunc_div_ref(a[:300], b[:300]))
+    assert jix.geterr() == DEFAULT_MODES
+    with pytest.raises(FloatingPointError, match=MESSAGE):
+        (za // zb).numpy()
+    # Only the elements read count.
+    np.testing.assert_array_equal((za // zb)[:300], _trunc_div_ref(a[:300], b[:300]))
+    with jix.errstate(divide="raise"), pytest.raises(FloatingPointError, match=MESSAGE):
+        (za // zb).numpy()
 
 
 @pytest.mark.parametrize("dtype", ints + uints)
@@ -84,74 +90,75 @@ def test_min_floor_divide_minus_one_wraps(dtype):
 
 def test_compact_and_write_array_report(tmp_path):
     q = jix.compact(np.array([6, 7], dtype=np.int32)) // jix.compact(np.array([2, 0], dtype=np.int32))
-    with pytest.warns(RuntimeWarning, match=MESSAGE):
-        np.testing.assert_array_equal(jix.compact(q).numpy(), [3, 0])
-    with pytest.warns(RuntimeWarning, match=MESSAGE):
-        jix.write_array(q, tmp_path / "q.jix")
+    with jix.errstate(divide="warn"):
+        with pytest.warns(RuntimeWarning, match=MESSAGE):
+            np.testing.assert_array_equal(jix.compact(q).numpy(), [3, 0])
+        with pytest.warns(RuntimeWarning, match=MESSAGE):
+            jix.write_array(q, tmp_path / "q.jix")
     np.testing.assert_array_equal(jix.read_array(tmp_path / "q.jix").numpy(), [3, 0])
 
-    with jix.errstate(divide="raise"):
-        with pytest.raises(FloatingPointError, match=MESSAGE):
-            jix.compact(q)
-        with pytest.raises(FloatingPointError, match=MESSAGE):
-            jix.write_array(q, tmp_path / "q2.jix")
+    with pytest.raises(FloatingPointError, match=MESSAGE):
+        jix.compact(q)
+    with pytest.raises(FloatingPointError, match=MESSAGE):
+        jix.write_array(q, tmp_path / "q2.jix")
 
 
 def test_modes_apply_at_read_time():
     # Operations are lazy: the modes in effect when the array is read apply.
     za = jix.compact(np.array([6, 7], dtype=np.int32))
     zb = jix.compact(np.array([2, 0], dtype=np.int32))
-    with jix.errstate(divide="raise"):
+    with jix.errstate(divide="warn"):
         q = za // zb
-    with pytest.warns(RuntimeWarning, match=MESSAGE):
+    with pytest.raises(FloatingPointError, match=MESSAGE):
         q.numpy()
-    with jix.errstate(divide="raise"), pytest.raises(FloatingPointError):
+    with jix.errstate(divide="warn"), pytest.warns(RuntimeWarning, match=MESSAGE):
         q.numpy()
 
 
-def test_seterr_geterr():
-    assert jix.geterr() == {"divide": "warn"}
-    old = jix.seterr(divide="raise")
+def test_errstate_as_function():
+    assert jix.geterr() == DEFAULT_MODES
     try:
-        assert old == {"divide": "warn"}
-        assert jix.geterr() == {"divide": "raise"}
-        assert jix.seterr(all="ignore") == {"divide": "raise"}
-        assert jix.geterr() == {"divide": "ignore"}
+        # Called without `with`, the modes change until changed again.
+        jix.errstate(divide="warn")
+        assert jix.geterr() == _modes(divide="warn")
+        jix.errstate(all="ignore")
+        assert jix.geterr() == _modes(divide="ignore", over="ignore", under="ignore", invalid="ignore")
         # An explicit kind takes precedence over `all`.
-        jix.seterr(all="raise", divide="warn")
-        assert jix.geterr() == {"divide": "warn"}
+        jix.errstate(all="raise", over="warn")
+        assert jix.geterr() == _modes(divide="raise", over="warn", under="raise", invalid="raise")
+        jix.errstate(under="ignore", invalid="warn")
+        assert jix.geterr() == _modes(divide="raise", over="warn", under="ignore", invalid="warn")
     finally:
-        jix.seterr(**old)
-    assert jix.geterr() == {"divide": "warn"}
+        jix.errstate(**DEFAULT_MODES)
+    assert jix.geterr() == DEFAULT_MODES
 
     for bad in ["call", "print", "log", "Raise", ""]:
-        with pytest.raises(ValueError, match="invalid error mode"):
-            jix.seterr(divide=bad)
-        with pytest.raises(ValueError, match="invalid error mode"):
-            jix.errstate(all=bad)
-    assert jix.geterr() == {"divide": "warn"}
+        for kind in ["all", "divide", "over", "under", "invalid"]:
+            with pytest.raises(ValueError, match="invalid error mode"):
+                jix.errstate(**{kind: bad})
+    assert jix.geterr() == DEFAULT_MODES
 
 
 def test_errstate_restores():
-    with jix.errstate(divide="raise"):
-        assert jix.geterr() == {"divide": "raise"}
+    with jix.errstate(divide="warn"):
+        assert jix.geterr() == _modes(divide="warn")
         with jix.errstate(all="ignore"):
-            assert jix.geterr() == {"divide": "ignore"}
-        assert jix.geterr() == {"divide": "raise"}
-    assert jix.geterr() == {"divide": "warn"}
+            assert jix.geterr() == _modes(divide="ignore", over="ignore", under="ignore", invalid="ignore")
+        assert jix.geterr() == _modes(divide="warn")
+    assert jix.geterr() == DEFAULT_MODES
 
     with pytest.raises(KeyError), jix.errstate(divide="ignore"):
         raise KeyError
-    assert jix.geterr() == {"divide": "warn"}
+    assert jix.geterr() == DEFAULT_MODES
 
 
 def test_modes_are_per_thread():
     seen = []
-    with jix.errstate(divide="raise"):
+    with jix.errstate(divide="warn"):
         thread = threading.Thread(target=lambda: seen.append(jix.geterr()))
         thread.start()
         thread.join()
-    assert seen == [{"divide": "warn"}]
+    assert seen == [DEFAULT_MODES]
 
 
 @pytest.mark.parametrize("dtype", ints + uints)

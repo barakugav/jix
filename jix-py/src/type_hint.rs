@@ -92,7 +92,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
     }
 }
 
-/// An arithmetic error mode of [`crate::errstate::seterr`].
+/// An arithmetic error mode of [`crate::error::errstate`].
 pub struct ErrMode(pub jix_core::error::ArithmeticErrorMode);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for ErrMode {
