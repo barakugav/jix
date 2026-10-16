@@ -794,14 +794,22 @@ mod tests {
                         " ",
                         stringify!($tb)
                     );
-                    assert_same_elements($kernel.apply_bulk(a, b, simd), |i| $f(a[i], b[i]), what);
+                    assert_same_elements(
+                        $kernel.apply_bulk(a, b, &mut Default::default(), simd),
+                        |i| $f(a[i], b[i]),
+                        what,
+                    );
                 };
             }
             macro_rules! case1 {
                 ($kernel:ident, $t:ty, $f:expr) => {
                     let xs = <$t>::simd_test_values(0);
                     let what = concat!(stringify!($kernel), " ", stringify!($t));
-                    assert_same_elements($kernel.apply_bulk(xs, simd), |i| $f(xs[i]), what);
+                    assert_same_elements(
+                        $kernel.apply_bulk(xs, &mut Default::default(), simd),
+                        |i| $f(xs[i]),
+                        what,
+                    );
                 };
             }
             macro_rules! ints {

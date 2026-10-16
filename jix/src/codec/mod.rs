@@ -6,13 +6,16 @@
 mod filter;
 pub use filter::*;
 
-use std::cell::UnsafeCell;
+use std::cell::{RefCell, UnsafeCell};
 use std::marker::PhantomData;
 
 use crate::buf_pool::{BufferPool, PoolBuf};
 use crate::dtype::{Alignment, Dtype};
 #[allow(unused_imports)]
 use crate::error::{ensure, error, Result};
+use crate::error::{
+    ArithmeticErrorKind, ArithmeticErrorMode, ArithmeticErrorModes, ArithmeticOpStatus, Error,
+};
 use crate::util::arrayvec::ArrayVec;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
 use crate::util::{AlignedBytes, AlternatingBuffers};
@@ -363,10 +366,20 @@ impl<'a> Decoder<'a> {
 ///
 /// A single `ReadContext` can be passed to multiple successive reads. Reusing it avoids
 /// reinitializing the decompressor and keeps the scratch buffer allocations warm:
+///
+/// # Arithmetic errors
+///
+/// An element-wise operation that hits an [`ArithmeticErrorKind`] - an integer division by zero, say -
+/// writes a fallback value for the element and reports the error to the context of the read,
+/// which reacts according to its [`ArithmeticErrorMode`] for it: fail the read (the default),
+/// record a warning, or ignore it.
 pub struct ReadContext {
     #[cfg(not(miri))]
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     buffer_pool: BufferPool,
+    arith_error_modes: ArithmeticErrorModes,
+    #[allow(clippy::box_collection)] // reduce the stack size when there are no warnings
+    warnings: RefCell<Option<Box<Vec<Error>>>>,
 }
 impl ReadContext {
     /// Creates a new `ReadContext` configured with the given decoder parameters.
@@ -378,7 +391,40 @@ impl ReadContext {
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
             buffer_pool: BufferPool::new(),
+            arith_error_modes: ArithmeticErrorModes::default(),
+            warnings: RefCell::new(None),
         })
+    }
+
+    /// Set how arithmetic errors of kind `error` are handled. The default is
+    /// [`ArithmeticErrorMode::Error`] for [`ArithmeticErrorKind::DivideByZero`] and
+    /// [`ArithmeticErrorKind::InvalidOperation`], and [`ArithmeticErrorMode::Warn`] for
+    /// [`ArithmeticErrorKind::Overflow`] and [`ArithmeticErrorKind::Underflow`].
+    pub fn set_arithmetic_error_mode(
+        &mut self,
+        error: ArithmeticErrorKind,
+        mode: ArithmeticErrorMode,
+    ) {
+        self.arith_error_modes.set(error, mode);
+    }
+
+    /// Takes the warnings recorded by reads performed with this context.
+    pub fn take_warnings(&self) -> Vec<Error> {
+        let mut warnings = self.warnings.borrow_mut();
+        match warnings.as_deref_mut() {
+            None => Vec::new(),
+            Some(warnings) => std::mem::take(warnings),
+        }
+    }
+
+    #[inline(never)]
+    pub(crate) fn check_op_status(&self, status: ArithmeticOpStatus) -> Result<()> {
+        if status.is_ok() {
+            return Ok(());
+        }
+        let mut warnings = self.warnings.borrow_mut();
+        let warnings = &mut **warnings.get_or_insert_with(|| Box::new(Vec::new()));
+        self.arith_error_modes.check_op_status(status, warnings)
     }
 
     #[inline]
