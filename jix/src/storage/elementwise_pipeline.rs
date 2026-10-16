@@ -246,7 +246,6 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
         output_contiguous: operand_contiguous(0),
     };
 
-    // The kernels report their errors here, all chunks into one status, checked once at the end.
     let mut status = OpStatus::default();
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
@@ -287,7 +286,15 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            inner_loop(dst, dst_stride, chunk_len, inner_loop_flags, &mut status);
+            let mut iteration_status = OpStatus::default();
+            inner_loop(
+                dst,
+                dst_stride,
+                chunk_len,
+                inner_loop_flags,
+                &mut iteration_status,
+            );
+            status |= iteration_status;
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -413,7 +420,15 @@ fn to_buf_type_erased_dyn(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            inner_loop(dst, dst_stride, chunk_len, inner_loop_flags, &mut status);
+            let mut iteration_status = OpStatus::default();
+            inner_loop(
+                dst,
+                dst_stride,
+                chunk_len,
+                inner_loop_flags,
+                &mut iteration_status,
+            );
+            status |= iteration_status;
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
