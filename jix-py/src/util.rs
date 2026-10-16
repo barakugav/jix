@@ -2,9 +2,12 @@ use jix_core::NDIM_MAX;
 use numpy::npyffi::{npy_intp, PyArray_Dims};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::PyTypeError;
+use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
-use pyo3::types::{PySlice, PySliceIndices, PyTuple};
+use pyo3::types::slice::PySliceIndices;
+use pyo3::types::{PySlice, PyTuple};
+use pyo3::{type_hint_subscript, type_hint_union};
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 
@@ -206,6 +209,17 @@ where
 {
     type Error = PyErr;
 
+    const INPUT_TYPE: PyStaticExpr = type_hint_union!(
+        T::INPUT_TYPE,
+        type_hint_subscript!(
+            <PyTuple as pyo3::PyTypeInfo>::TYPE_HINT,
+            T::INPUT_TYPE,
+            PyStaticExpr::Constant {
+                value: PyStaticConstant::Ellipsis
+            }
+        )
+    );
+
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
         // Only tuples count as sequences, unlike pyo3's `Vec<T>`, which
         // accepts any object with the sequence protocol: an array passed where dims are expected
@@ -283,22 +297,6 @@ impl<T, const N: usize> From<[T; N]> for ItemOrTuple<T> {
         ItemOrTuple::Sequence(arr.into())
     }
 }
-macro_rules! impl_item_or_sequence_stub_type {
-    ($($t:ty),*) => {
-        $(
-            impl pyo3_stub_gen::PyStubType for ItemOrTuple<$t> {
-                fn type_output() -> pyo3_stub_gen::TypeInfo {
-                    let mut info = <$t as pyo3_stub_gen::PyStubType>::type_input();
-                    let item = std::mem::take(&mut info.name);
-                    info.name = format!("{item} | builtins.tuple[{item}, ...]");
-                    info
-                }
-            }
-        )*
-    };
-}
-impl_item_or_sequence_stub_type!(i32, i64, u64);
-
 #[allow(unused)]
 pub(crate) struct UnsafeSend<T>(T);
 unsafe impl<T> Send for UnsafeSend<T> {}

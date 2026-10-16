@@ -56,7 +56,6 @@ use crate::Array;
 ///     result = jix.broadcast(b, (3, 2))
 ///     assert result.numpy()[0, 0] == result.numpy()[0, 1] == 10
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn broadcast<'py>(
     array: &Bound<'py, PyAny>,
@@ -97,7 +96,7 @@ pub fn broadcast<'py>(
 
     let ret = jix_core::ops::Broadcast::new_array(array.clone(), new_shape.as_slice())
         .into_py_result()?;
-    let np_dtype = py_arr.get().dtype(py)?;
+    let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
@@ -162,7 +161,6 @@ pub fn broadcast<'py>(
 ///     assert col.shape == (3,)
 ///     assert np.array_equal(col.numpy(), [2, 6, 10])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn slice<'py>(
     array: &Bound<'py, PyAny>,
@@ -190,7 +188,7 @@ pub fn slice<'py>(
             .into_py_result()?
             .into_any()
     };
-    let np_dtype = py_arr.get().dtype(py)?;
+    let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(result, np_dtype.unbind()),
@@ -402,7 +400,6 @@ pub(crate) struct ParsedBasicIndex {
 ///     # dims index the output shape: positions 0 and 2 become new length-1 dims
 ///     assert jix.insert_dim(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn insert_dim<'py>(
     array: &Bound<'py, PyAny>,
@@ -440,7 +437,7 @@ pub fn insert_dim<'py>(
         .map(|(i, &pos)| pos - i)
         .collect::<DimArray<_>>();
     let ret = jix_core::ops::InsertDim::new_array(array, gaps.as_slice()).into_py_result()?;
-    let np_dtype = py_arr.get().dtype(py)?;
+    let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
@@ -457,7 +454,6 @@ pub fn insert_dim<'py>(
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with new length-1 dims inserted at the specified positions.
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn unsqueeze<'py>(
     array: &Bound<'py, PyAny>,
@@ -500,7 +496,6 @@ pub fn unsqueeze<'py>(
 ///     assert jix.remove_dim(b, [0, 2]).numpy().shape == (2,)    # -> [2]
 ///     assert jix.remove_dim(b, [0, -1]).numpy().shape == (2,)   # negative dim
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn remove_dim<'py>(
     array: &Bound<'py, PyAny>,
@@ -514,7 +509,7 @@ pub fn remove_dim<'py>(
         return Ok(py_arr); // no-op if no dims to remove
     }
     let ret = jix_core::ops::RemoveDim::new_array(array, dims.as_slice()).into_py_result()?;
-    let np_dtype = py_arr.get().dtype(py)?;
+    let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
@@ -548,7 +543,6 @@ pub fn remove_dim<'py>(
 ///     assert jix.squeeze(a, dim=0).numpy().shape == (1, 3)    # remove only dim 0
 ///     assert jix.squeeze(a, dim=(0, 1)).numpy().shape == (3,) # remove dims 0 and 1
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, dim=None))]
 pub fn squeeze<'py>(
@@ -609,7 +603,6 @@ pub fn squeeze<'py>(
 ///     # Negative dims count from the end
 ///     assert np.array_equal(jix.permute_dims(a, [-1, 0]).numpy(), a.numpy().T)
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (
     array,
@@ -631,7 +624,7 @@ pub fn permute_dims<'py>(
         return Ok(py_arr); // no-op permutation
     }
     let ret = jix_core::ops::PermuteDims::new_array(array, &dims).into_py_result()?;
-    let np_dtype = py_arr.get().dtype(py)?;
+    let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
@@ -669,7 +662,6 @@ pub fn permute_dims<'py>(
 ///     # Negative dims count from the end: swap the last two dims
 ///     assert jix.swapdims(a, -1, -2).shape == (2, 4, 3)
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn swapdims<'py>(
     array: &Bound<'py, PyAny>,
@@ -722,7 +714,6 @@ pub fn swapdims<'py>(
 ///     r = jix.reshape(a, (-1, 2))
 ///     assert r.numpy().shape == (3, 2)
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (
     array,
@@ -781,7 +772,7 @@ pub fn reshape<'py>(
     let array = jix_core::ops::Reshape::new_array(array.clone(), new_shape.as_slice())
         .into_py_result()?
         .into_any();
-    let np_dtype = py_arr.get().dtype(py)?;
+    let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(py, Array::from_core_with_np_dtype(array, np_dtype.unbind()))
 }
 
@@ -811,7 +802,6 @@ pub fn reshape<'py>(
 ///     assert f.numpy().shape == (6,)
 ///     assert np.array_equal(f.numpy(), [1, 2, 3, 4, 5, 6])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
@@ -856,7 +846,6 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///     assert jix.concatenate([a, b], dim=0).numpy().shape == (3, 2)
 ///     assert jix.concatenate([a, b.T], dim=1).numpy().shape == (2, 3)
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (arrays, dim=0))]
 pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bound<'py, Array>> {
@@ -890,7 +879,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bo
         return Ok(array);
     }
     let ret = jix_core::ops::Concatenate::new_array(arrays, dim).into_py_result()?;
-    let np_dtype = py_arrays.first().unwrap().get().dtype(py)?;
+    let np_dtype = py_arrays.first().unwrap().get().numpy_dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
@@ -934,7 +923,6 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bo
 ///     assert d.numpy().shape == (3, 2)
 ///     assert np.array_equal(d.numpy()[:, 0], [1, 2, 3])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (
     arrays,
@@ -973,7 +961,7 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Array> {
         let ret = jix_core::ops::Stack::new_array(arrays, dim).into_py_result()?;
         ret.into_any()
     };
-    let np_dtype = py_arrays.first().unwrap().get().dtype(py)?;
+    let np_dtype = py_arrays.first().unwrap().get().numpy_dtype(py)?;
     Ok(Array::from_core_with_np_dtype(res, np_dtype.unbind()))
 }
 
@@ -1026,7 +1014,6 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Array> {
 ///     # repeats=0 yields an empty array
 ///     assert jix.repeat(a, 0, dim=0).numpy().shape == (0,)
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, repeats, dim=None))]
 pub fn repeat<'py>(
@@ -1042,7 +1029,7 @@ pub fn repeat<'py>(
         return Ok(py_arr); // no-op
     }
     let ret = jix_core::ops::Repeat::new_array(array, repeats, dim).into_py_result()?;
-    let np_dtype = py_arr.get().dtype(py)?;
+    let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
@@ -1091,7 +1078,6 @@ pub fn repeat<'py>(
 ///     # Tuple of dims (negative indices supported)
 ///     assert np.array_equal(jix.flip(b, dim=(-1,)).numpy(), [[3, 2, 1], [6, 5, 4]])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, dim=None))]
 pub fn flip<'py>(
@@ -1109,7 +1095,7 @@ pub fn flip<'py>(
         return Ok(py_arr); // no-op if no dims to flip
     }
     let ret = jix_core::ops::Flip::new_array(array, dims.as_slice()).into_py_result()?;
-    let np_dtype = py_arr.get().dtype(py)?;
+    let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
@@ -1154,7 +1140,6 @@ pub fn flip<'py>(
 ///     assert np.array_equal(jix.roll(b, 1, dim=0).numpy(), [[3, 4, 5], [0, 1, 2]])
 ///     assert np.array_equal(jix.roll(b, 1, dim=1).numpy(), [[2, 0, 1], [5, 3, 4]])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, shift, dim=None))]
 pub fn roll<'py>(
@@ -1170,7 +1155,7 @@ pub fn roll<'py>(
         return Ok(py_arr); // no-op if no shift
     }
     let ret = jix_core::ops::Roll::new_array(core, shift, dim).into_py_result()?;
-    let np_dtype = py_arr.get().dtype(py)?;
+    let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
@@ -1225,7 +1210,6 @@ pub fn roll<'py>(
 ///     # repeats=0 yields an empty array along that dim
 ///     assert jix.tile(a, 0).numpy().shape == (0,)
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, repeats, dim=None))]
 pub fn tile<'py>(
@@ -1241,7 +1225,7 @@ pub fn tile<'py>(
         return Ok(py_arr); // no-op
     }
     let ret = jix_core::ops::Tile::new_array(core, repeats, dim).into_py_result()?;
-    let np_dtype = py_arr.get().dtype(py)?;
+    let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),

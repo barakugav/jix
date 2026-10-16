@@ -38,7 +38,7 @@ cargo hack check --feature-powerset --depth 2   # CI checks the feature powerset
 # --- Python bindings (cd jix-py) ---
 maturin develop                           # build + install the extension into the active venv
 cargo test --all-features --all-targets   # Rust-side tests of the bindings
-cargo run --bin generate_pyi              # regenerate the .pyi type stubs
+maturin generate-stubs --out python      # regenerate the .pyi type stubs
 pytest python/tests --numprocesses auto   # Python tests - ALWAYS use --numprocesses auto (pytest-xdist)
 
 # --- Benchmarks ---
@@ -157,17 +157,21 @@ into `jix/src/archive/schema/_proto_gen/`. Edit a `.proto` -> rerun the generato
 ### Python bindings (`jix-py/`)
 
 PyO3 + the `numpy` crate. The Python `Array` wraps a type-erased enum; operations dispatch over the
-runtime dtype (`jix-py/src/ops/common/dispatch.rs`, `dtype_promote.rs`, `broadcast.rs`). `pyo3-stub-gen`
-produces the `.pyi` stubs via the `generate_pyi` binary. The generated `jix-py/python/jix/__init__.pyi`
-is gitignored (regenerate locally; it won't show up in `git status`). Python source (the thin
-`__init__.py` re-export + tests) is under `jix-py/python/`.
+runtime dtype (`jix-py/src/ops/common/dispatch.rs`, `dtype_promote.rs`, `broadcast.rs`). The `.pyi`
+stubs come from PyO3's own introspection (the `experimental-inspect` feature) via
+`maturin generate-stubs`. Type hints come from `FromPyObject::INPUT_TYPE` / `IntoPyObject::OUTPUT_TYPE`;
+for types that lack a precise one (e.g. everything from the `numpy` crate) wrap them in a type from
+`jix-py/src/type_hint.rs`. String annotations in `#[pyo3(signature = ...)]` are emitted as quoted
+strings without imports, so avoid them. The generated `jix-py/python/jix/jix.pyi` is gitignored
+(regenerate locally; it won't show up in `git status`). Python source (the thin `__init__.py`
+re-export, which also defines the function aliases such as `jix.pow`, + tests) is under `jix-py/python/`.
 
 ## Adding an operation
 
 An op typically exists in two places that must stay in sync: the Rust implementation under
 `jix/src/ops/` (e.g. `op1.rs` unary, `op2.rs` binary, `cmp.rs`, `reduction.rs`, `shape_ops/`) and its
 Python dispatch wrapper under `jix-py/src/ops/`. After changing the Python surface, regenerate stubs
-with `cargo run --bin generate_pyi`.
+with `maturin generate-stubs --out python`.
 
 ## Testing Conventions
 

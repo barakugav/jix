@@ -7,9 +7,10 @@ use jix_core::storage::StridedBuf;
 use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, Dim, DimDyn, Dimension, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
+
+use crate::type_hint::{NdArray, NpDtype};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
-use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
 
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::PyAnyMethods;
@@ -118,7 +119,6 @@ use crate::util::{
 /// Because the entire operation chain is resolved at read time, there is no intermediate
 /// allocation or data copy until you ask for output. The read releases the GIL while
 /// decompressing, so Python threads can run concurrently.
-#[gen_stub_pyclass]
 #[pyclass(module = "jix", frozen)]
 pub struct Array {
     pub(crate) arr: ArrayAny,
@@ -216,7 +216,7 @@ impl Array {
         out: &Bound<'_, PyUntypedArray>,
         out_shape: &[u64],
     ) -> PyResult<()> {
-        let expected_dtype = self.dtype(py)?;
+        let expected_dtype = self.numpy_dtype(py)?;
         let out_dtype = out.dtype();
         if !out_dtype.is_equiv_to(&expected_dtype) {
             return Err(PyValueError::new_err(format!(
@@ -238,7 +238,7 @@ impl Array {
 
         let (flags, data) = unsafe {
             let ptr = out.as_array_ptr();
-            ((*ptr).flags, (*ptr).data as usize)
+            ((*ptr).fields.flags, (*ptr).fields.data as usize)
         };
         if flags & numpy::npyffi::NPY_ARRAY_WRITEABLE == 0 {
             return Err(PyValueError::new_err("out is not writeable"));
@@ -281,9 +281,19 @@ impl Array {
         }
         Ok(())
     }
-}
 
-#[gen_stub_pymethods]
+    pub(crate) fn numpy_dtype<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))?;
+
+        if cache.numpy_dtype.is_none() {
+            cache.numpy_dtype = Some(dtype_to_numpy(py, self.arr.dtype())?.unbind());
+        }
+        Ok(cache.numpy_dtype.as_ref().unwrap().bind(py).clone())
+    }
+}
 #[pymethods]
 impl Array {
     /// The shape of the array: a tuple of dim lengths.
@@ -399,16 +409,8 @@ impl Array {
     /// ```
     #[getter]
     #[inline]
-    pub fn dtype<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
-        let mut cache = self
-            .cache
-            .lock()
-            .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))?;
-
-        if cache.numpy_dtype.is_none() {
-            cache.numpy_dtype = Some(dtype_to_numpy(py, self.arr.dtype())?.unbind());
-        }
-        Ok(cache.numpy_dtype.as_ref().unwrap().bind(py).clone())
+    pub fn dtype<'py>(&self, py: Python<'py>) -> PyResult<NpDtype<'py>> {
+        self.numpy_dtype(py).map(NpDtype)
     }
 
     /// Decode the array (or a sub-region of it) into a NumPy array.
@@ -514,8 +516,9 @@ impl Array {
         &self,
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
-        out: Option<Bound<'py, PyUntypedArray>>,
-    ) -> PyResult<Bound<'py, PyUntypedArray>> {
+        out: Option<NdArray<'py>>,
+    ) -> PyResult<NdArray<'py>> {
+        let out = out.map(|out| out.0);
         let (index, out_shape, drop_dims) = self.parse_index(index)?;
 
         let itemsize = self.arr.dtype().itemsize() as usize;
@@ -542,7 +545,7 @@ impl Array {
                     .filter(|&&dim| !drop_dims[dim as usize])
                     .map(|&dim| np_dim[dim as usize])
                     .collect::<DimArray<_>>();
-                numpy_empty_ordered(self.dtype(py)?, &out_shape, &order)?
+                numpy_empty_ordered(self.numpy_dtype(py)?, &out_shape, &order)?
             }
             Some(np_arr) => {
                 self.check_output_array(py, &np_arr, &out_shape)?;
@@ -587,7 +590,7 @@ impl Array {
 
         let nitems = read_shape.iter().product::<usize>();
         if nitems == 0 {
-            return Ok(np_arr);
+            return Ok(NdArray(np_arr));
         }
 
         let data_span = strided_span_bytes(&read_shape, &strides, itemsize);
@@ -595,7 +598,10 @@ impl Array {
         // through `strides` - it was either freshly allocated for `read_shape`, or checked by
         // `check_out_array`.
         let data = unsafe {
-            std::slice::from_raw_parts_mut((*np_arr.as_array_ptr()).data.cast::<u8>(), data_span)
+            std::slice::from_raw_parts_mut(
+                (*np_arr.as_array_ptr()).fields.data.cast::<u8>(),
+                data_span,
+            )
         };
 
         let should_detach =
@@ -633,7 +639,7 @@ impl Array {
             to_ndarray_fn(self.arr.view(), &index, &mut out, context).into_py_result()
         })?;
 
-        Ok(np_arr)
+        Ok(NdArray(np_arr))
     }
 
     /// Returns the single element of a zero-dimensional array as a Python scalar.
@@ -724,10 +730,7 @@ impl Array {
     /// Returns:
     ///     A NumPy array. See `numpy()` for details.
     #[inline]
-    pub fn __getitem__<'py>(
-        &self,
-        index: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyUntypedArray>> {
+    pub fn __getitem__<'py>(&self, index: &Bound<'py, PyAny>) -> PyResult<NdArray<'py>> {
         self.numpy(index.py(), Some(index), None)
     }
 
@@ -1536,14 +1539,15 @@ impl Array {
 ///
 ///     # Compacting a lazy computation pipeline
 ///     d = jix.compact([[1.5, 2.0], [3.14, 6.17]], dtype=np.float32)
-///     e = (d * 7.399) \    # Array<Mul<Compact, Scalar<f32>>> (lazy views, rust internal types
-///         .floor() \       # Array<Floor<Mul<Compact, Scalar<f32>>>>
-///         .compact()       # Array<Compact> - materialize the pipeline
+///     e = (
+///         (d * 7.399)  # Array<Mul<Compact, Scalar<f32>>> (lazy views, rust internal types)
+///         .floor()     # Array<Floor<Mul<Compact, Scalar<f32>>>>
+///         .compact()   # Array<Compact> - materialize the pipeline
+///     )
 ///
 ///     # After a shape-changing op, pin the block shape explicitly
 ///     f = jix.compact(d.T, params={"block_shape": [2, 1]})
 ///     ```
-#[gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, *, dtype=None, params=None))]
 pub fn compact<'py>(
@@ -1715,7 +1719,7 @@ mod tests {
         // ndarray::Array -> jix_core::Array -> jix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
             let py_arr = make_py_array(py, original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
+            let np = py_arr.get().numpy(py, None, None).unwrap().0;
             let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
             typed.to_owned_array().into_dimensionality().unwrap()
         })
@@ -1843,6 +1847,7 @@ mod tests {
             py_arr
                 .numpy(py, None, None)
                 .unwrap()
+                .0
                 .cast_into::<PyArrayDyn<T>>()
                 .unwrap()
                 .to_owned_array()
@@ -1951,6 +1956,7 @@ mod tests {
     {
         Array::__getitem__(py_arr.get(), key)
             .unwrap()
+            .0
             .cast_into::<PyArrayDyn<T>>()
             .unwrap()
             .to_owned_array()

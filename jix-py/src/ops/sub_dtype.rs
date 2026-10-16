@@ -47,7 +47,6 @@ use crate::Array;
 ///     assert xs2d.shape == (2, 2)
 ///     assert np.array_equal(xs2d.numpy(), [[1, 3], [5, 7]])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn dtype_sub_field<'py>(
     array: &Bound<'py, pyo3::PyAny>,

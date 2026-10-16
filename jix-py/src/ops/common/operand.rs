@@ -179,7 +179,7 @@ impl Operand {
             .collect::<PyResult<DimArray<_>>>()?;
         let data_ptr = {
             let arr_ptr = unsafe { &*array.as_array_ptr() };
-            arr_ptr.data.cast_const().cast::<u8>()
+            arr_ptr.fields.data.cast_const().cast::<u8>()
         };
         let array = array.unbind();
         let storage = unsafe {

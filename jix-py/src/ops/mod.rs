@@ -39,8 +39,6 @@ use pyo3::prelude::*;
 
 use crate::array::Array;
 use crate::dtype::{dtype_from_numpy, numpy_descr_from_any};
-
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 /// Casts each element of `array` to a new dtype.
 ///

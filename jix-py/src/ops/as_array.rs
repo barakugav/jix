@@ -1,7 +1,6 @@
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use pyo3_stub_gen::derive::gen_stub_pyfunction;
 
 use crate::array::{resolve_array_params, Array};
 use crate::dtype::{dtype_from_numpy, numpy_descr_from_any};
@@ -48,7 +47,6 @@ use crate::ops::common::Operand;
 /// Returns:
 ///     A [`jix.Array`][jix.Array] view of the input. If `value` is already a [`jix.Array`][jix.Array]
 ///         and no `dtype` is given, it is returned unchanged with no copy.
-#[gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (value, *, dtype=None, params=None))]
 #[inline]

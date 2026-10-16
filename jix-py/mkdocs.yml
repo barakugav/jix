@@ -49,6 +49,8 @@ plugins:
         python:
           paths: [python]
           options:
+            extensions:
+              - griffe_extensions.py:NativeModuleDocstring
             docstring_style: google
             show_source: false
             show_root_heading: true

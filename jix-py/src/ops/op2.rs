@@ -291,7 +291,6 @@ define_op2!(
 ///     assert result3.dtype == np.dtype("int32")
 ///     assert np.array_equal(result3.numpy(), [8, 27, 64])
 ///     ```
-#[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyo3::pyfunction]
 pub fn power<'py>(
     a: &pyo3::Bound<'py, pyo3::PyAny>,

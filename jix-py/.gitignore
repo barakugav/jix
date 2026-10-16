@@ -70,7 +70,7 @@ docs/_build/
 .python-version
 
 # auto generated stubs
-python/jix/__init__.pyi
+python/jix/jix.pyi
 
 # Benchmark output
 /python/benches/results/

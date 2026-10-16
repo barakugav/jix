@@ -37,10 +37,9 @@ macro_rules! define_reduction_op {
         $(#[$meta:meta])* $name:ident,
         $core_op:ident,
         dispatch = { $($dispatch:tt)* }
-        $(, extra_args = ($($extra_arg:ident : $extra_ty:ty = $extra_default:expr),+))?
+        $(, extra_args = ($($extra_arg:ident : $extra_ty:ty = $extra_default:tt),+))?
     ) => {
         $(#[$meta])*
-        #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
         #[pyo3(signature = (
             array,
@@ -92,7 +91,6 @@ macro_rules! define_reduction_op {
         dispatch = { $($dispatch:tt)* }
     ) => {
         $(#[$meta])*
-        #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
         #[pyo3(signature = (
             array,

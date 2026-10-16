@@ -17,6 +17,7 @@ mod archive;
 mod array;
 mod dtype;
 mod ops;
+mod type_hint;
 mod util;
 
 #[doc = include_str!("../docs/module.md")]
@@ -86,45 +87,5 @@ mod jix {
 
     #[pymodule_export]
     pub use crate::ops::{imag, real};
-
-    #[pymodule_init]
-    fn init(m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> pyo3::PyResult<()> {
-        use pyo3::prelude::*;
-
-        // aliases
-        m.add("pow", m.getattr("power")?)?;
-        m.add("abs", m.getattr("absolute")?)?;
-        m.add("concat", m.getattr("concatenate")?)?;
-        m.add("clip", m.getattr("clamp")?)?;
-        m.add("prod", m.getattr("product")?)?;
-        m.add("sub", m.getattr("subtract")?)?;
-        m.add("mul", m.getattr("multiply")?)?;
-        m.add("div", m.getattr("divide")?)?;
-        m.add("neg", m.getattr("negative")?)?;
-
-        Ok(())
-    }
 }
 pub use crate::jix::*;
-
-pyo3_stub_gen::inventory::submit! {
-    pyo3_stub_gen::type_info::ModuleDocInfo {
-        module: "jix",
-        doc: {
-            fn _fmt() -> String {
-                include_str!("../docs/module.md").to_string()
-            }
-            _fmt
-        }
-    }
-}
-
-// TODO: pyo3 stub doesn't generate a docstring for constants.
-pyo3_stub_gen::module_variable!("jix", "__version__", String);
-
-#[doc(hidden)]
-pub mod __private {
-    use pyo3_stub_gen::define_stub_info_gatherer;
-
-    define_stub_info_gatherer!(generate_pyi);
-}
