@@ -379,7 +379,6 @@ fn to_buf_type_erased_dyn(
         output_contiguous: operand_contiguous(0),
     };
 
-    // The kernels report their errors here, all chunks into one status, checked once at the end.
     let mut status = ArithmeticOpStatus::default();
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
@@ -616,8 +615,6 @@ fn inner_loop_impl<
         debug_assert!(dst.is_aligned());
     }
 
-    // The kernels OR into a local rather than into `status`: its address never escapes the
-    // inlined loop, so the flags stay in a register instead of going to memory every iteration.
     let mut loop_status = ArithmeticOpStatus::default();
 
     let body_limit = len - len % LANES;

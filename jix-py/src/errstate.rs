@@ -39,7 +39,7 @@ thread_local! {
 /// it.
 pub(crate) fn configure_context(context: &mut ReadContext) {
     let modes = MODES.with(Cell::get);
-    context.set_arith_error_mode(ArithmeticErrorKind::DivideByZero, modes.divide);
+    context.set_arithmetic_error_mode(ArithmeticErrorKind::DivideByZero, modes.divide);
     drop(context.take_warnings());
 }
 

@@ -1109,7 +1109,7 @@ pub(crate) mod tests {
 
                     // Warn: the value, and a single warning however many elements and reads hit it.
                     let mut ctx = q.read_ctx();
-                    ctx.set_arith_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Warn);
+                    ctx.set_arithmetic_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Warn);
                     for _ in 0..2 {
                         assert_eq!(q.to_ndarray_sub(&full, &ctx).unwrap(), expected);
                     }
@@ -1120,7 +1120,7 @@ pub(crate) mod tests {
                     assert!(ctx.take_warnings().is_empty());
 
                     // Ignore: just the value.
-                    ctx.set_arith_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Ignore);
+                    ctx.set_arithmetic_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Ignore);
                     assert_eq!(q.to_ndarray_sub(&full, &ctx).unwrap(), expected);
                     assert!(ctx.take_warnings().is_empty());
                 }
@@ -1143,7 +1143,7 @@ pub(crate) mod tests {
         assert!(q.to_ndarray().is_err());
 
         let mut ctx = q.read_ctx();
-        ctx.set_arith_error_mode(
+        ctx.set_arithmetic_error_mode(
             ArithmeticErrorKind::DivideByZero,
             ArithmeticErrorMode::Ignore,
         );
@@ -1228,7 +1228,7 @@ pub(crate) mod tests {
             }
 
             let mut ctx = q.read_ctx();
-            ctx.set_arith_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Ignore);
+            ctx.set_arithmetic_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Ignore);
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_b)
                 .map_collect(|&x, &y| if y == 0 { 0 } else { x / y });
