@@ -62,10 +62,6 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         simd: S,
     ) -> [T; N];
 
-    /// Compute the pipeline over `index` into `out` (or a pooled buffer).
-    ///
-    /// The errors the kernels report are checked once the whole region is computed, against the
-    /// modes of `context`.
     fn to_buf<'b>(
         &mut self,
         index: &[Range<u64>],

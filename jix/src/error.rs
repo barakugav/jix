@@ -282,18 +282,16 @@ pub enum ArithmeticErrorKind {
 }
 
 /// Setting of how to handle arithmetic errors during element-wise operations.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ArithmeticErrorMode {
     /// Ignore the error, keep a default value for the result.
     Ignore,
     /// Warn on the error, but keep the value for the element.
     Warn,
     /// Fail the read with an [`ErrorKind::Arithmetic`] error.
-    #[default]
-    Raise,
+    Error,
 }
 
-#[derive(Default)]
 pub(crate) struct ArithmeticErrorModes {
     divide_by_zero: ArithmeticErrorMode,
     overflow: ArithmeticErrorMode,
@@ -343,7 +341,7 @@ impl ArithmeticErrorModes {
                         warnings.push(warning);
                     }
                 }
-                ArithmeticErrorMode::Raise => {
+                ArithmeticErrorMode::Error => {
                     raised.get_or_insert_with(|| create_err(description));
                 }
             }
@@ -356,6 +354,16 @@ impl ArithmeticErrorModes {
             }
         }
         raised.map_or(Ok(()), Err)
+    }
+}
+impl Default for ArithmeticErrorModes {
+    fn default() -> Self {
+        Self {
+            divide_by_zero: ArithmeticErrorMode::Error,
+            overflow: ArithmeticErrorMode::Warn,
+            underflow: ArithmeticErrorMode::Warn,
+            invalid_operation: ArithmeticErrorMode::Warn,
+        }
     }
 }
 

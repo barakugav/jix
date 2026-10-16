@@ -233,7 +233,7 @@ pub fn write_array(
             write_array_impl(array, writer, params)
         }
     }?;
-    crate::errstate::emit_warnings(py, warnings)
+    crate::error::emit_warnings(py, warnings)
 }
 /// Returns the warnings of the read, see `crate::errstate::emit_warnings`.
 fn write_array_impl<W>(

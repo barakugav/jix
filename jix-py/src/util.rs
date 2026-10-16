@@ -53,7 +53,6 @@ impl<T> IntoPyResult<T> for Result<T, jix_core::Error> {
     #[inline(always)]
     fn into_py_result(self) -> PyResult<T> {
         self.map_err(|e| match e.kind() {
-            // numpy raises `FloatingPointError` for integer errors too.
             jix_core::error::ErrorKind::Arithmetic => {
                 PyErr::new::<pyo3::exceptions::PyFloatingPointError, _>(format!("{e}"))
             }

@@ -169,7 +169,7 @@ impl Array {
             .context
             .take()
             .unwrap_or_else(|| Box::new(self.arr.read_ctx()));
-        crate::errstate::configure_context(&mut context);
+        crate::error::configure_context_error_modes(&mut context);
         Ok(ContextGuard {
             array: self,
             context: Some(context),
@@ -626,7 +626,7 @@ impl Array {
                 .into_py_result()?;
             Ok::<_, PyErr>(context_guard.take_warnings())
         })?;
-        crate::errstate::emit_warnings(py, warnings)?;
+        crate::error::emit_warnings(py, warnings)?;
 
         Ok(NdArray(np_arr))
     }
@@ -1557,7 +1557,7 @@ pub fn compact<'py>(
             .into_py_result()?;
         Ok::<_, PyErr>((compacted, context.take_warnings()))
     })?;
-    crate::errstate::emit_warnings(py, warnings)?;
+    crate::error::emit_warnings(py, warnings)?;
 
     Bound::new(py, Array::from_core(compacted.into_any()))
 }

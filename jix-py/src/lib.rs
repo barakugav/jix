@@ -16,7 +16,7 @@ use pyo3::prelude::*;
 mod archive;
 mod array;
 mod dtype;
-mod errstate;
+mod error;
 mod ops;
 mod type_hint;
 mod util;
@@ -44,7 +44,7 @@ mod jix {
     pub use crate::archive::{read_array, write_array};
 
     #[pymodule_export]
-    pub use crate::errstate::{geterr, seterr, ErrState};
+    pub use crate::error::{errstate, geterr};
 
     #[pymodule_export]
     pub use crate::ops::{asarray, cast};

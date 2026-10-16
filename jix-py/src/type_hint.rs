@@ -115,7 +115,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ErrMode {
         match obj.extract::<&str>()? {
             "ignore" => Ok(Self(jix_core::error::ArithmeticErrorMode::Ignore)),
             "warn" => Ok(Self(jix_core::error::ArithmeticErrorMode::Warn)),
-            "raise" => Ok(Self(jix_core::error::ArithmeticErrorMode::Raise)),
+            "raise" => Ok(Self(jix_core::error::ArithmeticErrorMode::Error)),
             other => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "invalid error mode '{other}', expected one of 'ignore', 'warn', 'raise'"
             ))),
