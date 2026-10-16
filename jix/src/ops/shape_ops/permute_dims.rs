@@ -122,7 +122,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_get_range(self.shape(), index)?;
+        check_get_range_ndim(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
         let ndim = self.dims.as_ref().len();
         unsafe {
@@ -198,6 +198,16 @@ mod tests {
 
     use crate::util::{shape_strategy, ScalarStrategy};
     use crate::Array;
+
+    #[test]
+    fn rejects_invalid_index() {
+        let nd =
+            ndarray::Array3::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 100 + j * 10 + k) as i32);
+        let compact = Array::compact_ndarray(&nd).unwrap();
+        let plain = Array::plain_ndarray_ref(&nd).unwrap();
+        crate::util::assert_read_rejects_invalid_index(compact.permute_dims(&[2, 0, 1]).storage());
+        crate::util::assert_read_rejects_invalid_index(plain.permute_dims(&[1, 2, 0]).storage());
+    }
 
     #[test]
     fn test_i32_2d_transpose() {

@@ -207,17 +207,18 @@ pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
     Ok(())
 }
 
+#[cold]
+#[inline(never)]
+fn get_range_fail_ndim(shape_ndim: usize, index_ndim: usize) -> Result<()> {
+    bail!(
+        InvalidIndex,
+        "Index has different number of dimensions {index_ndim} than shape {shape_ndim}"
+    )
+}
+
 #[inline]
 pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()> {
     if shape.len() != index.len() {
-        #[cold]
-        #[inline(never)]
-        fn get_range_fail_ndim(shape_ndim: usize, index_ndim: usize) -> Result<()> {
-            bail!(
-                InvalidIndex,
-                "Index has different number of dimensions {index_ndim} than shape {shape_ndim}"
-            )
-        }
         return get_range_fail_ndim(shape.len(), index.len());
     }
     for (dim, (&dim_size, range)) in shape.iter().zip(index).enumerate() {
@@ -232,6 +233,14 @@ pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()>
         if range.start > range.end || range.end > dim_size {
             return check_range_fail(dim, range, dim_size);
         }
+    }
+    Ok(())
+}
+
+#[inline]
+pub(crate) fn check_get_range_ndim(shape: &[u64], index: &[Range<u64>]) -> Result<()> {
+    if shape.len() != index.len() {
+        return get_range_fail_ndim(shape.len(), index.len());
     }
     Ok(())
 }

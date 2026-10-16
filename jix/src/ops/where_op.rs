@@ -158,16 +158,16 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_get_range(self.shape(), index)?;
+        check_get_range_ndim(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
-        let out_shape = <Self::Dimension as Dimension>::vec(index.len(), |d| {
-            (index[d].end - index[d].start) as usize
-        });
         let dtype = self.dtype();
         let (itemsize, alignment) = (dtype.itemsize() as usize, dtype.alignment().as_usize());
 
         let condition_view = self.condition.read_data(index, context, None)?;
         let y_view = self.y.read_data(index, context, None)?;
+        let out_shape = <Self::Dimension as Dimension>::vec(index.len(), |d| {
+            (index[d].end - index[d].start) as usize
+        });
         let mut out = materialize_out_buf(
             out,
             context,
@@ -470,6 +470,19 @@ mod tests {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::util::ScalarStrategy;
+
+    #[test]
+    fn rejects_invalid_index() {
+        let cond = ndarray::Array2::from_shape_fn((2, 3), |(i, j)| (i + j) % 2 == 0);
+        let x = ndarray::Array2::from_shape_fn((2, 3), |(i, j)| (i * 10 + j) as i32);
+        let y = x.mapv(|v| -v);
+        let w = where_condition(
+            Array::compact_ndarray(&cond).unwrap(),
+            Array::plain_ndarray_ref(&x).unwrap(),
+            Array::compact_ndarray(&y).unwrap(),
+        );
+        crate::util::assert_read_rejects_invalid_index(w.storage());
+    }
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;
