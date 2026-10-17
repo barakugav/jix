@@ -1,6 +1,6 @@
 """
-Arithmetic error handling under jix.errstate: integer and float division, sqrt and integer power.
-Mirrors the tests in jix/src/ops/op1.rs and jix/src/ops/op2.rs.
+Arithmetic error handling under jix.errstate: integer and float division, sqrt, integer power and
+wrapping integer arithmetic. Mirrors the tests in jix/src/ops/op1.rs and jix/src/ops/op2.rs.
 """
 
 import threading
@@ -313,3 +313,17 @@ def test_power_wraps_like_numpy(dtype):
         warnings.simplefilter("error")
         result = jix.power(jix.compact(a), jix.compact(b)).numpy()
     np.testing.assert_array_equal(result, np.power(a, b))
+
+
+@pytest.mark.parametrize("dtype", ints + uints)
+def test_arithmetic_wraps_like_numpy(dtype):
+    info = np.iinfo(dtype)
+    edges = np.array([info.min, info.min + 1, 0, 1, info.max // 2 + 1, info.max], dtype=dtype)
+    a = np.resize(np.repeat(edges, len(edges)), 1000)
+    b = np.resize(np.tile(edges, len(edges)), 1000)
+    za, zb = jix.compact(a), jix.compact(b)
+    with np.errstate(all="raise"), jix.errstate(all="raise"):
+        np.testing.assert_array_equal((za + zb).numpy(), a + b)
+        np.testing.assert_array_equal((za - zb).numpy(), a - b)
+        np.testing.assert_array_equal((za * zb).numpy(), a * b)
+        np.testing.assert_array_equal(jix.square(za).numpy(), np.square(a))

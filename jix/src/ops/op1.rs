@@ -368,8 +368,7 @@ pub(crate) mod _traits {
         ///
         /// The output dtype is the input dtype.
         ///
-        /// For **integer** types squaring can overflow, following the semantics of the `*`
-        /// operator: it wraps in release builds and panics in debug builds.
+        /// For **integer** types the result wraps on overflow (two's complement).
         Square,
         /// Compute the square of the value.
         square,
@@ -377,14 +376,20 @@ pub(crate) mod _traits {
     );
     // SIMD for the types with SIMD mul
     impl_scalar_op1!(
-        impl Square for [f32, f64, i16, i32, i64, u8, u16, u32, u64] {
+        impl Square for [f32, f64] {
             fn square = |x| x * x,
             fn square_bulk = |x| x * x,
         }
     );
     impl_scalar_op1!(
+        impl Square for [i16, i32, i64, u8, u16, u32, u64] {
+            fn square = |x| x.wrapping_mul(x),
+            fn square_bulk = |x| x * x,
+        }
+    );
+    impl_scalar_op1!(
         impl Square for [i8] {
-            fn square = |x| x * x,
+            fn square = |x| x.wrapping_mul(x),
         }
     );
     // In f32 without FP16
@@ -1299,6 +1304,12 @@ pub(crate) mod tests {
         [f16],
         #[cfg(feature = "num-complex")]
         [complex_f32, complex_f64]
+    );
+    test_op1!(
+        square,
+        |a| a.wrapping_mul(a),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
     );
     #[test]
     fn square_concrete() {

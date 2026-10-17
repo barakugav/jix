@@ -12,7 +12,7 @@ The error kinds follow numpy: `divide` (`DivideByZero`), `over` (`Overflow`), `u
 
 | Kernel | Value | Status | State |
 |---|---|---|---|
-| `Add` `Sub` `Mul` `Square` | wraps | - | todo |
+| `Add` `Sub` `Mul` `Square` | wraps | - | done |
 | `Neg` `Abs` of `MIN` | `MIN` | - | todo |
 | `Pow`, unsigned exponent | wraps | - | done |
 | `Pow`, signed exponent `< 0` | `0` | `invalid` | done |
