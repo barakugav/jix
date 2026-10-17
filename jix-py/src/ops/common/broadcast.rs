@@ -3,41 +3,36 @@ use jix_core::{ops::Broadcast, NDIM_MAX};
 use pyo3::prelude::*;
 
 use crate::ops::common::Operand;
-use crate::util::{DimArray, IntoPyResult};
+use crate::util::{array_try_map, DimArray, IntoPyResult};
 
-pub(crate) fn broadcast_operands<const N: usize>(operands: [Operand; N]) -> PyResult<[Operand; N]> {
-    let operands = operands.into_iter().collect::<Vec<_>>();
-    let operands = broadcast_operands_dyn(operands)?;
-    let operands: [Operand; N] = operands.try_into().map_err(|_| unreachable!()).unwrap();
+pub(crate) fn broadcast_operands<const N: usize>(
+    mut operands: [Operand; N],
+) -> PyResult<[Operand; N]> {
+    if let Some(shape) = broadcast_operands_shape(&operands)? {
+        operands = array_try_map(operands, |_i, operand| broadcast_operand(operand, &shape))
+            .into_py_result()?;
+    };
     Ok(operands)
 }
 
-// TODO pub broadcast_arrays
-pub(crate) fn broadcast_operands_dyn(operands: Vec<Operand>) -> PyResult<Vec<Operand>> {
+pub(crate) fn broadcast_operands_shape(operands: &[Operand]) -> PyResult<Option<DimArray<u64>>> {
     if operands.len() < 2 {
-        return Ok(operands);
+        return Ok(None);
     }
 
-    let shape = {
-        let mut shapes = operands.iter().map(|operand| match operand {
-            Operand::PyArray(arr) => arr.get().arr.shape(),
-            Operand::Array(arr) => arr.shape(),
-            Operand::Scalar { shape, .. } => shape.as_slice(),
-        });
+    let mut shapes = operands.iter().map(|operand| match operand {
+        Operand::PyArray(arr) => arr.get().arr.shape(),
+        Operand::Array(arr) => arr.shape(),
+        Operand::Scalar { shape, .. } => shape.as_slice(),
+    });
 
-        let first_shape: DimArray<_> = shapes.next().unwrap().try_into().unwrap();
-        shapes
-            .try_fold(first_shape, |shape1, shape2| {
-                broadcast_shapes(&shape1, shape2)
-            })
-            .into_py_result()?
-    };
-
-    operands
-        .into_iter()
-        .map(|operand| broadcast_operand(operand, &shape))
-        .collect::<Result<Vec<_>, _>>()
-        .into_py_result()
+    let first_shape: DimArray<_> = shapes.next().unwrap().try_into().unwrap();
+    let shape = shapes
+        .try_fold(first_shape, |shape1, shape2| {
+            broadcast_shapes(&shape1, shape2)
+        })
+        .into_py_result()?;
+    Ok(Some(shape))
 }
 
 fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_core::Error> {
