@@ -276,6 +276,19 @@ def test_float_rounded_divide_errors_match_numpy(jix_fn, dtype):
             _errors_match_numpy(jix_fn, np.floor_divide, x, y)
 
 
+# `remainder_euclid` has the errors of `remainder`, though not its values.
+@pytest.mark.parametrize(
+    ("jix_fn", "np_fn"),
+    [(jix.remainder_trunc, np.fmod), (jix.remainder_floor, np.remainder), (jix.remainder_euclid, np.remainder)],
+)
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+def test_float_remainder_errors_match_numpy(jix_fn, np_fn, dtype):
+    edges = _float_edges(dtype)
+    for x in edges:
+        for y in edges:
+            _errors_match_numpy(jix_fn, np_fn, x, y)
+
+
 @pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
 def test_sqrt_errors_match_numpy(dtype):
     for x in _float_edges(dtype):

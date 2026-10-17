@@ -41,7 +41,7 @@ detect the errors from their inputs and outputs. The values stay the IEEE ones.
 | | `0 / 0`, `inf / inf` | `invalid` | done |
 | | finite `/` finite gives `inf` | `over` | done |
 | `DivideTrunc` `DivideFloor` `DivideEuclid` | `x / 0` / `0 / 0`, `inf / x` / finite gives `inf` | `divide` / `invalid` / `over` | done |
-| `RemainderTrunc` `RemainderFloor` `RemainderEuclid` | `x % 0`, `inf % x` | `invalid` | todo |
+| `RemainderTrunc` `RemainderFloor` `RemainderEuclid` | `x % 0`, `inf % x` | `invalid` | done |
 | `Sqrt` | `x < 0` | `invalid` | done |
 | `Ln` | `x == 0` / `x < 0` | `divide` / `invalid` | todo |
 | `Exp` | finite `x` gives `inf` | `over` | todo |
@@ -79,7 +79,8 @@ without the checks.
   `ArithmeticOpStatus::set_if` directly, which LLVM can still vectorize.
 - **SIMD path.** When the predicate is exact (`Sqrt`), set the status from it per vector
   (`set_if` of `any_true`): it measured the same as one mask test per bulk, even at AVX2 and
-  SSE4.2. When it is a superset (the float quotients), test it per vector and classify the rare
+  SSE4.2. When it needs a NaN-operand filter (the float remainders: a NaN result of non-NaN
+  operands), test the result first and filter only a vector that has a hit. When it is a superset (the float quotients), test it per vector and classify the rare
   vector that has a hit inline, with mask tests. Not with a call, even a cold one: x86-64 has no
   callee-saved vector registers, so a call in the loop keeps the loop's vector constants in
   memory (with 1% zero divisors, measured 40% slower for `Div` and 20% for `DivideFloor`).
