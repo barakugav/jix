@@ -216,8 +216,8 @@ def test_multiply_custom_inputs():
 @pytest.mark.parametrize("dtype", floats + complexes)
 @given(st.data())
 def test_divide(dtype: np.dtype, data: DataObject):
-    # divide dispatches only on float/complex dtypes; integer dtypes go through
-    # floor_divide (see test_floor_divide). Non-zero strategy avoids inf/NaN from
+    # divide dispatches only on float/complex dtypes; integer quotients come from
+    # divide_floor (see test_divide_integer_valued). Non-zero strategy avoids inf/NaN from
     # division-by-zero for the float case.
     nz = op_safe_non_zero_element_strategy(dtype)
     (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
@@ -260,64 +260,129 @@ def test_divide_custom_inputs():
     check(zac / [1 + 0j, 2 + 0j], dc / np.array([1 + 0j, 2 + 0j]))
 
 
-def _floor_divide_ref(np_a, np_b):
-    return (np_a.astype(np.float64) / np_b.astype(np.float64)).astype(np_a.dtype)
+def _remainder_euclid_ref(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    # Python's `%` is floored, so by `|b|` it is never negative.
+    values = [x % abs(y) for x, y in zip(a.ravel().tolist(), b.ravel().tolist())]
+    return np.array(values, dtype=a.dtype).reshape(a.shape)
 
 
-def test_floor_divide_concrete():
-    # floor_divide dispatches only on integer/unsigned dtypes. Non-zero divisors avoid
-    # divide-by-zero panics. jix's `//` truncates toward zero (Rust `/` semantics) - for
-    # signed-negative quotients this differs from numpy's `//` which floors toward -inf,
-    # so the expected is computed via float / and cast. A non-default block shape crosses a block
-    # boundary for the signed-int case. uint32/uint64: unsigned floor division has no
-    # sign/truncation subtlety.
-    check_op2_concrete(
-        lambda a, b: a // b,
-        _floor_divide_ref,
-        [
-            (np.int32, [[-100, -1, 7], [1, 50, 100]], [[3, -1, 2], [-4, 7, -100]], [1, 2]),
-            (np.int64, [[-100, -1, 7], [1, 50, 100]], [[3, -1, 2], [-4, 7, -100]], [1, 2]),
-            (np.uint32, [[1, 20, 100], [7, 50, 30]], [[1, 3, 7], [2, 6, 4]]),
-            (np.uint64, [[1, 20, 100], [7, 50, 30]], [[1, 3, 7], [2, 6, 4]]),
-        ],
-    )
+def _quotient(a: np.ndarray, b: np.ndarray, r: np.ndarray) -> np.ndarray:
+    """The quotient of `a / b` whose remainder is `r`."""
+    if np.issubdtype(a.dtype, np.integer):
+        return (a - r) // b
+    exact = (a.astype(np.float64) - r.astype(np.float64)) / b.astype(np.float64)
+    return exact.round().astype(a.dtype)
 
 
-def test_floor_divide_custom_inputs():
+# The division and remainder of each convention, and a reference remainder.
+CONVENTIONS = [
+    pytest.param(jix.divide_trunc, jix.remainder_trunc, np.fmod, id="trunc"),
+    pytest.param(jix.divide_floor, jix.remainder_floor, np.remainder, id="floor"),
+    pytest.param(jix.divide_euclid, jix.remainder_euclid, _remainder_euclid_ref, id="euclid"),
+]
+
+
+@pytest.mark.parametrize(("divide", "remainder", "remainder_ref"), CONVENTIONS)
+@pytest.mark.parametrize("dtype", ints + uints + floats)
+@given(st.data())
+def test_integer_division(divide, remainder, remainder_ref, dtype: np.dtype, data: DataObject):
+    # The remainder against the reference, and the quotient against the one of that remainder,
+    # which is exact. Non-zero divisors avoid the integer divide-by-zero error.
+    nz = op_safe_non_zero_element_strategy(dtype)
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
+    r = remainder_ref(np_a, np_b)
+    assert_array_matches(remainder(za, zb), r, data=data)
+    assert_array_matches(divide(za, zb), _quotient(np_a, np_b, r), data=data)
+
+
+@pytest.mark.parametrize("dtype", ints + uints + floats)
+@given(st.data())
+def test_floordiv_and_mod_operators_match_numpy(dtype: np.dtype, data: DataObject):
+    nz = op_safe_non_zero_element_strategy(dtype)
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
+    assert_array_matches(za // zb, np_a // np_b, data=data)
+    assert_array_matches(za % zb, np_a % np_b, data=data)
+
+
+def test_integer_division_custom_inputs():
     def check(result, expected):
         np.testing.assert_array_equal(result.numpy(), expected)
 
-    # int64: Python ints coerce to int64 naturally. For non-negative operands //
-    # and truncation-toward-zero agree, so numpy's // is the reference.
-    d = np.array([[10, 20, 30], [40, 50, 60]], dtype=np.int64)
-    za = jix.compact(d)
-    check(za // np.int64(3), d // 3)
-    check(np.int64(60) // za, 60 // d)  # __rfloordiv__ (int64 natural)
-    check(za // [[5, 4, 3], [2, 5, 6]], d // [[5, 4, 3], [2, 5, 6]])
-    check(za // ((5, 4, 3), (2, 5, 6)), d // ((5, 4, 3), (2, 5, 6)))
-    check(jix.floor_divide(za, np.int64(3)), d // 3)
-    check(jix.floor_divide(np.int64(60), za), 60 // d)  # scalar first via free-function
+    # Every sign combination: the conventions differ only when the operands have opposite signs,
+    # or (Euclidean vs floored) when the divisor is negative. Each quotient pairs with its remainder.
+    a = np.array([7, -7, 7, -7, 0], dtype=np.int32)
+    b = np.array([2, 2, -2, -2, 5], dtype=np.int32)
+    za, zb = jix.compact(a), jix.compact(b)
+    for divide, remainder, q, r in [
+        (jix.divide_trunc, jix.remainder_trunc, [3, -3, -3, 3, 0], [1, -1, 1, -1, 0]),
+        (jix.divide_floor, jix.remainder_floor, [3, -4, -4, 3, 0], [1, 1, -1, -1, 0]),
+        (jix.divide_euclid, jix.remainder_euclid, [3, -4, -3, 4, 0], [1, 1, 1, 1, 0]),
+    ]:
+        check(divide(za, zb), q)
+        check(remainder(za, zb), r)
+        check(divide(za, zb) * zb + remainder(za, zb), a)
+        check(getattr(za, divide.__name__)(zb), q)  # the Array methods
+        check(getattr(za, remainder.__name__)(zb), r)
+    check(za // zb, a // b)
+    check(za % zb, a % b)
 
-    # int32: signed-negative quotient - jix truncates toward zero, numpy floors
-    # toward -inf, so they diverge. Compute expected via Python int truncation.
-    neg = np.array([-7, -8, 9], dtype=np.int32)
-    zn = jix.compact(neg)
-    trunc = np.array([int(x / 2) for x in neg], dtype=np.int32)  # [-3, -4, 4]
-    check(zn // np.int32(2), trunc)
+    # Scalars and lists on either side.
+    d = np.array([[10, 20, 30], [40, 50, 61]], dtype=np.int64)
+    zd = jix.compact(d)
+    check(zd // np.int64(-7), d // -7)
+    check(zd % np.int64(-7), d % -7)
+    check(np.int64(65) // zd, 65 // d)  # __rfloordiv__
+    check(np.int64(-65) % zd, -65 % d)  # __rmod__
+    check(65 % zd, 65 % d)
+    check(zd // [[5, 4, 3], [2, 5, 6]], d // [[5, 4, 3], [2, 5, 6]])
+    check(jix.remainder_trunc(zd, [[3, 6, 7], [9, 8, 10]]), np.fmod(d, [[3, 6, 7], [9, 8, 10]]))
 
-    # uint32: unsigned floor div has no sign issue
-    du = np.array([10, 20, 30], dtype=np.uint32)
-    zu = jix.compact(du)
-    check(zu // np.uint32(3), du // np.uint32(3))
-    check(zu // np.array([2, 7, 4], dtype=np.uint32), du // np.array([2, 7, 4], dtype=np.uint32))
+    # Floats: of the exact quotient, so `0.1` fits in `1.0` 9 times, as in numpy.
+    f = np.array([1.0, -7.5, 7.5, -1e-20], dtype=np.float64)
+    g = np.array([0.1, 2.0, -2.0, 1.0], dtype=np.float64)
+    zf, zg = jix.compact(f), jix.compact(g)
+    check(zf // zg, f // g)
+    check(zf % zg, f % g)
+    check(jix.divide_trunc(zf, zg), [9.0, -3.0, -3.0, 0.0])
+    check(jix.divide_floor(zf, zg), [9.0, -4.0, -4.0, -1.0])
+    check(jix.divide_euclid(zf, zg), [9.0, -4.0, -3.0, -1.0])
+    check(jix.remainder_trunc(zf, zg), np.fmod(f, g))
+    check(jix.remainder_euclid(zf, zg), _remainder_euclid_ref(f, g))
 
 
-def test_floor_divide_rejects_floats():
-    """floor_divide dispatches only on integer/unsigned dtypes; floats must error."""
-    a = jix.compact([1.0, 2.0, 3.0], dtype=np.float32)
-    b = jix.compact([1.0, 2.0, 3.0], dtype=np.float32)
-    with pytest.raises(Exception):
-        _ = jix.floor_divide(a, b).numpy()
+@pytest.mark.parametrize("dtype", floats)
+@pytest.mark.parametrize(
+    ("jix_fn", "numpy_fn"),
+    [(jix.remainder_trunc, np.fmod), (jix.remainder_floor, np.remainder), (jix.divide_floor, np.floor_divide)],
+)
+def test_float_special_values(jix_fn, numpy_fn, dtype: np.dtype):
+    # Every pair of special values, bit for bit (zero signs included) as numpy.
+    values = [0.0, -0.0, 1.0, -1.0, 5.0, -2.5, np.inf, -np.inf, np.nan]
+    a = np.array([x for x in values for _ in values], dtype=dtype)
+    b = np.array([y for _ in values for y in values], dtype=dtype)
+    result = jix_fn(jix.compact(a), jix.compact(b)).numpy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        expected = numpy_fn(a, b)
+    np.testing.assert_array_equal(result, expected)
+    finite = ~np.isnan(expected)
+    np.testing.assert_array_equal(np.signbit(result[finite]), np.signbit(expected[finite]))
+
+
+INTEGER_DIVISIONS = [
+    jix.divide_trunc,
+    jix.divide_floor,
+    jix.divide_euclid,
+    jix.remainder_trunc,
+    jix.remainder_floor,
+    jix.remainder_euclid,
+]
+
+
+@pytest.mark.parametrize("jix_fn", INTEGER_DIVISIONS)
+def test_integer_division_rejects_complex(jix_fn):
+    a = jix.compact(np.array([1 + 1j, 2 + 2j], dtype=np.complex64))
+    with pytest.raises(RuntimeError):
+        _ = jix_fn(a, a).numpy()
 
 
 # Every (base_dtype, exponent_dtype) pair the power dispatch table accepts directly.
