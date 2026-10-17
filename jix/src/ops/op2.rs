@@ -557,7 +557,9 @@ pub(crate) mod _traits {
                 fn div(self, rhs: Self, status: &mut ArithmeticOpStatus) -> Self {
                     let r = self / rhs;
                     // Errors give non-finite results, and NaN operands are never one. The
-                    // finiteness test first: the common no-error case is a single test.
+                    // finiteness test first, and `&&`: the common no-error case is a single
+                    // test. With `&`, LLVM orders the tests itself and puts the operands' first
+                    // (measured up to 19% slower for `f16`).
                     if !r.is_finite() && !self.is_nan() && !rhs.is_nan() {
                         *status |= float_div_error_cold(self.into(), rhs.into(), r.is_infinite());
                     }
@@ -585,9 +587,9 @@ pub(crate) mod _traits {
                             // vector that has one, rare, is checked for lanes with non-NaN
                             // operands, which are classified out of line and from a copy, so
                             // the operands stay in registers. NaN operands are not errors.
-                            if (!r.is_finite()).to_bitmask() != 0 {
+                            if (!r.is_finite()).any_true() {
                                 let maybe_error = !r.is_finite() & a.simd_eq(a) & b.simd_eq(b);
-                                if maybe_error.to_bitmask() != 0 {
+                                if maybe_error.any_true() {
                                     errors |= float_div_errors(
                                         a.to_array().as_ref(),
                                         b.to_array().as_ref(),
@@ -617,6 +619,7 @@ pub(crate) mod _traits {
             let r = f16::from_f32(self.to_f32() / rhs.to_f32());
             #[cfg(all(target_arch = "aarch64", target_feature = "fp16"))]
             let r = self / rhs;
+            // The tests ordered as in the `f32` `div`.
             if !r.is_finite() && !self.is_nan() && !rhs.is_nan() {
                 *status |= float_div_error_cold(self.into(), rhs.into(), r.is_infinite());
             }

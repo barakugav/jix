@@ -561,7 +561,7 @@ pub(crate) mod _traits {
                     );
                     status.set_if(
                         ArithmeticErrorKind::InvalidOperation,
-                        negative.to_bitmask() != 0,
+                        negative.any_true(),
                     );
                     ys
                 }
