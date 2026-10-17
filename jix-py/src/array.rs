@@ -985,9 +985,9 @@ impl Array {
     /// struct dtypes) raise.
     pub fn __pos__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         let dtype = slf.get().arr.dtype();
-        let is_supported = dtype.try_to_scalar().map_or(false, |scalar| {
-            scalar.is_integer() | scalar.is_float() | scalar.is_complex()
-        });
+        let is_supported = dtype
+            .try_to_scalar()
+            .is_some_and(|scalar| scalar.is_integer() | scalar.is_float() | scalar.is_complex());
 
         if !is_supported {
             return Err(jix_core::Error::new(

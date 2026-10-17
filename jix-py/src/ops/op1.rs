@@ -605,10 +605,10 @@ pub fn absolute<'py>(
     let mut operand = Operand::from_any(array)?;
 
     // Unsigned and bool values are their own absolute value, no-op
-    if let Some((rank, _)) = operand.rank_precision() {
-        if matches!(rank, Rank::UInt | Rank::Bool) {
-            return operand.into_py_array(py);
-        }
+    if let Some((rank, _)) = operand.rank_precision()
+        && matches!(rank, Rank::UInt | Rank::Bool)
+    {
+        return operand.into_py_array(py);
     }
 
     // Array is a scalar, compute abs directly
