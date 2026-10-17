@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Compare two `analyze.py` outputs kernel by kernel, per platform and CPU.
 
 Usage:
@@ -47,9 +46,12 @@ def main() -> None:
 
     speedups: dict[tuple[str, str], dict[str, float]] = {}  # (platform, cpu) -> kernel -> speedup
     for (p, cpu, k), c in new.items():
-        if (p, cpu, k) in base and (p, k) not in new_calls | base_calls:
-            if not args.kernels or any(fnmatch.fnmatchcase(k, pat) for pat in args.kernels):
-                speedups.setdefault((p, cpu), {})[k] = base[(p, cpu, k)] / c
+        if (
+            (p, cpu, k) in base
+            and (p, k) not in new_calls | base_calls
+            and (not args.kernels or any(fnmatch.fnmatchcase(k, pat) for pat in args.kernels))
+        ):
+            speedups.setdefault((p, cpu), {})[k] = base[(p, cpu, k)] / c
     if not speedups:
         raise SystemExit("error: no kernel measured on both sides")
 

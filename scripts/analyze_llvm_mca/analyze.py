@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Static performance analysis of jix's hot loops: llvm-mca, on every platform jix ships wheels for.
 
 Compiles the `jix-py` extension crate, which instantiates every op for every dtype it dispatches, and
@@ -649,9 +648,9 @@ class IrValues:
                 return None
         if op in ("zext", "sext", "trunc", "freeze") and (m := re.match(r"i\d+ (\S+)", rest)):
             return self.operand(m.group(1), env, leaves, depth + 1)
-        if op == "load" and (m := re.fullmatch(r"i\d+, ptr (%[\w.]+)(?:, align \d+)?", rest)):
-            if m.group(1) in env:  # a stack slot named after an argument (`%len`) holds it
-                return env[m.group(1)]
+        # a stack slot named after an argument (`%len`) holds it
+        if op == "load" and (m := re.fullmatch(r"i\d+, ptr (%[\w.]+)(?:, align \d+)?", rest)) and m.group(1) in env:
+            return env[m.group(1)]
         leaves.add(name)
         return None
 
