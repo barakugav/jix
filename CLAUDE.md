@@ -45,6 +45,10 @@ pytest python/tests --numprocesses auto   # Python tests - ALWAYS use --numproce
 cd jix-py && python python/benches/run_all.py   # Python comparison suite (jix vs numpy/blosc2/zarr) -> results/
 cd jix && cargo bench                            # Rust benchmarks (criterion; HTML at target/criterion/report/index.html)
 
+# --- Static analysis of the hot loops (llvm-mca, every wheel platform; setup in the script's docstring) ---
+python scripts/analyze_llvm_mca/analyze.py --out <dir> [--platform x86_64-v3] [--fn 'add_*']
+python scripts/analyze_llvm_mca/compare.py <new dir> <base dir>   # per-kernel speedups between two runs
+
 # --- Coverage (from repo root) ---
 python scripts/coverage_report.py --out <dir>              # all targets; --out is required
 python scripts/coverage_report.py --out <dir> --fast       # skip the slow instrumented pytest leg
