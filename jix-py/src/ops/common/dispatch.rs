@@ -236,7 +236,7 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
 #[cold]
 #[inline(never)]
 fn unsupported_dtype_error(name: &str, inputs: &[Operand]) -> PyErr {
-    let operands = inputs
+    let ops_types = inputs
         .iter()
         .map(|dtype| match dtype {
             Operand::PyArray(array) => Cow::Owned(format!("{}", array.get().arr.dtype())),
@@ -269,11 +269,11 @@ fn unsupported_dtype_error(name: &str, inputs: &[Operand]) -> PyErr {
                 (Scalar::Complex(_), Some(_)) => "Complex<?>",
             }),
         })
-        .collect::<Vec<_>>()
-        .join(", ");
+        .collect::<Vec<_>>();
+    let ops_types_str = ops_types.join(", ");
     let err: Result<(), _> = Err(jix_core::Error::new(
         jix_core::error::ErrorKind::UnsupportedDtype,
-        format!("Op {name} does not support operands with dtypes [{operands}]"),
+        format!("Op '{name}' does not support operands with dtypes [{ops_types_str}]"),
     ));
     err.into_py_result().unwrap_err()
 }

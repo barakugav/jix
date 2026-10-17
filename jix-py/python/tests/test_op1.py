@@ -206,6 +206,57 @@ def test_absolute_complex_concrete():
     check_op1_concrete(jix.absolute, np.abs, [(dtype, values) for dtype, _ in cases], rtol=1e-5)
 
 
+@pytest.mark.parametrize("dtype", [np.bool_, np.uint8, np.uint16, np.uint32, np.uint64])
+def test_absolute_uint_bool_returns_self(dtype):
+    # abs is a no-op on unsigned and bool: the same Array object comes back, for the free
+    # function, the method and the builtin.
+    np_a = np.array([0, 1, 1], dtype=dtype) if dtype == np.bool_ else np.array([0, 1, 200], dtype=dtype)
+    za = jix.compact(np_a)
+    assert jix.absolute(za) is za
+    assert za.abs() is za
+    assert abs(za) is za
+    assert jix.absolute(za).dtype == dtype
+    np.testing.assert_array_equal(jix.absolute(za).numpy(), np.abs(np_a))
+
+
+def test_absolute_method_matches_function():
+    za = jix.compact(np.array([-1.5, 0.0, 3.0], dtype=np.float32))
+    np.testing.assert_array_equal(za.abs().numpy(), jix.absolute(za).numpy())
+    np.testing.assert_array_equal(abs(za).numpy(), jix.absolute(za).numpy())
+
+
+@pytest.mark.parametrize(
+    "value, expected, expected_dtype",
+    [
+        # Python scalars take the default (64-bit) precision.
+        (True, True, np.bool_),
+        (False, False, np.bool_),
+        (-5, 5, np.int64),
+        (2**63, 2**63, np.uint64),  # too big for i64 -> u64
+        (-(2**63), -(2**63), np.int64),  # i64 min wraps, like numpy
+        (-2.5, 2.5, np.float64),
+        (3 - 4j, 5.0, np.float64),
+        # NumPy scalars keep their precision.
+        (np.uint8(7), 7, np.uint8),
+        (np.int8(-7), 7, np.int8),
+        (np.int8(-128), -128, np.int8),  # i8 min wraps
+        (np.float16(-1.5), 1.5, np.float16),
+        (np.float32(-1.5), 1.5, np.float32),
+        (np.complex64(3 + 4j), 5.0, np.float32),
+    ],
+)
+def test_absolute_scalar_input(value, expected, expected_dtype):
+    result = jix.absolute(value)
+    assert result.dtype == expected_dtype
+    assert result.numpy()[()] == expected
+
+
+def test_absolute_unsupported_dtype_raises():
+    za = jix.compact(np.zeros(3, dtype=[("a", np.int32), ("b", np.float32)]))
+    with pytest.raises(RuntimeError, match="Op 'absolute' does not support"):
+        jix.absolute(za)
+
+
 def test_square_int_concrete():
     # int32: negative, zero, positive, and the op_safe_strategy bound (+/-100) so the squared
     # result (10000) still fits comfortably in int32.
@@ -282,7 +333,7 @@ def test_positive_returns_self(dtype):
 
 
 def test_positive_rejects_bool():
-    with pytest.raises(RuntimeError, match="positive"):
+    with pytest.raises(RuntimeError, match="Op 'positive' does not support"):
         +jix.compact(np.array([True, False]))
 
 
