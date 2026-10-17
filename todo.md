@@ -1,16 +1,15 @@
-- use cargo workspace
-- consider AlignedBytes with compile time alignment
 - compress offsets array
-- delegate power to square/sqrt if exponent is 2/0.5
-- if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl
 - use multiple threads for reads
 - ArrayParams stream syntax
 - resolve TODOs across the repo
 - add read benchmark of the whole array, also for low entropy data
-- benchmark LANES of {32/64/128/256} / itemsize on x86
-- replace array_from_fn_inline with map_enumerate
-- arrays_map, arrays_map_enumerate
 - optimize reshape and its flags propagation
-- local_prelude
 - document archive compatibility
 - examine the asm of [T;4].into_iter().next().unwrap() and make sure llvm optimize it away
+- add item() to rust
+- rearrange ops module
+- move ReadContext
+- Promotion in where/concat/stack op
+- correctly promoting python scalars, u64+PythonInt should be u64 (not f64)
+- errors in elementwise kernels, for example divide by zero
+- optimize std: if we read an output cell's whole require data, use numpy two pass with sum, rather then the iterator version of std
