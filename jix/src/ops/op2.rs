@@ -392,8 +392,11 @@ pub(crate) mod _traits {
         /// [`ArithmeticErrorKind::Overflow`], as numpy.
         /// For **float** types the result is the exact quotient rounded toward zero, not the
         /// rounded `a / b` (`1.0 / 0.1` rounds to `10.0`, but `0.1` fits in `1.0` only 9 times).
-        /// A zero divisor produces `+-inf` (`NaN` for `0 / 0`) and an infinite dividend `NaN`;
-        /// float errors are not reported yet.
+        /// A zero divisor produces `+-inf` (`NaN` for `0 / 0`) and an infinite dividend `NaN`.
+        /// The errors are those of numpy's `floor_divide`: a finite non-zero value divided by zero
+        /// sets [`ArithmeticErrorKind::DivideByZero`], `0 / 0` and an infinite dividend set
+        /// [`ArithmeticErrorKind::InvalidOperation`], and an infinite result of finite operands
+        /// sets [`ArithmeticErrorKind::Overflow`]. NaN operands propagate without an error.
         ///
         /// # Examples
         /// ```
@@ -413,6 +416,8 @@ pub(crate) mod _traits {
         /// assert!(status.contains(ArithmeticErrorKind::DivideByZero));
         /// assert_eq!(i32::MIN.divide_trunc(-1, &mut status), i32::MIN);
         /// assert!(status.contains(ArithmeticErrorKind::Overflow));
+        /// assert!(f64::INFINITY.divide_trunc(2.0, &mut status).is_nan());
+        /// assert!(status.contains(ArithmeticErrorKind::InvalidOperation));
         /// ```
         DivideTrunc,
         /// Divide by another value, rounding the quotient toward zero, reporting an arithmetic
@@ -429,7 +434,7 @@ pub(crate) mod _traits {
         /// For **integer** types this is Rust's `/`, minus one where the signs differ and
         /// `a % b != 0`, with the errors of [`DivideTrunc`].
         /// For **float** types it is the exact quotient rounded down, not the rounded `a / b` (so
-        /// `1.0 / 0.1` gives `9.0`), with the special values of [`DivideTrunc`].
+        /// `1.0 / 0.1` gives `9.0`), with the special values and errors of [`DivideTrunc`].
         ///
         /// # Examples
         /// ```
@@ -456,7 +461,7 @@ pub(crate) mod _traits {
         /// Pairs with [`RemainderEuclid`]: `a == q * b + r`.
         ///
         /// For **integer** types this is [`i32::div_euclid`], with the errors of [`DivideTrunc`].
-        /// For **float** types it rounds the exact quotient, with the special values of
+        /// For **float** types it rounds the exact quotient, with the special values and errors of
         /// [`DivideTrunc`] ([`f32::div_euclid`] rounds `a / b` first, and can be one off).
         ///
         /// # Examples
@@ -742,26 +747,6 @@ pub(crate) mod _traits {
         }
     }
 
-    impl_scalar_op2!(
-        impl Div for [f32, f64] {
-            fn div = |a, b, status| {
-                let q = a / b;
-                if !q.is_finite() && !a.is_nan() && !b.is_nan() {
-                    *status |= float_div_error(a, b);
-                }
-                q
-            },
-            fn div_bulk = |a, b, status| {
-                let q = a / b;
-                if (!q.is_finite()).any_true()
-                    && (!q.is_finite() & a.simd_eq(a) & b.simd_eq(b)).any_true()
-                {
-                    *status |= float_div_errors(a.to_array().as_ref(), b.to_array().as_ref());
-                }
-                q
-            },
-        }
-    );
     #[cfg(feature = "half")]
     impl_scalar_op2!(
         impl Div for [f16] {
@@ -770,11 +755,7 @@ pub(crate) mod _traits {
                 let q = f16::from_f32(a.to_f32() / b.to_f32());
                 #[cfg(all(target_arch = "aarch64", target_feature = "fp16"))]
                 let q = a / b;
-                // As in the `f32` `div`.
-                if !q.is_finite() && !a.is_nan() && !b.is_nan() {
-                    *status |= float_div_error(a, b);
-                }
-                q
+                f16_quotient(q, a, b, status)
             },
         }
     );
@@ -790,44 +771,6 @@ pub(crate) mod _traits {
             fn div = |a, b, _status| a / b,
         }
     );
-    #[cold]
-    #[inline(never)]
-    fn float_div_error<T>(x: T, y: T) -> ArithmeticOpStatus
-    where
-        T: Copy + Into<f64> + core::ops::Div<Output = T>,
-    {
-        float_div_errors_impl(&[x], &[y])
-    }
-    #[cold]
-    #[inline(never)]
-    fn float_div_errors<T>(xs: &[T], ys: &[T]) -> ArithmeticOpStatus
-    where
-        T: Copy + Into<f64> + core::ops::Div<Output = T>,
-    {
-        float_div_errors_impl(xs, ys)
-    }
-    // divides by zero: `x / 0` with a finite non-zero `x`
-    // invalid: `0 / 0` and `inf / inf`
-    // overflows: an infinite quotient of finite operands overflows
-    #[inline(always)]
-    fn float_div_errors_impl<T>(xs: &[T], ys: &[T]) -> ArithmeticOpStatus
-    where
-        T: Copy + Into<f64> + core::ops::Div<Output = T>,
-    {
-        use ArithmeticErrorKind::*;
-        let mut status = ArithmeticOpStatus::default();
-        for (&x, &y) in xs.iter().zip(ys) {
-            let (a, b, q): (f64, f64, f64) = (x.into(), y.into(), (x / y).into());
-            status.set_if(DivideByZero, b == 0.0 && a != 0.0 && a.is_finite());
-            status.set_if(
-                InvalidOperation,
-                (a == 0.0 && b == 0.0) || (a.is_infinite() && b.is_infinite()),
-            );
-            status.set_if(Overflow, q.is_infinite() && a.is_finite() && b != 0.0);
-        }
-        status
-    }
-
     macro_rules! float_div_rem {
         (
             mod = $m:ident,
@@ -836,6 +779,7 @@ pub(crate) mod _traits {
             exact_limit = $exact_limit:expr,
         ) => {
             mod $m {
+                use crate::error::ArithmeticOpStatus;
                 use fearless_simd::{Select, Simd, SimdBase, SimdFloat, SimdMask};
 
                 type T = $t;
@@ -989,27 +933,81 @@ pub(crate) mod _traits {
                 }
 
                 #[inline(always)]
+                pub(super) fn quotient(q: T, a: T, b: T, status: &mut ArithmeticOpStatus) -> T {
+                    if !q.is_finite() && !a.is_nan() && !b.is_nan() {
+                        *status |= super::float_div_error(a, b, q);
+                    }
+                    q
+                }
+
+                #[inline(always)]
+                pub(super) fn quotient_v<S: Simd>(
+                    simd: S,
+                    q: V<S>,
+                    a: V<S>,
+                    b: V<S>,
+                    status: &mut ArithmeticOpStatus,
+                ) -> V<S> {
+                    use crate::error::ArithmeticErrorKind::*;
+                    let non_finite = !q.is_finite();
+                    if non_finite.any_true() {
+                        let ordered = a.simd_eq(a) & b.simd_eq(b);
+                        if (non_finite & ordered).any_true() {
+                            // As `float_div_error`, inline: a call would keep the vector
+                            // constants of the loop in memory.
+                            let zero = splat(simd, 0.0);
+                            let infinite = non_finite & q.simd_eq(q) & a.is_finite();
+                            status.set_if(InvalidOperation, (q.simd_ne(q) & ordered).any_true());
+                            status.set_if(DivideByZero, (infinite & b.simd_eq(zero)).any_true());
+                            status.set_if(Overflow, (infinite & b.simd_ne(zero)).any_true());
+                        }
+                    }
+                    q
+                }
+
+                #[inline(always)]
                 fn splat<S: Simd>(simd: S, x: T) -> V<S> {
                     <V<S> as SimdBase<S>>::splat(simd, x)
                 }
             }
 
             impl_scalar_op2!(
+                impl Div for [$t] {
+                    fn div = |a, b, status| $m::quotient(a / b, a, b, status),
+                    fn div_bulk = |a, b, status| $m::quotient_v(a.token(), a / b, a, b, status),
+                }
+            );
+            impl_scalar_op2!(
                 impl DivideTrunc for [$t] {
-                    fn divide_trunc = |a, b, _status| $m::div_trunc(a, b),
-                    fn divide_trunc_bulk = |a, b, _status| $m::div_trunc_v(a.token(), a, b),
+                    fn divide_trunc = |a, b, status| {
+                        $m::quotient($m::div_trunc(a, b), a, b, status)
+                    },
+                    fn divide_trunc_bulk = |a, b, status| {
+                        let simd = a.token();
+                        $m::quotient_v(simd, $m::div_trunc_v(simd, a, b), a, b, status)
+                    },
                 }
             );
             impl_scalar_op2!(
                 impl DivideFloor for [$t] {
-                    fn divide_floor = |a, b, _status| $m::div_floor(a, b),
-                    fn divide_floor_bulk = |a, b, _status| $m::div_floor_v(a.token(), a, b),
+                    fn divide_floor = |a, b, status| {
+                        $m::quotient($m::div_floor(a, b), a, b, status)
+                    },
+                    fn divide_floor_bulk = |a, b, status| {
+                        let simd = a.token();
+                        $m::quotient_v(simd, $m::div_floor_v(simd, a, b), a, b, status)
+                    },
                 }
             );
             impl_scalar_op2!(
                 impl DivideEuclid for [$t] {
-                    fn divide_euclid = |a, b, _status| $m::div_euclid(a, b),
-                    fn divide_euclid_bulk = |a, b, _status| $m::div_euclid_v(a.token(), a, b),
+                    fn divide_euclid = |a, b, status| {
+                        $m::quotient($m::div_euclid(a, b), a, b, status)
+                    },
+                    fn divide_euclid_bulk = |a, b, status| {
+                        let simd = a.token();
+                        $m::quotient_v(simd, $m::div_euclid_v(simd, a, b), a, b, status)
+                    },
                 }
             );
             impl_scalar_op2!(
@@ -1046,6 +1044,17 @@ pub(crate) mod _traits {
     );
 
     macro_rules! impl_f16_div_rem {
+        ($check:ident: $($Trait:ident::$f:ident = $g:ident),*) => {$(
+            #[cfg(feature = "half")]
+            impl_scalar_op2!(
+                impl $Trait for [f16] {
+                    fn $f = |a, b, status| {
+                        let r = f16::from_f32(f32_div_rem::$g(a.to_f32(), b.to_f32()));
+                        $check(r, a, b, status)
+                    },
+                }
+            );
+        )*};
         ($($Trait:ident::$f:ident = $g:ident),*) => {$(
             #[cfg(feature = "half")]
             impl_scalar_op2!(
@@ -1056,13 +1065,40 @@ pub(crate) mod _traits {
         )*};
     }
     impl_f16_div_rem!(
+        f16_quotient:
         DivideTrunc::divide_trunc = div_trunc,
         DivideFloor::divide_floor = div_floor,
-        DivideEuclid::divide_euclid = div_euclid,
+        DivideEuclid::divide_euclid = div_euclid
+    );
+    impl_f16_div_rem!(
         RemainderTrunc::remainder_trunc = rem_trunc,
         RemainderFloor::remainder_floor = rem_floor,
         RemainderEuclid::remainder_euclid = rem_euclid
     );
+
+    #[cfg(feature = "half")]
+    #[inline(always)]
+    fn f16_quotient(q: f16, a: f16, b: f16, status: &mut ArithmeticOpStatus) -> f16 {
+        if !q.is_finite() && !a.is_nan() && !b.is_nan() {
+            *status |= float_div_error(a, b, q);
+        }
+        q
+    }
+    // From the result `q` of a division of `x` by `y`, neither NaN:
+    // invalid: a NaN `q`, as `0 / 0`, `inf / inf` and `inf // x`
+    // divides by zero: an infinite `q` of a finite `x` and a zero `y`
+    // overflows: an infinite `q` of a finite `x` and a non-zero `y`
+    #[cold]
+    #[inline(never)]
+    fn float_div_error<T: Into<f64>>(x: T, y: T, q: T) -> ArithmeticOpStatus {
+        use ArithmeticErrorKind::*;
+        let (a, b, q): (f64, f64, f64) = (x.into(), y.into(), q.into());
+        let mut status = ArithmeticOpStatus::default();
+        status.set_if(InvalidOperation, q.is_nan());
+        status.set_if(DivideByZero, q.is_infinite() && a.is_finite() && b == 0.0);
+        status.set_if(Overflow, q.is_infinite() && a.is_finite() && b != 0.0);
+        status
+    }
 
     define_scalar_op2_trait!(
         /// Exponentiation operation: as [`i32::wrapping_pow`] for integers, [`f32::powi`] and
@@ -2557,33 +2593,56 @@ pub(crate) mod tests {
         }
     }
 
-    /// The float division errors, as numpy, for every pair of edge-case operands, against a
-    /// reference from the IEEE value of the result.
+    /// numpy's errors of a float division of `a` by `b` with the result `q`, from the IEEE values.
+    fn expected_div_errors(
+        a: f64,
+        b: f64,
+        q: f64,
+    ) -> [(crate::error::ArithmeticErrorKind, bool); 3] {
+        use crate::error::ArithmeticErrorKind::*;
+        let ordered = !a.is_nan() && !b.is_nan();
+        let finite = a.is_finite() && b.is_finite();
+        [
+            (
+                DivideByZero,
+                ordered && b == 0.0 && a.is_finite() && a != 0.0,
+            ),
+            (InvalidOperation, ordered && q.is_nan()),
+            (Overflow, finite && b != 0.0 && q.is_infinite()),
+        ]
+    }
+
+    /// The errors of the float divisions, as numpy, for every pair of edge-case operands.
     #[test]
     fn float_div_errors() {
-        use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
-        use crate::scalar::Div;
+        use crate::error::ArithmeticOpStatus;
+        use crate::scalar::{Div, DivideEuclid, DivideFloor, DivideTrunc};
         use crate::util::SimdTestValues;
 
+        type F<T> = fn(T, T, &mut ArithmeticOpStatus) -> T;
         macro_rules! check {
             ($($t:ty),*) => {$(
                 let values = <$t>::edge_cases();
+                let ops: [(&str, F<$t>); 4] = [
+                    ("div", Div::div),
+                    ("divide_trunc", DivideTrunc::divide_trunc),
+                    ("divide_floor", DivideFloor::divide_floor),
+                    ("divide_euclid", DivideEuclid::divide_euclid),
+                ];
                 for &a in &values {
                     for &b in &values {
-                        let mut status = ArithmeticOpStatus::default();
-                        let r = Div::div(a, b, &mut status);
-                        assert!(r.to_bits() == (a / b).to_bits() || r.is_nan() && (a / b).is_nan());
-                        let ordered = !a.is_nan() && !b.is_nan();
-                        let finite = a.is_finite() && b.is_finite();
-                        for (kind, expected) in [
-                            (
-                                ArithmeticErrorKind::DivideByZero,
-                                ordered && b == 0.0 && a.is_finite() && a != 0.0,
-                            ),
-                            (ArithmeticErrorKind::InvalidOperation, ordered && r.is_nan()),
-                            (ArithmeticErrorKind::Overflow, finite && b != 0.0 && r.is_infinite()),
-                        ] {
-                            assert_eq!(status.contains(kind), expected, "{a} / {b}: {kind:?}");
+                        for (name, f) in ops {
+                            let mut status = ArithmeticOpStatus::default();
+                            let r = f(a, b, &mut status);
+                            if name == "div" {
+                                let q = a / b;
+                                assert!(r.to_bits() == q.to_bits() || r.is_nan() && q.is_nan());
+                            }
+                            let errors = expected_div_errors(a.into(), b.into(), r.into());
+                            for (kind, expected) in errors {
+                                let what = format!("{name}({a}, {b}): {kind:?}");
+                                assert_eq!(status.contains(kind), expected, "{what}");
+                            }
                         }
                     }
                 }
@@ -2595,30 +2654,41 @@ pub(crate) mod tests {
     #[cfg(feature = "half")]
     #[test]
     fn float_div_errors_f16() {
-        use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
-        use crate::scalar::{f16, Div};
+        use crate::error::ArithmeticOpStatus;
+        use crate::scalar::{f16, Div, DivideEuclid, DivideFloor, DivideTrunc};
 
-        let f = f16::from_f32;
-        for (a, b, error) in [
-            (f(1.0), f(4.0), None),
-            (f(-3.0), f(0.0), Some(ArithmeticErrorKind::DivideByZero)),
-            (f(0.0), f(-0.0), Some(ArithmeticErrorKind::InvalidOperation)),
-            (
-                f16::INFINITY,
-                f16::NEG_INFINITY,
-                Some(ArithmeticErrorKind::InvalidOperation),
-            ),
-            // Overflows f16, not the f32 it is computed in.
-            (f(60000.0), f(0.5), Some(ArithmeticErrorKind::Overflow)),
-            (f16::INFINITY, f(0.0), None),
-            (f16::NAN, f(0.0), None),
-            (f(1.0), f16::INFINITY, None),
-        ] {
-            let mut status = ArithmeticOpStatus::default();
-            Div::div(a, b, &mut status);
-            assert_eq!(status.is_ok(), error.is_none(), "{a} / {b}");
-            if let Some(error) = error {
-                assert!(status.contains(error), "{a} / {b}");
+        type F<T> = fn(T, T, &mut ArithmeticOpStatus) -> T;
+        let ops: [(&str, F<f16>); 4] = [
+            ("div", Div::div),
+            ("divide_trunc", DivideTrunc::divide_trunc),
+            ("divide_floor", DivideFloor::divide_floor),
+            ("divide_euclid", DivideEuclid::divide_euclid),
+        ];
+        // 60000 / 0.5 overflows f16, not the f32 it is computed in.
+        let values = [
+            0.0,
+            -0.0,
+            1.0,
+            -3.0,
+            0.5,
+            60000.0,
+            f32::INFINITY,
+            -f32::INFINITY,
+            f32::NAN,
+        ];
+        for a in values.map(f16::from_f32) {
+            for b in values.map(f16::from_f32) {
+                for (name, f) in ops {
+                    let mut status = ArithmeticOpStatus::default();
+                    let r = f(a, b, &mut status);
+                    for (kind, expected) in expected_div_errors(a.into(), b.into(), r.into()) {
+                        assert_eq!(
+                            status.contains(kind),
+                            expected,
+                            "{name}({a}, {b}): {kind:?}"
+                        );
+                    }
+                }
             }
         }
     }
@@ -2627,7 +2697,9 @@ pub(crate) mod tests {
     /// pair of edge-case operands, in one lane of a bulk of ordinary ones.
     #[test]
     fn simd_bodies_status_all_levels() {
-        use super::{DivKernel, Op2Kernel};
+        use super::{
+            DivKernel, DivideEuclidKernel, DivideFloorKernel, DivideTruncKernel, Op2Kernel,
+        };
         use crate::error::ArithmeticOpStatus;
         use crate::util::{for_each_simd_level, SimdTestValues, SIMD_TEST_N};
         use fearless_simd::Simd;
@@ -2661,6 +2733,12 @@ pub(crate) mod tests {
             simd.vectorize(|| {
                 case!(DivKernel, f32);
                 case!(DivKernel, f64);
+                case!(DivideTruncKernel, f32);
+                case!(DivideTruncKernel, f64);
+                case!(DivideFloorKernel, f32);
+                case!(DivideFloorKernel, f64);
+                case!(DivideEuclidKernel, f32);
+                case!(DivideEuclidKernel, f64);
             });
         }
         for_each_simd_level!(check);

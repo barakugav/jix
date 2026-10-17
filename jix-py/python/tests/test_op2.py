@@ -360,7 +360,8 @@ def test_float_special_values(jix_fn, numpy_fn, dtype: np.dtype):
     values = [0.0, -0.0, 1.0, -1.0, 5.0, -2.5, np.inf, -np.inf, np.nan]
     a = np.array([x for x in values for _ in values], dtype=dtype)
     b = np.array([y for _ in values for y in values], dtype=dtype)
-    result = jix_fn(jix.compact(a), jix.compact(b)).numpy()
+    with jix.errstate(divide="ignore", invalid="ignore"):
+        result = jix_fn(jix.compact(a), jix.compact(b)).numpy()
     with np.errstate(divide="ignore", invalid="ignore"):
         expected = numpy_fn(a, b)
     np.testing.assert_array_equal(result, expected)

@@ -266,6 +266,16 @@ def test_float_divide_errors_match_numpy(dtype):
             _errors_match_numpy(lambda a, b: a / b, np.divide, x, y)
 
 
+# numpy has only `floor_divide`, whose errors are those of the three.
+@pytest.mark.parametrize("jix_fn", _QUOTIENTS)
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+def test_float_rounded_divide_errors_match_numpy(jix_fn, dtype):
+    edges = _float_edges(dtype)
+    for x in edges:
+        for y in edges:
+            _errors_match_numpy(jix_fn, np.floor_divide, x, y)
+
+
 @pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
 def test_sqrt_errors_match_numpy(dtype):
     for x in _float_edges(dtype):

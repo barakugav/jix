@@ -40,7 +40,7 @@ detect the errors from their inputs and outputs. The values stay the IEEE ones.
 | `Div` | `x / 0` with finite `x != 0` | `divide` | done |
 | | `0 / 0`, `inf / inf` | `invalid` | done |
 | | finite `/` finite gives `inf` | `over` | done |
-| `DivideTrunc` `DivideFloor` `DivideEuclid` | `x / 0` / `0 / 0`, `inf / x` / finite gives `inf` | `divide` / `invalid` / `over` | todo |
+| `DivideTrunc` `DivideFloor` `DivideEuclid` | `x / 0` / `0 / 0`, `inf / x` / finite gives `inf` | `divide` / `invalid` / `over` | done |
 | `RemainderTrunc` `RemainderFloor` `RemainderEuclid` | `x % 0`, `inf % x` | `invalid` | todo |
 | `Sqrt` | `x < 0` | `invalid` | done |
 | `Ln` | `x == 0` / `x < 0` | `divide` / `invalid` | todo |
@@ -68,9 +68,9 @@ without the checks.
   closure with `map_vectors_status` / `map_vectors2_status`. The integer quotients and
   remainders come from `checked_div` & co.: `int_quotient` / `int_remainder` give numpy's
   result where they are `None`.
-- The status of a loop must stay in a register. Never pass `&mut status` (or a bulk's input
-  arrays) to an out-of-line function: the pointer forces the status, or the arrays, into memory
-  on every iteration. Out-of-line functions return the status bits by value instead.
+- The status of a loop must stay in a register. Never pass `&mut status` to an out-of-line
+  function: the pointer forces the status into memory on every iteration. Out-of-line functions
+  return the status bits by value instead.
 - **Scalar path.** A rare error branches to an out-of-line `#[cold]` function. For integer
   `Div` the opaque call is required: without it LLVM if-converts the loop into vector code with
   a scalarized division per lane, which measured up to 2x slower. A call that returns the status
@@ -79,8 +79,15 @@ without the checks.
   `ArithmeticOpStatus::set_if` directly, which LLVM can still vectorize.
 - **SIMD path.** When the predicate is exact (`Sqrt`), set the status from it per vector
   (`set_if` of `any_true`): it measured the same as one mask test per bulk, even at AVX2 and
-  SSE4.2. When it is a superset (float `Div`), test it per vector and classify the rare vector
-  that has a hit out of line, from a copy of its lanes. Order the tests so the common
-  case is a single test: `!is_finite(r)` first, and only then the NaN-operand filter, so NaN
-  inputs do not reach the out-of-line classification.
+  SSE4.2. When it is a superset (the float quotients), test it per vector and classify the rare
+  vector that has a hit inline, with mask tests. Not with a call, even a cold one: x86-64 has no
+  callee-saved vector registers, so a call in the loop keeps the loop's vector constants in
+  memory (with 1% zero divisors, measured 40% slower for `Div` and 20% for `DivideFloor`).
+  Order the tests so the common case is a single test: `!is_finite(r)` first, and only then the
+  NaN-operand filter, so NaN inputs skip the classification.
+- The float quotients (`Div` and the `Divide*`s) share `quotient` / `quotient_v`: a non-finite
+  result of non-NaN operands is classified from the operands and the result, so the same rules
+  give `Div`'s `inf / 2 = inf` no error and `DivideFloor`'s `inf // 2 = NaN` an `invalid`. The
+  check costs the `Divide*`s 3 to 16% without errors (AVX-512): unlike `Div`, they are bound by
+  the vector ports, not by the divider.
 - The status is checked once per read, in `to_buf_type_erased(_dyn)`.
