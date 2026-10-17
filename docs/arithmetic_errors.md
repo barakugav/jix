@@ -16,8 +16,10 @@ The error kinds follow numpy: `divide` (`DivideByZero`), `over` (`Overflow`), `u
 | `Neg` `Abs` of `MIN` | `MIN` | - | todo |
 | `Pow`, unsigned exponent | wraps | - | done |
 | `Pow`, signed exponent `< 0` | `0` | `invalid` | done |
-| `Div` by `0` | `0` | `divide` | done |
-| `Div` `MIN / -1` | `MIN` | `over` | done |
+| `Div` `DivideTrunc` `DivideFloor` `DivideEuclid` by `0` | `0` | `divide` | done |
+| the same, `MIN / -1` | `MIN` | `over` | done |
+| `RemainderTrunc` `RemainderFloor` `RemainderEuclid` by `0` | `0` | `divide` | done |
+| the same, `MIN % -1` | `0` | - | done |
 | `Shl` `Shr` with count `>= width` or `< 0` | undecided | - | open |
 | `Sum` `Product` `Mean` | wraps | - | todo |
 
@@ -34,6 +36,8 @@ detect the errors from their inputs and outputs. The values stay the IEEE ones.
 | `Div` | `x / 0` with finite `x != 0` | `divide` | done |
 | | `0 / 0`, `inf / inf` | `invalid` | done |
 | | finite `/` finite gives `inf` | `over` | done |
+| `DivideTrunc` `DivideFloor` `DivideEuclid` | `x / 0` / `0 / 0`, `inf / x` / finite gives `inf` | `divide` / `invalid` / `over` | todo |
+| `RemainderTrunc` `RemainderFloor` `RemainderEuclid` | `x % 0`, `inf % x` | `invalid` | todo |
 | `Sqrt` | `x < 0` | `invalid` | done |
 | `Ln` | `x == 0` / `x < 0` | `divide` / `invalid` | todo |
 | `Exp` | finite `x` gives `inf` | `over` | todo |
@@ -54,6 +58,12 @@ Deferred.
 The rules below come from reading the generated assembly and A/B benchmarks against a version
 without the checks.
 
+- A kernel that can hit an error is declared as `f(status)` in `define_scalar_op1_trait!` /
+  `define_scalar_op2_trait!` and `define_op1!` / `define_op2!`, and implemented with
+  `|a, b, status|` closures in `impl_scalar_op1!` / `impl_scalar_op2!`, which map the SIMD
+  closure with `map_vectors_status` / `map_vectors2_status`. The integer quotients and
+  remainders come from `checked_div` & co.: `int_quotient` / `int_remainder` give numpy's
+  result where they are `None`.
 - The status of a loop must stay in a register. Never pass `&mut status` (or a bulk's input
   arrays) to an out-of-line function: the pointer forces the status, or the arrays, into memory
   on every iteration. Out-of-line functions return the status bits by value instead.
@@ -63,9 +73,10 @@ without the checks.
   by value is still opaque enough. A check that is cheap and
   branch-free, like `x < 0` for `Sqrt` or the negative exponent of `Pow`, uses
   `ArithmeticOpStatus::set_if` directly, which LLVM can still vectorize.
-- **SIMD path.** When the predicate is exact (`Sqrt`), OR it into a mask per vector and test the
-  mask once per bulk. When it is a superset (float `Div`), test it per vector and classify the
-  rare vector that has a hit out of line, from a copy of its lanes. Order the tests so the common
+- **SIMD path.** When the predicate is exact (`Sqrt`), set the status from it per vector
+  (`set_if` of `any_true`): it measured the same as one mask test per bulk, even at AVX2 and
+  SSE4.2. When it is a superset (float `Div`), test it per vector and classify the rare vector
+  that has a hit out of line, from a copy of its lanes. Order the tests so the common
   case is a single test: `!is_finite(r)` first, and only then the NaN-operand filter, so NaN
   inputs do not reach the out-of-line classification.
 - The status is checked once per read, in `to_buf_type_erased(_dyn)`.

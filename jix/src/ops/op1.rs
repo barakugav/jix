@@ -9,8 +9,8 @@ pub(crate) struct Op1<S, K> {
 pub(crate) trait Op1Kernel<T> {
     type Output;
 
-    /// Apply the kernel to `x`. An [`ArithmeticErrorKind`] is not a panic or an early return: the kernel
-    /// produces a fallback value and sets the error in `status`, see
+    /// Apply the kernel to `x`. An [`ArithmeticErrorKind`] is not a panic or an early
+    /// return: the kernel produces a fallback value and sets the error in `status`, see
     /// [`ElementwisePipelineImpl::read_bulk`].
     fn apply(&self, x: T, status: &mut ArithmeticOpStatus) -> Self::Output;
 
@@ -165,9 +165,8 @@ macro_rules! define_op1 {
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident,
-        crate::scalar::$trait:ident::$kernel_fn:ident,
+        crate::scalar::$trait:ident::$kernel_fn:ident $(($status:ident))?,
         simd: $bulk_fn:ident,
-        $(with_status: $with_status:tt,)?
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -177,19 +176,22 @@ macro_rules! define_op1 {
         {
             type Output = <T as crate::scalar::$trait>::Output;
 
+            // `(status)`: the scalar functions take the status too.
             #[inline(always)]
-            fn apply(&self, x: T, status: &mut ArithmeticOpStatus) -> Self::Output {
-                define_op1!(@apply $trait::$kernel_fn(x), status, $($with_status)?)
+            fn apply(&self, x: T, _status: &mut ArithmeticOpStatus) -> Self::Output {
+                $(let $status = _status;)?
+                <T as crate::scalar::$trait>::$kernel_fn(x $(, $status)?)
             }
 
             #[inline(always)]
             fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
                 &self,
                 xs: [T; N],
-                status: &mut ArithmeticOpStatus,
+                _status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [Self::Output; N] {
-                define_op1!(@bulk $trait::$bulk_fn(xs), status, simd, $($with_status)?)
+                $(let $status = _status;)?
+                <T as crate::scalar::$trait>::$bulk_fn(xs, $($status,)? simd)
             }
         }
         $(#[$meta])*
@@ -231,22 +233,6 @@ macro_rules! define_op1 {
         );
     };
 
-    // Calls of the scalar functions, passing `status` if the scalar trait takes one.
-    (@apply $trait:ident::$f:ident($x:ident), $status:ident,) => {{
-        let _ = $status;
-        <T as crate::scalar::$trait>::$f($x)
-    }};
-    (@apply $trait:ident::$f:ident($x:ident), $status:ident, true) => {
-        <T as crate::scalar::$trait>::$f($x, $status)
-    };
-    (@bulk $trait:ident::$f:ident($xs:ident), $status:ident, $simd:ident,) => {{
-        let _ = $status;
-        <T as crate::scalar::$trait>::$f($xs, $simd)
-    }};
-    (@bulk $trait:ident::$f:ident($xs:ident), $status:ident, $simd:ident, true) => {
-        <T as crate::scalar::$trait>::$f($xs, $status, $simd)
-    };
-
     (
         @define_core
         impl $Op:ident,
@@ -276,7 +262,7 @@ macro_rules! define_op1 {
 pub(crate) use define_op1;
 
 pub(crate) mod _traits {
-    use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+    use crate::error::ArithmeticErrorKind;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
@@ -529,62 +515,27 @@ pub(crate) mod _traits {
         /// as numpy. `-0.0` gives `-0.0`, and `NaN` propagates, without an error.
         Sqrt,
         /// Compute the square root, reporting an arithmetic error to `status`.
-        sqrt,
+        sqrt(status),
         bulk_fn: sqrt_bulk,
-        with_status,
     );
-    macro_rules! impl_sqrt {
-        ($($t:ty),*) => {$(
-            impl Sqrt for $t {
-                type Output = Self;
-                #[inline(always)]
-                fn sqrt(self, status: &mut ArithmeticOpStatus) -> Self {
-                    status.set_if(ArithmeticErrorKind::InvalidOperation, self < 0.0);
-                    <$t>::sqrt(self)
-                }
-
-                #[inline(always)]
-                fn sqrt_bulk<const N: usize, S: fearless_simd::Simd>(
-                    xs: [Self; N],
-                    status: &mut ArithmeticOpStatus,
-                    simd: S,
-                ) -> [Self; N] {
-                    use fearless_simd::{SimdBase, SimdFloat, SimdMask};
-                    type V<S> = <$t as crate::scalar::simd::SimdElementExt>::V<S>;
-                    let zero = V::<S>::splat(simd, 0.0);
-                    // A single mask OR per vector, tested once per bulk.
-                    let mut negative = <V<S> as SimdBase<S>>::Mask::splat(simd, false);
-                    let ys = crate::scalar::simd::map_vectors::<Self, Self, N, S>(
-                        xs,
-                        #[inline(always)]
-                        |x| <Self as Sqrt>::sqrt(x, status),
-                        #[inline(always)]
-                        |v| {
-                            negative |= v.simd_lt(zero);
-                            v.sqrt()
-                        },
-                        simd,
-                    );
-                    status.set_if(
-                        ArithmeticErrorKind::InvalidOperation,
-                        negative.any_true(),
-                    );
-                    ys
-                }
-            }
-        )*};
-    }
-    impl_sqrt!(f32, f64);
-    #[cfg(feature = "half")]
-    impl Sqrt for f16 {
-        type Output = Self;
-        #[inline(always)]
-        fn sqrt(self, status: &mut ArithmeticOpStatus) -> Self {
-            let x = self.to_f32();
-            status.set_if(ArithmeticErrorKind::InvalidOperation, x < 0.0);
-            f16::from_f32(x.sqrt())
+    impl_scalar_op1!(
+        impl Sqrt for [f32, f64] {
+            fn sqrt = |x, status| {
+                status.set_if(ArithmeticErrorKind::InvalidOperation, x < 0.0);
+                x.sqrt()
+            },
+            fn sqrt_bulk = |x, status| {
+                status.set_if(ArithmeticErrorKind::InvalidOperation, x.simd_lt(0.0).any_true());
+                x.sqrt()
+            },
         }
-    }
+    );
+    #[cfg(feature = "half")]
+    impl_scalar_op1!(
+        impl Sqrt for [f16] {
+            fn sqrt = |x, status| f16::from_f32(Sqrt::sqrt(x.to_f32(), status)),
+        }
+    );
     float_op1!(
         /// Rounding operation, as [`f32::round`].
         ///
@@ -817,9 +768,8 @@ define_op1!(
     /// ```
     Sqrt,
     SqrtKernel,
-    crate::scalar::Sqrt::sqrt,
+    crate::scalar::Sqrt::sqrt(status),
     simd: sqrt_bulk,
-    with_status: true,
 );
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
@@ -1649,6 +1599,7 @@ pub(crate) mod tests {
                 fn [<sqrt_invalid_ $t>]() {
                     use crate::Array;
                     use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
+                    #[cfg(feature = "half")]
                     #[allow(unused_imports)]
                     use crate::scalar::f16;
 

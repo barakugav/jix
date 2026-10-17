@@ -23,15 +23,25 @@ def _modes(**kinds):
     return {**DEFAULT_MODES, **kinds}
 
 
-def _trunc_div_ref(np_a, np_b):
-    """`a // b` truncating toward zero, `0` for a zero divisor, `MIN // -1` wrapping."""
+# The integer divisions, with their results for a non-zero divisor.
+_INT_DIVISIONS = {
+    jix.divide_trunc: lambda x, y: abs(x) // abs(y) * (1 if (x < 0) == (y < 0) else -1),
+    jix.divide_floor: lambda x, y: x // y,
+    jix.divide_euclid: lambda x, y: (x - x % abs(y)) // y,
+    jix.remainder_trunc: lambda x, y: abs(x) % abs(y) * (1 if x >= 0 else -1),
+    jix.remainder_floor: lambda x, y: x % y,
+    jix.remainder_euclid: lambda x, y: x % abs(y),
+}
+_QUOTIENTS = [jix.divide_trunc, jix.divide_floor, jix.divide_euclid]
+
+
+def _int_div_ref(jix_fn, np_a, np_b):
+    """`jix_fn` of each pair as numpy: `0` for a zero divisor, and wrapping (`MIN // -1` is `MIN`)."""
     out = np.zeros_like(np_a)
     for idx in np.ndindex(np_a.shape):
         x, y = int(np_a[idx]), int(np_b[idx])
         if y != 0:
-            q = abs(x) // abs(y)
-            q = q if (x < 0) == (y < 0) else -q
-            out[idx] = np.array(q).astype(np_a.dtype)  # wraps MIN // -1
+            out[idx] = np.array(_INT_DIVISIONS[jix_fn](x, y)).astype(np_a.dtype)
     return out
 
 
@@ -50,7 +60,7 @@ def test_divide_by_zero_warn(dtype):
     with jix.errstate(divide="warn"), warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         result = (za // zb).numpy()
-    np.testing.assert_array_equal(result, _trunc_div_ref(a, b))
+    np.testing.assert_array_equal(result, _int_div_ref(jix.divide_floor, a, b))
     # One warning per read, however many elements hit it.
     assert [(x.category, str(x.message)) for x in w] == [(RuntimeWarning, MESSAGE)]
 
@@ -63,7 +73,7 @@ def test_divide_by_zero_raises_by_default(dtype):
     with pytest.raises(FloatingPointError, match=MESSAGE):
         (za // zb).numpy()
     # Only the elements read count.
-    np.testing.assert_array_equal((za // zb)[:300], _trunc_div_ref(a[:300], b[:300]))
+    np.testing.assert_array_equal((za // zb)[:300], _int_div_ref(jix.divide_floor, a[:300], b[:300]))
     with jix.errstate(divide="raise"), pytest.raises(FloatingPointError, match=MESSAGE):
         (za // zb).numpy()
 
@@ -74,7 +84,7 @@ def test_divide_by_zero_ignore(dtype):
     za, zb = jix.compact(a), jix.compact(b)
     with jix.errstate(divide="ignore"), warnings.catch_warnings():
         warnings.simplefilter("error")
-        np.testing.assert_array_equal((za // zb).numpy(), _trunc_div_ref(a, b))
+        np.testing.assert_array_equal((za // zb).numpy(), _int_div_ref(jix.divide_floor, a, b))
 
 
 @pytest.mark.parametrize("dtype", ints)
@@ -166,9 +176,10 @@ def test_modes_are_per_thread():
     assert seen == [DEFAULT_MODES]
 
 
+@pytest.mark.parametrize("jix_fn", _INT_DIVISIONS, ids=lambda f: f.__name__)
 @pytest.mark.parametrize("dtype", ints + uints)
 @given(st.data())
-def test_divide_by_zero_random(dtype, data: DataObject):
+def test_divide_by_zero_random(jix_fn, dtype, data: DataObject):
     # Zero divisors in about a third of the elements, random shapes and block shapes.
     (np_a, za), (np_b, zb) = data.draw(
         carrays2_mixed_strategy(
@@ -179,15 +190,33 @@ def test_divide_by_zero_random(dtype, data: DataObject):
         ),
         label="arrays",
     )
-    expected = _trunc_div_ref(np_a, np_b)
+    expected = _int_div_ref(jix_fn, np_a, np_b)
     with jix.errstate(divide="ignore"):
-        np.testing.assert_array_equal((za // zb).numpy(), expected)
+        np.testing.assert_array_equal(jix_fn(za, zb).numpy(), expected)
     with jix.errstate(divide="raise"):
         if (np_b == 0).any():
-            with pytest.raises(FloatingPointError):
-                (za // zb).numpy()
+            with pytest.raises(FloatingPointError, match=MESSAGE):
+                jix_fn(za, zb).numpy()
         else:
-            np.testing.assert_array_equal((za // zb).numpy(), expected)
+            np.testing.assert_array_equal(jix_fn(za, zb).numpy(), expected)
+
+
+@pytest.mark.parametrize("jix_fn", _INT_DIVISIONS, ids=lambda f: f.__name__)
+@pytest.mark.parametrize("dtype", ints)
+def test_min_by_minus_one(jix_fn, dtype):
+    # As numpy: the quotients are `MIN`, an overflow, and the remainders `0`, exact.
+    info = np.iinfo(dtype)
+    a = np.array([info.min, 7, info.max], dtype=dtype)
+    b = np.full(3, -1, dtype=dtype)
+    result = jix_fn(jix.compact(a), jix.compact(b))
+    expected = _int_div_ref(jix_fn, a, b)
+    if jix_fn in _QUOTIENTS:
+        with pytest.warns(RuntimeWarning, match="overflow encountered"):
+            np.testing.assert_array_equal(result.numpy(), expected)
+    else:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            np.testing.assert_array_equal(result.numpy(), expected)
 
 
 # Operands for the float error tests: every pair of these.

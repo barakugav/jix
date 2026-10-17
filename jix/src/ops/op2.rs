@@ -11,8 +11,8 @@ pub(crate) struct Op2<S1, S2, K> {
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
 
-    /// Apply the kernel to `a` and `b`. An [`ArithmeticErrorKind`] is not a panic or an early return: the
-    /// kernel produces a fallback value and sets the error in `status`, see
+    /// Apply the kernel to `a` and `b`. An [`ArithmeticErrorKind`] is not a panic or an early
+    /// return: the kernel produces a fallback value and sets the error in `status`, see
     /// [`ElementwisePipelineImpl::read_bulk`].
     fn apply(&self, a: T1, b: T2, status: &mut ArithmeticOpStatus) -> Self::Output;
 
@@ -222,9 +222,8 @@ macro_rules! define_op2 {
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident,
-        crate::scalar::$trait:ident::$kernel_fn:ident,
+        crate::scalar::$trait:ident::$kernel_fn:ident $(($status:ident))?,
         simd: $bulk_fn:ident,
-        $(with_status: $with_status:tt,)?
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -235,9 +234,11 @@ macro_rules! define_op2 {
         {
             type Output = <T1 as crate::scalar::$trait<T2>>::Output;
 
+            // `(status)`: the scalar functions take the status too.
             #[inline(always)]
-            fn apply(&self, a: T1, b: T2, status: &mut ArithmeticOpStatus) -> Self::Output {
-                define_op2!(@apply $trait::$kernel_fn(a, b), status, $($with_status)?)
+            fn apply(&self, a: T1, b: T2, _status: &mut ArithmeticOpStatus) -> Self::Output {
+                $(let $status = _status;)?
+                <T1 as crate::scalar::$trait<T2>>::$kernel_fn(a, b $(, $status)?)
             }
 
             #[inline(always)]
@@ -245,10 +246,11 @@ macro_rules! define_op2 {
                 &self,
                 a: [T1; N],
                 b: [T2; N],
-                status: &mut ArithmeticOpStatus,
+                _status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [Self::Output; N] {
-                define_op2!(@bulk $trait::$bulk_fn(a, b), status, simd, $($with_status)?)
+                $(let $status = _status;)?
+                <T1 as crate::scalar::$trait<T2>>::$bulk_fn(a, b, $($status,)? simd)
             }
         }
         $(#[$meta])*
@@ -289,22 +291,6 @@ macro_rules! define_op2 {
             $trait,
             $(core_op: $core_op_trait::$core_op_fn,)?
         );
-    };
-
-    // Calls of the scalar functions, passing `status` if the scalar trait takes one.
-    (@apply $trait:ident::$f:ident($a:ident, $b:ident), $status:ident,) => {{
-        let _ = $status;
-        <T1 as crate::scalar::$trait<T2>>::$f($a, $b)
-    }};
-    (@apply $trait:ident::$f:ident($a:ident, $b:ident), $status:ident, true) => {
-        <T1 as crate::scalar::$trait<T2>>::$f($a, $b, $status)
-    };
-    (@bulk $trait:ident::$f:ident($a:ident, $b:ident), $status:ident, $simd:ident,) => {{
-        let _ = $status;
-        <T1 as crate::scalar::$trait<T2>>::$f($a, $b, $simd)
-    }};
-    (@bulk $trait:ident::$f:ident($a:ident, $b:ident), $status:ident, $simd:ident, true) => {
-        <T1 as crate::scalar::$trait<T2>>::$f($a, $b, $status, $simd)
     };
 
     (
@@ -379,29 +365,59 @@ pub(crate) mod _traits {
         bulk_fn: mul_bulk,
     );
     define_scalar_op2_trait!(
+        /// Division operation, like [`core::ops::Div`], reporting arithmetic errors to an
+        /// [`ArithmeticOpStatus`] instead of panicking.
+        ///
+        /// For **integer** types the result is truncating (rounds towards zero). Dividing by zero
+        /// gives `0` and sets [`ArithmeticErrorKind::DivideByZero`], and `MIN / -1` gives `MIN`
+        /// and sets [`ArithmeticErrorKind::Overflow`].
+        /// For **float** types the result is the IEEE 754 one, and the errors are those of numpy:
+        /// a finite non-zero value divided by zero sets [`ArithmeticErrorKind::DivideByZero`],
+        /// `0 / 0` and `inf / inf` set [`ArithmeticErrorKind::InvalidOperation`], and an infinite
+        /// result of finite operands sets [`ArithmeticErrorKind::Overflow`]. NaN operands
+        /// propagate without an error.
+        /// For **complex** types this is full complex division; errors are not reported yet.
+        Div,
+        /// Divide by another value, reporting an arithmetic error to `status`.
+        div(status),
+        bulk_fn: div_bulk,
+    );
+    define_scalar_op2_trait!(
         /// Truncated division: the quotient `a / b` rounded toward zero.
         ///
         /// Pairs with [`RemainderTrunc`]: `a == q * b + r`.
         ///
-        /// For **integer** types this is Rust's `/`.
+        /// For **integer** types this is Rust's `/`, except that a zero divisor gives `0` and sets
+        /// [`ArithmeticErrorKind::DivideByZero`], and `MIN / -1` gives `MIN` and sets
+        /// [`ArithmeticErrorKind::Overflow`], as numpy.
         /// For **float** types the result is the exact quotient rounded toward zero, not the
         /// rounded `a / b` (`1.0 / 0.1` rounds to `10.0`, but `0.1` fits in `1.0` only 9 times).
-        /// A zero divisor produces `+-inf` (`NaN` for `0 / 0`) and an infinite dividend `NaN`.
+        /// A zero divisor produces `+-inf` (`NaN` for `0 / 0`) and an infinite dividend `NaN`;
+        /// float errors are not reported yet.
         ///
         /// # Examples
         /// ```
+        /// use jix::error::{ArithmeticErrorKind, ArithmeticOpStatus};
         /// use jix::scalar::DivideTrunc;
         ///
-        /// assert_eq!(7i32.divide_trunc(3), 2);
-        /// assert_eq!((-7i32).divide_trunc(3), -2);
-        /// assert_eq!(7i32.divide_trunc(-3), -2);
-        /// assert_eq!((-7i32).divide_trunc(-3), 2);
-        /// assert_eq!((-7.5f64).divide_trunc(2.0), -3.0);
-        /// assert_eq!(1.0f64.divide_trunc(0.1), 9.0);
+        /// let mut status = ArithmeticOpStatus::default();
+        /// assert_eq!(7i32.divide_trunc(3, &mut status), 2);
+        /// assert_eq!((-7i32).divide_trunc(3, &mut status), -2);
+        /// assert_eq!(7i32.divide_trunc(-3, &mut status), -2);
+        /// assert_eq!((-7i32).divide_trunc(-3, &mut status), 2);
+        /// assert_eq!((-7.5f64).divide_trunc(2.0, &mut status), -3.0);
+        /// assert_eq!(1.0f64.divide_trunc(0.1, &mut status), 9.0);
+        /// assert!(status.is_ok());
+        ///
+        /// assert_eq!(7i32.divide_trunc(0, &mut status), 0);
+        /// assert!(status.contains(ArithmeticErrorKind::DivideByZero));
+        /// assert_eq!(i32::MIN.divide_trunc(-1, &mut status), i32::MIN);
+        /// assert!(status.contains(ArithmeticErrorKind::Overflow));
         /// ```
         DivideTrunc,
-        /// Divide by another value, rounding the quotient toward zero.
-        divide_trunc,
+        /// Divide by another value, rounding the quotient toward zero, reporting an arithmetic
+        /// error to `status`.
+        divide_trunc(status),
         bulk_fn: divide_trunc_bulk,
     );
     define_scalar_op2_trait!(
@@ -411,23 +427,26 @@ pub(crate) mod _traits {
         /// Pairs with [`RemainderFloor`]: `a == q * b + r`.
         ///
         /// For **integer** types this is Rust's `/`, minus one where the signs differ and
-        /// `a % b != 0`.
+        /// `a % b != 0`, with the errors of [`DivideTrunc`].
         /// For **float** types it is the exact quotient rounded down, not the rounded `a / b` (so
         /// `1.0 / 0.1` gives `9.0`), with the special values of [`DivideTrunc`].
         ///
         /// # Examples
         /// ```
+        /// use jix::error::ArithmeticOpStatus;
         /// use jix::scalar::DivideFloor;
         ///
-        /// assert_eq!(7i32.divide_floor(3), 2);
-        /// assert_eq!((-7i32).divide_floor(3), -3);
-        /// assert_eq!(7i32.divide_floor(-3), -3);
-        /// assert_eq!((-7i32).divide_floor(-3), 2);
-        /// assert_eq!((-7.5f64).divide_floor(2.0), -4.0);
+        /// let mut status = ArithmeticOpStatus::default();
+        /// assert_eq!(7i32.divide_floor(3, &mut status), 2);
+        /// assert_eq!((-7i32).divide_floor(3, &mut status), -3);
+        /// assert_eq!(7i32.divide_floor(-3, &mut status), -3);
+        /// assert_eq!((-7i32).divide_floor(-3, &mut status), 2);
+        /// assert_eq!((-7.5f64).divide_floor(2.0, &mut status), -4.0);
         /// ```
         DivideFloor,
-        /// Divide by another value, rounding the quotient toward negative infinity.
-        divide_floor,
+        /// Divide by another value, rounding the quotient toward negative infinity, reporting an
+        /// arithmetic error to `status`.
+        divide_floor(status),
         bulk_fn: divide_floor_bulk,
     );
     define_scalar_op2_trait!(
@@ -436,23 +455,26 @@ pub(crate) mod _traits {
         ///
         /// Pairs with [`RemainderEuclid`]: `a == q * b + r`.
         ///
-        /// For **integer** types this is [`i32::div_euclid`].
+        /// For **integer** types this is [`i32::div_euclid`], with the errors of [`DivideTrunc`].
         /// For **float** types it rounds the exact quotient, with the special values of
         /// [`DivideTrunc`] ([`f32::div_euclid`] rounds `a / b` first, and can be one off).
         ///
         /// # Examples
         /// ```
+        /// use jix::error::ArithmeticOpStatus;
         /// use jix::scalar::DivideEuclid;
         ///
-        /// assert_eq!(7i32.divide_euclid(3), 2);
-        /// assert_eq!((-7i32).divide_euclid(3), -3);
-        /// assert_eq!(7i32.divide_euclid(-3), -2);
-        /// assert_eq!((-7i32).divide_euclid(-3), 3);
-        /// assert_eq!((-7.5f64).divide_euclid(2.0), -4.0);
+        /// let mut status = ArithmeticOpStatus::default();
+        /// assert_eq!(7i32.divide_euclid(3, &mut status), 2);
+        /// assert_eq!((-7i32).divide_euclid(3, &mut status), -3);
+        /// assert_eq!(7i32.divide_euclid(-3, &mut status), -2);
+        /// assert_eq!((-7i32).divide_euclid(-3, &mut status), 3);
+        /// assert_eq!((-7.5f64).divide_euclid(2.0, &mut status), -4.0);
         /// ```
         DivideEuclid,
-        /// Divide by another value, with the quotient of the never negative remainder.
-        divide_euclid,
+        /// Divide by another value, with the quotient of the never negative remainder, reporting
+        /// an arithmetic error to `status`.
+        divide_euclid(status),
         bulk_fn: divide_euclid_bulk,
     );
     define_scalar_op2_trait!(
@@ -461,22 +483,32 @@ pub(crate) mod _traits {
         /// The result has the sign of the dividend `a`, like C's `%` and `fmod`, `numpy.fmod` and
         /// `torch.fmod`. It pairs with [`DivideTrunc`].
         ///
-        /// For **integer** and **float** types this is Rust's `%`; a float zero divisor produces
-        /// `NaN`.
+        /// For **integer** types this is Rust's `%`, except that a zero divisor gives `0` and sets
+        /// [`ArithmeticErrorKind::DivideByZero`], and `MIN % -1` gives `0`, as numpy.
+        /// For **float** types it is Rust's `%`; a zero divisor produces `NaN`, and float errors
+        /// are not reported yet.
         ///
         /// # Examples
         /// ```
+        /// use jix::error::{ArithmeticErrorKind, ArithmeticOpStatus};
         /// use jix::scalar::RemainderTrunc;
         ///
-        /// assert_eq!(7i32.remainder_trunc(3), 1);
-        /// assert_eq!((-7i32).remainder_trunc(3), -1);
-        /// assert_eq!(7i32.remainder_trunc(-3), 1);
-        /// assert_eq!((-7i32).remainder_trunc(-3), -1);
-        /// assert_eq!((-7.5f64).remainder_trunc(2.0), -1.5);
+        /// let mut status = ArithmeticOpStatus::default();
+        /// assert_eq!(7i32.remainder_trunc(3, &mut status), 1);
+        /// assert_eq!((-7i32).remainder_trunc(3, &mut status), -1);
+        /// assert_eq!(7i32.remainder_trunc(-3, &mut status), 1);
+        /// assert_eq!((-7i32).remainder_trunc(-3, &mut status), -1);
+        /// assert_eq!((-7.5f64).remainder_trunc(2.0, &mut status), -1.5);
+        /// assert_eq!(i32::MIN.remainder_trunc(-1, &mut status), 0);
+        /// assert!(status.is_ok());
+        ///
+        /// assert_eq!(7i32.remainder_trunc(0, &mut status), 0);
+        /// assert!(status.contains(ArithmeticErrorKind::DivideByZero));
         /// ```
         RemainderTrunc,
-        /// Truncated remainder of the division by another value.
-        remainder_trunc,
+        /// Truncated remainder of the division by another value, reporting an arithmetic error to
+        /// `status`.
+        remainder_trunc(status),
         bulk_fn: remainder_trunc_bulk,
     );
     define_scalar_op2_trait!(
@@ -486,23 +518,26 @@ pub(crate) mod _traits {
         /// `torch.remainder`. It pairs with [`DivideFloor`].
         ///
         /// For **integer** types this is Rust's `%`, plus `b` where it is not zero and its sign
-        /// differs from `b`'s.
+        /// differs from `b`'s, with the errors of [`RemainderTrunc`].
         /// For **float** types it is Python's float `%`, which gives a zero result the sign of `b`;
         /// a zero divisor produces `NaN`.
         ///
         /// # Examples
         /// ```
+        /// use jix::error::ArithmeticOpStatus;
         /// use jix::scalar::RemainderFloor;
         ///
-        /// assert_eq!(7i32.remainder_floor(3), 1);
-        /// assert_eq!((-7i32).remainder_floor(3), 2);
-        /// assert_eq!(7i32.remainder_floor(-3), -2);
-        /// assert_eq!((-7i32).remainder_floor(-3), -1);
-        /// assert_eq!((-7.5f64).remainder_floor(2.0), 0.5);
+        /// let mut status = ArithmeticOpStatus::default();
+        /// assert_eq!(7i32.remainder_floor(3, &mut status), 1);
+        /// assert_eq!((-7i32).remainder_floor(3, &mut status), 2);
+        /// assert_eq!(7i32.remainder_floor(-3, &mut status), -2);
+        /// assert_eq!((-7i32).remainder_floor(-3, &mut status), -1);
+        /// assert_eq!((-7.5f64).remainder_floor(2.0, &mut status), 0.5);
         /// ```
         RemainderFloor,
-        /// Floored remainder of the division by another value.
-        remainder_floor,
+        /// Floored remainder of the division by another value, reporting an arithmetic error to
+        /// `status`.
+        remainder_floor(status),
         bulk_fn: remainder_floor_bulk,
     );
     define_scalar_op2_trait!(
@@ -511,22 +546,26 @@ pub(crate) mod _traits {
         /// The result is never negative, and equals the [`RemainderFloor`] when `b > 0`. It pairs
         /// with [`DivideEuclid`].
         ///
-        /// For **integer** types this is [`i32::rem_euclid`], and for **float** types
-        /// [`f32::rem_euclid`], where a zero divisor produces `NaN`.
+        /// For **integer** types this is [`i32::rem_euclid`], with the errors of
+        /// [`RemainderTrunc`], and for **float** types [`f32::rem_euclid`], where a zero divisor
+        /// produces `NaN`.
         ///
         /// # Examples
         /// ```
+        /// use jix::error::ArithmeticOpStatus;
         /// use jix::scalar::RemainderEuclid;
         ///
-        /// assert_eq!(7i32.remainder_euclid(3), 1);
-        /// assert_eq!((-7i32).remainder_euclid(3), 2);
-        /// assert_eq!(7i32.remainder_euclid(-3), 1);
-        /// assert_eq!((-7i32).remainder_euclid(-3), 2);
-        /// assert_eq!((-7.5f64).remainder_euclid(2.0), 0.5);
+        /// let mut status = ArithmeticOpStatus::default();
+        /// assert_eq!(7i32.remainder_euclid(3, &mut status), 1);
+        /// assert_eq!((-7i32).remainder_euclid(3, &mut status), 2);
+        /// assert_eq!(7i32.remainder_euclid(-3, &mut status), 1);
+        /// assert_eq!((-7i32).remainder_euclid(-3, &mut status), 2);
+        /// assert_eq!((-7.5f64).remainder_euclid(2.0, &mut status), 0.5);
         /// ```
         RemainderEuclid,
-        /// Euclidean remainder of the division by another value.
-        remainder_euclid,
+        /// Euclidean remainder of the division by another value, reporting an arithmetic error to
+        /// `status`.
+        remainder_euclid(status),
         bulk_fn: remainder_euclid_bulk,
     );
 
@@ -586,74 +625,208 @@ pub(crate) mod _traits {
         Mul::mul, *, [i8], // i8 auto-vectorized scalar is faster
         simd: mul_bulk, [f32, f64, i16, i32, i64, u8, u16, u32, u64]
     );
-    define_scalar_op2_trait!(
-        /// Division operation, like [`core::ops::Div`], reporting arithmetic errors to an
-        /// [`ArithmeticOpStatus`] instead of panicking.
-        ///
-        /// For **integer** types the result is truncating (rounds towards zero). Dividing by zero
-        /// gives `0` and sets [`ArithmeticErrorKind::DivideByZero`], and `MIN / -1` gives `MIN`
-        /// and sets [`ArithmeticErrorKind::Overflow`].
-        /// For **float** types the result is the IEEE 754 one, and the errors are those of numpy:
-        /// a finite non-zero value divided by zero sets [`ArithmeticErrorKind::DivideByZero`],
-        /// `0 / 0` and `inf / inf` set [`ArithmeticErrorKind::InvalidOperation`], and an infinite
-        /// result of finite operands sets [`ArithmeticErrorKind::Overflow`]. NaN operands
-        /// propagate without an error.
-        /// For **complex** types this is full complex division; errors are not reported yet.
-        Div,
-        /// Divide by another value, reporting an arithmetic error to `status`.
-        div,
-        bulk_fn: div_bulk,
-        with_status,
+    /// `q`, the quotient of an integer division `a / b`, or, where it is `None` for a zero `b` or
+    /// `MIN / -1`, numpy's results: `0` and a division by zero, or `MIN` and an overflow.
+    #[inline(always)]
+    fn int_quotient<T: Copy + Default + PartialEq>(
+        q: Option<T>,
+        a: T,
+        b: T,
+        status: &mut ArithmeticOpStatus,
+    ) -> T {
+        match q {
+            Some(q) => q,
+            None => {
+                let (q, error) = int_div_error(a, b);
+                *status |= error;
+                q
+            }
+        }
+    }
+
+    /// The error path of [`int_quotient`].
+    ///
+    /// Out of line on purpose. Besides keeping the rare path out of the loop, the opaque call
+    /// keeps LLVM from if-converting the loop to vector code: integer division has no SIMD
+    /// instruction, so it would scalarize each division with lane extracts and inserts and a
+    /// branch per lane, which measured up to 2x slower (`i16`) than this scalar loop. The status
+    /// is returned rather than set through a pointer, which would take the caller's status out of
+    /// a register for the whole loop (measured up to 15% slower on strided reads).
+    #[cold]
+    #[inline(never)]
+    fn int_div_error<T: Default + PartialEq>(a: T, b: T) -> (T, ArithmeticOpStatus) {
+        if b == T::default() {
+            (T::default(), ArithmeticErrorKind::DivideByZero.into())
+        } else {
+            (a, ArithmeticErrorKind::Overflow.into())
+        }
+    }
+
+    /// `r`, the remainder of an integer division `a % b`, or, where it is `None` for a zero `b` or
+    /// `MIN % -1`, numpy's result: `0`, and a division by zero for a zero `b`.
+    #[inline(always)]
+    fn int_remainder<T: Copy + Default + PartialEq>(
+        r: Option<T>,
+        b: T,
+        status: &mut ArithmeticOpStatus,
+    ) -> T {
+        match r {
+            Some(r) => r,
+            None => {
+                *status |= int_rem_error(b);
+                T::default()
+            }
+        }
+    }
+
+    /// The error path of [`int_remainder`], out of line as [`int_div_error`].
+    #[cold]
+    #[inline(never)]
+    fn int_rem_error<T: Default + PartialEq>(b: T) -> ArithmeticOpStatus {
+        let mut status = ArithmeticOpStatus::default();
+        status.set_if(ArithmeticErrorKind::DivideByZero, b == T::default());
+        status
+    }
+
+    impl_scalar_op2!(
+        impl Div for [i8, i16, i32, i64, u8, u16, u32, u64] {
+            fn div = |a, b, status| int_quotient(a.checked_div(b), a, b, status),
+        }
     );
     impl_scalar_op2!(
         impl DivideTrunc for [i8, i16, i32, i64, u8, u16, u32, u64] {
-            fn divide_trunc = |a, b| a / b,
+            fn divide_trunc = |a, b, status| int_quotient(a.checked_div(b), a, b, status),
         }
     );
     impl_scalar_op2!(
         impl DivideFloor for [i8, i16, i32, i64] {
-            fn divide_floor = |a, b| {
+            fn divide_floor = |a, b, status| {
                 // https://github.com/rust-lang/rust/blob/1.97.0/library/core/src/num/int_macros.rs#L3308-L3324
-                let d = a / b;
-                let r = a % b;
-                let correction = (a ^ b) >> (Self::BITS - 1);
-                if r != 0 { d + correction } else { d }
+                let floor = |d| {
+                    let correction = (a ^ b) >> (Self::BITS - 1);
+                    if a % b != 0 { d + correction } else { d }
+                };
+                int_quotient(a.checked_div(b).map(floor), a, b, status)
             },
         }
     );
     impl_scalar_op2!(
         impl DivideFloor for [u8, u16, u32, u64] {
-            fn divide_floor = |a, b| a / b,
+            fn divide_floor = |a, b, status| int_quotient(a.checked_div(b), a, b, status),
         }
     );
     impl_scalar_op2!(
         impl DivideEuclid for [i8, i16, i32, i64, u8, u16, u32, u64] {
-            fn divide_euclid = |a, b| a.div_euclid(b),
+            fn divide_euclid = |a, b, status| int_quotient(a.checked_div_euclid(b), a, b, status),
         }
     );
     impl_scalar_op2!(
         impl RemainderTrunc for [i8, i16, i32, i64, u8, u16, u32, u64] {
-            fn remainder_trunc = |a, b| a % b,
+            fn remainder_trunc = |a, b, status| int_remainder(a.checked_rem(b), b, status),
         }
     );
     impl_scalar_op2!(
         impl RemainderFloor for [i8, i16, i32, i64] {
-            fn remainder_floor = |a, b| {
+            fn remainder_floor = |a, b, status| {
                 // numpy's `remainder`, which compiles without branches, unlike num-integer's:
                 // https://github.com/numpy/numpy/blob/v2.3.0/numpy/_core/src/umath/loops_modulo.dispatch.c.src#L595-L602
-                let rem = a % b;
-                if (a > 0) == (b > 0) || rem == 0 { rem } else { rem + b }
+                let floor = |rem| if (a > 0) == (b > 0) || rem == 0 { rem } else { rem + b };
+                int_remainder(a.checked_rem(b).map(floor), b, status)
             },
         }
     );
     impl_scalar_op2!(
         impl RemainderFloor for [u8, u16, u32, u64] {
-            fn remainder_floor = |a, b| a % b,
+            fn remainder_floor = |a, b, status| int_remainder(a.checked_rem(b), b, status),
         }
     );
     impl_scalar_op2!(
         impl RemainderEuclid for [i8, i16, i32, i64, u8, u16, u32, u64] {
-            fn remainder_euclid = |a, b| a.rem_euclid(b),
+            fn remainder_euclid = |a, b, status| int_remainder(a.checked_rem_euclid(b), b, status),
+        }
+    );
+
+    /// numpy's errors of the float divisions of `xs` by `ys`: `x / 0` with a finite non-zero `x`
+    /// divides by zero, `0 / 0` and `inf / inf` are invalid, and an infinite quotient of finite
+    /// operands overflows. NaN operands propagate silently, and so do infinite ones otherwise.
+    ///
+    /// The rare path of [`Div`]: out of line, and of copies of the operands, so they stay in
+    /// registers. The status is returned rather than set through a pointer, which would take the
+    /// caller's status out of a register for the whole loop.
+    #[cold]
+    #[inline(never)]
+    fn float_div_errors<T>(xs: &[T], ys: &[T]) -> ArithmeticOpStatus
+    where
+        T: Copy + Into<f64> + core::ops::Div<Output = T>,
+    {
+        use ArithmeticErrorKind::*;
+        let mut status = ArithmeticOpStatus::default();
+        for (&x, &y) in xs.iter().zip(ys) {
+            let (a, b, q): (f64, f64, f64) = (x.into(), y.into(), (x / y).into());
+            status.set_if(DivideByZero, b == 0.0 && a != 0.0 && a.is_finite());
+            status.set_if(
+                InvalidOperation,
+                (a == 0.0 && b == 0.0) || (a.is_infinite() && b.is_infinite()),
+            );
+            status.set_if(Overflow, q.is_infinite() && a.is_finite() && b != 0.0);
+        }
+        status
+    }
+
+    impl_scalar_op2!(
+        impl Div for [f32, f64] {
+            fn div = |a, b, status| {
+                let q = a / b;
+                // Errors give non-finite results, and NaN operands are never one. The
+                // finiteness test first, and `&&`: the common no-error case is a single
+                // test. With `&`, LLVM orders the tests itself and puts the operands' first
+                // (measured up to 19% slower for `f16`).
+                if !q.is_finite() && !a.is_nan() && !b.is_nan() {
+                    *status |= float_div_errors(&[a], &[b]);
+                }
+                q
+            },
+            fn div_bulk = |a, b, status| {
+                let q = a / b;
+                // As in `div`, a single test per vector in the common case. NaN operands are
+                // filtered per vector too, so they don't reach the out-of-line path.
+                if (!q.is_finite()).any_true()
+                    && (!q.is_finite() & a.simd_eq(a) & b.simd_eq(b)).any_true()
+                {
+                    *status |= float_div_errors(a.to_array().as_ref(), b.to_array().as_ref());
+                }
+                q
+            },
+        }
+    );
+    #[cfg(feature = "half")]
+    impl_scalar_op2!(
+        impl Div for [f16] {
+            fn div = |a, b, status| {
+                // In f32 without FP16, as half's operators do, but inlined: theirs call a
+                // software fallback.
+                #[cfg(not(all(target_arch = "aarch64", target_feature = "fp16")))]
+                let q = f16::from_f32(a.to_f32() / b.to_f32());
+                #[cfg(all(target_arch = "aarch64", target_feature = "fp16"))]
+                let q = a / b;
+                // As in the `f32` `div`.
+                if !q.is_finite() && !a.is_nan() && !b.is_nan() {
+                    *status |= float_div_errors(&[a], &[b]);
+                }
+                q
+            },
+        }
+    );
+    #[cfg(feature = "num-complex")]
+    impl_scalar_op2!(
+        impl Div for [Complex<f32>, Complex<f64>] {
+            fn div = |a, b, _status| a / b,
+        }
+    );
+    #[cfg(all(feature = "half", feature = "num-complex"))]
+    impl_scalar_op2!(
+        impl Div for [Complex<f16>] {
+            fn div = |a, b, _status| a / b,
         }
     );
 
@@ -825,38 +998,38 @@ pub(crate) mod _traits {
 
             impl_scalar_op2!(
                 impl DivideTrunc for [$t] {
-                    fn divide_trunc = |a, b| $m::div_trunc(a, b),
-                    fn divide_trunc_bulk = |a, b| $m::div_trunc_v(a.token(), a, b),
+                    fn divide_trunc = |a, b, _status| $m::div_trunc(a, b),
+                    fn divide_trunc_bulk = |a, b, _status| $m::div_trunc_v(a.token(), a, b),
                 }
             );
             impl_scalar_op2!(
                 impl DivideFloor for [$t] {
-                    fn divide_floor = |a, b| $m::div_floor(a, b),
-                    fn divide_floor_bulk = |a, b| $m::div_floor_v(a.token(), a, b),
+                    fn divide_floor = |a, b, _status| $m::div_floor(a, b),
+                    fn divide_floor_bulk = |a, b, _status| $m::div_floor_v(a.token(), a, b),
                 }
             );
             impl_scalar_op2!(
                 impl DivideEuclid for [$t] {
-                    fn divide_euclid = |a, b| $m::div_euclid(a, b),
-                    fn divide_euclid_bulk = |a, b| $m::div_euclid_v(a.token(), a, b),
+                    fn divide_euclid = |a, b, _status| $m::div_euclid(a, b),
+                    fn divide_euclid_bulk = |a, b, _status| $m::div_euclid_v(a.token(), a, b),
                 }
             );
             impl_scalar_op2!(
                 impl RemainderTrunc for [$t] {
-                    fn remainder_trunc = |a, b| $m::rem_trunc(a, b),
-                    fn remainder_trunc_bulk = |a, b| $m::rem_trunc_v(a.token(), a, b),
+                    fn remainder_trunc = |a, b, _status| $m::rem_trunc(a, b),
+                    fn remainder_trunc_bulk = |a, b, _status| $m::rem_trunc_v(a.token(), a, b),
                 }
             );
             impl_scalar_op2!(
                 impl RemainderFloor for [$t] {
-                    fn remainder_floor = |a, b| $m::rem_floor(a, b),
-                    fn remainder_floor_bulk = |a, b| $m::rem_floor_v(a.token(), a, b),
+                    fn remainder_floor = |a, b, _status| $m::rem_floor(a, b),
+                    fn remainder_floor_bulk = |a, b, _status| $m::rem_floor_v(a.token(), a, b),
                 }
             );
             impl_scalar_op2!(
                 impl RemainderEuclid for [$t] {
-                    fn remainder_euclid = |a, b| $m::rem_euclid(a, b),
-                    fn remainder_euclid_bulk = |a, b| $m::rem_euclid_v(a.token(), a, b),
+                    fn remainder_euclid = |a, b, _status| $m::rem_euclid(a, b),
+                    fn remainder_euclid_bulk = |a, b, _status| $m::rem_euclid_v(a.token(), a, b),
                 }
             );
         };
@@ -879,7 +1052,7 @@ pub(crate) mod _traits {
             #[cfg(feature = "half")]
             impl_scalar_op2!(
                 impl $Trait for [f16] {
-                    fn $f = |a, b| f16::from_f32(f32_div_rem::$g(a.to_f32(), b.to_f32())),
+                    fn $f = |a, b, _status| f16::from_f32(f32_div_rem::$g(a.to_f32(), b.to_f32())),
                 }
             );
         )*};
@@ -893,197 +1066,6 @@ pub(crate) mod _traits {
         RemainderEuclid::remainder_euclid = rem_euclid
     );
 
-    /// The error path of integer division `lhs / rhs`, for a zero `rhs` or `MIN / -1`.
-    ///
-    /// Out of line on purpose. Besides keeping the rare path out of the loop, the opaque call
-    /// keeps LLVM from if-converting the loop to vector code: integer division has no SIMD
-    /// instruction, so it would scalarize each division with lane extracts and inserts and a
-    /// branch per lane, which measured up to 2x slower (`i16`) than this scalar loop. The status
-    /// is returned rather than set through a pointer, which would take the caller's status out of
-    /// a register for the whole loop (measured up to 15% slower on strided reads).
-    #[cold]
-    #[inline(never)]
-    fn int_div_error<T: Default + PartialEq>(lhs: T, rhs: T) -> (T, ArithmeticOpStatus) {
-        let mut status = ArithmeticOpStatus::default();
-        if rhs == T::default() {
-            status.set_if(ArithmeticErrorKind::DivideByZero, true);
-            (T::default(), status)
-        } else {
-            // `MIN / -1`: `MIN`, as numpy.
-            status.set_if(ArithmeticErrorKind::Overflow, true);
-            (lhs, status)
-        }
-    }
-
-    // Integers have no SIMD division: the default `div_bulk` maps `div`.
-    macro_rules! impl_int_div {
-        ($($t:ty),*) => {$(
-            impl Div for $t {
-                type Output = Self;
-                #[inline(always)]
-                fn div(self, rhs: Self, status: &mut ArithmeticOpStatus) -> Self {
-                    match self.checked_div(rhs) {
-                        Some(q) => q,
-                        None => {
-                            let (q, error) = int_div_error(self, rhs);
-                            *status |= error;
-                            q
-                        }
-                    }
-                }
-            }
-        )*};
-    }
-    impl_int_div!(i8, i16, i32, i64, u8, u16, u32, u64);
-
-    /// The error of a float division `a / b`, if any, as numpy: `x / 0` with a finite non-zero
-    /// `x` is a division by zero, `0 / 0` and `inf / inf` are invalid, and an infinite result
-    /// (`r_is_inf`, in the operands' type) of finite operands is an overflow. NaN operands
-    /// propagate silently, and so do infinite operands otherwise.
-    #[inline(always)]
-    fn float_div_error(a: f64, b: f64, r_is_inf: bool) -> ArithmeticOpStatus {
-        use ArithmeticErrorKind::*;
-        let mut status = ArithmeticOpStatus::default();
-        if a.is_nan() || b.is_nan() {
-            return status;
-        }
-        let error = if b == 0.0 {
-            if a == 0.0 {
-                Some(InvalidOperation)
-            } else {
-                a.is_finite().then_some(DivideByZero)
-            }
-        } else if a.is_infinite() {
-            b.is_infinite().then_some(InvalidOperation)
-        } else {
-            r_is_inf.then_some(Overflow)
-        };
-        if let Some(error) = error {
-            status.set_if(error, true);
-        }
-        status
-    }
-
-    /// [`float_div_error`] out of line, the cold path of a scalar division.
-    ///
-    /// The status is returned rather than set through a pointer: a pointer would take the
-    /// caller's status out of a register for the whole loop.
-    #[cold]
-    #[inline(never)]
-    fn float_div_error_cold(a: f64, b: f64, r_is_inf: bool) -> ArithmeticOpStatus {
-        float_div_error(a, b, r_is_inf)
-    }
-
-    /// [`float_div_error`] of each pair of `xs` and `ys`, the cold path of a SIMD vector.
-    #[cold]
-    #[inline(never)]
-    fn float_div_errors<T>(xs: &[T], ys: &[T]) -> ArithmeticOpStatus
-    where
-        T: Copy + Into<f64> + core::ops::Div<Output = T>,
-    {
-        let mut status = ArithmeticOpStatus::default();
-        for (&a, &b) in xs.iter().zip(ys) {
-            let r: f64 = (a / b).into();
-            status |= float_div_error(a.into(), b.into(), r.is_infinite());
-        }
-        status
-    }
-
-    macro_rules! impl_float_div {
-        ($($t:ty),*) => {$(
-            impl Div for $t {
-                type Output = Self;
-                #[inline(always)]
-                fn div(self, rhs: Self, status: &mut ArithmeticOpStatus) -> Self {
-                    let r = self / rhs;
-                    // Errors give non-finite results, and NaN operands are never one. The
-                    // finiteness test first, and `&&`: the common no-error case is a single
-                    // test. With `&`, LLVM orders the tests itself and puts the operands' first
-                    // (measured up to 19% slower for `f16`).
-                    if !r.is_finite() && !self.is_nan() && !rhs.is_nan() {
-                        *status |= float_div_error_cold(self.into(), rhs.into(), r.is_infinite());
-                    }
-                    r
-                }
-
-                #[inline(always)]
-                fn div_bulk<const N: usize, S: fearless_simd::Simd>(
-                    xs: [Self; N],
-                    ys: [Self; N],
-                    status: &mut ArithmeticOpStatus,
-                    simd: S,
-                ) -> [Self; N] {
-                    use fearless_simd::{SimdBase, SimdFloat, SimdMask};
-                    let mut errors = ArithmeticOpStatus::default();
-                    let zs = crate::scalar::simd::map_vectors2::<Self, Self, Self, N, S>(
-                        xs,
-                        ys,
-                        #[inline(always)]
-                        |a, b| Self::div(a, b, status),
-                        #[inline(always)]
-                        |a, b| {
-                            let r = a / b;
-                            // Errors give non-finite results: a single test per vector. A
-                            // vector that has one, rare, is checked for lanes with non-NaN
-                            // operands, which are classified out of line and from a copy, so
-                            // the operands stay in registers. NaN operands are not errors.
-                            if (!r.is_finite()).any_true() {
-                                let maybe_error = !r.is_finite() & a.simd_eq(a) & b.simd_eq(b);
-                                if maybe_error.any_true() {
-                                    errors |= float_div_errors(
-                                        a.to_array().as_ref(),
-                                        b.to_array().as_ref(),
-                                    );
-                                }
-                            }
-                            r
-                        },
-                        simd,
-                    );
-                    *status |= errors;
-                    zs
-                }
-            }
-        )*};
-    }
-    impl_float_div!(f32, f64);
-
-    #[cfg(feature = "half")]
-    impl Div for f16 {
-        type Output = Self;
-        #[inline(always)]
-        fn div(self, rhs: Self, status: &mut ArithmeticOpStatus) -> Self {
-            // In f32 without FP16, as half's operators do, but inlined: theirs call a software
-            // fallback.
-            #[cfg(not(all(target_arch = "aarch64", target_feature = "fp16")))]
-            let r = f16::from_f32(self.to_f32() / rhs.to_f32());
-            #[cfg(all(target_arch = "aarch64", target_feature = "fp16"))]
-            let r = self / rhs;
-            // The tests ordered as in the `f32` `div`.
-            if !r.is_finite() && !self.is_nan() && !rhs.is_nan() {
-                *status |= float_div_error_cold(self.into(), rhs.into(), r.is_infinite());
-            }
-            r
-        }
-    }
-
-    #[cfg(feature = "num-complex")]
-    macro_rules! impl_complex_div {
-        ($($t:ty),*) => {$(
-            impl Div for $t {
-                type Output = Self;
-                #[inline(always)]
-                fn div(self, rhs: Self, _status: &mut ArithmeticOpStatus) -> Self {
-                    self / rhs
-                }
-            }
-        )*};
-    }
-    #[cfg(feature = "num-complex")]
-    impl_complex_div!(Complex<f32>, Complex<f64>);
-    #[cfg(all(feature = "half", feature = "num-complex"))]
-    impl_complex_div!(Complex<f16>);
-
     define_scalar_op2_trait!(
         /// Exponentiation operation: as [`i32::wrapping_pow`] for integers, [`f32::powi`] and
         /// [`f32::powf`] for floats.
@@ -1094,32 +1076,28 @@ pub(crate) mod _traits {
         /// reported yet. Semantics follow [`f32::powf`].
         Pow,
         /// Raise to the power of another value, reporting an arithmetic error to `status`.
-        pow,
+        pow(status),
         bulk_fn: pow_bulk,
-        with_status,
     );
 
-    macro_rules! impl_int_pow {
-        ($($t:ty),*) => {$(
-            impl_int_pow!(@impl $t, [u8, u16, u32], |a, b, _status| a.wrapping_pow(b as u32));
-            // A negative exponent gives `0`, and an invalid operation. Branch-free: a power has no
-            // SIMD instruction to be if-converted into, unlike a division.
-            impl_int_pow!(@impl $t, [i8, i16, i32], |a, b, status| {
-                let negative = b < 0;
-                status.set_if(ArithmeticErrorKind::InvalidOperation, negative);
-                let r = a.wrapping_pow(if negative { 0 } else { b as u32 });
-                if negative { 0 } else { r }
-            });
-            impl_int_pow!(@impl $t, [i64], |a, b, status| {
-                let negative = b < 0;
-                status.set_if(ArithmeticErrorKind::InvalidOperation, negative);
-                let r = if let Ok(b) = u32::try_from(b) {
+    impl_scalar_op2!(
+        impl Pow for [i8, i16, i32, i64, u8, u16, u32, u64] x [u8, u16, u32] {
+            fn pow = |a, b, _status| a.wrapping_pow(b as u32),
+        }
+    );
+    impl_scalar_op2!(
+        impl Pow for [i8, i16, i32, i64, u8, u16, u32, u64] x [i8, i16, i32, i64] {
+            fn pow = |a, b, status| {
+                // A negative exponent gives `0`, and an invalid operation.
+                status.set_if(ArithmeticErrorKind::InvalidOperation, b < 0);
+                if let Ok(b) = u32::try_from(b) {
                     a.wrapping_pow(b)
-                } else if negative {
-                    1
+                } else if b < 0 {
+                    0
                 } else {
-                    // `wrapping_pow` by squaring, for an exponent beyond `u32`.
-                    let (mut acc, mut base, mut exp) = (1 as $t, a, b as u64);
+                    // Beyond `wrapping_pow`'s `u32`, of an `i64`: by squaring, as numpy's
+                    // `power` does any exponent. Wrapping, it is the same `a^b mod 2^BITS`.
+                    let (mut acc, mut base, mut exp): (Self, Self, u64) = (1, a, b as u64);
                     while exp > 0 {
                         if exp & 1 == 1 {
                             acc = acc.wrapping_mul(base);
@@ -1128,40 +1106,25 @@ pub(crate) mod _traits {
                         exp >>= 1;
                     }
                     acc
-                };
-                if negative { 0 } else { r }
-            });
-        )*};
-        (@impl $t:ty, [$($rhs:ty),*], |$a:ident, $b:ident, $status:ident| $f:expr) => {$(
-            impl Pow<$rhs> for $t {
-                type Output = $t;
-                #[inline(always)]
-                fn pow(self, rhs: $rhs, status: &mut ArithmeticOpStatus) -> $t {
-                    let ($a, $b, $status) = (self, rhs, status);
-                    $f
                 }
-            }
-        )*};
-    }
-    impl_int_pow!(i8, i16, i32, i64, u8, u16, u32, u64);
-
-    macro_rules! impl_float_pow {
-        ($t:ty, [$($rhs:ty),*], |$a:ident, $b:ident| $f:expr) => {$(
-            impl Pow<$rhs> for $t {
-                type Output = $t;
-                #[inline(always)]
-                fn pow(self, rhs: $rhs, _status: &mut ArithmeticOpStatus) -> $t {
-                    let ($a, $b) = (self, rhs);
-                    $f
-                }
-            }
-        )*};
-    }
-    impl_float_pow!(f32, [i8, u8, i16, u16, i32], |a, b| a.powi(b as i32));
-    impl_float_pow!(f64, [i8, u8, i16, u16, i32], |a, b| a.powi(b as i32));
-    impl_float_pow!(f32, [f32], |a, b| a.powf(b));
-    impl_float_pow!(f64, [f32], |a, b| a.powf(b as f64));
-    impl_float_pow!(f64, [f64], |a, b| a.powf(b));
+            },
+        }
+    );
+    impl_scalar_op2!(
+        impl Pow for [f32, f64] x [i8, u8, i16, u16, i32] {
+            fn pow = |a, b, _status| a.powi(b as i32),
+        }
+    );
+    impl_scalar_op2!(
+        impl Pow for [f32, f64] x [f32] {
+            fn pow = |a, b, _status| a.powf(b as Self),
+        }
+    );
+    impl_scalar_op2!(
+        impl Pow for [f64] x [f64] {
+            fn pow = |a, b, _status| a.powf(b),
+        }
+    );
 }
 
 define_op2!(
@@ -1269,9 +1232,8 @@ define_op2!(
     /// ```
     Div,
     DivKernel,
-    crate::scalar::Div::div,
+    crate::scalar::Div::div(status),
     simd: div_bulk,
-    with_status: true,
     core_op: core::ops::Div::div,
 );
 define_op2!(
@@ -1301,7 +1263,7 @@ define_op2!(
     /// ```
     DivideTrunc,
     DivideTruncKernel,
-    crate::scalar::DivideTrunc::divide_trunc,
+    crate::scalar::DivideTrunc::divide_trunc(status),
     simd: divide_trunc_bulk,
 );
 define_op2!(
@@ -1331,7 +1293,7 @@ define_op2!(
     /// ```
     DivideFloor,
     DivideFloorKernel,
-    crate::scalar::DivideFloor::divide_floor,
+    crate::scalar::DivideFloor::divide_floor(status),
     simd: divide_floor_bulk,
 );
 define_op2!(
@@ -1361,7 +1323,7 @@ define_op2!(
     /// ```
     DivideEuclid,
     DivideEuclidKernel,
-    crate::scalar::DivideEuclid::divide_euclid,
+    crate::scalar::DivideEuclid::divide_euclid(status),
     simd: divide_euclid_bulk,
 );
 define_op2!(
@@ -1389,7 +1351,7 @@ define_op2!(
     /// ```
     RemainderTrunc,
     RemainderTruncKernel,
-    crate::scalar::RemainderTrunc::remainder_trunc,
+    crate::scalar::RemainderTrunc::remainder_trunc(status),
     simd: remainder_trunc_bulk,
     core_op: core::ops::Rem::rem,
 );
@@ -1414,7 +1376,7 @@ define_op2!(
     /// ```
     RemainderFloor,
     RemainderFloorKernel,
-    crate::scalar::RemainderFloor::remainder_floor,
+    crate::scalar::RemainderFloor::remainder_floor(status),
     simd: remainder_floor_bulk,
 );
 define_op2!(
@@ -1438,7 +1400,7 @@ define_op2!(
     /// ```
     RemainderEuclid,
     RemainderEuclidKernel,
-    crate::scalar::RemainderEuclid::remainder_euclid,
+    crate::scalar::RemainderEuclid::remainder_euclid(status),
     simd: remainder_euclid_bulk,
 );
 define_op2!(
@@ -1469,9 +1431,8 @@ define_op2!(
     /// ```
     Pow,
     PowKernel,
-    crate::scalar::Pow::pow,
+    crate::scalar::Pow::pow(status),
     simd: pow_bulk,
-    with_status: true,
 );
 
 impl<S> Array<S>
@@ -2003,6 +1964,7 @@ pub(crate) mod tests {
     #[test]
     fn divide_float_exact() {
         use crate::scalar::{DivideEuclid, DivideFloor, DivideTrunc};
+        let s = &mut crate::error::ArithmeticOpStatus::default(); // floats report no errors
 
         macro_rules! check {
             ($t:ty, $pairs:expr, $exact:expr, $to_f64:expr, $round:expr) => {
@@ -2014,7 +1976,11 @@ pub(crate) mod tests {
                     let Some(exact) = exact_quotients(af, bf) else {
                         continue;
                     };
-                    let actual = [a.divide_trunc(b), a.divide_floor(b), a.divide_euclid(b)];
+                    let actual = [
+                        a.divide_trunc(b, s),
+                        a.divide_floor(b, s),
+                        a.divide_euclid(b, s),
+                    ];
                     for (q, x) in exact.into_iter().zip(actual) {
                         let expected: $t = $round(q);
                         let what = format!("{a:e} / {b:e}: {x:e}, expected {expected:e}");
@@ -2049,6 +2015,7 @@ pub(crate) mod tests {
     #[test]
     fn remainder_float_matches_fmod() {
         use crate::scalar::{RemainderEuclid, RemainderFloor, RemainderTrunc};
+        let s = &mut crate::error::ArithmeticOpStatus::default(); // floats report no errors
 
         macro_rules! check {
             ($t:ty, $pairs:expr, $refs:expr) => {{
@@ -2056,10 +2023,16 @@ pub(crate) mod tests {
                 let same = |x: $t, y: $t| x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan());
                 for (a, b) in $pairs {
                     let what = format!("{a:e} % {b:e}");
-                    assert!(same(a.remainder_trunc(b), trunc_ref(a, b)), "trunc {what}");
-                    assert!(same(a.remainder_floor(b), floor_ref(a, b)), "floor {what}");
                     assert!(
-                        same(a.remainder_euclid(b), euclid_ref(a, b)),
+                        same(a.remainder_trunc(b, s), trunc_ref(a, b)),
+                        "trunc {what}"
+                    );
+                    assert!(
+                        same(a.remainder_floor(b, s), floor_ref(a, b)),
+                        "floor {what}"
+                    );
+                    assert!(
+                        same(a.remainder_euclid(b, s), euclid_ref(a, b)),
                         "euclid {what}"
                     );
                 }
@@ -2130,6 +2103,7 @@ pub(crate) mod tests {
     #[test]
     fn divide_float_special_values() {
         use crate::scalar::{DivideEuclid, DivideFloor, DivideTrunc};
+        let s = &mut crate::error::ArithmeticOpStatus::default(); // floats report no errors
 
         let same = |x: f64, y: f64| x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan());
         let values = [
@@ -2161,11 +2135,11 @@ pub(crate) mod tests {
                 };
                 let what = format!("{a:e} / {b:e}");
                 assert!(
-                    same(a.divide_floor(b), py_floor_divide(a, b)),
+                    same(a.divide_floor(b, s), py_floor_divide(a, b)),
                     "floor {what}"
                 );
-                assert!(same(a.divide_trunc(b), trunc), "trunc {what}");
-                assert!(same(a.divide_euclid(b), euclid), "euclid {what}");
+                assert!(same(a.divide_trunc(b, s), trunc), "trunc {what}");
+                assert!(same(a.divide_euclid(b, s), euclid), "euclid {what}");
             }
         }
     }
@@ -2483,6 +2457,79 @@ pub(crate) mod tests {
         assert!(status.contains(ArithmeticErrorKind::Overflow));
     }
 
+    /// The integer quotients and remainders of a zero divisor and of `MIN` by `-1`, as numpy.
+    #[test]
+    fn int_division_errors() {
+        use crate::error::ArithmeticErrorKind::{DivideByZero, Overflow};
+        use crate::error::ArithmeticOpStatus;
+        use crate::scalar::{
+            Div, DivideEuclid, DivideFloor, DivideTrunc, RemainderEuclid, RemainderFloor,
+            RemainderTrunc,
+        };
+
+        type F<T> = fn(T, T, &mut ArithmeticOpStatus) -> T;
+        fn quotients<T>() -> [F<T>; 4]
+        where
+            T: Div<Output = T> + DivideTrunc<Output = T>,
+            T: DivideFloor<Output = T> + DivideEuclid<Output = T>,
+        {
+            [
+                Div::div,
+                DivideTrunc::divide_trunc,
+                DivideFloor::divide_floor,
+                DivideEuclid::divide_euclid,
+            ]
+        }
+        fn remainders<T>() -> [F<T>; 3]
+        where
+            T: RemainderTrunc<Output = T> + RemainderFloor<Output = T>,
+            T: RemainderEuclid<Output = T>,
+        {
+            [
+                RemainderTrunc::remainder_trunc,
+                RemainderFloor::remainder_floor,
+                RemainderEuclid::remainder_euclid,
+            ]
+        }
+        fn check<T: Copy + PartialEq + core::fmt::Debug>(
+            f: F<T>,
+            (a, b): (T, T),
+            expected: T,
+            error: ArithmeticOpStatus,
+        ) {
+            let mut status = ArithmeticOpStatus::default();
+            assert_eq!(f(a, b, &mut status), expected, "{a:?}, {b:?}");
+            assert_eq!(status, error, "{a:?}, {b:?}");
+        }
+
+        macro_rules! check {
+            ($($t:ty),*) => {$(
+                for f in quotients::<$t>() {
+                    check(f, (7, 3), 2, ArithmeticOpStatus::default());
+                    check(f, (7, 0), 0, DivideByZero.into());
+                    check(f, (<$t>::MIN, 0), 0, DivideByZero.into());
+                }
+                for f in remainders::<$t>() {
+                    check(f, (7, 3), 1, ArithmeticOpStatus::default());
+                    check(f, (7, 0), 0, DivideByZero.into());
+                }
+            )*};
+        }
+        check!(i8, i16, i32, i64, u8, u16, u32, u64);
+        // `MIN` by `-1`: a quotient of `MIN` and an overflow, and an exact remainder of `0`.
+        macro_rules! check_signed {
+            ($($t:ty),*) => {$(
+                for f in quotients::<$t>() {
+                    check(f, (<$t>::MIN, -1), <$t>::MIN, Overflow.into());
+                }
+                for f in remainders::<$t>() {
+                    check(f, (<$t>::MIN, -1), 0, ArithmeticOpStatus::default());
+                }
+            )*};
+        }
+        check_signed!(i8, i16, i32, i64);
+    }
+
     // Random shapes, storage backends and layouts, with zero divisors in about a third of the
     // elements: an error iff some divisor is zero, and with errors ignored, the reference values.
     proptest::proptest! {
@@ -2629,6 +2676,7 @@ pub(crate) mod tests {
                 fn [<float_div_errors_read_ $t>]() {
                     use crate::Array;
                     use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
+                    #[cfg(feature = "half")]
                     #[allow(unused_imports)]
                     use crate::scalar::f16;
 

@@ -155,7 +155,10 @@ define_op2!(
     /// For integer quotients use [`jix.divide_floor()`][jix.divide_floor] (or the `//`
     /// operator).
     ///
-    /// For **float** types, division by zero produces `+/-inf` or `NaN`.
+    /// For **float** types the results are the IEEE 754 ones (`+/-inf`, `NaN`), and the errors
+    /// those of numpy, reported according to [`jix.errstate()`][jix.errstate]: `x / 0` as
+    /// `divide`, `0 / 0` and `inf / inf` as `invalid`, and an infinite quotient of finite operands
+    /// as `over`.
     /// For **complex** types this is full complex division.
     ///
     /// Available via the `/` operator on arrays.
@@ -203,8 +206,9 @@ define_op2!(
     /// See also [`jix.divide_floor()`][jix.divide_floor] (the `//` operator) and
     /// [`jix.divide_euclid()`][jix.divide_euclid].
     ///
-    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
-    /// as does the minimum signed value by `-1`.
+    /// For **integer** dtypes a zero divisor gives `0`, and the minimum signed value by `-1` gives
+    /// itself, as in numpy. They are reported as `divide` and `over`, according to
+    /// [`jix.errstate()`][jix.errstate].
     /// For **float** dtypes the quotient is of the exact `a / b`, as an integer-valued float:
     /// `1.0 // 0.1` is `9.0`, though `1.0 / 0.1` rounds to `10.0`. It is exact below `2^53` (`2^24`
     /// for `f32`) in magnitude, and within one ulp above. A zero divisor produces `+-inf` (`NaN`
@@ -255,8 +259,9 @@ define_op2!(
     /// [`jix.divide_trunc()`][jix.divide_trunc] and
     /// [`jix.divide_euclid()`][jix.divide_euclid].
     ///
-    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
-    /// as does the minimum signed value by `-1`.
+    /// For **integer** dtypes a zero divisor gives `0`, and the minimum signed value by `-1` gives
+    /// itself, as in numpy. They are reported as `divide` and `over`, according to
+    /// [`jix.errstate()`][jix.errstate].
     /// For **float** dtypes the quotient is of the exact `a / b`, as an integer-valued float:
     /// `1.0 // 0.1` is `9.0`, though `1.0 / 0.1` rounds to `10.0`. It is exact below `2^53` (`2^24`
     /// for `f32`) in magnitude, and within one ulp above. A zero divisor produces `+-inf` (`NaN`
@@ -306,8 +311,9 @@ define_op2!(
     /// See also [`jix.divide_trunc()`][jix.divide_trunc] and
     /// [`jix.divide_floor()`][jix.divide_floor] (the `//` operator).
     ///
-    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
-    /// as does the minimum signed value by `-1`.
+    /// For **integer** dtypes a zero divisor gives `0`, and the minimum signed value by `-1` gives
+    /// itself, as in numpy. They are reported as `divide` and `over`, according to
+    /// [`jix.errstate()`][jix.errstate].
     /// For **float** dtypes the quotient is of the exact `a / b`, as an integer-valued float:
     /// `1.0 // 0.1` is `9.0`, though `1.0 / 0.1` rounds to `10.0`. It is exact below `2^53` (`2^24`
     /// for `f32`) in magnitude, and within one ulp above. A zero divisor produces `+-inf` (`NaN`
@@ -356,8 +362,8 @@ define_op2!(
     /// See also [`jix.remainder_floor()`][jix.remainder_floor] (the `%` operator) and
     /// [`jix.remainder_euclid()`][jix.remainder_euclid].
     ///
-    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
-    /// as does the minimum signed value by `-1`. For **float** dtypes it produces `NaN`.
+    /// For **integer** dtypes a zero divisor gives `0`, as in numpy, reported as `divide`
+    /// according to [`jix.errstate()`][jix.errstate]. For **float** dtypes it produces `NaN`.
     ///
     /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
     /// smallest type that can represent both without information loss (Safe casting
@@ -403,8 +409,8 @@ define_op2!(
     /// [`jix.remainder_trunc()`][jix.remainder_trunc] and
     /// [`jix.remainder_euclid()`][jix.remainder_euclid].
     ///
-    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
-    /// as does the minimum signed value by `-1`. For **float** dtypes it produces `NaN`.
+    /// For **integer** dtypes a zero divisor gives `0`, as in numpy, reported as `divide`
+    /// according to [`jix.errstate()`][jix.errstate]. For **float** dtypes it produces `NaN`.
     ///
     /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
     /// smallest type that can represent both without information loss (Safe casting
@@ -450,8 +456,8 @@ define_op2!(
     /// See also [`jix.remainder_trunc()`][jix.remainder_trunc] and
     /// [`jix.remainder_floor()`][jix.remainder_floor] (the `%` operator).
     ///
-    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
-    /// as does the minimum signed value by `-1`. For **float** dtypes it produces `NaN`.
+    /// For **integer** dtypes a zero divisor gives `0`, as in numpy, reported as `divide`
+    /// according to [`jix.errstate()`][jix.errstate]. For **float** dtypes it produces `NaN`.
     ///
     /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
     /// smallest type that can represent both without information loss (Safe casting
