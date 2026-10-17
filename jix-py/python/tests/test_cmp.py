@@ -192,8 +192,10 @@ _clamp_dtypes = ints + uints + floats
 @pytest.mark.parametrize("dtype", _clamp_dtypes)
 @given(st.data())
 def test_clamp_both(dtype: np.dtype, data: DataObject):
+    # Unordered bounds: where lo > hi both numpy and jix return hi.
     np_a, za = data.draw(carray_strategy(dtype, element_st=_max_min_st(dtype)), label="array")
-    lo, hi = sorted([data.draw(_max_min_st(dtype), label="lo"), data.draw(_max_min_st(dtype), label="hi")])
+    lo = data.draw(_max_min_st(dtype), label="lo")
+    hi = data.draw(_max_min_st(dtype), label="hi")
     assert_array_matches(jix.clamp(za, min=lo, max=hi), np.clip(np_a, lo, hi), data=data)
 
 
@@ -235,37 +237,38 @@ def test_clamp_none_concrete():
     assert_array_matches(jix.clamp(za_f), a_f)
 
 
-# --- invalid limit tests (non-property) ---
+@pytest.mark.parametrize("lo, hi", [(5, 2), (2, 2), (-1, 10)])
+def test_clamp_min_greater_than_max_gives_max(lo, hi):
+    a = np.array([1, 2, 3], dtype=np.int32)
+    assert_array_matches(jix.clamp(jix.compact(a), min=lo, max=hi), np.clip(a, lo, hi))
 
 
-def test_clamp_min_greater_than_max_raises():
-    a = jix.compact([1, 2, 3], dtype=np.int32)
-    with pytest.raises(ValueError, match="min"):
-        jix.clamp(a, min=5, max=2).numpy()
+@pytest.mark.parametrize("lo, hi", [(np.nan, 1.0), (0.0, np.nan), (np.nan, np.nan), (np.nan, None), (None, np.nan)])
+def test_clamp_nan_bound_propagates(lo, hi):
+    a = np.array([1.0, 2.0], dtype=np.float64)
+    assert_array_matches(jix.clamp(jix.compact(a), min=lo, max=hi), np.clip(a, lo, hi))
 
 
-def test_clamp_nan_min_raises():
-    a = jix.compact([1.0, 2.0], dtype=np.float32)
-    with pytest.raises(ValueError):
-        jix.clamp(a, min=float("nan"), max=1.0).numpy()
+def test_clamp_array_bounds_broadcast():
+    a = np.arange(6, dtype=np.float32).reshape(2, 3)
+    lo = np.array([[1.0], [4.0]], dtype=np.float32)
+    hi = np.array([2.0, 3.0, 5.0], dtype=np.float32)
+    expected = np.clip(a, lo, hi)
+    assert_array_matches(jix.clamp(jix.compact(a), min=jix.compact(lo), max=hi), expected)
+    assert_array_matches(jix.compact(a).clamp(min=lo, max=jix.compact(hi)), expected)
 
 
-def test_clamp_nan_max_raises():
-    a = jix.compact([1.0, 2.0], dtype=np.float32)
-    with pytest.raises(ValueError):
-        jix.clamp(a, min=0.0, max=float("nan")).numpy()
-
-
-def test_clamp_nan_both_raises():
-    a = jix.compact([1.0], dtype=np.float64)
-    with pytest.raises(ValueError):
-        jix.clamp(a, min=float("nan"), max=float("nan")).numpy()
+def test_clamp_promotes_like_maximum():
+    a = np.array([1, 2, 5, 9], dtype=np.int32)
+    result = jix.clamp(jix.compact(a), min=0.5, max=7.7)
+    assert result.dtype == np.float64
+    assert_array_matches(result, np.clip(a, 0.5, 7.7))
 
 
 def test_clamp_complex_limit_raises():
     a = jix.compact([1.0, 2.0], dtype=np.float32)
-    with pytest.raises(TypeError):
-        jix.clamp(a, min=complex(1, 0)).numpy()
+    with pytest.raises(RuntimeError):
+        jix.clamp(a, min=complex(1, 0), max=2.0)
 
 
 def test_clamp_equal_bounds():
