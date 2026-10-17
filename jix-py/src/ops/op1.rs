@@ -4,7 +4,9 @@ use jix_core::dtype::Dtyped;
 use jix_core::scalar::{f16, Complex};
 use pyo3::prelude::*;
 
-use crate::ops::common::{define_op1, CastKind, OpDescriptor, OpFnDescriptor, Operand};
+use crate::ops::common::{
+    define_op1, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
+};
 use crate::util::IntoPyResult;
 
 define_op1!(
@@ -556,44 +558,89 @@ define_op1!(
         None
     }
 );
-define_op1!(
-    /// Computes the absolute value of each element.
-    ///
-    /// Supported dtypes and output dtype:
-    ///
-    /// | Input dtype | Output dtype |
-    /// |-------------|--------------|
-    /// | `i8`, `i16`, `i32`, `i64` | same |
-    /// | `f16`, `f32`, `f64` | same |
-    /// | `Complex<f32>` | `f32` |
-    /// | `Complex<f64>` | `f64` |
-    ///
-    /// For **complex** types the result is the modulus `sqrt(re^2 + im^2)` computed via
-    /// `hypot` for numerical stability. The output dtype is the real component type.
-    ///
-    /// For **signed integer** types, the minimum value overflows: `abs(-128)` on `int8`
-    /// wraps back to `-128`.
-    ///
-    /// Args:
-    ///     array: Input array.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([-3, 0, 5, -7], dtype=np.int32)
-    ///     result = jix.absolute(a)
-    ///     assert np.array_equal(result.numpy(), [3, 0, 5, 7])
-    ///     ```
-    absolute,
-    Abs,
-    dispatch = {
-        [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
-        None
+
+/// Computes the absolute value of each element.
+///
+/// Supported dtypes and output dtype:
+///
+/// | Input dtype | Output dtype |
+/// |-------------|--------------|
+/// | `bool` | same |
+/// | `u8`, `u16`, `u32`, `u64` | same |
+/// | `i8`, `i16`, `i32`, `i64` | same |
+/// | `f16`, `f32`, `f64` | same |
+/// | `Complex<f32>` | `f32` |
+/// | `Complex<f64>` | `f64` |
+///
+/// For **unsigned integer** and **bool** types this is a no-op: a [`jix.Array`][jix.Array]
+/// input is returned as is (the same object), not wrapped in a new view.
+///
+/// For **complex** types the result is the modulus `sqrt(re^2 + im^2)` computed via
+/// `hypot` for numerical stability. The output dtype is the real component type.
+///
+/// For **signed integer** types, the minimum value overflows: `abs(-128)` on `int8`
+/// wraps back to `-128`.
+///
+/// Args:
+///     array: Input array.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
+///         the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([-3, 0, 5, -7], dtype=np.int32)
+///     result = jix.absolute(a)
+///     assert np.array_equal(result.numpy(), [3, 0, 5, 7])
+///     ```
+#[pyo3::pyfunction]
+pub fn absolute<'py>(
+    array: &pyo3::Bound<'py, pyo3::PyAny>,
+) -> pyo3::PyResult<Bound<'py, crate::Array>> {
+    let py = array.py();
+    let mut operand = Operand::from_any(array)?;
+
+    // Unsigned and bool values are their own absolute value, no-op
+    if let Some((rank, _)) = operand.rank_precision() {
+        if matches!(rank, Rank::UInt | Rank::Bool) {
+            return operand.into_py_array(py);
+        }
     }
-);
+
+    // Array is a scalar, compute abs directly
+    if let Operand::Scalar {
+        value,
+        shape: _,
+        precision: _,
+        params: _,
+    } = &mut operand
+    {
+        *value = match *value {
+            Scalar::Bool(value) => Scalar::Bool(value),
+            Scalar::UInt(value) => Scalar::UInt(value),
+            Scalar::Int(value) => Scalar::Int(value.wrapping_abs()),
+            Scalar::Float(value) => Scalar::Float(value.abs()),
+            Scalar::Complex(complex) => Scalar::Float(complex.norm()),
+        };
+        return operand.into_py_array(py);
+    }
+
+    static DISPATCH_TABLE: std::sync::LazyLock<crate::ops::common::OpDescriptor<1, ()>> =
+        std::sync::LazyLock::new(|| {
+            crate::ops::common::OpDescriptor::new(
+                "absolute",
+                crate::ops::common::define_op1_desc!(
+                    Abs,
+                    [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+                    None
+                ),
+            )
+        });
+
+    let res = DISPATCH_TABLE.dispatch1(operand)?;
+    Bound::new(py, crate::Array::from_core(res))
+}
