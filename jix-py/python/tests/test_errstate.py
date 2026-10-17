@@ -327,3 +327,6 @@ def test_arithmetic_wraps_like_numpy(dtype):
         np.testing.assert_array_equal((za - zb).numpy(), a - b)
         np.testing.assert_array_equal((za * zb).numpy(), a * b)
         np.testing.assert_array_equal(jix.square(za).numpy(), np.square(a))
+        np.testing.assert_array_equal(jix.absolute(za).numpy(), np.absolute(a))
+        if np.issubdtype(dtype, np.signedinteger):
+            np.testing.assert_array_equal(jix.negative(za).numpy(), np.negative(a))
