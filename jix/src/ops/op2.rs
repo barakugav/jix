@@ -625,68 +625,6 @@ pub(crate) mod _traits {
         Mul::mul, *, [i8], // i8 auto-vectorized scalar is faster
         simd: mul_bulk, [f32, f64, i16, i32, i64, u8, u16, u32, u64]
     );
-    /// `q`, the quotient of an integer division `a / b`, or, where it is `None` for a zero `b` or
-    /// `MIN / -1`, numpy's results: `0` and a division by zero, or `MIN` and an overflow.
-    #[inline(always)]
-    fn int_quotient<T: Copy + Default + PartialEq>(
-        q: Option<T>,
-        a: T,
-        b: T,
-        status: &mut ArithmeticOpStatus,
-    ) -> T {
-        match q {
-            Some(q) => q,
-            None => {
-                let (q, error) = int_div_error(a, b);
-                *status |= error;
-                q
-            }
-        }
-    }
-
-    /// The error path of [`int_quotient`].
-    ///
-    /// Out of line on purpose. Besides keeping the rare path out of the loop, the opaque call
-    /// keeps LLVM from if-converting the loop to vector code: integer division has no SIMD
-    /// instruction, so it would scalarize each division with lane extracts and inserts and a
-    /// branch per lane, which measured up to 2x slower (`i16`) than this scalar loop. The status
-    /// is returned rather than set through a pointer, which would take the caller's status out of
-    /// a register for the whole loop (measured up to 15% slower on strided reads).
-    #[cold]
-    #[inline(never)]
-    fn int_div_error<T: Default + PartialEq>(a: T, b: T) -> (T, ArithmeticOpStatus) {
-        if b == T::default() {
-            (T::default(), ArithmeticErrorKind::DivideByZero.into())
-        } else {
-            (a, ArithmeticErrorKind::Overflow.into())
-        }
-    }
-
-    /// `r`, the remainder of an integer division `a % b`, or, where it is `None` for a zero `b` or
-    /// `MIN % -1`, numpy's result: `0`, and a division by zero for a zero `b`.
-    #[inline(always)]
-    fn int_remainder<T: Copy + Default + PartialEq>(
-        r: Option<T>,
-        b: T,
-        status: &mut ArithmeticOpStatus,
-    ) -> T {
-        match r {
-            Some(r) => r,
-            None => {
-                *status |= int_rem_error(b);
-                T::default()
-            }
-        }
-    }
-
-    /// The error path of [`int_remainder`], out of line as [`int_div_error`].
-    #[cold]
-    #[inline(never)]
-    fn int_rem_error<T: Default + PartialEq>(b: T) -> ArithmeticOpStatus {
-        let mut status = ArithmeticOpStatus::default();
-        status.set_if(ArithmeticErrorKind::DivideByZero, b == T::default());
-        status
-    }
 
     impl_scalar_op2!(
         impl Div for [i8, i16, i32, i64, u8, u16, u32, u64] {
@@ -702,11 +640,11 @@ pub(crate) mod _traits {
         impl DivideFloor for [i8, i16, i32, i64] {
             fn divide_floor = |a, b, status| {
                 // https://github.com/rust-lang/rust/blob/1.97.0/library/core/src/num/int_macros.rs#L3308-L3324
-                let floor = |d| {
+                let q = a.checked_div(b).map(|d| {
                     let correction = (a ^ b) >> (Self::BITS - 1);
                     if a % b != 0 { d + correction } else { d }
-                };
-                int_quotient(a.checked_div(b).map(floor), a, b, status)
+                }) ;
+                int_quotient(q, a, b, status)
             },
         }
     );
@@ -730,8 +668,10 @@ pub(crate) mod _traits {
             fn remainder_floor = |a, b, status| {
                 // numpy's `remainder`, which compiles without branches, unlike num-integer's:
                 // https://github.com/numpy/numpy/blob/v2.3.0/numpy/_core/src/umath/loops_modulo.dispatch.c.src#L595-L602
-                let floor = |rem| if (a > 0) == (b > 0) || rem == 0 { rem } else { rem + b };
-                int_remainder(a.checked_rem(b).map(floor), b, status)
+                let rem = a.checked_rem(b).map(
+                    |rem| if (a > 0) == (b > 0) || rem == 0 { rem } else { rem + b }
+                );
+                int_remainder(rem, b, status)
             },
         }
     );
@@ -746,50 +686,67 @@ pub(crate) mod _traits {
         }
     );
 
-    /// numpy's errors of the float divisions of `xs` by `ys`: `x / 0` with a finite non-zero `x`
-    /// divides by zero, `0 / 0` and `inf / inf` are invalid, and an infinite quotient of finite
-    /// operands overflows. NaN operands propagate silently, and so do infinite ones otherwise.
-    ///
-    /// The rare path of [`Div`]: out of line, and of copies of the operands, so they stay in
-    /// registers. The status is returned rather than set through a pointer, which would take the
-    /// caller's status out of a register for the whole loop.
-    #[cold]
-    #[inline(never)]
-    fn float_div_errors<T>(xs: &[T], ys: &[T]) -> ArithmeticOpStatus
-    where
-        T: Copy + Into<f64> + core::ops::Div<Output = T>,
-    {
-        use ArithmeticErrorKind::*;
-        let mut status = ArithmeticOpStatus::default();
-        for (&x, &y) in xs.iter().zip(ys) {
-            let (a, b, q): (f64, f64, f64) = (x.into(), y.into(), (x / y).into());
-            status.set_if(DivideByZero, b == 0.0 && a != 0.0 && a.is_finite());
-            status.set_if(
-                InvalidOperation,
-                (a == 0.0 && b == 0.0) || (a.is_infinite() && b.is_infinite()),
-            );
-            status.set_if(Overflow, q.is_infinite() && a.is_finite() && b != 0.0);
+    #[inline(always)]
+    fn int_quotient<T: Copy + Default + PartialEq>(
+        q: Option<T>,
+        a: T,
+        b: T,
+        status: &mut ArithmeticOpStatus,
+    ) -> T {
+        match q {
+            Some(q) => q,
+            None => {
+                #[cold]
+                #[inline(never)]
+                fn int_div_error<T: Default + PartialEq>(a: T, b: T) -> (T, ArithmeticOpStatus) {
+                    if b == T::default() {
+                        (T::default(), ArithmeticErrorKind::DivideByZero.into())
+                    } else {
+                        (a, ArithmeticErrorKind::Overflow.into())
+                    }
+                }
+
+                let (q, error) = int_div_error(a, b);
+                *status |= error;
+                q
+            }
         }
-        status
+    }
+
+    #[inline(always)]
+    fn int_remainder<T: Copy + Default + PartialEq>(
+        r: Option<T>,
+        b: T,
+        status: &mut ArithmeticOpStatus,
+    ) -> T {
+        match r {
+            Some(r) => r,
+            None => {
+                #[cold]
+                #[inline(never)]
+                fn int_rem_error<T: Default + PartialEq>(b: T) -> ArithmeticOpStatus {
+                    let mut status = ArithmeticOpStatus::default();
+                    status.set_if(ArithmeticErrorKind::DivideByZero, b == T::default());
+                    status
+                }
+
+                *status |= int_rem_error(b);
+                T::default()
+            }
+        }
     }
 
     impl_scalar_op2!(
         impl Div for [f32, f64] {
             fn div = |a, b, status| {
                 let q = a / b;
-                // Errors give non-finite results, and NaN operands are never one. The
-                // finiteness test first, and `&&`: the common no-error case is a single
-                // test. With `&`, LLVM orders the tests itself and puts the operands' first
-                // (measured up to 19% slower for `f16`).
                 if !q.is_finite() && !a.is_nan() && !b.is_nan() {
-                    *status |= float_div_errors(&[a], &[b]);
+                    *status |= float_div_error(a, b);
                 }
                 q
             },
             fn div_bulk = |a, b, status| {
                 let q = a / b;
-                // As in `div`, a single test per vector in the common case. NaN operands are
-                // filtered per vector too, so they don't reach the out-of-line path.
                 if (!q.is_finite()).any_true()
                     && (!q.is_finite() & a.simd_eq(a) & b.simd_eq(b)).any_true()
                 {
@@ -803,15 +760,13 @@ pub(crate) mod _traits {
     impl_scalar_op2!(
         impl Div for [f16] {
             fn div = |a, b, status| {
-                // In f32 without FP16, as half's operators do, but inlined: theirs call a
-                // software fallback.
                 #[cfg(not(all(target_arch = "aarch64", target_feature = "fp16")))]
                 let q = f16::from_f32(a.to_f32() / b.to_f32());
                 #[cfg(all(target_arch = "aarch64", target_feature = "fp16"))]
                 let q = a / b;
                 // As in the `f32` `div`.
                 if !q.is_finite() && !a.is_nan() && !b.is_nan() {
-                    *status |= float_div_errors(&[a], &[b]);
+                    *status |= float_div_error(a, b);
                 }
                 q
             },
@@ -829,6 +784,43 @@ pub(crate) mod _traits {
             fn div = |a, b, _status| a / b,
         }
     );
+    #[cold]
+    #[inline(never)]
+    fn float_div_error<T>(x: T, y: T) -> ArithmeticOpStatus
+    where
+        T: Copy + Into<f64> + core::ops::Div<Output = T>,
+    {
+        float_div_errors_impl(&[x], &[y])
+    }
+    #[cold]
+    #[inline(never)]
+    fn float_div_errors<T>(xs: &[T], ys: &[T]) -> ArithmeticOpStatus
+    where
+        T: Copy + Into<f64> + core::ops::Div<Output = T>,
+    {
+        float_div_errors_impl(xs, ys)
+    }
+    // divides by zero: `x / 0` with a finite non-zero `x`
+    // invalid: `0 / 0` and `inf / inf`
+    // overflows: an infinite quotient of finite operands overflows
+    #[inline(always)]
+    fn float_div_errors_impl<T>(xs: &[T], ys: &[T]) -> ArithmeticOpStatus
+    where
+        T: Copy + Into<f64> + core::ops::Div<Output = T>,
+    {
+        use ArithmeticErrorKind::*;
+        let mut status = ArithmeticOpStatus::default();
+        for (&x, &y) in xs.iter().zip(ys) {
+            let (a, b, q): (f64, f64, f64) = (x.into(), y.into(), (x / y).into());
+            status.set_if(DivideByZero, b == 0.0 && a != 0.0 && a.is_finite());
+            status.set_if(
+                InvalidOperation,
+                (a == 0.0 && b == 0.0) || (a.is_infinite() && b.is_infinite()),
+            );
+            status.set_if(Overflow, q.is_infinite() && a.is_finite() && b != 0.0);
+        }
+        status
+    }
 
     macro_rules! float_div_rem {
         (
@@ -1095,8 +1087,6 @@ pub(crate) mod _traits {
                 } else if b < 0 {
                     0
                 } else {
-                    // Beyond `wrapping_pow`'s `u32`, of an `i64`: by squaring, as numpy's
-                    // `power` does any exponent. Wrapping, it is the same `a^b mod 2^BITS`.
                     let (mut acc, mut base, mut exp): (Self, Self, u64) = (1, a, b as u64);
                     while exp > 0 {
                         if exp & 1 == 1 {
