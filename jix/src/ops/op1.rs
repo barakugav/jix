@@ -262,8 +262,8 @@ pub(crate) mod _traits {
     use crate::scalar::Complex;
 
     define_scalar_op1_trait!(
-        /// Sign operation: as [`f32::signum`] and [`i32::signum`], `0` or `1` for unsigned
-        /// integers.
+        /// Sign operation: as [`i32::signum`] for signed integers, `0` or `1` for unsigned
+        /// integers, and as `numpy.sign` for floats.
         ///
         /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
         /// `f16`, `f32`, `f64`.
@@ -273,16 +273,15 @@ pub(crate) mod _traits {
         /// For **unsigned integer** types: returns `0` or `1` of the same type (since
         /// unsigned values cannot be negative).
         ///
-        /// For **float** types: returns `+1.0` for positive values and `-1.0` for
-        /// negative values. Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns
-        /// `-1.0`. Semantics follow [`f32::signum`].
+        /// For **float** types: returns `+1.0` for positive values, `-1.0` for negative values,
+        /// `0.0` for `+0.0` and `-0.0`, and `NaN` for `NaN`, like `numpy.sign`.
         Sign,
         /// Compute the sign of the value.
         sign,
         bulk_fn: sign_bulk,
     );
     impl_scalar_op1!(
-        impl Sign for [i8, i16, i32, i64, f32, f64] {
+        impl Sign for [i8, i16, i32, i64] {
             fn sign = |x| x.signum(),
         }
     );
@@ -291,10 +290,17 @@ pub(crate) mod _traits {
             fn sign = |x| (x != 0) as Self,
         }
     );
+    // Unlike `signum`, which maps `+-0.0` to `+-1.0`, zero maps to `0.0` (as in numpy and torch).
+    // `NaN` stays `NaN`.
+    impl_scalar_op1!(
+        impl Sign for [f32, f64] {
+            fn sign = |x| if x == 0.0 { 0.0 } else { x.signum() },
+        }
+    );
     #[cfg(feature = "half")]
     impl_scalar_op1!(
         impl Sign for [f16] {
-            fn sign = |x| f16::from_f32(x.to_f32().signum()),
+            fn sign = |x| if x == f16::ZERO { f16::ZERO } else { f16::from_f32(x.to_f32().signum()) },
         }
     );
     define_scalar_op1_trait!(
@@ -1001,10 +1007,10 @@ define_op1!(
     /// let result = b.sign().to_ndarray()?;
     /// assert_eq!(result, array![1.0, -1.0, -1.0]);
     ///
-    /// // Float: positive zero returns +1.0.
-    /// let c = Array::compact_ndarray(&array![0.0f32])?;
-    /// let result = c.sign().to_ndarray::<Ix1>()?;
-    /// assert_eq!(result[[0]], 1.0);
+    /// // Float: both zeros return 0.0.
+    /// let c = Array::compact_ndarray(&array![0.0f32, -0.0])?;
+    /// let result = c.sign().to_ndarray()?;
+    /// assert_eq!(result, array![0.0, 0.0]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Sign,
@@ -1464,18 +1470,20 @@ pub(crate) mod tests {
         let expectedu = ndu.mapv(|a: u32| if a == 0 { a - a } else { a - a + 1 });
         crate::util::assert_array_matches(&zau.view().sign(), &expectedu);
 
-        // f32: zero is signed - +0.0 -> +1.0, -0.0 -> -1.0 - plus a negative and a positive
-        // value.
+        // f32: both zeros map to +0.0 (not signum's +-1.0), and NaN stays NaN.
         let ndf = ndarray::array![-3.0f32, -0.0, 0.0, 5.0];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
-        let expectedf = ndf.mapv(|a: f32| a.signum());
-        crate::util::assert_array_matches(&zaf.view().sign(), &expectedf);
+        let resf = zaf.view().sign().to_ndarray::<ndarray::Ix1>().unwrap();
+        assert_eq!(resf.as_slice().unwrap(), &[-1.0, 0.0, 0.0, 1.0]);
+        assert!(resf.iter().all(|x| !x.is_sign_negative() || *x == -1.0));
+        let nan = Array::compact_ndarray(&ndarray::array![f32::NAN]).unwrap();
+        assert!(nan.sign().to_ndarray::<ndarray::Ix1>().unwrap()[0].is_nan());
 
-        // f64: same signed-zero behavior, plus a non-default block shape.
+        // f64: same, plus a non-default block shape.
         let ndd = ndarray::array![-3.0f64, -0.0, 0.0, 5.0];
         let zad = Array::compact_ndarray_with(&ndd, crate::util::arr_params(&[2])).unwrap();
-        let expectedd = ndd.mapv(|a: f64| a.signum());
-        crate::util::assert_array_matches(&zad.view().sign(), &expectedd);
+        let resd = zad.view().sign().to_ndarray::<ndarray::Ix1>().unwrap();
+        assert_eq!(resd.as_slice().unwrap(), &[-1.0, 0.0, 0.0, 1.0]);
     }
     // abs: same dtype for scalar types; complex types have a different output dtype (see below).
     #[test]

@@ -408,12 +408,13 @@ def test_divide_promotes_integers_to_float():
     assert result.dtype == np.float64
 
 
-def test_floor_divide_rejects_floats():
-    """floor_divide's dispatch is integers only; float inputs have no safe target."""
-    a = jix.compact(np.array([1.0, 2.0, 3.0], dtype=np.float32))
-    b = jix.compact(np.array([1.0, 2.0, 3.0], dtype=np.float32))
-    with pytest.raises(Exception):
-        _ = jix.floor_divide(a, b).numpy()
+def test_divide_floor_keeps_float_dtypes():
+    """divide_floor's dispatch has the floats: float inputs keep their dtype."""
+    a = jix.compact(np.array([7.5, -7.5], dtype=np.float32))
+    b = jix.compact(np.array([2.0, 2.0], dtype=np.float32))
+    result = jix.divide_floor(a, b)
+    assert result.dtype == np.float32
+    np.testing.assert_array_equal(result.numpy(), [3.0, -4.0])
 
 
 # ---------------------------------------------------------------------------

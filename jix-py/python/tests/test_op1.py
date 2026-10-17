@@ -153,14 +153,9 @@ def test_atan_concrete():
 
 
 def test_sign_float_concrete():
-    # jix.sign on floats: +1.0 for positive and +0.0, -1.0 for negative and -0.0.
-    # np.sign returns 0.0 for 0.0; np.copysign(1, x) matches Rust's f32::signum.
-    values = [-3.0, -0.0, 0.0, 5.0]
-    check_op1_concrete(
-        jix.sign,
-        lambda a: np.copysign(np.ones_like(a), a),
-        [(np.float32, values, [2]), (np.float64, values, [2])],
-    )
+    # jix.sign on floats matches np.sign: +-1.0, 0.0 for both zeros, NaN for NaN.
+    values = [-3.0, -0.0, 0.0, 5.0, np.nan]
+    check_op1_concrete(jix.sign, np.sign, [(np.float16, values), (np.float32, values, [2]), (np.float64, values, [2])])
 
 
 def test_sign_int_concrete():

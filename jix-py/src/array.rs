@@ -876,14 +876,64 @@ impl Array {
         crate::ops::divide(other, slf)
     }
 
-    /// Element-wise floor division of two arrays. See [`jix.floor_divide()`][jix.floor_divide].
-    pub fn __floordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::floor_divide(slf, other)
+    /// Element-wise floored division of two arrays. See
+    /// [`jix.divide_floor()`][jix.divide_floor].
+    pub fn divide_floor(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::divide_floor(slf, other)
     }
 
-    /// Element-wise floor division of two arrays. See [`jix.floor_divide()`][jix.floor_divide].
+    /// Element-wise floored division of two arrays (`a // b`), as Python's and numpy's `//`. See
+    /// [`jix.divide_floor()`][jix.divide_floor].
+    pub fn __floordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::divide_floor(slf, other)
+    }
+
+    /// Element-wise floored division of two arrays (`a // b`), as Python's and numpy's `//`. See
+    /// [`jix.divide_floor()`][jix.divide_floor].
     pub fn __rfloordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::floor_divide(other, slf)
+        crate::ops::divide_floor(other, slf)
+    }
+
+    /// Element-wise truncated division of two arrays. See
+    /// [`jix.divide_trunc()`][jix.divide_trunc].
+    pub fn divide_trunc(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::divide_trunc(slf, other)
+    }
+
+    /// Element-wise Euclidean division of two arrays. See
+    /// [`jix.divide_euclid()`][jix.divide_euclid].
+    pub fn divide_euclid(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::divide_euclid(slf, other)
+    }
+
+    /// Element-wise floored remainder of two arrays. See
+    /// [`jix.remainder_floor()`][jix.remainder_floor].
+    pub fn remainder_floor(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::remainder_floor(slf, other)
+    }
+
+    /// Element-wise floored remainder of two arrays (`a % b`), as Python's and numpy's `%`. See
+    /// [`jix.remainder_floor()`][jix.remainder_floor].
+    pub fn __mod__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::remainder_floor(slf, other)
+    }
+
+    /// Element-wise floored remainder of two arrays (`a % b`), as Python's and numpy's `%`. See
+    /// [`jix.remainder_floor()`][jix.remainder_floor].
+    pub fn __rmod__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::remainder_floor(other, slf)
+    }
+
+    /// Element-wise truncated remainder of two arrays. See
+    /// [`jix.remainder_trunc()`][jix.remainder_trunc].
+    pub fn remainder_trunc(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::remainder_trunc(slf, other)
+    }
+
+    /// Element-wise Euclidean remainder of two arrays. See
+    /// [`jix.remainder_euclid()`][jix.remainder_euclid].
+    pub fn remainder_euclid(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::remainder_euclid(slf, other)
     }
 
     /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].

@@ -152,7 +152,7 @@ define_op2!(
     /// Element-wise (true) division of two arrays (`a / b`).
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
-    /// For integer dtypes use [`jix.floor_divide()`][jix.floor_divide] (or the `//`
+    /// For integer quotients use [`jix.divide_floor()`][jix.divide_floor] (or the `//`
     /// operator).
     ///
     /// For **float** types, division by zero produces `+/-inf` or `NaN`.
@@ -192,29 +192,33 @@ define_op2!(
     }
 );
 define_op2!(
-    /// Element-wise integer division of two arrays (`a // b`).
+    /// Element-wise truncated division of two arrays.
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// For float and complex dtypes use [`jix.divide()`][jix.divide] (or the `/`
-    /// operator).
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`,
+    /// `f64`.
     ///
-    /// The result truncates toward zero (matching Rust's `/` on integers), so for
-    /// signed operands with a negative quotient this differs from numpy's
-    /// `floor_divide`, which rounds toward negative infinity (e.g. `-7 // 2` is `-3`
-    /// here, but `-4` in numpy). For unsigned operands the two agree. Dividing by
-    /// zero raises an error.
+    /// The quotient `a / b` rounded toward zero, like C's and Rust's integer `/`. It pairs with
+    /// [`jix.remainder_trunc()`][jix.remainder_trunc].
     ///
-    /// Available via the `//` operator on arrays.
+    /// See also [`jix.divide_floor()`][jix.divide_floor] (the `//` operator) and
+    /// [`jix.divide_euclid()`][jix.divide_euclid].
+    ///
+    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
+    /// as does the minimum signed value by `-1`.
+    /// For **float** dtypes the quotient is of the exact `a / b`, as an integer-valued float:
+    /// `1.0 // 0.1` is `9.0`, though `1.0 / 0.1` rounds to `10.0`. It is exact below `2^53` (`2^24`
+    /// for `f32`) in magnitude, and within one ulp above. A zero divisor produces `+-inf` (`NaN`
+    /// for `0 / 0`) and an infinite dividend `NaN`, as in numpy.
     ///
     /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
     /// smallest type that can represent both without information loss (Safe casting
-    /// rules). For example `u8 // i32 -> i32`.
+    /// rules). For example `u8` and `i32` -> `i32`.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: First operand.
-    ///     b: Second operand.
+    ///     a: First operand (the dividend).
+    ///     b: Second operand (the divisor).
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
@@ -225,15 +229,257 @@ define_op2!(
     ///     import jix
     ///     import numpy as np
     ///
-    ///     a = jix.compact([10, 20, 30], dtype=np.int32)
-    ///     b = jix.compact([3, 4, 7], dtype=np.int32)
-    ///     result = jix.floor_divide(a, b)  # same as `a // b`
-    ///     assert np.array_equal(result.numpy(), [3, 5, 4])
+    ///     a = jix.compact([7, -7, 7, -7], dtype=np.int32)
+    ///     b = jix.compact([2, 2, -2, -2], dtype=np.int32)
+    ///     assert np.array_equal(jix.divide_trunc(a, b).numpy(), [3, -3, -3, 3])
     ///     ```
-    floor_divide,
-    Div,
+    divide_trunc,
+    DivideTrunc,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64],
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        Safe
+    }
+);
+define_op2!(
+    /// Element-wise floored division of two arrays.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`,
+    /// `f64`.
+    ///
+    /// The quotient `a / b` rounded toward negative infinity, like Python's and numpy's `//`. It
+    /// pairs with [`jix.remainder_floor()`][jix.remainder_floor], the `%` operator:
+    /// `a == (a // b) * b + a % b`. For floats it matches numpy, except for some quotients beyond
+    /// `2^51` (`2^22` for `f32`) in magnitude, where numpy's own result is off by one.
+    ///
+    /// Available via the `//` operator on arrays. See also
+    /// [`jix.divide_trunc()`][jix.divide_trunc] and
+    /// [`jix.divide_euclid()`][jix.divide_euclid].
+    ///
+    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
+    /// as does the minimum signed value by `-1`.
+    /// For **float** dtypes the quotient is of the exact `a / b`, as an integer-valued float:
+    /// `1.0 // 0.1` is `9.0`, though `1.0 / 0.1` rounds to `10.0`. It is exact below `2^53` (`2^24`
+    /// for `f32`) in magnitude, and within one ulp above. A zero divisor produces `+-inf` (`NaN`
+    /// for `0 / 0`) and an infinite dividend `NaN`, as in numpy.
+    ///
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
+    /// smallest type that can represent both without information loss (Safe casting
+    /// rules). For example `u8` and `i32` -> `i32`.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+    ///
+    /// Args:
+    ///     a: First operand (the dividend).
+    ///     b: Second operand (the divisor).
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
+    ///         No computation occurs until the result is read.
+    ///
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([7, -7, 7, -7], dtype=np.int32)
+    ///     b = jix.compact([2, 2, -2, -2], dtype=np.int32)
+    ///     result = jix.divide_floor(a, b)  # same as `a // b`
+    ///     assert np.array_equal(result.numpy(), [3, -4, -4, 3])
+    ///     ```
+    divide_floor,
+    DivideFloor,
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        Safe
+    }
+);
+define_op2!(
+    /// Element-wise Euclidean division of two arrays.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`,
+    /// `f64`.
+    ///
+    /// The quotient for which [`jix.remainder_euclid()`][jix.remainder_euclid] is never
+    /// negative: `floor(a / b)` for `b > 0` and `ceil(a / b)` for `b < 0`, like Rust's
+    /// `div_euclid`. numpy and torch have no equivalent.
+    ///
+    /// See also [`jix.divide_trunc()`][jix.divide_trunc] and
+    /// [`jix.divide_floor()`][jix.divide_floor] (the `//` operator).
+    ///
+    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
+    /// as does the minimum signed value by `-1`.
+    /// For **float** dtypes the quotient is of the exact `a / b`, as an integer-valued float:
+    /// `1.0 // 0.1` is `9.0`, though `1.0 / 0.1` rounds to `10.0`. It is exact below `2^53` (`2^24`
+    /// for `f32`) in magnitude, and within one ulp above. A zero divisor produces `+-inf` (`NaN`
+    /// for `0 / 0`) and an infinite dividend `NaN`, as in numpy.
+    ///
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
+    /// smallest type that can represent both without information loss (Safe casting
+    /// rules). For example `u8` and `i32` -> `i32`.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+    ///
+    /// Args:
+    ///     a: First operand (the dividend).
+    ///     b: Second operand (the divisor).
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
+    ///         No computation occurs until the result is read.
+    ///
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([7, -7, 7, -7], dtype=np.int32)
+    ///     b = jix.compact([2, 2, -2, -2], dtype=np.int32)
+    ///     assert np.array_equal(jix.divide_euclid(a, b).numpy(), [3, -4, -3, 4])
+    ///     ```
+    divide_euclid,
+    DivideEuclid,
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        Safe
+    }
+);
+define_op2!(
+    /// Element-wise truncated remainder of two arrays.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`,
+    /// `f64`.
+    ///
+    /// Computes `a - b * trunc(a / b)`: the result has the sign of the dividend `a`, like Rust's
+    /// and C's `%`, `numpy.fmod` and `torch.fmod`. It pairs with
+    /// [`jix.divide_trunc()`][jix.divide_trunc].
+    ///
+    /// See also [`jix.remainder_floor()`][jix.remainder_floor] (the `%` operator) and
+    /// [`jix.remainder_euclid()`][jix.remainder_euclid].
+    ///
+    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
+    /// as does the minimum signed value by `-1`. For **float** dtypes it produces `NaN`.
+    ///
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
+    /// smallest type that can represent both without information loss (Safe casting
+    /// rules). For example `u8` and `i32` -> `i32`.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+    ///
+    /// Args:
+    ///     a: First operand (the dividend).
+    ///     b: Second operand (the divisor).
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
+    ///         No computation occurs until the result is read.
+    ///
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([7, -7, 7, -7], dtype=np.int32)
+    ///     b = jix.compact([3, 3, -3, -3], dtype=np.int32)
+    ///     assert np.array_equal(jix.remainder_trunc(a, b).numpy(), [1, -1, 1, -1])
+    ///     ```
+    remainder_trunc,
+    RemainderTrunc,
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        Safe
+    }
+);
+define_op2!(
+    /// Element-wise floored remainder of two arrays.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`,
+    /// `f64`.
+    ///
+    /// Computes `a - b * floor(a / b)`: the result has the sign of the divisor `b`, like Python's
+    /// `%`, `numpy.remainder` and `torch.remainder`. For **float** dtypes it is exactly Python's
+    /// float `%`, which gives a zero result the sign of `b`.
+    ///
+    /// Available via the `%` operator on arrays. See also
+    /// [`jix.remainder_trunc()`][jix.remainder_trunc] and
+    /// [`jix.remainder_euclid()`][jix.remainder_euclid].
+    ///
+    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
+    /// as does the minimum signed value by `-1`. For **float** dtypes it produces `NaN`.
+    ///
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
+    /// smallest type that can represent both without information loss (Safe casting
+    /// rules). For example `u8` and `i32` -> `i32`.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+    ///
+    /// Args:
+    ///     a: First operand (the dividend).
+    ///     b: Second operand (the divisor).
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
+    ///         No computation occurs until the result is read.
+    ///
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([7, -7, 7, -7], dtype=np.int32)
+    ///     b = jix.compact([3, 3, -3, -3], dtype=np.int32)
+    ///     result = jix.remainder_floor(a, b)  # same as `a % b`
+    ///     assert np.array_equal(result.numpy(), [1, 2, -2, -1])
+    ///     ```
+    remainder_floor,
+    RemainderFloor,
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        Safe
+    }
+);
+define_op2!(
+    /// Element-wise Euclidean remainder of two arrays.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`,
+    /// `f64`.
+    ///
+    /// Computes `a - |b| * floor(a / |b|)`: the result is never negative, like Rust's
+    /// `rem_euclid`, and equals [`jix.remainder_floor()`][jix.remainder_floor] when `b > 0`. numpy
+    /// and torch have no equivalent.
+    ///
+    /// See also [`jix.remainder_trunc()`][jix.remainder_trunc] and
+    /// [`jix.remainder_floor()`][jix.remainder_floor] (the `%` operator).
+    ///
+    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
+    /// as does the minimum signed value by `-1`. For **float** dtypes it produces `NaN`.
+    ///
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
+    /// smallest type that can represent both without information loss (Safe casting
+    /// rules). For example `u8` and `i32` -> `i32`.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+    ///
+    /// Args:
+    ///     a: First operand (the dividend).
+    ///     b: Second operand (the divisor).
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
+    ///         No computation occurs until the result is read.
+    ///
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([7, -7, 7, -7], dtype=np.int32)
+    ///     b = jix.compact([3, 3, -3, -3], dtype=np.int32)
+    ///     assert np.array_equal(jix.remainder_euclid(a, b).numpy(), [1, 2, 1, 2])
+    ///     ```
+    remainder_euclid,
+    RemainderEuclid,
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
         Safe
     }
 );

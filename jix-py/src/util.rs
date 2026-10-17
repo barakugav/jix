@@ -1,3 +1,5 @@
+use std::mem::{ManuallyDrop, MaybeUninit};
+
 use jix_core::NDIM_MAX;
 use numpy::npyffi::{npy_intp, PyArray_Dims};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
@@ -351,6 +353,95 @@ pub(crate) fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: u
         biggest_offset += stride * (len - 1);
     }
     biggest_offset + itemsize
+}
+
+#[inline]
+pub(crate) fn array_try_from_fn<T, E, const N: usize>(
+    mut f: impl FnMut(usize) -> Result<T, E>,
+) -> Result<[T; N], E> {
+    let mut data = MaybeUninit::<[T; N]>::uninit();
+    let ptr = data.as_mut_ptr().cast::<T>();
+    if const { !std::mem::needs_drop::<T>() } {
+        for i in 0..N {
+            #[allow(clippy::question_mark)]
+            let value = match f(i) {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            };
+            unsafe { ptr.add(i).write(value) };
+        }
+    } else {
+        struct InitGuard<T> {
+            ptr: *mut T,
+            initialized: usize,
+        }
+        impl<T> Drop for InitGuard<T> {
+            #[inline(always)]
+            fn drop(&mut self) {
+                unsafe {
+                    std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(
+                        self.ptr,
+                        self.initialized,
+                    ))
+                };
+            }
+        }
+        let mut guard = InitGuard {
+            ptr,
+            initialized: 0,
+        };
+        while guard.initialized < N {
+            #[allow(clippy::question_mark)]
+            let value = match f(guard.initialized) {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            };
+            unsafe { ptr.add(guard.initialized).write(value) };
+            guard.initialized += 1;
+        }
+        std::mem::forget(guard);
+    }
+    Ok(unsafe { data.assume_init() })
+}
+
+#[inline]
+pub(crate) fn array_try_map<T, U, E, const N: usize>(
+    src: [T; N],
+    mut f: impl FnMut(usize, T) -> Result<U, E>,
+) -> Result<[U; N], E> {
+    let mut src = ManuallyDrop::new(src);
+    if const { !std::mem::needs_drop::<T>() } {
+        // SAFETY: every index is read at most once, and `src` is never dropped (`T` has no drop)
+        return array_try_from_fn(
+            #[inline(always)]
+            |i| f(i, unsafe { std::ptr::read(&src[i]) }),
+        );
+    }
+
+    /// Drops the items `src[next..]` that were not mapped yet
+    struct DropGuard<'a, T, const N: usize> {
+        src: &'a mut ManuallyDrop<[T; N]>,
+        next: usize,
+    }
+    impl<T, const N: usize> Drop for DropGuard<'_, T, N> {
+        #[inline(always)]
+        fn drop(&mut self) {
+            // SAFETY: the items `next..` were never read out, and are dropped exactly once here.
+            unsafe { std::ptr::drop_in_place(&mut self.src[self.next..]) };
+        }
+    }
+    let mut unconsumed = DropGuard {
+        src: &mut src,
+        next: 0,
+    };
+    array_try_from_fn(
+        #[inline(always)]
+        |i| {
+            let item = unsafe { std::ptr::read(&unconsumed.src[i]) };
+            unconsumed.next = i + 1;
+            f(i, item)
+        },
+    )
 }
 
 #[cfg(test)]
