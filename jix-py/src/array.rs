@@ -985,23 +985,28 @@ impl Array {
     /// struct dtypes) raise.
     pub fn __pos__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         let dtype = slf.get().arr.dtype();
-        match dtype.try_to_scalar() {
-            Some(kind) if !kind.is_bool() => Ok(slf.clone()),
-            _ => Err(jix_core::Error::new(
+        let is_supported = dtype
+            .try_to_scalar()
+            .is_some_and(|scalar| scalar.is_integer() | scalar.is_float() | scalar.is_complex());
+
+        if !is_supported {
+            return Err(jix_core::Error::new(
                 jix_core::error::ErrorKind::UnsupportedDtype,
-                format!("Op positive does not support operands with dtypes [{dtype}]"),
+                format!("Op 'positive' does not support operands with dtypes [{dtype}]"),
             ))
-            .into_py_result(),
+            .into_py_result();
         }
+
+        Ok(slf.clone())
     }
 
     /// Computes the absolute value of each element. See [`jix.absolute()`][jix.absolute].
-    pub fn abs(slf: &Bound<'_, Self>) -> PyResult<Self> {
+    pub fn abs<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::absolute(slf)
     }
 
     /// Computes the absolute value of each element. See [`jix.absolute()`][jix.absolute].
-    pub fn __abs__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
+    pub fn __abs__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::absolute(slf)
     }
 

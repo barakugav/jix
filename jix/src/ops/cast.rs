@@ -109,6 +109,7 @@ pub(crate) mod _traits {
     }
 
     macro_rules! impl_cast_to_bool {
+        // TODO much faster: self.to_bits() & 0x7fff != 0
         (f16) => { impl_cast!(f16 => bool, bulk=("disabled")); };
         (bool) => { impl_cast!(bool => bool, bulk=("disabled")); };
         ($src_type:ident) => {
