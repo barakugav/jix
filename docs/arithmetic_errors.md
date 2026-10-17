@@ -21,10 +21,14 @@ The error kinds follow numpy: `divide` (`DivideByZero`), `over` (`Overflow`), `u
 | `RemainderTrunc` `RemainderFloor` `RemainderEuclid` by `0` | `0` | `divide` | done |
 | the same, `MIN % -1` | `0` | - | done |
 | `Shl` `Shr` with count `>= width` or `< 0` | undecided | - | open |
-| `Sum` `Product` `Mean` | wraps | - | todo |
+| `Sum` `Product` `Mean` | wraps | - | done |
 
 numpy raises `ValueError` for a negative integer exponent, whatever `errstate` says. jix reports
 it as `invalid` instead, so it follows the mode like the other errors.
+
+`Sum` and `Product` accumulate in `i64` / `u64`, as numpy. numpy's `mean` of integers
+accumulates in `f64`, so it does not wrap; jix's sums in `i64` / `u64`, exact, and wraps past
+them.
 
 ## Floats
 
