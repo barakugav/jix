@@ -725,6 +725,7 @@ pub struct Clamp<S, SMin, SMax> {
     a: S,
     min: SMin,
     max: SMax,
+    cache_id: ArrayCacheId,
     spec: ArraySpecDynamic,
 }
 impl<S, SMin, SMax> Clamp<S, SMin, SMax>
@@ -758,14 +759,22 @@ where
                 .each_ref()
                 .map(|spec| (spec.block_shape().as_slice(), spec.block_shape_fixed_dims())),
         );
+        let cache_id = ArrayCacheId::new();
         let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
-        );
-        Ok(Self { a, min, max, spec })
+        )
+        .with_cache_ids(Some(cache_id), specs.each_ref().map(|spec| spec.dynamic()));
+        Ok(Self {
+            a,
+            min,
+            max,
+            cache_id,
+            spec,
+        })
     }
 
     /// Constructs an array with [`Clamp`] storage. See the storage struct docs for semantics and examples.
@@ -790,8 +799,10 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        self.read_as_elementwise_pipeline::<S::Item>(index, context)?
-            .to_buf(index, context, out)
+        context.read_cached(self.cache_id, index, out, CacheScope::Current, &|out| {
+            self.read_as_elementwise_pipeline::<S::Item>(index, context)?
+                .to_buf(index, context, out)
+        })
     }
 
     #[inline]

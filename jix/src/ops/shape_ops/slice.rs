@@ -100,7 +100,8 @@ impl<S: ArrayStorage> Slice<S> {
             inner_spec.element_cost(),
             DimArray::from_slice(inner_spec.read_shape_scale_weight()).unwrap(),
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
-        );
+        )
+        .with_cache_ids(None, [inner_spec.dynamic()]);
 
         Ok(Self {
             array,

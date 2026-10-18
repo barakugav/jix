@@ -68,6 +68,8 @@ pub use any::*;
 pub(crate) mod block;
 pub use block::BlockSize;
 
+pub(crate) mod cache_id;
+
 pub(crate) mod scalar;
 
 mod buf;

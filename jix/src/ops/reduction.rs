@@ -13,6 +13,7 @@ pub(crate) struct ReductionOp<S: ArrayStorage, K> {
     is_reduced: DimArray<bool>,
 
     shape: DimDyn,
+    cache_id: ArrayCacheId,
     spec: ArraySpecDynamic,
 }
 pub(crate) trait ReductionOpKernel<T> {
@@ -168,6 +169,7 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
             .filter(|&&d| !is_reduced[d as usize])
             .map(|&d| dim_orig2new(d as usize))
             .collect();
+        let cache_id = ArrayCacheId::new();
         let spec = ArraySpecDynamic::new(
             dim_new2orig
                 .iter()
@@ -181,11 +183,13 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
-        );
+        )
+        .with_cache_ids(Some(cache_id), [spec.dynamic()]);
 
         Ok(Self {
             kernel,
             shape,
+            cache_id,
             spec,
             array,
             is_reduced,
@@ -207,24 +211,27 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        read_data_dispatch(
-            &self.array,
-            self.shape(),
-            self.dtype(),
-            size_of::<K::State>(),
-            Alignment::of::<K::State>(),
-            &self.is_reduced,
-            K::NEEDS_FINALIZE,
-            &|args| reduce_tile::<S::Item, K>(&self.kernel, args),
-            &|args| finalize_states_inner_loop::<S::Item, K>(&self.kernel, args),
-            &|out, len, out_stride| {
-                finalize_states_empty_inner_loop(&self.kernel, out, len, out_stride)
-            },
-            index,
-            context,
-            out,
-            self.spec().read_layout_order(),
-        )
+        let scope = CacheScope::Own(&self.spec.arrays_to_cache);
+        context.read_cached(self.cache_id, index, out, scope, &|out| {
+            read_data_dispatch(
+                &self.array,
+                self.shape(),
+                self.dtype(),
+                size_of::<K::State>(),
+                Alignment::of::<K::State>(),
+                &self.is_reduced,
+                K::NEEDS_FINALIZE,
+                &|args| reduce_tile::<S::Item, K>(&self.kernel, args),
+                &|args| finalize_states_inner_loop::<S::Item, K>(&self.kernel, args),
+                &|out, len, out_stride| {
+                    finalize_states_empty_inner_loop(&self.kernel, out, len, out_stride)
+                },
+                index,
+                context,
+                out,
+                self.spec().read_layout_order(),
+            )
+        })
     }
 
     #[inline(always)]

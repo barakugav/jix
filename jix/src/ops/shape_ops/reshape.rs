@@ -140,7 +140,8 @@ impl<S> Reshape<S> {
             inner_spec.element_cost(),
             read_shape_scale_weight,
             read_layout_order,
-        );
+        )
+        .with_cache_ids(None, [inner_spec.dynamic()]);
 
         Ok(Self {
             new_shape: new_shape_raw,
