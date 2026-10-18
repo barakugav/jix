@@ -294,7 +294,7 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
-        context.read_cached(self.cache_id, index, out, CacheScope::Current, &|out| {
+        context.read_cached(self.cache_id, index, out, &|out| {
             self.read_as_elementwise_pipeline::<S::Item>(index, context)?
                 .to_buf(index, context, out)
         })

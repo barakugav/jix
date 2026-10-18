@@ -33,6 +33,10 @@ use crate::ops::prelude::*;
 pub struct Flip<S: ArrayStorage> {
     array: S,
     is_flipped: DimArray<bool>,
+    /// The arrays to cache in the cache scope in which `array` is read, see
+    /// [`ReadContext::cache_scope`].
+    cache_scope: Option<Arc<ArrayCacheIdSet>>,
+    spec: ArraySpecDynamic,
 }
 
 impl<S: ArrayStorage> Flip<S> {
@@ -59,7 +63,16 @@ impl<S: ArrayStorage> Flip<S> {
             }
             is_flipped[d] = true;
         }
-        Ok(Self { array, is_flipped })
+        let inner_spec = array.spec().dynamic();
+        let (spec, cache_scope) = inner_spec
+            .clone()
+            .with_cache_scope(None, [inner_spec], true);
+        Ok(Self {
+            array,
+            is_flipped,
+            cache_scope,
+            spec,
+        })
     }
 
     /// Constructs an array with [`Flip`] storage. See the storage struct docs for semantics and examples.
@@ -91,6 +104,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
             index,
             self.dtype().itemsize() as usize,
         )?;
+        let _scope = context.cache_scope(&self.cache_scope);
 
         let ndim = index.len();
         let dtype = self.dtype();
@@ -182,7 +196,10 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         if self.is_identity() {
             return self.array.spec();
         }
-        self.array.spec().with_cleared_flags()
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Flip", [&self.array])
@@ -203,6 +220,8 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         Ok(Flip {
             array: self.array.element_type_change()?,
             is_flipped: self.is_flipped,
+            cache_scope: self.cache_scope,
+            spec: self.spec,
         })
     }
 }

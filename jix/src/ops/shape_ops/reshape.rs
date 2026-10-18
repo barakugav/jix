@@ -35,6 +35,9 @@ pub struct Reshape<S> {
     array: S,
 
     new_shape: DimArray<u64>,
+    /// The arrays to cache in the cache scope in which `array` is read, see
+    /// [`ReadContext::cache_scope`].
+    cache_scope: Option<Arc<ArrayCacheIdSet>>,
     spec: ArraySpecDynamic,
 }
 impl<S> Reshape<S> {
@@ -127,17 +130,18 @@ impl<S> Reshape<S> {
                 (0..new_shape.len() as DimIdx).collect::<DimArray<_>>()
             }
         };
-        let spec = ArraySpecDynamic::new(
+        let (spec, cache_scope) = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             inner_spec.element_cost(),
             read_shape_scale_weight,
             read_layout_order,
         )
-        .with_cache_ids(None, [inner_spec.dynamic()]);
+        .with_cache_scope(None, [inner_spec.dynamic()], true);
 
         Ok(Self {
             new_shape,
+            cache_scope,
             spec,
             array,
         })
@@ -259,6 +263,7 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
+        let _scope = context.cache_scope(&self.cache_scope);
         let dtype = self.dtype();
         let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let mut out = materialize_out_buf(
@@ -403,6 +408,7 @@ where
         Ok(Reshape {
             array: self.array.element_type_change()?,
             new_shape: self.new_shape,
+            cache_scope: self.cache_scope,
             spec: self.spec,
         })
     }
