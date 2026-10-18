@@ -135,7 +135,8 @@ where
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
-        );
+        )
+        .with_cache_ids(None, (0..narrays).map(|i| arrays.spec(i).dynamic()));
 
         Ok(Self {
             shape: new_shape,

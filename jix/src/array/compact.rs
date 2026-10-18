@@ -138,7 +138,9 @@ impl<S: ArrayStorage> Array<S> {
     {
         // Erase the storage to reduce monomorphization bloat
         let storage: &dyn ArrayStorage = &self.storage;
-        compact_into_builder_dyn_dispatch(storage, params, context, builder_init)
+        context.top_level_read(storage.spec().dynamic().arrays_to_cache.clone(), || {
+            compact_into_builder_dyn_dispatch(storage, params, context, builder_init)
+        })
     }
 }
 

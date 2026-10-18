@@ -3,6 +3,7 @@ use crate::ops::prelude::*;
 pub(crate) struct Op1<S, K> {
     pub(crate) array: S,
     kernel: K,
+    cache_id: ArrayCacheId,
     spec: ArraySpecDynamic,
 }
 pub(crate) trait Op1Kernel<T> {
@@ -32,11 +33,14 @@ impl<S, K> Op1<S, K> {
     {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
         check_shape_overflow(array.shape(), K::Output::DTYPE.itemsize() as _)?;
+        let cache_id = ArrayCacheId::new();
         let mut spec = array.spec().dynamic().clone();
         spec.add_elementwise_cost(1.0);
+        spec.add_cache_id(cache_id);
         Ok(Self {
             array,
             kernel,
+            cache_id,
             spec,
         })
     }
@@ -63,8 +67,10 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
-        self.read_as_elementwise_pipeline::<K::Output>(index, context)?
-            .to_buf(index, context, out)
+        context.read_cached(self.cache_id, index, out, CacheScope::Current, &|out| {
+            self.read_as_elementwise_pipeline::<K::Output>(index, context)?
+                .to_buf(index, context, out)
+        })
     }
 
     #[inline]

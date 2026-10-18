@@ -1,5 +1,6 @@
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
+use std::sync::Arc;
 
 use crate::cpu_cache::CACHE_LINE_SIZE;
 use crate::dtype::Alignment;
@@ -54,6 +55,14 @@ impl BufferPool {
         let (pool, _) = self.get_pool(buf.align().try_into().unwrap());
         let pool = unsafe { &mut *pool };
         pool.push(buf);
+    }
+
+    /// Drops one reference to a shared buffer, returning the allocation to the pool if it was the
+    /// last one.
+    pub(crate) fn return_shared(&self, buf: Arc<RawAlignedBytes>) {
+        if let Some(buf) = Arc::into_inner(buf) {
+            self.return_buf(buf);
+        }
     }
 
     /// Returns a raw pointer to the free list for `alignment` together with the actual alignment
@@ -117,12 +126,49 @@ impl PoolBuf<'_> {
         // SAFETY: the allocation holds `capacity` bytes.
         unsafe { std::slice::from_raw_parts_mut(self.buf.as_mut_ptr(), self.buf.capacity()) }
     }
+
+    /// Take the allocation out of the guard, which then does not return it to the pool.
+    pub(crate) fn into_inner(self) -> RawAlignedBytes {
+        let mut this = ManuallyDrop::new(self);
+        // SAFETY: `this` is never used or dropped again.
+        unsafe { ManuallyDrop::take(&mut this.buf) }
+    }
 }
 impl Drop for PoolBuf<'_> {
     fn drop(&mut self) {
         // SAFETY: `buf` is not touched again after being taken.
         let buf = unsafe { ManuallyDrop::take(&mut self.buf) };
         self.buffers.return_buf(buf);
+    }
+}
+
+/// A read-only, reference-counted buffer whose allocation returns to its [`BufferPool`] when the
+/// last reference is dropped.
+pub(crate) struct PoolBufShared<'a> {
+    buf: ManuallyDrop<Arc<RawAlignedBytes>>,
+    buffers: &'a BufferPool,
+}
+impl<'a> PoolBufShared<'a> {
+    #[inline]
+    pub(crate) fn new(buf: Arc<RawAlignedBytes>, buffers: &'a BufferPool) -> Self {
+        Self {
+            buf: ManuallyDrop::new(buf),
+            buffers,
+        }
+    }
+
+    /// The whole allocation.
+    #[inline(always)]
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        // SAFETY: the allocation holds `capacity` bytes.
+        unsafe { std::slice::from_raw_parts(self.buf.as_ptr(), self.buf.capacity()) }
+    }
+}
+impl Drop for PoolBufShared<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.buf` is never used again.
+        let buf = unsafe { ManuallyDrop::take(&mut self.buf) };
+        self.buffers.return_shared(buf);
     }
 }
 

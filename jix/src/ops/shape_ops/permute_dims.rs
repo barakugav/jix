@@ -93,7 +93,8 @@ impl<S: ArrayStorage> PermuteDims<S> {
                 .iter()
                 .map(|&old| inv_dims[old as usize])
                 .collect(),
-        );
+        )
+        .with_cache_ids(None, [inner_spec.dynamic()]);
         let dims = dim_arr(ndim, |i| dims[i] as DimIdx);
         Ok(Self {
             shape,
