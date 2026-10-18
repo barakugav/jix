@@ -34,6 +34,10 @@ pub struct Roll<S: ArrayStorage> {
     dim: DimIdx,
     /// `shift` normalized to `[0, shape[dim])`. Zero means the op is a pass-through.
     shift: u64,
+    /// The arrays to cache in the cache scope in which `array` is read, see
+    /// [`ReadContext::cache_scope`].
+    cache_scope: Option<Arc<ArrayCacheIdSet>>,
+    spec: ArraySpecDynamic,
 }
 
 impl<S: ArrayStorage> Roll<S> {
@@ -54,10 +58,16 @@ impl<S: ArrayStorage> Roll<S> {
             shift.rem_euclid(len as i64) as u64
         };
 
+        let inner_spec = array.spec().dynamic();
+        let (spec, cache_scope) = inner_spec
+            .clone()
+            .with_cache_scope(None, [inner_spec], true);
         Ok(Self {
             array,
             dim: dim as DimIdx,
             shift,
+            cache_scope,
+            spec,
         })
     }
 
@@ -78,6 +88,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
+        let _scope = context.cache_scope(&self.cache_scope);
 
         let k = self.dim as usize;
         let shift = self.shift;
@@ -154,7 +165,10 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_cleared_flags()
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Roll", [&self.array])
@@ -169,6 +183,8 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             array: self.array.element_type_change()?,
             dim: self.dim,
             shift: self.shift,
+            cache_scope: self.cache_scope,
+            spec: self.spec,
         })
     }
 }

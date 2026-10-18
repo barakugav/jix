@@ -115,7 +115,7 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        context.read_cached(self.cache_id, index, out, CacheScope::Current, &|out| {
+        context.read_cached(self.cache_id, index, out, &|out| {
             self.read_as_elementwise_pipeline::<K::Output>(index, context)?
                 .to_buf(index, context, out)
         })

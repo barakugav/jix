@@ -29,6 +29,9 @@ pub struct Repeat<S: ArrayStorage> {
     dim: DimIdx,
     repeats: u64,
     new_shape: DimDyn,
+    /// The arrays to cache in the cache scope in which `array` is read, see
+    /// [`ReadContext::cache_scope`].
+    cache_scope: Option<Arc<ArrayCacheIdSet>>,
     spec: ArraySpecDynamic,
 }
 
@@ -71,20 +74,21 @@ impl<S: ArrayStorage> Repeat<S> {
             .saturating_mul(repeats.min(BlockSize::MAX as u64) as BlockSize)
             .min(new_len.min(BlockSize::MAX as u64) as BlockSize)
             .max(1);
-        let spec = ArraySpecDynamic::new(
+        let (spec, cache_scope) = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             inner_spec.element_cost(),
             inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>(),
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
         )
-        .with_cache_ids(None, [inner_spec.dynamic()]);
+        .with_cache_scope(None, [inner_spec.dynamic()], true);
 
         Ok(Self {
             array,
             dim: dim as DimIdx,
             repeats,
             new_shape,
+            cache_scope,
             spec,
         })
     }
@@ -106,6 +110,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
+        let _scope = context.cache_scope(&self.cache_scope);
 
         let ndim = self.new_shape.ndim();
         let dtype = self.dtype();
@@ -267,6 +272,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             dim: self.dim,
             repeats: self.repeats,
             new_shape: self.new_shape,
+            cache_scope: self.cache_scope,
             spec: self.spec,
         })
     }

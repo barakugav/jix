@@ -166,7 +166,7 @@ where
     ) -> Result<StridedBuf<'a>> {
         check_get_range_ndim(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
-        context.read_cached(self.cache_id, index, out, CacheScope::Current, &|out| {
+        context.read_cached(self.cache_id, index, out, &|out| {
             let dtype = self.dtype();
             let (itemsize, alignment) = (dtype.itemsize() as usize, dtype.alignment().as_usize());
 

@@ -962,7 +962,7 @@ impl<S: ArrayStorage> Array<S> {
         let spec = self.storage.spec();
         let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
         let small_read = spec.flags().plain_read() || nitems as u64 <= min_nitems;
-        context.top_level_read(spec.dynamic().arrays_to_cache.clone(), || {
+        context.top_level_read(spec.dynamic(), || {
             if small_read {
                 // Fast path for small reads
                 self.storage.read_data(index, context, out)
@@ -1248,7 +1248,7 @@ impl<S: ArrayStorage> Array<S> {
     {
         // Erase the storage to reduce monomorphization bloat
         let storage: &dyn ArrayStorage = &self.storage;
-        context.top_level_read(storage.spec().dynamic().arrays_to_cache.clone(), || {
+        context.top_level_read(storage.spec().dynamic(), || {
             compact_into_builder_dyn_dispatch(storage, params, context, builder_init)
         })
     }

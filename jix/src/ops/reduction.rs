@@ -14,6 +14,9 @@ pub(crate) struct ReductionOp<S: ArrayStorage, K> {
 
     shape: DimDyn,
     cache_id: ArrayCacheId,
+    /// The arrays to cache in the cache scope in which `array` is read, see
+    /// [`ReadContext::cache_scope`].
+    cache_scope: Option<Arc<ArrayCacheIdSet>>,
     spec: ArraySpecDynamic,
 }
 pub(crate) trait ReductionOpKernel<T> {
@@ -170,7 +173,7 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
             .map(|&d| dim_orig2new(d as usize))
             .collect();
         let cache_id = ArrayCacheId::new();
-        let spec = ArraySpecDynamic::new(
+        let (spec, cache_scope) = ArraySpecDynamic::new(
             dim_new2orig
                 .iter()
                 .map(|&dim| spec.block_shape()[dim])
@@ -184,12 +187,13 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
             read_shape_scale_weight,
             read_layout_order,
         )
-        .with_cache_ids(Some(cache_id), [spec.dynamic()]);
+        .with_cache_scope(Some(cache_id), [spec.dynamic()], true);
 
         Ok(Self {
             kernel,
             shape,
             cache_id,
+            cache_scope,
             spec,
             array,
             is_reduced,
@@ -211,8 +215,8 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        let scope = CacheScope::Own(&self.spec.arrays_to_cache);
-        context.read_cached(self.cache_id, index, out, scope, &|out| {
+        context.read_cached(self.cache_id, index, out, &|out| {
+            let _scope = context.cache_scope(&self.cache_scope);
             read_data_dispatch(
                 &self.array,
                 self.shape(),
