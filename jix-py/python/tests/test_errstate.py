@@ -1,6 +1,6 @@
 """
-Arithmetic error handling under jix.errstate: integer and float division, the float functions
-and wrapping integer arithmetic. Mirrors the tests in jix/src/ops/op1.rs and
+Arithmetic error handling under jix.errstate: integer and float division, the float functions,
+integer power and wrapping integer arithmetic. Mirrors the tests in jix/src/ops/op1.rs and
 jix/src/ops/op2.rs.
 """
 
@@ -315,6 +315,34 @@ def test_float_function_errors_match_numpy(jix_fn, np_fn, dtype):
         _errors_match_numpy(jix_fn, np_fn, x, fills=(0.5,))
 
 
+# Past the domain and the overflow thresholds of power.
+_POWER_EDGES = [2.0, 0.5, -8.0, 1 / 3, 300.0, -300.0]
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_float_power_errors_match_numpy(dtype):
+    with np.errstate(over="ignore"):
+        values = np.concatenate([_float_edges(dtype), np.array(_POWER_EDGES, dtype=dtype)])
+    for x in values:
+        for y in values:
+            # Exact results, whose errors depend on numpy's implementation: on AVX-512 it overflows
+            # where `x * x` does, as `1e30 ** inf` in float32.
+            if np.isinf(y) and np.isfinite(x):
+                continue
+            _errors_match_numpy(jix.power, np.power, x, y)
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_float_power_zero_to_minus_inf(dtype):
+    # A divide by zero, as numpy's AVX-512 power, and IEEE 754's for any other negative exponent.
+    a = jix.compact(np.array([0.0, -0.0, 0.0], dtype=dtype))
+    b = jix.compact(np.array([-np.inf, -np.inf, np.inf], dtype=dtype))
+    with jix.errstate(divide="raise"), pytest.raises(FloatingPointError, match=MESSAGE):
+        jix.power(a, b).numpy()
+    with jix.errstate(divide="ignore"):
+        np.testing.assert_array_equal(jix.power(a, b).numpy(), [np.inf, np.inf, 0.0])
+
+
 def test_float_divide_modes():
     a = jix.compact(np.array([1.0, 0.0, 6.0]))
     b = jix.compact(np.array([0.0, 0.0, 3.0]))
@@ -328,6 +356,34 @@ def test_float_divide_modes():
         result = q.numpy()
     assert sorted(str(x.message) for x in w) == [MESSAGE, "invalid operation encountered"]
     np.testing.assert_array_equal(result, [np.inf, np.nan, 2.0])
+
+
+@pytest.mark.parametrize("dtype", ints)
+def test_power_negative_exponent(dtype):
+    a = np.array([2, 3, 4, -5], dtype=dtype)
+    b = np.array([3, -1, 0, 3], dtype=dtype)
+    q = jix.power(jix.compact(a), jix.compact(b))
+    assert q.dtype == dtype
+    # numpy raises a ValueError whatever its modes, jix follows `invalid`.
+    with pytest.raises(ValueError, match="negative integer powers"):
+        np.power(a, b)
+    with pytest.raises(FloatingPointError, match="invalid operation encountered"):
+        q.numpy()
+    with jix.errstate(invalid="ignore"):
+        np.testing.assert_array_equal(q.numpy(), [8, 0, 1, -125])
+    with jix.errstate(invalid="warn"), pytest.warns(RuntimeWarning, match="invalid operation encountered"):
+        q.numpy()
+
+
+@pytest.mark.parametrize("dtype", ints + uints)
+def test_power_wraps_like_numpy(dtype):
+    signed = np.issubdtype(dtype, np.signedinteger)
+    a = (np.arange(-50, 50) if signed else np.arange(100)).astype(dtype)
+    b = (np.arange(100) % 70).astype(dtype if signed else np.uint8)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = jix.power(jix.compact(a), jix.compact(b)).numpy()
+    np.testing.assert_array_equal(result, np.power(a, b))
 
 
 @pytest.mark.parametrize("dtype", ints + uints)

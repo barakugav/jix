@@ -1149,36 +1149,90 @@ pub(crate) mod _traits {
     }
 
     define_scalar_op2_trait!(
-        /// Exponentiation operation: as [`i32::pow`] for integers (unsigned exponents),
-        /// [`f32::powi`] and [`f32::powf`] for floats.
+        /// Exponentiation operation: as [`i32::wrapping_pow`] for integers, [`f32::powi`] and
+        /// [`f32::powf`] for floats.
         ///
-        /// A negative base with a non-integer exponent produces `NaN`.
-        /// Semantics follow [`f32::powf`].
+        /// Integer results wrap on overflow. A negative exponent of an integer base gives `0`
+        /// and sets [`ArithmeticErrorKind::InvalidOperation`].
+        ///
+        /// Float values follow [`f32::powf`]. A negative base with a non-integer exponent
+        /// produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`], zero to a negative
+        /// power gives `inf` and sets [`ArithmeticErrorKind::DivideByZero`], and finite operands
+        /// with an infinite result set [`ArithmeticErrorKind::Overflow`].
         Pow,
-        /// Raise to the power of another value.
-        pow,
+        /// Raise to the power of another value, reporting an arithmetic error to `status`.
+        pow(status),
         bulk_fn: pow_bulk,
     );
+
     impl_scalar_op2!(
         impl Pow for [i8, i16, i32, i64, u8, u16, u32, u64] x [u8, u16, u32] {
-            fn pow = |a, b| a.pow(b as u32),
+            fn pow = |a, b, _status| a.wrapping_pow(b as u32),
+        }
+    );
+    impl_scalar_op2!(
+        impl Pow for [i8, i16, i32, i64, u8, u16, u32, u64] x [i8, i16, i32, i64] {
+            fn pow = |a, b, status| {
+                status.set_if(ArithmeticErrorKind::InvalidOperation, b < 0);
+                if let Ok(b) = u32::try_from(b) {
+                    a.wrapping_pow(b)
+                } else if b < 0 {
+                    0
+                } else {
+                    let (mut acc, mut base, mut exp): (Self, Self, u64) = (1, a, b as u64);
+                    while exp > 0 {
+                        if exp & 1 == 1 {
+                            acc = acc.wrapping_mul(base);
+                        }
+                        base = base.wrapping_mul(base);
+                        exp >>= 1;
+                    }
+                    acc
+                }
+            },
         }
     );
     impl_scalar_op2!(
         impl Pow for [f32, f64] x [i8, u8, i16, u16, i32] {
-            fn pow = |a, b| a.powi(b as i32),
+            fn pow = |a, b, status| float_power(a.powi(b as i32), a, b, status),
         }
     );
     impl_scalar_op2!(
-        impl Pow for [f32, f64] {
-            fn pow = |a, b| a.powf(b),
+        impl Pow for [f32, f64] x [f32] {
+            fn pow = |a, b, status| float_power(a.powf(b as Self), a, b, status),
         }
     );
     impl_scalar_op2!(
-        impl Pow for [f64] x [f32] {
-            fn pow = |a, b| a.powf(b as f64),
+        impl Pow for [f64] x [f64] {
+            fn pow = |a, b, status| float_power(a.powf(b), a, b, status),
         }
     );
+
+    #[inline(always)]
+    fn float_power<T: Into<f64> + Copy, U: Into<f64>>(
+        p: T,
+        a: T,
+        b: U,
+        status: &mut ArithmeticOpStatus,
+    ) -> T {
+        let (x, y, r): (f64, f64, f64) = (a.into(), b.into(), p.into());
+        if !r.is_finite() && !x.is_nan() && !y.is_nan() {
+            *status |= float_pow_error(x, y, r);
+        }
+        p
+    }
+    // r=x^y
+    #[cold]
+    #[inline(never)]
+    fn float_pow_error(x: f64, y: f64, r: f64) -> ArithmeticOpStatus {
+        use ArithmeticErrorKind::*;
+        let mut status = ArithmeticOpStatus::default();
+        status.set_if(InvalidOperation, r.is_nan());
+        status.set_if(DivideByZero, x == 0.0 && y < 0.0);
+        let finite = x.is_finite() && y.is_finite();
+        status.set_if(Overflow, r.is_infinite() && finite && x != 0.0);
+        status
+    }
 }
 
 define_op2!(
@@ -1485,7 +1539,7 @@ define_op2!(
     /// ```
     Pow,
     PowKernel,
-    crate::scalar::Pow::pow,
+    crate::scalar::Pow::pow(status),
     simd: pow_bulk,
 );
 
@@ -2950,5 +3004,146 @@ pub(crate) mod tests {
             .and(&nd_b.t())
             .map_collect(|&x, &y| x / y);
         assert_eq!(q.to_ndarray_sub(&[0..30, 0..40], &ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn int_pow() {
+        use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+        use crate::scalar::Pow;
+
+        let mut status = ArithmeticOpStatus::default();
+        // Wraps on overflow.
+        assert_eq!(Pow::pow(3i32, 40u32, &mut status), 689956897);
+        assert_eq!(Pow::pow(3u8, 9u8, &mut status), 227);
+        assert_eq!(Pow::pow(-2i8, 7i8, &mut status), -128);
+        assert_eq!(Pow::pow(-3i64, 0i64, &mut status), 1);
+        assert_eq!(Pow::pow(0u16, 0i16, &mut status), 1);
+        // Exponents beyond `u32`.
+        assert_eq!(Pow::pow(1i32, i64::MAX, &mut status), 1);
+        assert_eq!(Pow::pow(-1i32, (1i64 << 40) + 1, &mut status), -1);
+        assert_eq!(Pow::pow(2u64, 1i64 << 33, &mut status), 0);
+        let mut squared = 3u32;
+        for _ in 0..33 {
+            squared = squared.wrapping_mul(squared);
+        }
+        assert_eq!(Pow::pow(3u32, 1i64 << 33, &mut status), squared);
+        assert!(status.is_ok());
+
+        // A negative exponent: `0`, and an invalid operation.
+        assert_eq!(Pow::pow(2i32, -1i32, &mut status), 0);
+        assert!(status.contains(ArithmeticErrorKind::InvalidOperation));
+        let mut status = ArithmeticOpStatus::default();
+        assert_eq!(Pow::pow(1u8, i64::MIN, &mut status), 0);
+        assert!(status.contains(ArithmeticErrorKind::InvalidOperation));
+    }
+
+    #[test]
+    fn int_pow_negative_exponent_read() {
+        use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
+        use crate::Array;
+
+        let a = Array::compact_ndarray(&ndarray::array![2i32, 3, 4, -5]).unwrap();
+        let b = Array::compact_ndarray(&ndarray::array![3i32, -1, 0, 3]).unwrap();
+        let q = a.pow(b);
+        let err = q.to_ndarray::<Ix1>().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Arithmetic);
+        assert_eq!(err.message(), "invalid operation encountered");
+        let mut ctx = q.read_ctx();
+        ctx.set_arithmetic_error_mode(
+            ArithmeticErrorKind::InvalidOperation,
+            ArithmeticErrorMode::Ignore,
+        );
+        assert_eq!(
+            q.to_ndarray_sub(&[0..4], &ctx).unwrap(),
+            ndarray::array![8, 0, 1, -125]
+        );
+    }
+
+    #[test]
+    fn float_pow_errors() {
+        use crate::error::ArithmeticErrorKind::*;
+        use crate::error::ArithmeticOpStatus;
+        use crate::scalar::Pow;
+
+        let values = [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            2.0,
+            -2.0,
+            0.5,
+            -0.5,
+            -2.5,
+            3.0,
+            -8.0,
+            1.0 / 3.0,
+            300.0,
+            -300.0,
+            1e30,
+            -1e-30,
+            f64::MAX,
+            f64::INFINITY,
+            -f64::INFINITY,
+            f64::NAN,
+        ];
+        // `r` is the power of `x` to `y`.
+        let check = |what: &str, x: f64, y: f64, r: f64, status: ArithmeticOpStatus| {
+            let finite = x.is_finite() && y.is_finite();
+            let expected = [
+                (InvalidOperation, finite && x < 0.0 && y.fract() != 0.0),
+                (DivideByZero, x == 0.0 && y < 0.0),
+                (Overflow, finite && x != 0.0 && r.is_infinite()),
+                (Underflow, false),
+            ];
+            for (kind, expected) in expected {
+                assert_eq!(
+                    status.contains(kind),
+                    expected,
+                    "{what}({x}, {y}): {kind:?}"
+                );
+            }
+        };
+        for &x in &values {
+            for &y in &values {
+                let mut status = ArithmeticOpStatus::default();
+                let r = Pow::pow(x, y, &mut status);
+                check("f64", x, y, r, status);
+                let (x, y) = (x as f32, y as f32);
+                let mut status = ArithmeticOpStatus::default();
+                let r = Pow::pow(x, y, &mut status);
+                check("f32", x.into(), y.into(), r.into(), status);
+                if y.is_finite() && y.fract() == 0.0 {
+                    let mut status = ArithmeticOpStatus::default();
+                    let r = Pow::pow(x, y as i32, &mut status);
+                    check("f32 x i32", x.into(), y.into(), r.into(), status);
+                    let mut status = ArithmeticOpStatus::default();
+                    let r = Pow::pow(f64::from(x), y as i32, &mut status);
+                    check("f64 x i32", x.into(), y.into(), r, status);
+                }
+            }
+        }
+    }
+
+    // Integer powers against repeated wrapping multiplication.
+    proptest::proptest! {
+        #[test]
+        fn int_pow_random(a in proptest::num::i32::ANY, b in -3i64..100) {
+            use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+            use crate::scalar::Pow;
+
+            let mut status = ArithmeticOpStatus::default();
+            let res = Pow::pow(a, b, &mut status);
+            if b < 0 {
+                proptest::prop_assert_eq!(res, 0);
+                proptest::prop_assert!(status.contains(ArithmeticErrorKind::InvalidOperation));
+            } else {
+                proptest::prop_assert_eq!(res, (0..b).fold(1i32, |acc, _| acc.wrapping_mul(a)));
+                proptest::prop_assert!(status.is_ok());
+                let mut status = ArithmeticOpStatus::default();
+                proptest::prop_assert_eq!(res, Pow::pow(a, b as i32, &mut status));
+                proptest::prop_assert_eq!(res, Pow::pow(a, b as u32, &mut status));
+            }
+        }
     }
 }
