@@ -296,6 +296,7 @@ _FUNCTION_EDGES = [0.5, -1.0]
 
 _FUNCTIONS = [
     (jix.sqrt, np.sqrt),
+    (jix.log, np.log),
 ]
 
 

@@ -259,7 +259,7 @@ macro_rules! define_op1 {
 pub(crate) use define_op1;
 
 pub(crate) mod _traits {
-    use crate::error::ArithmeticErrorKind;
+    use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
@@ -620,11 +620,14 @@ pub(crate) mod _traits {
     float_op1!(
         /// Natural logarithm operation, as [`f32::ln`].
         ///
-        /// Negative inputs produce `NaN`; zero produces `-inf`.
+        /// Zero produces `-inf` and sets [`ArithmeticErrorKind::DivideByZero`]; a negative input
+        /// produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`]. `NaN`
+        /// propagates without an error.
         Ln,
-        /// Compute the natural logarithm.
-        ln,
-        ln_bulk
+        /// Compute the natural logarithm, reporting an arithmetic error to `status`.
+        ln(status),
+        ln_bulk,
+        errors = |x, r| { DivideByZero: x == 0.0, InvalidOperation: x < 0.0 }
     );
     float_op1!(
         /// Sine operation, as [`f32::sin`].
@@ -878,6 +881,7 @@ define_op1!(
     /// # Examples
     /// ```
     /// use jix::Array;
+    /// use jix::error::{ArithmeticErrorKind, ArithmeticErrorMode};
     /// use ndarray::{array, Ix1};
     ///
     /// let a = Array::compact_ndarray(&array![1.0f32, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E])?;
@@ -885,16 +889,22 @@ define_op1!(
     /// assert!((result[[0]] - 0.0).abs() < 1e-5);
     /// assert!((result[[1]] - 1.0).abs() < 1e-5);
     ///
-    /// // Zero produces -inf; negative input produces NaN.
-    /// let b = Array::compact_ndarray(&array![0.0f32, -1.0])?;
-    /// let result = b.ln().to_ndarray::<Ix1>()?;
+    /// // Zero divides by zero and a negative input is invalid, which fail the read by default.
+    /// let b = Array::compact_ndarray(&array![0.0f32, -1.0])?.ln();
+    /// assert!(b.to_ndarray::<Ix1>().is_err());
+    /// // Ignored, they produce -inf and NaN.
+    /// let mut ctx = b.read_ctx();
+    /// for kind in [ArithmeticErrorKind::DivideByZero, ArithmeticErrorKind::InvalidOperation] {
+    ///     ctx.set_arithmetic_error_mode(kind, ArithmeticErrorMode::Ignore);
+    /// }
+    /// let result = b.to_ndarray_sub::<Ix1>(&[0..2], &ctx)?;
     /// assert_eq!(result[[0]], f32::NEG_INFINITY);
     /// assert!(result[[1]].is_nan());
     /// # Ok::<(), jix::Error>(())
     /// ```
     Ln,
     LnKernel,
-    crate::scalar::Ln::ln,
+    crate::scalar::Ln::ln(status),
     simd: ln_bulk,
 );
 define_op1!(
@@ -1454,7 +1464,7 @@ pub(crate) mod tests {
         crate::util::assert_array_matches_approx(&za64.view().sqrt(), &expected64, 1e-12, 1e-12);
     }
     test_op1!(exp, |a| a.exp(), [f32, f64], op_safe_strategy);
-    test_op1!(ln, |a| a.ln(), [f32, f64], op_safe_non_negative_strategy);
+    test_op1!(ln, |a| a.ln(), [f32, f64], op_safe_positive_strategy);
     #[test]
     fn sin_concrete() {
         use crate::Array;
@@ -1661,6 +1671,52 @@ pub(crate) mod tests {
             });
         }
         for_each_simd_level!(check);
+    }
+
+    /// The errors of the float functions that report them, on edge cases.
+    #[test]
+    fn float_op1_errors() {
+        use crate::error::ArithmeticErrorKind::{self, *};
+        use crate::error::ArithmeticOpStatus;
+        #[cfg(feature = "half")]
+        use crate::scalar::f16;
+        use crate::scalar::{Cast, Ln};
+
+        type Cases<'a> = &'a [(f64, &'a [ArithmeticErrorKind])];
+        fn check<T>(name: &str, f: fn(T, &mut ArithmeticOpStatus) -> T, cases: Cases<'_>)
+        where
+            f64: Cast<T>,
+        {
+            for &(x, expected) in cases {
+                let mut status = ArithmeticOpStatus::default();
+                f(Cast::cast(x), &mut status);
+                for kind in [DivideByZero, Overflow, Underflow, InvalidOperation] {
+                    let what = format!("{name}({x}) {}: {kind:?}", std::any::type_name::<T>());
+                    assert_eq!(status.contains(kind), expected.contains(&kind), "{what}");
+                }
+            }
+        }
+        macro_rules! check {
+            ($name:literal, $f:path, $cases:expr) => {
+                check::<f32>($name, $f, $cases);
+                check::<f64>($name, $f, $cases);
+                #[cfg(feature = "half")]
+                check::<f16>($name, $f, $cases);
+            };
+        }
+        let (inf, nan) = (f64::INFINITY, f64::NAN);
+        let ln: Cases = &[
+            (0.0, &[DivideByZero]),
+            (-0.0, &[DivideByZero]),
+            (-1.0, &[InvalidOperation]),
+            (-0.001, &[InvalidOperation]),
+            (-inf, &[InvalidOperation]),
+            (0.001, &[]),
+            (1.0, &[]),
+            (inf, &[]),
+            (nan, &[]),
+        ];
+        check!("ln", Ln::ln, ln);
     }
 
     macro_rules! test_sqrt_invalid {

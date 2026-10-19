@@ -64,6 +64,10 @@ pub(crate) trait ScalarStrategy:
     fn op_safe_non_negative_strategy() -> BoxedStrategy<Self> {
         Self::op_safe_strategy()
     }
+    /// Overridden for the floats, which have no other use for it.
+    fn op_safe_positive_strategy() -> BoxedStrategy<Self> {
+        Self::op_safe_non_negative_strategy()
+    }
     /// Values in `[0, bit_width)`. Used as shift amounts so that `a << b` / `a >> b` never
     /// panic in debug mode. Overridden for all integer types; falls back to `any_strategy`
     /// for non-integer types (not expected to be called for those).
@@ -297,6 +301,9 @@ impl ScalarStrategy for f32 {
     fn op_safe_non_negative_strategy() -> BoxedStrategy<Self> {
         (0..=(100 * 100)).prop_map(|x| (x as f32) / 100.0).boxed()
     }
+    fn op_safe_positive_strategy() -> BoxedStrategy<Self> {
+        (1..=(100 * 100)).prop_map(|x| (x as f32) / 100.0).boxed()
+    }
     fn comparable_strategy() -> BoxedStrategy<Self> {
         prop_oneof![Just(0.0f32), Just(1.0f32), Just(2.4f32), Just(f32::NAN)].boxed()
     }
@@ -329,6 +336,9 @@ impl ScalarStrategy for f64 {
     }
     fn op_safe_non_negative_strategy() -> BoxedStrategy<Self> {
         (0..=(100 * 100)).prop_map(|x| (x as f64) / 100.0).boxed()
+    }
+    fn op_safe_positive_strategy() -> BoxedStrategy<Self> {
+        (1..=(100 * 100)).prop_map(|x| (x as f64) / 100.0).boxed()
     }
 
     fn comparable_strategy() -> BoxedStrategy<Self> {
