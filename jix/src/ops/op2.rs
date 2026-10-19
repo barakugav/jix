@@ -1194,12 +1194,12 @@ pub(crate) mod _traits {
     );
     impl_scalar_op2!(
         impl Pow for [f32, f64] x [i8, u8, i16, u16, i32] {
-            fn pow = |a, b, status| float_power(a.powi(b as i32), a, b, status),
+            fn pow = |a, b, status| float_power(a.powi(b as i32), a, b as Self, status),
         }
     );
     impl_scalar_op2!(
         impl Pow for [f32, f64] x [f32] {
-            fn pow = |a, b, status| float_power(a.powf(b as Self), a, b, status),
+            fn pow = |a, b, status| float_power(a.powf(b as Self), a, b as Self, status),
         }
     );
     impl_scalar_op2!(
@@ -1209,23 +1209,24 @@ pub(crate) mod _traits {
     );
 
     #[inline(always)]
-    fn float_power<T: Into<f64> + Copy, U: Into<f64>>(
-        p: T,
-        a: T,
-        b: U,
-        status: &mut ArithmeticOpStatus,
-    ) -> T {
-        let (x, y, r): (f64, f64, f64) = (a.into(), b.into(), p.into());
-        if !r.is_finite() && !x.is_nan() && !y.is_nan() {
-            *status |= float_pow_error(x, y, r);
+    fn float_power<T>(p: T, a: T, b: T, status: &mut ArithmeticOpStatus) -> T
+    where
+        T: Copy
+            + Into<f64>
+            + crate::scalar::IsFinite<Output = bool>
+            + crate::scalar::IsNan<Output = bool>,
+    {
+        if !p.is_finite() && !a.is_nan() && !b.is_nan() {
+            *status |= float_pow_error(a, b, p);
         }
         p
     }
     // r=x^y
     #[cold]
     #[inline(never)]
-    fn float_pow_error(x: f64, y: f64, r: f64) -> ArithmeticOpStatus {
+    fn float_pow_error<T: Into<f64>>(x: T, y: T, r: T) -> ArithmeticOpStatus {
         use ArithmeticErrorKind::*;
+        let (x, y, r) = (x.into(), y.into(), r.into());
         let mut status = ArithmeticOpStatus::default();
         status.set_if(InvalidOperation, r.is_nan());
         status.set_if(DivideByZero, x == 0.0 && y < 0.0);

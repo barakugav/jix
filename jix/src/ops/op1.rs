@@ -520,6 +520,7 @@ pub(crate) mod _traits {
                     fn $f = |$x, status| {
                         #[allow(unused_variables)]
                         let $r = $x.$f();
+                        #[allow(clippy::double_comparisons)]
                         if $($cond)||+ {
                             *status |= float_op1!(@error $x, $r, $($kind: $cond),+);
                         }
@@ -534,6 +535,7 @@ pub(crate) mod _traits {
                         let r = f16::from_f32(x.to_f32().$f());
                         #[allow(unused_variables)]
                         let ($x, $r) = (x.to_f32(), r.to_f32());
+                        #[allow(clippy::double_comparisons)]
                         if $($cond)||+ {
                             *status |= float_op1!(@error $x, $r, $($kind: $cond),+);
                         }
