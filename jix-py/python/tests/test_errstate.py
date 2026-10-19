@@ -29,6 +29,9 @@ _INT_DIVISIONS = {
     jix.divide_trunc: lambda x, y: abs(x) // abs(y) * (1 if (x < 0) == (y < 0) else -1),
     jix.divide_floor: lambda x, y: x // y,
     jix.divide_euclid: lambda x, y: (x - x % abs(y)) // y,
+    jix.remainder_trunc: lambda x, y: abs(x) % abs(y) * (1 if x >= 0 else -1),
+    jix.remainder_floor: lambda x, y: x % y,
+    jix.remainder_euclid: lambda x, y: x % abs(y),
 }
 _QUOTIENTS = [jix.divide_trunc, jix.divide_floor, jix.divide_euclid]
 
@@ -202,13 +205,19 @@ def test_divide_by_zero_random(jix_fn, dtype, data: DataObject):
 @pytest.mark.parametrize("jix_fn", _INT_DIVISIONS, ids=lambda f: f.__name__)
 @pytest.mark.parametrize("dtype", ints)
 def test_min_by_minus_one(jix_fn, dtype):
-    # As numpy: the quotients are `MIN`, an overflow.
+    # As numpy: the quotients are `MIN`, an overflow, and the remainders `0`, exact.
     info = np.iinfo(dtype)
     a = np.array([info.min, 7, info.max], dtype=dtype)
     b = np.full(3, -1, dtype=dtype)
     result = jix_fn(jix.compact(a), jix.compact(b))
-    with pytest.warns(RuntimeWarning, match="overflow encountered"):
-        np.testing.assert_array_equal(result.numpy(), _int_div_ref(jix_fn, a, b))
+    expected = _int_div_ref(jix_fn, a, b)
+    if jix_fn in _QUOTIENTS:
+        with pytest.warns(RuntimeWarning, match="overflow encountered"):
+            np.testing.assert_array_equal(result.numpy(), expected)
+    else:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            np.testing.assert_array_equal(result.numpy(), expected)
 
 
 # Operands for the float error tests: every pair of these.
@@ -266,6 +275,19 @@ def test_float_rounded_divide_errors_match_numpy(jix_fn, dtype):
     for x in edges:
         for y in edges:
             _errors_match_numpy(jix_fn, np.floor_divide, x, y)
+
+
+# `remainder_euclid` has the errors of `remainder`, though not its values.
+@pytest.mark.parametrize(
+    ("jix_fn", "np_fn"),
+    [(jix.remainder_trunc, np.fmod), (jix.remainder_floor, np.remainder), (jix.remainder_euclid, np.remainder)],
+)
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+def test_float_remainder_errors_match_numpy(jix_fn, np_fn, dtype):
+    edges = _float_edges(dtype)
+    for x in edges:
+        for y in edges:
+            _errors_match_numpy(jix_fn, np_fn, x, y)
 
 
 def test_float_divide_modes():

@@ -408,8 +408,8 @@ define_op2!(
     /// See also [`jix.remainder_floor()`][jix.remainder_floor] (the `%` operator) and
     /// [`jix.remainder_euclid()`][jix.remainder_euclid].
     ///
-    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
-    /// as does the minimum signed value by `-1`. For **float** dtypes it produces `NaN`.
+    /// For **integer** dtypes a zero divisor gives `0`, as in numpy, reported as `divide`
+    /// according to [`jix.errstate()`][jix.errstate]. For **float** dtypes it produces `NaN`.
     ///
     /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
     /// smallest type that can represent both without information loss (Safe casting
@@ -455,8 +455,8 @@ define_op2!(
     /// [`jix.remainder_trunc()`][jix.remainder_trunc] and
     /// [`jix.remainder_euclid()`][jix.remainder_euclid].
     ///
-    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
-    /// as does the minimum signed value by `-1`. For **float** dtypes it produces `NaN`.
+    /// For **integer** dtypes a zero divisor gives `0`, as in numpy, reported as `divide`
+    /// according to [`jix.errstate()`][jix.errstate]. For **float** dtypes it produces `NaN`.
     ///
     /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
     /// smallest type that can represent both without information loss (Safe casting
@@ -502,8 +502,8 @@ define_op2!(
     /// See also [`jix.remainder_trunc()`][jix.remainder_trunc] and
     /// [`jix.remainder_floor()`][jix.remainder_floor] (the `%` operator).
     ///
-    /// For **integer** dtypes a zero divisor raises an error (numpy returns `0` with a warning),
-    /// as does the minimum signed value by `-1`. For **float** dtypes it produces `NaN`.
+    /// For **integer** dtypes a zero divisor gives `0`, as in numpy, reported as `divide`
+    /// according to [`jix.errstate()`][jix.errstate]. For **float** dtypes it produces `NaN`.
     ///
     /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
     /// smallest type that can represent both without information loss (Safe casting

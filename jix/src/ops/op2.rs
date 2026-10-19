@@ -485,22 +485,35 @@ pub(crate) mod _traits {
         /// The result has the sign of the dividend `a`, like C's `%` and `fmod`, `numpy.fmod` and
         /// `torch.fmod`. It pairs with [`DivideTrunc`].
         ///
-        /// For **integer** and **float** types this is Rust's `%`; a float zero divisor produces
-        /// `NaN`.
+        /// For **integer** types this is Rust's `%`, except that a zero divisor gives `0` and sets
+        /// [`ArithmeticErrorKind::DivideByZero`], and `MIN % -1` gives `0`.
+        /// For **float** types it is Rust's `%`. A zero divisor or an infinite dividend gives `NaN`
+        /// and sets [`ArithmeticErrorKind::InvalidOperation`]. NaN operands propagate
+        /// without an error.
         ///
         /// # Examples
         /// ```
+        /// use jix::error::{ArithmeticErrorKind, ArithmeticOpStatus};
         /// use jix::scalar::RemainderTrunc;
         ///
-        /// assert_eq!(7i32.remainder_trunc(3), 1);
-        /// assert_eq!((-7i32).remainder_trunc(3), -1);
-        /// assert_eq!(7i32.remainder_trunc(-3), 1);
-        /// assert_eq!((-7i32).remainder_trunc(-3), -1);
-        /// assert_eq!((-7.5f64).remainder_trunc(2.0), -1.5);
+        /// let mut status = ArithmeticOpStatus::default();
+        /// assert_eq!(7i32.remainder_trunc(3, &mut status), 1);
+        /// assert_eq!((-7i32).remainder_trunc(3, &mut status), -1);
+        /// assert_eq!(7i32.remainder_trunc(-3, &mut status), 1);
+        /// assert_eq!((-7i32).remainder_trunc(-3, &mut status), -1);
+        /// assert_eq!((-7.5f64).remainder_trunc(2.0, &mut status), -1.5);
+        /// assert_eq!(i32::MIN.remainder_trunc(-1, &mut status), 0);
+        /// assert!(status.is_ok());
+        ///
+        /// assert_eq!(7i32.remainder_trunc(0, &mut status), 0);
+        /// assert!(status.contains(ArithmeticErrorKind::DivideByZero));
+        /// assert!(7.0f64.remainder_trunc(0.0, &mut status).is_nan());
+        /// assert!(status.contains(ArithmeticErrorKind::InvalidOperation));
         /// ```
         RemainderTrunc,
-        /// Truncated remainder of the division by another value.
-        remainder_trunc,
+        /// Truncated remainder of the division by another value, reporting an arithmetic error to
+        /// `status`.
+        remainder_trunc(status),
         bulk_fn: remainder_trunc_bulk,
     );
     define_scalar_op2_trait!(
@@ -510,23 +523,26 @@ pub(crate) mod _traits {
         /// `torch.remainder`. It pairs with [`DivideFloor`].
         ///
         /// For **integer** types this is Rust's `%`, plus `b` where it is not zero and its sign
-        /// differs from `b`'s.
-        /// For **float** types it is Python's float `%`, which gives a zero result the sign of `b`;
-        /// a zero divisor produces `NaN`.
+        /// differs from `b`'s, with the errors of [`RemainderTrunc`].
+        /// For **float** types it is Python's float `%`, which gives a zero result the sign of `b`,
+        /// with the special values and errors of [`RemainderTrunc`].
         ///
         /// # Examples
         /// ```
+        /// use jix::error::ArithmeticOpStatus;
         /// use jix::scalar::RemainderFloor;
         ///
-        /// assert_eq!(7i32.remainder_floor(3), 1);
-        /// assert_eq!((-7i32).remainder_floor(3), 2);
-        /// assert_eq!(7i32.remainder_floor(-3), -2);
-        /// assert_eq!((-7i32).remainder_floor(-3), -1);
-        /// assert_eq!((-7.5f64).remainder_floor(2.0), 0.5);
+        /// let mut status = ArithmeticOpStatus::default();
+        /// assert_eq!(7i32.remainder_floor(3, &mut status), 1);
+        /// assert_eq!((-7i32).remainder_floor(3, &mut status), 2);
+        /// assert_eq!(7i32.remainder_floor(-3, &mut status), -2);
+        /// assert_eq!((-7i32).remainder_floor(-3, &mut status), -1);
+        /// assert_eq!((-7.5f64).remainder_floor(2.0, &mut status), 0.5);
         /// ```
         RemainderFloor,
-        /// Floored remainder of the division by another value.
-        remainder_floor,
+        /// Floored remainder of the division by another value, reporting an arithmetic error to
+        /// `status`.
+        remainder_floor(status),
         bulk_fn: remainder_floor_bulk,
     );
     define_scalar_op2_trait!(
@@ -536,21 +552,24 @@ pub(crate) mod _traits {
         /// with [`DivideEuclid`].
         ///
         /// For **integer** types this is [`i32::rem_euclid`], and for **float** types
-        /// [`f32::rem_euclid`], where a zero divisor produces `NaN`.
+        /// [`f32::rem_euclid`], both with the special values and errors of [`RemainderTrunc`].
         ///
         /// # Examples
         /// ```
+        /// use jix::error::ArithmeticOpStatus;
         /// use jix::scalar::RemainderEuclid;
         ///
-        /// assert_eq!(7i32.remainder_euclid(3), 1);
-        /// assert_eq!((-7i32).remainder_euclid(3), 2);
-        /// assert_eq!(7i32.remainder_euclid(-3), 1);
-        /// assert_eq!((-7i32).remainder_euclid(-3), 2);
-        /// assert_eq!((-7.5f64).remainder_euclid(2.0), 0.5);
+        /// let mut status = ArithmeticOpStatus::default();
+        /// assert_eq!(7i32.remainder_euclid(3, &mut status), 1);
+        /// assert_eq!((-7i32).remainder_euclid(3, &mut status), 2);
+        /// assert_eq!(7i32.remainder_euclid(-3, &mut status), 1);
+        /// assert_eq!((-7i32).remainder_euclid(-3, &mut status), 2);
+        /// assert_eq!((-7.5f64).remainder_euclid(2.0, &mut status), 0.5);
         /// ```
         RemainderEuclid,
-        /// Euclidean remainder of the division by another value.
-        remainder_euclid,
+        /// Euclidean remainder of the division by another value, reporting an arithmetic error to
+        /// `status`.
+        remainder_euclid(status),
         bulk_fn: remainder_euclid_bulk,
     );
 
@@ -663,27 +682,29 @@ pub(crate) mod _traits {
     );
     impl_scalar_op2!(
         impl RemainderTrunc for [i8, i16, i32, i64, u8, u16, u32, u64] {
-            fn remainder_trunc = |a, b| a % b,
+            fn remainder_trunc = |a, b, status| int_remainder(a.checked_rem(b), b, status),
         }
     );
     impl_scalar_op2!(
         impl RemainderFloor for [i8, i16, i32, i64] {
-            fn remainder_floor = |a, b| {
+            fn remainder_floor = |a, b, status| {
                 // numpy's `remainder`, which compiles without branches, unlike num-integer's:
                 // https://github.com/numpy/numpy/blob/v2.3.0/numpy/_core/src/umath/loops_modulo.dispatch.c.src#L595-L602
-                let rem = a % b;
-                if (a > 0) == (b > 0) || rem == 0 { rem } else { rem + b }
+                let rem = a.checked_rem(b).map(
+                    |rem| if (a > 0) == (b > 0) || rem == 0 { rem } else { rem + b }
+                );
+                int_remainder(rem, b, status)
             },
         }
     );
     impl_scalar_op2!(
         impl RemainderFloor for [u8, u16, u32, u64] {
-            fn remainder_floor = |a, b| a % b,
+            fn remainder_floor = |a, b, status| int_remainder(a.checked_rem(b), b, status),
         }
     );
     impl_scalar_op2!(
         impl RemainderEuclid for [i8, i16, i32, i64, u8, u16, u32, u64] {
-            fn remainder_euclid = |a, b| a.rem_euclid(b),
+            fn remainder_euclid = |a, b, status| int_remainder(a.checked_rem_euclid(b), b, status),
         }
     );
 
@@ -707,6 +728,23 @@ pub(crate) mod _traits {
                 } else {
                     a
                 }
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn int_remainder<T: Copy + Default + PartialEq>(
+        r: Option<T>,
+        b: T,
+        status: &mut ArithmeticOpStatus,
+    ) -> T {
+        match r {
+            Some(r) => r,
+            None => {
+                let mut error = ArithmeticOpStatus::default();
+                error.set_if(ArithmeticErrorKind::DivideByZero, b == T::default());
+                *status |= int_error_barrier::<T>(error);
+                T::default()
             }
         }
     }
@@ -941,6 +979,29 @@ pub(crate) mod _traits {
                 }
 
                 #[inline(always)]
+                pub(super) fn remainder(r: T, a: T, b: T, status: &mut ArithmeticOpStatus) -> T {
+                    let invalid = r.is_nan() && !a.is_nan() && !b.is_nan();
+                    status.set_if(ArithmeticErrorKind::InvalidOperation, invalid);
+                    r
+                }
+
+                #[inline(always)]
+                pub(super) fn remainder_v<S: Simd>(
+                    r: V<S>,
+                    a: V<S>,
+                    b: V<S>,
+                    status: &mut ArithmeticOpStatus,
+                    _simd: S,
+                ) -> V<S> {
+                    let nan = r.simd_ne(r);
+                    if nan.any_true() {
+                        let invalid = nan & a.simd_eq(a) & b.simd_eq(b);
+                        status.set_if(ArithmeticErrorKind::InvalidOperation, invalid.any_true());
+                    }
+                    r
+                }
+
+                #[inline(always)]
                 fn splat<S: Simd>(x: T, simd: S) -> V<S> {
                     <V<S> as SimdBase<S>>::splat(simd, x)
                 }
@@ -987,20 +1048,35 @@ pub(crate) mod _traits {
             );
             impl_scalar_op2!(
                 impl RemainderTrunc for [$t] {
-                    fn remainder_trunc = |a, b| $m::rem_trunc(a, b),
-                    fn remainder_trunc_bulk = |a, b| $m::rem_trunc_v(a, b, a.token()),
+                    fn remainder_trunc = |a, b, status| {
+                        $m::remainder($m::rem_trunc(a, b), a, b, status)
+                    },
+                    fn remainder_trunc_bulk = |a, b, status| {
+                        let simd = a.token();
+                        $m::remainder_v($m::rem_trunc_v(a, b, simd), a, b, status, simd)
+                    },
                 }
             );
             impl_scalar_op2!(
                 impl RemainderFloor for [$t] {
-                    fn remainder_floor = |a, b| $m::rem_floor(a, b),
-                    fn remainder_floor_bulk = |a, b| $m::rem_floor_v(a, b, a.token()),
+                    fn remainder_floor = |a, b, status| {
+                        $m::remainder($m::rem_floor(a, b), a, b, status)
+                    },
+                    fn remainder_floor_bulk = |a, b, status| {
+                        let simd = a.token();
+                        $m::remainder_v($m::rem_floor_v(a, b, simd), a, b, status, simd)
+                    },
                 }
             );
             impl_scalar_op2!(
                 impl RemainderEuclid for [$t] {
-                    fn remainder_euclid = |a, b| $m::rem_euclid(a, b),
-                    fn remainder_euclid_bulk = |a, b| $m::rem_euclid_v(a, b, a.token()),
+                    fn remainder_euclid = |a, b, status| {
+                        $m::remainder($m::rem_euclid(a, b), a, b, status)
+                    },
+                    fn remainder_euclid_bulk = |a, b, status| {
+                        let simd = a.token();
+                        $m::remainder_v($m::rem_euclid_v(a, b, simd), a, b, status, simd)
+                    },
                 }
             );
         };
@@ -1030,14 +1106,6 @@ pub(crate) mod _traits {
                 }
             );
         )*};
-        ($($Trait:ident::$f:ident = $g:ident),*) => {$(
-            #[cfg(feature = "half")]
-            impl_scalar_op2!(
-                impl $Trait for [f16] {
-                    fn $f = |a, b| f16::from_f32(f32_div_rem::$g(a.to_f32(), b.to_f32())),
-                }
-            );
-        )*};
     }
     impl_f16_div_rem!(
         f16_quotient:
@@ -1046,6 +1114,7 @@ pub(crate) mod _traits {
         DivideEuclid::divide_euclid = div_euclid
     );
     impl_f16_div_rem!(
+        f16_remainder:
         RemainderTrunc::remainder_trunc = rem_trunc,
         RemainderFloor::remainder_floor = rem_floor,
         RemainderEuclid::remainder_euclid = rem_euclid
@@ -1058,6 +1127,13 @@ pub(crate) mod _traits {
             *status |= float_div_error(a, b, q);
         }
         q
+    }
+    #[cfg(feature = "half")]
+    #[inline(always)]
+    fn f16_remainder(r: f16, a: f16, b: f16, status: &mut ArithmeticOpStatus) -> f16 {
+        let invalid = r.is_nan() && !a.is_nan() && !b.is_nan();
+        status.set_if(ArithmeticErrorKind::InvalidOperation, invalid);
+        r
     }
     // q=x/y
     #[cold]
@@ -1329,7 +1405,7 @@ define_op2!(
     /// ```
     RemainderTrunc,
     RemainderTruncKernel,
-    crate::scalar::RemainderTrunc::remainder_trunc,
+    crate::scalar::RemainderTrunc::remainder_trunc(status),
     simd: remainder_trunc_bulk,
     core_op: core::ops::Rem::rem,
 );
@@ -1354,7 +1430,7 @@ define_op2!(
     /// ```
     RemainderFloor,
     RemainderFloorKernel,
-    crate::scalar::RemainderFloor::remainder_floor,
+    crate::scalar::RemainderFloor::remainder_floor(status),
     simd: remainder_floor_bulk,
 );
 define_op2!(
@@ -1378,7 +1454,7 @@ define_op2!(
     /// ```
     RemainderEuclid,
     RemainderEuclidKernel,
-    crate::scalar::RemainderEuclid::remainder_euclid,
+    crate::scalar::RemainderEuclid::remainder_euclid(status),
     simd: remainder_euclid_bulk,
 );
 define_op2!(
@@ -2009,6 +2085,7 @@ pub(crate) mod tests {
     #[test]
     fn remainder_float_matches_fmod() {
         use crate::scalar::{RemainderEuclid, RemainderFloor, RemainderTrunc};
+        let s = &mut crate::error::ArithmeticOpStatus::default(); // floats report no errors
 
         macro_rules! check {
             ($t:ty, $pairs:expr, $refs:expr) => {{
@@ -2016,10 +2093,16 @@ pub(crate) mod tests {
                 let same = |x: $t, y: $t| x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan());
                 for (a, b) in $pairs {
                     let what = format!("{a:e} % {b:e}");
-                    assert!(same(a.remainder_trunc(b), trunc_ref(a, b)), "trunc {what}");
-                    assert!(same(a.remainder_floor(b), floor_ref(a, b)), "floor {what}");
                     assert!(
-                        same(a.remainder_euclid(b), euclid_ref(a, b)),
+                        same(a.remainder_trunc(b, s), trunc_ref(a, b)),
+                        "trunc {what}"
+                    );
+                    assert!(
+                        same(a.remainder_floor(b, s), floor_ref(a, b)),
+                        "floor {what}"
+                    );
+                    assert!(
+                        same(a.remainder_euclid(b, s), euclid_ref(a, b)),
                         "euclid {what}"
                     );
                 }
@@ -2219,8 +2302,18 @@ pub(crate) mod tests {
                 Array::compact_ndarray(&nd_g).unwrap(),
             )
         };
+        // `1.0 % 0.0` is invalid: read with the error ignored.
+        fn read<S: crate::storage::ArrayStorageTyped>(r: Array<S>) -> ndarray::Array1<S::Item> {
+            use crate::error::{
+                ArithmeticErrorKind::InvalidOperation, ArithmeticErrorMode::Ignore,
+            };
+            let mut ctx = r.read_ctx();
+            ctx.set_arithmetic_error_mode(InvalidOperation, Ignore);
+            let index = r.shape().iter().map(|&d| 0..d).collect::<Vec<_>>();
+            r.to_ndarray_sub(&index, &ctx).unwrap()
+        }
         let (zf, zg) = floats();
-        let result = zf.remainder_trunc(zg).to_ndarray::<ndarray::Ix1>().unwrap();
+        let result = read(zf.remainder_trunc(zg));
         assert_eq!(
             result.slice(ndarray::s![..4]),
             ndarray::array![-1.5, 1.5, -1.5, 1.5]
@@ -2228,7 +2321,7 @@ pub(crate) mod tests {
         assert!(result[4].is_nan());
         assert_eq!(result[7], -5.0);
         let (zf, zg) = floats();
-        let result = zf.remainder_floor(zg).to_ndarray::<ndarray::Ix1>().unwrap();
+        let result = read(zf.remainder_floor(zg));
         assert_eq!(
             result.slice(ndarray::s![..4]),
             ndarray::array![0.5, 1.5, -1.5, -0.5]
@@ -2240,10 +2333,7 @@ pub(crate) mod tests {
         assert!(result[6] == 0.0 && result[6].is_sign_negative());
         assert_eq!(result[7], f64::INFINITY);
         let (zf, zg) = floats();
-        let result = zf
-            .remainder_euclid(zg)
-            .to_ndarray::<ndarray::Ix1>()
-            .unwrap();
+        let result = read(zf.remainder_euclid(zg));
         assert_eq!(
             result.slice(ndarray::s![..4]),
             ndarray::array![0.5, 1.5, 0.5, 1.5]
@@ -2429,12 +2519,15 @@ pub(crate) mod tests {
         assert!(status.contains(ArithmeticErrorKind::Overflow));
     }
 
-    /// The integer quotients of a zero divisor and of `MIN` by `-1`.
+    /// The integer quotients and remainders of a zero divisor and of `MIN` by `-1`.
     #[test]
     fn int_division_errors() {
         use crate::error::ArithmeticErrorKind::{DivideByZero, Overflow};
         use crate::error::ArithmeticOpStatus;
-        use crate::scalar::{Div, DivideEuclid, DivideFloor, DivideTrunc};
+        use crate::scalar::{
+            Div, DivideEuclid, DivideFloor, DivideTrunc, RemainderEuclid, RemainderFloor,
+            RemainderTrunc,
+        };
 
         type F<T> = fn(T, T, &mut ArithmeticOpStatus) -> T;
         fn quotients<T>() -> [F<T>; 4]
@@ -2447,6 +2540,17 @@ pub(crate) mod tests {
                 DivideTrunc::divide_trunc,
                 DivideFloor::divide_floor,
                 DivideEuclid::divide_euclid,
+            ]
+        }
+        fn remainders<T>() -> [F<T>; 3]
+        where
+            T: RemainderTrunc<Output = T> + RemainderFloor<Output = T>,
+            T: RemainderEuclid<Output = T>,
+        {
+            [
+                RemainderTrunc::remainder_trunc,
+                RemainderFloor::remainder_floor,
+                RemainderEuclid::remainder_euclid,
             ]
         }
         fn check<T: Copy + PartialEq + core::fmt::Debug>(
@@ -2467,14 +2571,21 @@ pub(crate) mod tests {
                     check(f, (7, 0), 0, DivideByZero.into());
                     check(f, (<$t>::MIN, 0), 0, DivideByZero.into());
                 }
+                for f in remainders::<$t>() {
+                    check(f, (7, 3), 1, ArithmeticOpStatus::default());
+                    check(f, (7, 0), 0, DivideByZero.into());
+                }
             )*};
         }
         check!(i8, i16, i32, i64, u8, u16, u32, u64);
-        // `MIN` by `-1`: a quotient of `MIN` and an overflow.
+        // `MIN` by `-1`: a quotient of `MIN` and an overflow, and an exact remainder of `0`.
         macro_rules! check_signed {
             ($($t:ty),*) => {$(
                 for f in quotients::<$t>() {
                     check(f, (<$t>::MIN, -1), <$t>::MIN, Overflow.into());
+                }
+                for f in remainders::<$t>() {
+                    check(f, (<$t>::MIN, -1), 0, ArithmeticOpStatus::default());
                 }
             )*};
         }
@@ -2611,12 +2722,85 @@ pub(crate) mod tests {
         }
     }
 
+    /// The errors of the float remainders for every pair of edge-case operands: `NaN`
+    /// exactly for `x % 0` and `inf % x`, which are invalid.
+    #[test]
+    fn float_rem_errors() {
+        use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+        use crate::scalar::{RemainderEuclid, RemainderFloor, RemainderTrunc};
+        use crate::util::SimdTestValues;
+
+        type F<T> = fn(T, T, &mut ArithmeticOpStatus) -> T;
+        macro_rules! check {
+            ($($t:ty),*) => {$(
+                let ops: [(&str, F<$t>); 3] = [
+                    ("remainder_trunc", RemainderTrunc::remainder_trunc),
+                    ("remainder_floor", RemainderFloor::remainder_floor),
+                    ("remainder_euclid", RemainderEuclid::remainder_euclid),
+                ];
+                for &a in &<$t>::edge_cases() {
+                    for &b in &<$t>::edge_cases() {
+                        for (name, f) in ops {
+                            let mut status = ArithmeticOpStatus::default();
+                            let r = f(a, b, &mut status);
+                            let ordered = !a.is_nan() && !b.is_nan();
+                            let invalid = ordered && (b == 0.0 || a.is_infinite());
+                            assert_eq!(r.is_nan(), invalid || !ordered, "{name}({a}, {b})");
+                            let mut expected = ArithmeticOpStatus::default();
+                            expected.set_if(ArithmeticErrorKind::InvalidOperation, invalid);
+                            assert_eq!(status, expected, "{name}({a}, {b})");
+                        }
+                    }
+                }
+            )*};
+        }
+        check!(f32, f64);
+    }
+
+    #[cfg(feature = "half")]
+    #[test]
+    fn float_rem_errors_f16() {
+        use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+        use crate::scalar::{f16, RemainderEuclid, RemainderFloor, RemainderTrunc};
+
+        type F<T> = fn(T, T, &mut ArithmeticOpStatus) -> T;
+        let ops: [(&str, F<f16>); 3] = [
+            ("remainder_trunc", RemainderTrunc::remainder_trunc),
+            ("remainder_floor", RemainderFloor::remainder_floor),
+            ("remainder_euclid", RemainderEuclid::remainder_euclid),
+        ];
+        let values = [
+            0.0,
+            -0.0,
+            1.0,
+            -3.0,
+            0.5,
+            60000.0,
+            f32::INFINITY,
+            -f32::INFINITY,
+            f32::NAN,
+        ];
+        for a in values.map(f16::from_f32) {
+            for b in values.map(f16::from_f32) {
+                for (name, f) in ops {
+                    let mut status = ArithmeticOpStatus::default();
+                    f(a, b, &mut status);
+                    let invalid = !a.is_nan() && !b.is_nan() && (b == f16::ZERO || a.is_infinite());
+                    let mut expected = ArithmeticOpStatus::default();
+                    expected.set_if(ArithmeticErrorKind::InvalidOperation, invalid);
+                    assert_eq!(status, expected, "{name}({a}, {b})");
+                }
+            }
+        }
+    }
+
     /// The status of the SIMD bodies against the scalar functions', on every SIMD level: each
     /// pair of edge-case operands, in one lane of a bulk of ordinary ones.
     #[test]
     fn simd_bodies_status_all_levels() {
         use super::{
             DivKernel, DivideEuclidKernel, DivideFloorKernel, DivideTruncKernel, Op2Kernel,
+            RemainderEuclidKernel, RemainderFloorKernel, RemainderTruncKernel,
         };
         use crate::error::ArithmeticOpStatus;
         use crate::util::{for_each_simd_level, SimdTestValues, SIMD_TEST_N};
@@ -2657,6 +2841,12 @@ pub(crate) mod tests {
                 case!(DivideFloorKernel, f64);
                 case!(DivideEuclidKernel, f32);
                 case!(DivideEuclidKernel, f64);
+                case!(RemainderTruncKernel, f32);
+                case!(RemainderTruncKernel, f64);
+                case!(RemainderFloorKernel, f32);
+                case!(RemainderFloorKernel, f64);
+                case!(RemainderEuclidKernel, f32);
+                case!(RemainderEuclidKernel, f64);
             });
         }
         for_each_simd_level!(check);
