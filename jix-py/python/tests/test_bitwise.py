@@ -259,7 +259,22 @@ def test_bitwise_xor_concrete():
     check_op2_concrete(jix.bitwise_xor, lambda a, b: a ^ b, cases)
 
 
-# shift ops: shift amount must be in [0, bit_width) to avoid debug panic.
+@pytest.mark.parametrize("dtype", _int_dtypes)
+def test_shift_out_of_range_like_numpy(dtype):
+    # Past the bit width and negative: all the bits out, as numpy.
+    info = np.iinfo(dtype)
+    bits = info.bits
+    counts = [n for n in [0, 1, bits - 1, bits, bits + 1, 100, -1, -bits] if info.min <= n <= info.max]
+    values = np.array([0, 1, 5, info.max, info.min, info.max // 3], dtype=dtype)
+    a = np.repeat(values, len(counts))
+    b = np.tile(np.array(counts, dtype=dtype), len(values))
+    # Long enough for the SIMD bulk part of the loop, not only its scalar tail.
+    a, b = np.resize(a, 1000), np.resize(b, 1000)
+    za, zb = jix.compact(a), jix.compact(b)
+    np.testing.assert_array_equal(jix.bitwise_left_shift(za, zb).numpy(), np.left_shift(a, b))
+    np.testing.assert_array_equal(jix.bitwise_right_shift(za, zb).numpy(), np.right_shift(a, b))
+
+
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
 def test_bitwise_left_shift(dtype: np.dtype, data: DataObject):

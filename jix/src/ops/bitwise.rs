@@ -85,9 +85,10 @@ pub(crate) mod _traits {
         /// For **unsigned** types this is a logical shift: vacated bits are filled with zeros.
         /// For **signed** types this is an arithmetic shift: vacated bits are filled with the
         /// sign bit (the result preserves the sign of the value).
-        /// The shift uses Rust's `>>` operator: shifting by a value greater than or equal to the
-        /// bit width of the type panics in debug builds and masks the shift amount modulo the bit
-        /// width in release builds (it does NOT produce zero).
+        ///
+        /// A shift by the bit width of the type or more, or by a negative value,
+        /// shifts all the bits out: `0`, or `-1` for a negative signed value. See
+        /// [`i32::unbounded_shr`].
         Shr,
         /// Shift the bits right by another value.
         shr,
@@ -95,31 +96,31 @@ pub(crate) mod _traits {
     );
     impl_scalar_op2!(
         impl Shr for [i8, i16, i32, i64, u8, u16, u32, u64] x [i8, i16, i64, u8, u16, u64] {
-            fn shr = |a, b| a >> b,
+            fn shr = |a, b| a.unbounded_shr(b.shift_count()),
         }
     );
     impl_scalar_op2!(
         impl Shr for [i8, i16, i64, u8, u16, u64] x [i32, u32] {
-            fn shr = |a, b| a >> b,
+            fn shr = |a, b| a.unbounded_shr(b.shift_count()),
         }
     );
     // SIMD for 32-bit values only: the others are not faster than the auto-vectorized scalar.
+    // The counts past 31 are clamped to 31 for the signed values, which shifts the sign in, and
+    // select 0 for the unsigned ones: fearless_simd leaves those shifts to the platform.
     impl_scalar_op2!(
-        impl Shr for [i32, u32] {
-            fn shr = |a, b| a >> b,
-            fn shr_bulk = |a, b| a >> (b & 31),
+        impl Shr for [i32] x [i32, u32] {
+            fn shr = |a, b| a.unbounded_shr(b.shift_count()),
+            fn shr_bulk = |a, b| a >> b.bitcast::<S::u32s>().min(31).bitcast::<S::i32s>(),
         }
     );
     impl_scalar_op2!(
-        impl Shr for [i32] x [u32] {
-            fn shr = |a, b| a >> b,
-            fn shr_bulk = |a, b| a >> (b & 31).bitcast::<S::i32s>(), // TODO: is this module 32 correct?
-        }
-    );
-    impl_scalar_op2!(
-        impl Shr for [u32] x [i32] {
-            fn shr = |a, b| a >> b,
-            fn shr_bulk = |a, b| a >> (b & 31).bitcast::<S::u32s>(), // TODO: is this module 32 correct?
+        impl Shr for [u32] x [i32, u32] {
+            fn shr = |a, b| a.unbounded_shr(b.shift_count()),
+            fn shr_bulk = |a, b| {
+                let n = b.bitcast::<S::u32s>();
+                let zero = SimdBase::splat(fearless_simd::ExtractToken::token(&a), 0);
+                n.simd_lt(32).select(a >> (n & 31), zero)
+            },
         }
     );
 
@@ -275,10 +276,9 @@ pub(crate) mod _traits {
     define_scalar_op2_trait!(
         /// Left shift operation, like [`core::ops::Shl`].
         ///
-        /// Shifts the bits left by `rhs`. Vacated bits are filled with zeros. The shift uses
-        /// Rust's `<<` operator: shifting by a value greater than or equal to the bit width of
-        /// the type panics in debug builds and masks the shift amount modulo the bit width in
-        /// release builds (it does NOT produce zero).
+        /// Shifts the bits left by `rhs`. Vacated bits are filled with zeros. A shift by the
+        /// bit width of the type or more, or by a negative value, gives `0`. See
+        /// [`i32::unbounded_shl`].
         Shl,
         /// Shift the bits left by another value.
         shl,
@@ -288,8 +288,28 @@ pub(crate) mod _traits {
         impl Shl for
             [i8, i16, i32, i64, u8, u16, u32, u64] x [i8, i16, i32, i64, u8, u16, u32, u64]
         {
-            fn shl = |a, b| a << b,
+            fn shl = |a, b| a.unbounded_shl(b.shift_count()),
         }
+    );
+
+    trait ShiftCount {
+        /// The count as a `u32`, past every bit width where it is negative or does not fit.
+        fn shift_count(self) -> u32;
+    }
+    // A negative count reinterpreted unsigned is past every bit width: LLVM vectorizes that test
+    // better than a `try_from` of the signed count (up to 37% faster for `i8`).
+    macro_rules! impl_shift_count {
+        ($($t:ty => $u:ty),*) => {$(
+            impl ShiftCount for $t {
+                #[inline(always)]
+                fn shift_count(self) -> u32 {
+                    (self as $u).try_into().unwrap_or(u32::MAX)
+                }
+            }
+        )*};
+    }
+    impl_shift_count!(
+        i8 => u8, i16 => u16, i32 => u32, i64 => u64, u8 => u8, u16 => u16, u32 => u32, u64 => u64
     );
 }
 
@@ -770,8 +790,7 @@ mod tests {
     use crate::ops::op2::tests::test_op2;
 
     /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
-    /// their scalar semantics (release builds: shift amounts modulo the bit width), on every SIMD
-    /// level of the CPU, over edge cases.
+    /// their scalar semantics, on every SIMD level of the CPU, over edge cases.
     #[test]
     fn simd_bodies_all_levels() {
         use super::{
@@ -846,7 +865,7 @@ mod tests {
                     };
                 }
                 ints!(not!(NotKernel, ()));
-                shifts!(BitwiseShiftRightKernel, wrapping_shr);
+                shifts!(BitwiseShiftRightKernel, unbounded_shr);
                 case1!(CountOnesKernel, i32, i32::count_ones);
                 case1!(CountOnesKernel, u32, u32::count_ones);
                 case1!(CountZerosKernel, i32, i32::count_zeros);
@@ -880,6 +899,36 @@ mod tests {
     const EDGE_U32_2: [u32; 4] = [u32::MAX, 0, 0xAAAA_AAAA, 1];
     const EDGE_U64: [u64; 4] = [0, u64::MAX, 1, 0xAAAA_AAAA_AAAA_AAAA];
     const EDGE_U64_2: [u64; 4] = [u64::MAX, 0, 0xAAAA_AAAA_AAAA_AAAA, 1];
+
+    /// Shifts past the bit width, by negative counts and by counts past `u32`: all the bits
+    /// out.
+    #[test]
+    fn shift_out_of_range() {
+        use crate::scalar::{Shl, Shr};
+
+        macro_rules! check {
+            ([$($ta:ty),*], $tbs:tt) => {$(check!(@a $ta, $tbs);)*};
+            (@a $ta:ty, [$($tb:ty),*]) => {$(
+                let bits = <$ta>::BITS as i128;
+                for a in [0, 1, 5, <$ta>::MAX, <$ta>::MIN, <$ta>::MAX / 3] {
+                    for n in [0, 1, bits - 1, bits, bits + 1, 63, 64, 100, -1, -64, 1 << 32] {
+                        let Ok(b) = <$tb>::try_from(n) else { continue };
+                        let shifts = (0..bits).contains(&n);
+                        let shl = if shifts { a << n } else { 0 };
+                        let sign = if (a as i128) < 0 { !0 } else { 0 };
+                        let shr = if shifts { a >> n } else { sign };
+                        let what = format!("{a}: {} by {b}: {}", stringify!($ta), stringify!($tb));
+                        assert_eq!(Shl::shl(a, b), shl, "<< {what}");
+                        assert_eq!(Shr::shr(a, b), shr, ">> {what}");
+                    }
+                }
+            )*};
+        }
+        check!(
+            [i8, i16, i32, i64, u8, u16, u32, u64],
+            [i8, i16, i32, i64, u8, u16, u32, u64]
+        );
+    }
 
     // Shift-amount arrays for the shift ops: 0 and width - 1 alongside 1 and half the width,
     // matching the `EDGE_*` array of the same width.
