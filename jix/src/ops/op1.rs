@@ -161,7 +161,7 @@ macro_rules! define_op1 {
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident,
-        crate::scalar::$trait:ident::$kernel_fn:ident,
+        crate::scalar::$trait:ident::$kernel_fn:ident $(($status:ident))?,
         simd: $bulk_fn:ident,
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
@@ -173,18 +173,22 @@ macro_rules! define_op1 {
             type Output = <T as crate::scalar::$trait>::Output;
 
             #[inline(always)]
-            fn apply(&self, x: T, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
-                <T as crate::scalar::$trait>::$kernel_fn(x)
+            fn apply(&self, x: T, status: &mut ArithmeticOpStatus) -> Self::Output {
+                { let _ = status; } // suppress unused
+                $(let $status = status;)?
+                <T as crate::scalar::$trait>::$kernel_fn(x $(, $status)?)
             }
 
             #[inline(always)]
             fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
                 &self,
                 xs: [T; N],
-                _status: &mut crate::error::ArithmeticOpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [Self::Output; N] {
-                <T as crate::scalar::$trait>::$bulk_fn(xs, simd)
+                { let _ = status; } // suppress unused
+                $(let $status = status;)?
+                <T as crate::scalar::$trait>::$bulk_fn(xs, $($status,)? simd)
             }
         }
         $(#[$meta])*
@@ -255,6 +259,7 @@ macro_rules! define_op1 {
 pub(crate) use define_op1;
 
 pub(crate) mod _traits {
+    use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
@@ -319,8 +324,8 @@ pub(crate) mod _traits {
         /// via `hypot` for numerical stability. The output dtype is the real component type
         /// (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
         ///
-        /// For **signed integer** types, `MIN.abs()` overflows: `(-128i8).abs()` wraps back
-        /// to `i8::MIN` in release builds and panics in debug builds.
+        /// For **signed integer** types `MIN.abs()` wraps back to `MIN`: `(-128i8).abs()` is
+        /// `-128`.
         ///
         /// Floating-point semantics follow [`f32::abs`].
         Abs,
@@ -329,8 +334,14 @@ pub(crate) mod _traits {
         bulk_fn: abs_bulk,
     );
     impl_scalar_op1!(
-        impl Abs for [i8, i16, i32, i64, f32, f64] {
+        impl Abs for [f32, f64] {
             fn abs = |x| x.abs(),
+            fn abs_bulk = |x| x.abs(),
+        }
+    );
+    impl_scalar_op1!(
+        impl Abs for [i8, i16, i32, i64] {
+            fn abs = |x| x.wrapping_abs(),
             fn abs_bulk = |x| x.abs(),
         }
     );
@@ -360,8 +371,7 @@ pub(crate) mod _traits {
         ///
         /// The output dtype is the input dtype.
         ///
-        /// For **integer** types squaring can overflow, following the semantics of the `*`
-        /// operator: it wraps in release builds and panics in debug builds.
+        /// For **integer** types the result wraps on overflow (two's complement).
         Square,
         /// Compute the square of the value.
         square,
@@ -369,14 +379,20 @@ pub(crate) mod _traits {
     );
     // SIMD for the types with SIMD mul
     impl_scalar_op1!(
-        impl Square for [f32, f64, i16, i32, i64, u8, u16, u32, u64] {
+        impl Square for [f32, f64] {
             fn square = |x| x * x,
             fn square_bulk = |x| x * x,
         }
     );
     impl_scalar_op1!(
+        impl Square for [i16, i32, i64, u8, u16, u32, u64] {
+            fn square = |x| x.wrapping_mul(x),
+            fn square_bulk = |x| x * x,
+        }
+    );
+    impl_scalar_op1!(
         impl Square for [i8] {
-            fn square = |x| x * x,
+            fn square = |x| x.wrapping_mul(x),
         }
     );
     // In f32 without FP16
@@ -411,9 +427,8 @@ pub(crate) mod _traits {
     define_scalar_op1_trait!(
         /// Negation operation, like [`core::ops::Neg`].
         ///
-        /// For **integer** types the result is the two's-complement negation.
-        /// Negating the minimum representable value (e.g. `i32::MIN`) overflows:
-        /// it wraps in release builds and panics in debug builds.
+        /// For **integer** types the result is the two's-complement negation, which wraps:
+        /// `-i32::MIN` is `i32::MIN`.
         ///
         /// For **complex** types both components are negated independently:
         /// `-(a + bi) = -a - bi`.
@@ -425,8 +440,14 @@ pub(crate) mod _traits {
         bulk_fn: neg_bulk,
     );
     impl_scalar_op1!(
-        impl Neg for [f32, f64, i8, i16, i32, i64] {
+        impl Neg for [f32, f64] {
             fn neg = |x| -x,
+            fn neg_bulk = |x| -x,
+        }
+    );
+    impl_scalar_op1!(
+        impl Neg for [i8, i16, i32, i64] {
+            fn neg = |x| x.wrapping_neg(),
             fn neg_bulk = |x| -x,
         }
     );
@@ -483,6 +504,58 @@ pub(crate) mod _traits {
                 }
             );
         };
+        (
+            $(#[$trait_meta:meta])* $Trait:ident,
+            $(#[$fn_meta:meta])* $f:ident(status),
+            $f_bulk:ident,
+            errors = |$x:ident, $r:ident| { $($kind:ident: $cond:expr),+ $(,)? }
+        ) => {
+            define_scalar_op1_trait!(
+                $(#[$trait_meta])* $Trait,
+                $(#[$fn_meta])* $f(status),
+                bulk_fn: $f_bulk,
+            );
+            impl_scalar_op1!(
+                impl $Trait for [f32, f64] {
+                    fn $f = |$x, status| {
+                        #[allow(unused_variables)]
+                        let $r = $x.$f();
+                        #[allow(clippy::double_comparisons)]
+                        if $($cond)||+ {
+                            *status |= float_op1!(@error $x, $r, $($kind: $cond),+);
+                        }
+                        $r
+                    },
+                }
+            );
+            #[cfg(feature = "half")]
+            impl_scalar_op1!(
+                impl $Trait for [f16] {
+                    fn $f = |x, status| {
+                        let r = f16::from_f32(x.to_f32().$f());
+                        #[allow(unused_variables)]
+                        let ($x, $r) = (x.to_f32(), r.to_f32());
+                        #[allow(clippy::double_comparisons)]
+                        if $($cond)||+ {
+                            *status |= float_op1!(@error $x, $r, $($kind: $cond),+);
+                        }
+                        r
+                    },
+                }
+            );
+        };
+        // The rare error, inline(never)
+        (@error $x:ident, $r:ident, $($kind:ident: $cond:expr),+) => {{
+            #[cold]
+            #[inline(never)]
+            #[allow(unused_variables)]
+            fn error($x: f64, $r: f64) -> ArithmeticOpStatus {
+                let mut status = ArithmeticOpStatus::default();
+                $(status.set_if(ArithmeticErrorKind::$kind, $cond);)+
+                status
+            }
+            error($x.into(), $r.into())
+        }};
     }
     float_op1!(
         /// Flooring operation, as [`f32::floor`].
@@ -500,15 +573,33 @@ pub(crate) mod _traits {
         ceil_bulk,
         simd = "enabled"
     );
-    float_op1!(
+    define_scalar_op1_trait!(
         /// Square root operation, as [`f32::sqrt`].
         ///
-        /// Negative inputs produce `NaN`.
+        /// A negative input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`].
+        /// `-0.0` gives `-0.0`, and `NaN` propagates, without an error.
         Sqrt,
-        /// Compute the square root.
-        sqrt,
-        sqrt_bulk,
-        simd = "enabled"
+        /// Compute the square root, reporting an arithmetic error to `status`.
+        sqrt(status),
+        bulk_fn: sqrt_bulk,
+    );
+    impl_scalar_op1!(
+        impl Sqrt for [f32, f64] {
+            fn sqrt = |x, status| {
+                status.set_if(ArithmeticErrorKind::InvalidOperation, x < 0.0);
+                x.sqrt()
+            },
+            fn sqrt_bulk = |x, status| {
+                status.set_if(ArithmeticErrorKind::InvalidOperation, x.simd_lt(0.0).any_true());
+                x.sqrt()
+            },
+        }
+    );
+    #[cfg(feature = "half")]
+    impl_scalar_op1!(
+        impl Sqrt for [f16] {
+            fn sqrt = |x, status| f16::from_f32(Sqrt::sqrt(x.to_f32(), status)),
+        }
     );
     float_op1!(
         /// Rounding operation, as [`f32::round`].
@@ -523,58 +614,78 @@ pub(crate) mod _traits {
     );
     float_op1!(
         /// Natural exponential operation (`e^x`), as [`f32::exp`].
+        ///
+        /// A finite input whose result overflows to `inf` sets [`ArithmeticErrorKind::Overflow`].
+        /// Underflow is not reported.
         Exp,
-        /// Compute the natural exponential.
-        exp,
-        exp_bulk
+        /// Compute the natural exponential, reporting an arithmetic error to `status`.
+        exp(status),
+        exp_bulk,
+        errors = |x, r| { Overflow: r.is_infinite() && x.is_finite() }
     );
     float_op1!(
         /// Natural logarithm operation, as [`f32::ln`].
         ///
-        /// Negative inputs produce `NaN`; zero produces `-inf`.
+        /// Zero produces `-inf` and sets [`ArithmeticErrorKind::DivideByZero`]; a negative input
+        /// produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`]. `NaN`
+        /// propagates without an error.
         Ln,
-        /// Compute the natural logarithm.
-        ln,
-        ln_bulk
+        /// Compute the natural logarithm, reporting an arithmetic error to `status`.
+        ln(status),
+        ln_bulk,
+        errors = |x, r| { DivideByZero: x == 0.0, InvalidOperation: x < 0.0 }
     );
     float_op1!(
         /// Sine operation, as [`f32::sin`].
+        ///
+        /// An infinite input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`].
         Sin,
-        /// Compute the sine (input in radians).
-        sin,
-        sin_bulk
+        /// Compute the sine (input in radians), reporting an arithmetic error to `status`.
+        sin(status),
+        sin_bulk,
+        errors = |x, r| { InvalidOperation: x.is_infinite() }
     );
     float_op1!(
         /// Cosine operation, as [`f32::cos`].
+        ///
+        /// An infinite input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`].
         Cos,
-        /// Compute the cosine (input in radians).
-        cos,
-        cos_bulk
+        /// Compute the cosine (input in radians), reporting an arithmetic error to `status`.
+        cos(status),
+        cos_bulk,
+        errors = |x, r| { InvalidOperation: x.is_infinite() }
     );
     float_op1!(
         /// Tangent operation, as [`f32::tan`].
+        ///
+        /// An infinite input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`].
         Tan,
-        /// Compute the tangent (input in radians).
-        tan,
-        tan_bulk
+        /// Compute the tangent (input in radians), reporting an arithmetic error to `status`.
+        tan(status),
+        tan_bulk,
+        errors = |x, r| { InvalidOperation: x.is_infinite() }
     );
     float_op1!(
         /// Arcsine operation, as [`f32::asin`].
         ///
-        /// Inputs outside `[-1, 1]` produce `NaN`.
+        /// An input outside `[-1, 1]` produces `NaN` and sets
+        /// [`ArithmeticErrorKind::InvalidOperation`].
         Asin,
-        /// Compute the arcsine; the output is in radians in `[-pi/2, pi/2]`.
-        asin,
-        asin_bulk
+        /// Compute the arcsine; the output is in radians in `[-pi/2, pi/2]`, reporting an arithmetic error to `status`.
+        asin(status),
+        asin_bulk,
+        errors = |x, r| { InvalidOperation: x.abs() > 1.0 }
     );
     float_op1!(
         /// Arccosine operation, as [`f32::acos`].
         ///
-        /// Inputs outside `[-1, 1]` produce `NaN`.
+        /// An input outside `[-1, 1]` produces `NaN` and sets
+        /// [`ArithmeticErrorKind::InvalidOperation`].
         Acos,
-        /// Compute the arccosine; the output is in radians in `[0, pi]`.
-        acos,
-        acos_bulk
+        /// Compute the arccosine; the output is in radians in `[0, pi]`, reporting an arithmetic error to `status`.
+        acos(status),
+        acos_bulk,
+        errors = |x, r| { InvalidOperation: x.abs() > 1.0 }
     );
     float_op1!(
         /// Arctangent operation, as [`f32::atan`].
@@ -721,21 +832,28 @@ define_op1!(
     /// # Examples
     /// ```
     /// use jix::Array;
+    /// use jix::error::{ArithmeticErrorKind, ArithmeticErrorMode};
     /// use ndarray::{array, Ix1};
     ///
     /// let a = Array::compact_ndarray(&array![4.0f32, 9.0, 16.0])?;
     /// let result = a.sqrt().to_ndarray()?;
     /// assert_eq!(result, array![2.0, 3.0, 4.0]);
     ///
-    /// // Negative input produces NaN.
-    /// let b = Array::compact_ndarray(&array![-1.0f32])?;
-    /// let result = b.sqrt().to_ndarray::<Ix1>()?;
-    /// assert!(result[[0]].is_nan());
+    /// // A negative input is an invalid operation, which fails the read by default.
+    /// let b = Array::compact_ndarray(&array![-1.0f32])?.sqrt();
+    /// assert!(b.to_ndarray::<Ix1>().is_err());
+    /// // Ignored, it produces NaN.
+    /// let mut ctx = b.read_ctx();
+    /// ctx.set_arithmetic_error_mode(
+    ///     ArithmeticErrorKind::InvalidOperation,
+    ///     ArithmeticErrorMode::Ignore,
+    /// );
+    /// assert!(b.to_ndarray_sub::<Ix1>(&[0..1], &ctx)?[[0]].is_nan());
     /// # Ok::<(), jix::Error>(())
     /// ```
     Sqrt,
     SqrtKernel,
-    crate::scalar::Sqrt::sqrt,
+    crate::scalar::Sqrt::sqrt(status),
     simd: sqrt_bulk,
 );
 define_op1!(
@@ -766,7 +884,7 @@ define_op1!(
     /// ```
     Exp,
     ExpKernel,
-    crate::scalar::Exp::exp,
+    crate::scalar::Exp::exp(status),
     simd: exp_bulk,
 );
 define_op1!(
@@ -782,6 +900,7 @@ define_op1!(
     /// # Examples
     /// ```
     /// use jix::Array;
+    /// use jix::error::{ArithmeticErrorKind, ArithmeticErrorMode};
     /// use ndarray::{array, Ix1};
     ///
     /// let a = Array::compact_ndarray(&array![1.0f32, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E])?;
@@ -789,16 +908,22 @@ define_op1!(
     /// assert!((result[[0]] - 0.0).abs() < 1e-5);
     /// assert!((result[[1]] - 1.0).abs() < 1e-5);
     ///
-    /// // Zero produces -inf; negative input produces NaN.
-    /// let b = Array::compact_ndarray(&array![0.0f32, -1.0])?;
-    /// let result = b.ln().to_ndarray::<Ix1>()?;
+    /// // Zero divides by zero and a negative input is invalid, which fail the read by default.
+    /// let b = Array::compact_ndarray(&array![0.0f32, -1.0])?.ln();
+    /// assert!(b.to_ndarray::<Ix1>().is_err());
+    /// // Ignored, they produce -inf and NaN.
+    /// let mut ctx = b.read_ctx();
+    /// for kind in [ArithmeticErrorKind::DivideByZero, ArithmeticErrorKind::InvalidOperation] {
+    ///     ctx.set_arithmetic_error_mode(kind, ArithmeticErrorMode::Ignore);
+    /// }
+    /// let result = b.to_ndarray_sub::<Ix1>(&[0..2], &ctx)?;
     /// assert_eq!(result[[0]], f32::NEG_INFINITY);
     /// assert!(result[[1]].is_nan());
     /// # Ok::<(), jix::Error>(())
     /// ```
     Ln,
     LnKernel,
-    crate::scalar::Ln::ln,
+    crate::scalar::Ln::ln(status),
     simd: ln_bulk,
 );
 define_op1!(
@@ -828,7 +953,7 @@ define_op1!(
     /// ```
     Sin,
     SinKernel,
-    crate::scalar::Sin::sin,
+    crate::scalar::Sin::sin(status),
     simd: sin_bulk,
 );
 define_op1!(
@@ -859,7 +984,7 @@ define_op1!(
     /// ```
     Cos,
     CosKernel,
-    crate::scalar::Cos::cos,
+    crate::scalar::Cos::cos(status),
     simd: cos_bulk,
 );
 define_op1!(
@@ -889,7 +1014,7 @@ define_op1!(
     /// ```
     Tan,
     TanKernel,
-    crate::scalar::Tan::tan,
+    crate::scalar::Tan::tan(status),
     simd: tan_bulk,
 );
 define_op1!(
@@ -905,6 +1030,7 @@ define_op1!(
     /// # Examples
     /// ```
     /// use jix::Array;
+    /// use jix::error::{ArithmeticErrorKind, ArithmeticErrorMode};
     /// use ndarray::{array, Ix1};
     ///
     /// let a = Array::compact_ndarray(&array![0.0f32, 1.0, -1.0])?;
@@ -912,15 +1038,21 @@ define_op1!(
     /// assert_eq!(result[[0]], 0.0);
     /// assert!((result[[1]] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
     ///
-    /// // Input outside [-1, 1] produces NaN.
-    /// let b = Array::compact_ndarray(&array![2.0f32])?;
-    /// let result = b.asin().to_ndarray::<Ix1>()?;
-    /// assert!(result[[0]].is_nan());
+    /// // An input outside [-1, 1] is invalid, which fails the read by default.
+    /// let b = Array::compact_ndarray(&array![2.0f32])?.asin();
+    /// assert!(b.to_ndarray::<Ix1>().is_err());
+    /// // Ignored, it produces NaN.
+    /// let mut ctx = b.read_ctx();
+    /// ctx.set_arithmetic_error_mode(
+    ///     ArithmeticErrorKind::InvalidOperation,
+    ///     ArithmeticErrorMode::Ignore,
+    /// );
+    /// assert!(b.to_ndarray_sub::<Ix1>(&[0..1], &ctx)?[[0]].is_nan());
     /// # Ok::<(), jix::Error>(())
     /// ```
     Asin,
     AsinKernel,
-    crate::scalar::Asin::asin,
+    crate::scalar::Asin::asin(status),
     simd: asin_bulk,
 );
 define_op1!(
@@ -936,6 +1068,7 @@ define_op1!(
     /// # Examples
     /// ```
     /// use jix::Array;
+    /// use jix::error::{ArithmeticErrorKind, ArithmeticErrorMode};
     /// use ndarray::{array, Ix1};
     ///
     /// let a = Array::compact_ndarray(&array![1.0f32, 0.0, -1.0])?;
@@ -943,15 +1076,21 @@ define_op1!(
     /// assert_eq!(result[[0]], 0.0);
     /// assert!((result[[1]] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
     ///
-    /// // Input outside [-1, 1] produces NaN.
-    /// let b = Array::compact_ndarray(&array![2.0f32])?;
-    /// let result = b.acos().to_ndarray::<Ix1>()?;
-    /// assert!(result[[0]].is_nan());
+    /// // An input outside [-1, 1] is invalid, which fails the read by default.
+    /// let b = Array::compact_ndarray(&array![2.0f32])?.acos();
+    /// assert!(b.to_ndarray::<Ix1>().is_err());
+    /// // Ignored, it produces NaN.
+    /// let mut ctx = b.read_ctx();
+    /// ctx.set_arithmetic_error_mode(
+    ///     ArithmeticErrorKind::InvalidOperation,
+    ///     ArithmeticErrorMode::Ignore,
+    /// );
+    /// assert!(b.to_ndarray_sub::<Ix1>(&[0..1], &ctx)?[[0]].is_nan());
     /// # Ok::<(), jix::Error>(())
     /// ```
     Acos,
     AcosKernel,
-    crate::scalar::Acos::acos,
+    crate::scalar::Acos::acos(status),
     simd: acos_bulk,
 );
 define_op1!(
@@ -1257,15 +1396,23 @@ pub(crate) mod tests {
 
     pub(crate) use {test_op1, test_op1_dtype};
 
+    test_op1!(neg, |a| a.wrapping_neg(), [i8, i16, i32, i64], any_strategy);
+    test_op1!(abs, |a| a.wrapping_abs(), [i8, i16, i32, i64], any_strategy);
     test_op1!(
         neg,
         |a| -a,
-        [i8, i16, i32, i64, f32, f64],
+        [f32, f64],
         op_safe_strategy,
         #[cfg(feature = "half")]
         [f16],
         #[cfg(feature = "num-complex")]
         [complex_f32, complex_f64]
+    );
+    test_op1!(
+        square,
+        |a| a.wrapping_mul(a),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
     );
     #[test]
     fn square_concrete() {
@@ -1350,7 +1497,7 @@ pub(crate) mod tests {
         crate::util::assert_array_matches_approx(&za64.view().sqrt(), &expected64, 1e-12, 1e-12);
     }
     test_op1!(exp, |a| a.exp(), [f32, f64], op_safe_strategy);
-    test_op1!(ln, |a| a.ln(), [f32, f64], op_safe_non_negative_strategy);
+    test_op1!(ln, |a| a.ln(), [f32, f64], op_safe_positive_strategy);
     #[test]
     fn sin_concrete() {
         use crate::Array;
@@ -1519,4 +1666,194 @@ pub(crate) mod tests {
         test_op1_dtype!(abs, |a| a.re.hypot(a.im), complex_f32, op_safe_strategy);
         test_op1_dtype!(abs, |a| a.re.hypot(a.im), complex_f64, op_safe_strategy);
     }
+
+    /// The status of the SIMD bodies against the scalar functions', on every SIMD level: each
+    /// edge case in one lane of a bulk of ordinary values.
+    #[test]
+    fn simd_bodies_status_all_levels() {
+        use super::{Op1Kernel, SqrtKernel};
+        use crate::error::ArithmeticOpStatus;
+        use crate::util::{for_each_simd_level, SimdTestValues, SIMD_TEST_N};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $t:ty) => {
+                    for &x in &<$t>::edge_cases() {
+                        let mut scalar = ArithmeticOpStatus::default();
+                        $kernel.apply(x, &mut scalar);
+                        for lane in [0, 9, 40, SIMD_TEST_N - 1] {
+                            let mut xs = [1.5 as $t; SIMD_TEST_N];
+                            xs[lane] = x;
+                            let mut bulk = ArithmeticOpStatus::default();
+                            $kernel.apply_bulk(xs, &mut bulk, simd);
+                            assert_eq!(
+                                bulk,
+                                scalar,
+                                "{} {}: {x} in lane {lane}",
+                                stringify!($kernel),
+                                stringify!($t)
+                            );
+                        }
+                    }
+                };
+            }
+            simd.vectorize(|| {
+                case!(SqrtKernel, f32);
+                case!(SqrtKernel, f64);
+            });
+        }
+        for_each_simd_level!(check);
+    }
+
+    /// The errors of the float functions that report them, on edge cases.
+    #[test]
+    fn float_op1_errors() {
+        use crate::error::ArithmeticErrorKind::{self, *};
+        use crate::error::ArithmeticOpStatus;
+        #[cfg(feature = "half")]
+        use crate::scalar::f16;
+        use crate::scalar::{Acos, Asin, Cast, Cos, Exp, Ln, Sin, Tan};
+
+        type Cases<'a> = &'a [(f64, &'a [ArithmeticErrorKind])];
+        fn check<T>(name: &str, f: fn(T, &mut ArithmeticOpStatus) -> T, cases: Cases<'_>)
+        where
+            f64: Cast<T>,
+        {
+            for &(x, expected) in cases {
+                let mut status = ArithmeticOpStatus::default();
+                f(Cast::cast(x), &mut status);
+                for kind in [DivideByZero, Overflow, Underflow, InvalidOperation] {
+                    let what = format!("{name}({x}) {}: {kind:?}", std::any::type_name::<T>());
+                    assert_eq!(status.contains(kind), expected.contains(&kind), "{what}");
+                }
+            }
+        }
+        macro_rules! check {
+            ($name:literal, $f:path, $cases:expr) => {
+                check::<f32>($name, $f, $cases);
+                check::<f64>($name, $f, $cases);
+                #[cfg(feature = "half")]
+                check::<f16>($name, $f, $cases);
+            };
+        }
+        let (inf, nan) = (f64::INFINITY, f64::NAN);
+        let ln: Cases = &[
+            (0.0, &[DivideByZero]),
+            (-0.0, &[DivideByZero]),
+            (-1.0, &[InvalidOperation]),
+            (-0.001, &[InvalidOperation]),
+            (-inf, &[InvalidOperation]),
+            (0.001, &[]),
+            (1.0, &[]),
+            (inf, &[]),
+            (nan, &[]),
+        ];
+        check!("ln", Ln::ln, ln);
+        let exp: Cases = &[
+            (1000.0, &[Overflow]),
+            (-1000.0, &[]),
+            (0.0, &[]),
+            (inf, &[]),
+            (-inf, &[]),
+            (nan, &[]),
+        ];
+        check!("exp", Exp::exp, exp);
+        // Past the largest finite result of each type only.
+        check::<f32>("exp", Exp::exp, &[(88.8, &[Overflow]), (88.7, &[])]);
+        check::<f64>(
+            "exp",
+            Exp::exp,
+            &[(709.8, &[Overflow]), (709.7, &[]), (88.8, &[])],
+        );
+        #[cfg(feature = "half")]
+        check::<f16>("exp", Exp::exp, &[(11.1, &[Overflow]), (11.0, &[])]);
+        let trig: Cases = &[
+            (inf, &[InvalidOperation]),
+            (-inf, &[InvalidOperation]),
+            (nan, &[]),
+            (0.0, &[]),
+            (1.5707963267948966, &[]),
+            (60000.0, &[]),
+        ];
+        check!("sin", Sin::sin, trig);
+        check!("cos", Cos::cos, trig);
+        check!("tan", Tan::tan, trig);
+        let arc: Cases = &[
+            (1.5, &[InvalidOperation]),
+            (-1.5, &[InvalidOperation]),
+            (inf, &[InvalidOperation]),
+            (-inf, &[InvalidOperation]),
+            (nan, &[]),
+            (1.0, &[]),
+            (-1.0, &[]),
+            (0.0, &[]),
+        ];
+        check!("asin", Asin::asin, arc);
+        check!("acos", Acos::acos, arc);
+        // The value after 1 of each type.
+        check::<f32>("asin", Asin::asin, &[(1.0000001, &[InvalidOperation])]);
+        check::<f64>(
+            "acos",
+            Acos::acos,
+            &[(1.0000000000000002, &[InvalidOperation])],
+        );
+        #[cfg(feature = "half")]
+        check::<f16>("asin", Asin::asin, &[(1.001, &[InvalidOperation])]);
+    }
+
+    macro_rules! test_sqrt_invalid {
+        ($($t:ident),*) => {$(
+            paste::paste! {
+                #[test]
+                fn [<sqrt_invalid_ $t>]() {
+                    use crate::Array;
+                    use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
+                    #[cfg(feature = "half")]
+                    #[allow(unused_imports)]
+                    use crate::scalar::f16;
+
+                    let c = |x: f64| <f64 as crate::scalar::Cast<$t>>::cast(x);
+                    let n = 1000;
+                    for (x, invalid) in [
+                        (-2.0, true),
+                        (f64::NEG_INFINITY, true),
+                        (-0.25, true),
+                        (-0.0, false),
+                        (f64::NAN, false),
+                        (f64::INFINITY, false),
+                    ] {
+                        // In the bulk part of the loop, and in its scalar tail.
+                        for i in [300, n - 1] {
+                            let mut nd = ndarray::Array1::from_shape_fn(n, |i| c(i as f64 * 0.5));
+                            nd[i] = c(x);
+                            let r = Array::compact_ndarray(&nd).unwrap().sqrt();
+                            let what = format!("sqrt({x}) at {i}");
+                            let res = r.to_ndarray::<ndarray::Ix1>();
+                            if !invalid {
+                                res.expect(&what);
+                                continue;
+                            }
+                            let err = res.expect_err(&what);
+                            assert_eq!(err.kind(), ErrorKind::Arithmetic);
+                            assert_eq!(err.message(), "invalid operation encountered");
+
+                            let mut ctx = r.read_ctx();
+                            ctx.set_arithmetic_error_mode(
+                                ArithmeticErrorKind::InvalidOperation,
+                                ArithmeticErrorMode::Ignore,
+                            );
+                            let res = r
+                                .to_ndarray_sub::<ndarray::Ix1>(&[0..n as u64], &ctx)
+                                .unwrap();
+                            assert!(res[i].is_nan(), "{what}");
+                        }
+                    }
+                }
+            }
+        )*};
+    }
+    test_sqrt_invalid!(f32, f64);
+    #[cfg(feature = "half")]
+    test_sqrt_invalid!(f16);
 }

@@ -1,5 +1,6 @@
 //! Building blocks of the SIMD `*_bulk` functions of the scalar traits.
 
+use crate::error::ArithmeticOpStatus;
 use crate::util::{array_from_fn_inline, ArrayExt};
 use fearless_simd::{Simd, SimdBase, SimdElement};
 
@@ -138,8 +139,8 @@ impl_simd_element_ext!(
 #[inline(always)]
 pub(crate) fn map_vectors<T, U, const N: usize, S>(
     xs: [T; N],
-    f_scalar: impl Fn(T) -> U,
-    f_simd: impl Fn(T::V<S>) -> U::V<S>,
+    f_scalar: impl FnMut(T) -> U,
+    mut f_simd: impl FnMut(T::V<S>) -> U::V<S>,
     simd: S,
 ) -> [U; N]
 where
@@ -166,8 +167,8 @@ pub(crate) fn map_vectors_different_width<
     S,
 >(
     xs: [T; N],
-    f_scalar: impl Fn(T) -> U,
-    f_simd: impl Fn([T::V<S>; KT]) -> [U::V<S>; KU],
+    f_scalar: impl FnMut(T) -> U,
+    mut f_simd: impl FnMut([T::V<S>; KT]) -> [U::V<S>; KU],
     simd: S,
 ) -> [U; N]
 where
@@ -206,8 +207,8 @@ where
 pub(crate) fn map_vectors2<T1, T2, U, const N: usize, S>(
     xs: [T1; N],
     ys: [T2; N],
-    f_scalar: impl Fn(T1, T2) -> U,
-    f_simd: impl Fn(T1::V<S>, T2::V<S>) -> U::V<S>,
+    mut f_scalar: impl FnMut(T1, T2) -> U,
+    mut f_simd: impl FnMut(T1::V<S>, T2::V<S>) -> U::V<S>,
     simd: S,
 ) -> [U; N]
 where
@@ -237,6 +238,61 @@ where
             f_simd(x, y).store_slice(&mut zs[c * lanes..][..lanes]);
         },
     );
+    zs
+}
+
+#[inline(always)]
+pub(crate) fn map_vectors_status<T, U, const N: usize, S>(
+    xs: [T; N],
+    status: &mut ArithmeticOpStatus,
+    mut f_scalar: impl FnMut(T, &mut ArithmeticOpStatus) -> U,
+    mut f_simd: impl FnMut(T::V<S>, &mut ArithmeticOpStatus) -> U::V<S>,
+    simd: S,
+) -> [U; N]
+where
+    T: SimdElementExt,
+    U: SimdElementExt,
+    S: Simd,
+{
+    let mut simd_status = ArithmeticOpStatus::default();
+    let ys = map_vectors(
+        xs,
+        #[inline(always)]
+        |x| f_scalar(x, status),
+        #[inline(always)]
+        |x| f_simd(x, &mut simd_status),
+        simd,
+    );
+    *status |= simd_status;
+    ys
+}
+
+#[inline(always)]
+pub(crate) fn map_vectors2_status<T1, T2, U, const N: usize, S>(
+    xs: [T1; N],
+    ys: [T2; N],
+    status: &mut ArithmeticOpStatus,
+    mut f_scalar: impl FnMut(T1, T2, &mut ArithmeticOpStatus) -> U,
+    mut f_simd: impl FnMut(T1::V<S>, T2::V<S>, &mut ArithmeticOpStatus) -> U::V<S>,
+    simd: S,
+) -> [U; N]
+where
+    T1: SimdElementExt,
+    T2: SimdElementExt,
+    U: SimdElementExt,
+    S: Simd,
+{
+    let mut simd_status = ArithmeticOpStatus::default();
+    let zs = map_vectors2(
+        xs,
+        ys,
+        #[inline(always)]
+        |x, y| f_scalar(x, y, status),
+        #[inline(always)]
+        |x, y| f_simd(x, y, &mut simd_status),
+        simd,
+    );
+    *status |= simd_status;
     zs
 }
 

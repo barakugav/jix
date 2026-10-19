@@ -216,6 +216,19 @@ def op_safe_non_negative_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     }[dtype]
 
 
+def op_safe_positive_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
+    """Positive float elements mirroring ScalarStrategy::op_safe_positive_strategy().
+
+    (1..=10000).map(|x| x / 100.0) -> [0.01, 100.0]
+    """
+    _st = st.integers(1, 100 * 100).map(lambda x: float(x) / 100.0)
+    return {
+        np.float16: _st,
+        np.float32: _st,
+        np.float64: _st,
+    }[dtype]
+
+
 @st.composite
 def carrays2_strategy(draw, dtype: np.dtype, element_st=None):
     """

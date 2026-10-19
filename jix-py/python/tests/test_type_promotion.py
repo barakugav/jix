@@ -445,35 +445,24 @@ def test_power_integer_dispatch_keeps_integer(base_dtype, exp_dtype, expected_dt
     np.testing.assert_array_equal(result.numpy(), np.array([8, 9, 4], dtype=expected_dtype))
 
 
-def test_power_promotes_small_int_to_float32():
-    """int8 base with int8 exponent: no integer pair matches (the exponent slot is unsigned and
-    Int -> UInt is not a safe cast), so it falls through to (f32, i32) - the first float pair where
-    both i8 -> f32 and i8 -> i32 are safe casts."""
-    a = jix.compact(np.array([2, 3, 4], dtype=np.int8))
-    b = jix.compact(np.array([2, 2, 2], dtype=np.int8))
+@pytest.mark.parametrize(
+    "base_dtype,exp_dtype,expected_dtype",
+    [
+        (np.int8, np.int8, np.int8),  # direct
+        (np.int32, np.int32, np.int32),  # direct
+        (np.int64, np.int64, np.int64),  # direct
+        (np.uint8, np.int8, np.int16),  # both widen to the first signed slot, as numpy
+        (np.uint32, np.int32, np.int64),
+        (np.uint64, np.int64, np.float64),  # no signed integer holds u64
+    ],
+)
+def test_power_signed_exponent_keeps_integer(base_dtype, exp_dtype, expected_dtype):
+    """An integer base with a signed exponent dispatches to an integer impl, as numpy."""
+    a = jix.compact(np.array([2, 3, 4], dtype=base_dtype))
+    b = jix.compact(np.array([3, 2, 1], dtype=exp_dtype))
     result = jix.power(a, b)
-    assert result.dtype == np.float32
-    np.testing.assert_array_equal(result.numpy(), np.array([4.0, 9.0, 16.0], dtype=np.float32))
-
-
-def test_power_promotes_int32_to_float64():
-    """int32 base with int32 exponent: a signed exponent can't reach the unsigned slot, and the
-    32-bit base does not fit (f32, i32) (i32 -> f32 needs P8), so it lands in (f64, f64)."""
-    a = jix.compact(np.array([2, 3, 4], dtype=np.int32))
-    b = jix.compact(np.array([2, 2, 2], dtype=np.int32))
-    result = jix.power(a, b)
-    assert result.dtype == np.float64
-    np.testing.assert_array_equal(result.numpy(), np.array([4.0, 9.0, 16.0], dtype=np.float64))
-
-
-def test_power_promotes_int64_to_float64():
-    """int64 base with int64 exponent: integer pairs are skipped (Int -> UInt unsafe); among float
-    pairs, (f32, i32) fails because i64 -> f32 has no higher precision, and (f64, i32) fails because
-    i64 -> i32 is narrowing; (f64, f64) wins via the P8 short-circuit (any int fits f64)."""
-    a = jix.compact(np.array([2, 3, 4], dtype=np.int64))
-    b = jix.compact(np.array([2, 2, 2], dtype=np.int64))
-    result = jix.power(a, b)
-    assert result.dtype == np.float64
+    assert result.dtype == np.dtype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), np.array([8, 9, 4], dtype=expected_dtype))
 
 
 def test_power_promotes_uint64_exponent_to_float64():
@@ -485,21 +474,14 @@ def test_power_promotes_uint64_exponent_to_float64():
     np.testing.assert_array_equal(result.numpy(), np.array([4.0, 9.0, 16.0], dtype=np.float64))
 
 
-def test_power_signed_scalar_exponent_promotes_to_float():
-    """A plain Python int is signed (no precision tag), so it can't fill the unsigned exponent
-    slot: power(int32_array, 3) promotes to f64. Passing np.uint32(3) keeps int32."""
+def test_power_signed_scalar_exponent_keeps_integer():
+    """A plain Python int is signed and fills the signed exponent slot: power(int32_array, 3)
+    stays int32, like an unsigned exponent."""
     a = jix.compact(np.array([2, 3, 4], dtype=np.int32))
-    assert jix.power(a, 3).dtype == np.float64
-    assert jix.power(a, np.int32(3)).dtype == np.float64
-    assert jix.power(a, -1).dtype == np.float64
+    assert jix.power(a, 3).dtype == np.int32
+    assert jix.power(a, np.int32(3)).dtype == np.int32
+    assert jix.power(a, -1).dtype == np.int32
     assert jix.power(a, np.uint32(3)).dtype == np.int32
-
-
-def test_power_signed_array_exponent_promotes_to_float():
-    """Same for a signed *array* exponent - it can't reach the unsigned slot either."""
-    a = jix.compact(np.array([2, 3, 4], dtype=np.int32))
-    b = jix.compact(np.array([3, 3, 3], dtype=np.int32))
-    assert jix.power(a, b).dtype == np.float64
 
 
 def test_power_scalar_exponent_keeps_float_base_narrow():

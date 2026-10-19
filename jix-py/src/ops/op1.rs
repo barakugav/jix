@@ -148,7 +148,8 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// Negative inputs produce `NaN`.
+    /// A negative input produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
     ///
     /// Args:
     ///     array: Input array.
@@ -166,9 +167,10 @@ define_op1!(
     ///     result = jix.sqrt(a)
     ///     assert np.array_equal(result.numpy(), [2.0, 3.0, 4.0])
     ///
-    ///     # Negative input produces NaN.
+    ///     # A negative input produces NaN, an error that raises by default.
     ///     b = jix.compact([-1.0], dtype=np.float32)
-    ///     assert np.isnan(jix.sqrt(b).numpy()[0])
+    ///     with jix.errstate(invalid="ignore"):
+    ///         assert np.isnan(jix.sqrt(b).numpy()[0])
     ///     ```
     sqrt,
     Sqrt,
@@ -220,6 +222,9 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
+    /// A finite input whose result is `inf` overflows, reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
+    ///
     /// Args:
     ///     array: Input array.
     ///
@@ -251,7 +256,8 @@ define_op1!(
 ///
 /// Supported dtypes: `f16`, `f32`, `f64`.
 ///
-/// Negative inputs produce `NaN`; zero produces `-inf`.
+/// Zero produces `-inf`, a divide by zero, and a negative input `NaN`, an invalid operation,
+/// both reported according to [`jix.errstate()`][jix.errstate], as numpy.
 ///
 /// Args:
 ///     array: Input array.
@@ -287,11 +293,12 @@ define_op1!(
 ///     assert abs(result_d.numpy()[1] - 1.0) < 1e-10 # log10(10) = 1
 ///     assert abs(result_d.numpy()[2] - 2.0) < 1e-10 # log10(100) = 2
 ///
-///     # Zero produces -inf; negative input produces NaN.
+///     # Zero produces -inf and a negative input NaN, errors that raise by default.
 ///     b = jix.compact([0.0, -1.0], dtype=np.float32)
-///     result_b = jix.log(b)
-///     assert np.isneginf(result_b.numpy()[0])
-///     assert np.isnan(result_b.numpy()[1])
+///     with jix.errstate(divide="ignore", invalid="ignore"):
+///         result_b = jix.log(b).numpy()
+///     assert np.isneginf(result_b[0])
+///     assert np.isnan(result_b[1])
 ///     ```
 #[pyo3::pyfunction(signature = (array, base=None))]
 pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<crate::Array> {
@@ -335,6 +342,9 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
+    /// An infinite input produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
+    ///
     /// Args:
     ///     array: Input array.
     ///
@@ -363,6 +373,9 @@ define_op1!(
     /// Computes the cosine of each element (input in radians).
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
+    ///
+    /// An infinite input produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
     ///
     /// Args:
     ///     array: Input array.
@@ -393,6 +406,9 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
+    /// An infinite input produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
+    ///
     /// Args:
     ///     array: Input array.
     ///
@@ -422,7 +438,8 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// Inputs outside `[-1, 1]` produce `NaN`.
+    /// An input outside `[-1, 1]` produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
     ///
     /// Args:
     ///     array: Input array.
@@ -453,7 +470,8 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// Inputs outside `[-1, 1]` produce `NaN`.
+    /// An input outside `[-1, 1]` produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
     ///
     /// Args:
     ///     array: Input array.
