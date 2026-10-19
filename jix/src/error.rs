@@ -373,6 +373,17 @@ impl Default for ArithmeticErrorModes {
 /// `&mut ArithmeticOpStatus`: rather than panicking, they produce a fallback value for the element and set
 /// the error's bit. After the computation, the status is checked against the mode configured
 /// in the read context.
+///
+/// ```
+/// use jix::scalar::Div;
+/// use jix::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+///
+/// let mut status = ArithmeticOpStatus::default();
+/// assert_eq!(7i32.div(2, &mut status), 3);
+/// assert!(status.is_ok());
+/// assert_eq!(7i32.div(0, &mut status), 0);
+/// assert!(status.contains(ArithmeticErrorKind::DivideByZero));
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ArithmeticOpStatus(u8);
 impl ArithmeticOpStatus {

@@ -373,6 +373,25 @@ impl<'a> Decoder<'a> {
 /// writes a fallback value for the element and reports the error to the context of the read,
 /// which reacts according to its [`ArithmeticErrorMode`] for it: fail the read (the default),
 /// record a warning, or ignore it.
+///
+/// ```
+/// use jix::Array;
+/// use jix::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
+/// use ndarray::{array, Ix1};
+///
+/// let a = Array::compact_ndarray(&array![6i32, 7, 8])?;
+/// let b = Array::compact_ndarray(&array![2i32, 0, 4])?;
+/// let q = a / b;
+///
+/// let err = q.to_ndarray::<Ix1>().unwrap_err();
+/// assert_eq!(err.kind(), ErrorKind::Arithmetic);
+///
+/// let mut ctx = q.read_ctx();
+/// ctx.set_arithmetic_error_mode(ArithmeticErrorKind::DivideByZero, ArithmeticErrorMode::Warn);
+/// assert_eq!(q.to_ndarray_sub(&[0..3], &ctx)?, array![3, 0, 2]);
+/// assert_eq!(ctx.take_warnings().len(), 1);
+/// # Ok::<(), jix::Error>(())
+/// ```
 pub struct ReadContext {
     #[cfg(not(miri))]
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
