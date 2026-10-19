@@ -1404,8 +1404,9 @@ pub(crate) mod _traits {
     /// Scalar kernel trait for the element-wise `sum` reduction.
     ///
     /// Integer types accumulate into a wider output to reduce overflow risk (`i8..=i64 ->
-    /// i64`; `u8..=u64` and `bool -> u64`). Floating-point and complex types keep their input
-    /// width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...), matching NumPy.
+    /// i64`; `u8..=u64` and `bool -> u64`), which wraps on overflow. Floating-point and complex
+    /// types keep their input width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`,
+    /// ...), matching NumPy.
     pub trait Sum {
         /// The sum element type: `i64`/`u64` for integers and `bool`, otherwise the input type.
         type Output;
@@ -1459,12 +1460,13 @@ pub(crate) mod _traits {
                 }
                 #[inline(always)]
                 fn update(state: Self::Output, item: Self) -> Self::Output {
-                    state + <_ as crate::scalar::Cast<Self::Output>>::cast(item)
+                    let item = <_ as crate::scalar::Cast<Self::Output>>::cast(item);
+                    crate::scalar::Add::add(state, item)
                 }
                 $($bulk)*
                 #[inline(always)]
                 fn merge_states(a: Self::Output, b: Self::Output) -> Self::Output {
-                    a + b
+                    crate::scalar::Add::add(a, b)
                 }
             }
         };
@@ -1490,8 +1492,9 @@ pub(crate) mod _traits {
     /// Scalar kernel trait for the element-wise `product` reduction.
     ///
     /// Integer types accumulate into a wider output to reduce overflow risk (`i8..=i64 ->
-    /// i64`; `u8..=u64 -> u64`). Floating-point and complex types keep their input width
-    /// (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...), matching NumPy.
+    /// i64`; `u8..=u64 -> u64`), which wraps on overflow. Floating-point and complex types keep
+    /// their input width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...),
+    /// matching NumPy.
     pub trait Product {
         /// The product element type: `i64`/`u64` for integers, otherwise the input type.
         type Output;
@@ -1543,12 +1546,13 @@ pub(crate) mod _traits {
                 }
                 #[inline(always)]
                 fn update(state: Self::Output, item: Self) -> Self::Output {
-                    state * <_ as crate::scalar::Cast<Self::Output>>::cast(item)
+                    let item = <_ as crate::scalar::Cast<Self::Output>>::cast(item);
+                    crate::scalar::Mul::mul(state, item)
                 }
                 $($bulk)*
                 #[inline(always)]
                 fn merge_states(a: Self::Output, b: Self::Output) -> Self::Output {
-                    a * b
+                    crate::scalar::Mul::mul(a, b)
                 }
             }
         };
@@ -3913,15 +3917,15 @@ pub(crate) mod tests {
 
     test_reduction!(
         sum,
-        |items| { items.fold(0u64, |m, x| m + x as u64) },
+        |items| { items.fold(0u64, |m, x| m.wrapping_add(x as u64)) },
         [u8, u16, u32, u64, bool],
-        op_safe_strategy
+        any_strategy
     );
     test_reduction!(
         sum,
-        |items| { items.fold(0i64, |m, x| m + x as i64) },
+        |items| { items.fold(0i64, |m, x| m.wrapping_add(x as i64)) },
         [i8, i16, i32, i64],
-        op_safe_strategy
+        any_strategy
     );
     // Float/complex sum preserves the input width and accumulates in it, so the block fold
     // reassociates - compare approximately, and skip f16 (its native accumulation drifts too
@@ -3944,6 +3948,18 @@ pub(crate) mod tests {
         },
         [complex_f32, complex_f64],
         op_safe_strategy
+    );
+    test_reduction!(
+        product,
+        |items| { items.fold(1u64, |m, x| m.wrapping_mul(x as u64)) },
+        [u8, u16, u32, u64],
+        any_strategy
+    );
+    test_reduction!(
+        product,
+        |items| { items.fold(1i64, |m, x| m.wrapping_mul(x as i64)) },
+        [i8, i16, i32, i64],
+        any_strategy
     );
     #[test]
     fn product_concrete() {
