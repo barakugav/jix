@@ -290,13 +290,14 @@ def test_float_remainder_errors_match_numpy(jix_fn, np_fn, dtype):
             _errors_match_numpy(jix_fn, np_fn, x, y)
 
 
-# Past the domains of the float functions.
-_FUNCTION_EDGES = [0.5, -1.0]
+# Past the domains and overflow thresholds of the float functions.
+_FUNCTION_EDGES = [0.5, -1.0, 11.1, 88.8, 709.8, -745.2]
 
 
 _FUNCTIONS = [
     (jix.sqrt, np.sqrt),
     (jix.log, np.log),
+    (jix.exp, np.exp),
 ]
 
 

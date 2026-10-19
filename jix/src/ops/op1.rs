@@ -612,10 +612,14 @@ pub(crate) mod _traits {
     );
     float_op1!(
         /// Natural exponential operation (`e^x`), as [`f32::exp`].
+        ///
+        /// A finite input whose result overflows to `inf` sets [`ArithmeticErrorKind::Overflow`].
+        /// Underflow is not reported.
         Exp,
-        /// Compute the natural exponential.
-        exp,
-        exp_bulk
+        /// Compute the natural exponential, reporting an arithmetic error to `status`.
+        exp(status),
+        exp_bulk,
+        errors = |x, r| { Overflow: r.is_infinite() && x.is_finite() }
     );
     float_op1!(
         /// Natural logarithm operation, as [`f32::ln`].
@@ -865,7 +869,7 @@ define_op1!(
     /// ```
     Exp,
     ExpKernel,
-    crate::scalar::Exp::exp,
+    crate::scalar::Exp::exp(status),
     simd: exp_bulk,
 );
 define_op1!(
@@ -1680,7 +1684,7 @@ pub(crate) mod tests {
         use crate::error::ArithmeticOpStatus;
         #[cfg(feature = "half")]
         use crate::scalar::f16;
-        use crate::scalar::{Cast, Ln};
+        use crate::scalar::{Cast, Exp, Ln};
 
         type Cases<'a> = &'a [(f64, &'a [ArithmeticErrorKind])];
         fn check<T>(name: &str, f: fn(T, &mut ArithmeticOpStatus) -> T, cases: Cases<'_>)
@@ -1717,6 +1721,24 @@ pub(crate) mod tests {
             (nan, &[]),
         ];
         check!("ln", Ln::ln, ln);
+        let exp: Cases = &[
+            (1000.0, &[Overflow]),
+            (-1000.0, &[]),
+            (0.0, &[]),
+            (inf, &[]),
+            (-inf, &[]),
+            (nan, &[]),
+        ];
+        check!("exp", Exp::exp, exp);
+        // Past the largest finite result of each type only.
+        check::<f32>("exp", Exp::exp, &[(88.8, &[Overflow]), (88.7, &[])]);
+        check::<f64>(
+            "exp",
+            Exp::exp,
+            &[(709.8, &[Overflow]), (709.7, &[]), (88.8, &[])],
+        );
+        #[cfg(feature = "half")]
+        check::<f16>("exp", Exp::exp, &[(11.1, &[Overflow]), (11.0, &[])]);
     }
 
     macro_rules! test_sqrt_invalid {

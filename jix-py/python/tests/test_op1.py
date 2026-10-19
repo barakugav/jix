@@ -74,7 +74,9 @@ def test_sqrt_concrete():
 def test_exp(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
     rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
-    assert_array_matches(jix.exp(za), np.exp(np_a).astype(dtype), data=data, rtol=rtol)
+    # Its overflows (float16 past 11.1, float32 past 88.8) are tested in test_errstate.py.
+    with jix.errstate(over="ignore"), np.errstate(over="ignore"):
+        assert_array_matches(jix.exp(za), np.exp(np_a).astype(dtype), data=data, rtol=rtol)
 
 
 def test_log_natural_no_base():

@@ -222,6 +222,9 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
+    /// A finite input whose result is `inf` overflows, reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
+    ///
     /// Args:
     ///     array: Input array.
     ///
