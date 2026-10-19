@@ -1,10 +1,30 @@
 use std::sync::LazyLock;
 
 use jix_core::scalar::{f16, Complex};
+use pyo3::types::PyAnyMethods;
 
 use crate::ops::common::{
-    broadcast_operands, define_op2, define_op2_desc, OpDescriptor, Operand, Scalar,
+    broadcast_operands, define_op2, define_op2_desc, OpDescriptor, Operand, Rank, Scalar,
 };
+
+macro_rules! unary_shortcut_desc {
+    (|$x:ident| $f:expr, [$(($a_ty:ty, $b_ty:ty)),* $(,)?]) => {
+        vec![
+            $(
+                crate::ops::common::OpFnDescriptor::new2::<$a_ty, $b_ty>(
+                    crate::ops::common::CastKind::Safe,
+                    |$x, _b| {
+                        let res = { $f }.map(|res| res.into_any());
+                        <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
+                    },
+                ),
+            )*
+        ]
+    };
+    (|$x:ident| $f:expr, [$($ty:ty),* $(,)?]) => {
+        unary_shortcut_desc!(|$x| $f, [$(($ty, $ty)),*])
+    };
+}
 
 define_op2!(
     /// Element-wise addition of two arrays.
@@ -105,49 +125,75 @@ define_op2!(
         Safe
     }
 );
-define_op2!(
-    /// Element-wise multiplication of two arrays.
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
-    ///
-    /// For **integer** types the result wraps on overflow (two's complement).
-    /// For **complex** types this is full complex multiplication:
-    /// `(a + bi) * (c + di) = (ac - bd) + (ad + bc)i`.
-    ///
-    /// Available via the `*` operator on arrays.
-    ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
-    /// smallest type that can represent both without information loss (Safe casting
-    /// rules).
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
-    ///
-    /// Args:
-    ///     a: First operand.
-    ///     b: Second operand.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-    ///         No computation occurs until the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([1, 2, 3], dtype=np.int32)
-    ///     b = jix.compact([4, 5, 6], dtype=np.int32)
-    ///     result = jix.multiply(a, b)  # same as `a * b`
-    ///     assert np.array_equal(result.numpy(), [4, 10, 18])
-    ///     ```
-    multiply,
-    Mul,
-    dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
-        Safe
+/// Element-wise multiplication of two arrays.
+///
+/// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+/// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
+///
+/// For **integer** types the result wraps on overflow (two's complement).
+/// For **complex** types this is full complex multiplication:
+/// `(a + bi) * (c + di) = (ac - bd) + (ad + bc)i`.
+///
+/// Available via the `*` operator on arrays.
+///
+/// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
+/// smallest type that can represent both without information loss (Safe casting
+/// rules).
+///
+/// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+///
+/// Args:
+///     a: First operand.
+///     b: Second operand.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
+///         No computation occurs until the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([1, 2, 3], dtype=np.int32)
+///     b = jix.compact([4, 5, 6], dtype=np.int32)
+///     result = jix.multiply(a, b)  # same as `a * b`
+///     assert np.array_equal(result.numpy(), [4, 10, 18])
+///     ```
+#[pyo3::pyfunction]
+pub fn multiply<'py>(
+    a: &pyo3::Bound<'py, pyo3::PyAny>,
+    b: &pyo3::Bound<'py, pyo3::PyAny>,
+) -> pyo3::PyResult<crate::Array> {
+    let a_op = Operand::from_any(a)?;
+
+    // fast path for x * x
+    if a.is(b) {
+        let is_supported_dtype = a_op
+            .rank_precision()
+            .is_some_and(|(rank, _)| !matches!(rank, Rank::Bool));
+        if is_supported_dtype {
+            return crate::square(a);
+        }
     }
-);
+
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "multiply",
+            define_op2_desc!(
+                Mul,
+                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+                Safe
+            ),
+        )
+    });
+
+    let a = a_op;
+    let b = Operand::from_any(b)?;
+    let [a, b] = broadcast_operands([a, b])?;
+    let res = DISPATCH_TABLE.dispatch2(a, b)?;
+    Ok(crate::Array::from_core(res))
+}
 define_op2!(
     /// Element-wise (true) division of two arrays (`a / b`).
     ///
@@ -570,29 +616,12 @@ pub fn power<'py>(
         )
     });
 
-    macro_rules! pow_shortcut_desc {
-        ($core_op:ident, [$(($a_ty:ty, $b_ty:ty)),* $(,)?]) => {
-            vec![
-                $(
-                    crate::ops::common::OpFnDescriptor::new2::<$a_ty, $b_ty>(
-                        crate::ops::common::CastKind::Safe,
-                        |a, _exponent| {
-                            let res = jix_core::ops::$core_op::new_array(a)
-                                .map(|res| res.into_any());
-                            <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
-                        },
-                    ),
-                )*
-            ]
-        };
-    }
-
     // `x ** 2`. Same pairs as `DISPATCH_TABLE`, so the promotion is identical.
     static SQUARE_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
         OpDescriptor::new(
             "power",
-            pow_shortcut_desc!(
-                Square,
+            unary_shortcut_desc!(
+                |a| jix_core::ops::Square::new_array(a),
                 [
                     (u8, u8),
                     (i8, u8),
@@ -614,7 +643,10 @@ pub fn power<'py>(
     static SQRT_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
         OpDescriptor::new(
             "power",
-            pow_shortcut_desc!(Sqrt, [(f32, i32), (f32, f32), (f64, i32), (f64, f64)]),
+            unary_shortcut_desc!(
+                |a| jix_core::ops::Sqrt::new_array(a),
+                [(f32, i32), (f32, f32), (f64, i32), (f64, f64)]
+            ),
         )
     });
 
