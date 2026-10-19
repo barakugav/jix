@@ -342,6 +342,9 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
+    /// An infinite input produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
+    ///
     /// Args:
     ///     array: Input array.
     ///
@@ -370,6 +373,9 @@ define_op1!(
     /// Computes the cosine of each element (input in radians).
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
+    ///
+    /// An infinite input produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
     ///
     /// Args:
     ///     array: Input array.
@@ -400,6 +406,9 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
+    /// An infinite input produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
+    ///
     /// Args:
     ///     array: Input array.
     ///
@@ -429,7 +438,8 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// Inputs outside `[-1, 1]` produce `NaN`.
+    /// An input outside `[-1, 1]` produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
     ///
     /// Args:
     ///     array: Input array.
@@ -460,7 +470,8 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// Inputs outside `[-1, 1]` produce `NaN`.
+    /// An input outside `[-1, 1]` produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
     ///
     /// Args:
     ///     array: Input array.
