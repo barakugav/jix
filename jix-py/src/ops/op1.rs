@@ -148,7 +148,8 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// Negative inputs produce `NaN`.
+    /// A negative input produces `NaN`, an invalid operation reported according to
+    /// [`jix.errstate()`][jix.errstate], as numpy.
     ///
     /// Args:
     ///     array: Input array.
@@ -166,9 +167,10 @@ define_op1!(
     ///     result = jix.sqrt(a)
     ///     assert np.array_equal(result.numpy(), [2.0, 3.0, 4.0])
     ///
-    ///     # Negative input produces NaN.
+    ///     # A negative input produces NaN, an error that raises by default.
     ///     b = jix.compact([-1.0], dtype=np.float32)
-    ///     assert np.isnan(jix.sqrt(b).numpy()[0])
+    ///     with jix.errstate(invalid="ignore"):
+    ///         assert np.isnan(jix.sqrt(b).numpy()[0])
     ///     ```
     sqrt,
     Sqrt,

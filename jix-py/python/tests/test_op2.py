@@ -636,9 +636,10 @@ def test_power_shortcut_edge_cases_follow_sqrt():
     the general pow path (`pow(-inf, 0.5) == +inf`, `pow(-0.0, 0.5) == +0.0`)."""
     np_a = np.array([-np.inf, -0.0, -1.0, 4.0], dtype=np.float64)
     za = jix.compact(np_a)
-    np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), jix.sqrt(za).numpy())
-    with np.errstate(invalid="ignore"):
-        np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), np.power(np_a, 0.5))
+    with jix.errstate(invalid="ignore"):
+        np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), jix.sqrt(za).numpy())
+        with np.errstate(invalid="ignore"):
+            np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), np.power(np_a, 0.5))
 
 
 def test_power_shortcut_not_taken_for_array_exponent():

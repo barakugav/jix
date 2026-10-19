@@ -1,6 +1,6 @@
 """
-Arithmetic error handling under jix.errstate: integer and float division and
-wrapping integer arithmetic. Mirrors the tests in jix/src/ops/op1.rs and
+Arithmetic error handling under jix.errstate: integer and float division, the float functions
+and wrapping integer arithmetic. Mirrors the tests in jix/src/ops/op1.rs and
 jix/src/ops/op2.rs.
 """
 
@@ -288,6 +288,24 @@ def test_float_remainder_errors_match_numpy(jix_fn, np_fn, dtype):
     for x in edges:
         for y in edges:
             _errors_match_numpy(jix_fn, np_fn, x, y)
+
+
+# Past the domains of the float functions.
+_FUNCTION_EDGES = [0.5, -1.0]
+
+
+_FUNCTIONS = [
+    (jix.sqrt, np.sqrt),
+]
+
+
+@pytest.mark.parametrize(("jix_fn", "np_fn"), _FUNCTIONS)
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+def test_float_function_errors_match_numpy(jix_fn, np_fn, dtype):
+    with np.errstate(over="ignore"):
+        edges = np.concatenate([_float_edges(dtype), np.array(_FUNCTION_EDGES, dtype=dtype)])
+    for x in edges:
+        _errors_match_numpy(jix_fn, np_fn, x, fills=(0.5,))
 
 
 def test_float_divide_modes():

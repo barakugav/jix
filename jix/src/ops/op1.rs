@@ -259,6 +259,7 @@ macro_rules! define_op1 {
 pub(crate) use define_op1;
 
 pub(crate) mod _traits {
+    use crate::error::ArithmeticErrorKind;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
@@ -570,15 +571,33 @@ pub(crate) mod _traits {
         ceil_bulk,
         simd = "enabled"
     );
-    float_op1!(
+    define_scalar_op1_trait!(
         /// Square root operation, as [`f32::sqrt`].
         ///
-        /// Negative inputs produce `NaN`.
+        /// A negative input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`].
+        /// `-0.0` gives `-0.0`, and `NaN` propagates, without an error.
         Sqrt,
-        /// Compute the square root.
-        sqrt,
-        sqrt_bulk,
-        simd = "enabled"
+        /// Compute the square root, reporting an arithmetic error to `status`.
+        sqrt(status),
+        bulk_fn: sqrt_bulk,
+    );
+    impl_scalar_op1!(
+        impl Sqrt for [f32, f64] {
+            fn sqrt = |x, status| {
+                status.set_if(ArithmeticErrorKind::InvalidOperation, x < 0.0);
+                x.sqrt()
+            },
+            fn sqrt_bulk = |x, status| {
+                status.set_if(ArithmeticErrorKind::InvalidOperation, x.simd_lt(0.0).any_true());
+                x.sqrt()
+            },
+        }
+    );
+    #[cfg(feature = "half")]
+    impl_scalar_op1!(
+        impl Sqrt for [f16] {
+            fn sqrt = |x, status| f16::from_f32(Sqrt::sqrt(x.to_f32(), status)),
+        }
     );
     float_op1!(
         /// Rounding operation, as [`f32::round`].
@@ -791,21 +810,28 @@ define_op1!(
     /// # Examples
     /// ```
     /// use jix::Array;
+    /// use jix::error::{ArithmeticErrorKind, ArithmeticErrorMode};
     /// use ndarray::{array, Ix1};
     ///
     /// let a = Array::compact_ndarray(&array![4.0f32, 9.0, 16.0])?;
     /// let result = a.sqrt().to_ndarray()?;
     /// assert_eq!(result, array![2.0, 3.0, 4.0]);
     ///
-    /// // Negative input produces NaN.
-    /// let b = Array::compact_ndarray(&array![-1.0f32])?;
-    /// let result = b.sqrt().to_ndarray::<Ix1>()?;
-    /// assert!(result[[0]].is_nan());
+    /// // A negative input is an invalid operation, which fails the read by default.
+    /// let b = Array::compact_ndarray(&array![-1.0f32])?.sqrt();
+    /// assert!(b.to_ndarray::<Ix1>().is_err());
+    /// // Ignored, it produces NaN.
+    /// let mut ctx = b.read_ctx();
+    /// ctx.set_arithmetic_error_mode(
+    ///     ArithmeticErrorKind::InvalidOperation,
+    ///     ArithmeticErrorMode::Ignore,
+    /// );
+    /// assert!(b.to_ndarray_sub::<Ix1>(&[0..1], &ctx)?[[0]].is_nan());
     /// # Ok::<(), jix::Error>(())
     /// ```
     Sqrt,
     SqrtKernel,
-    crate::scalar::Sqrt::sqrt,
+    crate::scalar::Sqrt::sqrt(status),
     simd: sqrt_bulk,
 );
 define_op1!(
@@ -1597,4 +1623,98 @@ pub(crate) mod tests {
         test_op1_dtype!(abs, |a| a.re.hypot(a.im), complex_f32, op_safe_strategy);
         test_op1_dtype!(abs, |a| a.re.hypot(a.im), complex_f64, op_safe_strategy);
     }
+
+    /// The status of the SIMD bodies against the scalar functions', on every SIMD level: each
+    /// edge case in one lane of a bulk of ordinary values.
+    #[test]
+    fn simd_bodies_status_all_levels() {
+        use super::{Op1Kernel, SqrtKernel};
+        use crate::error::ArithmeticOpStatus;
+        use crate::util::{for_each_simd_level, SimdTestValues, SIMD_TEST_N};
+        use fearless_simd::Simd;
+
+        fn check<S: Simd>(simd: S) {
+            macro_rules! case {
+                ($kernel:ident, $t:ty) => {
+                    for &x in &<$t>::edge_cases() {
+                        let mut scalar = ArithmeticOpStatus::default();
+                        $kernel.apply(x, &mut scalar);
+                        for lane in [0, 9, 40, SIMD_TEST_N - 1] {
+                            let mut xs = [1.5 as $t; SIMD_TEST_N];
+                            xs[lane] = x;
+                            let mut bulk = ArithmeticOpStatus::default();
+                            $kernel.apply_bulk(xs, &mut bulk, simd);
+                            assert_eq!(
+                                bulk,
+                                scalar,
+                                "{} {}: {x} in lane {lane}",
+                                stringify!($kernel),
+                                stringify!($t)
+                            );
+                        }
+                    }
+                };
+            }
+            simd.vectorize(|| {
+                case!(SqrtKernel, f32);
+                case!(SqrtKernel, f64);
+            });
+        }
+        for_each_simd_level!(check);
+    }
+
+    macro_rules! test_sqrt_invalid {
+        ($($t:ident),*) => {$(
+            paste::paste! {
+                #[test]
+                fn [<sqrt_invalid_ $t>]() {
+                    use crate::Array;
+                    use crate::error::{ArithmeticErrorKind, ArithmeticErrorMode, ErrorKind};
+                    #[cfg(feature = "half")]
+                    #[allow(unused_imports)]
+                    use crate::scalar::f16;
+
+                    let c = |x: f64| <f64 as crate::scalar::Cast<$t>>::cast(x);
+                    let n = 1000;
+                    for (x, invalid) in [
+                        (-2.0, true),
+                        (f64::NEG_INFINITY, true),
+                        (-0.25, true),
+                        (-0.0, false),
+                        (f64::NAN, false),
+                        (f64::INFINITY, false),
+                    ] {
+                        // In the bulk part of the loop, and in its scalar tail.
+                        for i in [300, n - 1] {
+                            let mut nd = ndarray::Array1::from_shape_fn(n, |i| c(i as f64 * 0.5));
+                            nd[i] = c(x);
+                            let r = Array::compact_ndarray(&nd).unwrap().sqrt();
+                            let what = format!("sqrt({x}) at {i}");
+                            let res = r.to_ndarray::<ndarray::Ix1>();
+                            if !invalid {
+                                res.expect(&what);
+                                continue;
+                            }
+                            let err = res.expect_err(&what);
+                            assert_eq!(err.kind(), ErrorKind::Arithmetic);
+                            assert_eq!(err.message(), "invalid operation encountered");
+
+                            let mut ctx = r.read_ctx();
+                            ctx.set_arithmetic_error_mode(
+                                ArithmeticErrorKind::InvalidOperation,
+                                ArithmeticErrorMode::Ignore,
+                            );
+                            let res = r
+                                .to_ndarray_sub::<ndarray::Ix1>(&[0..n as u64], &ctx)
+                                .unwrap();
+                            assert!(res[i].is_nan(), "{what}");
+                        }
+                    }
+                }
+            }
+        )*};
+    }
+    test_sqrt_invalid!(f32, f64);
+    #[cfg(feature = "half")]
+    test_sqrt_invalid!(f16);
 }
