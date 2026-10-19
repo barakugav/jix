@@ -400,6 +400,12 @@ impl std::ops::BitOrAssign for ArithmeticOpStatus {
         self.0 |= rhs.0;
     }
 }
+impl From<ArithmeticErrorKind> for ArithmeticOpStatus {
+    #[inline(always)]
+    fn from(error: ArithmeticErrorKind) -> Self {
+        Self(error as u8)
+    }
+}
 
 #[cfg(test)]
 mod tests {

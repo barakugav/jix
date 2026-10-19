@@ -218,7 +218,7 @@ macro_rules! define_op2 {
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident,
-        crate::scalar::$trait:ident::$kernel_fn:ident,
+        crate::scalar::$trait:ident::$kernel_fn:ident $(($status:ident))?,
         simd: $bulk_fn:ident,
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
@@ -229,9 +229,12 @@ macro_rules! define_op2 {
             T2: Copy + 'static,
         {
             type Output = <T1 as crate::scalar::$trait<T2>>::Output;
+
             #[inline(always)]
-            fn apply(&self, a: T1, b: T2, _status: &mut ArithmeticOpStatus) -> Self::Output {
-                <T1 as crate::scalar::$trait<T2>>::$kernel_fn(a, b)
+            fn apply(&self, a: T1, b: T2, status: &mut ArithmeticOpStatus) -> Self::Output {
+                { let _ = status; } // suppress unused
+                $(let $status = status;)?
+                <T1 as crate::scalar::$trait<T2>>::$kernel_fn(a, b $(, $status)?)
             }
 
             #[inline(always)]
@@ -239,10 +242,12 @@ macro_rules! define_op2 {
                 &self,
                 a: [T1; N],
                 b: [T2; N],
-                _status: &mut ArithmeticOpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [Self::Output; N] {
-                <T1 as crate::scalar::$trait<T2>>::$bulk_fn(a, b, simd)
+                { let _ = status; } // suppress unused
+                $(let $status = status;)?
+                <T1 as crate::scalar::$trait<T2>>::$bulk_fn(a, b, $($status,)? simd)
             }
         }
         $(#[$meta])*

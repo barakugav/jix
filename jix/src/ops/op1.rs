@@ -161,7 +161,7 @@ macro_rules! define_op1 {
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident,
-        crate::scalar::$trait:ident::$kernel_fn:ident,
+        crate::scalar::$trait:ident::$kernel_fn:ident $(($status:ident))?,
         simd: $bulk_fn:ident,
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
@@ -173,18 +173,22 @@ macro_rules! define_op1 {
             type Output = <T as crate::scalar::$trait>::Output;
 
             #[inline(always)]
-            fn apply(&self, x: T, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
-                <T as crate::scalar::$trait>::$kernel_fn(x)
+            fn apply(&self, x: T, status: &mut ArithmeticOpStatus) -> Self::Output {
+                { let _ = status; } // suppress unused
+                $(let $status = status;)?
+                <T as crate::scalar::$trait>::$kernel_fn(x $(, $status)?)
             }
 
             #[inline(always)]
             fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
                 &self,
                 xs: [T; N],
-                _status: &mut crate::error::ArithmeticOpStatus,
+                status: &mut ArithmeticOpStatus,
                 simd: S,
             ) -> [Self::Output; N] {
-                <T as crate::scalar::$trait>::$bulk_fn(xs, simd)
+                { let _ = status; } // suppress unused
+                $(let $status = status;)?
+                <T as crate::scalar::$trait>::$bulk_fn(xs, $($status,)? simd)
             }
         }
         $(#[$meta])*
@@ -483,6 +487,56 @@ pub(crate) mod _traits {
                 }
             );
         };
+        (
+            $(#[$trait_meta:meta])* $Trait:ident,
+            $(#[$fn_meta:meta])* $f:ident(status),
+            $f_bulk:ident,
+            errors = |$x:ident, $r:ident| { $($kind:ident: $cond:expr),+ $(,)? }
+        ) => {
+            define_scalar_op1_trait!(
+                $(#[$trait_meta])* $Trait,
+                $(#[$fn_meta])* $f(status),
+                bulk_fn: $f_bulk,
+            );
+            impl_scalar_op1!(
+                impl $Trait for [f32, f64] {
+                    fn $f = |$x, status| {
+                        #[allow(unused_variables)]
+                        let $r = $x.$f();
+                        if $($cond)||+ {
+                            *status |= float_op1!(@error $x, $r, $($kind: $cond),+);
+                        }
+                        $r
+                    },
+                }
+            );
+            #[cfg(feature = "half")]
+            impl_scalar_op1!(
+                impl $Trait for [f16] {
+                    fn $f = |x, status| {
+                        let r = f16::from_f32(x.to_f32().$f());
+                        #[allow(unused_variables)]
+                        let ($x, $r) = (x.to_f32(), r.to_f32());
+                        if $($cond)||+ {
+                            *status |= float_op1!(@error $x, $r, $($kind: $cond),+);
+                        }
+                        r
+                    },
+                }
+            );
+        };
+        // The rare error, inline(never)
+        (@error $x:ident, $r:ident, $($kind:ident: $cond:expr),+) => {{
+            #[cold]
+            #[inline(never)]
+            #[allow(unused_variables)]
+            fn error($x: f64, $r: f64) -> ArithmeticOpStatus {
+                let mut status = ArithmeticOpStatus::default();
+                $(status.set_if(ArithmeticErrorKind::$kind, $cond);)+
+                status
+            }
+            error($x.into(), $r.into())
+        }};
     }
     float_op1!(
         /// Flooring operation, as [`f32::floor`].
