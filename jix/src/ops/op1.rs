@@ -323,8 +323,8 @@ pub(crate) mod _traits {
         /// via `hypot` for numerical stability. The output dtype is the real component type
         /// (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
         ///
-        /// For **signed integer** types, `MIN.abs()` overflows: `(-128i8).abs()` wraps back
-        /// to `i8::MIN` in release builds and panics in debug builds.
+        /// For **signed integer** types `MIN.abs()` wraps back to `MIN`: `(-128i8).abs()` is
+        /// `-128`.
         ///
         /// Floating-point semantics follow [`f32::abs`].
         Abs,
@@ -333,8 +333,14 @@ pub(crate) mod _traits {
         bulk_fn: abs_bulk,
     );
     impl_scalar_op1!(
-        impl Abs for [i8, i16, i32, i64, f32, f64] {
+        impl Abs for [f32, f64] {
             fn abs = |x| x.abs(),
+            fn abs_bulk = |x| x.abs(),
+        }
+    );
+    impl_scalar_op1!(
+        impl Abs for [i8, i16, i32, i64] {
+            fn abs = |x| x.wrapping_abs(),
             fn abs_bulk = |x| x.abs(),
         }
     );
@@ -364,8 +370,7 @@ pub(crate) mod _traits {
         ///
         /// The output dtype is the input dtype.
         ///
-        /// For **integer** types squaring can overflow, following the semantics of the `*`
-        /// operator: it wraps in release builds and panics in debug builds.
+        /// For **integer** types the result wraps on overflow (two's complement).
         Square,
         /// Compute the square of the value.
         square,
@@ -373,14 +378,20 @@ pub(crate) mod _traits {
     );
     // SIMD for the types with SIMD mul
     impl_scalar_op1!(
-        impl Square for [f32, f64, i16, i32, i64, u8, u16, u32, u64] {
+        impl Square for [f32, f64] {
             fn square = |x| x * x,
             fn square_bulk = |x| x * x,
         }
     );
     impl_scalar_op1!(
+        impl Square for [i16, i32, i64, u8, u16, u32, u64] {
+            fn square = |x| x.wrapping_mul(x),
+            fn square_bulk = |x| x * x,
+        }
+    );
+    impl_scalar_op1!(
         impl Square for [i8] {
-            fn square = |x| x * x,
+            fn square = |x| x.wrapping_mul(x),
         }
     );
     // In f32 without FP16
@@ -415,9 +426,8 @@ pub(crate) mod _traits {
     define_scalar_op1_trait!(
         /// Negation operation, like [`core::ops::Neg`].
         ///
-        /// For **integer** types the result is the two's-complement negation.
-        /// Negating the minimum representable value (e.g. `i32::MIN`) overflows:
-        /// it wraps in release builds and panics in debug builds.
+        /// For **integer** types the result is the two's-complement negation, which wraps:
+        /// `-i32::MIN` is `i32::MIN`.
         ///
         /// For **complex** types both components are negated independently:
         /// `-(a + bi) = -a - bi`.
@@ -429,8 +439,14 @@ pub(crate) mod _traits {
         bulk_fn: neg_bulk,
     );
     impl_scalar_op1!(
-        impl Neg for [f32, f64, i8, i16, i32, i64] {
+        impl Neg for [f32, f64] {
             fn neg = |x| -x,
+            fn neg_bulk = |x| -x,
+        }
+    );
+    impl_scalar_op1!(
+        impl Neg for [i8, i16, i32, i64] {
+            fn neg = |x| x.wrapping_neg(),
             fn neg_bulk = |x| -x,
         }
     );
@@ -1311,15 +1327,23 @@ pub(crate) mod tests {
 
     pub(crate) use {test_op1, test_op1_dtype};
 
+    test_op1!(neg, |a| a.wrapping_neg(), [i8, i16, i32, i64], any_strategy);
+    test_op1!(abs, |a| a.wrapping_abs(), [i8, i16, i32, i64], any_strategy);
     test_op1!(
         neg,
         |a| -a,
-        [i8, i16, i32, i64, f32, f64],
+        [f32, f64],
         op_safe_strategy,
         #[cfg(feature = "half")]
         [f16],
         #[cfg(feature = "num-complex")]
         [complex_f32, complex_f64]
+    );
+    test_op1!(
+        square,
+        |a| a.wrapping_mul(a),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
     );
     #[test]
     fn square_concrete() {

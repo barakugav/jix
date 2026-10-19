@@ -526,18 +526,24 @@ pub(crate) mod _traits {
 
     macro_rules! impl_arith {
         (
-            $Trait:ident::$f:ident, $op:tt, [$($scalar:ty),*],
+            $Trait:ident::$f:ident, $op:tt, $wrapping_f:ident, [$($scalar:ty),*],
             simd: $f_bulk:ident, [$($simd:ty),*]
         ) => {
             impl_scalar_op2!(
-                impl $Trait for [$($simd),*] {
+                impl $Trait for [f32, f64] {
                     fn $f = |a, b| a $op b,
                     fn $f_bulk = |a, b| a $op b,
                 }
             );
             impl_scalar_op2!(
+                impl $Trait for [$($simd),*] {
+                    fn $f = |a, b| a.$wrapping_f(b),
+                    fn $f_bulk = |a, b| a $op b,
+                }
+            );
+            impl_scalar_op2!(
                 impl $Trait for [$($scalar),*] {
-                    fn $f = |a, b| a $op b,
+                    fn $f = |a, b| a.$wrapping_f(b),
                 }
             );
             // In f32 without FP16, as half's operators do, but inlined: theirs call a software
@@ -569,20 +575,20 @@ pub(crate) mod _traits {
         };
     }
     impl_arith!(
-        Add::add, +, [],
-        simd: add_bulk, [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64]
+        Add::add, +, wrapping_add, [],
+        simd: add_bulk, [i8, i16, i32, i64, u8, u16, u32, u64]
     );
     impl_arith!(
-        Sub::sub, -, [],
-        simd: sub_bulk, [f32, f64, i8, i16, i32, i64, u8, u16, u32, u64]
+        Sub::sub, -, wrapping_sub, [],
+        simd: sub_bulk, [i8, i16, i32, i64, u8, u16, u32, u64]
     );
     impl_arith!(
-        Mul::mul, *, [i8], // i8 auto-vectorized scalar is faster
-        simd: mul_bulk, [f32, f64, i16, i32, i64, u8, u16, u32, u64]
+        Mul::mul, *, wrapping_mul, [i8], // i8 auto-vectorized scalar is faster
+        simd: mul_bulk, [i16, i32, i64, u8, u16, u32, u64]
     );
     impl_arith!(
-        Div::div, /, [i8, i16, i32, i64, u8, u16, u32, u64], // integers have no SIMD division
-        simd: div_bulk, [f32, f64]
+        Div::div, /, wrapping_div, [i8, i16, i32, i64, u8, u16, u32, u64], // no SIMD division
+        simd: div_bulk, []
     );
     impl_scalar_op2!(
         impl DivideTrunc for [i8, i16, i32, i64, u8, u16, u32, u64] {
@@ -1494,12 +1500,28 @@ pub(crate) mod tests {
 
     pub(crate) use {test_op2, test_op2_dtype};
 
-    // sub excludes unsigned types: independent random arrays don't guarantee a >= b,
-    // and unsigned underflow panics in debug mode. See sub_u32 below.
+    test_op2!(
+        add,
+        |a, b| a.wrapping_add(b),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
+    );
+    test_op2!(
+        sub,
+        |a, b| a.wrapping_sub(b),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
+    );
+    test_op2!(
+        mul,
+        |a, b| a.wrapping_mul(b),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
+    );
     test_op2!(
         add,
         |a, b| a + b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
+        [f32, f64],
         op_safe_strategy,
         #[cfg(feature = "half")]
         [f16],
@@ -2027,21 +2049,6 @@ pub(crate) mod tests {
         );
         assert!(result[4].is_nan());
         assert_eq!(result[7], f64::INFINITY);
-    }
-
-    // sub_u32: a = c + b guarantees a - b == c with no unsigned underflow.
-    proptest::proptest! {
-        #[test]
-        fn sub_u32(
-            ((nd_c, _zc), (nd_b, zb)) in crate::util::arrays2_strategy_generic::<u32>(
-                crate::util::shape_strategy(),
-                <u32 as crate::util::ScalarStrategy>::op_safe_strategy()
-            )
-        ) {
-            let nd_a = &nd_c + &nd_b;
-            let za = crate::Array::compact_ndarray(&nd_a).unwrap();
-            crate::util::assert_array_matches(&(za - zb), &nd_c);
-        }
     }
 
     // three_arrays_f32: (za + zb) * zc lazy chain equals (&a + &b) * &c.
