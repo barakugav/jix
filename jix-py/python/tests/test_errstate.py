@@ -4,12 +4,13 @@ integer power and wrapping integer arithmetic. Mirrors the tests in jix/src/ops/
 jix/src/ops/op2.rs.
 """
 
+import sys
 import threading
 import warnings
 
 import numpy as np
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.strategies import DataObject
 from tests_util import carrays2_mixed_strategy, comparable_element_strategy, ints, op_safe_element_strategy, uints
@@ -179,6 +180,7 @@ def test_modes_are_per_thread():
 
 @pytest.mark.parametrize("jix_fn", _INT_DIVISIONS, ids=lambda f: f.__name__)
 @pytest.mark.parametrize("dtype", ints + uints)
+@settings(deadline=None)  # the reference is a Python loop over up to thousands of elements
 @given(st.data())
 def test_divide_by_zero_random(jix_fn, dtype, data: DataObject):
     # Zero divisors in about a third of the elements, random shapes and block shapes.
@@ -254,6 +256,16 @@ def _errors_match_numpy(jix_op, np_op, *operands, fills=(1.5, 3.0)):
             arrays.append(a)
         with np.errstate(all="raise", under="ignore"):
             expected = _error_kind(np_op, *arrays)
+        if sys.platform == "darwin":
+            # numpy's float errors are off on macOS: it misses the 'invalid' of a NaN made by `fmod`
+            # (see the darwin xfails in numpy's test_umath.py), and `remainder` reports the overflow
+            # of the quotient it drops (`remainder(1.0, smallest_subnormal)`, which is exactly 0)
+            with np.errstate(all="ignore"):
+                r = np_op(*arrays)[i]
+            if expected is None and np.isnan(r) and not any(np.isnan(x) for x in operands):
+                expected = "invalid"
+            if expected == "over" and np.isfinite(r):
+                expected = None
         with jix.errstate(all="raise"):
             actual = _error_kind(lambda *a: jix_op(*map(jix.compact, a)).numpy(), *arrays)
         assert actual == expected, (operands, i)

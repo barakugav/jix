@@ -60,29 +60,29 @@ impl Operand {
         if !is_np_generic {
             let mut scalar = None;
             if let Ok(value) = value.cast::<PyBool>() {
-                scalar = Some(Scalar::Bool(value.extract()?));
+                scalar = Some((Scalar::Bool(value.extract()?), Some(Precision::P1)));
             } else if let Ok(value) = value.cast::<PyInt>() {
                 if let Ok(value) = value.extract::<i64>() {
-                    scalar = Some(Scalar::Int(value));
+                    scalar = Some((Scalar::Int(value), None));
                 } else if let Ok(value) = value.extract::<u64>() {
-                    scalar = Some(Scalar::UInt(value));
+                    scalar = Some((Scalar::UInt(value), None));
                 } else {
-                    return Err(PyErr::new::<PyOverflowError, _>(
-                        "Integer value is too large to fit in 64 bits",
-                    ));
+                    let value = value.extract::<f64>()?; // too big for 64bit int, use f64
+                    scalar = Some((Scalar::Float(value), Some(Precision::P8)));
                 }
             } else if let Ok(value) = value.cast::<PyFloat>() {
-                scalar = Some(Scalar::Float(value.extract()?));
+                scalar = Some((Scalar::Float(value.extract()?), None));
             } else if let Ok(value) = value.cast::<PyComplex>() {
-                scalar = Some(Scalar::Complex(Complex {
+                let value = Complex {
                     re: value.real(),
                     im: value.imag(),
-                }));
+                };
+                scalar = Some((Scalar::Complex(value), None));
             }
-            if let Some(scalar) = scalar {
+            if let Some((scalar, precision)) = scalar {
                 return Ok(Self::Scalar {
                     value: scalar,
-                    precision: None,
+                    precision,
                     shape: DimArray::new(),
                     params,
                 });
@@ -152,7 +152,7 @@ impl Operand {
                     let im = item.getattr("imag")?.extract::<f64>()?;
                     (Scalar::Complex(Complex::new(re, im)), Some(Precision::P8))
                 }
-                ScalarKind::Bool => (Scalar::Bool(item.extract::<bool>()?), None),
+                ScalarKind::Bool => (Scalar::Bool(item.extract::<bool>()?), Some(Precision::P1)),
             };
             return Ok(Self::Scalar {
                 value,
@@ -200,11 +200,15 @@ impl Operand {
     pub(crate) fn cast(self, kind: ScalarKind) -> PyResult<Self> {
         if let Self::Scalar {
             value,
-            precision: _,
+            precision,
             shape,
             params,
         } = self
         {
+            // a python int will be cast to the target kind, check its wont overflow
+            if precision.is_none() {
+                value.check_int_in_bounds(kind)?;
+            }
             return Ok(Self::Scalar {
                 value: value.cast(kind)?,
                 precision: scalar_kind_to_rank_precision(kind).1,
@@ -363,6 +367,40 @@ impl Scalar {
             Operand::PyArray(_) | Operand::Array(_) => {
                 Err(PyErr::new::<PyTypeError, _>("expected a scalar value"))
             }
+        }
+    }
+
+    /// Raise an `OverflowError` if this is an integer value that does not fit in the integer type
+    /// `kind`. Non-integer values and non-integer targets always pass.
+    fn check_int_in_bounds(&self, kind: ScalarKind) -> PyResult<()> {
+        let value = match *self {
+            Self::Int(value) => i128::from(value),
+            Self::UInt(value) => i128::from(value),
+            Self::Bool(_) | Self::Float(_) | Self::Complex(_) => return Ok(()),
+        };
+        let in_bounds = match kind {
+            ScalarKind::I8 => i8::try_from(value).is_ok(),
+            ScalarKind::I16 => i16::try_from(value).is_ok(),
+            ScalarKind::I32 => i32::try_from(value).is_ok(),
+            ScalarKind::I64 => i64::try_from(value).is_ok(),
+            ScalarKind::U8 => u8::try_from(value).is_ok(),
+            ScalarKind::U16 => u16::try_from(value).is_ok(),
+            ScalarKind::U32 => u32::try_from(value).is_ok(),
+            ScalarKind::U64 => u64::try_from(value).is_ok(),
+            ScalarKind::F16
+            | ScalarKind::F32
+            | ScalarKind::F64
+            | ScalarKind::ComplexF32
+            | ScalarKind::ComplexF64
+            | ScalarKind::Bool => true,
+        };
+        if in_bounds {
+            Ok(())
+        } else {
+            Err(PyOverflowError::new_err(format!(
+                "Python integer {value} out of bounds for {}",
+                Dtype::new_scalar(kind)
+            )))
         }
     }
 

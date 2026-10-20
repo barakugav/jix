@@ -16,7 +16,12 @@ Promotion rules (`jix-py/src/ops/common/dtype_promote.rs`):
 
 Scalars carry a precision when the user passed a typed numpy scalar
 (``np.int64(5)``) and ``None`` when they passed an untyped Python value
-(``5``, ``5.0``, ``True``). An ``None`` precision matches any same-rank impl.
+(``5``, ``5.0``, ``True``). An ``None`` precision matches any same-rank impl, and
+an untyped Python int also matches unsigned impls (it has no signedness). Its
+value must fit the dtype dispatch picks, otherwise ``OverflowError`` is raised.
+If every operand is untyped they all default to 64-bit; otherwise, if no float
+or complex operand is typed, the untyped Python floats/complexes default to
+32-bit (``i8 + 1.5`` is f32).
 
 This file exists in part to catch a regression where ``ScalarKind::I64``
 was tagged ``Precision::P4`` in ``operand.rs`` instead of ``P8``: an
@@ -320,23 +325,39 @@ _PY_SCALAR_CASES = [
     (np.int8, 5, np.int8),
     (np.int32, 5, np.int32),
     (np.int64, 5, np.int64),
-    # Python int with uint array: Int rank > UInt rank -> can't land in UInt
-    # impls (src_rank > dst_rank fails Safe). First int impl that fits the
-    # array's u8 input is i16 (u8 -> i16 needs P2 <= P2: ok).
-    (np.uint8, 5, np.int16),
+    # Python int with uint array: an untyped int has no signedness, so it fills
+    # the unsigned impl of the array's own dtype.
+    (np.uint8, 5, np.uint8),
+    (np.uint16, 5, np.uint16),
+    (np.uint32, 5, np.uint32),
+    (np.uint64, 5, np.uint64),
+    # Python int with bool array: bool -> u8 is safe and the int fills u8 too.
+    (np.bool_, 5, np.uint8),
     # Python int with float array: untyped scalar's precision is None, so the
     # rule short-circuits via `src_precision.is_none()` -- the scalar matches
     # whichever float impl the array already fits into.
     (np.float32, 5, np.float32),
     (np.float64, 5, np.float64),
-    # Python float: rank Float.
+    # Python float: rank Float. With a typed float operand it stays untyped and
+    # follows that operand's precision.
+    (np.float16, 1.5, np.float16),
     (np.float32, 1.5, np.float32),
     (np.float64, 1.5, np.float64),
+    # Without a typed float/complex operand it defaults to 32-bit (f32), not the
+    # narrowest float that fits the array.
+    (np.bool_, 1.5, np.float32),
+    (np.uint8, 1.5, np.float32),
+    (np.int8, 1.5, np.float32),
+    (np.int16, 1.5, np.float32),
     (np.int32, 1.5, np.float64),  # int P4 -> f32 fails (P8 <= P4 false), -> f64
-    # Python complex.
+    # Python complex: same rules, the 32-bit default is Complex<f32>.
     (np.complex64, 1 + 2j, np.complex64),
     (np.complex128, 1 + 2j, np.complex128),
+    (np.float16, 1 + 2j, np.complex64),  # f16 -> c64 ok
     (np.float32, 1 + 2j, np.complex64),  # f32 -> c64 same precision ok
+    (np.float64, 1 + 2j, np.complex128),
+    (np.int8, 1 + 2j, np.complex64),
+    (np.int32, 1 + 2j, np.complex128),
 ]
 
 
@@ -348,6 +369,173 @@ def test_binary_array_python_scalar_promotion(arr_dtype, scalar, expected):
         f"add({arr_dtype.__name__}, py {type(scalar).__name__}={scalar!r}): "
         f"got {result.dtype}, expected {np.dtype(expected)}"
     )
+
+
+def test_python_float_defaults_to_f32_next_to_typed_int_scalar():
+    """A typed numpy int scalar is not a float operand, so the Python float still defaults to f32."""
+    result = jix.add(np.int8(1), 1.5)
+    assert result.dtype == np.float32
+    np.testing.assert_array_equal(result.numpy(), np.float32(2.5))
+
+
+def test_python_scalars_only_default_to_64_bit():
+    """With only untyped operands the 64-bit default applies first, so the f32 default never does."""
+    assert jix.add(1, 1.5).dtype == np.float64
+    assert jix.add(1, 1j).dtype == np.complex128
+    assert jix.sqrt(2.0).dtype == np.float64
+
+
+@pytest.mark.parametrize("b", [True, np.bool_(True)])
+def test_bool_scalar_has_fixed_dtype(b):
+    """A bool scalar (Python or numpy) has a single width, so it is typed like a bool array and
+    never triggers the all-untyped 64-bit default: True + 1 behaves like bool_arr + 1."""
+    result = jix.add(b, 1)
+    assert result.dtype == np.uint8
+    np.testing.assert_array_equal(result.numpy(), 2)
+    assert jix.add(b, 1.5).dtype == np.float32
+    assert jix.add(b, True).dtype == np.uint8
+
+
+def test_python_float_default_keeps_f32_precision():
+    """In f16, 1.0001 rounds to 1.0 and 1e10 overflows to inf. f32 holds both apart."""
+    a = jix.compact(np.array([1, 0], dtype=np.int8))
+    np.testing.assert_array_equal(jix.equal(a, 1.0001).numpy(), [False, False])
+    np.testing.assert_array_equal(jix.add(a, 1e10).numpy(), np.array([1e10, 1e10], dtype=np.float32))
+
+
+# ---------------------------------------------------------------------------
+# An untyped Python int adopts the integer dtype dispatch picked for it, so its
+# value must fit that dtype. Otherwise an OverflowError is raised rather than
+# silently wrapping the scalar (like numpy). No special cases for comparisons
+# or clamp: they raise too.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "op, arr_dtype, scalars",
+    [
+        (jix.add, np.int8, (1000,)),
+        (jix.add, np.int8, (-1000,)),
+        (jix.add, np.int16, (70000,)),
+        (jix.add, np.int32, (2**40,)),
+        (jix.add, np.int8, (2**63,)),
+        (jix.add, np.int64, (2**63,)),
+        (jix.add, np.bool_, (1000,)),
+        (jix.subtract, np.int8, (1000,)),
+        (jix.multiply, np.int16, (-70000,)),
+        (jix.equal, np.int8, (1000,)),
+        (jix.less, np.int32, (2**40,)),
+        (jix.maximum, np.int8, (1000,)),
+        (jix.bitwise_or, np.int8, (0x100,)),
+        (jix.clamp, np.int8, (-1000, 1000)),
+    ],
+)
+def test_python_int_out_of_bounds_raises(op, arr_dtype, scalars):
+    a = jix.compact(np.array([0, 1, 1], dtype=arr_dtype))
+    with pytest.raises(OverflowError, match="out of bounds"):
+        op(a, *scalars)
+
+
+@pytest.mark.parametrize(
+    "arr_dtype, scalar",
+    [
+        (np.int8, 127),
+        (np.int8, -128),
+        (np.int16, -32768),
+        (np.int32, 2**31 - 1),
+        (np.int64, 2**63 - 1),
+        (np.int64, -(2**63)),
+    ],
+)
+def test_python_int_at_bounds_is_kept(arr_dtype, scalar):
+    a_np = np.array([0, 0], dtype=arr_dtype)
+    result = jix.add(jix.compact(a_np), scalar)
+    assert result.dtype == np.dtype(arr_dtype)
+    np.testing.assert_array_equal(result.numpy(), a_np + scalar)
+
+
+def test_python_int_keeps_uint64_exact():
+    """u64 + Python int stays u64. It used to promote to f64 and lose precision above 2**53."""
+    a_np = np.array([2**53, 2**64 - 2], dtype=np.uint64)
+    result = jix.add(jix.compact(a_np), 1)
+    assert result.dtype == np.uint64
+    np.testing.assert_array_equal(result.numpy(), a_np + np.uint64(1))
+
+
+@pytest.mark.parametrize(
+    "op, arr_dtype, scalar, expected",
+    [
+        (jix.bitwise_and, np.uint64, 1, [0, 1, 0]),
+        (jix.bitwise_and, np.uint8, 0x0F, [0, 1, 2]),
+        (jix.bitwise_left_shift, np.uint8, 1, [0, 2, 4]),
+        (jix.bitwise_rotate_left, np.uint8, 1, [0, 2, 4]),
+        (jix.maximum, np.uint16, 1, [1, 1, 2]),
+        (jix.equal, np.uint32, 1, [False, True, False]),
+    ],
+)
+def test_python_int_fills_unsigned_impl(op, arr_dtype, scalar, expected):
+    a = jix.compact(np.array([0, 1, 2], dtype=arr_dtype))
+    result = op(a, scalar)
+    if result.dtype != np.bool_:
+        assert result.dtype == np.dtype(arr_dtype)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+@pytest.mark.parametrize(
+    "op, scalar",
+    [(jix.add, -1), (jix.add, 256), (jix.subtract, -1), (jix.equal, 300), (jix.less, -1)],
+)
+def test_python_int_out_of_unsigned_bounds_raises(op, scalar):
+    """The int lands in the u8 impl, so a value outside [0, 255] raises - for comparisons too."""
+    a = jix.compact(np.array([0, 1, 2], dtype=np.uint8))
+    with pytest.raises(OverflowError, match="out of bounds"):
+        op(a, scalar)
+
+
+def test_typed_scalar_out_of_bounds_promotes_instead_of_raising():
+    """The bounds check applies only to untyped Python ints. A typed numpy scalar carries its own
+    dtype, which promotion respects."""
+    a = jix.compact(np.array([0, 1], dtype=np.int8))
+    result = jix.add(a, np.int16(1000))
+    assert result.dtype == np.int16
+    np.testing.assert_array_equal(result.numpy(), [1000, 1001])
+
+
+@pytest.mark.parametrize(
+    "arr_dtype, scalar, expected",
+    [
+        (np.float64, 2**64, np.float64),
+        (np.float64, -(2**64), np.float64),
+        # It is a typed f64, so it widens narrower arrays to f64 too.
+        (np.float32, 10**30, np.float64),
+        (np.float16, 2**70, np.float64),
+        (np.uint8, 2**70, np.float64),
+        (np.int64, 2**70, np.float64),
+    ],
+)
+def test_python_int_wider_than_64_bits_is_f64(arr_dtype, scalar, expected):
+    """No integer dtype holds it, so it is an f64 scalar (like `np.float64(scalar)`)."""
+    a_np = np.array([0, 1], dtype=arr_dtype)
+    result = jix.add(jix.compact(a_np), scalar)
+    assert result.dtype == np.dtype(expected)
+    np.testing.assert_array_equal(result.numpy(), a_np.astype(expected) + np.dtype(expected).type(float(scalar)))
+
+
+def test_python_int_wider_than_64_bits_only_scalars():
+    assert jix.add(2**70, 1).dtype == np.float64
+    np.testing.assert_array_equal(jix.add(2**70, 1).numpy(), float(2**70) + 1)
+
+
+def test_python_int_wider_than_f64_raises():
+    a = jix.compact(np.array([1.0, 2.0]))
+    with pytest.raises(OverflowError):
+        jix.add(a, 10**400)
+
+
+def test_python_int_into_float_is_not_bounds_checked():
+    """Only integer targets are checked: a Python int cast to a float rounds or overflows to inf."""
+    a = jix.compact(np.array([1.0, 2.0], dtype=np.float16))
+    np.testing.assert_array_equal(jix.add(a, 70000).numpy(), [np.inf, np.inf])
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +596,32 @@ def test_divide_promotes_integers_to_float():
     assert result.dtype == np.float64
 
 
+def test_integer_only_inputs_skip_f16():
+    """Integer-only inputs to a float-only op default to at least f32, like untyped Python floats:
+    f16 is used only when some operand is already a float."""
+    u8_np = np.array([1, 2, 200], dtype=np.uint8)
+    u8 = jix.compact(u8_np)
+    i8 = jix.compact(np.array([1, 2, 3], dtype=np.int8))
+    assert jix.divide(u8, 2).dtype == np.float32
+    assert jix.divide(u8, 2.0).dtype == np.float32
+    assert jix.divide(i8, i8).dtype == np.float32
+    assert jix.sqrt(u8).dtype == np.float32
+    np.testing.assert_array_equal(jix.sqrt(u8).numpy(), np.sqrt(u8_np.astype(np.float32)))
+    assert jix.exp(jix.compact(np.array([True, False]))).dtype == np.float32
+    assert jix.sqrt(np.int8(4)).dtype == np.float32
+    assert jix.sqrt(True).dtype == np.float32
+    # Wider ints still go to the float that holds them.
+    assert jix.sqrt(jix.compact(np.array([4], dtype=np.int32))).dtype == np.float64
+
+
+def test_float_operand_keeps_f16():
+    """With an f16 operand present, integer operands still promote into f16."""
+    i8 = jix.compact(np.array([1, 2], dtype=np.int8))
+    f16 = jix.compact(np.array([1.0, 2.0], dtype=np.float16))
+    assert jix.add(i8, f16).dtype == np.float16
+    assert jix.divide(i8, np.float16(2)).dtype == np.float16
+
+
 def test_divide_floor_keeps_float_dtypes():
     """divide_floor's dispatch has the floats: float inputs keep their dtype."""
     a = jix.compact(np.array([7.5, -7.5], dtype=np.float32))
@@ -420,9 +634,10 @@ def test_divide_floor_keeps_float_dtypes():
 # ---------------------------------------------------------------------------
 # power dispatch table (base, exponent) pairs:
 #   integers: (u8,u8) (i8,u8) (u16,u16) (i16,u16) (u32,u32) (i32,u32) (u64,u32) (i64,u32)
-#   floats:   (f32,i32) (f32,f32) (f64,i32) (f64,f64)
-# Integer bases require an *unsigned* exponent slot (widest is u32). Because the
-# dispatch table has no (i8,i8)/(u64,u64)/... entry, those inputs promote to float.
+#             (i8,i8) (i16,i16) (i32,i32) (i64,i64)
+#   floats:   (f16,i32) (f16,f16) (f32,i32) (f32,f32) (f64,i32) (f64,f64)
+# The widest unsigned exponent slot is u32, and no signed slot holds a u64, so a
+# u64 exponent, or a u64 base with a signed exponent, promotes to float.
 # ---------------------------------------------------------------------------
 
 
@@ -474,14 +689,42 @@ def test_power_promotes_uint64_exponent_to_float64():
     np.testing.assert_array_equal(result.numpy(), np.array([4.0, 9.0, 16.0], dtype=np.float64))
 
 
-def test_power_signed_scalar_exponent_keeps_integer():
-    """A plain Python int is signed and fills the signed exponent slot: power(int32_array, 3)
-    stays int32, like an unsigned exponent."""
+def test_power_python_int_exponent_keeps_integer_base():
+    """A plain Python int has no signedness, so it fills the unsigned exponent slot:
+    power(int32_array, 3) stays int32, like a typed signed or unsigned exponent."""
     a = jix.compact(np.array([2, 3, 4], dtype=np.int32))
     assert jix.power(a, 3).dtype == np.int32
-    assert jix.power(a, np.int32(3)).dtype == np.int32
-    assert jix.power(a, -1).dtype == np.int32
+    np.testing.assert_array_equal(jix.power(a, 3).numpy(), [8, 27, 64])
     assert jix.power(a, np.uint32(3)).dtype == np.int32
+    assert jix.power(a, np.int32(3)).dtype == np.int32
+
+
+def test_power_python_int_base_keeps_unsigned_exponent_dtype():
+    """A Python int base fills the base slot of the exponent's own dtype: 2 ** u8 -> u8."""
+    b = jix.compact(np.array([0, 1, 7], dtype=np.uint8))
+    result = jix.power(2, b)
+    assert result.dtype == np.uint8
+    np.testing.assert_array_equal(result.numpy(), [1, 2, 128])
+
+
+def test_power_f16_base_keeps_f16():
+    """f16 has its own pairs (computed in f32), so an f16 base with a Python scalar exponent or a
+    small int exponent stays f16. A Python float base follows a typed f16 exponent."""
+    a_np = np.array([1.0, 2.0, 4.0], dtype=np.float16)
+    a = jix.compact(a_np)
+    for exponent in (3, 1.5, np.int8(3), jix.compact(np.array([1, 2, 3], dtype=np.uint8))):
+        result = jix.power(a, exponent)
+        assert result.dtype == np.float16
+    np.testing.assert_array_equal(jix.power(a, 3).numpy(), a_np**3)
+    np.testing.assert_array_equal(jix.power(a, 1.5).numpy(), a_np ** np.float16(1.5))
+    assert jix.power(2.0, a).dtype == np.float16
+
+
+def test_power_negative_python_int_exponent_raises_for_integer_base():
+    """A negative Python int does not fit the unsigned exponent slot of an integer base."""
+    a = jix.compact(np.array([2, 3, 4], dtype=np.int32))
+    with pytest.raises(OverflowError, match="out of bounds"):
+        jix.power(a, -1)
 
 
 def test_power_scalar_exponent_keeps_float_base_narrow():

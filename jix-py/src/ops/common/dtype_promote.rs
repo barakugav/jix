@@ -60,9 +60,17 @@ pub(crate) enum CastKind {
 
 impl CastKind {
     pub(crate) fn is_cast_allowed(&self, src: (Rank, Option<Precision>), dst: ScalarKind) -> bool {
-        let (src_rank, src_precision) = src;
+        let (mut src_rank, src_precision) = src;
         let (dst_rank, dst_precision) = scalar_kind_to_rank_precision(dst);
         let dst_precision = dst_precision.unwrap();
+
+        let is_python_scalar = src_precision.is_none();
+        if is_python_scalar {
+            // a python int is not signed and not unsigned, it can fit both
+            if src_rank == Rank::Int && dst_rank == Rank::UInt {
+                src_rank = Rank::UInt;
+            }
+        }
 
         match self {
             CastKind::None => {

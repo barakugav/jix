@@ -192,6 +192,7 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
             .ok();
 
         if let Some(mut in_dtypes) = in_dtypes {
+            // if all operands have no precision (all are python scalars), set precision to 8 (i64, f64)
             let all_without_precision = in_dtypes
                 .iter()
                 .all(|(_rank, precision)| precision.is_none());
@@ -199,14 +200,30 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
                 in_dtypes = in_dtypes.map(|(rank, precision)| {
                     debug_assert!(precision.is_none());
                     let precision = match rank {
-                        Rank::Bool => None,
+                        Rank::Bool => Some(Precision::P1),
                         Rank::UInt | Rank::Int | Rank::Float | Rank::Complex => Some(Precision::P8),
                     };
                     (rank, precision)
                 });
             }
 
+            let has_float16_input = in_dtypes.iter().any(|(rank, precision)| {
+                matches!(rank, Rank::Float | Rank::Complex)
+                    & matches!(precision, Some(Precision::P2))
+            });
+
             for op_fn in &self.fns {
+                if !has_float16_input {
+                    // if none of the inputs is f16, never dispatch a function that requires f16
+                    let has_f16_desc = op_fn
+                        .input_desc
+                        .iter()
+                        .any(|input_desc| input_desc.dtype == ScalarKind::F16);
+                    if has_f16_desc {
+                        continue;
+                    }
+                }
+
                 let dtypes_supported = in_dtypes.iter().zip(op_fn.input_desc.iter()).all(
                     |(input_dtype, input_desc)| {
                         input_desc

@@ -1207,6 +1207,26 @@ pub(crate) mod _traits {
             fn pow = |a, b, status| float_power(a.powf(b), a, b, status),
         }
     );
+    #[cfg(feature = "half")]
+    impl_scalar_op2!(
+        impl Pow for [f16] x [i8, u8, i16, u16, i32] {
+            fn pow = |a, b, status| {
+                let p = f16::from_f32(a.to_f32().powi(b as i32));
+                float_power(p.to_f32(), a.to_f32(), b as f32, status);
+                p
+            },
+        }
+    );
+    #[cfg(feature = "half")]
+    impl_scalar_op2!(
+        impl Pow for [f16] {
+            fn pow = |a, b, status| {
+                let p = f16::from_f32(a.to_f32().powf(b.to_f32()));
+                float_power(p.to_f32(), a.to_f32(), b.to_f32(), status);
+                p
+            },
+        }
+    );
 
     #[inline(always)]
     fn float_power<T>(p: T, a: T, b: T, status: &mut ArithmeticOpStatus) -> T
@@ -1907,6 +1927,39 @@ pub(crate) mod tests {
             .and(&nd_b64)
             .map_collect(|&a, &b| a * b);
         crate::util::assert_array_matches(&(za64 * zb64), &expected64);
+    }
+
+    // pow, f16 arm: computed in f32 and rounded back to f16. Non-negative bases only, a negative
+    // base with a non-integer exponent is NaN, which never compares equal.
+    #[cfg(feature = "half")]
+    test_op2_dtype!(
+        pow,
+        |a, b| f16::from_f32(a.to_f32().powf(b.to_f32())),
+        f16,
+        op_safe_non_negative_strategy
+    );
+
+    #[cfg(feature = "half")]
+    #[test]
+    fn pow_f16_concrete() {
+        use crate::Array;
+
+        let f16s = |xs: &[f32]| ndarray::Array1::from_iter(xs.iter().map(|&x| f16::from_f32(x)));
+
+        // Integer exponents, including negative ones and a result past the f16 max (65504).
+        let za = Array::compact_ndarray(&f16s(&[0.5, 2.0, -3.0, 10.0])).unwrap();
+        let zb = Array::compact_ndarray(&ndarray::array![3i32, -2, 3, 5]).unwrap();
+        let expected = f16s(&[0.125, 0.25, -27.0, f32::INFINITY]);
+        crate::util::assert_array_matches(&za.pow(zb), &expected);
+
+        let za = Array::compact_ndarray(&f16s(&[1.5, 2.0])).unwrap();
+        let zb = Array::compact_ndarray(&ndarray::array![2u8, 4]).unwrap();
+        crate::util::assert_array_matches(&za.pow(zb), &f16s(&[2.25, 16.0]));
+
+        // Float exponents.
+        let za = Array::compact_ndarray(&f16s(&[4.0, 2.0, 0.0, 8.0])).unwrap();
+        let zb = Array::compact_ndarray(&f16s(&[0.5, 10.0, 0.0, -1.0])).unwrap();
+        crate::util::assert_array_matches(&za.pow(zb), &f16s(&[2.0, 1024.0, 1.0, 0.125]));
     }
 
     // mul, complex arm: full complex multiplication `(a+bi)*(c+di) = (ac-bd) + (ad+bc)i`,
@@ -3121,6 +3174,19 @@ pub(crate) mod tests {
                     let mut status = ArithmeticOpStatus::default();
                     let r = Pow::pow(f64::from(x), y as i32, &mut status);
                     check("f64 x i32", x.into(), y.into(), r, status);
+                }
+                // f16 is computed in f32: 300 ** 2 is finite there but overflows f16.
+                #[cfg(feature = "half")]
+                {
+                    let (x, y) = (f16::from_f32(x), f16::from_f32(y));
+                    let mut status = ArithmeticOpStatus::default();
+                    let r = Pow::pow(x, y, &mut status);
+                    check("f16", x.into(), y.into(), r.into(), status);
+                    if y.is_finite() && y.to_f32().fract() == 0.0 {
+                        let mut status = ArithmeticOpStatus::default();
+                        let r = Pow::pow(x, y.to_f32() as i32, &mut status);
+                        check("f16 x i32", x.into(), y.into(), r.into(), status);
+                    }
                 }
             }
         }
