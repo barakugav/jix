@@ -201,11 +201,16 @@ impl Operand {
     pub(crate) fn cast(self, kind: ScalarKind) -> PyResult<Self> {
         if let Self::Scalar {
             value,
-            precision: _,
+            precision,
             shape,
             params,
         } = self
         {
+            // An untyped Python int adopts the integer dtype the dispatch picked for it, so its value
+            // must fit. Wrapping it would silently change the result.
+            if precision.is_none() {
+                value.check_int_in_bounds(kind)?;
+            }
             return Ok(Self::Scalar {
                 value: value.cast(kind)?,
                 precision: scalar_kind_to_rank_precision(kind).1,
@@ -364,6 +369,40 @@ impl Scalar {
             Operand::PyArray(_) | Operand::Array(_) => {
                 Err(PyErr::new::<PyTypeError, _>("expected a scalar value"))
             }
+        }
+    }
+
+    /// Raise an `OverflowError` if this is an integer value that does not fit in the integer type
+    /// `kind`. Non-integer values and non-integer targets always pass.
+    fn check_int_in_bounds(&self, kind: ScalarKind) -> PyResult<()> {
+        let value = match *self {
+            Self::Int(value) => i128::from(value),
+            Self::UInt(value) => i128::from(value),
+            Self::Bool(_) | Self::Float(_) | Self::Complex(_) => return Ok(()),
+        };
+        let in_bounds = match kind {
+            ScalarKind::I8 => i8::try_from(value).is_ok(),
+            ScalarKind::I16 => i16::try_from(value).is_ok(),
+            ScalarKind::I32 => i32::try_from(value).is_ok(),
+            ScalarKind::I64 => i64::try_from(value).is_ok(),
+            ScalarKind::U8 => u8::try_from(value).is_ok(),
+            ScalarKind::U16 => u16::try_from(value).is_ok(),
+            ScalarKind::U32 => u32::try_from(value).is_ok(),
+            ScalarKind::U64 => u64::try_from(value).is_ok(),
+            ScalarKind::F16
+            | ScalarKind::F32
+            | ScalarKind::F64
+            | ScalarKind::ComplexF32
+            | ScalarKind::ComplexF64
+            | ScalarKind::Bool => true,
+        };
+        if in_bounds {
+            Ok(())
+        } else {
+            Err(PyOverflowError::new_err(format!(
+                "Python integer {value} out of bounds for {}",
+                Dtype::new_scalar(kind)
+            )))
         }
     }
 

@@ -17,6 +17,8 @@ Promotion rules (`jix-py/src/ops/common/dtype_promote.rs`):
 Scalars carry a precision when the user passed a typed numpy scalar
 (``np.int64(5)``) and ``None`` when they passed an untyped Python value
 (``5``, ``5.0``, ``True``). An ``None`` precision matches any same-rank impl.
+An untyped Python int's value must fit the dtype dispatch picks, otherwise
+``OverflowError`` is raised.
 If every operand is untyped they all default to 64-bit; otherwise, if no float
 or complex operand is typed, the untyped Python floats/complexes default to
 32-bit (``i8 + 1.5`` is f32).
@@ -384,6 +386,72 @@ def test_python_float_default_keeps_f32_precision():
     a = jix.compact(np.array([1, 0], dtype=np.int8))
     np.testing.assert_array_equal(jix.equal(a, 1.0001).numpy(), [False, False])
     np.testing.assert_array_equal(jix.add(a, 1e10).numpy(), np.array([1e10, 1e10], dtype=np.float32))
+
+
+# ---------------------------------------------------------------------------
+# An untyped Python int adopts the integer dtype dispatch picked for it, so its
+# value must fit that dtype. Otherwise an OverflowError is raised rather than
+# silently wrapping the scalar (like numpy). No special cases for comparisons
+# or clamp: they raise too.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "op, arr_dtype, scalars",
+    [
+        (jix.add, np.int8, (1000,)),
+        (jix.add, np.int8, (-1000,)),
+        (jix.add, np.int16, (70000,)),
+        (jix.add, np.int32, (2**40,)),
+        (jix.add, np.int8, (2**63,)),
+        (jix.add, np.int64, (2**63,)),
+        (jix.add, np.bool_, (1000,)),
+        (jix.subtract, np.int8, (1000,)),
+        (jix.multiply, np.int16, (-70000,)),
+        (jix.equal, np.int8, (1000,)),
+        (jix.less, np.int32, (2**40,)),
+        (jix.maximum, np.int8, (1000,)),
+        (jix.bitwise_or, np.int8, (0x100,)),
+        (jix.clamp, np.int8, (-1000, 1000)),
+    ],
+)
+def test_python_int_out_of_bounds_raises(op, arr_dtype, scalars):
+    a = jix.compact(np.array([0, 1, 1], dtype=arr_dtype))
+    with pytest.raises(OverflowError, match="out of bounds"):
+        op(a, *scalars)
+
+
+@pytest.mark.parametrize(
+    "arr_dtype, scalar",
+    [
+        (np.int8, 127),
+        (np.int8, -128),
+        (np.int16, -32768),
+        (np.int32, 2**31 - 1),
+        (np.int64, 2**63 - 1),
+        (np.int64, -(2**63)),
+    ],
+)
+def test_python_int_at_bounds_is_kept(arr_dtype, scalar):
+    a_np = np.array([0, 0], dtype=arr_dtype)
+    result = jix.add(jix.compact(a_np), scalar)
+    assert result.dtype == np.dtype(arr_dtype)
+    np.testing.assert_array_equal(result.numpy(), a_np + scalar)
+
+
+def test_typed_scalar_out_of_bounds_promotes_instead_of_raising():
+    """The bounds check applies only to untyped Python ints. A typed numpy scalar carries its own
+    dtype, which promotion respects."""
+    a = jix.compact(np.array([0, 1], dtype=np.int8))
+    result = jix.add(a, np.int16(1000))
+    assert result.dtype == np.int16
+    np.testing.assert_array_equal(result.numpy(), [1000, 1001])
+
+
+def test_python_int_into_float_is_not_bounds_checked():
+    """Only integer targets are checked: a Python int cast to a float rounds or overflows to inf."""
+    a = jix.compact(np.array([1.0, 2.0], dtype=np.float16))
+    np.testing.assert_array_equal(jix.add(a, 70000).numpy(), [np.inf, np.inf])
 
 
 # ---------------------------------------------------------------------------
