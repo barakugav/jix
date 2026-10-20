@@ -66,7 +66,7 @@ fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_cor
 
     let missing_dims_n = shape.len().saturating_sub(array.ndim());
     let array = if missing_dims_n > 0 {
-        let missing_dims = (0..missing_dims_n).map(|_| 0).collect::<DimArray<_>>();
+        let missing_dims = (0..missing_dims_n).collect::<DimArray<_>>();
         Either::Left(array.insert_dim(missing_dims.as_slice()))
     } else {
         Either::Right(array)

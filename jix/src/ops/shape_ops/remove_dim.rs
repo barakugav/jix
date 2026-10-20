@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn shape_remove_multiple() {
-        let a = make2d(arange(6), 2, 3).insert_dim([0, 1, 2]);
+        let a = make2d(arange(6), 2, 3).insert_dim([0, 2, 4]);
         assert_eq!(a.remove_dim([0, 2, 4]).shape(), &[2, 3]);
     }
 
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn full_read_remove_multiple() {
         let got = make2d(arange(6), 2, 3)
-            .insert_dim([0, 1, 2])
+            .insert_dim([0, 2, 4])
             .remove_dim([0, 2, 4])
             .to_ndarray()
             .unwrap();
