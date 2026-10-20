@@ -67,9 +67,8 @@ impl Operand {
                 } else if let Ok(value) = value.extract::<u64>() {
                     scalar = Some((Scalar::UInt(value), None));
                 } else {
-                    return Err(PyErr::new::<PyOverflowError, _>(
-                        "Integer value is too large to fit in 64 bits",
-                    ));
+                    let value = value.extract::<f64>()?; // too big for 64bit int, use f64
+                    scalar = Some((Scalar::Float(value), Some(Precision::P8)));
                 }
             } else if let Ok(value) = value.cast::<PyFloat>() {
                 scalar = Some((Scalar::Float(value.extract()?), None));
