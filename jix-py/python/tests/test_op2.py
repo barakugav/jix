@@ -398,6 +398,8 @@ _POWER_DIRECT_PAIRS = [
     (np.int32, np.uint32),
     (np.uint64, np.uint32),
     (np.int64, np.uint32),
+    (np.float16, np.int32),
+    (np.float16, np.float16),
     (np.float32, np.int32),
     (np.float32, np.float32),
     (np.float64, np.int32),
@@ -450,8 +452,10 @@ _POWER_PROMOTE_CASES = [
     # 64-bit exponent has no slot (widest is 32-bit) -> promote to float.
     (np.uint8, np.uint64, np.float64),
     (np.uint64, np.uint64, np.float64),
-    # f16 has no impl; it promotes to f32 (or f64).
-    (np.float16, np.float16, np.float32),
+    # f16 pairs: an int base lands there with an f16 exponent, a wider exponent promotes past them.
+    (np.uint8, np.float16, np.float16),
+    (np.float16, np.float32, np.float32),
+    (np.float16, np.int64, np.float64),
     (np.float32, np.float64, np.float64),
 ]
 
@@ -534,7 +538,7 @@ _POWER_SHORTCUT_DTYPES = [
     (np.int32, np.int32, np.float64),
     (np.uint64, np.float64, np.float64),
     (np.int64, np.int64, np.float64),
-    (np.float16, np.float32, np.float32),
+    (np.float16, np.float16, np.float16),
     (np.float32, np.float32, np.float32),
     (np.float64, np.float64, np.float64),
 ]

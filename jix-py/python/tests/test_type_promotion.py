@@ -482,9 +482,10 @@ def test_divide_floor_keeps_float_dtypes():
 # ---------------------------------------------------------------------------
 # power dispatch table (base, exponent) pairs:
 #   integers: (u8,u8) (i8,u8) (u16,u16) (i16,u16) (u32,u32) (i32,u32) (u64,u32) (i64,u32)
-#   floats:   (f32,i32) (f32,f32) (f64,i32) (f64,f64)
-# Integer bases require an *unsigned* exponent slot (widest is u32). Because the
-# dispatch table has no (i8,i8)/(u64,u64)/... entry, those inputs promote to float.
+#             (i8,i8) (i16,i16) (i32,i32) (i64,i64)
+#   floats:   (f16,i32) (f16,f16) (f32,i32) (f32,f32) (f64,i32) (f64,f64)
+# The widest unsigned exponent slot is u32, and no signed slot holds a u64, so a
+# u64 exponent, or a u64 base with a signed exponent, promotes to float.
 # ---------------------------------------------------------------------------
 
 
@@ -544,6 +545,19 @@ def test_power_signed_scalar_exponent_keeps_integer():
     assert jix.power(a, np.int32(3)).dtype == np.int32
     assert jix.power(a, -1).dtype == np.int32
     assert jix.power(a, np.uint32(3)).dtype == np.int32
+
+
+def test_power_f16_base_keeps_f16():
+    """f16 has its own pairs (computed in f32), so an f16 base with a Python scalar exponent or a
+    small int exponent stays f16. A Python float base follows a typed f16 exponent."""
+    a_np = np.array([1.0, 2.0, 4.0], dtype=np.float16)
+    a = jix.compact(a_np)
+    for exponent in (3, 1.5, np.int8(3), jix.compact(np.array([1, 2, 3], dtype=np.uint8))):
+        result = jix.power(a, exponent)
+        assert result.dtype == np.float16
+    np.testing.assert_array_equal(jix.power(a, 3).numpy(), a_np**3)
+    np.testing.assert_array_equal(jix.power(a, 1.5).numpy(), a_np ** np.float16(1.5))
+    assert jix.power(2.0, a).dtype == np.float16
 
 
 def test_power_scalar_exponent_keeps_float_base_narrow():

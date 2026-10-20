@@ -539,9 +539,8 @@ define_op2!(
 /// Element-wise exponentiation (`a` raised to the power `b`).
 ///
 /// Supported base dtypes: `u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`,
-/// `f32`, `f64`. For an **integer** base the exponent must be an integer; for a
-/// **float** base it may be an integer or a float. Complex dtypes are not supported
-/// yet.
+/// `f16`, `f32`, `f64`. For an **integer** base the exponent must be an integer; for a
+/// **float** base it may be an integer or a float. Complex dtypes are not supported yet.
 ///
 /// For a directly supported `(base, exponent)` pair the output dtype equals the
 /// base dtype - e.g. `u8 ** u8 -> u8`, `i32 ** i32 -> i32`, `f32 ** i32 -> f32`,
@@ -617,6 +616,8 @@ pub fn power<'py>(
                     (i32, i32),
                     (i64, i64),
                     // floats
+                    (f16, i32),
+                    (f16, f16),
                     (f32, i32),
                     (f32, f32),
                     (f64, i32),
@@ -646,6 +647,8 @@ pub fn power<'py>(
                     (i16, i16),
                     (i32, i32),
                     (i64, i64),
+                    (f16, i32),
+                    (f16, f16),
                     (f32, i32),
                     (f32, f32),
                     (f64, i32),
@@ -660,7 +663,14 @@ pub fn power<'py>(
             "power",
             unary_shortcut_desc!(
                 |a| jix_core::ops::Sqrt::new_array(a),
-                [(f32, i32), (f32, f32), (f64, i32), (f64, f64)]
+                [
+                    (f16, i32),
+                    (f16, f16),
+                    (f32, i32),
+                    (f32, f32),
+                    (f64, i32),
+                    (f64, f64)
+                ]
             ),
         )
     });
