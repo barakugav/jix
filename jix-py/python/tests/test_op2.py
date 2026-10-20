@@ -485,7 +485,8 @@ def test_power_custom_inputs():
     def check(result, expected):
         np.testing.assert_array_equal(result.numpy(), expected)
 
-    # int32 base: a signed or unsigned integer exponent keeps the base dtype.
+    # int32 base: a signed or unsigned integer exponent keeps the base dtype, and so does a plain
+    # Python int (it has no signedness, so it fills the unsigned exponent slot).
     di32 = np.array([2, 3, 4], dtype=np.int32)
     zai32 = jix.compact(di32)
     r = jix.power(zai32, np.uint32(3))
@@ -495,7 +496,9 @@ def test_power_custom_inputs():
         jix.power(zai32, np.array([1, 2, 3], dtype=np.uint32)),
         di32 ** np.array([1, 2, 3]),
     )
-    check(jix.power(zai32, 3), di32**3)
+    r = jix.power(zai32, 3)
+    assert r.dtype == np.int32
+    check(r, di32**3)
     check(jix.power(zai32, np.array([3, 2, 1], dtype=np.int32)), di32 ** np.array([3, 2, 1]))
 
     # Broadcasting: (2, 1) base ** (1, 3) exponent -> (2, 3)
@@ -527,16 +530,17 @@ def test_power_custom_inputs():
 # kernel. The shortcut dispatch tables mirror power's own (base, exponent) pairs, so the exponent
 # still takes part in dispatch and the result dtype is whatever the general path would produce.
 # (base dtype, dtype of `** 2` with a plain Python int, dtype of `** 2.0` and `** 0.5`). A plain
-# Python int is signed, so an unsigned base widens to the next signed integer.
+# Python int fills the unsigned exponent slot, so an integer base keeps its dtype (bool goes to
+# u8); a Python float sends it to a float pair.
 _POWER_SHORTCUT_DTYPES = [
-    (np.bool_, np.int8, np.float32),
-    (np.uint8, np.int16, np.float32),
+    (np.bool_, np.uint8, np.float32),
+    (np.uint8, np.uint8, np.float32),
     (np.int8, np.int8, np.float32),
-    (np.uint16, np.int32, np.float32),
+    (np.uint16, np.uint16, np.float32),
     (np.int16, np.int16, np.float32),
-    (np.uint32, np.int64, np.float64),
+    (np.uint32, np.uint32, np.float64),
     (np.int32, np.int32, np.float64),
-    (np.uint64, np.float64, np.float64),
+    (np.uint64, np.uint64, np.float64),
     (np.int64, np.int64, np.float64),
     (np.float16, np.float16, np.float16),
     (np.float32, np.float32, np.float32),
@@ -611,10 +615,10 @@ def test_power_shortcut_sqrt_does_not_narrow_to_f16():
 
 
 def test_power_shortcut_accepts_bool_base():
-    """bool ** 2 reaches the (i8, i8) pair, same as bool ** 3. square's own table has no bool."""
+    """bool ** 2 reaches the (u8, u8) pair, same as bool ** 3. square's own table has no bool."""
     za = jix.compact(np.array([True, False]))
-    assert jix.power(za, 2).dtype == jix.power(za, 3).dtype == np.int8
-    np.testing.assert_array_equal(jix.power(za, 2).numpy(), np.array([1, 0], dtype=np.int8))
+    assert jix.power(za, 2).dtype == jix.power(za, 3).dtype == np.uint8
+    np.testing.assert_array_equal(jix.power(za, 2).numpy(), np.array([1, 0], dtype=np.uint8))
 
 
 def test_power_shortcut_rejects_complex_base():
