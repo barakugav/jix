@@ -60,29 +60,30 @@ impl Operand {
         if !is_np_generic {
             let mut scalar = None;
             if let Ok(value) = value.cast::<PyBool>() {
-                scalar = Some(Scalar::Bool(value.extract()?));
+                scalar = Some((Scalar::Bool(value.extract()?), Some(Precision::P1)));
             } else if let Ok(value) = value.cast::<PyInt>() {
                 if let Ok(value) = value.extract::<i64>() {
-                    scalar = Some(Scalar::Int(value));
+                    scalar = Some((Scalar::Int(value), None));
                 } else if let Ok(value) = value.extract::<u64>() {
-                    scalar = Some(Scalar::UInt(value));
+                    scalar = Some((Scalar::UInt(value), None));
                 } else {
                     return Err(PyErr::new::<PyOverflowError, _>(
                         "Integer value is too large to fit in 64 bits",
                     ));
                 }
             } else if let Ok(value) = value.cast::<PyFloat>() {
-                scalar = Some(Scalar::Float(value.extract()?));
+                scalar = Some((Scalar::Float(value.extract()?), None));
             } else if let Ok(value) = value.cast::<PyComplex>() {
-                scalar = Some(Scalar::Complex(Complex {
+                let value = Complex {
                     re: value.real(),
                     im: value.imag(),
-                }));
+                };
+                scalar = Some((Scalar::Complex(value), None));
             }
-            if let Some(scalar) = scalar {
+            if let Some((scalar, precision)) = scalar {
                 return Ok(Self::Scalar {
                     value: scalar,
-                    precision: None,
+                    precision,
                     shape: DimArray::new(),
                     params,
                 });
@@ -152,7 +153,7 @@ impl Operand {
                     let im = item.getattr("imag")?.extract::<f64>()?;
                     (Scalar::Complex(Complex::new(re, im)), Some(Precision::P8))
                 }
-                ScalarKind::Bool => (Scalar::Bool(item.extract::<bool>()?), None),
+                ScalarKind::Bool => (Scalar::Bool(item.extract::<bool>()?), Some(Precision::P1)),
             };
             return Ok(Self::Scalar {
                 value,

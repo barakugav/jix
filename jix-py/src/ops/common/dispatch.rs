@@ -192,6 +192,7 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
             .ok();
 
         if let Some(mut in_dtypes) = in_dtypes {
+            // if all operands have no precision (all are python scalars), set precision to 8 (i64, f64)
             let all_without_precision = in_dtypes
                 .iter()
                 .all(|(_rank, precision)| precision.is_none());
@@ -199,7 +200,7 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
                 in_dtypes = in_dtypes.map(|(rank, precision)| {
                     debug_assert!(precision.is_none());
                     let precision = match rank {
-                        Rank::Bool => None,
+                        Rank::Bool => Some(Precision::P1),
                         Rank::UInt | Rank::Int | Rank::Float | Rank::Complex => Some(Precision::P8),
                     };
                     (rank, precision)
