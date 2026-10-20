@@ -206,7 +206,23 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
                 });
             }
 
+            let has_float16_input = in_dtypes.iter().any(|(rank, precision)| {
+                matches!(rank, Rank::Float | Rank::Complex)
+                    & matches!(precision, Some(Precision::P2))
+            });
+
             for op_fn in &self.fns {
+                if !has_float16_input {
+                    // if none of the inputs is f16, never dispatch a function that requires f16
+                    let has_f16_desc = op_fn
+                        .input_desc
+                        .iter()
+                        .any(|input_desc| input_desc.dtype == ScalarKind::F16);
+                    if has_f16_desc {
+                        continue;
+                    }
+                }
+
                 let dtypes_supported = in_dtypes.iter().zip(op_fn.input_desc.iter()).all(
                     |(input_dtype, input_desc)| {
                         input_desc

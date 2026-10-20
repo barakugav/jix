@@ -17,6 +17,9 @@ Promotion rules (`jix-py/src/ops/common/dtype_promote.rs`):
 Scalars carry a precision when the user passed a typed numpy scalar
 (``np.int64(5)``) and ``None`` when they passed an untyped Python value
 (``5``, ``5.0``, ``True``). An ``None`` precision matches any same-rank impl.
+If every operand is untyped they all default to 64-bit; otherwise, if no float
+or complex operand is typed, the untyped Python floats/complexes default to
+32-bit (``i8 + 1.5`` is f32).
 
 This file exists in part to catch a regression where ``ScalarKind::I64``
 was tagged ``Precision::P4`` in ``operand.rs`` instead of ``P8``: an
@@ -329,14 +332,26 @@ _PY_SCALAR_CASES = [
     # whichever float impl the array already fits into.
     (np.float32, 5, np.float32),
     (np.float64, 5, np.float64),
-    # Python float: rank Float.
+    # Python float: rank Float. With a typed float operand it stays untyped and
+    # follows that operand's precision.
+    (np.float16, 1.5, np.float16),
     (np.float32, 1.5, np.float32),
     (np.float64, 1.5, np.float64),
+    # Without a typed float/complex operand it defaults to 32-bit (f32), not the
+    # narrowest float that fits the array.
+    (np.bool_, 1.5, np.float32),
+    (np.uint8, 1.5, np.float32),
+    (np.int8, 1.5, np.float32),
+    (np.int16, 1.5, np.float32),
     (np.int32, 1.5, np.float64),  # int P4 -> f32 fails (P8 <= P4 false), -> f64
-    # Python complex.
+    # Python complex: same rules, the 32-bit default is Complex<f32>.
     (np.complex64, 1 + 2j, np.complex64),
     (np.complex128, 1 + 2j, np.complex128),
+    (np.float16, 1 + 2j, np.complex64),  # f16 -> c64 ok
     (np.float32, 1 + 2j, np.complex64),  # f32 -> c64 same precision ok
+    (np.float64, 1 + 2j, np.complex128),
+    (np.int8, 1 + 2j, np.complex64),
+    (np.int32, 1 + 2j, np.complex128),
 ]
 
 
@@ -348,6 +363,27 @@ def test_binary_array_python_scalar_promotion(arr_dtype, scalar, expected):
         f"add({arr_dtype.__name__}, py {type(scalar).__name__}={scalar!r}): "
         f"got {result.dtype}, expected {np.dtype(expected)}"
     )
+
+
+def test_python_float_defaults_to_f32_next_to_typed_int_scalar():
+    """A typed numpy int scalar is not a float operand, so the Python float still defaults to f32."""
+    result = jix.add(np.int8(1), 1.5)
+    assert result.dtype == np.float32
+    np.testing.assert_array_equal(result.numpy(), np.float32(2.5))
+
+
+def test_python_scalars_only_default_to_64_bit():
+    """With only untyped operands the 64-bit default applies first, so the f32 default never does."""
+    assert jix.add(1, 1.5).dtype == np.float64
+    assert jix.add(1, 1j).dtype == np.complex128
+    assert jix.sqrt(2.0).dtype == np.float64
+
+
+def test_python_float_default_keeps_f32_precision():
+    """In f16, 1.0001 rounds to 1.0 and 1e10 overflows to inf. f32 holds both apart."""
+    a = jix.compact(np.array([1, 0], dtype=np.int8))
+    np.testing.assert_array_equal(jix.equal(a, 1.0001).numpy(), [False, False])
+    np.testing.assert_array_equal(jix.add(a, 1e10).numpy(), np.array([1e10, 1e10], dtype=np.float32))
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +442,32 @@ def test_divide_promotes_integers_to_float():
     b = jix.compact(np.array([2, 4, 5], dtype=np.int32))
     result = jix.divide(a, b)
     assert result.dtype == np.float64
+
+
+def test_integer_only_inputs_skip_f16():
+    """Integer-only inputs to a float-only op default to at least f32, like untyped Python floats:
+    f16 is used only when some operand is already a float."""
+    u8_np = np.array([1, 2, 200], dtype=np.uint8)
+    u8 = jix.compact(u8_np)
+    i8 = jix.compact(np.array([1, 2, 3], dtype=np.int8))
+    assert jix.divide(u8, 2).dtype == np.float32
+    assert jix.divide(u8, 2.0).dtype == np.float32
+    assert jix.divide(i8, i8).dtype == np.float32
+    assert jix.sqrt(u8).dtype == np.float32
+    np.testing.assert_array_equal(jix.sqrt(u8).numpy(), np.sqrt(u8_np.astype(np.float32)))
+    assert jix.exp(jix.compact(np.array([True, False]))).dtype == np.float32
+    assert jix.sqrt(np.int8(4)).dtype == np.float32
+    assert jix.sqrt(True).dtype == np.float32
+    # Wider ints still go to the float that holds them.
+    assert jix.sqrt(jix.compact(np.array([4], dtype=np.int32))).dtype == np.float64
+
+
+def test_float_operand_keeps_f16():
+    """With an f16 operand present, integer operands still promote into f16."""
+    i8 = jix.compact(np.array([1, 2], dtype=np.int8))
+    f16 = jix.compact(np.array([1.0, 2.0], dtype=np.float16))
+    assert jix.add(i8, f16).dtype == np.float16
+    assert jix.divide(i8, np.float16(2)).dtype == np.float16
 
 
 def test_divide_floor_keeps_float_dtypes():
