@@ -205,8 +205,7 @@ impl Operand {
             params,
         } = self
         {
-            // An untyped Python int adopts the integer dtype the dispatch picked for it, so its value
-            // must fit. Wrapping it would silently change the result.
+            // a python int will be cast to the target kind, check its wont overflow
             if precision.is_none() {
                 value.check_int_in_bounds(kind)?;
             }
