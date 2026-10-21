@@ -384,7 +384,7 @@ def test_python_float_default_keeps_f32_precision():
 # An untyped Python int adopts the integer dtype dispatch picked for it, so its
 # value must fit that dtype. Otherwise an OverflowError is raised rather than
 # silently wrapping the scalar (like numpy). clamp drops a bound that clamps
-# nothing, otherwise it raises too. No special cases for comparisons.
+# nothing, otherwise it raises too. Comparisons compare by value instead.
 # ---------------------------------------------------------------------------
 
 
@@ -400,8 +400,6 @@ def test_python_float_default_keeps_f32_precision():
         (jix.add, np.bool_, (1000,)),
         (jix.subtract, np.int8, (1000,)),
         (jix.multiply, np.int16, (-70000,)),
-        (jix.equal, np.int8, (1000,)),
-        (jix.less, np.int32, (2**40,)),
         (jix.maximum, np.int8, (1000,)),
         (jix.bitwise_or, np.int8, (0x100,)),
         (jix.clamp, np.int8, (1000, None)),
@@ -460,13 +458,26 @@ def test_python_int_fills_unsigned_impl(op, arr_dtype, scalar, expected):
 
 @pytest.mark.parametrize(
     "op, scalar",
-    [(jix.add, -1), (jix.add, 256), (jix.subtract, -1), (jix.equal, 300), (jix.less, -1)],
+    [(jix.add, -1), (jix.add, 256), (jix.subtract, -1), (jix.maximum, -1)],
 )
 def test_python_int_out_of_unsigned_bounds_raises(op, scalar):
-    """The int lands in the u8 impl, so a value outside [0, 255] raises - for comparisons too."""
+    """The int lands in the u8 impl, so a value outside [0, 255] raises."""
     a = jix.compact(np.array([0, 1, 2], dtype=np.uint8))
     with pytest.raises(OverflowError, match="out of bounds"):
         op(a, scalar)
+
+
+@pytest.mark.parametrize("dtype", [np.bool_, np.uint8, np.int8, np.uint64, np.int64])
+@pytest.mark.parametrize("scalar", [-1, -129, 256, 2**40, -(2**63)])
+@pytest.mark.parametrize("op", [jix.equal, jix.not_equal, jix.less, jix.less_equal, jix.greater, jix.greater_equal])
+def test_compare_with_python_int_outside_dtype_is_by_value(op, dtype, scalar):
+    """As numpy: uint8 == -1 is False, uint8 < 256 is True, whichever side the int is on."""
+    a = np.array([[0, 1], [1, 0]], dtype=dtype)
+    np_op = getattr(np, op.__name__)
+    for x, y in [(a, scalar), (scalar, a), (a[0, 0], scalar)]:
+        jx = jix.compact(x) if isinstance(x, np.ndarray) else x
+        jy = jix.compact(y) if isinstance(y, np.ndarray) else y
+        np.testing.assert_array_equal(op(jx, jy).numpy(), np_op(x, y))
 
 
 def test_typed_scalar_out_of_bounds_promotes_instead_of_raising():

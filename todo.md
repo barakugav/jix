@@ -11,7 +11,6 @@
 - move ReadContext
 - optimize nd copy of structs
 - support bool, int and complex in is_nan, is_infinite, is_finite
-- compare arrays with Python ints outside their dtype by value (uint8 == -1 is False), as numpy, instead of raising OverflowError
 - support slice steps other than 1, including negative, in a[...] and jix.slice (as numpy); the core Slice already takes steps >= 1
 - support complex in sqrt, exp, log, sin, cos, tan, asin, acos, atan
 - support complex in power

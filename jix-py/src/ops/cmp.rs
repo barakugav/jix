@@ -8,255 +8,336 @@ use pyo3::prelude::*;
 
 use crate::ops::asarray_simple;
 use crate::ops::common::{
-    broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
+    broadcast_operands, define_op2, define_op2_desc, CastKind, OpDescriptor, OpFnDescriptor,
+    Operand, Precision, Rank, Scalar,
 };
 use crate::util::IntoPyResult;
 
-define_op2!(
-    /// Element-wise equality test (`a == b`).
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, `bool`.
-    ///
-    /// For **float** types, `NaN != NaN` per IEEE 754: comparing two `NaN` values returns
-    /// `False`. For **complex** types, both the real and imaginary components must be equal.
-    ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
-    ///
-    /// Args:
-    ///     a: First operand.
-    ///     b: Second operand.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([1, 2, 3], dtype=np.int32)
-    ///     b = jix.compact([1, 0, 3], dtype=np.int32)
-    ///     result = jix.equal(a, b)
-    ///     assert np.array_equal(result.numpy(), [True, False, True])
-    ///
-    ///     # NaN != NaN per IEEE 754.
-    ///     c = jix.compact([float('nan'), 1.0], dtype=np.float32)
-    ///     d = jix.compact([float('nan'), 1.0], dtype=np.float32)
-    ///     result = jix.equal(c, d)
-    ///     assert np.array_equal(result.numpy(), [False, True])
-    ///     ```
-    equal,
-    Equal,
-    dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>, bool],
-        Safe
-    }
-);
+/// Element-wise equality test (`a == b`).
+///
+/// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+/// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, `bool`.
+///
+/// For **float** types, `NaN != NaN` per IEEE 754: comparing two `NaN` values returns
+/// `False`. For **complex** types, both the real and imaginary components must be equal.
+///
+/// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+/// common type (Safe casting rules) before comparison.
+/// A Python int outside the integer dtype of the other operand compares by value, as
+/// numpy: `uint8 == -1` is `False`.
+///
+/// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+///
+/// Args:
+///     a: First operand.
+///     b: Second operand.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
+///         until the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([1, 2, 3], dtype=np.int32)
+///     b = jix.compact([1, 0, 3], dtype=np.int32)
+///     result = jix.equal(a, b)
+///     assert np.array_equal(result.numpy(), [True, False, True])
+///
+///     # NaN != NaN per IEEE 754.
+///     c = jix.compact([float('nan'), 1.0], dtype=np.float32)
+///     d = jix.compact([float('nan'), 1.0], dtype=np.float32)
+///     result = jix.equal(c, d)
+///     assert np.array_equal(result.numpy(), [False, True])
+///     ```
+#[pyo3::pyfunction]
+pub fn equal<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<crate::Array> {
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "equal",
+            define_op2_desc!(
+                Equal,
+                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>, bool],
+                Safe
+            ),
+        )
+    });
+    compare(&DISPATCH_TABLE, a, b, Ordering::is_eq)
+}
 
-define_op2!(
-    /// Element-wise inequality test (`a != b`).
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, `bool`.
-    ///
-    /// For **float** types, `NaN != NaN` returns `True` per IEEE 754.
-    /// For **complex** types, returns `True` if either the real or imaginary component differs.
-    ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
-    ///
-    /// Args:
-    ///     a: First operand.
-    ///     b: Second operand.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([1, 2, 3], dtype=np.int32)
-    ///     b = jix.compact([1, 0, 3], dtype=np.int32)
-    ///     result = jix.not_equal(a, b)
-    ///     assert np.array_equal(result.numpy(), [False, True, False])
-    ///     ```
-    not_equal,
-    NotEqual,
-    dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>, bool],
-        Safe
-    }
-);
+/// Element-wise inequality test (`a != b`).
+///
+/// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+/// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, `bool`.
+///
+/// For **float** types, `NaN != NaN` returns `True` per IEEE 754.
+/// For **complex** types, returns `True` if either the real or imaginary component differs.
+///
+/// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+/// common type (Safe casting rules) before comparison.
+/// A Python int outside the integer dtype of the other operand compares by value, as
+/// numpy: `uint8 == -1` is `False`.
+///
+/// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+///
+/// Args:
+///     a: First operand.
+///     b: Second operand.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
+///         until the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([1, 2, 3], dtype=np.int32)
+///     b = jix.compact([1, 0, 3], dtype=np.int32)
+///     result = jix.not_equal(a, b)
+///     assert np.array_equal(result.numpy(), [False, True, False])
+///     ```
+#[pyo3::pyfunction]
+pub fn not_equal<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<crate::Array> {
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "not_equal",
+            define_op2_desc!(
+                NotEqual,
+                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>, bool],
+                Safe
+            ),
+        )
+    });
+    compare(&DISPATCH_TABLE, a, b, Ordering::is_ne)
+}
 
-define_op2!(
-    /// Element-wise greater-than test (`a > b`).
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
-    ///
-    /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
-    /// For **bool**: `True > False`.
-    ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
-    ///
-    /// Args:
-    ///     a: First operand.
-    ///     b: Second operand.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([3, 1, 2], dtype=np.int32)
-    ///     b = jix.compact([1, 1, 3], dtype=np.int32)
-    ///     result = jix.greater(a, b)
-    ///     assert np.array_equal(result.numpy(), [True, False, False])
-    ///     ```
-    greater,
-    Greater,
-    dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
-        Safe
-    }
-);
+/// Element-wise greater-than test (`a > b`).
+///
+/// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+/// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
+///
+/// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
+/// For **bool**: `True > False`.
+///
+/// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+/// common type (Safe casting rules) before comparison.
+/// A Python int outside the integer dtype of the other operand compares by value, as
+/// numpy: `uint8 == -1` is `False`.
+///
+/// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+///
+/// Args:
+///     a: First operand.
+///     b: Second operand.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
+///         until the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([3, 1, 2], dtype=np.int32)
+///     b = jix.compact([1, 1, 3], dtype=np.int32)
+///     result = jix.greater(a, b)
+///     assert np.array_equal(result.numpy(), [True, False, False])
+///     ```
+#[pyo3::pyfunction]
+pub fn greater<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<crate::Array> {
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "greater",
+            define_op2_desc!(
+                Greater,
+                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+                Safe
+            ),
+        )
+    });
+    compare(&DISPATCH_TABLE, a, b, Ordering::is_gt)
+}
 
-define_op2!(
-    /// Element-wise greater-than-or-equal test (`a >= b`).
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
-    ///
-    /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
-    /// For **bool**: `True >= False`, and both `True >= True` and `False >= False` hold.
-    ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
-    ///
-    /// Args:
-    ///     a: First operand.
-    ///     b: Second operand.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([3, 1, 2], dtype=np.int32)
-    ///     b = jix.compact([1, 1, 3], dtype=np.int32)
-    ///     result = jix.greater_equal(a, b)
-    ///     assert np.array_equal(result.numpy(), [True, True, False])
-    ///     ```
-    greater_equal,
-    GreaterEqual,
-    dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
-        Safe
-    }
-);
+/// Element-wise greater-than-or-equal test (`a >= b`).
+///
+/// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+/// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
+///
+/// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
+/// For **bool**: `True >= False`, and both `True >= True` and `False >= False` hold.
+///
+/// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+/// common type (Safe casting rules) before comparison.
+/// A Python int outside the integer dtype of the other operand compares by value, as
+/// numpy: `uint8 == -1` is `False`.
+///
+/// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+///
+/// Args:
+///     a: First operand.
+///     b: Second operand.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
+///         until the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([3, 1, 2], dtype=np.int32)
+///     b = jix.compact([1, 1, 3], dtype=np.int32)
+///     result = jix.greater_equal(a, b)
+///     assert np.array_equal(result.numpy(), [True, True, False])
+///     ```
+#[pyo3::pyfunction]
+pub fn greater_equal<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<crate::Array> {
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "greater_equal",
+            define_op2_desc!(
+                GreaterEqual,
+                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+                Safe
+            ),
+        )
+    });
+    compare(&DISPATCH_TABLE, a, b, Ordering::is_ge)
+}
 
-define_op2!(
-    /// Element-wise less-than test (`a < b`).
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
-    ///
-    /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
-    /// For **bool**: `False < True`.
-    ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
-    ///
-    /// Args:
-    ///     a: First operand.
-    ///     b: Second operand.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([1, 1, 3], dtype=np.int32)
-    ///     b = jix.compact([3, 1, 2], dtype=np.int32)
-    ///     result = jix.less(a, b)
-    ///     assert np.array_equal(result.numpy(), [True, False, False])
-    ///     ```
-    less,
-    Less,
-    dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
-        Safe
-    }
-);
+/// Element-wise less-than test (`a < b`).
+///
+/// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+/// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
+///
+/// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
+/// For **bool**: `False < True`.
+///
+/// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+/// common type (Safe casting rules) before comparison.
+/// A Python int outside the integer dtype of the other operand compares by value, as
+/// numpy: `uint8 == -1` is `False`.
+///
+/// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+///
+/// Args:
+///     a: First operand.
+///     b: Second operand.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
+///         until the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([1, 1, 3], dtype=np.int32)
+///     b = jix.compact([3, 1, 2], dtype=np.int32)
+///     result = jix.less(a, b)
+///     assert np.array_equal(result.numpy(), [True, False, False])
+///     ```
+#[pyo3::pyfunction]
+pub fn less<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<crate::Array> {
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "less",
+            define_op2_desc!(
+                Less,
+                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+                Safe
+            ),
+        )
+    });
+    compare(&DISPATCH_TABLE, a, b, Ordering::is_lt)
+}
 
-define_op2!(
-    /// Element-wise less-than-or-equal test (`a <= b`).
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
-    ///
-    /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
-    /// For **bool**: `False <= True`, and both `False <= False` and `True <= True` hold.
-    ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
-    ///
-    /// Args:
-    ///     a: First operand.
-    ///     b: Second operand.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([1, 1, 3], dtype=np.int32)
-    ///     b = jix.compact([3, 1, 2], dtype=np.int32)
-    ///     result = jix.less_equal(a, b)
-    ///     assert np.array_equal(result.numpy(), [True, True, False])
-    ///     ```
-    less_equal,
-    LessEqual,
-    dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
-        Safe
-    }
-);
+/// Element-wise less-than-or-equal test (`a <= b`).
+///
+/// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+/// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
+///
+/// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
+/// For **bool**: `False <= True`, and both `False <= False` and `True <= True` hold.
+///
+/// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+/// common type (Safe casting rules) before comparison.
+/// A Python int outside the integer dtype of the other operand compares by value, as
+/// numpy: `uint8 == -1` is `False`.
+///
+/// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+///
+/// Args:
+///     a: First operand.
+///     b: Second operand.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
+///         until the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([1, 1, 3], dtype=np.int32)
+///     b = jix.compact([3, 1, 2], dtype=np.int32)
+///     result = jix.less_equal(a, b)
+///     assert np.array_equal(result.numpy(), [True, True, False])
+///     ```
+#[pyo3::pyfunction]
+pub fn less_equal<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<crate::Array> {
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "less_equal",
+            define_op2_desc!(
+                LessEqual,
+                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+                Safe
+            ),
+        )
+    });
+    compare(&DISPATCH_TABLE, a, b, Ordering::is_le)
+}
+
+/// Compares `a` and `b`, or, if one is a Python int outside the integer dtype of the other, gives
+/// `cmp` of their ordering, the same for all elements.
+fn compare<'py>(
+    table: &OpDescriptor<2, ()>,
+    a: &Bound<'py, PyAny>,
+    b: &Bound<'py, PyAny>,
+    cmp: fn(Ordering) -> bool,
+) -> PyResult<crate::Array> {
+    let [a, b] = broadcast_operands([Operand::from_any(a)?, Operand::from_any(b)?])?;
+    let outside = |x: &Operand, y: &Operand| match y.rank_precision() {
+        Some((rank, Some(precision))) => x.python_int_outside(rank, precision),
+        _ => None,
+    };
+    let (scalar, ordering) = if let Some(ordering) = outside(&a, &b) {
+        (a, ordering)
+    } else if let Some(ordering) = outside(&b, &a) {
+        (b, ordering.reverse())
+    } else {
+        return Ok(crate::Array::from_core(table.dispatch2(a, b)?));
+    };
+    let Operand::Scalar { shape, params, .. } = scalar else {
+        unreachable!()
+    };
+    let res = Operand::Scalar {
+        value: Scalar::Bool(cmp(ordering)),
+        shape,
+        precision: Some(Precision::P1),
+        params,
+    };
+    Ok(crate::Array::from_core(res.into_array()?))
+}
 
 define_op2!(
     /// Element-wise maximum of two arrays.
