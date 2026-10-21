@@ -27,3 +27,9 @@ scripts/bench/.results/
 
 jix/Cargo.lock
 jix-macros/Cargo.lock
+
+# Bug-hunt scratch: per-run integration tests (the report stage moves repros into
+# bug-hunt/runs/<run>/repros/) and hunter scratch scripts. See bug-hunt/README.md.
+jix/tests/hunt_*.rs
+jix/tests/repro_*.rs
+bug-hunt/runs/*/scratch/
