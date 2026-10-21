@@ -990,11 +990,9 @@ impl Array {
             .is_some_and(|scalar| scalar.is_integer() | scalar.is_float() | scalar.is_complex());
 
         if !is_supported {
-            return Err(jix_core::Error::new(
-                jix_core::error::ErrorKind::UnsupportedDtype,
-                format!("Op 'positive' does not support operands with dtypes [{dtype}]"),
-            ))
-            .into_py_result();
+            return Err(PyTypeError::new_err(format!(
+                "Op 'positive' does not support operands with dtypes [{dtype}]"
+            )));
         }
 
         Ok(slf.clone())

@@ -267,7 +267,7 @@ def test_clamp_promotes_like_maximum():
 
 def test_clamp_complex_limit_raises():
     a = jix.compact([1.0, 2.0], dtype=np.float32)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(TypeError):
         jix.clamp(a, min=complex(1, 0), max=2.0)
 
 

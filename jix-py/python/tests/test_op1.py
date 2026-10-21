@@ -182,7 +182,7 @@ def test_sign_never_casts():
     for dtype in (np.int8, np.uint16, np.float16):
         assert jix.sign(jix.compact(np.array([1, 0], dtype=dtype))).dtype == dtype
     assert jix.sign(-5).numpy() == -1  # untyped Python int -> int64
-    with pytest.raises(RuntimeError, match="sign"):
+    with pytest.raises(TypeError, match="sign"):
         jix.sign(jix.compact(np.array([True, False])))
 
 
@@ -259,7 +259,7 @@ def test_absolute_scalar_input(value, expected, expected_dtype):
 
 def test_absolute_unsupported_dtype_raises():
     za = jix.compact(np.zeros(3, dtype=[("a", np.int32), ("b", np.float32)]))
-    with pytest.raises(RuntimeError, match="Op 'absolute' does not support"):
+    with pytest.raises(TypeError, match="Op 'absolute' does not support"):
         jix.absolute(za)
 
 
@@ -339,7 +339,7 @@ def test_positive_returns_self(dtype):
 
 
 def test_positive_rejects_bool():
-    with pytest.raises(RuntimeError, match="Op 'positive' does not support"):
+    with pytest.raises(TypeError, match="Op 'positive' does not support"):
         +jix.compact(np.array([True, False]))
 
 

@@ -7,7 +7,7 @@ use jix_core::{Array as CoreArray, ArrayAny, Ty};
 use pyo3::prelude::*;
 
 use crate::ops::common::{CastKind, Operand, Precision, Rank, Scalar};
-use crate::util::{array_try_map, IntoPyResult, ItemOrTuple, IterExt};
+use crate::util::{array_try_map, ItemOrTuple, IterExt};
 
 type TypedOperand<T> = CoreArray<IntoType<ArrayStorageAny, Ty<T>>>;
 
@@ -373,11 +373,9 @@ fn unsupported_dtype_error(name: &str, inputs: &[Operand]) -> PyErr {
         })
         .collect::<Vec<_>>();
     let ops_types_str = ops_types.join(", ");
-    let err: Result<(), _> = Err(jix_core::Error::new(
-        jix_core::error::ErrorKind::UnsupportedDtype,
-        format!("Op '{name}' does not support operands with dtypes [{ops_types_str}]"),
-    ));
-    err.into_py_result().unwrap_err()
+    pyo3::exceptions::PyTypeError::new_err(format!(
+        "Op '{name}' does not support operands with dtypes [{ops_types_str}]"
+    ))
 }
 impl<const IN_N: usize> OpDescriptor<IN_N, ()> {
     fn dispatch(&self, inputs: [Operand; IN_N]) -> PyResult<ArrayAny> {

@@ -382,7 +382,7 @@ INTEGER_DIVISIONS = [
 @pytest.mark.parametrize("jix_fn", INTEGER_DIVISIONS)
 def test_integer_division_rejects_complex(jix_fn):
     a = jix.compact(np.array([1 + 1j, 2 + 2j], dtype=np.complex64))
-    with pytest.raises(RuntimeError):
+    with pytest.raises(TypeError):
         _ = jix_fn(a, a).numpy()
 
 

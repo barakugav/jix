@@ -924,5 +924,5 @@ def test_where_concatenate_stack_struct_and_scalar_dtype_raise():
     i = jix.compact(np.array([1, 2], dtype=np.int32))
     cond = jix.compact(np.array([True, False]))
     for fn in [lambda: jix.where(cond, s, i), lambda: jix.concatenate([s, i]), lambda: jix.stack([s, i])]:
-        with pytest.raises(RuntimeError, match="does not support operands with dtypes"):
+        with pytest.raises(TypeError, match="does not support operands with dtypes"):
             fn()
