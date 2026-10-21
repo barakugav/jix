@@ -31,6 +31,20 @@ pub(crate) trait ReductionOpKernel<T> {
     /// [`NEEDS_INDICES`](Self::NEEDS_INDICES) (argmax/argmin), which record it.
     fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State;
 
+    #[inline(always)]
+    fn init_state_bulk<const N: usize, S: Simd>(
+        &self,
+        items: [T; N],
+        indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        let _ = simd;
+        items.map_enumerate(
+            #[inline(always)]
+            |i, item| self.init_state(Some((item, indices.map(|idx| idx[i])))),
+        )
+    }
+
     /// Fold `item` (at true global stream position `idx`, `Some` exactly for the kernels that
     /// [`NEEDS_INDICES`](Self::NEEDS_INDICES)) into `state`.
     fn update_state(&self, state: Self::State, item: T, idx: Option<u64>) -> Self::State;
@@ -923,12 +937,11 @@ where
     );
     let idx_step = (LANES * ctx.idx_stride) as u64;
 
-    let mut states = ctx
-        .read_items_bulk::<LANES, CONTIGUOUS>(begin)
-        .map_enumerate(
-            #[inline(always)]
-            |b, item| kernel.init_state(Some((item, indices.map(|idx| idx[b])))),
-        );
+    let mut states = kernel.init_state_bulk(
+        ctx.read_items_bulk::<LANES, CONTIGUOUS>(begin),
+        indices,
+        simd,
+    );
 
     let mut i = begin;
     for _ in 1..len / LANES {
@@ -1805,7 +1818,11 @@ pub(crate) mod _traits {
         fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output;
     }
     macro_rules! impl_variance {
-        ($item_ty:ty => $output_ty:ty, MeanT = $mean_ty:ty, |$delta:ident, $delta2:ident| $m2_expr:expr) => {
+        (
+            $item_ty:ty => $output_ty:ty,
+            MeanT = $mean_ty:ty,
+            is_complex = $is_complex:ident,
+        ) => {
             impl Variance for $item_ty {
                 type Output = $output_ty;
                 type State = VarianceState<$mean_ty>;
@@ -1822,10 +1839,10 @@ pub(crate) mod _traits {
                 fn update(mut state: Self::State, item: Self) -> Self::State {
                     state.count += 1;
                     let x = <_ as crate::scalar::Cast<$mean_ty>>::cast(item);
-                    let $delta = x - state.mean;
-                    state.mean += $delta / state.count as f64;
-                    let $delta2 = x - state.mean;
-                    state.m2 += $m2_expr;
+                    let delta = x - state.mean;
+                    state.mean += delta / state.count as f64;
+                    let delta2 = x - state.mean;
+                    state.m2 += impl_variance!(@mul_dev is_complex=$is_complex, delta, delta2);
                     state
                 }
                 #[inline(always)]
@@ -1834,34 +1851,14 @@ pub(crate) mod _traits {
                     items: [Self; N],
                     simd: S,
                 ) -> [Self::State; N] {
-                    // `update`, a field at a time: the states interleave their fields, which
-                    // the compiler does not vectorize across.
                     use crate::util::array_from_fn_inline;
-                    let _ = simd;
-                    let x = items.map_inline(
-                        #[inline(always)]
-                        |x| <_ as crate::scalar::Cast<$mean_ty>>::cast(x),
-                    );
+                    let x = items.map_inline(#[inline(always)] |x| <_ as crate::scalar::Cast<$mean_ty>>::cast(x));
                     // let x = <_ as crate::scalar::Cast<$mean_ty>>::cast_bulk(items, simd); // TODO: is this faster?
-                    let count = states.map_inline(
-                        #[inline(always)]
-                        |s| s.count + 1,
-                    );
-                    let old_mean = states.map_inline(
-                        #[inline(always)]
-                        |s| s.mean,
-                    );
-                    let mean: [$mean_ty; N] = array_from_fn_inline(
-                        #[inline(always)]
-                        |i| old_mean[i] + (x[i] - old_mean[i]) / count[i] as f64,
-                    );
-                    let m2: [f64; N] = array_from_fn_inline(
-                        #[inline(always)]
-                        |i| {
-                            let ($delta, $delta2) = (x[i] - old_mean[i], x[i] - mean[i]);
-                            states[i].m2 + $m2_expr
-                        },
-                    );
+                    let count = states.map_inline(#[inline(always)] |s| s.count + 1);
+                    let count_f = count.map_inline(#[inline(always)] |c| c as f64);
+                    let old_mean = states.map_inline(#[inline(always)] |s| s.mean);
+                    let old_m2 = states.map_inline(#[inline(always)] |s| s.m2);
+                    let (mean, m2) = impl_variance!(@update_bulk is_complex=$is_complex, old_mean, old_m2, x, count_f, simd);
                     array_from_fn_inline(
                         #[inline(always)]
                         |i| VarianceState {
@@ -1882,15 +1879,16 @@ pub(crate) mod _traits {
                     let na = a.count;
                     let nb = b.count;
                     let n = na + nb;
-                    // Chan's parallel Welford combine. The m2 cross-term reuses the per-type
-                    // squared-deviation expression with `delta2 = delta` (real: delta^2;
-                    // complex: |delta|^2).
-                    let $delta = b.mean - a.mean;
+                    // Chan's parallel Welford combine. The m2 cross-term is the squared
+                    // deviation of the means (real: delta^2; complex: |delta|^2).
+                    let delta = b.mean - a.mean;
                     let mean = a.mean
-                        + $delta
+                        + delta
                             * <f64 as crate::scalar::Cast<$mean_ty>>::cast(nb as f64 / n as f64);
-                    let $delta2 = $delta;
-                    let m2 = a.m2 + b.m2 + ($m2_expr) * (na as f64 * nb as f64 / n as f64);
+                    let m2 = a.m2
+                        + b.m2
+                        + impl_variance!(@mul_dev is_complex=$is_complex, delta, delta)
+                            * (na as f64 * nb as f64 / n as f64);
                     VarianceState {
                         mean,
                         m2,
@@ -1909,28 +1907,131 @@ pub(crate) mod _traits {
                 }
             }
         };
+        (@mul_dev is_complex=false, $a:ident, $b:ident) => { $a * $b };
+        (@mul_dev is_complex=true, $a:ident, $b:ident) => { $a.re * $b.re + $a.im * $b.im };
+        (@square_dev is_complex=false, $dev:ident) => { $dev.square() };
+        (@square_dev is_complex=true, $dev:ident) => { $dev.map(|d| d.re * d.re + d.im * d.im) };
+        (@update_bulk is_complex=false,
+            $mean:ident, $m2:ident, $x:ident, $count:ident, $simd:ident
+        ) => {
+            welford_update_bulk($mean, $m2, $x, $count, $simd)
+        };
+        (@update_bulk is_complex=true,
+            $mean:ident, $m2:ident, $x:ident, $count:ident, $simd:ident
+        ) => {{
+            let re = |c: Complex<_>| c.re;
+            let im = |c: Complex<_>| c.im;
+            let (mean_re, m2) =
+                welford_update_bulk($mean.map_inline(re), $m2, $x.map_inline(re), $count, $simd);
+            let (mean_im, m2) =
+                welford_update_bulk($mean.map_inline(im), m2, $x.map_inline(im), $count, $simd);
+            let mean: [_; N] = crate::util::array_from_fn_inline(
+                #[inline(always)]
+                |i| Complex::new(mean_re[i], mean_im[i]),
+            );
+            (mean, m2)
+        }};
     }
-    impl_variance!(i8 => f64, MeanT = f64, |delta, delta2| delta * delta2);
-    impl_variance!(i16 => f64, MeanT = f64, |delta, delta2| delta * delta2);
-    impl_variance!(i32 => f64, MeanT = f64, |delta, delta2| delta * delta2);
-    impl_variance!(i64 => f64, MeanT = f64, |delta, delta2| delta * delta2);
-    impl_variance!(u8 => f64, MeanT = f64, |delta, delta2| delta * delta2);
-    impl_variance!(u16 => f64, MeanT = f64, |delta, delta2| delta * delta2);
-    impl_variance!(u32 => f64, MeanT = f64, |delta, delta2| delta * delta2);
-    impl_variance!(u64 => f64, MeanT = f64, |delta, delta2| delta * delta2);
+
+    #[inline(always)]
+    fn welford_update_bulk<const N: usize, S: fearless_simd::Simd>(
+        mean: [f64; N],
+        m2: [f64; N],
+        x: [f64; N],
+        count: [f64; N],
+        simd: S,
+    ) -> ([f64; N], [f64; N]) {
+        use crate::scalar::simd::map_vectors2;
+        let delta = map_vectors2(x, mean, |x, m| x - m, |x, m| x - m, simd);
+
+        let same_count = count.len() > 1 && count.iter().all(|&c| c == count[0]);
+        let step = if same_count {
+            let inv_count = [1.0 / count[0]; N]; // only one divide
+            map_vectors2(delta, inv_count, |d, r| d * r, |d, r| d * r, simd)
+        } else {
+            map_vectors2(delta, count, |d, n| d / n, |d, n| d / n, simd)
+        };
+
+        let mean = map_vectors2(mean, step, |m, s| m + s, |m, s| m + s, simd);
+        let delta2 = map_vectors2(x, mean, |x, m| x - m, |x, m| x - m, simd);
+        let sq = map_vectors2(delta, delta2, |a, b| a * b, |a, b| a * b, simd);
+        let m2 = map_vectors2(m2, sq, |a, b| a + b, |a, b| a + b, simd);
+        (mean, m2)
+    }
+
+    impl_variance!(
+        i8 => f64,
+        MeanT = f64,
+        is_complex = false,
+    );
+    impl_variance!(
+        i16 => f64,
+        MeanT = f64,
+        is_complex = false,
+    );
+    impl_variance!(
+        i32 => f64,
+        MeanT = f64,
+        is_complex = false,
+    );
+    impl_variance!(
+        i64 => f64,
+        MeanT = f64,
+        is_complex = false,
+    );
+    impl_variance!(
+        u8 => f64,
+        MeanT = f64,
+        is_complex = false,
+    );
+    impl_variance!(
+        u16 => f64,
+        MeanT = f64,
+        is_complex = false,
+    );
+    impl_variance!(
+        u32 => f64,
+        MeanT = f64,
+        is_complex = false,
+    );
+    impl_variance!(
+        u64 => f64,
+        MeanT = f64,
+        is_complex = false,
+    );
     #[cfg(feature = "half")]
-    impl_variance!(f16 => f16, MeanT = f64, |delta, delta2| delta * delta2);
-    impl_variance!(f32 => f32, MeanT = f64, |delta, delta2| delta * delta2);
-    impl_variance!(f64 => f64, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(
+        f16 => f16,
+        MeanT = f64,
+        is_complex = false,
+    );
+    impl_variance!(
+        f32 => f32,
+        MeanT = f64,
+        is_complex = false,
+    );
+    impl_variance!(
+        f64 => f64,
+        MeanT = f64,
+        is_complex = false,
+    );
     #[cfg(feature = "num-complex")]
-    impl_variance!(Complex<f32> => f32, MeanT = Complex<f64>, |delta, delta2| delta.re
-        * delta2.re
-        + delta.im * delta2.im);
+    impl_variance!(
+        Complex<f32> => f32,
+        MeanT = Complex<f64>,
+        is_complex = true,
+    );
     #[cfg(feature = "num-complex")]
-    impl_variance!(Complex<f64> => f64, MeanT = Complex<f64>, |delta, delta2| delta.re
-        * delta2.re
-        + delta.im * delta2.im);
-    impl_variance!(bool => f64, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(
+        Complex<f64> => f64,
+        MeanT = Complex<f64>,
+        is_complex = true,
+    );
+    impl_variance!(
+        bool => f64,
+        MeanT = f64,
+        is_complex = false,
+    );
 }
 
 define_reduction_op!(
@@ -2583,6 +2684,20 @@ where
         state
     }
     #[inline(always)]
+    fn init_state_bulk<const N: usize, S: fearless_simd::Simd>(
+        &self,
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        // somehow this helps the compiler optimize the loop better, avoid lane shuffles
+        let states = array_from_fn_inline(
+            #[inline(always)]
+            |_| <T as crate::scalar::Variance>::init(),
+        );
+        <T as crate::scalar::Variance>::update_bulk(states, items, simd)
+    }
+    #[inline(always)]
     fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
         <T as crate::scalar::Variance>::update(state, item)
     }
@@ -2667,6 +2782,20 @@ where
             state = self.update_state(state, item, None);
         }
         state
+    }
+    #[inline(always)]
+    fn init_state_bulk<const N: usize, S: fearless_simd::Simd>(
+        &self,
+        items: [T; N],
+        _indices: Option<[u64; N]>,
+        simd: S,
+    ) -> [Self::State; N] {
+        // somehow this helps the compiler optimize the loop better, avoid lane shuffles
+        let states = array_from_fn_inline(
+            #[inline(always)]
+            |_| <T as crate::scalar::Variance>::init(),
+        );
+        <T as crate::scalar::Variance>::update_bulk(states, items, simd)
     }
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
