@@ -12,7 +12,9 @@ use crate::type_hint::{NdArray, NpDtype};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
-use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{
+    PyIndexError, PyNotImplementedError, PyRuntimeError, PyTypeError, PyValueError,
+};
 use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
@@ -948,7 +950,7 @@ impl Array {
         modulo: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Self> {
         if modulo.is_some() {
-            return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            return Err(PyNotImplementedError::new_err(
                 "modulo argument to pow() is not supported",
             ));
         }
@@ -962,7 +964,7 @@ impl Array {
         modulo: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Self> {
         if modulo.is_some() {
-            return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            return Err(PyNotImplementedError::new_err(
                 "modulo argument to pow() is not supported",
             ));
         }
@@ -1669,7 +1671,7 @@ pub(crate) fn resolve_array_params(
     }
     if let Some(read_size) = read_size {
         if read_size.len() != 1 && read_size.len() != 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            return Err(PyValueError::new_err(format!(
                 "read_size must be a scalar or a 2-element tuple, got {} elements",
                 read_size.len()
             )));
@@ -1689,9 +1691,7 @@ pub(crate) fn resolve_array_params(
                 params.codec(Codec::Zstd);
             }
             _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Unsupported codec: {codec}"
-                )));
+                return Err(PyValueError::new_err(format!("Unsupported codec: {codec}")));
             }
         }
     }
@@ -1704,7 +1704,7 @@ pub(crate) fn resolve_array_params(
             .map(|filter| match filter.as_str() {
                 "byte-shuffle" => Ok(Filter::ByteShuffle),
                 "bit-shuffle" => Ok(Filter::BitShuffle),
-                _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                _ => Err(PyValueError::new_err(format!(
                     "Unsupported filter: {filter}"
                 ))),
             })

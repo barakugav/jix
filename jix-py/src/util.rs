@@ -3,7 +3,7 @@ use std::mem::{ManuallyDrop, MaybeUninit};
 use jix_core::NDIM_MAX;
 use numpy::npyffi::{npy_intp, PyArray_Dims};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
-use pyo3::exceptions::PyTypeError;
+use pyo3::exceptions::{PyFloatingPointError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
@@ -40,7 +40,7 @@ pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> 
 #[inline(always)]
 pub(crate) fn check_ndim(ndim: usize) -> PyResult<()> {
     if ndim > NDIM_MAX {
-        Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+        Err(PyValueError::new_err(format!(
             "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
         )))
     } else {
@@ -54,11 +54,13 @@ pub(crate) trait IntoPyResult<T> {
 impl<T> IntoPyResult<T> for Result<T, jix_core::Error> {
     #[inline(always)]
     fn into_py_result(self) -> PyResult<T> {
-        self.map_err(|e| match e.kind() {
-            jix_core::error::ErrorKind::Arithmetic => {
-                PyErr::new::<pyo3::exceptions::PyFloatingPointError, _>(format!("{e}"))
+        self.map_err(|e| {
+            let err_str = format!("{e}");
+            match e.kind() {
+                jix_core::error::ErrorKind::Arithmetic => PyFloatingPointError::new_err(err_str),
+                jix_core::error::ErrorKind::UnsupportedDtype => PyTypeError::new_err(err_str),
+                _ => PyRuntimeError::new_err(err_str),
             }
-            _ => PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")),
         })
     }
 }
@@ -156,7 +158,7 @@ pub(crate) fn numpy_reshape<'py>(
 pub(crate) fn normalize_dim(dim: i32, ndim: usize) -> pyo3::PyResult<usize> {
     let ndim = ndim as i32;
     if dim < -ndim || dim >= ndim {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(PyValueError::new_err(format!(
             "dim {dim} is out of bounds for array of dimension {ndim}"
         )));
     }
@@ -172,7 +174,7 @@ pub(crate) fn normalize_dim_optional(dim: Option<i32>, ndim: usize) -> pyo3::PyR
         Some(dim) => normalize_dim(dim, ndim),
         None => {
             if ndim != 1 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
+                return Err(PyValueError::new_err(
                     "dim must be specified for arrays with ndim != 1",
                 ));
             }
@@ -184,7 +186,7 @@ pub(crate) fn normalize_dim_optional(dim: Option<i32>, ndim: usize) -> pyo3::PyR
 #[inline]
 pub(crate) fn normalize_dims(dims: &[i32], ndim: usize) -> pyo3::PyResult<DimArray<usize>> {
     if ndim > NDIM_MAX {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(PyValueError::new_err(format!(
             "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
         )));
     }
@@ -196,7 +198,7 @@ pub(crate) fn normalize_dims_optional(
     ndim: usize,
 ) -> pyo3::PyResult<DimArray<usize>> {
     if ndim > NDIM_MAX {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(PyValueError::new_err(format!(
             "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
         )));
     }
@@ -262,7 +264,7 @@ impl<T> ItemOrTuple<T> {
             }
             ItemOrTuple::Sequence(seq) => {
                 if seq.len() > NDIM_MAX {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    return Err(PyValueError::new_err(format!(
                         "Number of dimensions {} exceeds the maximum supported {}",
                         seq.len(),
                         NDIM_MAX

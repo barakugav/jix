@@ -4,6 +4,7 @@ use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
 use jix_core::ops::IntoType;
 use jix_core::storage::ArrayStorageAny;
 use jix_core::{Array as CoreArray, ArrayAny, Ty};
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use crate::ops::common::{CastKind, Operand, Precision, Rank, Scalar};
@@ -373,7 +374,7 @@ fn unsupported_dtype_error(name: &str, inputs: &[Operand]) -> PyErr {
         })
         .collect::<Vec<_>>();
     let ops_types_str = ops_types.join(", ");
-    pyo3::exceptions::PyTypeError::new_err(format!(
+    PyTypeError::new_err(format!(
         "Op '{name}' does not support operands with dtypes [{ops_types_str}]"
     ))
 }

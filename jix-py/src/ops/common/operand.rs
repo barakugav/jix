@@ -89,7 +89,7 @@ impl Operand {
             }
         }
         if only_scalar && !is_np_generic {
-            return Err(PyErr::new::<PyTypeError, _>("expected a scalar value"));
+            return Err(PyTypeError::new_err("expected a scalar value"));
         }
 
         let array = if let Ok(array) = value.cast::<PyUntypedArray>() {
@@ -365,7 +365,7 @@ impl Scalar {
         match Operand::from_any_with_params(value, ArrayParams::default(), true)? {
             Operand::Scalar { value, .. } => Ok(value),
             Operand::PyArray(_) | Operand::Array(_) => {
-                Err(PyErr::new::<PyTypeError, _>("expected a scalar value"))
+                Err(PyTypeError::new_err("expected a scalar value"))
             }
         }
     }
@@ -448,7 +448,7 @@ impl Scalar {
                 }
                 ScalarKind::ComplexF64 => Self::Complex(value),
                 _ => {
-                    return Err(PyErr::new::<PyTypeError, _>(format!(
+                    return Err(PyTypeError::new_err(format!(
                         "Unsupported cast from {} to {}",
                         Dtype::new_scalar(ScalarKind::ComplexF64),
                         Dtype::new_scalar(kind)

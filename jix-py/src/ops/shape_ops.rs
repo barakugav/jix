@@ -68,7 +68,7 @@ pub fn broadcast<'py>(
     let old_shape = array.shape();
     let shape = shape.into_dim_array()?;
     if shape.len() != old_shape.len() {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(PyValueError::new_err(format!(
             "Cannot broadcast array of shape {:?} to shape {:?}: different number of dimensions",
             old_shape, shape
         )));
@@ -82,7 +82,7 @@ pub fn broadcast<'py>(
             } else if new_len == -1 {
                 Ok(*old_len)
             } else {
-                Err(pyo3::exceptions::PyValueError::new_err(format!(
+                Err(PyValueError::new_err(format!(
                     "Invalid broadcast shape dimension: expected non-negative or -1, got {}",
                     new_len
                 )))
@@ -724,23 +724,19 @@ pub fn reshape<'py>(
                 known_size *= dim as u64;
             } else if dim == -1 {
                 if inferred_dim.is_some() {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
+                    return Err(PyValueError::new_err(
                         "Only one dimension can be inferred (-1)",
                     ));
                 }
                 inferred_dim = Some(i);
             } else {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "shape must be non negative or -1",
-                ));
+                return Err(PyValueError::new_err("shape must be non negative or -1"));
             }
         }
         if let Some(inferred_dim) = inferred_dim {
             let array_size = array.shape().iter().product::<u64>();
             if array_size == 0 || known_size == 0 || !array_size.is_multiple_of(known_size) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "Cannot infer dimension size",
-                ));
+                return Err(PyValueError::new_err("Cannot infer dimension size"));
             }
             new_shape[inferred_dim] = (array_size / known_size) as i64;
         }
@@ -841,7 +837,7 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 #[pyo3(signature = (arrays, dim=0))]
 pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bound<'py, Array>> {
     if arrays.is_empty() {
-        return Err(pyo3::exceptions::PyValueError::new_err(
+        return Err(PyValueError::new_err(
             "arrays must contain at least one array",
         ));
     }
@@ -862,7 +858,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bo
     let ndim = arrays[0].ndim();
     for arr in &arrays {
         if arr.ndim() != ndim {
-            return Err(pyo3::exceptions::PyValueError::new_err(
+            return Err(PyValueError::new_err(
                 "All arrays must have the same number of dimensions",
             ));
         }
@@ -924,7 +920,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bo
 ))]
 pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Array> {
     if arrays.is_empty() {
-        return Err(pyo3::exceptions::PyValueError::new_err(
+        return Err(PyValueError::new_err(
             "arrays must contain at least one array",
         ));
     }
@@ -945,7 +941,7 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Array> {
     let ndim = arrays[0].ndim();
     for arr in &arrays {
         if arr.ndim() != ndim {
-            return Err(pyo3::exceptions::PyValueError::new_err(
+            return Err(PyValueError::new_err(
                 "All arrays must have the same number of dimensions",
             ));
         }
