@@ -105,6 +105,7 @@ def test_log_base2_concrete():
     for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
         with jix.errstate(divide="ignore"), np.errstate(divide="ignore"):
             check_op1_concrete(lambda za: jix.log(za, base=2), np.log2, [(dtype, values)], rtol=rtol)
+            check_op1_concrete(jix.log2, np.log2, [(dtype, values)], rtol=rtol)
 
 
 def test_log_base10_concrete():
@@ -113,6 +114,7 @@ def test_log_base10_concrete():
     for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
         with jix.errstate(divide="ignore"), np.errstate(divide="ignore"):
             check_op1_concrete(lambda za: jix.log(za, base=10), np.log10, [(dtype, values)], rtol=rtol)
+            check_op1_concrete(jix.log10, np.log10, [(dtype, values)], rtol=rtol)
 
 
 def test_sin_concrete():

@@ -1,6 +1,8 @@
+from typing import Any
+
 from .jix import *  # noqa: F403
 from .jix import __version__ as __version__
-from .jix import absolute, clamp, concatenate, divide, multiply, negative, power, product, subtract
+from .jix import absolute, clamp, concatenate, divide, log, multiply, negative, power, product, subtract
 
 __doc__ = jix.__doc__  # noqa: F405
 if hasattr(jix, "__all__"):  # noqa: F405
@@ -32,3 +34,13 @@ div = divide
 
 neg = negative
 """Alias for [`jix.negative`][jix.negative]"""
+
+
+def log2(array: Any):
+    """Alias for [`jix.log`][jix.log] with `base=2`"""
+    return log(array, base=2)
+
+
+def log10(array: Any):
+    """Alias for [`jix.log`][jix.log] with `base=10`"""
+    return log(array, base=10)
