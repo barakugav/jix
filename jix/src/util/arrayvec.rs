@@ -7,7 +7,7 @@ type LenUint = u8;
 /// A vector with a fixed capacity.
 ///
 /// A simplified version of `arrayvec::ArrayVec`.
-/// See https://github.com/bluss/arrayvec
+/// See <https://github.com/bluss/arrayvec>
 #[repr(C)]
 pub struct ArrayVec<T, const CAP: usize> {
     len: LenUint,

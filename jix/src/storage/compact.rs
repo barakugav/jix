@@ -173,7 +173,8 @@ impl_array_storage!(CompactMmap<ET>);
 /// for all `d`.
 ///
 /// `encoder_params` and `decoder_params` are kept here - not in `BlockTable` - so that
-/// `ArrayStorage::spec` can propagate them through lazy view operations and `compact_with`.
+/// [`ArrayStorage::spec`] can propagate them through lazy view operations and
+/// [`compact_with`](crate::Array::compact_with).
 pub(crate) struct ArrayBlockTableStorageBase<S, ET>
 where
     S: BlockTableStorage,

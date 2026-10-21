@@ -235,7 +235,7 @@ pub fn write_array(
     }?;
     crate::error::emit_warnings(py, warnings)
 }
-/// Returns the warnings of the read, see `crate::error::emit_warnings`.
+/// Returns the warnings of the read, see [`crate::error::emit_warnings`].
 fn write_array_impl<W>(
     array: &Array,
     mut writer: W,

@@ -295,7 +295,7 @@ impl ArrayParams {
     /// Returns `InvalidArgument` if:
     /// - `block_shape_fixed_dims` is provided without `block_shape`
     /// - the length of `block_shape_fixed_dims` does not match `ndim`
-    /// - `ndim` exceeds [`NDIM_MAX`]
+    /// - `ndim` exceeds [`NDIM_MAX`](crate::NDIM_MAX)
     pub(crate) fn tune(&mut self, shape: &[u64], dtype: &Dtype) -> Result<()> {
         let block_shape = self.block_shape.clone();
         let block_shape_fixed_dims = self.block_shape_fixed_dims;

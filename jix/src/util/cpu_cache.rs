@@ -233,7 +233,7 @@ mod macos {
 /// Pads and aligns a value to the length of a cache line.
 ///
 /// Copied from crossbeam.
-/// https://docs.rs/crossbeam-utils/0.8.21/src/crossbeam_utils/cache_padded.rs.html
+/// <https://docs.rs/crossbeam-utils/0.8.21/src/crossbeam_utils/cache_padded.rs.html>
 #[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
 // Starting from Intel's Sandy Bridge, spatial prefetcher is now pulling pairs of 64-byte cache
 // lines at a time, so we have to align to 128 bytes rather than 64.

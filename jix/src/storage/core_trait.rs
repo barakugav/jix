@@ -18,14 +18,15 @@ use crate::{ElementType, TypeDyn};
 /// # Primary storage backends
 ///
 /// The main concrete storages are the block-compressed backends:
-/// `compact::Compact` (heap-allocated) and `compact::CompactMmap` (memory-mapped file).
+/// [`Compact`](crate::storage::Compact) (heap-allocated) and
+/// [`CompactMmap`](crate::storage::CompactMmap) (memory-mapped file).
 /// These store the array as independently
 /// compressed nd-blocks and are the primary on-disk format.
 ///
 /// # Adapter
 ///
 /// An adapter lets plain data participate in the same `Array<S>` world:
-/// - `plain::Plain` - wraps a contiguous or strided in-memory ndarray, used when
+/// - [`Plain`](crate::storage::Plain) - wraps a contiguous or strided in-memory ndarray, used when
 ///   operating on regular Rust/ndarray data alongside compressed arrays.
 ///
 /// # Lazy operation views

@@ -236,7 +236,7 @@ where
 
 /// A sink that consumes a block table's compressed blocks one at a time and finalizes into some
 /// output - either an in-memory [`BlockTable`] ([`OwnedBlockTableBuilder`]) or bytes streamed to an
-/// archive ([`BlockArchiveWriter`](crate::archive::block::BlockArchiveWriter)).
+/// archive (`BlockArchiveWriter`).
 pub(crate) trait BlockTableBuilder {
     /// What [`finalize`](Self::finalize) yields. For example the built [`BlockTable`] for an
     /// in-memory builder.
