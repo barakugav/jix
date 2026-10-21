@@ -181,7 +181,21 @@ python jix/run_miri.py --all-features --test <name>
 
 Under Miri zstd is replaced by a memcpy (`cfg(miri)` in `jix/src/codec/mod.rs`), so compact
 arrays work. The Miri build of the library is cached; the first run of a new test still takes a
-while.
+while. To run one test of a file, append `-- <test_fn_name>`.
+
+### 32-bit (i686) - for truncation / overflow / alignment claims that depend on usize = 32 bits
+
+x86 and armv7 wheels ship but are never tested, so a 32-bit claim is worth running for real. The
+same integration test builds and runs natively as a static i686-musl binary (`usize` is 32 bits,
+`align_of::<u64>()` is 4):
+
+```bash
+bug-hunt/tools/cargo-i686 test --manifest-path jix/Cargo.toml --all-features --test <name> -- --nocapture
+```
+
+It uses its own target dir (`target-i686/`), prebuilt by `setup.sh`; a new test rebuilds in tens of
+seconds. Huge-size triggers are usually cheap here: a lazy `broadcast` of a 1-element array to a
+shape of 2^32+ elements costs no memory until it is read.
 
 ### Python
 
@@ -203,7 +217,10 @@ A finding is only useful if someone can act on it without redoing your work:
   op chain. "Some edge case" is not a trigger.
 - **Expected vs actual**: what should happen, what happens instead (wrong value, OOB write of N
   bytes at offset X, panic message...).
-- **Reachability**: public Rust API, Python API, or crate-internal only.
+- **Reachability**: public Rust API, Python API, or crate-internal only. Before claiming
+  "crate-internal", check whether the type leaks through a public associated type or trait
+  (e.g. `Dimension::Vec<T>` exposes the crate's `ArrayVec` / `DimArray` to user code with
+  user-chosen `T`), a public generic bound, or a public unsafe-free constructor.
 - **Evidence**: what you ran and what it printed, if you ran anything.
 - **Confidence**: high (you demonstrated it or the code path is unambiguous), medium (the argument
   holds but you could not run it), low (a suspicion worth a second look).
@@ -220,6 +237,16 @@ say so in `coverage` - "no findings" from a careful read is a valid and useful r
 - `refuted` - name the specific reason (precondition established at file:line, unreachable,
   misread code, result is actually correct).
 - `intended` - deliberate and documented behavior (cite where), and not unreasonable.
+
+### Repro convention
+
+A repro asserts the CORRECT behavior, so it fails while the bug exists and passes once it is
+fixed: an assertion failure, a panic, a Miri error or a crash all count as "fails". Never write a
+test that passes because the bug happens (e.g. `assert!(catch_unwind(..).is_err())` for a panic
+that should be an `Err`); assert the `Err` instead. Then the repros double as regression tests.
+For a repro that crashes the process (segfault, abort), say so at the top of the file; in Python,
+run the crashing step in a subprocess and report its exit status. Re-run any hunter claim your
+verdict relies on (e.g. "release build segfaults") instead of quoting it.
 
 ### Finding write-up (verifiers write one per confirmed / plausible finding)
 

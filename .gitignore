@@ -33,3 +33,4 @@ jix-macros/Cargo.lock
 jix/tests/hunt_*.rs
 jix/tests/repro_*.rs
 bug-hunt/runs/*/scratch/
+target-i686/
