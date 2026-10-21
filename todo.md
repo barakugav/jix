@@ -10,7 +10,6 @@
 - rearrange ops module
 - move ReadContext
 - optimize nd copy of structs
-- support bool, int and complex in is_nan, is_infinite, is_finite
 - support slice steps other than 1, including negative, in a[...] and jix.slice (as numpy); the core Slice already takes steps >= 1
 - support complex in sqrt, exp, log, sin, cos, tan, asin, acos, atan
 - support complex in power

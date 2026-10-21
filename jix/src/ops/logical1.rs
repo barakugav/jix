@@ -6,6 +6,8 @@ pub(crate) mod _traits {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
 
     /// Define the float classification scalar trait `$Trait` as `f32`'s `$f`.
     macro_rules! classify_op1 {
@@ -67,6 +69,29 @@ pub(crate) mod _traits {
         /// Test whether the value is infinite (`+inf` or `-inf`).
         is_infinite,
         is_infinite_bulk
+    );
+
+    // As numpy: NaN or infinite if either part is
+    #[cfg(feature = "num-complex")]
+    impl_scalar_op1!(
+        impl IsNan for [Complex<f32>, Complex<f64>] {
+            type Output = bool;
+            fn is_nan = |x| x.re.is_nan() || x.im.is_nan(),
+        }
+    );
+    #[cfg(feature = "num-complex")]
+    impl_scalar_op1!(
+        impl IsFinite for [Complex<f32>, Complex<f64>] {
+            type Output = bool;
+            fn is_finite = |x| x.re.is_finite() && x.im.is_finite(),
+        }
+    );
+    #[cfg(feature = "num-complex")]
+    impl_scalar_op1!(
+        impl IsInfinite for [Complex<f32>, Complex<f64>] {
+            type Output = bool;
+            fn is_infinite = |x| x.re.is_infinite() || x.im.is_infinite(),
+        }
     );
 }
 
@@ -277,5 +302,37 @@ mod tests {
             let expectedh = ndh.mapv(|a: f16| a.is_infinite());
             crate::util::assert_array_matches(&zah.view().is_infinite(), &expectedh);
         }
+    }
+
+    #[cfg(feature = "num-complex")]
+    #[test]
+    fn complex_concrete() {
+        use crate::scalar::Complex;
+        use crate::Array;
+        let (nan, inf) = (f64::NAN, f64::INFINITY);
+        let nd = ndarray::array![
+            Complex::new(1.0, 2.0),
+            Complex::new(nan, 0.0),
+            Complex::new(0.0, -inf),
+            Complex::new(inf, nan)
+        ];
+        let za = Array::compact_ndarray(&nd).unwrap();
+        assert_eq!(
+            za.view().is_nan().to_ndarray().unwrap(),
+            ndarray::array![false, true, false, true]
+        );
+        assert_eq!(
+            za.view().is_finite().to_ndarray().unwrap(),
+            ndarray::array![true, false, false, false]
+        );
+        assert_eq!(
+            za.view().is_infinite().to_ndarray().unwrap(),
+            ndarray::array![false, false, true, true]
+        );
+        let za32 = za.cast::<Complex<f32>>();
+        assert_eq!(
+            za32.is_infinite().to_ndarray().unwrap(),
+            ndarray::array![false, false, true, true]
+        );
     }
 }
