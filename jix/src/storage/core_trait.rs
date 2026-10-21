@@ -128,9 +128,9 @@ pub trait ArrayStorage {
         T: Dtyped,
         Self: Sized,
     {
-        check_dtype(&T::DTYPE, self.dtype())?;
+        check_dtype(Dtype::new_ref::<T>(), self.dtype())?;
         let data = self.read_data(index, context, None)?;
-        Ok(unsafe { OperandTyped::new_input(data, self.dtype()) })
+        Ok(unsafe { OperandTyped::new_input(data, Dtype::new_ref::<T>()) })
     }
 
     /// Returns the shape of the array, one element per dimension.

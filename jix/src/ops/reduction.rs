@@ -1755,10 +1755,7 @@ pub(crate) mod _traits {
     impl_mean!(Complex<f64>, Complex<f64>, Complex<f64>, Complex<f64>);
     impl_mean!(bool, u64, f64, f64);
 
-    /// Welford accumulator used by [`Variance`]. The count of folded items is tracked
-    /// **inside** this struct (`count`) so each interleaved lane accumulator counts only
-    /// the items it saw and [`Variance::merge_states`] can recombine lanes with Chan's
-    /// algorithm.
+    /// Welford accumulator used by [`Variance`]
     #[derive(Clone, Copy)]
     pub struct VarianceState<M> {
         /// Running mean in the type-specific accumulator domain.
