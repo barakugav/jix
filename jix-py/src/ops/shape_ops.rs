@@ -4,7 +4,8 @@ use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyEllipsis, PySlice, PyTuple};
 
-use crate::ops::{any_to_core_array, asarray_simple};
+use crate::ops::asarray_simple;
+use crate::ops::common::{operands_dtype_promotion_vec, Operand};
 use crate::util::{
     normalize_dim, normalize_dim_optional, normalize_dims, normalize_dims_optional, slice_unpack,
     DimArray, IntoPyResult, ItemOrTuple,
@@ -796,19 +797,19 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 
 /// Joins a sequence of arrays along an existing dim.
 ///
-/// All input arrays must have the same number of dimensions, the same dtype, and identical
-/// sizes on every dim *except* the concatenation dim, along which their sizes may differ.
-/// The output has the same number of dimensions as the inputs.
+/// All input arrays must have the same number of dimensions, and identical sizes on every dim
+/// *except* the concatenation dim, along which their sizes may differ. The output has the same
+/// number of dimensions as the inputs.
 ///
-/// This function deviates from numpy in a few ways:
-/// - all arrays must have the same dtype (numpy will upcast if they differ)
-/// - all arrays must have the same number of dimensions (numpy will expand dims if they differ)
+/// **Type promotion**: if the arrays have different dtypes, they are cast to a common dtype.
+///
+/// This function deviates from numpy: all arrays must have the same number of dimensions (numpy
+/// will expand dims if they differ).
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
-///     arrays: Sequence of arrays to concatenate. All must have the same dtype and number
-///         of dimensions.
+///     arrays: Sequence of arrays to concatenate. All must have the same number of dimensions.
 ///     dim: Dim along which to concatenate. Supports negative values.
 ///
 /// Returns:
@@ -830,24 +831,34 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///     b = jix.compact([[5, 6]], dtype=np.int32)
 ///     assert jix.concatenate([a, b], dim=0).numpy().shape == (3, 2)
 ///     assert jix.concatenate([a, b.T], dim=1).numpy().shape == (2, 3)
+///
+///     # Mixed dtypes promote to a common dtype
+///     u = jix.compact([1, 2], dtype=np.uint8)
+///     i = jix.compact([-1], dtype=np.int8)
+///     assert jix.concatenate([u, i]).dtype == np.int16
 ///     ```
 #[pyfunction]
 #[pyo3(signature = (arrays, dim=0))]
 pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bound<'py, Array>> {
-    let py_arrays = arrays
-        .iter()
-        .map(|arr| asarray_simple(arr))
-        .collect::<Result<Vec<_>, _>>()?;
-    let arrays = py_arrays
-        .iter()
-        .map(|arr| any_to_core_array(arr))
-        .collect::<Result<Vec<_>, _>>()?;
     if arrays.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "arrays must contain at least one array",
         ));
     }
-    let py = py_arrays.first().unwrap().py();
+    let py = arrays.first().unwrap().py();
+    let operands = arrays
+        .iter()
+        .map(|arr| Operand::from_any(arr))
+        .collect::<Result<Vec<_>, _>>()?;
+    let operands = operands_dtype_promotion_vec("concatenate", operands)?;
+    let py_arrays = operands
+        .into_iter()
+        .map(|arr| arr.into_py_array(py))
+        .collect::<Result<Vec<_>, _>>()?;
+    let arrays = py_arrays
+        .iter()
+        .map(|arr| arr.get().arr.clone())
+        .collect::<Vec<_>>();
     let ndim = arrays[0].ndim();
     for arr in &arrays {
         if arr.ndim() != ndim {
@@ -873,18 +884,16 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bo
 
 /// Joins a sequence of arrays along a **new** dim.
 ///
-/// All input arrays must have identical shapes and the same dtype. A new dim of size equal
-/// to the number of arrays is inserted at position `dim` in the output. The output has one
-/// more dimension than the inputs - unlike [`jix.concatenate()`][jix.concatenate], which joins along an existing
-/// dim.
+/// All input arrays must have identical shapes. A new dim of size equal to the number of arrays
+/// is inserted at position `dim` in the output. The output has one more dimension than the
+/// inputs - unlike [`jix.concatenate()`][jix.concatenate], which joins along an existing dim.
 ///
-/// This function deviates from numpy in a few ways:
-/// - all arrays must have the same dtype (numpy will upcast if they differ)
+/// **Type promotion**: if the arrays have different dtypes, they are cast to a common dtype.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
-///     arrays: Sequence of arrays to stack. All must have identical shapes and the same dtype.
+///     arrays: Sequence of arrays to stack. All must have identical shapes.
 ///     dim: Position of the new dim in the output. Supports negative values.
 ///
 /// Returns:
@@ -914,20 +923,25 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bo
     dim=0,
 ))]
 pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Array> {
-    let py_arrays = arrays
-        .into_iter()
-        .map(|arr| asarray_simple(&arr))
-        .collect::<Result<Vec<_>, _>>()?;
-    let arrays = py_arrays
-        .iter()
-        .map(|arr| any_to_core_array(arr))
-        .collect::<Result<Vec<_>, _>>()?;
     if arrays.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "arrays must contain at least one array",
         ));
     }
-    let py = py_arrays.first().unwrap().py();
+    let py = arrays.first().unwrap().py();
+    let operands = arrays
+        .iter()
+        .map(|arr| Operand::from_any(arr))
+        .collect::<Result<Vec<_>, _>>()?;
+    let operands = operands_dtype_promotion_vec("stack", operands)?;
+    let py_arrays = operands
+        .into_iter()
+        .map(|op| op.into_py_array(py))
+        .collect::<Result<Vec<_>, _>>()?;
+    let arrays = py_arrays
+        .iter()
+        .map(|arr| arr.get().arr.clone())
+        .collect::<Vec<_>>();
     let ndim = arrays[0].ndim();
     for arr in &arrays {
         if arr.ndim() != ndim {

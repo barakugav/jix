@@ -579,11 +579,12 @@ def test_concatenate_default_dim():
     np.testing.assert_array_equal(r.numpy(), [1, 2, 3, 4])
 
 
-def test_concatenate_dtype_mismatch_raises():
+def test_concatenate_promotes_mixed_dtypes():
     a = jix.compact([1, 2], dtype=np.int32)
     b = jix.compact([3.0, 4.0], dtype=np.float32)
-    with pytest.raises(Exception):
-        jix.concatenate([a, b])
+    r = jix.concatenate([a, b])
+    assert r.dtype == np.float64
+    np.testing.assert_array_equal(r.numpy(), [1.0, 2.0, 3.0, 4.0])
 
 
 # ---------------------------------------------------------------------------
@@ -628,11 +629,12 @@ def test_stack_shape_mismatch_raises():
         jix.stack([a, b])
 
 
-def test_stack_dtype_mismatch_raises():
+def test_stack_promotes_mixed_dtypes():
     a = jix.compact([1, 2], dtype=np.int32)
     b = jix.compact([3.0, 4.0], dtype=np.float32)
-    with pytest.raises(Exception):
-        jix.stack([a, b])
+    r = jix.stack([a, b])
+    assert r.dtype == np.float64
+    np.testing.assert_array_equal(r.numpy(), [[1.0, 2.0], [3.0, 4.0]])
 
 
 # ---------------------------------------------------------------------------
