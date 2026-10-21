@@ -1,7 +1,7 @@
 export const meta = {
   name: 'bug-hunt',
   description: 'Hunt hard bugs in jix (unsafe/UB, wrong results, panics): module + concept + dynamic hunters, dedup, adversarial verification with repros, report',
-  whenToUse: 'Run a full or partial bug hunt over jix. args: {runId, units?, kinds?, verify?, focus?, minConfidence?}. See bug-hunt/README.md.',
+  whenToUse: 'Run a full or partial bug hunt over jix. args: {runId, units?, skip?, kinds?, verify?, focus?, minConfidence?}. Afterwards write the returned reportMarkdown to bug-hunt/runs/<runId>/REPORT.md. See bug-hunt/README.md.',
   phases: [
     { title: 'Hunt', detail: 'one agent per module unit, cross-cutting concept, and dynamic tester' },
     { title: 'Dedup', detail: 'merge findings that share a root cause, drop known issues' },
@@ -14,6 +14,7 @@ export const meta = {
 // Arguments
 //   runId          output dir name under bug-hunt/runs/ (default "run"); use a date, e.g. "2026-10-21"
 //   units          list of unit-id prefixes to run, e.g. ["reduction", "concept-alignment"]; default all
+//   skip           list of unit-id prefixes to leave out (applied after units), e.g. units already hunted
 //   kinds          subset of ["module", "concept", "dynamic"]; default all
 //   verify         false to skip verification (raw hunter output goes to the report); default true
 //   focus          extra instructions appended to every hunter prompt
@@ -1701,7 +1702,7 @@ ${f.others.length ? `\nThe same root cause was also reported as:\n${f.others.map
 Hunters are often wrong: misread code, a precondition established somewhere they did not look, an unreachable input, intended behavior. Your job is to decide, with evidence.
 1. Re-read the code at the cited locations and trace the claimed path end to end.
 2. Try to REFUTE it: a check or invariant elsewhere that prevents the trigger (grep the callers), documented intended behavior (context doc "Intentional behaviors", comments, tests), or an unreachable input.
-3. If it survives, build the smallest repro: jix/tests/${rt}.rs (public Rust API; \`cargo test --manifest-path jix/Cargo.toml --all-features --test ${rt} -- --nocapture\`) and/or ${RUN_DIR}/repros/${f.id}.py (run with .venv/bin/python). For a memory-safety claim that a debug build cannot show, you may run Miri ONCE on a tiny version: \`python jix/run_miri.py --all-features --test ${rt}\` (it is very slow - keep the test to a handful of elements).
+3. If it survives, build the smallest repro: jix/tests/${rt}.rs (public Rust API; \`cargo test --manifest-path jix/Cargo.toml --all-features --test ${rt} -- --nocapture\`) and/or ${RUN_DIR}/repros/${f.id}.py (run with .venv/bin/python). For a memory-safety claim that a debug build cannot show, you may run Miri ONCE on a tiny version: \`python jix/run_miri.py --all-features --test ${rt}\` (it is very slow - keep the test to a handful of elements). For a claim that depends on 32-bit usize or i686 alignment, run the same test natively as 32-bit: \`bug-hunt/tools/cargo-i686 test --manifest-path jix/Cargo.toml --all-features --test ${rt}\`. Follow the PRIMER repro convention: the repro asserts the CORRECT behavior, so it fails while the bug exists.
 4. Re-assess the severity with the PRIMER table; it may go up or down.
 5. If the verdict is confirmed or plausible, write ${RUN_DIR}/findings/${f.id}.md with the PRIMER template.
 Never modify tracked files and do not fix the bug.`
@@ -1715,7 +1716,7 @@ const ALL = [
   ...CONCEPT_UNITS.map(u => ({ ...u, kind: 'concept' })),
   ...DYNAMIC_UNITS.map(u => ({ ...u, kind: 'dynamic' })),
 ]
-const selected = ALL.filter(u => KINDS.includes(u.kind) && (!A.units || A.units.some(p => u.id.startsWith(p))))
+const selected = ALL.filter(u => KINDS.includes(u.kind) && (!A.units || A.units.some(p => u.id.startsWith(p))) && !(A.skip || []).some(p => u.id.startsWith(p)))
 if (!selected.length) {
   log(`No units match units=${JSON.stringify(A.units)} kinds=${JSON.stringify(KINDS)}. Unit ids: ${ALL.map(u => u.id).join(', ')}`)
   return { runId: RUN, error: 'no units selected' }
@@ -1817,7 +1818,9 @@ const summary = results.map(({ f, v, first }) => ({
 const unverified = skipped.map(f => ({ id: f.id, severity: f.finding.severity, confidence: f.finding.confidence, title: f.finding.title, location: `${f.finding.file}:${f.finding.line}`, sources: f.sources, description: f.finding.description, trigger: f.finding.trigger }))
 const coverage = done.map(h => ({ unit: h.unit.id, coverage: h.coverage, open_questions: h.open_questions || [], findings: h.findings.length }))
 
-const report = await agent(`Write the final report of jix bug-hunt run "${RUN}" for the maintainers. Create ${RUN_DIR}/REPORT.md (ASCII only - the repo CI rejects non-ASCII bytes).
+// Subagents may not write report files, so the report agent RETURNS the markdown; the session that
+// ran the workflow writes it to `report` from this workflow's return value (`reportMarkdown`).
+const report = await agent(`Write the final report of jix bug-hunt run "${RUN}" for the maintainers, as markdown (ASCII only - the repo CI rejects non-ASCII bytes). Do NOT write it to a file: your final reply must be exactly the report markdown and nothing else - the caller saves it as ${RUN_DIR}/REPORT.md. Read findings/*.md and the repros under ${RUN_DIR}/ as needed to summarize accurately.
 
 Sections:
 1. Summary: counts by verdict and by severity; hunters run; hunters that failed: ${JSON.stringify(failedUnits)}.
@@ -1827,7 +1830,7 @@ Sections:
 5. Coverage: one line per hunter from its coverage note; then a list of everything hunters said they skipped or only skimmed.
 6. Open questions from hunters, grouped by theme.
 
-Then clean up this run's test files in jix/tests/ so the crate's test suite stays clean: mkdir -p ${RUN_DIR}/repros, MOVE every jix/tests/repro_${RS}__*.rs into ${RUN_DIR}/repros/ (keep the file names), and delete jix/tests/hunt_${RS}__*.rs (hunter scratch). Touch no other file in jix/tests/ - other runs may be using them. Python repros are already in ${RUN_DIR}/repros/. In the report, say how to re-run a repro: copy it back to jix/tests/ and run \`cargo test --manifest-path jix/Cargo.toml --all-features --test <name>\`. Do not modify tracked files.
+Before writing the report, clean up this run's test files in jix/tests/ so the crate's test suite stays clean: mkdir -p ${RUN_DIR}/repros, MOVE every jix/tests/repro_${RS}__*.rs into ${RUN_DIR}/repros/ (keep the file names), and delete jix/tests/hunt_${RS}__*.rs (hunter scratch). Touch no other file in jix/tests/ - other runs may be using them. Python repros are already in ${RUN_DIR}/repros/. In the report, say how to re-run a repro: copy it back to jix/tests/ and run \`cargo test --manifest-path jix/Cargo.toml --all-features --test <name>\`. Do not modify tracked files.
 
 Verified findings:
 ${JSON.stringify(summary, null, 1)}
@@ -1842,6 +1845,7 @@ const count = k => summary.filter(s => s.verdict === k).length
 return {
   runId: RUN,
   report: `${RUN_DIR}/REPORT.md`,
+  note: 'Write reportMarkdown to the report path (subagents cannot write it).',
   hunters: done.length,
   failedHunters: failedUnits,
   rawFindings: raw.length,
@@ -1852,4 +1856,5 @@ return {
   intended: count('intended'),
   unverified: unverified.length,
   findings: summary.filter(s => s.verdict === 'confirmed' || s.verdict === 'plausible').map(s => `${s.id} [${s.severity}/${s.verdict}] ${s.title} (${s.location})`),
+  reportMarkdown: typeof report === 'string' ? report.replace(/^```(?:markdown)?\n([\s\S]*)\n```\s*$/, '$1') : '',
 }

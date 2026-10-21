@@ -7,18 +7,21 @@
 #   - the jix unit-test binary, so existing inline tests can be run by name
 #   - the Miri build of the library (nightly), used sparingly for memory-safety repros
 #   - the Python bindings (debug build) installed into .venv
+#   - an i686-unknown-linux-musl (32-bit) build, so 32-bit claims can be tested natively
 #
-# Usage: bash bug-hunt/setup.sh [--no-miri] [--no-python]
+# Usage: bash bug-hunt/setup.sh [--no-miri] [--no-python] [--no-i686]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
 MIRI=1
 PYTHON=1
+I686=1
 for arg in "$@"; do
     case "$arg" in
         --no-miri) MIRI=0 ;;
         --no-python) PYTHON=0 ;;
+        --no-i686) I686=0 ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
@@ -54,6 +57,18 @@ if [ "$PYTHON" = 1 ]; then
     # Run from outside the repo root: there, the crate directory jix/ shadows the package.
     (cd /tmp && "$ROOT/.venv/bin/python" -c \
         "import jix, numpy as np; a = jix.compact(np.arange(6.0).reshape(2, 3)); print('python ok:', a.shape)")
+fi
+
+if [ "$I686" = 1 ]; then
+    echo "== i686: 32-bit musl target (zig compiles zstd, clang + lld link, binaries run natively)"
+    if ! command -v clang >/dev/null || ! command -v ld.lld >/dev/null; then
+        echo "   skipped: needs clang and ld.lld on PATH"
+    else
+        rustup target add i686-unknown-linux-musl
+        [ -d .venv ] || uv venv --python 3.13 .venv
+        uv pip install --python .venv/bin/python ziglang
+        bug-hunt/tools/cargo-i686 test --manifest-path jix/Cargo.toml --all-features --test hunt_setup_smoke
+    fi
 fi
 
 echo "== Ready. Start a run from Claude Code, e.g.: run the bug-hunt workflow with runId $(date +%F)"
