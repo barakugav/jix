@@ -24,16 +24,18 @@ A build takes about 8 minutes per platform, two at a time. Outputs, under `--out
 
 Setup:
 - A Rust toolchain (pick it with `RUSTUP_TOOLCHAIN`) with the targets of `PLATFORMS` and the
-  `llvm-tools` component, for `opt`:
-      rustup component add llvm-tools
-      rustup target add i686-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin
-  Its unstable flags (`-Zverbose-asm`) are enabled by `RUSTC_BOOTSTRAP=1`, so it may be stable.
+  `llvm-tools` component, for `opt`. The beta, 1.100, has LLVM 23:
+      rustup toolchain install beta --profile minimal --component llvm-tools
+      rustup target add --toolchain beta i686-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin
+      export RUSTUP_TOOLCHAIN=beta
+  Its unstable flags (`-Zverbose-asm`) are enabled by `RUSTC_BOOTSTRAP=1`, so it may be stable
+  or beta.
 - llvm-mca of rustc's LLVM major version (`rustc -vV`), at `$LLVM_MCA`, `llvm-mca-<major>` or
-  `llvm-mca`. rustup's llvm-tools has none: take it from the LLVM release, e.g. for LLVM 23.1.1
-  (`nightly-2026-09-27`):
-      curl -sSLO https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.1/LLVM-23.1.1-Linux-X64.tar.xz
-      tar -xJf LLVM-23.1.1-Linux-X64.tar.xz LLVM-23.1.1-Linux-X64/bin/llvm-mca  # static binary
-      sudo install LLVM-23.1.1-Linux-X64/bin/llvm-mca /usr/local/bin/llvm-mca-23
+  `llvm-mca`. rustup's llvm-tools has none: take it from the LLVM release, e.g. for LLVM 23.1.4
+  (beta 1.100.0-beta.7):
+      curl -sSLO https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.4/LLVM-23.1.4-Linux-X64.tar.xz
+      tar -xJf LLVM-23.1.4-Linux-X64.tar.xz LLVM-23.1.4-Linux-X64/bin/llvm-mca  # static binary
+      sudo install LLVM-23.1.4-Linux-X64/bin/llvm-mca /usr/local/bin/llvm-mca-23
 - `c++filt` (binutils), which demangles Rust's v0 symbols.
 
 The crate is compiled as an rlib, never linked, so any rustup target builds without its linker or

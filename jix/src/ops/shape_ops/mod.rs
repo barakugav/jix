@@ -178,12 +178,13 @@ where
     /// Returns a lazy view of the array with new length-1 dimensions inserted. See [`InsertDim`]
     /// for details and examples.
     ///
-    /// Each value in `dim` is a gap index: `0` inserts before dim 0, `ndim` appends after the
-    /// last dim. Duplicates are allowed and each inserts one dimension.
+    /// Like `numpy.expand_dims`, each value in `dim` is a dim index in the output shape, whose
+    /// ndim is `self.ndim() + dim.len()`.
     ///
     /// # Panics
     ///
-    /// Panics if any value in `dim` is > `self.ndim()` or the resulting ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
+    /// Panics if any value in `dim` is out of bounds for the output ndim, is repeated, or the
+    /// resulting ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
     #[track_caller]
     pub fn insert_dim(self, dim: impl DimsArg) -> Array<InsertDim<S>> {
         InsertDim::new_array(self, dim).unwrap()

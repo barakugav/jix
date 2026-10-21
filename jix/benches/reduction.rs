@@ -83,5 +83,28 @@ fn bench_sum_compact(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_sum_plain, bench_sum_compact);
+fn bench_std_plain(c: &mut Criterion) {
+    for shape in [[200_000, 64], [20_000, 2000]] {
+        let mut group = c.benchmark_group(format!("std plain [{}, {}]", shape[0], shape[1]));
+        group.sample_size(10);
+        group.warm_up_time(std::time::Duration::from_millis(500));
+        group.measurement_time(std::time::Duration::from_secs(2));
+
+        let base = create_data::<i32>(Profile::Smooth, &shape, 0xbfef73fd8b3364d9)
+            .into_dimensionality::<Ix2>()
+            .unwrap();
+
+        let arr_i32 = Array::plain_ndarray_ref(&base).unwrap();
+        group.bench_function(BenchmarkId::new("i32", "dim=1 (contiguous)"), |b| {
+            b.iter(|| arr_i32.view().std(1, 0.0).to_ndarray::<Ix1>().unwrap());
+        });
+        let arr_f32 = Array::plain_ndarray(base.mapv(|x| x as f32)).unwrap();
+        group.bench_function(BenchmarkId::new("f32", "dim=1 (contiguous)"), |b| {
+            b.iter(|| arr_f32.view().std(1, 0.0).to_ndarray::<Ix1>().unwrap());
+        });
+        group.finish();
+    }
+}
+
+criterion_group!(benches, bench_sum_plain, bench_sum_compact, bench_std_plain);
 criterion_main!(benches);

@@ -4,22 +4,10 @@ use crate::ops::prelude::*;
 /// returned by [`Array::insert_dim`](crate::Array::insert_dim). The inverse operation
 /// is [`RemoveDim`](crate::ops::RemoveDim).
 ///
-/// Each element of `dim` is a **gap index** that identifies a position *between* (or outside)
-/// the input dimensions:
-///
-/// ```text
-/// gap:   0      1      2   orig_ndim
-///        |  d0  |  d1  |  d2  |
-/// ```
-///
-/// * Gap `0` - before the first input dimension.
-/// * Gap `k` - between input dimensions `k-1` and `k`.
-/// * Gap `orig_ndim` - after the last input dimension.
-///
-/// Each occurrence of a gap index inserts one new length-1 dimension at that position. Duplicate
-/// gap indices are allowed and each adds another dimension at the same gap. The order of values in
-/// `dim` does not matter - only the multiset of gap indices matters. Valid gap indices are
-/// `0..=orig_ndim`.
+/// Like `numpy.expand_dims`, each element of `dim` is a dim index in the *output* shape, whose
+/// ndim is `orig_ndim + dim.len()`. Each named output dim is a new length-1 dim; the input dims
+/// fill the remaining positions in order. Valid indices are `0..orig_ndim + dim.len()`.
+/// Duplicates are not allowed. The order of values in `dim` does not matter.
 ///
 /// Output dtype equals the input dtype.
 ///
@@ -31,7 +19,8 @@ use crate::ops::prelude::*;
 /// [N]       dim: [0]     -> [1, N]      (insert before first dim)
 /// [N]       dim: [1]     -> [N, 1]      (append after last dim)
 /// [N, M]    dim: [1]     -> [N, 1, M]   (insert between dims)
-/// [N, M]    dim: [0, 2]  -> [1, N, M, 1]
+/// [N, M]    dim: [0, 3]  -> [1, N, M, 1]
+/// [N, M]    dim: [0, 1]  -> [1, 1, N, M]
 /// ```
 ///
 /// The dims can be given as any [`DimsArg`](crate::ops::DimsArg): a single `usize`, an array or tuple of `usize`, or a
@@ -45,13 +34,12 @@ use crate::ops::prelude::*;
 ///
 /// assert_eq!(a.view().insert_dim(0).shape(), &[1, 3]);
 /// assert_eq!(a.view().insert_dim(1).shape(), &[3, 1]);
-/// assert_eq!(a.view().insert_dim([0, 1]).shape(), &[1, 3, 1]);
+/// assert_eq!(a.view().insert_dim([0, 2]).shape(), &[1, 3, 1]);
 ///
-/// let gaps = vec![0, 1];
-/// assert_eq!(a.view().insert_dim(gaps.as_slice()).shape(), &[1, 3, 1]);
+/// let dims = vec![0, 2];
+/// assert_eq!(a.view().insert_dim(dims.as_slice()).shape(), &[1, 3, 1]);
 ///
-/// // duplicates are allowed; each occurrence inserts one dimension
-/// assert_eq!(a.view().insert_dim([0, 0, 1, 1]).shape(), &[1, 1, 3, 1, 1]);
+/// assert_eq!(a.view().insert_dim([0, 1, 3, 4]).shape(), &[1, 1, 3, 1, 1]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct InsertDim<S: ArrayStorage> {
@@ -72,33 +60,33 @@ where
         let new_ndim = orig_ndim + dim.len();
         check_ndim(new_ndim)?;
 
-        // Each value in `dims` is a gap index in the *input* shape: 0 means "before input dim 0",
-        // 1 means "before input dim 1" (i.e. between dims 0 and 1), ..., orig_ndim means "after
-        // the last input dim". Duplicates are allowed - each occurrence inserts one additional
-        // dim at that gap.
+        // Each value in `dim` is a position in the *output* shape that becomes a new length-1
+        // dim; the input dims fill the remaining positions in order.
+        let mut is_inserted = dim_arr(new_ndim, |_| false);
         for i in 0..dim.len() {
             let d = dim.get(i);
             ensure!(
-                d <= orig_ndim,
+                d < new_ndim,
                 InvalidShapeOperation,
-                "dim {d} out of bounds for array of ndim {orig_ndim} \
-                     (gap indices must be in 0..={orig_ndim})"
+                "dim {d} out of bounds for output ndim {new_ndim} (must be in 0..{new_ndim})"
             );
+            ensure!(
+                !is_inserted[d],
+                InvalidShapeOperation,
+                "repeated dim {d} in insert_dim"
+            );
+            is_inserted[d] = true;
         }
-        let mut dims = dim_arr(dim.len(), |i| dim.get(i) as DimIdx);
-        dims.sort_unstable();
 
-        let mut is_inserted = dim_arr(orig_ndim, |_| false);
         let mut shape = DimArray::from_slice(array.shape()).unwrap();
         let orig_spec = array.spec();
         let mut block_shape = <_ as Clone>::clone(orig_spec.block_shape());
         let mut block_shape_fixed_dims = orig_spec.block_shape_fixed_dims();
-        for (inserted_dim_count, &d) in dims.iter().enumerate() {
-            let insert_pos = d as usize + inserted_dim_count;
-            is_inserted.insert(insert_pos, true);
-            shape.insert(insert_pos, 1);
-            block_shape.insert(insert_pos, 1);
-            block_shape_fixed_dims.insert(insert_pos, false);
+        // Inserting in ascending order puts each new dim at its final output position.
+        for d in (0..new_ndim).filter(|&d| is_inserted[d]) {
+            shape.insert(d, 1);
+            block_shape.insert(d, 1);
+            block_shape_fixed_dims.insert(d, false);
         }
         let shape = DimDyn::from_slice(&shape);
         let original_dims = is_inserted
@@ -291,13 +279,13 @@ mod tests {
 
     #[test]
     fn shape_insert_front_and_back() {
-        assert_eq!(make1d(arange(6), 6).insert_dim([0, 1]).shape(), &[1, 6, 1]);
+        assert_eq!(make1d(arange(6), 6).insert_dim([0, 2]).shape(), &[1, 6, 1]);
     }
 
     #[test]
-    fn shape_insert_duplicates_same_gap() {
+    fn shape_insert_adjacent() {
         assert_eq!(
-            make2d(arange(12), 3, 4).insert_dim([0, 0]).shape(),
+            make2d(arange(12), 3, 4).insert_dim([0, 1]).shape(),
             &[1, 1, 3, 4]
         );
     }
@@ -306,16 +294,16 @@ mod tests {
     fn shape_insert_user_example() {
         let a = make3d(arange(24), 2, 3, 4);
         assert_eq!(
-            a.insert_dim([0, 1, 1, 1, 3]).shape(),
+            a.insert_dim([0, 2, 3, 4, 7]).shape(),
             &[1, 2, 1, 1, 1, 3, 4, 1]
         );
     }
 
     #[test]
     fn shape_insert_unsorted_dims_same_result() {
-        // Order of dims values should not matter; only the multiset matters.
-        let a1 = make3d(arange(24), 2, 3, 4).insert_dim([0, 1, 1, 1, 3]);
-        let a2 = make3d(arange(24), 2, 3, 4).insert_dim([3, 1, 0, 1, 1]);
+        // Order of dims values should not matter; only the set matters.
+        let a1 = make3d(arange(24), 2, 3, 4).insert_dim([0, 2, 3, 4, 7]);
+        let a2 = make3d(arange(24), 2, 3, 4).insert_dim([7, 3, 0, 4, 2]);
         assert_eq!(a1.shape(), a2.shape());
     }
 
@@ -361,7 +349,7 @@ mod tests {
     #[test]
     fn full_read_insert_front_and_back() {
         let got = make1d(arange(6), 6)
-            .insert_dim([0, 1])
+            .insert_dim([0, 2])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -373,7 +361,7 @@ mod tests {
     #[test]
     fn full_read_insert_user_example() {
         let got = make3d(arange(24), 2, 3, 4)
-            .insert_dim([0, 1, 1, 1, 3])
+            .insert_dim([0, 2, 3, 4, 7])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -423,12 +411,25 @@ mod tests {
     #[test]
     fn error_dim_out_of_bounds() {
         let a = make1d(arange(4), 4);
-        // orig_ndim=1, valid gaps are 0..=1; dim 2 is out of bounds
+        // output ndim is 2, so valid dims are 0..2; dim 2 is out of bounds
         assert!(InsertDim::new_array(a, [2]).is_err());
     }
 
+    #[test]
+    fn error_dim_out_of_bounds_multiple() {
+        let a = make1d(arange(4), 4);
+        // output ndim is 3, so valid dims are 0..3
+        assert!(InsertDim::new_array(a, [0, 3]).is_err());
+    }
+
+    #[test]
+    fn error_dim_repeated() {
+        let a = make1d(arange(4), 4);
+        assert!(InsertDim::new_array(a, [0, 0]).is_err());
+    }
+
     // -----------------------------------------------------------------------
-    // Proptest: arbitrary shape, arbitrary gap multiset, order-independent
+    // Proptest: arbitrary shape, arbitrary set of output dims, order-independent
     // -----------------------------------------------------------------------
 
     #[allow(clippy::type_complexity)]
@@ -444,9 +445,14 @@ mod tests {
                 (Just(shape), 0..=max_to_insert)
             })
             .prop_flat_map(|(shape, n_insert)| {
-                let ndim = shape.len();
-                let gaps = prop::collection::vec(0..=ndim, n_insert);
-                (Just(shape), gaps)
+                let out_ndim = shape.len() + n_insert;
+                let dims = Just((0..out_ndim).collect::<Vec<_>>())
+                    .prop_shuffle()
+                    .prop_map(move |mut dims| {
+                        dims.truncate(n_insert);
+                        dims
+                    });
+                (Just(shape), dims)
             })
             .prop_flat_map(|(shape, dims)| {
                 let array_strat =
@@ -463,8 +469,8 @@ mod tests {
             let mut sorted_dims = dims.clone();
             sorted_dims.sort_unstable();
             let mut expected_shape= nd.shape().to_vec();
-            for (i, &gap) in sorted_dims.iter().enumerate() {
-                expected_shape.insert(gap + i, 1);
+            for &d in &sorted_dims {
+                expected_shape.insert(d, 1);
             }
             let expected = ndarray::ArrayD::from_shape_vec(
                 expected_shape,

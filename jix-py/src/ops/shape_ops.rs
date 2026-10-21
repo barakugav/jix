@@ -419,24 +419,9 @@ pub fn insert_dim<'py>(
         )));
     }
     let dim = dim.into_dim_array().unwrap();
-    let mut out_positions = normalize_dims(&dim, out_ndim)?;
-    out_positions.sort_unstable();
-    // Repeated output positions are ambiguous; numpy.expand_dims rejects them too.
-    if let Some(w) = out_positions.windows(2).find(|w| w[0] == w[1]) {
-        return Err(PyValueError::new_err(format!(
-            "repeated dim {} in `dim` argument to insert_dim",
-            w[0]
-        )));
-    }
-    // Translate each output position into the core "gap index" (a position in the *input*
-    // shape): the i-th smallest output position has exactly i new dims before it, so the
-    // number of original dimensions preceding it - the gap index - is `position - i`.
-    let gaps = out_positions
-        .iter()
-        .enumerate()
-        .map(|(i, &pos)| pos - i)
-        .collect::<DimArray<_>>();
-    let ret = jix_core::ops::InsertDim::new_array(array, gaps.as_slice()).into_py_result()?;
+    let out_positions = normalize_dims(&dim, out_ndim)?;
+    let ret =
+        jix_core::ops::InsertDim::new_array(array, out_positions.as_slice()).into_py_result()?;
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
