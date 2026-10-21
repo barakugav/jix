@@ -10,3 +10,13 @@
 - rearrange ops module
 - move ReadContext
 - optimize nd copy of structs
+- ignore a Python int clamp bound outside the array dtype where it is a no-op (clamp(uint8, min=-1)), as numpy, instead of raising OverflowError; numpy still raises for clamp(uint8, min=300)
+- support bool, int and complex in is_nan, is_infinite, is_finite
+- compare arrays with Python ints outside their dtype by value (uint8 == -1 is False), as numpy, instead of raising OverflowError
+- support slice steps other than 1, including negative, in a[...] and jix.slice (as numpy); the core Slice already takes steps >= 1
+- support complex in sqrt, exp, log, sin, cos, tan, asin, acos, atan
+- support complex in power
+- add the numpy ufuncs jix lacks (see `missing` in scripts/np_diff/report.md): arctan2, hypot, log1p, expm1, exp2, sinh/cosh/tanh and inverses, trunc, rint, fmax/fmin, copysign, signbit, logaddexp, gcd/lcm, reciprocal, cbrt, conjugate, ...
+- report underflow ('under' in jix.errstate) where numpy does: e.g. f32 1e-30 * 1e-30, exp(-1000), sin of subnormals; no op reports it today
+- support integer-array (fancy) indexing, a[[0, 1]] (as numpy)
+- support boolean-mask indexing, a[a > 2] (as numpy)
