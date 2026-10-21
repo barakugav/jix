@@ -58,7 +58,8 @@ here. Differences that are known but still need fixing are in the repo's `todo.m
 ## FP errors
 
 - The default errstate is `raise` for `divide` and `invalid`, `warn` for `over` and `under` (numpy: warn, warn, ignore under).
-- `add`, `multiply`, `square`, `sum`, `product` report no `over` on float overflow (numpy does).
+- `add`, `multiply`, `square`, `sum`, `product` report no `over` or `under` (numpy does).
+- `under` is reported by `exp`, `sin`, `divide`, `power` only. numpy also reports it from intermediate results: in `floor_divide` (jix `divide_floor`), `isclose`, and float32 `exp`, `sin`, `cos` (e.g. `exp` of a subnormal, `sin(1e-30)`).
 - `add`, `subtract`, `multiply`, `sum`, `product` report no `invalid` when they produce NaN, e.g. `inf - inf`, `0 * inf` (numpy does).
 - `cast` reports no FP errors (numpy: `invalid` for nan/inf/out-of-range float -> int, `over` for int -> float16).
 - `mean`, `var`, `std` report no FP errors (numpy: `over`, `invalid`, `divide`, `under` on inf/max inputs).

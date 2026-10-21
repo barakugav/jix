@@ -612,16 +612,61 @@ pub(crate) mod _traits {
         round,
         round_bulk
     );
-    float_op1!(
+    /// The status of `errors`, out of line so that the check for them stays a branch, cheaper
+    /// than computing it for every element.
+    #[cold]
+    #[inline(never)]
+    fn errors_status<const N: usize>(
+        errors: [(ArithmeticErrorKind, bool); N],
+    ) -> ArithmeticOpStatus {
+        let mut status = ArithmeticOpStatus::default();
+        for (kind, error) in errors {
+            status.set_if(kind, error);
+        }
+        status
+    }
+    define_scalar_op1_trait!(
         /// Natural exponential operation (`e^x`), as [`f32::exp`].
         ///
-        /// A finite input whose result overflows to `inf` sets [`ArithmeticErrorKind::Overflow`].
-        /// Underflow is not reported.
+        /// A finite input whose result overflows to `inf` sets [`ArithmeticErrorKind::Overflow`],
+        /// and one whose result is subnormal or `0` sets [`ArithmeticErrorKind::Underflow`].
         Exp,
         /// Compute the natural exponential, reporting an arithmetic error to `status`.
         exp(status),
-        exp_bulk,
-        errors = |x, r| { Overflow: r.is_infinite() && x.is_finite() }
+        bulk_fn: exp_bulk,
+    );
+    impl_scalar_op1!(
+        impl Exp for [f32, f64] {
+            fn exp = |x, status| {
+                let r = x.exp();
+                // One check of the common case, a normal result
+                if !(Self::MIN_POSITIVE..Self::INFINITY).contains(&r) {
+                    let underflow = r < Self::MIN_POSITIVE && x > Self::NEG_INFINITY;
+                    *status |= errors_status([
+                        (ArithmeticErrorKind::Overflow, r.is_infinite() && x.is_finite()),
+                        (ArithmeticErrorKind::Underflow, underflow),
+                    ]);
+                }
+                r
+            },
+        }
+    );
+    #[cfg(feature = "half")]
+    impl_scalar_op1!(
+        impl Exp for [f16] {
+            fn exp = |x, status| {
+                let r = f16::from_f32(x.to_f32().exp());
+                // One check of the common case, a normal result
+                if !(Self::MIN_POSITIVE..Self::INFINITY).contains(&r) {
+                    let underflow = r < Self::MIN_POSITIVE && x > Self::NEG_INFINITY;
+                    *status |= errors_status([
+                        (ArithmeticErrorKind::Overflow, r.is_infinite() && x.is_finite()),
+                        (ArithmeticErrorKind::Underflow, underflow),
+                    ]);
+                }
+                r
+            },
+        }
     );
     float_op1!(
         /// Natural logarithm operation, as [`f32::ln`].
@@ -635,15 +680,49 @@ pub(crate) mod _traits {
         ln_bulk,
         errors = |x, r| { DivideByZero: x == 0.0, InvalidOperation: x < 0.0 }
     );
-    float_op1!(
+    define_scalar_op1_trait!(
         /// Sine operation, as [`f32::sin`].
         ///
-        /// An infinite input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`].
+        /// An infinite input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`], and
+        /// a subnormal input, whose result is subnormal, sets [`ArithmeticErrorKind::Underflow`]
+        /// (for `f16`, computed in `f32`, a subnormal inexact result).
         Sin,
         /// Compute the sine (input in radians), reporting an arithmetic error to `status`.
         sin(status),
-        sin_bulk,
-        errors = |x, r| { InvalidOperation: x.is_infinite() }
+        bulk_fn: sin_bulk,
+    );
+    impl_scalar_op1!(
+        impl Sin for [f32, f64] {
+            fn sin = |x, status| {
+                // One check of the common case, a non-zero normal input. As the result is about
+                // the input, it is subnormal if the input is.
+                if !(Self::MIN_POSITIVE..Self::INFINITY).contains(&x.abs()) && x != 0.0 {
+                    *status |= errors_status([
+                        (ArithmeticErrorKind::InvalidOperation, x.is_infinite()),
+                        (ArithmeticErrorKind::Underflow, x.abs() < Self::MIN_POSITIVE),
+                    ]);
+                }
+                x.sin()
+            },
+        }
+    );
+    #[cfg(feature = "half")]
+    impl_scalar_op1!(
+        impl Sin for [f16] {
+            fn sin = |x, status| {
+                // In f32, so as numpy the f16 result underflows if it is tiny and inexact
+                let r32 = x.to_f32().sin();
+                let r = f16::from_f32(r32);
+                let tiny = r.to_f32().abs() < Self::MIN_POSITIVE.to_f32() && r.to_f32() != r32;
+                if x.is_infinite() || tiny {
+                    *status |= errors_status([
+                        (ArithmeticErrorKind::InvalidOperation, x.is_infinite()),
+                        (ArithmeticErrorKind::Underflow, tiny),
+                    ]);
+                }
+                r
+            },
+        }
     );
     float_op1!(
         /// Cosine operation, as [`f32::cos`].
@@ -1752,7 +1831,7 @@ pub(crate) mod tests {
         check!("ln", Ln::ln, ln);
         let exp: Cases = &[
             (1000.0, &[Overflow]),
-            (-1000.0, &[]),
+            (-1000.0, &[Underflow]),
             (0.0, &[]),
             (inf, &[]),
             (-inf, &[]),
@@ -1779,6 +1858,12 @@ pub(crate) mod tests {
         check!("sin", Sin::sin, trig);
         check!("cos", Cos::cos, trig);
         check!("tan", Tan::tan, trig);
+        // A subnormal result, and the smallest input with a normal one.
+        check::<f32>("sin", Sin::sin, &[(1e-40, &[Underflow]), (1.2e-38, &[])]);
+        check::<f64>("sin", Sin::sin, &[(1e-310, &[Underflow]), (2.3e-308, &[])]);
+        // In f32, an inexact subnormal result only: sin(710) is about 6.03e-5.
+        #[cfg(feature = "half")]
+        check::<f16>("sin", Sin::sin, &[(710.0, &[Underflow]), (1e-6, &[])]);
         let arc: Cases = &[
             (1.5, &[InvalidOperation]),
             (-1.5, &[InvalidOperation]),

@@ -206,8 +206,8 @@ define_op2!(
     ///
     /// For **float** types the results are the IEEE 754 ones (`+/-inf`, `NaN`), and the errors
     /// those of numpy, reported according to [`jix.errstate()`][jix.errstate]: `x / 0` as
-    /// `divide`, `0 / 0` and `inf / inf` as `invalid`, and an infinite quotient of finite operands
-    /// as `over`.
+    /// `divide`, `0 / 0` and `inf / inf` as `invalid`, an infinite quotient of finite operands
+    /// as `over`, and an inexact subnormal or `0` one as `under`.
     /// For **complex** types this is full complex division.
     ///
     /// Available via the `/` operator on arrays.
@@ -553,8 +553,9 @@ define_op2!(
 /// A negative exponent of an integer base gives `0` and is reported as `invalid`
 /// according to [`jix.errstate()`][jix.errstate] (numpy raises a `ValueError`
 /// instead). For a float base, as numpy: a negative base with a non-integer exponent
-/// produces `NaN`, `invalid`, zero to a negative power `inf`, `divide`, and finite operands
-/// with an infinite result `over`.
+/// produces `NaN`, `invalid`, zero to a negative power `inf`, `divide`, finite operands
+/// with an infinite result `over`, and finite non-zero operands with a subnormal or `0` result
+/// `under`.
 ///
 /// **Type promotion**: when `a` and `b` do not directly match a supported pair,
 /// both operands are cast under Safe casting rules and the first matching pair

@@ -224,7 +224,7 @@ def test_min_by_minus_one(jix_fn, dtype):
 
 # Operands for the float error tests: every pair of these.
 _FLOAT_EDGES = [0.0, -0.0, 1.0, -2.5, 1e30, -1e-30, np.inf, -np.inf, np.nan, "max", "-max", "tiny"]
-_KINDS = {"divide by zero": "divide", "overflow": "over", "invalid": "invalid"}
+_KINDS = {"divide by zero": "divide", "overflow": "over", "underflow": "under", "invalid": "invalid"}
 
 
 def _float_edges(dtype):
@@ -243,10 +243,11 @@ def _error_kind(f, *args):
     return None
 
 
-def _errors_match_numpy(jix_op, np_op, *operands, fills=(1.5, 3.0)):
+def _errors_match_numpy(jix_op, np_op, *operands, fills=(1.5, 3.0), under=False):
     """Each operand tuple in one element of an array of ordinary values, in the SIMD bulk part of
-    the loop and in its scalar tail: jix reports the error numpy reports, ignoring underflow,
-    which jix does not detect."""
+    the loop and in its scalar tail: jix reports the error numpy reports, ignoring underflow
+    unless `under`, for the ops jix reports it for."""
+    under = "raise" if under else "ignore"
     n = 1000
     for i in [300, n - 1]:
         arrays = []
@@ -254,7 +255,7 @@ def _errors_match_numpy(jix_op, np_op, *operands, fills=(1.5, 3.0)):
             a = np.full(n, fill, dtype=x.dtype)
             a[i] = x
             arrays.append(a)
-        with np.errstate(all="raise", under="ignore"):
+        with np.errstate(all="raise", under=under):
             expected = _error_kind(np_op, *arrays)
         if sys.platform == "darwin":
             # numpy's float errors are off on macOS: it misses the 'invalid' of a NaN made by `fmod`
@@ -266,7 +267,7 @@ def _errors_match_numpy(jix_op, np_op, *operands, fills=(1.5, 3.0)):
                 expected = "invalid"
             if expected == "over" and np.isfinite(r):
                 expected = None
-        with jix.errstate(all="raise"):
+        with jix.errstate(all="raise", under=under):
             actual = _error_kind(lambda *a: jix_op(*map(jix.compact, a)).numpy(), *arrays)
         assert actual == expected, (operands, i)
 
@@ -276,7 +277,7 @@ def test_float_divide_errors_match_numpy(dtype):
     edges = _float_edges(dtype)
     for x in edges:
         for y in edges:
-            _errors_match_numpy(lambda a, b: a / b, np.divide, x, y)
+            _errors_match_numpy(lambda a, b: a / b, np.divide, x, y, under=True)
 
 
 # numpy has only `floor_divide`, whose errors are those of the three.
@@ -324,7 +325,10 @@ def test_float_function_errors_match_numpy(jix_fn, np_fn, dtype):
     with np.errstate(over="ignore"):
         edges = np.concatenate([_float_edges(dtype), np.array(_FUNCTION_EDGES, dtype=dtype)])
     for x in edges:
-        _errors_match_numpy(jix_fn, np_fn, x, fills=(0.5,))
+        # numpy's float32 exp and sin report underflows of their SIMD intermediates too: exp of a
+        # subnormal, sin(1e-30)
+        under = jix_fn in (jix.exp, jix.sin) and dtype != np.float32
+        _errors_match_numpy(jix_fn, np_fn, x, fills=(0.5,), under=under)
 
 
 # Past the domain and the overflow thresholds of power.
@@ -341,7 +345,7 @@ def test_float_power_errors_match_numpy(dtype):
             # where `x * x` does, as `1e30 ** inf` in float32.
             if np.isinf(y) and np.isfinite(x):
                 continue
-            _errors_match_numpy(jix.power, np.power, x, y)
+            _errors_match_numpy(jix.power, np.power, x, y, under=True)
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])

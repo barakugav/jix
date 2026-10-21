@@ -14,6 +14,5 @@
 - support complex in sqrt, exp, log, sin, cos, tan, asin, acos, atan
 - support complex in power
 - add the numpy ufuncs jix lacks (see `missing` in scripts/np_diff/report.md): arctan2, hypot, log1p, expm1, exp2, sinh/cosh/tanh and inverses, trunc, rint, fmax/fmin, copysign, signbit, logaddexp, gcd/lcm, reciprocal, cbrt, conjugate, ...
-- report underflow ('under' in jix.errstate) where numpy does: e.g. f32 1e-30 * 1e-30, exp(-1000), sin of subnormals; no op reports it today
 - support integer-array (fancy) indexing, a[[0, 1]] (as numpy)
 - support boolean-mask indexing, a[a > 2] (as numpy)

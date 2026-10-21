@@ -265,8 +265,8 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// A finite input whose result is `inf` overflows, reported according to
-    /// [`jix.errstate()`][jix.errstate], as numpy.
+    /// A finite input whose result is `inf` overflows, and one whose result is subnormal or `0`
+    /// underflows, reported according to [`jix.errstate()`][jix.errstate], as numpy.
     ///
     /// Args:
     ///     array: Input array.
@@ -385,8 +385,8 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// An infinite input produces `NaN`, an invalid operation reported according to
-    /// [`jix.errstate()`][jix.errstate], as numpy.
+    /// An infinite input produces `NaN`, an invalid operation, and a subnormal result underflows,
+    /// reported according to [`jix.errstate()`][jix.errstate], as numpy.
     ///
     /// Args:
     ///     array: Input array.

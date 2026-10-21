@@ -370,8 +370,9 @@ pub(crate) mod _traits {
         /// and sets [`ArithmeticErrorKind::Overflow`].
         /// For **float** types the result is the IEEE 754 one, and the errors are:
         /// a finite non-zero value divided by zero sets [`ArithmeticErrorKind::DivideByZero`],
-        /// `0 / 0` and `inf / inf` set [`ArithmeticErrorKind::InvalidOperation`], and an infinite
-        /// result of finite operands sets [`ArithmeticErrorKind::Overflow`]. NaN operands
+        /// `0 / 0` and `inf / inf` set [`ArithmeticErrorKind::InvalidOperation`], an infinite
+        /// result of finite operands sets [`ArithmeticErrorKind::Overflow`], and an inexact
+        /// subnormal or `0` result sets [`ArithmeticErrorKind::Underflow`]. NaN operands
         /// propagate without an error.
         /// For **complex** types this is full complex division; errors are not reported yet.
         Div,
@@ -770,6 +771,11 @@ pub(crate) mod _traits {
                 let q = f16::from_f32(a.to_f32() / b.to_f32());
                 #[cfg(all(target_arch = "aarch64", target_feature = "fp16"))]
                 let q = a / b;
+                // A tiny inexact quotient is an underflow, exact in f64
+                if q.to_f32().abs() < f16::MIN_POSITIVE.to_f32() && a != f16::ZERO && b.is_finite() {
+                    let inexact = q.to_f64() * b.to_f64() != a.to_f64();
+                    status.set_if(ArithmeticErrorKind::Underflow, inexact);
+                }
                 f16_quotient(q, a, b, status)
             },
         }
@@ -978,6 +984,42 @@ pub(crate) mod _traits {
                     q
                 }
 
+                /// Scales the residual `a - q * b` of a tiny `q = a / b`, which is 0 if `q` is exact,
+                /// so it can't underflow to 0. Nothing overflows.
+                const UNDERFLOW_SCALE: T = (1u128 << 104) as T;
+
+                /// [`quotient`], which also reports a tiny inexact `q = a / b` as an underflow,
+                /// as IEEE 754 (and numpy)
+                #[inline(always)]
+                pub(super) fn true_quotient(q: T, a: T, b: T, status: &mut ArithmeticOpStatus) -> T {
+                    if q.abs() < T::MIN_POSITIVE && a != 0.0 && b.is_finite() {
+                        let residual = (q * UNDERFLOW_SCALE).mul_add(-b, a * UNDERFLOW_SCALE);
+                        status.set_if(ArithmeticErrorKind::Underflow, residual != 0.0);
+                    }
+                    quotient(q, a, b, status)
+                }
+
+                #[inline(always)]
+                pub(super) fn true_quotient_v<S: Simd>(
+                    q: V<S>,
+                    a: V<S>,
+                    b: V<S>,
+                    status: &mut ArithmeticOpStatus,
+                    simd: S,
+                ) -> V<S> {
+                    let zero = splat(0.0, simd);
+                    let tiny = q.abs().simd_lt(splat(T::MIN_POSITIVE, simd)) & a.simd_ne(zero);
+                    // One check of the common case, a finite non-tiny quotient
+                    if (tiny | !q.is_finite()).any_true() {
+                        let scale = splat(UNDERFLOW_SCALE, simd);
+                        let residual = (q * scale).mul_add_precise(-b, a * scale);
+                        let inexact = tiny & b.is_finite() & residual.simd_ne(zero);
+                        status.set_if(ArithmeticErrorKind::Underflow, inexact.any_true());
+                        return quotient_v(q, a, b, status, simd);
+                    }
+                    q
+                }
+
                 #[inline(always)]
                 pub(super) fn remainder(r: T, a: T, b: T, status: &mut ArithmeticOpStatus) -> T {
                     let invalid = r.is_nan() && !a.is_nan() && !b.is_nan();
@@ -1009,8 +1051,10 @@ pub(crate) mod _traits {
 
             impl_scalar_op2!(
                 impl Div for [$t] {
-                    fn div = |a, b, status| $m::quotient(a / b, a, b, status),
-                    fn div_bulk = |a, b, status| $m::quotient_v(a / b, a, b, status, a.token()),
+                    fn div = |a, b, status| $m::true_quotient(a / b, a, b, status),
+                    fn div_bulk = |a, b, status| {
+                        $m::true_quotient_v(a / b, a, b, status, a.token())
+                    },
                 }
             );
             impl_scalar_op2!(
@@ -1157,8 +1201,9 @@ pub(crate) mod _traits {
         ///
         /// Float values follow [`f32::powf`]. A negative base with a non-integer exponent
         /// produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`], zero to a negative
-        /// power gives `inf` and sets [`ArithmeticErrorKind::DivideByZero`], and finite operands
-        /// with an infinite result set [`ArithmeticErrorKind::Overflow`].
+        /// power gives `inf` and sets [`ArithmeticErrorKind::DivideByZero`], finite operands
+        /// with an infinite result set [`ArithmeticErrorKind::Overflow`], and finite non-zero
+        /// operands with a subnormal or `0` result set [`ArithmeticErrorKind::Underflow`].
         Pow,
         /// Raise to the power of another value, reporting an arithmetic error to `status`.
         pow(status),
@@ -1194,17 +1239,21 @@ pub(crate) mod _traits {
     );
     impl_scalar_op2!(
         impl Pow for [f32, f64] x [i8, u8, i16, u16, i32] {
-            fn pow = |a, b, status| float_power(a.powi(b as i32), a, b as Self, status),
+            fn pow = |a, b, status| {
+                float_power(a.powi(b as i32), a, b as Self, Self::MIN_POSITIVE, status)
+            },
         }
     );
     impl_scalar_op2!(
         impl Pow for [f32, f64] x [f32] {
-            fn pow = |a, b, status| float_power(a.powf(b as Self), a, b as Self, status),
+            fn pow = |a, b, status| {
+                float_power(a.powf(b as Self), a, b as Self, Self::MIN_POSITIVE, status)
+            },
         }
     );
     impl_scalar_op2!(
         impl Pow for [f64] x [f64] {
-            fn pow = |a, b, status| float_power(a.powf(b), a, b, status),
+            fn pow = |a, b, status| float_power(a.powf(b), a, b, Self::MIN_POSITIVE, status),
         }
     );
     #[cfg(feature = "half")]
@@ -1212,7 +1261,8 @@ pub(crate) mod _traits {
         impl Pow for [f16] x [i8, u8, i16, u16, i32] {
             fn pow = |a, b, status| {
                 let p = f16::from_f32(a.to_f32().powi(b as i32));
-                float_power(p.to_f32(), a.to_f32(), b as f32, status);
+                let min_positive = f16::MIN_POSITIVE.to_f32();
+                float_power(p.to_f32(), a.to_f32(), b as f32, min_positive, status);
                 p
             },
         }
@@ -1222,29 +1272,31 @@ pub(crate) mod _traits {
         impl Pow for [f16] {
             fn pow = |a, b, status| {
                 let p = f16::from_f32(a.to_f32().powf(b.to_f32()));
-                float_power(p.to_f32(), a.to_f32(), b.to_f32(), status);
+                let min_positive = f16::MIN_POSITIVE.to_f32();
+                float_power(p.to_f32(), a.to_f32(), b.to_f32(), min_positive, status);
                 p
             },
         }
     );
 
+    /// The errors of `p = a ** b`, for `p` of a type whose smallest normal is `min_positive`
     #[inline(always)]
-    fn float_power<T>(p: T, a: T, b: T, status: &mut ArithmeticOpStatus) -> T
+    fn float_power<T>(p: T, a: T, b: T, min_positive: T, status: &mut ArithmeticOpStatus) -> T
     where
-        T: Copy
-            + Into<f64>
-            + crate::scalar::IsFinite<Output = bool>
-            + crate::scalar::IsNan<Output = bool>,
+        T: Copy + Into<f64> + crate::scalar::IsNan<Output = bool>,
     {
-        if !p.is_finite() && !a.is_nan() && !b.is_nan() {
-            *status |= float_pow_error(a, b, p);
+        let (p64, a64, min_positive): (f64, f64, f64) = (p.into(), a.into(), min_positive.into());
+        // One check of the common case, a normal result, or 0 of a 0 base
+        let normal = (min_positive..f64::INFINITY).contains(&p64.abs());
+        if !normal && (p64 != 0.0 || a64 != 0.0) && !a.is_nan() && !b.is_nan() {
+            *status |= float_pow_error(a, b, p, min_positive);
         }
         p
     }
     // r=x^y
     #[cold]
     #[inline(never)]
-    fn float_pow_error<T: Into<f64>>(x: T, y: T, r: T) -> ArithmeticOpStatus {
+    fn float_pow_error<T: Into<f64>>(x: T, y: T, r: T, min_positive: f64) -> ArithmeticOpStatus {
         use ArithmeticErrorKind::*;
         let (x, y, r) = (x.into(), y.into(), r.into());
         let mut status = ArithmeticOpStatus::default();
@@ -1252,6 +1304,7 @@ pub(crate) mod _traits {
         status.set_if(DivideByZero, x == 0.0 && y < 0.0);
         let finite = x.is_finite() && y.is_finite();
         status.set_if(Overflow, r.is_infinite() && finite && x != 0.0);
+        status.set_if(Underflow, r.abs() < min_positive && finite && x != 0.0);
         status
     }
 }
@@ -2982,6 +3035,8 @@ pub(crate) mod tests {
                         (c(f64::NAN), c(0.0), None),
                         (c(inf), c(0.0), None),
                         (c(-1.0), c(inf), None),
+                        ($t::MIN_POSITIVE, c(3.0), Some(ArithmeticErrorKind::Underflow)),
+                        ($t::MIN_POSITIVE, c(2.0), None), // exact
                     ] {
                         // In the bulk part of the loop, and in its scalar tail.
                         for i in [300, n - 1] {
@@ -2998,6 +3053,7 @@ pub(crate) mod tests {
                             for kind in [
                                 ArithmeticErrorKind::DivideByZero,
                                 ArithmeticErrorKind::Overflow,
+                                ArithmeticErrorKind::Underflow,
                                 ArithmeticErrorKind::InvalidOperation,
                             ] {
                                 ctx.set_arithmetic_error_mode(kind, ArithmeticErrorMode::Error);
@@ -3012,6 +3068,7 @@ pub(crate) mod tests {
                             let message = match error {
                                 ArithmeticErrorKind::DivideByZero => "divide by zero encountered",
                                 ArithmeticErrorKind::Overflow => "overflow encountered",
+                                ArithmeticErrorKind::Underflow => "underflow encountered",
                                 _ => "invalid operation encountered",
                             };
                             assert_eq!(err.message(), message, "{what}");
@@ -3141,14 +3198,19 @@ pub(crate) mod tests {
             -f64::INFINITY,
             f64::NAN,
         ];
-        // `r` is the power of `x` to `y`.
+        // `r` is the power of `x` to `y`, of a type whose smallest normal is `min_positive`.
         let check = |what: &str, x: f64, y: f64, r: f64, status: ArithmeticOpStatus| {
+            let min_positive = match what {
+                "f64" | "f64 x i32" => f64::MIN_POSITIVE,
+                "f32" | "f32 x i32" => f32::MIN_POSITIVE.into(),
+                _ => 6.103515625e-5, // f16
+            };
             let finite = x.is_finite() && y.is_finite();
             let expected = [
                 (InvalidOperation, finite && x < 0.0 && y.fract() != 0.0),
                 (DivideByZero, x == 0.0 && y < 0.0),
                 (Overflow, finite && x != 0.0 && r.is_infinite()),
-                (Underflow, false),
+                (Underflow, finite && x != 0.0 && r.abs() < min_positive),
             ];
             for (kind, expected) in expected {
                 assert_eq!(
