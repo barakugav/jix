@@ -18,14 +18,15 @@ use crate::{ElementType, TypeDyn};
 /// # Primary storage backends
 ///
 /// The main concrete storages are the block-compressed backends:
-/// `compact::Compact` (heap-allocated) and `compact::CompactMmap` (memory-mapped file).
+/// [`Compact`](crate::storage::Compact) (heap-allocated) and
+/// [`CompactMmap`](crate::storage::CompactMmap) (memory-mapped file).
 /// These store the array as independently
 /// compressed nd-blocks and are the primary on-disk format.
 ///
 /// # Adapter
 ///
 /// An adapter lets plain data participate in the same `Array<S>` world:
-/// - `plain::Plain` - wraps a contiguous or strided in-memory ndarray, used when
+/// - [`Plain`](crate::storage::Plain) - wraps a contiguous or strided in-memory ndarray, used when
 ///   operating on regular Rust/ndarray data alongside compressed arrays.
 ///
 /// # Lazy operation views
@@ -128,9 +129,9 @@ pub trait ArrayStorage {
         T: Dtyped,
         Self: Sized,
     {
-        check_dtype(&T::DTYPE, self.dtype())?;
+        check_dtype(Dtype::new_ref::<T>(), self.dtype())?;
         let data = self.read_data(index, context, None)?;
-        Ok(unsafe { OperandTyped::new_input(data, self.dtype()) })
+        Ok(unsafe { OperandTyped::new_input(data, Dtype::new_ref::<T>()) })
     }
 
     /// Returns the shape of the array, one element per dimension.

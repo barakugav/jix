@@ -94,7 +94,7 @@ impl BufferPool {
 
 /// An RAII guard for a temporary scratch buffer borrowed from a [`BufferPool`].
 ///
-/// Obtained via [`BufferPool::get`] (or [`ReadContext::tmp_buf`]). The slices it hands out cover
+/// Obtained via [`BufferPool::get`] (or [`ReadContext::allocate_buf`](crate::codec::ReadContext::allocate_buf)). The slices it hands out cover
 /// the whole allocation, which may be larger than the size asked for: slice them to that size
 /// wherever the length matters. When `PoolBuf` is dropped, the underlying allocation is returned to
 /// the pool for reuse.

@@ -1,10 +1,5 @@
 //! Scalar element types and associated arithmetic traits used by the operation layer.
 //!
-//! ## `f16` and `Complex<T>` coverage
-//!
-//! The [`struct@f16`] and [`Complex<T>`] types are available under the  **`half`** and
-//! **`num-complex`** crate features, respectively.
-//!
 //! ## Operation traits
 //!
 //! Each element-wise [`Array`](crate::Array) operation is bounded by a *scalar-level* trait of
@@ -15,6 +10,11 @@
 //! Each such trait has the scalar
 //! function (`add`) and a bulk one on `N` elements (`add_bulk`), which the ops call, vectorized
 //! with SIMD for the types with SIMD support (the default computes element by element).
+//!
+//! ## `f16` and `Complex<T>` coverage
+//!
+//! The [`struct@f16`] and [`Complex<T>`] types are available under the  **`half`** and
+//! **`num-complex`** crate features, respectively.
 
 #[cfg(feature = "half")]
 pub use half::f16;

@@ -9,7 +9,4 @@
 - add item() to rust
 - rearrange ops module
 - move ReadContext
-- Promotion in where/concat/stack op
-- correctly promoting python scalars, u64+PythonInt should be u64 (not f64)
-- errors in elementwise kernels, for example divide by zero
-- optimize std: if we read an output cell's whole require data, use numpy two pass with sum, rather then the iterator version of std
+- optimize nd copy of structs

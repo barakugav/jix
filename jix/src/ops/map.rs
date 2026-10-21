@@ -234,7 +234,7 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
         F: Fn(ArraysT::ItemSequence<'_>) -> O,
         O: Dtyped,
     {
-        check_dtype_size_nonzero(&O::DTYPE)?;
+        check_dtype_size_nonzero(Dtype::new_ref::<O>())?;
         let narrays = arrays.narrays();
         if narrays > 1 {
             let shape = arrays.shape(0);

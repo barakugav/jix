@@ -806,7 +806,7 @@ pub(crate) mod _traits {
                 ///
                 /// The quotient is `div_trunc` of rust-lang/rust#134062, a proposed fix to
                 /// `f64::div_euclid`:
-                /// https://github.com/rust-lang/rust/blob/343e091465e81589a164adba621f331201746dc6/library/std/src/f64.rs#L280-L293
+                /// <https://github.com/rust-lang/rust/blob/343e091465e81589a164adba621f331201746dc6/library/std/src/f64.rs#L280-L293>
                 /// Unlike there, it compares the residual with `< 0.0`, not `is_sign_negative()`,
                 /// which the NaN residuals of special values may pass, and goes on past
                 /// `EXACT_LIMIT`, where #134062 returns NaN, within one ulp. As in numpy's
@@ -814,7 +814,7 @@ pub(crate) mod _traits {
                 ///
                 /// The residual of the exact quotient is the remainder, as in the docs there
                 /// (L222-L223), exact as `fmod` is:
-                /// https://en.cppreference.com/w/c/numeric/math/fmod
+                /// <https://en.cppreference.com/w/c/numeric/math/fmod>
                 #[inline(always)]
                 fn div_rem_trunc(a: T, b: T) -> (T, T) {
                     let d = a / b; // for the sign of the quotient

@@ -1,13 +1,13 @@
 use std::borrow::Cow;
 
-use jix_core::dtype::{Dtyped, ScalarKind};
+use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
 use jix_core::ops::IntoType;
 use jix_core::storage::ArrayStorageAny;
 use jix_core::{Array as CoreArray, ArrayAny, Ty};
 use pyo3::prelude::*;
 
 use crate::ops::common::{CastKind, Operand, Precision, Rank, Scalar};
-use crate::util::{IntoPyResult, ItemOrTuple, IterExt};
+use crate::util::{array_try_map, IntoPyResult, ItemOrTuple, IterExt};
 
 type TypedOperand<T> = CoreArray<IntoType<ArrayStorageAny, Ty<T>>>;
 
@@ -192,25 +192,8 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
             .ok();
 
         if let Some(mut in_dtypes) = in_dtypes {
-            // if all operands have no precision (all are python scalars), set precision to 8 (i64, f64)
-            let all_without_precision = in_dtypes
-                .iter()
-                .all(|(_rank, precision)| precision.is_none());
-            if all_without_precision {
-                in_dtypes = in_dtypes.map(|(rank, precision)| {
-                    debug_assert!(precision.is_none());
-                    let precision = match rank {
-                        Rank::Bool => Some(Precision::P1),
-                        Rank::UInt | Rank::Int | Rank::Float | Rank::Complex => Some(Precision::P8),
-                    };
-                    (rank, precision)
-                });
-            }
-
-            let has_float16_input = in_dtypes.iter().any(|(rank, precision)| {
-                matches!(rank, Rank::Float | Rank::Complex)
-                    & matches!(precision, Some(Precision::P2))
-            });
+            cast_python_scalars_to_default_precision(&mut in_dtypes);
+            let has_float16_input = has_float16_input(&in_dtypes);
 
             for op_fn in &self.fns {
                 if !has_float16_input {
@@ -248,6 +231,108 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
 
         Err(unsupported_dtype_error(self.name, &inputs))
     }
+}
+
+pub(crate) fn operands_dtype_promotion<const N: usize>(
+    name: &str,
+    operands: [Operand; N],
+) -> PyResult<[Operand; N]> {
+    match promotion_target(name, &operands)? {
+        None => Ok(operands),
+        Some(dtype) => array_try_map(operands, |_i, operand| operand.cast(dtype)),
+    }
+}
+
+pub(crate) fn operands_dtype_promotion_vec(
+    name: &str,
+    operands: Vec<Operand>,
+) -> PyResult<Vec<Operand>> {
+    match promotion_target(name, &operands)? {
+        None => Ok(operands),
+        Some(dtype) => operands
+            .into_iter()
+            .map(|operand| operand.cast(dtype))
+            .collect(),
+    }
+}
+
+/// The dtype to cast `operands` to, or `None` if they are arrays that already share a dtype.
+fn promotion_target(name: &str, operands: &[Operand]) -> PyResult<Option<ScalarKind>> {
+    fn array_dtype(operand: &Operand) -> Option<&Dtype> {
+        match operand {
+            Operand::PyArray(array) => Some(array.get().arr.dtype()),
+            Operand::Array(array) => Some(array.dtype()),
+            Operand::Scalar { .. } => None,
+        }
+    }
+    let first_dtype = operands.first().and_then(array_dtype);
+    if first_dtype.is_some() && operands.iter().all(|op| array_dtype(op) == first_dtype) {
+        return Ok(None);
+    }
+    match promotion_target_impl(operands) {
+        Some(dtype) => Ok(Some(dtype)),
+        None => Err(unsupported_dtype_error(name, operands)),
+    }
+}
+
+pub(crate) fn promotion_target_impl(operands: &[Operand]) -> Option<ScalarKind> {
+    let mut in_dtypes = operands
+        .iter()
+        .map(Operand::rank_precision)
+        .collect::<Option<Vec<_>>>()?;
+    cast_python_scalars_to_default_precision(&mut in_dtypes);
+    let has_float16_input = has_float16_input(&in_dtypes);
+
+    let promotion_target_impls = [
+        ScalarKind::Bool,
+        ScalarKind::U8,
+        ScalarKind::I8,
+        ScalarKind::U16,
+        ScalarKind::I16,
+        ScalarKind::U32,
+        ScalarKind::I32,
+        ScalarKind::U64,
+        ScalarKind::I64,
+        ScalarKind::F16,
+        ScalarKind::F32,
+        ScalarKind::F64,
+        ScalarKind::ComplexF32,
+        ScalarKind::ComplexF64,
+    ];
+    for &dtype in &promotion_target_impls {
+        if dtype == ScalarKind::F16 && !has_float16_input {
+            continue;
+        }
+        if in_dtypes
+            .iter()
+            .all(|&in_dtype| CastKind::Safe.is_cast_allowed(in_dtype, dtype))
+        {
+            return Some(dtype);
+        }
+    }
+    None
+}
+
+/// If all operands have no precision (all are python scalars), set precision to 8 (i64, f64).
+fn cast_python_scalars_to_default_precision(in_dtypes: &mut [(Rank, Option<Precision>)]) {
+    let all_without_precision = in_dtypes
+        .iter()
+        .all(|(_rank, precision)| precision.is_none());
+    if all_without_precision {
+        for (rank, precision) in in_dtypes {
+            *precision = match rank {
+                Rank::Bool => Some(Precision::P1),
+                Rank::UInt | Rank::Int | Rank::Float | Rank::Complex => Some(Precision::P8),
+            };
+        }
+    }
+}
+
+/// Whether one of the inputs is f16. If none is, a function that requires f16 is never dispatched.
+fn has_float16_input(in_dtypes: &[(Rank, Option<Precision>)]) -> bool {
+    in_dtypes.iter().any(|(rank, precision)| {
+        matches!(rank, Rank::Float | Rank::Complex) && matches!(precision, Some(Precision::P2))
+    })
 }
 
 #[cold]

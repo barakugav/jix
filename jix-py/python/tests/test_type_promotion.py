@@ -801,3 +801,128 @@ def test_complex_scalar_keeps_its_value():
     arr = np.array([1 + 2j, 3 + 4j], dtype=np.complex64)
     a = jix.compact(arr)
     np.testing.assert_array_equal((a * (0.1 + 0.2j)).numpy(), arr * np.complex64(0.1 + 0.2j))
+
+
+# ---------------------------------------------------------------------------
+# where / concatenate / stack: inputs of different dtypes are cast to a common
+# dtype, picked with the same rules as the dispatch tables. Inputs that already
+# share a dtype, which may be a struct dtype, are used as they are.
+# ---------------------------------------------------------------------------
+
+_ALL_DTYPES = [
+    np.bool_,
+    np.uint8,
+    np.int8,
+    np.uint16,
+    np.int16,
+    np.uint32,
+    np.int32,
+    np.uint64,
+    np.int64,
+    np.float16,
+    np.float32,
+    np.float64,
+    np.complex64,
+    np.complex128,
+]
+
+
+@pytest.mark.parametrize("a_dtype", _ALL_DTYPES)
+@pytest.mark.parametrize("b_dtype", _ALL_DTYPES)
+def test_where_concatenate_stack_promote_arrays_like_numpy(a_dtype, b_dtype):
+    """For two arrays the common dtype is numpy's, for every pair of dtypes."""
+    a_np = np.array([0, 1], dtype=a_dtype)
+    b_np = np.array([1, 0], dtype=b_dtype)
+    cond_np = np.array([True, False])
+    a, b, cond = jix.compact(a_np), jix.compact(b_np), jix.compact(cond_np)
+    expected = np.result_type(a_dtype, b_dtype)
+    for result, ref in [
+        (jix.where(cond, a, b), np.where(cond_np, a_np, b_np)),
+        (jix.concatenate([a, b]), np.concatenate([a_np, b_np])),
+        (jix.stack([a, b]), np.stack([a_np, b_np])),
+    ]:
+        assert result.dtype == expected, (a_dtype, b_dtype)
+        np.testing.assert_array_equal(result.numpy(), ref)
+
+
+def test_concatenate_stack_promote_many_arrays():
+    """The common dtype is picked for all inputs at once, not pairwise: u8, i8 and f16 all fit f16,
+    as numpy, although u8 and i8 alone promote to i16, which then needs f32 with f16."""
+    arrays = [np.array([1], dtype=np.uint8), np.array([-1], dtype=np.int8), np.array([0.5], dtype=np.float16)]
+    zs = [jix.compact(a) for a in arrays]
+    assert jix.concatenate(zs).dtype == np.float16
+    np.testing.assert_array_equal(jix.concatenate(zs).numpy(), np.concatenate(arrays))
+    assert jix.stack(zs).dtype == np.float16
+    np.testing.assert_array_equal(jix.stack(zs).numpy(), np.stack(arrays))
+
+
+@pytest.mark.parametrize(
+    "arr_dtype, scalar, expected",
+    [
+        (np.uint8, 0, np.uint8),
+        (np.int8, -1, np.int8),
+        (np.uint64, 1, np.uint64),
+        (np.float16, 1.5, np.float16),
+        (np.float32, 1.5, np.float32),
+        (np.int8, 1.5, np.float32),  # no f16 input, so not f16 (numpy: f64)
+        (np.int32, 1.5, np.float64),
+        (np.bool_, True, np.bool_),
+        (np.bool_, 1, np.uint8),  # bool + int -> u8 (numpy: i64)
+        (np.int8, 1j, np.complex64),
+        (np.float64, 1j, np.complex128),
+    ],
+)
+def test_where_python_scalar_takes_array_dtype(arr_dtype, scalar, expected):
+    """A Python scalar follows the same rules as in the element-wise ops, in either position."""
+    a_np = np.array([0, 1], dtype=arr_dtype)
+    cond_np = np.array([True, False])
+    a, cond = jix.compact(a_np), jix.compact(cond_np)
+    for args, np_args in [((a, scalar), (a_np, scalar)), ((scalar, a), (scalar, a_np))]:
+        result = jix.where(cond, *args)
+        assert result.dtype == np.dtype(expected)
+        np.testing.assert_array_equal(result.numpy(), np.where(cond_np, *np_args).astype(expected))
+
+
+@pytest.mark.parametrize("x, y, expected", [(0, 1, np.int64), (0, 1.5, np.float64), (True, False, np.bool_)])
+def test_where_python_scalars_only(x, y, expected):
+    """With only untyped operands, the 64-bit default applies."""
+    cond_np = np.array([True, False])
+    result = jix.where(jix.compact(cond_np), x, y)
+    assert result.dtype == np.dtype(expected)
+    np.testing.assert_array_equal(result.numpy(), np.where(cond_np, x, y).astype(expected))
+
+
+@pytest.mark.parametrize("arr_dtype, scalar", [(np.uint8, 300), (np.uint8, -1), (np.int8, -1000)])
+def test_where_python_int_out_of_bounds_raises(arr_dtype, scalar):
+    a = jix.compact(np.array([0, 1], dtype=arr_dtype))
+    cond = jix.compact(np.array([True, False]))
+    with pytest.raises(OverflowError, match="out of bounds"):
+        jix.where(cond, a, scalar)
+
+
+_STRUCT_DTYPE = np.dtype([("x", np.int32), ("y", np.float64)])
+
+
+def test_where_concatenate_stack_keep_shared_struct_dtype():
+    """Inputs that already share a dtype skip promotion, so struct dtypes keep working."""
+    a_np = np.array([(1, 1.5), (2, 2.5)], dtype=_STRUCT_DTYPE)
+    b_np = np.array([(3, 3.5), (4, 4.5)], dtype=_STRUCT_DTYPE)
+    cond_np = np.array([True, False])
+    a, b, cond = jix.asarray(a_np), jix.asarray(b_np), jix.compact(cond_np)
+    for result, ref in [
+        (jix.where(cond, a, b), np.where(cond_np, a_np, b_np)),
+        (jix.concatenate([a, b]), np.concatenate([a_np, b_np])),
+        (jix.stack([a, b]), np.stack([a_np, b_np])),
+    ]:
+        assert result.dtype == _STRUCT_DTYPE
+        np.testing.assert_array_equal(result.numpy(), ref)
+
+
+def test_where_concatenate_stack_struct_and_scalar_dtype_raise():
+    """A struct dtype has no common dtype with a scalar one."""
+    s = jix.asarray(np.array([(1, 1.5), (2, 2.5)], dtype=_STRUCT_DTYPE))
+    i = jix.compact(np.array([1, 2], dtype=np.int32))
+    cond = jix.compact(np.array([True, False]))
+    for fn in [lambda: jix.where(cond, s, i), lambda: jix.concatenate([s, i]), lambda: jix.stack([s, i])]:
+        with pytest.raises(RuntimeError, match="does not support operands with dtypes"):
+            fn()

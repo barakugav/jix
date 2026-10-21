@@ -1499,7 +1499,7 @@ impl<S: ArrayStorage> Array<S> {
     #[inline]
     pub fn view(&self) -> Array<View<'_, S>> {
         Array {
-            storage: View(self.storage()),
+            storage: View::new(self.storage()),
         }
     }
 

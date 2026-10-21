@@ -11,7 +11,9 @@ use crate::{DimVec, Dimension};
 ///    - `block_begin[d] = begin[d] / block_shape[d]`
 ///    - `block_end[d]   = end[d].div_ceil(block_shape[d])`
 ///
-/// so start the builder with [`NdIter::builder_with_begin`] using those bounds.
+/// so start the builder with
+/// [`NdIter::builder_with_begin`](crate::util::iter::NdIter::builder_with_begin) using those
+/// bounds.
 ///
 /// Each iteration step yields `(block_idx, (inner_offset, block_size))` where
 /// `inner_offset` and `block_size` are per-dimension slices describing which elements of the

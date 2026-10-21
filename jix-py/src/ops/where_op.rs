@@ -1,4 +1,4 @@
-use crate::ops::common::{broadcast_operands, Operand};
+use crate::ops::common::{broadcast_operands, operands_dtype_promotion, Operand};
 use crate::util::IntoPyResult;
 use crate::Array;
 
@@ -6,16 +6,15 @@ use crate::Array;
 ///
 /// For each index `i`, the output is `x[i]` if `condition[i]` is `True`, otherwise `y[i]`.
 ///
-/// `condition` must have dtype `bool`. `x` and `y` must have the same dtype. Output dtype equals
-/// the dtype of `x` and `y`.
+/// `condition` must have dtype `bool`. Output dtype is the common dtype of `x` and `y`.
+///
+/// **Type promotion**: if `x` and `y` have different dtypes, they are cast to a common dtype.
 ///
 /// **Broadcasting**: the shapes of `condition`, `x`, and `y` are broadcast to a common shape
 /// following numpy rules, which is the output shape.
 ///
-/// This function deviates from numpy in a few ways:
-/// - `x` and `y` must have the same dtype (numpy will upcast if they differ)
-/// - `condition` must already have `bool` dtype; use [`jix.cast(condition, 'bool')`][jix.cast] if needed
-///   (numpy implicitly casts the condition to bool)
+/// This function deviates from numpy: `condition` must already have `bool` dtype; use
+/// [`jix.cast(condition, 'bool')`][jix.cast] if needed (numpy implicitly casts the condition to bool).
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -44,6 +43,13 @@ use crate::Array;
 ///     x = jix.compact(np.zeros((2, 3), dtype=np.int32))
 ///     y = jix.compact(np.array([7, 8, 9], dtype=np.int32))
 ///     assert np.array_equal(jix.where(cond, x, y).numpy(), [[0, 8, 0], [7, 0, 9]])
+///
+///     # Mixed dtypes promote; a Python scalar takes the array's dtype
+///     cond = jix.compact([True, False, True])
+///     a = jix.compact([1, 2, 3], dtype=np.uint8)
+///     b = jix.compact([-1, -2, -3], dtype=np.int8)
+///     assert jix.where(cond, a, b).dtype == np.int16
+///     assert jix.where(cond, a, 0).dtype == np.uint8
 ///     ```
 #[pyo3::pyfunction]
 #[pyo3(name = "where")]
@@ -58,6 +64,7 @@ pub fn r#where<'py>(
     let x = Operand::from_any(x)?;
     let y = Operand::from_any(y)?;
     let [condition, x, y] = broadcast_operands([condition, x, y])?;
+    let [x, y] = operands_dtype_promotion("where", [x, y])?;
 
     let condition = condition
         .into_array()?

@@ -83,8 +83,8 @@
 //! ```
 //!
 //! Each op additionally requires the input element type to implement the relevant scalar trait,
-//! of [`jix::scalar`](crate::scalar). For example, `a + b` requires `crate::scalar::Add`, `exp()`
-//! requires `crate::scalar::Exp`, and `sum()` requires `crate::scalar::Sum`.
+//! of [`jix::scalar`](crate::scalar). For example, `a + b` requires [`jix::scalar::Add`](crate::scalar::Add), `exp()`
+//! requires [`jix::scalar::Exp`](crate::scalar::Exp), and `sum()` requires [`jix::scalar::Sum`](crate::scalar::Sum).
 //!
 //! # Multi-array operations
 //!
