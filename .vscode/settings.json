@@ -22,6 +22,7 @@
         "blosc",
         "carray",
         "carrays",
+        "ddof",
         "Dtyped",
         "elementwise",
         "getattr",
@@ -53,7 +54,8 @@
         "rtol",
         "seekable",
         "strided",
-        "unsqueeze"
+        "unsqueeze",
+        "Welford"
     ],
     "rust-analyzer.runnables.extraEnv": {
         "VIRTUAL_ENV": "${workspaceFolder}/.venv",

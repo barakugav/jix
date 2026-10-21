@@ -1682,20 +1682,21 @@ pub(crate) mod _traits {
         fn finalize(state: Self::State, nitems: u64) -> Option<Self::Output>;
     }
     macro_rules! impl_mean {
-        ($item_ty:ty, $output_ty:ty) => {
-            impl Mean for $item_ty {
-                type Output = $output_ty;
-                type State = <Self as Sum>::Output;
+        ($ItemT:ty, $MeanT:ty, $FinalizeT:ty, $OutputT:ty) => {
+            impl Mean for $ItemT {
+                type Output = $OutputT;
+                type State = $MeanT;
 
-                const IS_PRECISE_SUM: bool = <Self as Sum>::IS_PRECISE;
+                const IS_PRECISE_SUM: bool = <Self::State as Sum>::IS_PRECISE;
 
                 #[inline(always)]
                 fn init() -> Self::State {
-                    <Self as Sum>::init()
+                    <Self::State as Sum>::init()
                 }
                 #[inline(always)]
                 fn update(state: Self::State, item: Self) -> Self::State {
-                    <Self as Sum>::update(state, item)
+                    let item = <Self as crate::scalar::Cast<Self::State>>::cast(item);
+                    <Self::State as Sum>::update(state, item)
                 }
                 #[inline(always)]
                 fn update_bulk<const N: usize, S: fearless_simd::Simd>(
@@ -1703,42 +1704,43 @@ pub(crate) mod _traits {
                     items: [Self; N],
                     simd: S,
                 ) -> [Self::State; N] {
-                    <Self as Sum>::update_bulk(states, items, simd)
+                    let items = <Self as crate::scalar::Cast<Self::State>>::cast_bulk(items, simd);
+                    <Self::State as Sum>::update_bulk(states, items, simd)
                 }
                 #[inline(always)]
                 fn merge_states(a: Self::State, b: Self::State) -> Self::State {
-                    <Self as Sum>::merge_states(a, b)
+                    <Self::State as Sum>::merge_states(a, b)
                 }
                 #[inline(always)]
                 fn finalize(state: Self::State, nitems: u64) -> Option<Self::Output> {
                     if nitems == 0 {
                         return None;
                     }
-                    Some(
-                        <_ as crate::scalar::Cast<Self::Output>>::cast(state)
-                            / <_ as crate::scalar::Cast<Self::Output>>::cast(nitems),
-                    )
+                    let state = <_ as crate::scalar::Cast<$FinalizeT>>::cast(state);
+                    let nitems = <_ as crate::scalar::Cast<$FinalizeT>>::cast(nitems);
+                    let mean = state / nitems;
+                    Some(<_ as crate::scalar::Cast<Self::Output>>::cast(mean))
                 }
             }
         };
     }
-    impl_mean!(i8, f64);
-    impl_mean!(i16, f64);
-    impl_mean!(i32, f64);
-    impl_mean!(i64, f64);
-    impl_mean!(u8, f64);
-    impl_mean!(u16, f64);
-    impl_mean!(u32, f64);
-    impl_mean!(u64, f64);
+    impl_mean!(i8, i64, f64, f64);
+    impl_mean!(i16, i64, f64, f64);
+    impl_mean!(i32, i64, f64, f64);
+    impl_mean!(i64, f64, f64, f64);
+    impl_mean!(u8, u64, f64, f64);
+    impl_mean!(u16, u64, f64, f64);
+    impl_mean!(u32, u64, f64, f64);
+    impl_mean!(u64, f64, f64, f64);
     #[cfg(feature = "half")]
-    impl_mean!(f16, f16);
-    impl_mean!(f32, f32);
-    impl_mean!(f64, f64);
+    impl_mean!(f16, f32, f32, f16);
+    impl_mean!(f32, f64, f64, f32);
+    impl_mean!(f64, f64, f64, f64);
     #[cfg(feature = "num-complex")]
-    impl_mean!(Complex<f32>, Complex<f32>);
+    impl_mean!(Complex<f32>, Complex<f64>, Complex<f64>, Complex<f32>);
     #[cfg(feature = "num-complex")]
-    impl_mean!(Complex<f64>, Complex<f64>);
-    impl_mean!(bool, f64);
+    impl_mean!(Complex<f64>, Complex<f64>, Complex<f64>, Complex<f64>);
+    impl_mean!(bool, u64, f64, f64);
 
     /// Welford accumulator used by [`Variance`]. The count of folded items is tracked
     /// **inside** this struct (`count`) so each interleaved lane accumulator counts only
