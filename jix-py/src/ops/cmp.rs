@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::sync::LazyLock;
 
 use jix_core::dtype::Dtyped;
@@ -7,7 +8,7 @@ use pyo3::prelude::*;
 
 use crate::ops::asarray_simple;
 use crate::ops::common::{
-    broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Scalar,
+    broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
 };
 use crate::util::IntoPyResult;
 
@@ -367,6 +368,8 @@ define_op2!(
 /// **Type promotion**: the operands are cast to a common dtype under Safe casting rules, as in
 /// [`jix.maximum()`][jix.maximum]. For example, clamping an `int32` array to float bounds gives
 /// `float64`.
+/// A Python int bound outside an integer array's dtype is ignored if it clamps nothing
+/// (`min=-1` for `uint8`), and raises an `OverflowError` otherwise, as numpy.
 ///
 /// Args:
 ///     array: Input array.
@@ -406,6 +409,23 @@ pub fn clamp<'py>(
     max: Option<&Bound<'py, PyAny>>,
 ) -> pyo3::PyResult<Bound<'py, crate::Array>> {
     let py = array.py();
+    // A Python int bound outside the array's integer dtype that clamps nothing is dropped, as numpy
+    let (mut min, mut max) = (min, max);
+    if let Some((rank @ (Rank::UInt | Rank::Int), Some(precision))) =
+        Operand::from_any(array)?.rank_precision()
+    {
+        if let Some(bound) = min
+            && Operand::from_any(bound)?.python_int_outside(rank, precision) == Some(Ordering::Less)
+        {
+            min = None;
+        }
+        if let Some(bound) = max
+            && Operand::from_any(bound)?.python_int_outside(rank, precision)
+                == Some(Ordering::Greater)
+        {
+            max = None;
+        }
+    }
     let (min, max) = match (min, max) {
         (None, None) => return asarray_simple(array),
         (Some(min), None) => return Bound::new(py, maximum(array, min)?),

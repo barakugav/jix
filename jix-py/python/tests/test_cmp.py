@@ -273,6 +273,25 @@ def test_clamp_complex_limit_raises():
         jix.clamp(a, min=complex(1, 0), max=2.0)
 
 
+@pytest.mark.parametrize(
+    "dtype, lo, hi",
+    [(np.uint8, -1, None), (np.uint8, None, 256), (np.uint8, -5, 300), (np.int8, -200, 3), (np.uint64, -1, None)],
+)
+def test_clamp_drops_python_int_bound_outside_dtype(dtype, lo, hi):
+    """As numpy: a bound outside the dtype on the side where it clamps nothing is dropped."""
+    a = np.array([0, 5, 100], dtype=dtype)
+    result = jix.clamp(jix.compact(a), min=lo, max=hi)
+    assert result.dtype == dtype
+    np.testing.assert_array_equal(result.numpy(), np.clip(a, lo, hi))
+
+
+@pytest.mark.parametrize("dtype, lo, hi", [(np.uint8, 300, None), (np.uint8, None, -1), (np.int8, -1, -200)])
+def test_clamp_python_int_bound_outside_dtype_raises(dtype, lo, hi):
+    """As numpy: a bound outside the dtype that would clamp every element raises."""
+    with pytest.raises(OverflowError):
+        jix.clamp(jix.compact(np.array([0, 5], dtype=dtype)), min=lo, max=hi)
+
+
 def test_clamp_equal_bounds():
     a = jix.compact([-1.0, 0.0, 1.0, 2.0], dtype=np.float32)
     result = jix.clamp(a, min=0.5, max=0.5).numpy()

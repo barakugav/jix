@@ -383,8 +383,8 @@ def test_python_float_default_keeps_f32_precision():
 # ---------------------------------------------------------------------------
 # An untyped Python int adopts the integer dtype dispatch picked for it, so its
 # value must fit that dtype. Otherwise an OverflowError is raised rather than
-# silently wrapping the scalar (like numpy). No special cases for comparisons
-# or clamp: they raise too.
+# silently wrapping the scalar (like numpy). clamp drops a bound that clamps
+# nothing, otherwise it raises too. No special cases for comparisons.
 # ---------------------------------------------------------------------------
 
 
@@ -404,7 +404,7 @@ def test_python_float_default_keeps_f32_precision():
         (jix.less, np.int32, (2**40,)),
         (jix.maximum, np.int8, (1000,)),
         (jix.bitwise_or, np.int8, (0x100,)),
-        (jix.clamp, np.int8, (-1000, 1000)),
+        (jix.clamp, np.int8, (1000, None)),
     ],
 )
 def test_python_int_out_of_bounds_raises(op, arr_dtype, scalars):

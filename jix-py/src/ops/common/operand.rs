@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use numpy::{PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -333,6 +335,34 @@ impl Operand {
                 };
                 Some((kind, *precision))
             }
+        }
+    }
+
+    /// For a Python int outside the range of the integer or bool dtype `rank, precision`, whether
+    /// it is below (`Less`) or above (`Greater`) it. `None` for anything else.
+    pub(crate) fn python_int_outside(&self, rank: Rank, precision: Precision) -> Option<Ordering> {
+        let Operand::Scalar {
+            value: Scalar::Int(value),
+            precision: None,
+            ..
+        } = *self
+        else {
+            return None;
+        };
+        let value = i128::from(value);
+        let bits = 8 << precision as u32;
+        let (min, max) = match rank {
+            Rank::Bool => (0, 1),
+            Rank::UInt => (0, (1 << bits) - 1),
+            Rank::Int => (-(1 << (bits - 1)), (1 << (bits - 1)) - 1),
+            Rank::Float | Rank::Complex => return None,
+        };
+        if value < min {
+            Some(Ordering::Less)
+        } else if value > max {
+            Some(Ordering::Greater)
+        } else {
+            None
         }
     }
 }
