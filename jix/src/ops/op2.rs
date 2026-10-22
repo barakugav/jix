@@ -1,6 +1,5 @@
 use crate::ops::common::define_array_op2_method;
 use crate::ops::prelude::*;
-use crate::util::assert_unchecked_eq;
 
 pub(crate) struct Op2<S1, S2, K> {
     pub(crate) a: S1,
@@ -178,9 +177,8 @@ where
     }
     #[inline(always)]
     fn shape(&self) -> &[u64] {
-        let shape = self.a.shape();
-        unsafe { assert_unchecked_eq!(shape, self.b.shape()) };
-        shape
+        debug_assert_eq!(self.a.shape(), self.b.shape());
+        self.a.shape()
     }
 
     #[inline(always)]

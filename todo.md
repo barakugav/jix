@@ -10,3 +10,4 @@
 - rearrange ops module
 - move ReadContext
 - optimize nd copy of structs
+- work on Dimension public API
