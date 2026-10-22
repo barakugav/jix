@@ -32,6 +32,7 @@ impl<S, K> Op1<S, K> {
         K: Op1Kernel<S::Item, Output: Dtyped>,
     {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
+        check_shape_overflow(array.shape(), K::Output::DTYPE.itemsize() as _)?;
         let mut spec = array.spec().dynamic().clone();
         spec.add_elementwise_cost(1.0);
         Ok(Self {
