@@ -489,8 +489,9 @@ impl Array {
     /// Returns:
     ///     A NumPy array with the same dtype as `self`, and the shape determined by the `index`
     ///         argument (or `self.shape` when no index is supplied). Without `out`, a brand-new
-    ///         C-contiguous (row-major) allocation the caller owns outright; with `out`, that same
-    ///         object.
+    ///         allocation is created (with implementation defined memory layout, but mostly it
+    ///         try to follow the source array's memory order like NumPy `order='K'`).
+    ///         With `out`, that same object.
     ///
     /// Raises:
     ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds,

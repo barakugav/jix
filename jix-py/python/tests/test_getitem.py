@@ -142,3 +142,11 @@ def test_out_with_a_reversed_length_one_dim_is_accepted():
     assert dst.strides[0] < 0
     a.numpy(out=dst)
     np.testing.assert_array_equal(dst, np_a)
+
+
+def test_numpy_result_follows_source_memory_order():
+    f = np.asfortranarray(arange((3, 4)))
+    assert jix.compact(f).numpy().flags.c_contiguous
+    got = jix.asarray(f).numpy()
+    assert got.flags.f_contiguous
+    np.testing.assert_array_equal(got, f)
