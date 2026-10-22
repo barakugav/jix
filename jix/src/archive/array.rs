@@ -418,7 +418,7 @@ where
                 };
                 writer.write_message(&header).map_err(Error::io)?;
 
-                let block_size = block_shape.iter().cloned().try_product().unwrap();
+                let block_size = block_shape.iter().cloned().try_shape_product().unwrap();
                 BlockArchiveWriter::start(writer, nblocks, block_size, &decoder_config)
             }
         }
@@ -487,19 +487,24 @@ where
                     s.ceil_to_multiple(b)
                 }
             })
-            .try_product()
+            .try_shape_product()
             .ok_or_else(|| {
                 error!(
                     InvalidArchive,
                     "array shape {shape:?} with block shape {block_shape:?} has too many items"
                 )
             })?;
-        let expected_block_size = block_shape.iter().cloned().try_product().ok_or_else(|| {
-            error!(
-                InvalidArchive,
-                "block shape {block_shape:?} has too many items for a block"
-            )
-        })?;
+        let expected_block_size =
+            block_shape
+                .iter()
+                .cloned()
+                .try_shape_product()
+                .ok_or_else(|| {
+                    error!(
+                        InvalidArchive,
+                        "block shape {block_shape:?} has too many items for a block"
+                    )
+                })?;
         let expected_nblocks = block_shape
             .iter()
             .zip(shape.as_slice().iter())

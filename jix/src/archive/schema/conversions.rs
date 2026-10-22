@@ -32,7 +32,7 @@ impl crate::dtype::Dtype {
                 })
             })
             .collect::<Result<DimArray<_>>>()?;
-        let shape_size = shape.iter().cloned().try_product().ok_or_else(|| {
+        let shape_size = shape.iter().cloned().try_shape_product().ok_or_else(|| {
             error!(
                 InvalidArchive,
                 "dtype shape has too many elements (size overflow)"

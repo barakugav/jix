@@ -1205,7 +1205,7 @@ impl<S: ArrayStorage> Array<S> {
             block_shape: &[BlockSize],
             decoder_config: DecoderCodecConfig,
         ) -> Result<OwnedBlockTableBuilder> {
-            let block_size = block_shape.iter().cloned().try_product().unwrap();
+            let block_size = block_shape.iter().cloned().try_shape_product().unwrap();
             OwnedBlockTableBuilder::start(nblocks, block_size, decoder_config)
         }
 
@@ -1290,13 +1290,18 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
 
     let block_shape = params.block_shape.as_ref().unwrap();
     let block_shape = D::vec(ndim, |dim| block_shape[dim]);
-    let block_size = block_shape.as_ref().iter().cloned().try_product().unwrap();
+    let block_size = block_shape
+        .as_ref()
+        .iter()
+        .cloned()
+        .try_shape_product()
+        .unwrap();
     let block_grid_shape = D::vec(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
     let nblocks = block_grid_shape
         .as_ref()
         .iter()
         .cloned()
-        .try_product()
+        .try_shape_product()
         .unwrap();
     // C-order strides over the block grid, used to map a block's grid position to its logical
     // index (blocks are produced out of C order, so each one carries its own index).
@@ -1606,7 +1611,7 @@ impl<S: ArrayStorage> Array<S> {
             let shape = storage.shape();
             let ndim = shape.len();
             debug_assert!(ndim <= NDIM_MAX);
-            debug_assert!(shape.iter().cloned().try_product().is_some());
+            debug_assert!(shape.iter().cloned().try_shape_product().is_some());
             let spec = storage.spec();
             debug_assert_eq!(spec.block_shape().len(), ndim);
             debug_assert!(spec.block_shape().iter().all(|&s| s > 0));

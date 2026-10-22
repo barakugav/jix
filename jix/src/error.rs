@@ -184,7 +184,7 @@ pub(crate) fn check_dtype_size_nonzero(dtype: &Dtype) -> Result<()> {
 
 #[inline]
 pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
-    let product = shape.iter().cloned().chain([itemsize]).try_product();
+    let product = shape.iter().cloned().chain([itemsize]).try_shape_product();
     if product.is_none() {
         #[cold]
         #[inline(never)]

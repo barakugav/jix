@@ -401,7 +401,7 @@ impl ArrayParams {
         // Update block_size to block_shape.product() if it is not specified
         let block_size = block_size
             .unwrap_or_else(|| {
-                block_shape.iter().map(|&b| b as u64).try_product().unwrap() * itemsize
+                block_shape.iter().map(|&b| b as u64).try_shape_product().unwrap() * itemsize
             })
             .max(1);
         // read_size defaults to a window derived from the cache sizes.

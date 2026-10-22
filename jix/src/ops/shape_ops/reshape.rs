@@ -54,8 +54,8 @@ impl<S> Reshape<S> {
         let new_shape_raw = DimDyn::from_slice(shape.into_dimension()?.as_slice());
         let new_shape = DimArray::from_slice(new_shape_raw.as_slice()).unwrap();
         let orig_shape = DimArray::from_slice(array.shape()).unwrap();
-        let nitems = orig_shape.iter().cloned().try_product().unwrap();
-        let new_nitems = new_shape.iter().cloned().try_product();
+        let nitems = orig_shape.iter().cloned().try_shape_product().unwrap();
+        let new_nitems = new_shape.iter().cloned().try_shape_product();
         ensure!(
             Some(nitems) == new_nitems,
             InvalidShapeOperation,

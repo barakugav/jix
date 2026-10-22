@@ -746,10 +746,12 @@ pub fn reshape<'py>(
     let new_shape = {
         let mut new_shape = new_shape.into_dim_array()?;
         let mut inferred_dim = None;
-        let mut known_size = 1;
+        let mut known_size = 1u64;
         for (i, &dim) in new_shape.iter().enumerate() {
             if dim >= 0 {
-                known_size *= dim as u64;
+                known_size = known_size
+                    .checked_mul(dim as u64)
+                    .ok_or_else(|| PyValueError::new_err("Shape is too large, overflow"))?;
             } else if dim == -1 {
                 if inferred_dim.is_some() {
                     return Err(PyValueError::new_err(
