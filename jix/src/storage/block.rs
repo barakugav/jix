@@ -190,7 +190,11 @@ where
 
         let decoder = context.decoder(&self.decoder_config);
         let nbytes = decoder.decode(block_data, buf)?;
-        debug_assert_eq!(nbytes, b_size_bytes);
+        ensure!(
+            nbytes == b_size_bytes,
+            InvalidArchive,
+            "Unexpected decoded block size: got {nbytes}, expected {b_size_bytes}"
+        );
         Ok(())
     }
 
