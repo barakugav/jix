@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, check_get_range, check_shape_overflow, Result};
+use crate::error::{check_dtype, check_get_range, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, ElementwisePipeline,
@@ -56,7 +56,6 @@ impl<T> Scalar<T> {
     {
         let shape = DimDyn::from_slice(shape.into_dimension()?.as_slice());
         let ndim = shape.ndim();
-        check_shape_overflow(shape.as_slice(), T::DTYPE.itemsize() as _)?;
 
         if params.block_shape_fixed_dims.is_none() {
             // A scalar broadcasts over every dimension, so none of them are fixed.
