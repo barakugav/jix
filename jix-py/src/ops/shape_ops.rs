@@ -1,5 +1,5 @@
-use jix_core::ops::{SliceItem, SliceSpec};
-use jix_core::NDIM_MAX;
+use jix_core::ops::{Broadcast, InsertDim, SliceItem, SliceSpec};
+use jix_core::{ArrayAny, NDIM_MAX};
 use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyEllipsis, PySlice, PyTuple};
@@ -14,11 +14,12 @@ use crate::Array;
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions.
 ///
-/// `shape` must have the same number of dimensions as the input. For each dimension `d`,
-/// either `shape[d] == input_shape[d]` (kept as-is) or `input_shape[d] == 1` (broadcast:
-/// the single element is repeated `shape[d]` times). Any other combination raises an error.
-/// `shape[d]` may be `-1` as a shorthand for `input_shape[d]` (keeps the dimension size
-/// unchanged regardless of whether that dimension is 1 or larger).
+/// `shape` may have more dimensions than the input, which is then treated as if it had leading
+/// length-1 dimensions, as numpy. For each dimension `d`, either `shape[d] == input_shape[d]`
+/// (kept as-is) or `input_shape[d] == 1` (broadcast: the single element is repeated `shape[d]`
+/// times). Any other combination raises an error. `shape[d]` may be `-1` as a shorthand for
+/// `input_shape[d]` (keeps the dimension size unchanged regardless of whether that dimension is 1
+/// or larger), but not on a new leading dimension, as torch.
 ///
 /// `broadcast` is the lazy zero-cost case of replication restricted to length-1 dims. For
 /// general element replication along a dim of any length use [`jix.repeat()`][jix.repeat]
@@ -29,14 +30,10 @@ use crate::Array;
 ///
 /// The result is a lazy view; no data is copied until the array is read.
 ///
-/// This function deviates from `numpy.broadcast_to`:
-/// - `shape` must have the same number of dimensions as the input (numpy pads leading
-///   dimensions automatically)
-///
 /// Args:
 ///     array: Array to broadcast.
-///     shape: Target shape. Must have the same number of dimensions as the input. Use `-1`
-///         to keep a dimension unchanged.
+///     shape: Target shape, with at least as many dimensions as the input. Use `-1` to keep a
+///         dimension unchanged.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with the requested broadcast shape.
@@ -67,25 +64,23 @@ pub fn broadcast<'py>(
     let array = &py_arr.get().arr;
     let old_shape = array.shape();
     let shape = shape.into_dim_array()?;
-    if shape.len() != old_shape.len() {
+    let Some(added_ndim) = shape.len().checked_sub(old_shape.len()) else {
         return Err(PyValueError::new_err(format!(
-            "Cannot broadcast array of shape {:?} to shape {:?}: different number of dimensions",
+            "Cannot broadcast array of shape {:?} to shape {:?}: fewer dimensions",
             old_shape, shape
         )));
-    }
+    };
     let new_shape = shape
-        .into_iter()
-        .zip(old_shape)
-        .map(|(new_len, old_len)| {
-            if new_len >= 0 {
-                Ok(new_len as u64)
-            } else if new_len == -1 {
-                Ok(*old_len)
-            } else {
-                Err(PyValueError::new_err(format!(
-                    "Invalid broadcast shape dimension: expected non-negative or -1, got {}",
-                    new_len
-                )))
+        .iter()
+        .enumerate()
+        .map(|(dim, &new_len)| {
+            let old_len = dim.checked_sub(added_ndim).map(|d| old_shape[d]);
+            match (new_len, old_len) {
+                (0.., _) => Ok(new_len as u64),
+                (-1, Some(old_len)) => Ok(old_len),
+                _ => Err(PyValueError::new_err(format!(
+                    "Invalid broadcast shape dimension {dim}: expected non-negative, or -1 for an existing dimension, got {new_len}",
+                ))),
             }
         })
         .collect::<PyResult<DimArray<_>>>()?;
@@ -95,13 +90,46 @@ pub fn broadcast<'py>(
         return Ok(py_arr);
     }
 
-    let ret = jix_core::ops::Broadcast::new_array(array.clone(), new_shape.as_slice())
-        .into_py_result()?;
+    let array = broadcast_array_impl(array.clone(), new_shape.as_slice()).into_py_result()?;
+
     let np_dtype = py_arr.get().numpy_dtype(py)?;
-    Bound::new(
-        py,
-        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
-    )
+    Bound::new(py, Array::from_core_with_np_dtype(array, np_dtype.unbind()))
+}
+pub(crate) fn broadcast_array_impl(
+    array: ArrayAny,
+    shape: &[u64],
+) -> Result<ArrayAny, jix_core::Error> {
+    pub(crate) enum Either<L, R> {
+        Left(L),
+        Right(R),
+    }
+
+    let missing_dims_n = shape.len().saturating_sub(array.ndim());
+    let array = if missing_dims_n > 0 {
+        let missing_dims = (0..missing_dims_n).collect::<DimArray<_>>();
+        Either::Left(InsertDim::new_array(array, missing_dims.as_slice())?)
+    } else {
+        Either::Right(array)
+    };
+
+    let array = match array {
+        Either::Left(arr) => {
+            if shape == arr.shape() {
+                arr.into_any()
+            } else {
+                Broadcast::new_array(arr, shape)?.into_any()
+            }
+        }
+        Either::Right(arr) => {
+            if shape == arr.shape() {
+                arr
+            } else {
+                Broadcast::new_array(arr, shape)?.into_any()
+            }
+        }
+    };
+
+    Ok(array)
 }
 
 /// Selects a sub-region of an array as a lazy view.

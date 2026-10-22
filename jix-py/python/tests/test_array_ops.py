@@ -530,6 +530,18 @@ def test_broadcast_identity():
     np.testing.assert_array_equal(r.numpy(), arr)
 
 
+def test_broadcast_prepends_dims():
+    """As numpy broadcast_to and torch broadcast_to."""
+    arr = np.array([[1], [2], [3]], dtype=np.int32)
+    za = jix.compact(arr)
+    for shape in [(2, 3, 1), (2, 3, 4), (1, 1, 3, 4)]:
+        np.testing.assert_array_equal(jix.broadcast(za, shape).numpy(), np.broadcast_to(arr, shape))
+    np.testing.assert_array_equal(jix.broadcast(za, (2, -1, 4)).numpy(), np.broadcast_to(arr, (2, 3, 4)))
+    for shape in [(-1, 3, 1), (3,)]:
+        with pytest.raises(ValueError):
+            jix.broadcast(za, shape)
+
+
 def test_broadcast_non_one_dim_raises():
     arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
     za = jix.compact(arr)

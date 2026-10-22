@@ -1,7 +1,8 @@
 use jix_core::error::ErrorKind;
-use jix_core::{ops::Broadcast, NDIM_MAX};
+use jix_core::NDIM_MAX;
 use pyo3::prelude::*;
 
+use crate::ops::broadcast_array_impl;
 use crate::ops::common::Operand;
 use crate::util::{array_try_map, DimArray, IntoPyResult};
 
@@ -64,37 +65,9 @@ fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_cor
         }
     };
 
-    let missing_dims_n = shape.len().saturating_sub(array.ndim());
-    let array = if missing_dims_n > 0 {
-        let missing_dims = (0..missing_dims_n).collect::<DimArray<_>>();
-        Either::Left(array.insert_dim(missing_dims.as_slice()))
-    } else {
-        Either::Right(array)
-    };
-
-    let array = match array {
-        Either::Left(arr) => {
-            if shape == arr.shape() {
-                arr.into_any()
-            } else {
-                Broadcast::new_array(arr, shape)?.into_any()
-            }
-        }
-        Either::Right(arr) => {
-            if shape == arr.shape() {
-                arr
-            } else {
-                Broadcast::new_array(arr, shape)?.into_any()
-            }
-        }
-    };
+    let array = broadcast_array_impl(array, shape)?;
 
     Ok(Operand::Array(array))
-}
-
-pub(crate) enum Either<L, R> {
-    Left(L),
-    Right(R),
 }
 
 fn broadcast_shapes(shape1: &[u64], shape2: &[u64]) -> Result<DimArray<u64>, jix_core::Error> {
