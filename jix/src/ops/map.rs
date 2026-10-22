@@ -236,7 +236,7 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
     {
         check_dtype_size_nonzero(Dtype::new_ref::<O>())?;
         let narrays = arrays.narrays();
-        if narrays > 1 {
+        if narrays > 0 {
             let shape = arrays.shape(0);
             ensure!(
                 (1..narrays).all(|i| arrays.shape(i) == shape),
@@ -244,6 +244,7 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
                 "MapMultiple shape mismatch: {:?}",
                 (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
             );
+            check_shape_overflow(shape, O::DTYPE.itemsize() as _)?;
         }
         let (element_cost, read_shape_scale_weight, read_layout_order) = {
             let inputs = (0..narrays)
@@ -414,6 +415,19 @@ mod tests {
 
     use crate::array::Array;
     use crate::util::arr_params;
+
+    #[test]
+    fn map_multiple_widening_shape_overflow_is_an_error() {
+        // [N] fits u64 as u8, but not as f64.
+        let n = (1u64 << 61) + 1;
+        let a = || {
+            Array::compact_ndarray(&array![7u8])
+                .unwrap()
+                .broadcast(&[n])
+        };
+        assert!(crate::ops::MapMultiple::new(vec![a()], |xs: &[u8]| xs[0] as f64).is_err());
+        assert!(crate::ops::MapMultiple::new([a()], |xs: [u8; 1]| xs[0] as u64).is_err());
+    }
 
     #[test]
     fn map_same_type_1d() {
