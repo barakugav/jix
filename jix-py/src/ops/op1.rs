@@ -5,7 +5,7 @@ use jix_core::scalar::{f16, Complex};
 use pyo3::prelude::*;
 
 use crate::ops::common::{
-    define_op1, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
+    define_op1, define_op1_desc, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
 };
 use crate::util::IntoPyResult;
 
@@ -55,94 +55,127 @@ define_op1!(
     }
 );
 
-define_op1!(
-    /// Rounds each element down to the nearest integer (towards -inf).
-    ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
-    ///
-    /// Args:
-    ///     array: Input array.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([1.1, 2.9, -1.1, -2.9], dtype=np.float32)
-    ///     result = jix.floor(a)
-    ///     assert np.array_equal(result.numpy(), [1.0, 2.0, -2.0, -3.0])
-    ///     ```
-    floor,
-    Floor,
-    dispatch = {
-        [f16, f32, f64],
-        None
+/// Rounds each element down to the nearest integer (towards -inf).
+///
+/// Supported dtypes: `f16`, `f32`, `f64`, and integers, which are returned as is.
+///
+/// Args:
+///     array: Input array.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
+///         the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([1.1, 2.9, -1.1, -2.9], dtype=np.float32)
+///     result = jix.floor(a)
+///     assert np.array_equal(result.numpy(), [1.0, 2.0, -2.0, -3.0])
+///     ```
+#[pyo3::pyfunction]
+pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array>> {
+    let py = array.py();
+    let array = Operand::from_any(array)?;
+    #[allow(clippy::collapsible_if)]
+    if let Some((rank, _precision)) = array.rank_precision() {
+        if matches!(rank, Rank::UInt | Rank::Int) {
+            return array.into_py_array(py);
+        }
     }
-);
-define_op1!(
-    /// Rounds each element up to the nearest integer (towards +inf).
-    ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
-    ///
-    /// Args:
-    ///     array: Input array.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([1.1, 2.0, -1.7, -0.1], dtype=np.float32)
-    ///     result = jix.ceil(a)
-    ///     assert np.array_equal(result.numpy(), [2.0, 2.0, -1.0, 0.0])
-    ///     ```
-    ceil,
-    Ceil,
-    dispatch = {
-        [f16, f32, f64],
-        None
+
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
+        OpDescriptor::new("floor", define_op1_desc!(Floor, [f16, f32, f64], None))
+    });
+
+    Bound::new(
+        py,
+        crate::Array::from_core(DISPATCH_TABLE.dispatch1(array)?),
+    )
+}
+/// Rounds each element up to the nearest integer (towards +inf).
+///
+/// Supported dtypes: `f16`, `f32`, `f64`, and integers, which are returned as is.
+///
+/// Args:
+///     array: Input array.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
+///         the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([1.1, 2.0, -1.7, -0.1], dtype=np.float32)
+///     result = jix.ceil(a)
+///     assert np.array_equal(result.numpy(), [2.0, 2.0, -1.0, 0.0])
+///     ```
+#[pyo3::pyfunction]
+pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array>> {
+    let py = array.py();
+    let array = Operand::from_any(array)?;
+    #[allow(clippy::collapsible_if)]
+    if let Some((rank, _precision)) = array.rank_precision() {
+        if matches!(rank, Rank::UInt | Rank::Int) {
+            return array.into_py_array(py);
+        }
     }
-);
-define_op1!(
-    /// Rounds each element to the nearest integer.
-    ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
-    ///
-    /// Ties (values exactly halfway between two integers) are broken by rounding away from
-    /// zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from "round-half-to-even"
-    /// (banker's rounding) used by Python's built-in `round()` and `numpy.round`.
-    ///
-    /// Args:
-    ///     array: Input array.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([1.4, 1.6, 2.5, -0.5], dtype=np.float32)
-    ///     result = jix.round(a)
-    ///     assert np.array_equal(result.numpy(), [1.0, 2.0, 3.0, -1.0])
-    ///     ```
-    round,
-    Round,
-    dispatch = {
-        [f16, f32, f64],
-        None
+
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> =
+        LazyLock::new(|| OpDescriptor::new("ceil", define_op1_desc!(Ceil, [f16, f32, f64], None)));
+    Bound::new(
+        py,
+        crate::Array::from_core(DISPATCH_TABLE.dispatch1(array)?),
+    )
+}
+/// Rounds each element to the nearest integer.
+///
+/// Supported dtypes: `f16`, `f32`, `f64`, and integers, which are returned as is.
+///
+/// Ties (values exactly halfway between two integers) are broken by rounding away from
+/// zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from "round-half-to-even"
+/// (banker's rounding) used by Python's built-in `round()` and `numpy.round`.
+///
+/// Args:
+///     array: Input array.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
+///         the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([1.4, 1.6, 2.5, -0.5], dtype=np.float32)
+///     result = jix.round(a)
+///     assert np.array_equal(result.numpy(), [1.0, 2.0, 3.0, -1.0])
+///     ```
+#[pyo3::pyfunction]
+pub fn round<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array>> {
+    let py = array.py();
+    let array = Operand::from_any(array)?;
+    #[allow(clippy::collapsible_if)]
+    if let Some((rank, _precision)) = array.rank_precision() {
+        if matches!(rank, Rank::UInt | Rank::Int) {
+            return array.into_py_array(py);
+        }
     }
-);
+
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
+        OpDescriptor::new("round", define_op1_desc!(Round, [f16, f32, f64], None))
+    });
+    Bound::new(
+        py,
+        crate::Array::from_core(DISPATCH_TABLE.dispatch1(array)?),
+    )
+}
 define_op1!(
     /// Computes the square root of each element.
     ///

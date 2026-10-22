@@ -1026,17 +1026,17 @@ impl Array {
     }
 
     /// Rounds each element up to the nearest integer (towards +inf). See [`jix.ceil()`][jix.ceil].
-    pub fn ceil(slf: &Bound<'_, Self>) -> PyResult<Self> {
+    pub fn ceil<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::ceil(slf)
     }
 
     /// Rounds each element down to the nearest integer (towards -inf). See [`jix.floor()`][jix.floor].
-    pub fn floor(slf: &Bound<'_, Self>) -> PyResult<Self> {
+    pub fn floor<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::floor(slf)
     }
 
     /// Rounds each element to the nearest integer. See [`jix.round()`][jix.round].
-    pub fn round(slf: &Bound<'_, Self>) -> PyResult<Self> {
+    pub fn round<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::round(slf)
     }
 

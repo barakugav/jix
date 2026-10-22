@@ -61,6 +61,17 @@ def test_round_concrete():
     check_op1_concrete(jix.round, _round_half_away_from_zero, [(np.float32, values), (np.float64, values)])
 
 
+@pytest.mark.parametrize("op", [jix.floor, jix.ceil, jix.round])
+def test_rounding_returns_ints_as_is(op):
+    for dtype in [np.int8, np.int64, np.uint8, np.uint64]:
+        za = jix.compact(np.array([0, 5], dtype=dtype))
+        assert op(za) is za
+    assert op(7).numpy() == 7
+    for dtype in [np.bool_, np.complex64]:
+        with pytest.raises(TypeError):
+            op(jix.compact(np.zeros(2, dtype=dtype)))
+
+
 def test_sqrt_concrete():
     # Domain is non-negative: 0.0, a perfect square, a non-perfect square, and the
     # op_safe_non_negative_strategy bound (100.0).
