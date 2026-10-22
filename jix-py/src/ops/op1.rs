@@ -9,51 +9,61 @@ use crate::ops::common::{
 };
 use crate::util::IntoPyResult;
 
-define_op1!(
-    /// Arithmetic negation applied element-wise (`-array`).
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`,
-    /// `Complex<f32>`, `Complex<f64>`.
-    ///
-    /// For **integer** types the result is the two's-complement negation. Negating the
-    /// minimum representable value (e.g. `int8` `-128`) overflows and wraps.
-    /// For **complex** types both components are negated independently.
-    ///
-    /// Available via the unary `-` operator on arrays: `-arr`.
-    ///
-    /// Args:
-    ///     array: Input array. Unsigned integer inputs are automatically cast to the next
-    ///         larger signed integer type before negation (Safe casting rules): `u8 -> i16`,
-    ///         `u16 -> i32`, `u32 -> i64`. This differs from numpy, which overflows for unsigned
-    ///         negation.
-    ///         A `bool` input is cast to `i8` (False -> 0, True -> -1).
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([1.0, -2.5, 3.0], dtype=np.float32)
-    ///     result = jix.negative(a)
-    ///     assert np.array_equal(result.numpy(), [-1.0, 2.5, -3.0])
-    ///
-    ///     # Unsigned integers are auto-cast to the next larger signed type.
-    ///     b = jix.compact([1, 2, 3], dtype=np.uint8)
-    ///     result = jix.negative(b)
-    ///     assert result.dtype == np.int16
-    ///     assert np.array_equal(result.numpy(), [-1, -2, -3])
-    ///     ```
-    negative,
-    Neg,
-    dispatch = {
-        [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
-        Safe
-    }
-);
+/// Arithmetic negation applied element-wise (`-array`).
+///
+/// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`,
+/// `Complex<f32>`, `Complex<f64>`.
+///
+/// For **integer** types the result is the two's-complement negation. Negating the
+/// minimum representable value (e.g. `int8` `-128`) overflows and wraps.
+/// For **complex** types both components are negated independently.
+///
+/// Available via the unary `-` operator on arrays: `-arr`.
+///
+/// Args:
+///     array: Input array. An unsigned integer input is negated as the signed integer of the
+///         same width, `u8 -> i8`, ..., `u64 -> i64`, so it wraps to the same bits as numpy's
+///         unsigned negation: `-uint8(200)` is `int8(56)` (numpy `uint8(56)`).
+///         A `bool` input is cast to `i8` (False -> 0, True -> -1).
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
+///         the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([1.0, -2.5, 3.0], dtype=np.float32)
+///     result = jix.negative(a)
+///     assert np.array_equal(result.numpy(), [-1.0, 2.5, -3.0])
+///
+///     # Unsigned integers are negated as the signed type of the same width.
+///     b = jix.compact([1, 2, 200], dtype=np.uint8)
+///     result = jix.negative(b)
+///     assert result.dtype == np.int8
+///     assert np.array_equal(result.numpy(), [-1, -2, 56])
+///     ```
+#[pyo3::pyfunction]
+pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<crate::Array> {
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
+        let mut fns = vec![
+            OpFnDescriptor::new1::<u8>(CastKind::None, |a| Ok((-a.cast::<i8>()).into_any())),
+            OpFnDescriptor::new1::<u16>(CastKind::None, |a| Ok((-a.cast::<i16>()).into_any())),
+            OpFnDescriptor::new1::<u32>(CastKind::None, |a| Ok((-a.cast::<i32>()).into_any())),
+            OpFnDescriptor::new1::<u64>(CastKind::None, |a| Ok((-a.cast::<i64>()).into_any())),
+        ];
+        fns.extend(define_op1_desc!(
+            Neg,
+            [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+            Safe
+        ));
+        OpDescriptor::new("negative", fns)
+    });
+    let array = Operand::from_any(array)?;
+    Ok(crate::Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
+}
 
 /// Rounds each element down to the nearest integer (towards -inf).
 ///

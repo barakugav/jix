@@ -324,22 +324,14 @@ def test_square_unsupported_bool_raises():
 
 @pytest.mark.parametrize(
     "dtype, expected_dtype",
-    [
-        # uint types auto-cast to the smallest signed type with higher precision
-        (np.uint8, np.int16),  # UInt P1 -> Int P2 (higher prec needed)
-        (np.uint16, np.int32),  # UInt P2 -> Int P4
-        (np.uint32, np.int64),  # UInt P4 -> Int P8
-    ],
+    [(np.uint8, np.int8), (np.uint16, np.int16), (np.uint32, np.int32), (np.uint64, np.int64)],
 )
-def test_negative_auto_cast_uint(dtype, expected_dtype):
-    """negative() on uint dtypes auto-casts to the next larger signed integer."""
-    np_a = np.array([1, 2, 3], dtype=dtype)
-    za = jix.compact(np_a)
-    result = jix.negative(za)
-    assert result.dtype == np.dtype(expected_dtype), (
-        f"negative({dtype.__name__}): got {result.dtype}, expected {expected_dtype.__name__}"
-    )
-    np.testing.assert_array_equal(result.numpy(), -np_a.astype(expected_dtype))
+def test_negative_uint_is_int_of_same_width(dtype, expected_dtype):
+    """The bits are those of numpy's wrapping unsigned negation."""
+    np_a = np.array([0, 1, 3, np.iinfo(dtype).max], dtype=dtype)
+    result = jix.negative(jix.compact(np_a))
+    assert result.dtype == np.dtype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), (-np_a).view(expected_dtype))
 
 
 @pytest.mark.parametrize("dtype", ints + floats + complexes + [np.uint8, np.uint64])

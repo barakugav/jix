@@ -110,32 +110,9 @@ def test_unary_sqrt_preserves_float_dtype(dtype):
 # ---------------------------------------------------------------------------
 # Unary ops: auto-cast when input dtype is not directly dispatched.
 #
-# `negative` dispatch table: [i8, i16, i32, i64, f16, f32, f64, c64, c128].
-# uint inputs must auto-cast to the smallest signed type whose Safe rule
-# accepts them (UInt P_n needs Int P_{>n}).
+# `negative` dispatch table: uN (negated as iN), i8, i16, i32, i64, f16, f32,
+# f64, c64, c128. bool auto-casts to the first one its Safe rule accepts.
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "src_dtype, expected_dtype",
-    [
-        (np.uint8, np.int16),  # UInt P1 -> Int P2
-        (np.uint16, np.int32),  # UInt P2 -> Int P4
-        (np.uint32, np.int64),  # UInt P4 -> Int P8
-    ],
-)
-def test_unary_uint_auto_casts_to_signed(src_dtype, expected_dtype):
-    a = jix.compact(np.array([1, 2, 3], dtype=src_dtype))
-    result = jix.negative(a)
-    assert result.dtype == np.dtype(expected_dtype)
-
-
-def test_unary_uint64_falls_back_to_float64():
-    """u64 has no safe signed-int target (UInt P8 has no higher precision),
-    but the `dst_precision == P8` short-circuit lets UInt P8 land in f64."""
-    a = jix.compact(np.array([1, 2, 3], dtype=np.uint64))
-    result = jix.negative(a)
-    assert result.dtype == np.float64
 
 
 def test_unary_bool_auto_casts_to_i8():
