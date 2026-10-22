@@ -165,6 +165,11 @@ fn repro() {
 
 Crate-internal (`pub(crate)`) items are not reachable from here. That is fine: a bug that no
 public path reaches is a latent hazard (severity low); say so and describe what would reach it.
+If you must exercise an internal item, do it in a scratch COPY of the crate, never in the shared
+tree: `cp -r jix bug-hunt/runs/<run>/scratch/crate-<id>`, add an inline test there, and run it with
+`CARGO_TARGET_DIR=bug-hunt/runs/<run>/scratch/target-<id> cargo test --manifest-path
+bug-hunt/runs/<run>/scratch/crate-<id>/Cargo.toml --all-features --lib <test>` (a full build, a
+few minutes). Save the test as `repros/<ID>_internal.rs`.
 Existing inline unit tests can be run by name (`cargo test --manifest-path jix/Cargo.toml
 --all-features <test_name>`; the test binary is prebuilt) to see how internals behave.
 
