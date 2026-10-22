@@ -67,6 +67,13 @@ CASES = [
     ((2, 1, 3, 4), (Ellipsis, 2)),
     ((2, 1, 3, 4), (Ellipsis, 1, 2)),
     ((1, 1, 4), (Ellipsis, 2)),
+    # empty slices at the end of a dim, and slices of a zero-length dim
+    ((3, 4), slice(3, None)),
+    ((3, 4), slice(3, 3)),
+    ((3, 4), (slice(None), slice(4, None))),
+    ((0, 3), slice(None)),
+    ((0, 3), slice(0, 0)),
+    ((0, 3), (slice(None), 0)),
 ]
 
 

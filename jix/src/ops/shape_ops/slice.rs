@@ -79,7 +79,6 @@ impl<S: ArrayStorage> Slice<S> {
         })?;
         let no_steps = slice.iter().all(|ds| ds.step == 1);
 
-        let slice = dim_arr(ndim, |dim| slice[dim].clone());
         let shape = DimDyn::from_fn(ndim, |dim| slice[dim].len());
 
         let inner_spec = array.spec();

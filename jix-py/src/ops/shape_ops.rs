@@ -339,7 +339,7 @@ pub(crate) fn parse_basic_index<'py>(
                 let stop = s.stop as i64;
                 let start_norm = if start < 0 { start + len } else { start };
                 let stop_norm = if stop < 0 { stop + len } else { stop };
-                if start_norm < 0 || start_norm >= len {
+                if start_norm < 0 || start_norm > len {
                     return Err(PyIndexError::new_err(format!(
                         "slice start {start} is out of bounds for dim {dim_cursor} with size {len}"
                     )));
