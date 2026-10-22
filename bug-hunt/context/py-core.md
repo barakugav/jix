@@ -153,6 +153,15 @@ released in `numpy()`/`compact`/`write_array`), `archive.rs:417`.
 - Python aliases `jix.pow/abs/concat/clip/prod/sub/mul/div/neg` shadow builtins on purpose
   (`python/jix/__init__.py:9-34`).
 
+### Changed since generation (dbb99e2 #85, 5b3a9f5 #86) - these supersede conflicting bullets above
+- A dtype mismatch raises TypeError (was RuntimeError); see the py-ops doc for the op-level
+  changes (unsigned negate, Python ints outside int64 raise OverflowError, broadcast inserts dims).
+- jix-py/src/archive.rs and array.rs were reworked (archive.rs ~50 lines); re-read them rather
+  than trusting line numbers here.
+- `resolve_array_params` uses `try_block_shape` / `try_block_shape_fixed_dims` (no panic on > 8 dims).
+- mmap reads check section bounds against the mapped file (KNOWN K5, fixed).
+Line numbers in this doc refer to bb1ee2c.
+
 ## Hot spots
 
 - Stride rebuild in `numpy()` (`array.rs:563-592`): it pops `np_arr.strides()` from the end
