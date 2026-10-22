@@ -367,6 +367,14 @@ impl ArrayParams {
         );
         // Scale block_shape up to block_size
         if !fixed_block_shape {
+            ensure!(
+                (0..ndim).all(|dim| !block_shape_fixed_dims.get(dim)
+                    || (block_shape[dim] > 0 && block_shape[dim] as u64 <= shape[dim].max(1))),
+                InvalidArgument,
+                "block_shape {:?} is invalid for array shape {:?}",
+                block_shape,
+                shape
+            );
             block_shape = Self::scale_block_shape(
                 &dim_arr(ndim, |dim| {
                     if block_shape_fixed_dims.get(dim) {
