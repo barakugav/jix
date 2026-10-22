@@ -190,6 +190,12 @@ pub(crate) fn normalize_dims(dims: &[i32], ndim: usize) -> pyo3::PyResult<DimArr
             "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
         )));
     }
+    if dims.len() > NDIM_MAX {
+        return Err(PyValueError::new_err(format!(
+            "Got {} dims, more than the maximum supported {NDIM_MAX}",
+            dims.len()
+        )));
+    }
     dims.iter().map(|a| normalize_dim(*a, ndim)).collect()
 }
 #[inline]

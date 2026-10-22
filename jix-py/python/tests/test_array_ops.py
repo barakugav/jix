@@ -475,6 +475,12 @@ def test_permute_dims_negative(dims):
     np.testing.assert_array_equal(za.permute_dims(dims).numpy(), np.transpose(arr, dims))
 
 
+def test_permute_dims_more_than_ndim_max_raises():
+    za = jix.compact(np.zeros((2, 3), dtype=np.int32))
+    with pytest.raises(ValueError):
+        jix.permute_dims(za, [0, 1] * 5)
+
+
 @pytest.mark.parametrize("dims", [[0, -2], [1, -1]])
 def test_permute_dims_negative_duplicate_raises(dims):
     # -2 resolves to 0 and -1 to 1 for a 2-D array, so these repeat a dim.
