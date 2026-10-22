@@ -117,10 +117,20 @@ impl ArrayParams {
     /// Setting the block shape also marks every dimension as fixed unless
     /// [`block_shape_fixed_dims`](Self::block_shape_fixed_dims) is also used, meaning the shape will
     /// be preserved as-is if this `ArrayParams` is later used as a propagation source.
+    ///
+    /// Panics if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries; see
+    /// [`try_block_shape`](Self::try_block_shape) for a non-panicking variant.
+    #[track_caller]
     pub fn block_shape(&mut self, block_shape: &[BlockSize]) -> &mut Self {
-        check_ndim(block_shape.len()).unwrap();
+        self.try_block_shape(block_shape).unwrap()
+    }
+
+    /// Like [`block_shape`](Self::block_shape), but fails with `TooManyDimensions` instead of
+    /// panicking if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries.
+    pub fn try_block_shape(&mut self, block_shape: &[BlockSize]) -> Result<&mut Self> {
+        check_ndim(block_shape.len())?;
         self.block_shape = Some(DimArray::from_slice(block_shape).unwrap());
-        self
+        Ok(self)
     }
 
     /// Sets, per dimension, whether that dimension of [`block_shape`](Self::block_shape) is
@@ -136,10 +146,22 @@ impl ArrayParams {
     /// [`block_shape`](Self::block_shape) to also be set. When this is not set, the default depends
     /// on the block shape: an explicitly-set [`block_shape`](Self::block_shape) is all-fixed
     /// (preserved exactly), while an auto-computed block shape is all-non-fixed.
+    ///
+    /// Panics if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries; see
+    /// [`try_block_shape_fixed_dims`](Self::try_block_shape_fixed_dims) for a non-panicking
+    /// variant.
+    #[track_caller]
     pub fn block_shape_fixed_dims(&mut self, fixed: &[bool]) -> &mut Self {
-        check_ndim(fixed.len()).unwrap();
+        self.try_block_shape_fixed_dims(fixed).unwrap()
+    }
+
+    /// Like [`block_shape_fixed_dims`](Self::block_shape_fixed_dims), but fails with
+    /// `TooManyDimensions` instead of panicking if given more than [`NDIM_MAX`](crate::NDIM_MAX)
+    /// entries.
+    pub fn try_block_shape_fixed_dims(&mut self, fixed: &[bool]) -> Result<&mut Self> {
+        check_ndim(fixed.len())?;
         self.block_shape_fixed_dims = Some(fixed.iter().copied().collect());
-        self
+        Ok(self)
     }
 
     /// Sets the target block size in bytes, used when auto-computing the block shape.
