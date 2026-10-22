@@ -237,6 +237,8 @@ pub(crate) fn parse_basic_index<'py>(
 ) -> PyResult<ParsedBasicIndex> {
     let ndim = shape.len();
 
+    // One extra slot for an Ellipsis
+    type RawIdx<T> = arrayvec::ArrayVec<T, { NDIM_MAX + 1 }>;
     enum RawIdxItem<'a> {
         Int(i64),
         Slice(&'a Bound<'a, PySlice>),
@@ -247,19 +249,20 @@ pub(crate) fn parse_basic_index<'py>(
         Some(index) => {
             if let Ok(tup) = index.cast::<PyTuple>() {
                 let tup = tup.as_slice();
-                if tup.len() > NDIM_MAX {
+
+                if tup.len() > NDIM_MAX + 1 {
                     return Err(PyIndexError::new_err(format!(
                         "too many indices for array: array is {ndim}-dimensional, \
                          but {len} were indexed",
                         len = tup.len()
                     )));
                 }
-                tup.iter().collect::<DimArray<_>>()
+                tup.iter().collect::<RawIdx<_>>()
             } else {
-                [index].into_iter().collect::<DimArray<_>>()
+                [index].into_iter().collect::<RawIdx<_>>()
             }
         }
-        None => DimArray::new(),
+        None => RawIdx::new(),
     };
     let raw = raw
         .into_iter()
@@ -277,7 +280,7 @@ pub(crate) fn parse_basic_index<'py>(
                 "only integers, slices (`:`), and ellipsis (`...`) are valid indices",
             ))
         })
-        .collect::<PyResult<DimArray<_>>>()?;
+        .collect::<PyResult<RawIdx<_>>>()?;
 
     let ellipsis_count = raw
         .iter()

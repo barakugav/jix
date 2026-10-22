@@ -74,6 +74,10 @@ CASES = [
     ((0, 3), slice(None)),
     ((0, 3), slice(0, 0)),
     ((0, 3), (slice(None), 0)),
+    # NDIM_MAX items plus an ellipsis
+    ((2,) * 8, (0,) * 8 + (Ellipsis,)),
+    ((2,) * 8, (Ellipsis,) + (slice(None),) * 8),
+    ((2,) * 8, (1,) * 4 + (Ellipsis,) + (1,) * 4),
 ]
 
 
@@ -150,3 +154,10 @@ def test_numpy_result_follows_source_memory_order():
     got = jix.asarray(f).numpy()
     assert got.flags.f_contiguous
     np.testing.assert_array_equal(got, f)
+
+
+def test_too_many_indices_raises():
+    a = jix.compact(arange((2,) * 8))
+    for index in [(0,) * 9, (0,) * 9 + (Ellipsis,)]:
+        with pytest.raises(IndexError):
+            a[index]
