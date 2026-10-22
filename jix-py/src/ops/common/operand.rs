@@ -62,14 +62,12 @@ impl Operand {
             if let Ok(value) = value.cast::<PyBool>() {
                 scalar = Some((Scalar::Bool(value.extract()?), Some(Precision::P1)));
             } else if let Ok(value) = value.cast::<PyInt>() {
-                if let Ok(value) = value.extract::<i64>() {
-                    scalar = Some((Scalar::Int(value), None));
-                } else if let Ok(value) = value.extract::<u64>() {
-                    scalar = Some((Scalar::UInt(value), None));
-                } else {
-                    let value = value.extract::<f64>()?; // too big for 64bit int, use f64
-                    scalar = Some((Scalar::Float(value), Some(Precision::P8)));
-                }
+                let Ok(int) = value.extract::<i64>() else {
+                    return Err(PyOverflowError::new_err(format!(
+                        "Python integer {value} out of bounds for int64"
+                    )));
+                };
+                scalar = Some((Scalar::Int(int), None));
             } else if let Ok(value) = value.cast::<PyFloat>() {
                 scalar = Some((Scalar::Float(value.extract()?), None));
             } else if let Ok(value) = value.cast::<PyComplex>() {

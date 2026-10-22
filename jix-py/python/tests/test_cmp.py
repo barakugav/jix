@@ -196,6 +196,8 @@ def test_clamp_both(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype, element_st=_max_min_st(dtype)), label="array")
     lo = data.draw(_max_min_st(dtype), label="lo")
     hi = data.draw(_max_min_st(dtype), label="hi")
+    if dtype == np.uint64:  # a Python int above int64 raises
+        lo, hi = np.uint64(lo), np.uint64(hi)
     assert_array_matches(jix.clamp(za, min=lo, max=hi), np.clip(np_a, lo, hi), data=data)
 
 

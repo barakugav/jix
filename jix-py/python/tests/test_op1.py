@@ -238,7 +238,6 @@ def test_absolute_method_matches_function():
         (True, True, np.bool_),
         (False, False, np.bool_),
         (-5, 5, np.int64),
-        (2**63, 2**63, np.uint64),  # too big for i64 -> u64
         (-(2**63), -(2**63), np.int64),  # i64 min wraps, like numpy
         (-2.5, 2.5, np.float64),
         (3 - 4j, 5.0, np.float64),
