@@ -1459,6 +1459,11 @@ impl Array {
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::remove_dim(slf, dim)
     }
+
+    // Opts out of NumPy ufuncs
+    #[classattr]
+    #[allow(non_upper_case_globals)]
+    const __array_ufunc__: Option<()> = None;
 }
 
 /// Compact any array-like object to a new [`jix.Array`][jix.Array] by compressing it into new blocks.
