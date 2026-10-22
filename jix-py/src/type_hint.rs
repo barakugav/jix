@@ -6,6 +6,7 @@ use std::convert::Infallible;
 use std::ops::Deref;
 
 use numpy::{PyArrayDescr, PyUntypedArray};
+use pyo3::exceptions::PyValueError;
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::prelude::*;
 use pyo3::{type_hint_identifier, type_hint_subscript};
@@ -85,7 +86,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
         match obj.extract::<&str>()? {
             "minimal" => Ok(Self(jix_core::ArchiveValidation::Minimal)),
             "strict" => Ok(Self(jix_core::ArchiveValidation::Strict)),
-            other => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            other => Err(PyValueError::new_err(format!(
                 "invalid validation value: '{other}'"
             ))),
         }
@@ -116,7 +117,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ErrMode {
             "ignore" => Ok(Self(jix_core::error::ArithmeticErrorMode::Ignore)),
             "warn" => Ok(Self(jix_core::error::ArithmeticErrorMode::Warn)),
             "raise" => Ok(Self(jix_core::error::ArithmeticErrorMode::Error)),
-            other => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            other => Err(PyValueError::new_err(format!(
                 "invalid error mode '{other}', expected one of 'ignore', 'warn', 'raise'"
             ))),
         }

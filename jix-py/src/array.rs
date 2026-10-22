@@ -12,7 +12,9 @@ use crate::type_hint::{NdArray, NpDtype};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
-use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{
+    PyIndexError, PyNotImplementedError, PyRuntimeError, PyTypeError, PyValueError,
+};
 use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
@@ -948,7 +950,7 @@ impl Array {
         modulo: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Self> {
         if modulo.is_some() {
-            return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            return Err(PyNotImplementedError::new_err(
                 "modulo argument to pow() is not supported",
             ));
         }
@@ -962,7 +964,7 @@ impl Array {
         modulo: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Self> {
         if modulo.is_some() {
-            return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            return Err(PyNotImplementedError::new_err(
                 "modulo argument to pow() is not supported",
             ));
         }
@@ -990,11 +992,9 @@ impl Array {
             .is_some_and(|scalar| scalar.is_integer() | scalar.is_float() | scalar.is_complex());
 
         if !is_supported {
-            return Err(jix_core::Error::new(
-                jix_core::error::ErrorKind::UnsupportedDtype,
-                format!("Op 'positive' does not support operands with dtypes [{dtype}]"),
-            ))
-            .into_py_result();
+            return Err(PyTypeError::new_err(format!(
+                "Op 'positive' does not support operands with dtypes [{dtype}]"
+            )));
         }
 
         Ok(slf.clone())
@@ -1026,17 +1026,17 @@ impl Array {
     }
 
     /// Rounds each element up to the nearest integer (towards +inf). See [`jix.ceil()`][jix.ceil].
-    pub fn ceil(slf: &Bound<'_, Self>) -> PyResult<Self> {
+    pub fn ceil<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::ceil(slf)
     }
 
     /// Rounds each element down to the nearest integer (towards -inf). See [`jix.floor()`][jix.floor].
-    pub fn floor(slf: &Bound<'_, Self>) -> PyResult<Self> {
+    pub fn floor<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::floor(slf)
     }
 
     /// Rounds each element to the nearest integer. See [`jix.round()`][jix.round].
-    pub fn round(slf: &Bound<'_, Self>) -> PyResult<Self> {
+    pub fn round<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::round(slf)
     }
 
@@ -1361,7 +1361,7 @@ impl Array {
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].
     #[getter]
-    pub fn real(slf: &Bound<'_, Self>) -> PyResult<Array> {
+    pub fn real<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Array>> {
         crate::ops::real(slf)
     }
 
@@ -1671,7 +1671,7 @@ pub(crate) fn resolve_array_params(
     }
     if let Some(read_size) = read_size {
         if read_size.len() != 1 && read_size.len() != 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            return Err(PyValueError::new_err(format!(
                 "read_size must be a scalar or a 2-element tuple, got {} elements",
                 read_size.len()
             )));
@@ -1691,9 +1691,7 @@ pub(crate) fn resolve_array_params(
                 params.codec(Codec::Zstd);
             }
             _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Unsupported codec: {codec}"
-                )));
+                return Err(PyValueError::new_err(format!("Unsupported codec: {codec}")));
             }
         }
     }
@@ -1706,7 +1704,7 @@ pub(crate) fn resolve_array_params(
             .map(|filter| match filter.as_str() {
                 "byte-shuffle" => Ok(Filter::ByteShuffle),
                 "bit-shuffle" => Ok(Filter::BitShuffle),
-                _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                _ => Err(PyValueError::new_err(format!(
                     "Unsupported filter: {filter}"
                 ))),
             })

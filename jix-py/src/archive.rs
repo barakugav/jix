@@ -1,6 +1,7 @@
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
@@ -107,9 +108,9 @@ pub fn read_array(
                 Some(len) => len,
                 None => {
                     let file_len = path.metadata()?.len();
-                    file_len.checked_sub(offset).ok_or_else(|| {
-                        PyErr::new::<pyo3::exceptions::PyValueError, _>("offset is out of bounds")
-                    })?
+                    file_len
+                        .checked_sub(offset)
+                        .ok_or_else(|| PyValueError::new_err("offset is out of bounds"))?
                 }
             };
 
@@ -128,12 +129,12 @@ pub fn read_array(
         }),
         PathOrReader::PyReader(reader) => {
             if offset.is_some() {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                return Err(PyValueError::new_err(
                     "offset is not supported for file-like readers",
                 ));
             }
             if mmap {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                return Err(PyValueError::new_err(
                     "mmap=True is not supported for file-like readers",
                 ));
             }
@@ -265,7 +266,7 @@ impl<'a> PathOrReader<'a> {
         } else if pyany.hasattr("read")? {
             Ok(Self::PyReader(PyReader::new(pyany.clone())?))
         } else {
-            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            Err(PyTypeError::new_err(
                 "Expected a file path or a file-like object with a 'read' method",
             ))
         }
@@ -282,15 +283,15 @@ struct PyReader<'py> {
 
 impl<'py> PyReader<'py> {
     fn new(inner: Bound<'py, PyAny>) -> PyResult<Self> {
-        let read_fn = inner.getattr("read").map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("Object must have a 'read' method")
-        })?;
-        let seek_fn = inner.getattr("seek").map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("Object must have a 'seek' method")
-        })?;
-        let tell_fn = inner.getattr("tell").map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("Object must have a 'tell' method")
-        })?;
+        let read_fn = inner
+            .getattr("read")
+            .map_err(|_| PyTypeError::new_err("Object must have a 'read' method"))?;
+        let seek_fn = inner
+            .getattr("seek")
+            .map_err(|_| PyTypeError::new_err("Object must have a 'seek' method"))?;
+        let tell_fn = inner
+            .getattr("tell")
+            .map_err(|_| PyTypeError::new_err("Object must have a 'tell' method"))?;
         Ok(Self {
             read_fn,
             seek_fn,
@@ -364,7 +365,7 @@ impl<'a> PathOrWriter<'a> {
         } else if pyany.hasattr("write")? {
             Ok(Self::PyWriter(PyWriter::new(pyany.clone())?))
         } else {
-            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            Err(PyTypeError::new_err(
                 "Expected a file path or a file-like object with a 'write' method",
             ))
         }
@@ -382,15 +383,15 @@ struct PyWriter<'py> {
 
 impl<'py> PyWriter<'py> {
     fn new(inner: Bound<'py, PyAny>) -> PyResult<Self> {
-        let write_fn = inner.getattr("write").map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("Object must have a 'write' method")
-        })?;
-        let seek_fn = inner.getattr("seek").map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("Object must have a 'seek' method")
-        })?;
-        let tell_fn = inner.getattr("tell").map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("Object must have a 'tell' method")
-        })?;
+        let write_fn = inner
+            .getattr("write")
+            .map_err(|_| PyTypeError::new_err("Object must have a 'write' method"))?;
+        let seek_fn = inner
+            .getattr("seek")
+            .map_err(|_| PyTypeError::new_err("Object must have a 'seek' method"))?;
+        let tell_fn = inner
+            .getattr("tell")
+            .map_err(|_| PyTypeError::new_err("Object must have a 'tell' method"))?;
         let flush_fn = inner.getattr("flush").ok();
         Ok(Self {
             write_fn,

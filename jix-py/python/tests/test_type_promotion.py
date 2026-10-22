@@ -110,32 +110,9 @@ def test_unary_sqrt_preserves_float_dtype(dtype):
 # ---------------------------------------------------------------------------
 # Unary ops: auto-cast when input dtype is not directly dispatched.
 #
-# `negative` dispatch table: [i8, i16, i32, i64, f16, f32, f64, c64, c128].
-# uint inputs must auto-cast to the smallest signed type whose Safe rule
-# accepts them (UInt P_n needs Int P_{>n}).
+# `negative` dispatch table: uN (negated as iN), i8, i16, i32, i64, f16, f32,
+# f64, c64, c128. bool auto-casts to the first one its Safe rule accepts.
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "src_dtype, expected_dtype",
-    [
-        (np.uint8, np.int16),  # UInt P1 -> Int P2
-        (np.uint16, np.int32),  # UInt P2 -> Int P4
-        (np.uint32, np.int64),  # UInt P4 -> Int P8
-    ],
-)
-def test_unary_uint_auto_casts_to_signed(src_dtype, expected_dtype):
-    a = jix.compact(np.array([1, 2, 3], dtype=src_dtype))
-    result = jix.negative(a)
-    assert result.dtype == np.dtype(expected_dtype)
-
-
-def test_unary_uint64_falls_back_to_float64():
-    """u64 has no safe signed-int target (UInt P8 has no higher precision),
-    but the `dst_precision == P8` short-circuit lets UInt P8 land in f64."""
-    a = jix.compact(np.array([1, 2, 3], dtype=np.uint64))
-    result = jix.negative(a)
-    assert result.dtype == np.float64
 
 
 def test_unary_bool_auto_casts_to_i8():
@@ -501,35 +478,15 @@ def test_typed_scalar_out_of_bounds_promotes_instead_of_raising():
     np.testing.assert_array_equal(result.numpy(), [1000, 1001])
 
 
-@pytest.mark.parametrize(
-    "arr_dtype, scalar, expected",
-    [
-        (np.float64, 2**64, np.float64),
-        (np.float64, -(2**64), np.float64),
-        # It is a typed f64, so it widens narrower arrays to f64 too.
-        (np.float32, 10**30, np.float64),
-        (np.float16, 2**70, np.float64),
-        (np.uint8, 2**70, np.float64),
-        (np.int64, 2**70, np.float64),
-    ],
-)
-def test_python_int_wider_than_64_bits_is_f64(arr_dtype, scalar, expected):
-    """No integer dtype holds it, so it is an f64 scalar (like `np.float64(scalar)`)."""
-    a_np = np.array([0, 1], dtype=arr_dtype)
-    result = jix.add(jix.compact(a_np), scalar)
-    assert result.dtype == np.dtype(expected)
-    np.testing.assert_array_equal(result.numpy(), a_np.astype(expected) + np.dtype(expected).type(float(scalar)))
-
-
-def test_python_int_wider_than_64_bits_only_scalars():
-    assert jix.add(2**70, 1).dtype == np.float64
-    np.testing.assert_array_equal(jix.add(2**70, 1).numpy(), float(2**70) + 1)
-
-
-def test_python_int_wider_than_f64_raises():
-    a = jix.compact(np.array([1.0, 2.0]))
-    with pytest.raises(OverflowError):
-        jix.add(a, 10**400)
+@pytest.mark.parametrize("arr_dtype", [np.uint8, np.int64, np.uint64, np.float16, np.float64])
+@pytest.mark.parametrize("scalar", [2**63, 2**64, -(2**63) - 1, 10**400])
+def test_python_int_outside_int64_raises(arr_dtype, scalar):
+    """numpy raises too, but only with integer arrays, and below 2**64 not with uint64 ones."""
+    a = jix.compact(np.array([0, 1], dtype=arr_dtype))
+    with pytest.raises(OverflowError, match="out of bounds"):
+        jix.add(a, scalar)
+    with pytest.raises(OverflowError, match="out of bounds"):
+        jix.add(scalar, 1)
 
 
 def test_python_int_into_float_is_not_bounds_checked():
@@ -924,5 +881,5 @@ def test_where_concatenate_stack_struct_and_scalar_dtype_raise():
     i = jix.compact(np.array([1, 2], dtype=np.int32))
     cond = jix.compact(np.array([True, False]))
     for fn in [lambda: jix.where(cond, s, i), lambda: jix.concatenate([s, i]), lambda: jix.stack([s, i])]:
-        with pytest.raises(RuntimeError, match="does not support operands with dtypes"):
+        with pytest.raises(TypeError, match="does not support operands with dtypes"):
             fn()

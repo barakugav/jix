@@ -627,5 +627,5 @@ def test_bool_sum_dtype_divergence():
 def test_product_bool_unsupported():
     """product(bool) is not supported by jix (numpy would upcast bool -> int64)."""
     za = jix.compact(np.array([True, False, True], dtype=np.bool_))
-    with pytest.raises(RuntimeError):
+    with pytest.raises(TypeError):
         jix.product(za)

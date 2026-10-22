@@ -2,7 +2,7 @@
 
 use jix_core::dtype::{Alignment, Dtype, Itemsize, ScalarKind, DTYPE_MAX_NDIM};
 use numpy::{PyArrayDescr, PyArrayDescrMethods};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
@@ -78,7 +78,7 @@ pub(crate) fn dtype_to_numpy<'py>(
     let dtype_layout = (itemsize as usize, dtype.alignment().as_usize());
     let numpy_layout = (numpy_dtype.itemsize(), numpy_dtype.alignment());
     if dtype_layout != numpy_layout {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(PyValueError::new_err(format!(
             "numpy dtype itemsize or alignment mismatch: {:?} != {:?}",
             numpy_layout, dtype_layout
         )));
@@ -91,7 +91,7 @@ pub(crate) fn numpy_descr_from_any<'py>(
     dtype: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyArrayDescr>> {
     if dtype.is_none() {
-        return Err(pyo3::exceptions::PyTypeError::new_err(
+        return Err(PyTypeError::new_err(
             "dtype must be a dtype-like object, not None",
         ));
     }

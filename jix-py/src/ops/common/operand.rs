@@ -62,14 +62,12 @@ impl Operand {
             if let Ok(value) = value.cast::<PyBool>() {
                 scalar = Some((Scalar::Bool(value.extract()?), Some(Precision::P1)));
             } else if let Ok(value) = value.cast::<PyInt>() {
-                if let Ok(value) = value.extract::<i64>() {
-                    scalar = Some((Scalar::Int(value), None));
-                } else if let Ok(value) = value.extract::<u64>() {
-                    scalar = Some((Scalar::UInt(value), None));
-                } else {
-                    let value = value.extract::<f64>()?; // too big for 64bit int, use f64
-                    scalar = Some((Scalar::Float(value), Some(Precision::P8)));
-                }
+                let Ok(int) = value.extract::<i64>() else {
+                    return Err(PyOverflowError::new_err(format!(
+                        "Python integer {value} out of bounds for int64"
+                    )));
+                };
+                scalar = Some((Scalar::Int(int), None));
             } else if let Ok(value) = value.cast::<PyFloat>() {
                 scalar = Some((Scalar::Float(value.extract()?), None));
             } else if let Ok(value) = value.cast::<PyComplex>() {
@@ -89,7 +87,7 @@ impl Operand {
             }
         }
         if only_scalar && !is_np_generic {
-            return Err(PyErr::new::<PyTypeError, _>("expected a scalar value"));
+            return Err(PyTypeError::new_err("expected a scalar value"));
         }
 
         let array = if let Ok(array) = value.cast::<PyUntypedArray>() {
@@ -365,7 +363,7 @@ impl Scalar {
         match Operand::from_any_with_params(value, ArrayParams::default(), true)? {
             Operand::Scalar { value, .. } => Ok(value),
             Operand::PyArray(_) | Operand::Array(_) => {
-                Err(PyErr::new::<PyTypeError, _>("expected a scalar value"))
+                Err(PyTypeError::new_err("expected a scalar value"))
             }
         }
     }
@@ -448,7 +446,7 @@ impl Scalar {
                 }
                 ScalarKind::ComplexF64 => Self::Complex(value),
                 _ => {
-                    return Err(PyErr::new::<PyTypeError, _>(format!(
+                    return Err(PyTypeError::new_err(format!(
                         "Unsupported cast from {} to {}",
                         Dtype::new_scalar(ScalarKind::ComplexF64),
                         Dtype::new_scalar(kind)

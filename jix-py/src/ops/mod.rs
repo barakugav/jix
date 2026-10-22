@@ -10,6 +10,7 @@ mod cmp;
 pub use cmp::*;
 
 mod shape_ops;
+use pyo3::exceptions::PyTypeError;
 pub use shape_ops::*;
 
 mod where_op;
@@ -172,7 +173,7 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
             ScalarKind::Bool => cast_num!(bool),
         };
     }
-    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
+    Err(PyTypeError::new_err(format!(
         "Unsupported cast from {} to {}",
         array.dtype(),
         dtype

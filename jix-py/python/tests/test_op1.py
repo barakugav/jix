@@ -61,6 +61,17 @@ def test_round_concrete():
     check_op1_concrete(jix.round, _round_half_away_from_zero, [(np.float32, values), (np.float64, values)])
 
 
+@pytest.mark.parametrize("op", [jix.floor, jix.ceil, jix.round])
+def test_rounding_returns_ints_as_is(op):
+    for dtype in [np.int8, np.int64, np.uint8, np.uint64]:
+        za = jix.compact(np.array([0, 5], dtype=dtype))
+        assert op(za) is za
+    assert op(7).numpy() == 7
+    for dtype in [np.bool_, np.complex64]:
+        with pytest.raises(TypeError):
+            op(jix.compact(np.zeros(2, dtype=dtype)))
+
+
 def test_sqrt_concrete():
     # Domain is non-negative: 0.0, a perfect square, a non-perfect square, and the
     # op_safe_non_negative_strategy bound (100.0).
@@ -105,6 +116,7 @@ def test_log_base2_concrete():
     for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
         with jix.errstate(divide="ignore"), np.errstate(divide="ignore"):
             check_op1_concrete(lambda za: jix.log(za, base=2), np.log2, [(dtype, values)], rtol=rtol)
+            check_op1_concrete(jix.log2, np.log2, [(dtype, values)], rtol=rtol)
 
 
 def test_log_base10_concrete():
@@ -113,6 +125,7 @@ def test_log_base10_concrete():
     for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
         with jix.errstate(divide="ignore"), np.errstate(divide="ignore"):
             check_op1_concrete(lambda za: jix.log(za, base=10), np.log10, [(dtype, values)], rtol=rtol)
+            check_op1_concrete(jix.log10, np.log10, [(dtype, values)], rtol=rtol)
 
 
 def test_sin_concrete():
@@ -180,7 +193,7 @@ def test_sign_never_casts():
     for dtype in (np.int8, np.uint16, np.float16):
         assert jix.sign(jix.compact(np.array([1, 0], dtype=dtype))).dtype == dtype
     assert jix.sign(-5).numpy() == -1  # untyped Python int -> int64
-    with pytest.raises(RuntimeError, match="sign"):
+    with pytest.raises(TypeError, match="sign"):
         jix.sign(jix.compact(np.array([True, False])))
 
 
@@ -236,7 +249,6 @@ def test_absolute_method_matches_function():
         (True, True, np.bool_),
         (False, False, np.bool_),
         (-5, 5, np.int64),
-        (2**63, 2**63, np.uint64),  # too big for i64 -> u64
         (-(2**63), -(2**63), np.int64),  # i64 min wraps, like numpy
         (-2.5, 2.5, np.float64),
         (3 - 4j, 5.0, np.float64),
@@ -257,7 +269,7 @@ def test_absolute_scalar_input(value, expected, expected_dtype):
 
 def test_absolute_unsupported_dtype_raises():
     za = jix.compact(np.zeros(3, dtype=[("a", np.int32), ("b", np.float32)]))
-    with pytest.raises(RuntimeError, match="Op 'absolute' does not support"):
+    with pytest.raises(TypeError, match="Op 'absolute' does not support"):
         jix.absolute(za)
 
 
@@ -312,22 +324,14 @@ def test_square_unsupported_bool_raises():
 
 @pytest.mark.parametrize(
     "dtype, expected_dtype",
-    [
-        # uint types auto-cast to the smallest signed type with higher precision
-        (np.uint8, np.int16),  # UInt P1 -> Int P2 (higher prec needed)
-        (np.uint16, np.int32),  # UInt P2 -> Int P4
-        (np.uint32, np.int64),  # UInt P4 -> Int P8
-    ],
+    [(np.uint8, np.int8), (np.uint16, np.int16), (np.uint32, np.int32), (np.uint64, np.int64)],
 )
-def test_negative_auto_cast_uint(dtype, expected_dtype):
-    """negative() on uint dtypes auto-casts to the next larger signed integer."""
-    np_a = np.array([1, 2, 3], dtype=dtype)
-    za = jix.compact(np_a)
-    result = jix.negative(za)
-    assert result.dtype == np.dtype(expected_dtype), (
-        f"negative({dtype.__name__}): got {result.dtype}, expected {expected_dtype.__name__}"
-    )
-    np.testing.assert_array_equal(result.numpy(), -np_a.astype(expected_dtype))
+def test_negative_uint_is_int_of_same_width(dtype, expected_dtype):
+    """The bits are those of numpy's wrapping unsigned negation."""
+    np_a = np.array([0, 1, 3, np.iinfo(dtype).max], dtype=dtype)
+    result = jix.negative(jix.compact(np_a))
+    assert result.dtype == np.dtype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), (-np_a).view(expected_dtype))
 
 
 @pytest.mark.parametrize("dtype", ints + floats + complexes + [np.uint8, np.uint64])
@@ -337,7 +341,7 @@ def test_positive_returns_self(dtype):
 
 
 def test_positive_rejects_bool():
-    with pytest.raises(RuntimeError, match="Op 'positive' does not support"):
+    with pytest.raises(TypeError, match="Op 'positive' does not support"):
         +jix.compact(np.array([True, False]))
 
 

@@ -2,6 +2,7 @@ use std::sync::LazyLock;
 
 use jix_core::dtype::Dtyped;
 use jix_core::scalar::{f16, Complex};
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use crate::ops::asarray_simple;
@@ -538,7 +539,7 @@ pub fn isclose<'py>(
             Scalar::Int(v) => <i64 as jix_core::scalar::Cast<T>>::cast(v),
             Scalar::Float(v) => <f64 as jix_core::scalar::Cast<T>>::cast(v),
             Scalar::Complex(_) => {
-                return Err(pyo3::exceptions::PyTypeError::new_err(
+                return Err(PyTypeError::new_err(
                     "a complex can't be cast to a real type for rtol or atol",
                 ))
             }
