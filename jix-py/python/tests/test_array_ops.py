@@ -279,6 +279,17 @@ def test_reshape_wrong_size_raises():
         jix.reshape(za, (2, 4))
 
 
+@pytest.mark.parametrize("shape,new_shape", [((0, 3), (-1, 3)), ((0,), (2, -1)), ((4, 0), (-1,))])
+def test_reshape_infers_zero_on_empty_array(shape, new_shape):
+    arr = np.zeros(shape, dtype=np.int32)
+    assert jix.reshape(jix.compact(arr), new_shape).shape == arr.reshape(new_shape).shape
+
+
+def test_reshape_infer_with_zero_known_size_raises():
+    with pytest.raises(ValueError):
+        jix.reshape(jix.compact(np.zeros((0, 3), dtype=np.int32)), (0, -1))
+
+
 # ---------------------------------------------------------------------------
 # insert_dim / remove_dim / squeeze / unsqueeze
 # ---------------------------------------------------------------------------

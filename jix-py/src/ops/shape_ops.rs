@@ -765,7 +765,7 @@ pub fn reshape<'py>(
         }
         if let Some(inferred_dim) = inferred_dim {
             let array_size = array.shape().iter().product::<u64>();
-            if array_size == 0 || known_size == 0 || !array_size.is_multiple_of(known_size) {
+            if known_size == 0 || !array_size.is_multiple_of(known_size) {
                 return Err(PyValueError::new_err("Cannot infer dimension size"));
             }
             new_shape[inferred_dim] = (array_size / known_size) as i64;
