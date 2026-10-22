@@ -484,8 +484,14 @@ impl BlockTableStorageRead for Mmap {
         );
         let len = section.size as usize / size_of::<T>();
 
-        let offset = self.base_offset as i64 + section.offset;
-        let offset = offset as usize;
+        let offset = self.base_offset.checked_add(section.offset as u64);
+        let end = offset.and_then(|offset| offset.checked_add(section.size));
+        ensure!(
+            end.is_some_and(|end| end <= self.mmap.len() as u64),
+            InvalidArchive,
+            "section is out of mapped file bounds"
+        );
+        let offset = offset.unwrap() as usize;
         let data = self.mmap[offset..].as_ptr().cast::<T>();
         ensure!(
             data.is_aligned(),
