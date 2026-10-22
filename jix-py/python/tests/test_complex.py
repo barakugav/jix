@@ -75,15 +75,15 @@ def test_real_accepts_python_list_of_complex():
     np.testing.assert_array_equal(result.numpy(), [1.0, 3.0])
 
 
-def test_real_rejects_float_input():
-    """`real` dispatches only on complex dtypes; float inputs have no safe target."""
-    a = jix.compact(np.array([1.0, 2.0, 3.0], dtype=np.float32))
-    with pytest.raises(Exception):
-        _ = jix.real(a).numpy()
+@pytest.mark.parametrize("dtype", [np.bool_, np.uint8, np.int32, np.float16, np.float64])
+def test_real_returns_non_complex_as_is(dtype):
+    a = jix.compact(np.array([0, 1], dtype=dtype))
+    assert jix.real(a) is a
+    assert a.real is a
 
 
-def test_imag_rejects_int_input():
-    """`imag` dispatches only on complex dtypes; int inputs have no safe target."""
-    a = jix.compact(np.array([1, 2, 3], dtype=np.int32))
-    with pytest.raises(Exception):
-        _ = jix.imag(a).numpy()
+@pytest.mark.parametrize("dtype", [np.bool_, np.int32, np.float32])
+def test_imag_rejects_non_complex(dtype):
+    a = jix.compact(np.array([0, 1], dtype=dtype))
+    with pytest.raises(TypeError):
+        jix.imag(a)

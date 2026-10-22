@@ -1361,7 +1361,7 @@ impl Array {
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].
     #[getter]
-    pub fn real(slf: &Bound<'_, Self>) -> PyResult<Array> {
+    pub fn real<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Array>> {
         crate::ops::real(slf)
     }
 
