@@ -267,7 +267,8 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    pub(crate) fn decode(&self, src: &[u8], dst: &mut [u8]) -> Result<usize> {
+    pub(crate) fn decode(&self, src: &[u8], dst: &mut [u8]) -> Result<()> {
+        let dst_len = dst.len();
         let mut buffers = None;
         let mut tmp_buf;
         let decompress_out = if self.filters.is_empty() {
@@ -310,6 +311,11 @@ impl<'a> Decoder<'a> {
             decompress_out.copy_from_slice(src);
             src.len()
         };
+        ensure!(
+            nbytes == dst_len,
+            InvalidArchive,
+            "Unexpected decoded block size: got {nbytes}, expected {dst_len}"
+        );
 
         // Apply filters in reverse order
         for filter in self.filters.iter().rev() {
@@ -317,7 +323,7 @@ impl<'a> Decoder<'a> {
             filter.decode(data, buf, self.dtype, &self.context.buffer_pool);
         }
 
-        Ok(nbytes)
+        Ok(())
     }
 }
 
@@ -487,6 +493,24 @@ mod tests {
             let mut params = EncoderParams::default();
             params.level(level as i32).unwrap();
             assert_eq!(params.level, level);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // the miri stand-in for zstd needs equal lengths
+    fn a_short_decode_errors_before_the_filters_touch_dst() {
+        let src = zstd::bulk::compress(&[1u8; 8], 3).unwrap();
+        let ctx = ReadContext::default();
+        for nfilters in [0, 1, 3] {
+            let config = DecoderCodecConfig {
+                codec: Codec::Zstd,
+                filters: (0..nfilters).map(|_| Filter::ByteShuffle).collect(),
+                dtype: Dtype::new_ref::<u8>().clone(),
+            };
+            let mut dst = [0xEEu8; 64];
+            let err = ctx.decoder(&config).decode(&src, &mut dst).unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::InvalidArchive);
+            assert!(dst[8..].iter().all(|&b| b == 0xEE));
         }
     }
 

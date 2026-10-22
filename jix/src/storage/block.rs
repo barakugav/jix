@@ -189,13 +189,7 @@ where
         let block_data = &self.block_data.as_ref()[offset as usize..][..len as usize];
 
         let decoder = context.decoder(&self.decoder_config);
-        let nbytes = decoder.decode(block_data, buf)?;
-        ensure!(
-            nbytes == b_size_bytes,
-            InvalidArchive,
-            "Unexpected decoded block size: got {nbytes}, expected {b_size_bytes}"
-        );
-        Ok(())
+        decoder.decode(block_data, buf)
     }
 
     pub(crate) fn as_ref(&self) -> BlockTable<Borrowed<'_>, ET>
