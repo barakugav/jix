@@ -108,7 +108,12 @@ where
                 "cannot stack arrays of different dtypes: {dtype} != {dtype_i}"
             );
 
-            shape[dim] += shape_i[dim];
+            shape[dim] = shape[dim].checked_add(shape_i[dim]).ok_or_else(|| {
+                error!(
+                    InvalidShapeOperation,
+                    "concatenated length of dim {dim} overflows u64"
+                )
+            })?;
             borders.push(shape[dim]);
         }
         check_shape_overflow(&shape, dtype.itemsize() as _)?;
@@ -314,6 +319,17 @@ mod tests {
     use crate::ops::concatenate;
     use crate::util::{shape_strategy, ScalarStrategy};
     use crate::Array;
+
+    #[test]
+    fn test_overflowing_concat_dim_is_an_error() {
+        let len = (1u64 << 63) + 2;
+        let a = || {
+            Array::compact_ndarray(&array![7u8])
+                .unwrap()
+                .broadcast(&[len])
+        };
+        assert!(crate::ops::Concatenate::new_array((a(), a()), 0).is_err());
+    }
 
     // in-place path
     #[test]
