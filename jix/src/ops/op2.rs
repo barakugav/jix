@@ -50,6 +50,7 @@ impl<S1, S2, K> Op2<S1, S2, K> {
                 a_shape,
                 b_shape
             );
+            check_shape_overflow(a_shape, K::Output::DTYPE.itemsize() as _)?;
         }
         let spec = {
             let (mut a_spec, mut b_spec) = (a.spec(), b.spec());

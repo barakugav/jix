@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
 use crate::dtype::{Dtype, Itemsize};
-use crate::error::{check_dtype_size_nonzero, check_ndim, ensure, Result};
+use crate::error::{check_dtype_size_nonzero, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight};
 use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt};
@@ -117,10 +117,20 @@ impl ArrayParams {
     /// Setting the block shape also marks every dimension as fixed unless
     /// [`block_shape_fixed_dims`](Self::block_shape_fixed_dims) is also used, meaning the shape will
     /// be preserved as-is if this `ArrayParams` is later used as a propagation source.
+    ///
+    /// Panics if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries; see
+    /// [`try_block_shape`](Self::try_block_shape) for a non-panicking variant.
+    #[track_caller]
     pub fn block_shape(&mut self, block_shape: &[BlockSize]) -> &mut Self {
-        check_ndim(block_shape.len()).unwrap();
+        self.try_block_shape(block_shape).unwrap()
+    }
+
+    /// Like [`block_shape`](Self::block_shape), but fails with `TooManyDimensions` instead of
+    /// panicking if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries.
+    pub fn try_block_shape(&mut self, block_shape: &[BlockSize]) -> Result<&mut Self> {
+        check_ndim(block_shape.len())?;
         self.block_shape = Some(DimArray::from_slice(block_shape).unwrap());
-        self
+        Ok(self)
     }
 
     /// Sets, per dimension, whether that dimension of [`block_shape`](Self::block_shape) is
@@ -136,10 +146,22 @@ impl ArrayParams {
     /// [`block_shape`](Self::block_shape) to also be set. When this is not set, the default depends
     /// on the block shape: an explicitly-set [`block_shape`](Self::block_shape) is all-fixed
     /// (preserved exactly), while an auto-computed block shape is all-non-fixed.
+    ///
+    /// Panics if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries; see
+    /// [`try_block_shape_fixed_dims`](Self::try_block_shape_fixed_dims) for a non-panicking
+    /// variant.
+    #[track_caller]
     pub fn block_shape_fixed_dims(&mut self, fixed: &[bool]) -> &mut Self {
-        check_ndim(fixed.len()).unwrap();
+        self.try_block_shape_fixed_dims(fixed).unwrap()
+    }
+
+    /// Like [`block_shape_fixed_dims`](Self::block_shape_fixed_dims), but fails with
+    /// `TooManyDimensions` instead of panicking if given more than [`NDIM_MAX`](crate::NDIM_MAX)
+    /// entries.
+    pub fn try_block_shape_fixed_dims(&mut self, fixed: &[bool]) -> Result<&mut Self> {
+        check_ndim(fixed.len())?;
         self.block_shape_fixed_dims = Some(fixed.iter().copied().collect());
-        self
+        Ok(self)
     }
 
     /// Sets the target block size in bytes, used when auto-computing the block shape.
@@ -345,6 +367,14 @@ impl ArrayParams {
         );
         // Scale block_shape up to block_size
         if !fixed_block_shape {
+            ensure!(
+                (0..ndim).all(|dim| !block_shape_fixed_dims.get(dim)
+                    || (block_shape[dim] > 0 && block_shape[dim] as u64 <= shape[dim].max(1))),
+                InvalidArgument,
+                "block_shape {:?} is invalid for array shape {:?}",
+                block_shape,
+                shape
+            );
             block_shape = Self::scale_block_shape(
                 &dim_arr(ndim, |dim| {
                     if block_shape_fixed_dims.get(dim) {
@@ -371,7 +401,12 @@ impl ArrayParams {
         // Update block_size to block_shape.product() if it is not specified
         let block_size = block_size
             .unwrap_or_else(|| {
-                block_shape.iter().map(|&b| b as u64).try_product().unwrap() * itemsize
+                block_shape
+                    .iter()
+                    .map(|&b| b as u64)
+                    .try_shape_product()
+                    .unwrap()
+                    * itemsize
             })
             .max(1);
         // read_size defaults to a window derived from the cache sizes.
@@ -460,6 +495,7 @@ impl ArrayParams {
         dtype: &Dtype,
         flags: ArraySpecFlags,
     ) -> Result<ArraySpecOwned> {
+        check_shape_overflow(shape, dtype.itemsize() as _)?;
         let mut params = self;
         params.tune(shape, dtype)?;
         let spec = ArraySpecOwned::new(
@@ -1905,6 +1941,61 @@ mod tests {
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::UnsupportedDtype
+        );
+    }
+
+    // An empty shape whose size would overflow if a zero dim grew to one. Ops on an existing
+    // array assume its shape is valid, so every constructor must reject this up front.
+    const OVERFLOWING_EMPTY_SHAPE: [u64; 3] = [0, 1 << 40, 1 << 40];
+
+    #[test]
+    fn into_spec_rejects_overflowing_shape() {
+        let err = ArrayParams::new()
+            .into_spec(
+                &OVERFLOWING_EMPTY_SHAPE,
+                &<i32 as crate::dtype::Dtyped>::DTYPE,
+                ArraySpecFlags::default(),
+            )
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
+    }
+
+    #[test]
+    fn compact_fn_rejects_overflowing_shape() {
+        let result = Array::compact_fn(OVERFLOWING_EMPTY_SHAPE, |_| 0i32);
+        assert_eq!(
+            result.unwrap_err().kind(),
+            crate::error::ErrorKind::InvalidShapeOperation
+        );
+    }
+
+    #[test]
+    fn plain_ndarray_ptr_rejects_overflowing_shape() {
+        let buf = [0u8; 8];
+        let result = unsafe {
+            Array::<crate::storage::Plain<&(), crate::TypeDyn>>::plain_ndarray_ptr(
+                buf.as_ptr(),
+                OVERFLOWING_EMPTY_SHAPE,
+                &[0usize; 3],
+                <i32 as crate::dtype::Dtyped>::DTYPE,
+                ArrayParams::new(),
+            )
+        };
+        assert_eq!(
+            result.unwrap_err().kind(),
+            crate::error::ErrorKind::InvalidShapeOperation
+        );
+    }
+
+    #[test]
+    fn scalar_rejects_overflowing_shape() {
+        let result =
+            crate::__private::Scalar::new(0i32, OVERFLOWING_EMPTY_SHAPE, ArrayParams::new())
+                .map(|_| ());
+        assert_eq!(
+            result.unwrap_err().kind(),
+            crate::error::ErrorKind::InvalidShapeOperation
         );
     }
 }

@@ -25,7 +25,7 @@ impl RuntimeAlign {
     #[inline]
     #[track_caller]
     fn new(align: usize) -> Self {
-        if align != 0 && !align.is_power_of_two() {
+        if !align.is_power_of_two() {
             #[inline(never)]
             fn panic_align_not_power_of_two(align: usize) -> ! {
                 panic!("alignment ({align}) is not a power of two.");
@@ -43,9 +43,7 @@ impl RuntimeAlign {
 
 /// Aligned vector. See [`Vec`] for more info.
 ///
-/// Note: passing an alignment value of `0` or a power of two that is less than the minimum
-/// alignment will cause the vector to use the minimum valid alignment for the type `T` and
-/// alignment type `A`.
+/// Note: the alignment must be a power of two; constructors panic otherwise.
 pub struct AlignedBytes {
     buf: RawAlignedBytes,
     len: usize,

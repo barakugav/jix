@@ -847,7 +847,7 @@ impl Dtype {
         let shape_prod = shape
             .iter()
             .cloned()
-            .try_product()
+            .try_shape_product()
             .ok_or_else(|| error!(InvalidArgument, "Dtype shape overflow"))?;
         ensure!(
             shape_prod != 0,

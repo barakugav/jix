@@ -145,6 +145,10 @@ impl RawAlignedBytes {
         debug_assert!(len < self.capacity());
         let old_capacity = self.capacity;
         let align = self.align;
+        if len == 0 {
+            *self = unsafe { Self::new_unchecked(align.alignment()) };
+            return;
+        }
         let old_ptr = self.ptr.as_ptr() as *mut u8;
 
         // this cannot overflow or exceed isize::MAX bytes since len < cap and the same was true
@@ -153,7 +157,11 @@ impl RawAlignedBytes {
             unsafe { Layout::from_size_align_unchecked(old_capacity, align.alignment()) };
 
         let ptr = unsafe { realloc(old_ptr, old_layout, len) };
-        let ptr = ptr as *mut u8;
+        if ptr.is_null() {
+            handle_alloc_error(unsafe {
+                Layout::from_size_align_unchecked(len, align.alignment())
+            });
+        }
         self.capacity = len;
         self.ptr = unsafe { NonNull::new_unchecked(ptr) };
     }

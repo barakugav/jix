@@ -213,13 +213,19 @@ where
 }
 
 pub(crate) trait IterExt: Iterator {
+    // Compute .product(), but also check that a prod with zeros replaces with ones does not
+    // overflow. This guard us from overflows when further manipulating arrays in shape ops.
     #[inline]
-    fn try_product(mut self) -> Option<Self::Item>
+    fn try_shape_product(mut self) -> Option<Self::Item>
     where
         Self: Sized,
         Self::Item: Idx,
     {
-        self.try_fold(Self::Item::ONE, |acc, x| acc.checked_mul(x))
+        self.try_fold((Self::Item::ONE, Self::Item::ONE), |(safe_acc, acc), x| {
+            let safe_acc = safe_acc.checked_mul(x.max(Self::Item::ONE))?;
+            Some((safe_acc, acc * x))
+        })
+        .map(|(_safe_acc, acc)| acc)
     }
 
     #[inline]
@@ -825,6 +831,20 @@ mod tests {
         calc_block_end, default_strides_slice, scale_read_shape, AlternatingBuffers, ScaleWeight,
     };
     use crate::DimDyn;
+
+    #[test]
+    fn try_shape_product_zero_does_not_hide_overflow() {
+        use super::IterExt;
+        assert_eq!([2u64, 0, 3].into_iter().try_shape_product(), Some(0));
+        assert_eq!(
+            [0u64, 1 << 40, 1 << 40].into_iter().try_shape_product(),
+            None
+        );
+        assert_eq!(
+            [1u64 << 40, 1 << 40, 0].into_iter().try_shape_product(),
+            None
+        );
+    }
 
     #[test]
     fn calc_block_end_non_empty_ranges() {

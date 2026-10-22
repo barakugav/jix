@@ -162,6 +162,8 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
             .map(|&dim| array.shape()[dim])
             .collect::<DimArray<_>>();
         let shape = DimDyn::from_slice(&shape);
+        let item_bytes = (K::Output::DTYPE.itemsize() as usize).max(size_of::<K::State>());
+        check_shape_overflow(shape.as_slice(), item_bytes as _)?;
 
         let spec = array.spec();
         let reduced_prod = (0..input_ndim)

@@ -1661,10 +1661,12 @@ pub(crate) fn resolve_array_params(
 
     let mut params = jix_core::ArrayParams::default();
     if let Some(block_shape) = block_shape {
-        params.block_shape(&block_shape);
+        params.try_block_shape(&block_shape).into_py_result()?;
     }
     if let Some(block_shape_fixed_dims) = block_shape_fixed_dims {
-        params.block_shape_fixed_dims(&block_shape_fixed_dims);
+        params
+            .try_block_shape_fixed_dims(&block_shape_fixed_dims)
+            .into_py_result()?;
     }
     if let Some(block_size) = block_size {
         params.block_size(block_size);
