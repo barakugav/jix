@@ -107,15 +107,28 @@ bug-hunt/
 
 ## Cost and time
 
-Measured on the pilot (4 hunters -> 16 raw / 13 distinct findings -> 13 verifiers + dedup +
-report = 19 agents): about 3.0M subagent tokens (~160k per agent) and 61 minutes at 2 agents at a
-time. A full run is 58 hunters plus one or two verifiers per distinct finding - extrapolating,
-roughly 200-250 agents and 30-40M tokens. The workflow runs at most `min(16, CPUs - 2)` agents at
-once, so on a 4-core cloud container it runs 2 at a time and takes on the order of 10-12 hours; on
-a 16+ core machine, 1-2 hours. To go faster on a small machine, split the run into batches with `units` and
-different `runId`s and launch them concurrently (scratch file names are run-scoped, so batches do
-not collide). Memory is the other limit: building the Python extension needs several GB, so do
-not run `setup.sh` next to a hunt.
+Measured, in input-token equivalents (cache reads weighted 0.1, cache writes 1.25; output is
+negligible):
+
+| run | units | agents | findings | cost | per unit | wall time (2 at a time) |
+|-----|------:|-------:|---------:|-----:|---------:|------------------------:|
+| pilot (util-memory, concept-alignment) | 4 | 19 | 13 | 24.5M | 6.1M | 61 min |
+| trial2 (mixed complexity) | 8 | 38 | 28 | 38.4M | 4.8M | 125 min |
+
+- A hunter costs 1.4-5.3M. The cost follows how much code it traces, not how "complex" the code
+  is: concept hunters and the differential tester cost the most, and Python wrappers the least.
+- A verifier costs ~0.3-1.5M, one per distinct finding. Bug density was ~3.5 per unit in both
+  runs, so the units that are "simple" to hunt are not much cheaper overall: py-ops-shape-ops had
+  the cheapest hunter and 8 findings.
+- Each agent takes ~6.5 min of wall time at 2 agents in parallel.
+
+Remaining after these two runs: 35 module + 10 concept + 1 dynamic = 46 units, so about 46 x 4.8M
+= ~220M input-equivalent tokens and ~230 agents, i.e. ~12 hours on a 4-core container (2 agents at
+a time) or ~2 hours with 14 at a time. The workflow runs at most `min(16, CPUs - 2)` agents at
+once. To go faster on a small machine, split the run into batches with `units` and different
+`runId`s and launch them concurrently (scratch file names are run-scoped, so batches do not
+collide). Memory is the other limit: building the Python extension needs several GB, so do not
+run `setup.sh` next to a hunt.
 
 An interrupted run can be resumed: re-invoke the workflow with `resumeFromRunId` and the same
 arguments; finished agents return their cached results.
@@ -136,4 +149,12 @@ arguments; finished agents return their cached results.
   with repros (6 high). Recorded as K1-K13 in `KNOWN.md`. Lessons folded into the primer:
   one repro convention (assert the correct behavior), "crate-internal" must account for public
   associated types, re-run hunter claims instead of quoting them, and the i686 test runner.
-  Next: the remaining units with `skip: ["util-memory", "concept-alignment"]`.
+- `2026-10-22-trial2` (after #85 / #86) - units reduction-fold-loops, pipeline-driver,
+  shape-ops-copy-ops, codec-archive-codec-pipeline, elementwise-ops-cmp-clamp-approx,
+  py-ops-shape-ops, concept-integer-width, dynamic-python-differential: 28 findings, all confirmed
+  (1 critical, 6 high), including 3 incomplete #86 fixes (F003 and F006 extend K2, F004 extends K1).
+  Recorded as K14-K41 in `KNOWN.md`.
+- Next: everything else, with
+  `skip: ["util-memory", "concept-alignment", "reduction-fold-loops", "pipeline-driver",
+  "shape-ops-copy-ops", "codec-archive-codec-pipeline", "elementwise-ops-cmp-clamp-approx",
+  "py-ops-shape-ops", "concept-integer-width", "dynamic-python-differential"]`.
