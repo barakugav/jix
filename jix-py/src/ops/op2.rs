@@ -91,6 +91,8 @@ define_op2!(
     /// For **integer** types the result wraps on underflow (two's complement).
     /// For **complex** types each component is subtracted independently:
     /// `(a + bi) - (c + di) = (a-c) + (b-d)i`.
+    /// Two `bool` operands give `int8`: `True - False` is `1`, `False - True` is `-1` (numpy
+    /// raises).
     ///
     /// Available via the `-` operator on arrays.
     ///
@@ -121,7 +123,8 @@ define_op2!(
     subtract,
     Sub,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        // i8 first, for two bools
+        [i8, u8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
         Safe
     }
 );

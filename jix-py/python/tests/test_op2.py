@@ -621,6 +621,17 @@ def test_power_shortcut_accepts_bool_base():
     np.testing.assert_array_equal(jix.power(za, 2).numpy(), np.array([1, 0], dtype=np.uint8))
 
 
+def test_subtract_two_bools_is_int8():
+    """numpy raises. bool - int keeps the int's dtype."""
+    a_np, b_np = np.array([True, False, True, False]), np.array([True, True, False, False])
+    a = jix.compact(a_np)
+    for y, y_np in [(jix.compact(b_np), b_np), (True, True), (np.bool_(True), True)]:
+        result = a - y
+        assert result.dtype == np.int8
+        np.testing.assert_array_equal(result.numpy(), a_np.astype(np.int8) - np.asarray(y_np).astype(np.int8))
+    assert jix.subtract(a, np.uint8(1)).dtype == np.uint8
+
+
 def test_power_shortcut_rejects_complex_base():
     """power has no complex impl; the shortcut must not quietly add one for exponent 2 (square's
     own table does support complex)."""
