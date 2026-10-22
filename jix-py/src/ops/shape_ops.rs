@@ -2,7 +2,7 @@ use jix_core::ops::{Broadcast, InsertDim, SliceItem, SliceSpec};
 use jix_core::{ArrayAny, NDIM_MAX};
 use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyEllipsis, PySlice, PyTuple};
+use pyo3::types::{PyBool, PyEllipsis, PySlice, PyTuple};
 
 use crate::ops::asarray_simple;
 use crate::ops::common::{operands_dtype_promotion_vec, Operand};
@@ -273,7 +273,9 @@ pub(crate) fn parse_basic_index<'py>(
             if let Ok(slice) = item.cast::<PySlice>() {
                 return Ok(RawIdxItem::Slice(slice));
             }
-            if let Ok(i) = item.extract::<i64>() {
+            if !item.is_instance_of::<PyBool>()
+                && let Ok(i) = item.extract::<i64>()
+            {
                 return Ok(RawIdxItem::Int(i));
             }
             Err(PyTypeError::new_err(

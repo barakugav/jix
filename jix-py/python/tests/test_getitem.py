@@ -161,3 +161,14 @@ def test_too_many_indices_raises():
     for index in [(0,) * 9, (0,) * 9 + (Ellipsis,)]:
         with pytest.raises(IndexError):
             a[index]
+
+
+@pytest.mark.parametrize("index", [True, False, (0, True), np.True_])
+def test_bool_index_raises(index):
+    a = jix.compact(arange((3, 4)))
+    with pytest.raises(TypeError):
+        a[index]
+    with pytest.raises(TypeError):
+        a.numpy(index)
+    with pytest.raises(TypeError):
+        jix.slice(a, index)
