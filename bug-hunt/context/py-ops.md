@@ -165,6 +165,22 @@ OverflowError directly.
 - asarray ignores `params` for an existing jix Array (as_array.rs:30-31).
 - All core errors surface as RuntimeError (test_type_promotion.py:921-928).
 
+### Changed since generation (dbb99e2 #85, 5b3a9f5 #86) - these supersede conflicting bullets above
+- Unsigned ints negate as the signed int of the SAME width (wrapping): `negative(u8) -> i8`,
+  `negative(u64) -> i64` (was i16 / f64). `bool - bool -> i8`.
+- `floor` / `ceil` / `round` return integer arrays as is; `real` returns non-complex arrays as is.
+- A Python int outside int64 raises OverflowError ("out of bounds") with every array dtype,
+  including float and uint64 arrays and all-scalar calls (it used to become an f64 scalar).
+- A dtype mismatch raises TypeError (was RuntimeError), e.g. where / concatenate / stack of a
+  struct and a scalar dtype ("does not support operands with dtypes").
+- `broadcast()` inserts leading dims when ndim differ (shared `broadcast_array_impl` in
+  jix-py/src/ops/, also used by operand broadcasting in ops/common/broadcast.rs).
+- New Python functions `jix.log2` / `jix.log10` (aliases of `jix.log(x, base=...)`,
+  jix-py/python/jix/__init__.py).
+- reshape's -1 inference checks the known-size product for overflow (ValueError).
+- `params={"block_shape": [...9 entries]}` raises instead of PanicException (try_block_shape).
+Line numbers in this doc refer to bb1ee2c; jix-py/src/ops/op1.rs and shape_ops.rs moved the most.
+
 ## Hot spots
 
 1. Dispatch tables (op1/op2/cmp/bitwise/reduction): is the order right for every input pair, and
