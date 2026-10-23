@@ -409,8 +409,8 @@ where
 impl BlockTableStorageRead for Owned {
     /// Read `section` into a heap-allocated `Vec<T>`.
     ///
-    /// Allocates a zeroed buffer, reads the raw bytes from
-    /// `reader` into it, then converts the `Vec<MaybeUninit<T>>` to `Vec<T>` in place.
+    /// Reads the raw bytes from `reader` into a zeroed buffer, then converts the
+    /// `Vec<MaybeUninit<T>>` to `Vec<T>` in place.
     fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
@@ -429,13 +429,17 @@ impl BlockTableStorageRead for Owned {
         );
         let len = section.size as usize / size_of::<T>();
 
-        // ::zeroed() is a bit of waste, but rust Read trait implementor can potentially read from the given buffer
-        let mut data = vec![MaybeUninit::<T>::zeroed(); len];
         reader
-            .read_section_into(&section, unsafe {
-                cast_slice_mut::<MaybeUninit<T>, u8>(data.as_mut_slice())
-            })
+            .seek_relative_to_base(section.offset)
             .map_err(Error::io)?;
+        let mut data = Vec::<MaybeUninit<T>>::new();
+        // read in chunks, as we treat the section length as potentially untrusted and large.
+        while data.len() < len {
+            let start = data.len();
+            data.resize((start * 2).max(4096).min(len), MaybeUninit::zeroed());
+            let chunk = unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(&mut data[start..]) };
+            reader.reader_mut().read_exact(chunk).map_err(Error::io)?;
+        }
         let mut data = std::mem::ManuallyDrop::new(data);
         Ok(unsafe {
             Vec::from_raw_parts(data.as_mut_ptr().cast::<T>(), data.len(), data.capacity())
