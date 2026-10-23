@@ -187,6 +187,10 @@ Line numbers in this doc refer to bb1ee2c; jix-py/src/ops/op1.rs and shape_ops.r
   accepted. A huge slice stop clamped by PySlice_Unpack is treated as stop = len.
 - uint64 vs int64 comparisons use exact kernels. jix-py/src/ops/common/mod.rs shrank (~60 lines).
 
+### Changed in 6f8e220 (#88) and 7e93487 (#89) - supersedes conflicting statements above
+- #89: bitwise / cmp / where / reduction wrappers dispatch on `bool8` (jix-py ops changed). Check that
+  numpy bool inputs holding bytes other than 0/1 give numpy's results.
+
 ## Hot spots
 
 1. Dispatch tables (op1/op2/cmp/bitwise/reduction): is the order right for every input pair, and

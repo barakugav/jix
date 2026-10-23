@@ -202,6 +202,10 @@ Unsafe fns with preconditions:
 - The decoded block size is checked before the filters run (K1 / K17 fixed). Block sizes are
   bounded to 2**30 items (K18 / K24 fixed). archive/array.rs grew ~58 lines of validation.
 
+### Changed in 6f8e220 (#88) and 7e93487 (#89) - supersedes conflicting statements above
+- #89 / #88: the dtype proto gained `bool8` and struct dtypes from files must be padding-free;
+  arrays of bool8 read from files are valid for any byte (K44 fixed).
+
 ## Hot spots
 
 - Short decompression: what does a release build return when a block decodes to fewer bytes

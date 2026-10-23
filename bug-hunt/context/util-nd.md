@@ -177,6 +177,10 @@ All strides are `usize` (bytes, or elements for `(1,1)` layouts) and never negat
 - REQUIRE_ALIGNED is false on x86/x86_64/aarch64 (mod.rs:641-645): unaligned typed access is
   allowed there by design.
 
+### Changed in 6f8e220 (#88) and 7e93487 (#89) - supersedes conflicting statements above
+- #88: struct dtypes have no padding any more, so NdCopier's integer-typed copies of struct elements
+  no longer read uninitialized bytes (K3 fixed).
+
 ## Hot spots
 
 - Coalescing (nd_iter_unordered.rs:129-150, _dyn.rs:91-107): can any combination of 0 strides,

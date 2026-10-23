@@ -74,8 +74,14 @@ Read the relevant context doc for the precise version; this is the short list.
   and OR an `ArithmeticOpStatus` flag, and the `ReadContext` error modes (error / warn / ignore)
   decide what happens next.
 - **Typed views of bytes.** Interpreting bytes as `T` is only sound if every bit pattern is a
-  valid `T` (false for `bool`; true for ints / floats; struct dtypes inherit from their fields)
-  and the dtype check that gates it really proves the layouts match.
+  valid `T` and the dtype check that gates it really proves the layouts match. Since #89 every
+  `Dtyped` type must accept every bit pattern, so the boolean element type is
+  `jix::scalar::bool8` (0 is false, ANY other byte is true) - not Rust `bool`. Two consequences to
+  hunt: (1) any remaining place that turns external bytes into a Rust `bool` (or another type with
+  invalid bit patterns) is UB; (2) any kernel that works on the raw `bool8` byte and assumes it is
+  0/1 is a wrong-result bug - e.g. bitwise `2 & 1 == 0` makes true AND true false, a SIMD mask built
+  from the byte, `sum` adding raw bytes, a cast or comparison of the raw byte. Since #88 struct
+  dtypes have no padding: the fields tile the element exactly.
 - **Integer widths.** Shapes and indices are `u64`; memory offsets are `usize`. x86 (32-bit) and
   armv7 wheels are shipped, so every `as usize` of a `u64`, and every unchecked product of
   shape * stride * itemsize, can truncate or wrap there - and a wrapped size feeding an
@@ -92,8 +98,10 @@ Facts that change how much to trust existing tests:
   wheels.
 - `debug_assert!` and `assert_unchecked` guard many invariants. In release, the first vanishes and
   the second becomes an optimizer assumption - a violated one is UB.
-- Several mappers found no validation of `bool` byte values anywhere (archive load, numpy input).
-  Treat "where can a non-0/1 byte reach a typed `bool` read" as an open question.
+- #89 replaced `bool` with `bool8` across the codebase (~1300 lines changed in cmp, cast,
+  where_op, reduction, map, logical1, bitwise, the pipeline and jix-py). It is new code: check
+  that every op treats a non-0/1 `bool8` byte as true, and that no path still materializes a Rust
+  `bool` from array bytes.
 
 ## 3. Checklist - apply to every unit
 
@@ -110,9 +118,9 @@ edge case and a fast path.
       boundary; a step that does not divide the length.
 - [ ] Integer edges: overflow in index / size arithmetic; `u64 -> usize` on 32-bit; signed MIN
       and -1; shifts >= bit width; float -> int of NaN / inf / out-of-range.
-- [ ] Dtype edges: bool, f16, complex (feature-gated - check both feature states compile the same
-      logic), struct dtypes (padding, itemsize != alignment, odd itemsizes like 3 or 12), inner
-      shapes.
+- [ ] Dtype edges: `bool8` holding bytes other than 0/1 (e.g. 2, 0xFF), f16, complex
+      (feature-gated - check both feature states compile the same logic), struct dtypes
+      (itemsize != alignment, odd itemsizes like 3 or 12, nested), inner shapes.
 - [ ] Two paths that must agree: SIMD body vs scalar tail, static `N_OPERANDS` path vs dyn path,
       contiguous vs strided, aligned vs unaligned, pull vs push, `read_data` vs
       `read_as_elementwise_pipeline`, Rust vs Python wrapper, encode vs decode.
