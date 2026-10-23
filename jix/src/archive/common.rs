@@ -167,7 +167,7 @@ impl<R> ArchiveReader<R> {
         R: Read,
     {
         let mut x: u64 = 0;
-        for i in 0.. {
+        for i in 0..10 {
             let b = match self.read_byte()? {
                 Some(b) => b,
                 None => {
@@ -181,6 +181,12 @@ impl<R> ArchiveReader<R> {
                     }
                 }
             };
+            if i == 9 && b > 1 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "uleb128 does not fit in u64",
+                ));
+            }
             x |= u64::from(b & 0x7F) << (i * 7);
             if b < 0x80 {
                 return Ok(Some(x));
@@ -300,6 +306,21 @@ mod tests {
         let mut reader = reader_after_metadata(&[0x80]);
         let err = reader.read_uleb128().unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn uleb128_longer_than_u64_is_an_error() {
+        let max = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
+        let mut reader = reader_after_metadata(&max);
+        assert_eq!(reader.read_uleb128().unwrap(), Some(u64::MAX));
+        for bytes in [
+            &[0x80; 10][..],
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02],
+        ] {
+            let mut reader = reader_after_metadata(bytes);
+            let err = reader.read_uleb128().unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        }
     }
 
     /// A reader positioned just past the file metadata that `ArchiveWriter::new` writes, with
