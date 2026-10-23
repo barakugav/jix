@@ -35,7 +35,7 @@ use crate::scalar::f16;
 #[cfg(feature = "num-complex")]
 use crate::scalar::Complex;
 use crate::util::arrayvec::ArrayVec;
-use crate::util::{Idx, IterExt};
+use crate::util::IterExt;
 
 /// A type alignment in bytes.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -173,13 +173,16 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// Group named fields with explicit byte offsets. Each field is itself a `Dtype`, allowing
 /// arbitrary nesting (structs of structs, arrays of structs, etc.).
 ///
+/// Struct dtypes never contain padding: the fields must cover every byte of the element, back
+/// to back in offset order. Padding bytes are uninitialized, and jix reads elements as raw bytes,
+/// so a layout that needs padding must spell it out as an explicit field (e.g. a `[u8; N]` field
+/// named `_pad`).
+///
 /// Struct layout comes in two variants matching C representations:
 ///
-/// - **Aligned** (`#[repr(C)]`): fields are padded to their natural alignment; the struct is
-///   padded at the end to a multiple of the maximum field alignment.
-/// - **Packed** (`#[repr(C, packed)]`): no padding anywhere; fields are laid out
-///   contiguously, so the offset of each field is exactly the sum of the sizes of all
-///   preceding fields.
+/// - **Aligned** (`#[repr(C)]`): every field sits at a multiple of its own alignment, and the
+///   itemsize is a multiple of the maximum field alignment, which is also the struct alignment.
+/// - **Packed** (`#[repr(C, packed)]`): fields at any offset, struct alignment 1.
 ///
 /// Create struct dtypes with [`Dtype::from_fields`] (auto-detects layout) or
 /// [`Dtype::new_struct`] (explicit control when auto-detection is ambiguous):
@@ -187,10 +190,11 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// ```rust
 /// use jix::dtype::{Dtype, Dtyped};
 ///
-/// // Aligned layout: id (u8) at 0, 3 bytes padding, grade (f32) at 4, 0 bytes tail padding.
+/// // Aligned layout: id (u8) at 0, 3 explicit padding bytes, grade (f32) at 4.
 /// // Total itemsize = 8, alignment = 4.
 /// let aligned = Dtype::from_fields(vec![
 ///     ("id".to_string(), 0, u8::DTYPE),
+///     ("_pad".to_string(), 1, <[u8; 3]>::DTYPE),
 ///     ("grade".to_string(), 4, f32::DTYPE),
 /// ]).unwrap();
 /// assert_eq!(aligned.itemsize(), 8);
@@ -205,6 +209,12 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// assert_eq!(packed.itemsize(), 5);
 /// assert_eq!(packed.alignment().as_usize(), 1);
 /// assert!(!packed.is_aligned());
+///
+/// // Implicit padding is rejected: bytes 1..4 are not covered by any field.
+/// assert!(Dtype::from_fields(vec![
+///     ("id".to_string(), 0, u8::DTYPE),
+///     ("grade".to_string(), 4, f32::DTYPE),
+/// ]).is_err());
 /// ```
 ///
 /// # Inner Shape
@@ -270,6 +280,8 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// - **Inner shape dimensions** - at most [`DTYPE_MAX_NDIM`] (currently 4).
 /// - **Itemsize limit** - stored as [`Itemsize`] (`u16`); the total bytes per element must not
 ///   exceed `u16::MAX`.
+/// - **No padding** - struct fields must cover every byte of the element; padding has to be an
+///   explicit field.
 /// - **Field offsets** - must conform to either an aligned (`#[repr(C)]`) or packed
 ///   (`#[repr(C, packed)]`) layout; arbitrary custom offsets are rejected.
 #[derive(Clone)]
@@ -409,29 +421,37 @@ impl Dtype {
     /// * `fields` - A vector of field definitions, where each field is represented as a tuple of
     ///   (name, offset, dtype). Names should be unique. Offsets are in bytes from the start of the struct.
     ///
-    /// The fields should be either in packed or aligned offsets. See [`Self::is_aligned`] for details.
+    /// The fields must cover every byte of the struct without gaps or overlap; padding is not
+    /// supported and has to be given as an explicit field. The itemsize is the end of the last
+    /// field.
     ///
-    /// There are some cases in which it is ambiguous whether the offsets are packed or aligned, and it may affect the
-    /// computed total itemsize of the struct. In these cases, consider using the explicit [`Self::new_struct`].
+    /// The layout is detected as aligned if every field sits at a multiple of its alignment and the
+    /// itemsize is a multiple of the maximum field alignment, and as packed otherwise. See
+    /// [`Self::is_aligned`] for details. Some layouts are valid as both (e.g. two `i32` fields);
+    /// they are detected as aligned. Use [`Self::new_struct`] to build the packed one instead.
     ///
     /// ```rust
     /// use jix::dtype::{Dtype, Dtyped};
     ///
-    /// /// A student struct with aligned fields.
+    /// /// A student struct with aligned fields. `Dtyped` rejects padding, so the gap before
+    /// /// `grade` is spelled out as an explicit field.
     /// #[derive(Copy, Clone, Dtyped)]
     /// #[repr(C)]
     /// struct Student {
     ///   id: u8,
+    ///   _pad: [u8; 3],
     ///   grade: f32,
     /// }
     /// let student_dtype = Dtype::from_fields(vec![
     ///   ("id".to_string(), 0, u8::DTYPE),
+    ///   ("_pad".to_string(), 1, <[u8; 3]>::DTYPE),
     ///   ("grade".to_string(), 4, f32::DTYPE),
     /// ]).unwrap();
-    /// assert_eq!(student_dtype.fields().unwrap().len(), 2);
+    /// assert_eq!(student_dtype.fields().unwrap().len(), 3);
     /// let fields = student_dtype.fields().unwrap();
     /// let mut fields = fields.iter();
     /// assert_eq!(*fields.next().unwrap(), ("id".into(), 0, u8::DTYPE));
+    /// assert_eq!(*fields.next().unwrap(), ("_pad".into(), 1, <[u8; 3]>::DTYPE));
     /// assert_eq!(*fields.next().unwrap(), ("grade".into(), 4, f32::DTYPE));
     /// assert_eq!(student_dtype.scalar_kind(), None);
     /// assert_eq!(student_dtype.itemsize(), 8);
@@ -468,56 +488,23 @@ impl Dtype {
 
         let mut fields = fields;
         fields.sort_by_key(|(_name, offset, _dtype)| *offset);
-
-        fn determine_itemsize_and_alignment(
-            fields: &[(String, Itemsize, Dtype)],
-        ) -> Result<(Itemsize, (Alignment, bool))> {
-            let mut expected_offset = 0;
-            let is_aligned = fields.iter().all({
-                |(_f_name, offset, dtype)| {
-                    expected_offset =
-                        expected_offset.ceil_to_multiple(dtype.alignment().as_usize() as Itemsize);
-                    let aligned = *offset == expected_offset;
-                    expected_offset += dtype.itemsize();
-                    aligned
-                }
-            });
-            if is_aligned {
-                let max_alignment = fields
-                    .iter()
-                    .map(|(_name, _offset, dtype)| dtype.alignment())
-                    .max()
-                    .unwrap_or(Alignment::new(1).unwrap());
-                let itemsize =
-                    expected_offset.ceil_to_multiple(max_alignment.as_usize() as Itemsize);
-                return Ok((itemsize, (max_alignment, true)));
-            }
-
-            let mut expected_offset = 0; // assuming sorted by offset
-            let is_packed = fields.iter().all({
-                |(_f_name, offset, dtype)| {
-                    let packed = *offset == expected_offset;
-                    expected_offset += dtype.itemsize();
-                    packed
-                }
-            });
-            if is_packed {
-                let itemsize = expected_offset;
-                return Ok((itemsize, (Alignment::new(1).unwrap(), false)));
-            }
-
-            bail!(
-                InvalidArgument,
-                "field offsets are not in a valid packed or aligned layout"
-            );
-        }
-
-        let (itemsize, (alignment, is_aligned)) = determine_itemsize_and_alignment(&fields)?;
-
         let fields = fields
             .into_iter()
             .map(|(name, offset, dtype)| (Cow::Owned(name), offset, dtype))
-            .collect();
+            .collect::<Box<_>>();
+
+        // No padding, so the fields end exactly at the itemsize.
+        let itemsize = fields
+            .last()
+            .map_or(0, |(_name, offset, dtype)| offset + dtype.itemsize());
+        Self::check_no_padding(&fields, itemsize)?;
+
+        let max_alignment = Self::max_field_alignment(&fields);
+        let (alignment, is_aligned) = if Self::is_aligned_struct(&fields, itemsize, max_alignment) {
+            (max_alignment, true)
+        } else {
+            (Alignment::new(1).unwrap(), false)
+        };
 
         Ok(Self(DtypeInner::StructOwned {
             fields: OwnedFields::new(fields),
@@ -531,7 +518,8 @@ impl Dtype {
     /// Creates a new struct dtype by specifying all of the parameters explicitly.
     ///
     /// Most of the time, the simpler [`Self::from_fields`] should be sufficient, and this function
-    /// is only needed in rare cases where the field offsets are ambiguous between packed and aligned layout.
+    /// is only needed in rare cases where the field offsets are valid for both a packed and an
+    /// aligned layout.
     ///
     /// # Arguments
     ///
@@ -545,26 +533,33 @@ impl Dtype {
     /// * `alignment` - The alignment of the dtype in bytes. Must be a power of two and less than
     ///   or equal to the itemsize.
     ///
-    /// The fields should be either in packed or aligned offsets. See [`Self::is_aligned`] for details.
-    /// The shape, itemsize and alignment will be validated against the fields.
+    /// The fields must be given in offset order and cover every byte of an element without gaps
+    /// or overlap: padding is not supported and has to be given as an explicit field. With an
+    /// alignment of 1 the struct is packed, otherwise it must be a valid aligned layout. See
+    /// [`Self::is_aligned`] for details. The shape, itemsize and alignment will be validated
+    /// against the fields.
     ///
     /// ```rust
     /// use jix::dtype::{Dtype, Dtyped, Alignment, Itemsize};
     ///
-    /// #[derive(Copy, Clone, Dtyped)]
-    /// #[repr(C)]
-    /// struct Person {
-    ///   weight: f32,
-    ///   age: u8,
-    /// }
+    /// // `{ a: i32 at 0, b: i32 at 4 }` is valid both as an aligned struct (alignment 4) and as a
+    /// // packed one (alignment 1). `Dtype::from_fields` picks the aligned one, so build the packed
+    /// // one by passing the itemsize and alignment explicitly.
+    /// let packed = Dtype::new_struct(
+    ///   vec![
+    ///     ("a".to_string(), 0, i32::DTYPE),
+    ///     ("b".to_string(), 4, i32::DTYPE),
+    ///   ],
+    ///   &[],
+    ///   8,
+    ///   Alignment::new(1).unwrap(),
+    /// ).unwrap();
+    /// assert_eq!(packed.alignment().as_usize(), 1);
+    /// assert!(!packed.is_aligned());
     ///
-    /// // We can't use `Dtype::from_fields` here because the offsets are ambiguous between packed and
-    /// // aligned layout: `weight` at offset 0 and `age` at offset 4 can be either an aligned struct
-    /// // with 3 bytes of padding after `age` or a packed struct with no padding, and we can not
-    /// // determine if the total itemsize is 5 or 8.
-    /// // We use `Dtype::new_struct` and pass the itemsize and alignment explicitly.
-    ///
-    /// let person_dtype = Dtype::new_struct(
+    /// // The C struct `struct Person { float weight; uint8_t age; }` has 3 bytes of padding after
+    /// // `age`. Padding is not supported, so this layout is rejected.
+    /// assert!(Dtype::new_struct(
     ///   vec![
     ///     ("weight".to_string(), 0, f32::DTYPE),
     ///     ("age".to_string(), 4, u8::DTYPE),
@@ -572,8 +567,21 @@ impl Dtype {
     ///   &[],
     ///   8,
     ///   Alignment::new(4).unwrap(),
+    /// ).is_err());
+    ///
+    /// // Adding the padding as an explicit field makes it valid.
+    /// let person = Dtype::new_struct(
+    ///   vec![
+    ///     ("weight".to_string(), 0, f32::DTYPE),
+    ///     ("age".to_string(), 4, u8::DTYPE),
+    ///     ("_pad".to_string(), 5, <[u8; 3]>::DTYPE),
+    ///   ],
+    ///   &[],
+    ///   8,
+    ///   Alignment::new(4).unwrap(),
     /// ).unwrap();
-    /// assert_eq!(Person::DTYPE, person_dtype);
+    /// assert_eq!(person.itemsize(), 8);
+    /// assert!(person.is_aligned());
     /// ```
     pub fn new_struct(
         fields: impl IntoIterator<Item = (String, Itemsize, Dtype)>,
@@ -607,15 +615,17 @@ impl Dtype {
             .into_iter()
             .map(|(name, offset, dtype)| (Cow::Owned(name), offset, dtype))
             .collect::<Box<_>>();
+        Self::check_no_padding(&fields, element_itemsize)?;
 
         let is_aligned = if Self::is_aligned_struct(&fields, element_itemsize, alignment) {
             true
-        } else if Self::is_packed_struct(&fields, element_itemsize, alignment) {
+        } else if alignment.as_usize() == 1 {
             false
         } else {
             bail!(
                 InvalidArgument,
-                "field offsets are not in a valid packed or aligned layout"
+                "struct alignment {} is neither 1 (packed) nor a valid aligned layout",
+                alignment.as_usize()
             );
         };
 
@@ -649,71 +659,50 @@ impl Dtype {
         const { &T::DTYPE }
     }
 
-    #[allow(clippy::needless_bool)]
+    fn check_no_padding(
+        fields: &[(Cow<'static, str>, Itemsize, Dtype)],
+        itemsize: Itemsize,
+    ) -> Result<()> {
+        let mut expected_offset: Itemsize = 0;
+        for (name, offset, dtype) in fields {
+            ensure!(
+                *offset == expected_offset,
+                InvalidArgument,
+                "struct dtype field `{name}` is at offset {offset}, expected {expected_offset}: \
+                 padding between fields is not supported, add an explicit padding field instead"
+            );
+            expected_offset = expected_offset
+                .checked_add(dtype.itemsize())
+                .ok_or_else(|| error!(InvalidArgument, "struct dtype itemsize overflow"))?;
+        }
+        ensure!(
+            expected_offset == itemsize,
+            InvalidArgument,
+            "struct dtype fields end at offset {expected_offset} but the itemsize is {itemsize}: \
+             trailing padding is not supported, add an explicit padding field instead"
+        );
+        Ok(())
+    }
+
+    fn max_field_alignment(fields: &[(Cow<'static, str>, Itemsize, Dtype)]) -> Alignment {
+        fields
+            .iter()
+            .map(|(_name, _offset, dtype)| dtype.alignment())
+            .max()
+            .unwrap_or(Alignment::new(1).unwrap())
+    }
+
     fn is_aligned_struct(
         fields: &[(Cow<'static, str>, Itemsize, Dtype)],
         itemsize: Itemsize,
         alignment: Alignment,
     ) -> bool {
-        let max_alignment = fields
-            .iter()
-            .map(|(_name, _offset, dtype)| dtype.alignment())
-            .max()
-            .unwrap_or(Alignment::new(1).unwrap());
-        if alignment != max_alignment {
-            return false;
-        }
-
-        let mut expected_offset = 0;
-        let is_aligned = fields.iter().all({
-            |(_name, offset, dtype)| {
-                expected_offset =
-                    expected_offset.ceil_to_multiple(dtype.alignment().as_usize() as Itemsize);
-                let aligned = *offset == expected_offset;
-                expected_offset += dtype.itemsize();
-                aligned
-            }
-        });
-        if !is_aligned {
-            return false;
-        }
-
-        let expected_itemsize =
-            expected_offset.ceil_to_multiple(max_alignment.as_usize() as Itemsize);
-        if expected_itemsize != itemsize {
-            return false;
-        }
-
-        true
-    }
-
-    #[allow(clippy::needless_bool)]
-    fn is_packed_struct(
-        fields: &[(Cow<'static, str>, Itemsize, Dtype)],
-        itemsize: Itemsize,
-        alignment: Alignment,
-    ) -> bool {
-        if alignment.as_usize() != 1 {
-            return false;
-        }
-
-        let mut expected_offset = 0;
-        let is_packed = fields.iter().all({
-            |(_name, offset, dtype)| {
-                let packed = *offset == expected_offset;
-                expected_offset += dtype.itemsize();
-                packed
-            }
-        });
-        if !is_packed {
-            return false;
-        }
-        let expected_itemsize = expected_offset;
-        if expected_itemsize != itemsize {
-            return false;
-        }
-
-        true
+        let align_of = |dtype: &Dtype| dtype.alignment().as_usize() as Itemsize;
+        alignment == Self::max_field_alignment(fields)
+            && itemsize.is_multiple_of(alignment.as_usize() as Itemsize)
+            && fields
+                .iter()
+                .all(|(_name, offset, dtype)| offset.is_multiple_of(align_of(dtype)))
     }
 
     /// Get the scalar kind of the dtype, if it is a scalar dtype.
@@ -794,17 +783,18 @@ impl Dtype {
 
     /// Returns whether the dtype is aligned (like C structs) or packed.
     ///
-    /// - Packed struct means the fields are laid out back to back without any padding, so the offset
-    ///   of each field is the sum of the itemsize of the previous fields, and the total itemsize of
-    ///   the struct is the sum of the itemsize of all fields. The alignment of a packed struct is 1.
-    ///   This matches `#[repr(C, packed)]` in Rust, and is compatible with packed structs in C, numpy, etc.
-    /// - Aligned struct means the fields are laid out with padding such that the offset of each field
-    ///   is the smallest offset that is greater than or equal to the end offset of the previous field,
-    ///   and the total itemsize of the struct is the smallest offset that is greater than or equal to
-    ///   the end offset of the last field and is a multiple of the maximum alignment of all fields.
-    ///   The alignment of an aligned struct is the maximum alignment of all fields.
-    ///   This matches `#[repr(C)]` in Rust, and is compatible with aligned structs in C, numpy, etc.
-    /// - Custom alignment and offsets that don't match either of the above layouts are not supported.
+    /// In both layouts the fields are laid out back to back without any padding, so the offset of
+    /// each field is the sum of the itemsize of the previous fields, and the total itemsize of the
+    /// struct is the sum of the itemsize of all fields. Where a C layout needs padding, it must be
+    /// an explicit field.
+    ///
+    /// - Packed struct has alignment 1, and its fields can be at any offset. This matches
+    ///   `#[repr(C, packed)]` in Rust, and is compatible with packed structs in C, numpy, etc.
+    /// - Aligned struct has the maximum alignment of all fields, every field sits at a multiple of
+    ///   its own alignment, and the itemsize is a multiple of the struct alignment. This matches
+    ///   `#[repr(C)]` in Rust (with any padding as explicit fields), and is compatible with aligned
+    ///   structs in C, numpy, etc.
+    /// - Custom alignment that doesn't match either of the above layouts is not supported.
     ///
     /// The "packed vs aligned" distinction only applies to struct dtypes, scalar dtypes are always
     /// considered aligned.
@@ -1136,12 +1126,36 @@ impl std::fmt::Debug for OwnedFields {
 /// struct MyStruct {
 ///     a: i32,
 ///     b: u8,
+///     _pad: [u8; 3],
 /// }
 /// let expected_dtype = Dtype::from_fields(vec![
 ///     ("a".to_string(), 0, i32::DTYPE),
 ///     ("b".to_string(), 4, u8::DTYPE),
+///     ("_pad".to_string(), 5, <[u8; 3]>::DTYPE),
 /// ]);
 /// assert_eq!(MyStruct::DTYPE, expected_dtype.unwrap());
+/// ```
+///
+/// # No padding
+///
+/// A `Dtyped` type must not contain padding bytes: every byte of the type has to belong to some
+/// field. jix reads elements as raw bytes (to compress them, copy them, write them to disk...), and
+/// padding bytes are uninitialized, so reading them is undefined behavior.
+///
+/// The derive macro rejects a struct with padding at compile time. To use such a struct, add the
+/// padding as an explicit field, usually a byte array like `_pad: [u8; N]`, so the bytes are
+/// part of the element and always initialized. Alternatively, use `#[repr(C, packed)]`, which has
+/// no padding at all.
+///
+/// ```rust,compile_fail
+/// use jix::dtype::Dtyped;
+///
+/// #[derive(Copy, Clone, Dtyped)]
+/// #[repr(C)]
+/// struct MyStruct {
+///     a: i32,
+///     b: u8, // followed by 3 bytes of implicit padding - rejected
+/// }
 /// ```
 ///
 /// # Safety
@@ -1149,6 +1163,7 @@ impl std::fmt::Debug for OwnedFields {
 /// This trait is very unsafe, and the caller should implement it carefully, matching the type size,
 /// alignment and inner fields of the type. Types implementing this should most likely be annotated with `#[repr(C)]`
 /// or `#[repr(C, packed)]`, for aligned and packed fields respectively.
+/// The type must not contain any padding bytes.
 pub unsafe trait Dtyped: Copy + Send + Sync + Sized + 'static {
     /// Get the dtype representing the type layout and inner fields.
     const DTYPE: Dtype;
@@ -1395,14 +1410,35 @@ mod tests {
 
     #[test]
     fn from_fields_detects_aligned_layout() {
-        // u8 at 0, f64 at 8: gap filled with padding -> aligned
+        // u8 at 0, explicit 7 byte pad, f64 at 8: every field at its alignment -> aligned
         let dtype = Dtype::from_fields(vec![
             ("a".to_string(), 0, u8::DTYPE),
+            ("_pad".to_string(), 1, <[u8; 7]>::DTYPE),
             ("b".to_string(), 8, f64::DTYPE),
         ])
         .unwrap();
-        assert_eq!(dtype.itemsize(), 16); // total padded to alignment 8
+        assert_eq!(dtype.itemsize(), 16);
         assert_eq!(dtype.alignment().as_usize(), 8);
+        assert!(dtype.is_aligned());
+    }
+
+    #[test]
+    fn from_fields_padding_between_fields_errors() {
+        // u8 at 0, f64 at 8: bytes 1..8 are not covered by any field.
+        let result = Dtype::from_fields(vec![
+            ("a".to_string(), 0, u8::DTYPE),
+            ("b".to_string(), 8, f64::DTYPE),
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn from_fields_overlapping_fields_errors() {
+        let result = Dtype::from_fields(vec![
+            ("a".to_string(), 0, i32::DTYPE),
+            ("b".to_string(), 2, i32::DTYPE),
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1415,17 +1451,31 @@ mod tests {
     }
 
     #[test]
-    fn from_fields_ambiguous_i32_u8_detected_as_aligned() {
-        // { a: i32 at 0, b: u8 at 4 } - offsets are valid for both packed and aligned layouts.
-        // from_fields tries aligned first and returns alignment=4, itemsize=8 (padded to align 4).
-        // Use new_struct() when explicit control is needed.
+    fn from_fields_i32_u8_without_tail_padding_is_packed() {
+        // { a: i32 at 0, b: u8 at 4 } - an aligned layout would need 3 bytes of tail padding, which
+        // is not allowed, so the only valid layout is packed with itemsize 5.
         let dtype = Dtype::from_fields(vec![
             ("a".to_string(), 0, i32::DTYPE),
             ("b".to_string(), 4, u8::DTYPE),
         ])
         .unwrap();
+        assert_eq!(dtype.alignment().as_usize(), 1);
+        assert_eq!(dtype.itemsize(), 5);
+        assert!(!dtype.is_aligned());
+    }
+
+    #[test]
+    fn from_fields_ambiguous_i32_i32_detected_as_aligned() {
+        // { a: i32 at 0, b: i32 at 4 } - valid both as packed (alignment 1) and aligned
+        // (alignment 4). from_fields prefers aligned; use new_struct() for the packed one.
+        let dtype = Dtype::from_fields(vec![
+            ("a".to_string(), 0, i32::DTYPE),
+            ("b".to_string(), 4, i32::DTYPE),
+        ])
+        .unwrap();
         assert_eq!(dtype.alignment().as_usize(), 4);
         assert_eq!(dtype.itemsize(), 8);
+        assert!(dtype.is_aligned());
     }
 
     #[test]
@@ -1466,28 +1516,30 @@ mod tests {
 
     #[test]
     fn new_struct_packed_explicit() {
-        // Disambiguate the i32+u8 case: explicitly request packed layout.
+        // Disambiguate the i32+i32 case: explicitly request packed layout.
         let dtype = Dtype::new_struct(
             vec![
                 ("a".to_string(), 0, i32::DTYPE),
-                ("b".to_string(), 4, u8::DTYPE),
+                ("b".to_string(), 4, i32::DTYPE),
             ],
             &[],
-            5,
+            8,
             1.try_into().unwrap(),
         )
         .unwrap();
-        assert_eq!(dtype.itemsize(), 5);
+        assert_eq!(dtype.itemsize(), 8);
         assert_eq!(dtype.alignment().as_usize(), 1);
+        assert!(!dtype.is_aligned());
     }
 
     #[test]
     fn new_struct_aligned_explicit() {
-        // Explicitly request aligned layout for i32+u8, getting the C struct size of 8.
+        // The C layout of { i32, u8 } with its tail padding as an explicit field.
         let dtype = Dtype::new_struct(
             vec![
                 ("a".to_string(), 0, i32::DTYPE),
                 ("b".to_string(), 4, u8::DTYPE),
+                ("_pad".to_string(), 5, <[u8; 3]>::DTYPE),
             ],
             &[],
             8,
@@ -1496,6 +1548,54 @@ mod tests {
         .unwrap();
         assert_eq!(dtype.itemsize(), 8);
         assert_eq!(dtype.alignment().as_usize(), 4);
+        assert!(dtype.is_aligned());
+    }
+
+    #[test]
+    fn new_struct_trailing_padding_errors() {
+        // The C layout of { i32, u8 } has 3 bytes of tail padding that no field covers.
+        assert!(Dtype::new_struct(
+            vec![
+                ("a".to_string(), 0, i32::DTYPE),
+                ("b".to_string(), 4, u8::DTYPE),
+            ],
+            &[],
+            8,
+            4.try_into().unwrap(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn new_struct_padding_between_fields_errors() {
+        // u8 at 0, f32 at 4: bytes 1..4 are padding.
+        assert!(Dtype::new_struct(
+            vec![
+                ("a".to_string(), 0, u8::DTYPE),
+                ("b".to_string(), 4, f32::DTYPE),
+            ],
+            &[],
+            8,
+            4.try_into().unwrap(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn new_struct_aligned_with_misaligned_field_errors() {
+        // No padding, but `b` at offset 1 is not a multiple of its alignment, so the layout is
+        // only valid as packed.
+        assert!(Dtype::new_struct(
+            vec![
+                ("a".to_string(), 0, u8::DTYPE),
+                ("b".to_string(), 1, f32::DTYPE),
+                ("_pad".to_string(), 5, <[u8; 3]>::DTYPE),
+            ],
+            &[],
+            8,
+            4.try_into().unwrap(),
+        )
+        .is_err());
     }
 
     #[test]
@@ -1590,8 +1690,7 @@ mod tests {
 
     #[test]
     fn new_struct_itemsize_too_small_errors() {
-        // Packed i32+u8 must be exactly 5; declaring 4 is rejected as invalid offsets
-        // (is_packed_struct checks itemsize as part of offset validation).
+        // Packed i32+u8 must be exactly 5; declaring 4 makes the fields overrun the itemsize.
         assert!(Dtype::new_struct(
             vec![
                 ("a".to_string(), 0, i32::DTYPE),
@@ -1611,8 +1710,10 @@ mod tests {
     #[repr(C)]
     struct SimpleStruct {
         a: u8,
+        _pad0: [u8; 3],
         b: f32,
         c: i16,
+        _pad1: [u8; 2],
     }
 
     #[test]
@@ -1627,10 +1728,12 @@ mod tests {
         assert_eq!(dtype.alignment().as_usize(), 4);
         assert_eq!(dtype.shape(), &[]);
         let fields = dtype.fields().unwrap();
-        assert_eq!(fields.len(), 3);
+        assert_eq!(fields.len(), 5);
         assert_eq!(fields[0], ("a".into(), 0, u8::DTYPE));
-        assert_eq!(fields[1], ("b".into(), 4, f32::DTYPE));
-        assert_eq!(fields[2], ("c".into(), 8, i16::DTYPE));
+        assert_eq!(fields[1], ("_pad0".into(), 1, <[u8; 3]>::DTYPE));
+        assert_eq!(fields[2], ("b".into(), 4, f32::DTYPE));
+        assert_eq!(fields[3], ("c".into(), 8, i16::DTYPE));
+        assert_eq!(fields[4], ("_pad1".into(), 10, <[u8; 2]>::DTYPE));
     }
 
     #[derive(Copy, Clone, Dtyped)]
@@ -1679,6 +1782,7 @@ mod tests {
     #[repr(C)]
     struct NestedStruct {
         a: SimpleStruct,
+        _pad: [u8; 4],
         b: f64,
     }
 
@@ -1691,12 +1795,13 @@ mod tests {
             std::mem::align_of::<NestedStruct>()
         );
         // SimpleStruct: 12 bytes, align 4. f64: 8 bytes, align 8.
-        // a at 0, b at ceil(12, 8)=16, total ceil(24, 8)=24
+        // a at 0, _pad at 12, b at 16, total 24
         assert_eq!(dtype.itemsize(), 24);
         assert_eq!(dtype.alignment().as_usize(), 8);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields[0], ("a".into(), 0, SimpleStruct::DTYPE));
-        assert_eq!(fields[1], ("b".into(), 16, f64::DTYPE));
+        assert_eq!(fields[1], ("_pad".into(), 12, <[u8; 4]>::DTYPE));
+        assert_eq!(fields[2], ("b".into(), 16, f64::DTYPE));
     }
 
     #[derive(Copy, Clone, Dtyped)]
@@ -1732,6 +1837,7 @@ mod tests {
     struct DeepNested {
         inner: NestedStruct,
         x: u32,
+        _pad: [u8; 4],
     }
 
     #[test]
@@ -1743,12 +1849,13 @@ mod tests {
             std::mem::align_of::<DeepNested>()
         );
         // NestedStruct: 24 bytes, align 8. u32: 4 bytes, align 4.
-        // inner at 0, x at ceil(24,4)=24, total ceil(28,8)=32
+        // inner at 0, x at 24, _pad at 28, total 32
         assert_eq!(dtype.itemsize(), 32);
         assert_eq!(dtype.alignment().as_usize(), 8);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields[0], ("inner".into(), 0, NestedStruct::DTYPE));
         assert_eq!(fields[1], ("x".into(), 24, u32::DTYPE));
+        assert_eq!(fields[2], ("_pad".into(), 28, <[u8; 4]>::DTYPE));
     }
 
     // ---- set_shape ----

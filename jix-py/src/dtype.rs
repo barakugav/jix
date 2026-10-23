@@ -229,6 +229,26 @@ mod tests {
         dtype_from_numpy(&PyArrayDescr::new(py, s)?)
     }
 
+    /// A `[u8; n]` dtype, for explicit padding fields.
+    fn pad(n: u16) -> Dtype {
+        let mut dtype = Dtype::new_scalar(ScalarKind::U8);
+        dtype.set_shape(&[n]).unwrap();
+        dtype
+    }
+
+    fn numpy_aligned_dtype<'py>(
+        py: Python<'py>,
+        fields: Vec<(&str, &str)>,
+    ) -> PyResult<Bound<'py, PyArrayDescr>> {
+        let kw = PyDict::new(py);
+        kw.set_item("align", true)?;
+        Ok(py
+            .import("numpy")?
+            .getattr("dtype")?
+            .call((fields,), Some(&kw))?
+            .cast_into::<PyArrayDescr>()?)
+    }
+
     fn roundtrip(py: Python<'_>, dtype: &Dtype) -> Dtype {
         let np = dtype_to_numpy(py, dtype).expect("dtype_to_numpy failed");
         dtype_from_numpy(&np).expect("dtype_from_numpy failed")
@@ -427,22 +447,8 @@ mod tests {
     #[test]
     fn test_from_numpy_struct_aligned() {
         Python::attach(|py| {
-            // aligned: u8 at 0, pad 3 bytes, f32 at 4 - alignment=4
-            let np = py
-                .import("numpy")
-                .unwrap()
-                .getattr("dtype")
-                .unwrap()
-                .call(
-                    (vec![("x", "<u1"), ("y", "<f4")],),
-                    Some(&{
-                        let kw = PyDict::new(py);
-                        kw.set_item("align", true).unwrap();
-                        kw
-                    }),
-                )
-                .unwrap()
-                .cast_into::<PyArrayDescr>()
+            // aligned: u8 at 0, explicit 3 byte pad, f32 at 4 - alignment=4
+            let np = numpy_aligned_dtype(py, vec![("x", "<u1"), ("_pad", "(3,)u1"), ("y", "<f4")])
                 .unwrap();
             let dtype = dtype_from_numpy(&np).unwrap();
 
@@ -450,44 +456,64 @@ mod tests {
             assert_eq!(dtype.alignment().as_usize(), 4);
             assert_eq!(dtype.itemsize(), 8);
             let fields = dtype.fields().unwrap();
-            assert_eq!(fields.len(), 2);
+            assert_eq!(fields.len(), 3);
             assert_eq!(fields[0].0, "x");
             assert_eq!(fields[0].1, 0);
-            assert_eq!(fields[1].0, "y");
-            assert_eq!(fields[1].1, 4);
+            assert_eq!(fields[1].0, "_pad");
+            assert_eq!(fields[1].1, 1);
+            assert_eq!(fields[2].0, "y");
+            assert_eq!(fields[2].1, 4);
+        });
+    }
+
+    #[test]
+    fn test_from_numpy_struct_with_padding_errors() {
+        Python::attach(|py| {
+            // numpy inserts 3 bytes of padding between `x` and `y`, which jix does not support.
+            let np = numpy_aligned_dtype(py, vec![("x", "<u1"), ("y", "<f4")]).unwrap();
+            assert!(dtype_from_numpy(&np).is_err());
+
+            // Trailing padding only: f4 then u1, rounded up to 8 bytes.
+            let np = numpy_aligned_dtype(py, vec![("x", "<f4"), ("y", "<u1")]).unwrap();
+            assert!(dtype_from_numpy(&np).is_err());
+
+            // Explicit offsets with a gap.
+            let dict = PyDict::new(py);
+            dict.set_item("names", vec!["a", "b"]).unwrap();
+            dict.set_item("formats", vec!["<u1", "<u1"]).unwrap();
+            dict.set_item("offsets", vec![0usize, 2]).unwrap();
+            let np = PyArrayDescr::new(py, dict).unwrap();
+            assert!(dtype_from_numpy(&np).is_err());
         });
     }
 
     #[test]
     fn test_from_numpy_struct_aligned_complex() {
         Python::attach(|py| {
-            // aligned struct with multiple field sizes
-            let np = py
-                .import("numpy")
-                .unwrap()
-                .getattr("dtype")
-                .unwrap()
-                .call(
-                    (vec![("a", "<u1"), ("b", "<i2"), ("c", "<f8")],),
-                    Some(&{
-                        let kw = PyDict::new(py);
-                        kw.set_item("align", true).unwrap();
-                        kw
-                    }),
-                )
-                .unwrap()
-                .cast_into::<PyArrayDescr>()
-                .unwrap();
+            // aligned struct with multiple field sizes and explicit padding
+            let np = numpy_aligned_dtype(
+                py,
+                vec![
+                    ("a", "<u1"),
+                    ("_pad0", "<u1"),
+                    ("b", "<i2"),
+                    ("_pad1", "(4,)u1"),
+                    ("c", "<f8"),
+                ],
+            )
+            .unwrap();
             let dtype = dtype_from_numpy(&np).unwrap();
 
             assert!(dtype.is_aligned());
             assert_eq!(dtype.alignment().as_usize(), 8);
-            // u8@0, pad1, i16@2, pad4, f64@8 -> itemsize=16
+            // u8@0, pad@1, i16@2, pad@4, f64@8 -> itemsize=16
             assert_eq!(dtype.itemsize(), 16);
             let fields = dtype.fields().unwrap();
             assert_eq!(fields[0].1, 0);
-            assert_eq!(fields[1].1, 2);
-            assert_eq!(fields[2].1, 8);
+            assert_eq!(fields[1].1, 1);
+            assert_eq!(fields[2].1, 2);
+            assert_eq!(fields[3].1, 4);
+            assert_eq!(fields[4].1, 8);
         });
     }
 
@@ -678,9 +704,10 @@ mod tests {
     #[test]
     fn test_to_numpy_struct_aligned() {
         Python::attach(|py| {
-            // u8@0, pad3, f32@4 -> aligned, itemsize=8, alignment=4
+            // u8@0, explicit pad@1, f32@4 -> aligned, itemsize=8, alignment=4
             let fields = vec![
                 ("x".to_string(), 0u16, Dtype::new_scalar(ScalarKind::U8)),
+                ("_pad".to_string(), 1u16, pad(3)),
                 ("y".to_string(), 4u16, Dtype::new_scalar(ScalarKind::F32)),
             ];
             let dtype = Dtype::new_struct(fields, &[], 8, 4.try_into().unwrap()).unwrap();
@@ -769,6 +796,7 @@ mod tests {
         Python::attach(|py| {
             let fields = vec![
                 ("x".to_string(), 0u16, Dtype::new_scalar(ScalarKind::U8)),
+                ("_pad".to_string(), 1u16, pad(3)),
                 ("y".to_string(), 4u16, Dtype::new_scalar(ScalarKind::F32)),
             ];
             let dtype = Dtype::new_struct(fields, &[], 8, 4.try_into().unwrap()).unwrap();
@@ -823,23 +851,10 @@ mod tests {
     #[test]
     fn test_roundtrip_from_numpy_struct_aligned() {
         Python::attach(|py| {
-            let np = py
-                .import("numpy")
-                .unwrap()
-                .getattr("dtype")
-                .unwrap()
-                .call(
-                    (vec![("a", "<u1"), ("b", "<i8")],),
-                    Some(&{
-                        let kw = PyDict::new(py);
-                        kw.set_item("align", true).unwrap();
-                        kw
-                    }),
-                )
-                .unwrap()
-                .cast_into::<PyArrayDescr>()
+            let np = numpy_aligned_dtype(py, vec![("a", "<u1"), ("_pad", "(7,)u1"), ("b", "<i8")])
                 .unwrap();
             let dtype = dtype_from_numpy(&np).unwrap();
+            assert!(dtype.is_aligned());
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }

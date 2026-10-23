@@ -28,6 +28,15 @@
 //!
 //! - The struct must be `#[repr(C)]` or `#[repr(C, packed)]` / `#[repr(packed)]`.
 //! - Every field must itself implement `Dtyped`.
+//! - The struct must not have padding bytes (checked at compile time). If the C layout needs
+//!   padding, add it as an explicit field, for example `_pad: [u8; 3]`, or use
+//!   `#[repr(C, packed)]`:
+//!
+//!   ```rust,ignore
+//!   #[derive(Copy, Clone, Dtyped)]
+//!   #[repr(C)]
+//!   struct Sample { id: u8, _pad: [u8; 3], value: f32 }
+//!   ```
 //! - Unit structs and enums are not supported.
 //! - Tuple structs must be `#[repr(transparent)]` and contain exactly one field.
 //!
@@ -53,6 +62,9 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, Meta};
 ///
 /// The generated code refers to the `jix` crate as `::jix`. Use `#[dtyped(crate = "...")]` to
 /// override that path when `jix` is renamed in `Cargo.toml`.
+///
+/// The struct must not have padding bytes; add explicit padding fields (e.g. `_pad: [u8; 3]`)
+/// where the layout needs them.
 ///
 /// See `jix::dtype::Dtyped` for more details on the trait and its requirements.
 #[proc_macro_derive(Dtyped, attributes(dtyped))]
@@ -219,6 +231,17 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
 
                 assert!(dtype.itemsize() as usize == size_of::<Self>());
                 assert!(dtype.alignment().as_usize() == align_of::<Self>());
+
+                let fields_size = 0 #( + size_of::<#field_types>() )*;
+                assert!(
+                    fields_size == size_of::<Self>(),
+                    concat!(
+                        "Dtyped can not be derived for `",
+                        stringify!(#struct_name),
+                        "` because it has padding bytes. Add explicit padding fields \
+                        (e.g. `_pad: [u8; N]`) or use #[repr(C, packed)]."
+                    )
+                );
                 dtype
             }
         }
@@ -254,6 +277,12 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         }
     };
 
+    let eval_check = input.generics.params.is_empty().then(|| {
+        quote::quote! {
+            const _: #jix_crate::dtype::Dtype = <#struct_name as #jix_crate::dtype::Dtyped>::DTYPE;
+        }
+    });
+
     let tokens = quote::quote! {
         unsafe impl #impl_generics #jix_crate::dtype::Dtyped for #struct_name #ty_generics
         where
@@ -262,6 +291,7 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         {
             const DTYPE: #jix_crate::dtype::Dtype = { #tokens };
         }
+        #eval_check
     };
 
     Ok(TokenStream::from(tokens))

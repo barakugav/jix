@@ -46,19 +46,21 @@ fn repr_c_named_fields() {
 #[repr(C)]
 struct Padded {
     a: u8,
+    _pad: [u8; 7],
     b: f64,
 }
 
 #[test]
-fn repr_c_inserts_padding() {
+fn repr_c_explicit_padding_field() {
     let d = Padded::DTYPE;
-    // `b` is pushed to offset 8 by its own alignment, and the struct is rounded up to 16.
+    // Implicit padding is rejected, so the gap before `b` is filled by `_pad`.
     assert_eq!(d.itemsize(), 16);
     assert_eq!(d.itemsize() as usize, size_of::<Padded>());
     assert_eq!(d.alignment().as_usize(), 8);
     let fields = d.fields().unwrap();
     assert_eq!(fields[0].1, 0);
-    assert_eq!(fields[1].1, 8);
+    assert_eq!(fields[1].1, 1);
+    assert_eq!(fields[2].1, 8);
 }
 
 // ---- packed structs ----
