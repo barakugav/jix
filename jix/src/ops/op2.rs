@@ -2005,7 +2005,9 @@ pub(crate) mod tests {
         // would overflow on the first value, powf gives the rounded exact cube.
         let a = ndarray::array![6.9814636e12f32, -1.5, 0.1, -1.5, 0.0];
         let b = ndarray::array![3i32, 3, 2, 1, 0];
-        let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a.powf(b as f32));
+        let expected = ndarray::Zip::from(&a)
+            .and(&b)
+            .map_collect(|&a, &b| a.powf(b as f32));
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
         assert_eq!(za.pow(zb).to_ndarray::<ndarray::Ix1>().unwrap(), expected);
