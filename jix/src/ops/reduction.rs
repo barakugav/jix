@@ -21,7 +21,7 @@ pub(crate) trait ReductionOpKernel<T> {
     type State;
 
     /// Build the initial accumulator. `init_item` is the first stream element together with
-    /// its bool8::TRUE global stream position (0-based), or `None` when the kernel was invoked on an
+    /// its true global stream position (0-based), or `None` when the kernel was invoked on an
     /// empty reduction. Kernels with [`SUPPORTS_EMPTY`](Self::SUPPORTS_EMPTY) set to
     /// `false` may unwrap `init_item` - the caller guarantees it is `Some` for those kernels.
     ///
@@ -1429,7 +1429,7 @@ pub(crate) mod _traits {
     /// Scalar kernel trait for the element-wise `sum` reduction.
     ///
     /// Integer types accumulate into a wider output to reduce overflow risk (`i8..=i64 ->
-    /// i64`; `u8..=u64` and `bool -> u64`), which wraps on overflow. Floating-point and complex
+    /// i64`; `u8..=u64` and `bool8 -> u64`), which wraps on overflow. Floating-point and complex
     /// types keep their input width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`,
     /// ...), matching NumPy.
     pub trait Sum {
