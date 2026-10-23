@@ -294,3 +294,12 @@ def test_clamp_neg_inf_min():
 def test_clamp_method():
     a = jix.compact([0, 5, 10], dtype=np.int32)
     assert np.array_equal(a.clamp(min=2, max=8).numpy(), [2, 5, 8])
+
+
+@pytest.mark.parametrize("op", ["equal", "not_equal", "less", "less_equal", "greater", "greater_equal"])
+def test_uint64_vs_int64_is_exact(op):
+    # A float64 common type would round these values above 2**53.
+    u = np.array([2**53 + 1, 2**63, 2**64 - 1, 0, 5], np.uint64)
+    i = np.array([2**53, -1, 2**63 - 1, -(2**63), 5], np.int64)
+    np.testing.assert_array_equal(getattr(jix, op)(u, i).numpy(), getattr(np, op)(u, i))
+    np.testing.assert_array_equal(getattr(jix, op)(i, u).numpy(), getattr(np, op)(i, u))

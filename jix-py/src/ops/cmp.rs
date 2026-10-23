@@ -52,7 +52,10 @@ define_op2!(
     equal,
     Equal,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>, bool],
+        [
+            u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64,
+            Complex<f32>, Complex<f64>, bool
+        ],
         Safe
     }
 );
@@ -92,7 +95,10 @@ define_op2!(
     not_equal,
     NotEqual,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>, bool],
+        [
+            u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64,
+            Complex<f32>, Complex<f64>, bool
+        ],
         Safe
     }
 );
@@ -132,7 +138,7 @@ define_op2!(
     greater,
     Greater,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool],
         Safe
     }
 );
@@ -172,7 +178,7 @@ define_op2!(
     greater_equal,
     GreaterEqual,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool],
         Safe
     }
 );
@@ -212,7 +218,7 @@ define_op2!(
     less,
     Less,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool],
         Safe
     }
 );
@@ -252,7 +258,7 @@ define_op2!(
     less_equal,
     LessEqual,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool],
         Safe
     }
 );
