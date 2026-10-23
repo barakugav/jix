@@ -322,13 +322,13 @@ mod tests {
 
     #[test]
     fn test_overflowing_concat_dim_is_an_error() {
-        let len = (1u64 << 63) + 2;
+        let len = i64::MAX as u64; // three of these overflow u64
         let a = || {
             Array::compact_ndarray(&array![7u8])
                 .unwrap()
                 .broadcast(&[len])
         };
-        assert!(crate::ops::Concatenate::new_array((a(), a()), 0).is_err());
+        assert!(crate::ops::Concatenate::new_array((a(), a(), a()), 0).is_err());
     }
 
     // in-place path

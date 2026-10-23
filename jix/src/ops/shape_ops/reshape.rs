@@ -61,6 +61,7 @@ impl<S> Reshape<S> {
             InvalidShapeOperation,
             "cannot reshape array of shape {orig_shape:?} into shape {new_shape:?}"
         );
+        check_shape_overflow(&new_shape, array.dtype().itemsize() as _)?;
 
         let orig_logical_strides = default_logical_strides(&orig_shape);
         let new_logical_strides = default_logical_strides(&new_shape);

@@ -185,13 +185,14 @@ pub(crate) fn check_dtype_size_nonzero(dtype: &Dtype) -> Result<()> {
 #[inline]
 pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
     let product = shape.iter().cloned().chain([itemsize]).try_shape_product();
-    if product.is_none() {
+    if product.is_none() || shape.iter().any(|&d| d > i64::MAX as u64) {
         #[cold]
         #[inline(never)]
         fn shape_overflow_fail(shape: &[u64], itemsize: u64) -> Result<()> {
             bail!(
                 InvalidShapeOperation,
-                "shape has overflowed u64 product with itemsize {itemsize}: {shape:?}"
+                "shape {shape:?} with itemsize {itemsize} overflows: dims must be at most \
+                 i64::MAX and the byte size must fit in u64"
             );
         }
         return shape_overflow_fail(shape, itemsize);
@@ -449,6 +450,9 @@ mod tests {
     fn check_shape_overflow_catches_u64_product() {
         assert!(check_shape_overflow(&[1000, 1000], 4).is_ok());
         let err = check_shape_overflow(&[u64::MAX, 2], 4).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidShapeOperation);
+        assert!(check_shape_overflow(&[i64::MAX as u64], 1).is_ok());
+        let err = check_shape_overflow(&[i64::MAX as u64 + 1], 1).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidShapeOperation);
     }
 
