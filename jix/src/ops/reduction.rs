@@ -3405,6 +3405,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 pub(crate) mod tests {
     use std::rc::Rc;
 

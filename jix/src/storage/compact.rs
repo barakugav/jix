@@ -569,14 +569,14 @@ mod tests {
         // elements are slots so the rest can be asserted untouched.
         let mut is_slot = vec![false; backing.len()];
         let mut coord = vec![0usize; ndim];
-        for flat in 0..nitems {
+        for (flat, &want) in expected[..nitems].iter().enumerate() {
             let mut rem = flat;
             for d in (0..ndim).rev() {
                 coord[d] = rem % out_shape[d];
                 rem /= out_shape[d];
             }
             let slot = (0..ndim).map(|d| coord[d] * el_strides[d]).sum::<usize>();
-            assert_eq!(backing[slot], expected[flat], "coord {coord:?}");
+            assert_eq!(backing[slot], want, "coord {coord:?}");
             is_slot[slot] = true;
         }
         for (i, &v) in backing.iter().enumerate() {

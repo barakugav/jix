@@ -1774,7 +1774,7 @@ pub(crate) mod tests {
             (-inf, &[InvalidOperation]),
             (nan, &[]),
             (0.0, &[]),
-            (1.5707963267948966, &[]),
+            (std::f64::consts::FRAC_PI_2, &[]),
             (60000.0, &[]),
         ];
         check!("sin", Sin::sin, trig);

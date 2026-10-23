@@ -1375,6 +1375,7 @@ pub(crate) fn assert_same_elements<T: PartialEq + Debug, const N: usize>(
 /// of a dim, and a reversed range with [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex), in
 /// both pull and push mode, rather than panicking or reading.
 #[track_caller]
+#[allow(clippy::reversed_empty_ranges, clippy::single_range_in_vec_init)]
 pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
     use crate::error::ErrorKind;
     use crate::storage::StridedBuf;

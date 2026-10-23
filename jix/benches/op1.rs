@@ -27,7 +27,7 @@ fn bench_op1_impl<S: ArrayStorageTyped<Item = i32>>(
 ) {
     for size in [4000, 40_000, 400_000, 2_000_000] {
         let shape = [size, 64];
-        group.bench_function(&format!("{shape:?}"), |b| {
+        group.bench_function(format!("{shape:?}"), |b| {
             let data = create_data::<i32>(Profile::Smooth, &shape, 0x7e5352cebf8b6db2);
             let array = create_array(data);
             b.iter_batched(

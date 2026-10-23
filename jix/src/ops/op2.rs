@@ -1591,6 +1591,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 pub(crate) mod tests {
     /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
     /// their scalar semantics (release builds: wrapping), on every SIMD level of the CPU, over edge

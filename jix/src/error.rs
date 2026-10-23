@@ -419,6 +419,7 @@ impl From<ArithmeticErrorKind> for ArithmeticOpStatus {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
     use crate::dtype::Dtyped;
