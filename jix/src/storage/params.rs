@@ -7,6 +7,8 @@ use crate::storage::block::BlockSize;
 use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight};
 use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt};
 
+const MAX_BLOCK_SIZE_BYTES: u64 = 1 << 30;
+
 /// Target byte range for a single read region.
 ///
 /// Stores a `(min, max)` range in bytes.
@@ -349,6 +351,7 @@ impl ArrayParams {
         if block_size.is_none() && (block_shape.is_none() || !fixed_block_shape) {
             block_size = Some(cache_sizes.l1_data as u64);
         }
+        let block_size = block_size.map(|n| n.min(MAX_BLOCK_SIZE_BYTES));
         // Compute block shape
         let mut block_shape = block_shape.unwrap_or_else(|| {
             Self::scale_block_shape(
@@ -397,6 +400,17 @@ impl ArrayParams {
             "block_shape {:?} is invalid for array shape {:?}",
             block_shape,
             shape
+        );
+        let block_bytes = block_shape
+            .iter()
+            .map(|&b| b as u64)
+            .chain([itemsize])
+            .try_shape_product();
+        ensure!(
+            block_bytes.is_some_and(|n| n <= MAX_BLOCK_SIZE_BYTES),
+            InvalidArgument,
+            "block_shape {block_shape:?} with itemsize {itemsize} is larger than the maximum of \
+             {MAX_BLOCK_SIZE_BYTES} bytes per block"
         );
         // Update block_size to block_shape.product() if it is not specified
         let block_size = block_size
@@ -978,6 +992,19 @@ mod tests {
     use super::scale_order_from_weights;
     use crate::util::ScaleWeight;
     use crate::{Array, ArrayParams, ArrayStorage};
+
+    #[test]
+    fn block_larger_than_max_block_bytes_is_rejected() {
+        // 2 GiB of u8 in one block
+        let a = || {
+            Array::compact_ndarray(&ndarray::array![7u8])
+                .unwrap()
+                .broadcast(&[1 << 31])
+        };
+        let mut params = ArrayParams::new();
+        params.block_shape(&[1 << 31]);
+        assert!(a().compact_with(params, &Default::default()).is_err());
+    }
 
     fn bits(bm: DimBitmap) -> Vec<bool> {
         bm.into_iter().collect()
