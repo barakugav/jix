@@ -204,6 +204,10 @@ wrappers used by every hot inner loop, raw POD I/O).
 - Python `numpy(out=x)` where the lazy chain reads `x` via `jix.asarray(x)` is documented UB, not checked
   (jix-py/src/array.rs:467-485) - do not report it as a new finding.
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- `IterExt::try_shape_product` (zero dims cannot hide an overflow) and `check_region_size`
+  (32-bit) are new. `value_from_io` and the archive readers zero-fill before calling `Read` (K4).
+
 ## Hot spots
 - PoolBuf full-capacity slices: does any consumer of `PoolBuf::as_*slice` or `StridedBuf::data()/data_mut()` on a
   pool-backed buffer use `.len()` as the logical size (copy_from_slice, compress, fill, length asserts)?

@@ -181,6 +181,15 @@ Provided by this subsystem / required of every `read_data` impl (core_trait.rs:7
 - Python rejects negative strides explicitly (jix-py/src/ops/common/operand.rs:177); the
   `StridedBuf`/`Plain` model has no negative strides by design (buf.rs:47).
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- `check_out_buf(out, shape, index, itemsize)` now also checks index ndim, the 32-bit region size
+  (`check_region_size`: prod(index) * itemsize <= isize::MAX on 32-bit), and that out's slice covers
+  the furthest byte the region touches (non-empty regions). K14 / K16 are fixed.
+- `check_shape_overflow` also caps every dim at i64::MAX.
+- The assert_unchecked in IntoType and Op2::shape were removed. The pipeline uses fewer lanes when
+  the itemsize exceeds the SIMD width.
+- Python numpy(out=...) documents that out must not overlap any numpy array in the lazy chain.
+
 ## Hot spots
 
 - Push-mode buffer size: is there ANY path from safe code that makes a push write past `out`'s
