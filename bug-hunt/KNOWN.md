@@ -219,3 +219,123 @@ Format: one entry per issue.
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F028, low)
 - Location: jix/src/ops/reduction.rs:1109
 - Notes: bug-hunt/runs/2026-10-22-trial2/findings/F028.md; repro in that run's repros/.
+
+## K42: Struct layout validation sums field ends in unchecked u16; a field list past 65535 wraps and validates against a tiny itemsize, so SubDtype reads up to 64 KiB OOB (crafted .jix -> SIGSEGV in release; also reachable from 100% safe Rust via from_fields + a safe user ArrayStorage)
+- Status: open (found in run 2026-10-23-batch3 as F001, high)
+- Location: jix/src/dtype.rs:673
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F001.md; repro in that run's repros/.
+
+## K43: Archive read keeps the caller's block_shape_fixed_dims, so tune rescales the file's block shape and blocks are decoded with the wrong geometry (silently wrong values, panic, or every read failing; write_to then persists a corrupt Strict-valid file)
+- Status: open (found in run 2026-10-23-batch3 as F002, high)
+- Location: jix/src/archive/array.rs:537
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F002.md; repro in that run's repros/.
+
+## K44: A Strict-valid .jix array of bool (or a struct with a bool field) whose bytes are not 0/1 decodes into typed Rust bool: UB from safe code (Miri-confirmed), and where/cast/not/sum/any give inconsistent results
+- Status: open (found in run 2026-10-23-batch3 as F003, high)
+- Location: jix/src/storage/block.rs:201
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F003.md; repro in that run's repros/. Archive-decode trigger of the bool-validity problem; K15 covers the numpy trigger.
+
+## K45: Safe ndarray Plain/compact constructors accept negative strides (reversed views): `s as usize * size_of::<T>()` wraps (plain.rs:289); debug panics, release returns a wrong window when the wrapped span is 0 and violates from_raw_parts/get_unchecked preconditions; the owned variant panics on unwrap (plain.rs:248)
+- Status: open (found in run 2026-10-23-batch3 as F004, high)
+- Location: jix/src/storage/plain.rs:289
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F004.md; repro in that run's repros/.
+
+## K46: check_section_bounds adds section offset + size unchecked: a crafted TOC panics (debug: add overflow; release: capacity overflow in Owned::read_section) instead of returning InvalidArchive, also from default Python read_array
+- Status: open (found in run 2026-10-23-batch3 as F005, medium)
+- Location: jix/src/archive/common.rs:264
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F005.md; repro in that run's repros/.
+
+## K47: Archive message length (uleb128) is allocated and zero-filled before it is checked against the archive length, so an 11-byte file aborts the process (Rust and Python)
+- Status: open (found in run 2026-10-23-batch3 as F006, medium)
+- Location: jix/src/archive/common.rs:210
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F006.md; repro in that run's repros/.
+
+## K48: With len=None (the Python default for file-like readers), Owned::read_section allocates and zero-fills the untrusted TOC section size before reading it: a 106-byte BytesIO aborts the interpreter, and a 1 GiB size commits 1 GiB first
+- Status: open (found in run 2026-10-23-batch3 as F007, medium)
+- Location: jix/src/archive/block.rs:433
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F007.md; repro in that run's repros/.
+
+## K49: Writing an archive into an append-mode (O_APPEND) file or file object returns Ok but leaves the TOC as zeros, so the archive cannot be read back
+- Status: open (found in run 2026-10-23-batch3 as F008, medium)
+- Location: jix/src/archive/block.rs:231
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F008.md; repro in that run's repros/.
+
+## K50: ArrayStorage is a safe, unsealed trait, but jix's unsafe code trusts its read_data buffers: a user storage with no unsafe causes OOB reads (default elementwise pipeline, pull) and uninitialized reads (to_ndarray_sub assume_init, push)
+- Status: open (found in run 2026-10-23-batch3 as F009, medium)
+- Location: jix/src/storage/core_trait.rs:134
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F009.md; repro in that run's repros/.
+
+## K51: Float base ** integer exponent uses powi: error grows with |n| (tens to thousands of ulps) and representable subnormal results are flushed to 0, silently
+- Status: open (found in run 2026-10-23-batch3 as F010, medium)
+- Location: jix/src/ops/op2.rs:1201
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F010.md; repro in that run's repros/.
+
+## K52: Dtype::new_struct, and so the archive reader, accepts duplicate struct field names that from_fields rejects. The second field cannot be selected, and in Python the dtype is unusable.
+- Status: open (found in run 2026-10-23-batch3 as F011, low)
+- Location: jix/src/dtype.rs:606
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F011.md; repro in that run's repros/.
+
+## K53: Derived structs with a [T; 0] field, or a zero-sized array field whose shape product exceeds u16, write to .jix but cannot be read back; Dtype::set_shape panics (debug) on such dtypes
+- Status: open (found in run 2026-10-23-batch3 as F012, low)
+- Location: jix/src/archive/schema/conversions.rs:125
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F012.md; repro in that run's repros/.
+
+## K54: NdCopier::copy trusts that its `dtype` matches the one given to `new`; scalar routes only debug_assert it, so a wider copier with spans sized from copy()'s dtype reads and writes past both spans in release (latent, crate-internal)
+- Status: open (found in run 2026-10-23-batch3 as F013, low)
+- Location: jix/src/util/nd_copy.rs:89
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F013.md; repro in that run's repros/.
+
+## K55: read_uleb128 has no length cap: an 11-byte length prefix panics in debug (shift overflow) and is silently accepted in release
+- Status: open (found in run 2026-10-23-batch3 as F014, low)
+- Location: jix/src/archive/common.rs:184
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F014.md; repro in that run's repros/.
+
+## K56: 32-bit: section sizes and uleb128 message lengths truncated with `as usize`; Owned reads panic (assert_eq at common.rs:240 / capacity overflow) and a malformed archive loads silently, where 64-bit returns Err
+- Status: open (found in run 2026-10-23-batch3 as F015, low)
+- Location: jix/src/archive/block.rs:430
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F015.md; repro in that run's repros/.
+
+## K57: The write_array docstring names gzip.GzipFile as a supported writer, but the archive writer seeks backwards in finalize, so every write_array to a GzipFile raises "Negative seek in write mode"
+- Status: open (found in run 2026-10-23-batch3 as F016, low)
+- Location: jix-py/src/archive.rs:162
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F016.md; repro in that run's repros/.
+
+## K58: Writable pull results with aliasing 0 strides (Broadcast pull, elementwise-pipeline pull) break the from_pool/with_strides no-aliasing contract and are accepted back as `out` by check_out_buf, so push reads return Ok with the region not in out
+- Status: open (found in run 2026-10-23-batch3 as F017, low)
+- Location: jix/src/ops/shape_ops/broadcast.rs:156
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F017.md; repro in that run's repros/. New trigger next to K14 (fixed): 0-stride writable pull results are still accepted as out.
+
+## K59: StridedBuf::from_raw_parts(_mut) Safety sections omit non-null (even for an empty region) and exclusive access / no overlap with any input: calls meeting the documented contract are UB (debug abort, Miri SB error)
+- Status: open (found in run 2026-10-23-batch3 as F018, low)
+- Location: jix/src/storage/buf.rs:84
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F018.md; repro in that run's repros/.
+
+## K60: jix.power(x, 2) / x ** 2 is routed to Square and silently drops the float Overflow report that the jix.power docstring promises (f16/f32/f64)
+- Status: open (found in run 2026-10-23-batch3 as F019, low)
+- Location: jix-py/src/ops/op2.rs:688
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F019.md; repro in that run's repros/.
+
+## K61: 32-bit: check_out_buf runs check_region_size (`r.end - r.start`) before the index is validated; a reversed range passed to read_data on Op1/Op2/MapMultiple/Clamp/InsertDim/RemoveDim/PermuteDims/Where/SubDtype panics (debug) or returns InvalidShapeOperation instead of InvalidIndex (release)
+- Status: open (found in run 2026-10-23-batch3 as F020, low)
+- Location: jix/src/error.rs:278
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F020.md; repro in that run's repros/. Regression from #87: check_region_size runs before index validation (32-bit).
+
+## K62: Empty float/complex sum returns -0.0 (sign bit set) instead of +0.0 (f16/f32/f64; complex gives (-0.0, +0.0))
+- Status: open (found in run 2026-10-23-batch3 as F021, low)
+- Location: jix/src/ops/reduction.rs:1483
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F021.md; repro in that run's repros/.
+
+## K63: Owned::read_section transmutes Vec<MaybeUninit<T>> to Vec<T>, relying on Vec layout that std does not guarantee (latent; no current rustc config, -Zrandomize-layout included, breaks it)
+- Status: open (found in run 2026-10-23-batch3 as F022, low)
+- Location: jix/src/archive/block.rs:439
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F022.md; repro in that run's repros/.
+
+## K64: Array::to_ndarray_buf pull mode copies the whole region for large reads of lazy views (broadcast, permute/slice over Plain, collapsed pipelines) that read_data(None) returns in O(1); a huge broadcast aborts
+- Status: open (found in run 2026-10-23-batch3 as F024, low)
+- Location: jix/src/array.rs:1034
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F024.md; repro in that run's repros/.
+
+## K65: power with a u64 exponent promotes to float64 (integer exponent slots stop at u32)
+- Status: intended (run 2026-10-23-batch3 F023; pinned by test_power_promotes_uint64_exponent_to_float64)
+- Location: jix/src/ops/op2.rs:1173
+- Notes: doc nit - the #81 docstring rewrite dropped the explicit u64-exponent sentence.

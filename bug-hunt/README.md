@@ -114,6 +114,7 @@ negligible):
 |-----|------:|-------:|---------:|-----:|---------:|------------------------:|
 | pilot (util-memory, concept-alignment) | 4 | 19 | 13 | 24.5M | 6.1M | 61 min |
 | trial2 (mixed complexity) | 8 | 38 | 28 | 38.4M | 4.8M | 125 min |
+| batch3 (#87 code, 2 untouched subsystems) | 8 | 34 | 23 (+1 intended) | 48.2M | 6.0M | 138 min |
 
 - A hunter costs 1.4-5.3M. The cost follows how much code it traces, not how "complex" the code
   is: concept hunters and the differential tester cost the most, and Python wrappers the least.
@@ -121,6 +122,11 @@ negligible):
   runs, so the units that are "simple" to hunt are not much cheaper overall: py-ops-shape-ops had
   the cheapest hunter and 8 findings.
 - Each agent takes ~6.5 min of wall time at 2 agents in parallel.
+- Yield per token differs a lot by kind (findings / cost): module units are the best value
+  (codec-archive-archive-io 8 / 2.2M, py-ops-shape-ops 8 / 1.4M); concept units 2 each for
+  2.3-6.6M; the dynamic testers are bimodal (Python 11 / 5.2M, Rust 2 / 10.4M with 293 turns).
+- Builds leave GBs behind (incremental caches, per-repro test binaries): batch3 ended with 3 GB of
+  disk free. setup.sh and the report stage now delete them.
 
 Remaining after these two runs: 35 module + 10 concept + 1 dynamic = 46 units, so about 46 x 4.8M
 = ~220M input-equivalent tokens and ~230 agents, i.e. ~12 hours on a 4-core container (2 agents at
@@ -154,7 +160,14 @@ arguments; finished agents return their cached results.
   py-ops-shape-ops, concept-integer-width, dynamic-python-differential: 28 findings, all confirmed
   (1 critical, 6 high), including 3 incomplete #86 fixes (F003 and F006 extend K2, F004 extends K1).
   Recorded as K14-K41 in `KNOWN.md`.
+- `2026-10-23-batch3` (after #87) - units storage-core-buf-contract, storage-compact-read-path,
+  codec-archive-archive-io, types-dtype-layout, util-nd-copier, elementwise-ops-op2-arith-div-pow,
+  concept-push-pull, dynamic-rust-differential: 23 confirmed (4 high), 1 intended, including a
+  regression from #87 (F020). Recorded as K42-K65 in `KNOWN.md`.
 - Next: everything else, with
   `skip: ["util-memory", "concept-alignment", "reduction-fold-loops", "pipeline-driver",
   "shape-ops-copy-ops", "codec-archive-codec-pipeline", "elementwise-ops-cmp-clamp-approx",
-  "py-ops-shape-ops", "concept-integer-width", "dynamic-python-differential"]`.
+  "py-ops-shape-ops", "concept-integer-width", "dynamic-python-differential",
+  "storage-core-buf-contract", "storage-compact-read-path", "codec-archive-archive-io",
+  "types-dtype-layout", "util-nd-copier", "elementwise-ops-op2-arith-div-pow", "concept-push-pull",
+  "dynamic-rust-differential"]`.
