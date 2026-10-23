@@ -255,6 +255,7 @@ mod tests {
     fn roundtrip_struct() {
         let original = Dtype::from_fields(vec![
             ("x".to_string(), 0, u8::DTYPE),
+            ("_pad".to_string(), 1, <[u8; 7]>::DTYPE),
             ("y".to_string(), 8, f64::DTYPE),
         ])
         .unwrap();

@@ -12,4 +12,3 @@
 - optimize nd copy of structs
 - work on Dimension public API
 - Dtyped of bool is wrong
-- copying and accessing padding in structs is UB according to Miri
