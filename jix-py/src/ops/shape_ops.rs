@@ -822,8 +822,7 @@ pub fn reshape<'py>(
 #[pyfunction]
 pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
-    let size = py_arr.get().arr.shape().iter().product::<u64>();
-    reshape(&py_arr, ItemOrTuple::Item(size as i64))
+    reshape(&py_arr, ItemOrTuple::Item(-1))
 }
 
 /// Joins a sequence of arrays along an existing dim.
