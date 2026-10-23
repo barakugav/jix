@@ -578,7 +578,8 @@ pub(crate) unsafe fn value_from_io<T>(mut src: impl std::io::Read) -> std::io::R
 where
     T: Sized + Send + Sync + Copy + 'static,
 {
-    let mut val = MaybeUninit::<T>::uninit();
+    // fill with 0 is a bit of waste, but rust Read trait implementor can potentially read from the given buffer
+    let mut val = MaybeUninit::<T>::zeroed();
     {
         let buf = unsafe {
             std::slice::from_raw_parts_mut(val.as_mut_ptr().cast::<u8>(), size_of::<T>())

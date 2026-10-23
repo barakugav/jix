@@ -429,8 +429,8 @@ where
 impl BlockTableStorageRead for Owned {
     /// Read `section` into a heap-allocated `Vec<T>`.
     ///
-    /// Allocates uninitialized capacity, reads the raw bytes from `reader` directly into the
-    /// buffer, then transmutes `Vec<MaybeUninit<T>>` to `Vec<T>` after the read succeeds.
+    /// Allocates a zeroed buffer, reads the raw bytes from
+    /// `reader` into it, then transmutes `Vec<MaybeUninit<T>>` to `Vec<T>`.
     fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
@@ -449,8 +449,8 @@ impl BlockTableStorageRead for Owned {
         );
         let len = section.size as usize / size_of::<T>();
 
-        let mut data = Vec::<MaybeUninit<T>>::with_capacity(len);
-        unsafe { data.set_len(len) };
+        // ::zeroed() is a bit of waste, but rust Read trait implementor can potentially read from the given buffer
+        let mut data = vec![MaybeUninit::<T>::zeroed(); len];
         reader
             .read_section_into(&section, unsafe {
                 cast_slice_mut::<MaybeUninit<T>, u8>(data.as_mut_slice())

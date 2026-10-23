@@ -205,12 +205,9 @@ impl<R> ArchiveReader<R> {
     where
         R: Read,
     {
+        // fill with 0 is a bit of waste, but rust Read trait implementor can potentially read from the given buffer
         self.tmp_buf.clear();
-        self.tmp_buf.reserve(len);
-        #[allow(clippy::uninit_vec)]
-        unsafe {
-            self.tmp_buf.set_len(len)
-        };
+        self.tmp_buf.resize(len, 0);
         self.reader.read_exact(self.tmp_buf.as_mut_slice())?;
         Ok(self.tmp_buf.as_slice())
     }

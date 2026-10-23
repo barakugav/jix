@@ -551,6 +551,32 @@ mod tests {
     use crate::util::{arr_params, carray_strategy_any};
     use crate::{ArchiveValidation, Array, ArrayParams, Dimension, IntoDimension, Ty};
 
+    #[test]
+    fn reader_is_never_handed_uninit_bytes() {
+        // A safe `Read` may look at `buf` before filling it; it must only ever see zeros.
+        struct Snoop(Cursor<Vec<u8>>, bool);
+        impl std::io::Read for Snoop {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.1 |= buf.iter().any(|&b| b != 0);
+                self.0.read(buf)
+            }
+        }
+        impl Seek for Snoop {
+            fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+                self.0.seek(pos)
+            }
+        }
+
+        let a = Array::compact_ndarray(&ndarray::array![1u8, 2, 3, 4]).unwrap();
+        let mut bytes = Cursor::new(Vec::new());
+        a.write_to(&mut bytes).unwrap();
+        drop(vec![0xA5u8; 4096]); // leave stale bytes in the allocator
+        let mut snoop = Snoop(Cursor::new(bytes.into_inner()), false);
+        Array::read_from_reader(&mut snoop, None, ArrayParams::default(), Default::default())
+            .unwrap();
+        assert!(!snoop.1);
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
