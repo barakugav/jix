@@ -187,6 +187,12 @@ Unsafe fns / preconditions:
 - The comment in test compact.rs:789-792 claims the slow path is taken; with exactly C strides
   fast path 1 is taken. Stale comment, assertion still valid.
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- Block sizes are bounded to 2**30 items. The decoded block size is checked before the filters run
+  (codec/mod.rs). storage/block.rs was reworked (~100 lines) and params.rs grew (~27 lines):
+  re-read them rather than trusting line numbers here.
+- On 32-bit, read regions must fit isize::MAX bytes (`check_region_size`, error.rs).
+
 ## Hot spots
 
 - Direct decode into `out` (compact.rs:429-437, 464-471): `lead_dim` = first dim with block > 1;

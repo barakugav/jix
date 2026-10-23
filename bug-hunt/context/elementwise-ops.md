@@ -199,6 +199,12 @@ SIMD/scalar split - the same element can go through either path:
   171-175); `fixed_lhs_type` actually fixes the RHS item type (common.rs:29-40); Cast docs list only
   Complex<f32>/<f64> (cast.rs:366).
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- cmp.rs has dedicated (i64, u64) / (u64, i64) comparison kernels (no cast to f64).
+- f64 -> f16 rounds once (`half`'s from_f64); Complex<f64> -> Complex<f16> as well.
+- MapMultiple::new checks shape overflow with the output itemsize. Op2::shape has no
+  assert_unchecked any more.
+
 ## Hot spots
 
 - SIMD vs scalar equality. Most SIMD tests compare with `==` via `same_value` (util/test_util.rs:1357-

@@ -192,6 +192,10 @@ Pub(crate) unsafe fns and who establishes their preconditions:
   `ops/maybe_compact.rs:257-296`). `map_multiple` with one array skips the shape check (`ops/map.rs:707`).
 - `Transmute` requires valid bit patterns and is an unsafe API (`ops/transmute.rs:12,53-54`).
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- Fewer lanes are used when the itemsize exceeds the SIMD width (K30). IntoType has no
+  assert_unchecked any more. MapMultiple checks shape overflow with the output itemsize (K19).
+
 ## Hot spots
 
 - N_OPERANDS / operands() agreement for every node (Op1, Op2, Where `ops/where_op.rs:371-387`,
