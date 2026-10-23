@@ -285,7 +285,7 @@ pub(crate) fn promotion_target_impl(operands: &[Operand]) -> Option<ScalarKind> 
     let has_float16_input = has_float16_input(&in_dtypes);
 
     let promotion_target_impls = [
-        ScalarKind::Bool,
+        ScalarKind::Bool8,
         ScalarKind::U8,
         ScalarKind::I8,
         ScalarKind::U16,

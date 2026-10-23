@@ -160,6 +160,7 @@ pub(crate) mod prelude {
     pub(crate) use crate::codec::ReadContext;
     pub(crate) use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
     pub(crate) use crate::error::*;
+    pub(crate) use crate::scalar::bool8;
     pub(crate) use crate::storage::params::{
         combine_block_layout, combine_elementwise_hints, combine_select_hints,
         read_layout_order_insert_dont_care_dim, ArraySpecDynamic,

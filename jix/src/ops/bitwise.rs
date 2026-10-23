@@ -4,6 +4,7 @@ use crate::ops::op2::define_op2;
 use crate::ops::prelude::*;
 
 pub(crate) mod _traits {
+    use crate::scalar::bool8;
     use crate::scalar::traits_util::{
         define_scalar_op1_trait, define_scalar_op2_trait, impl_scalar_op1, impl_scalar_op2,
     };
@@ -11,7 +12,7 @@ pub(crate) mod _traits {
     define_scalar_op2_trait!(
         /// Bitwise AND operation, like [`core::ops::BitAnd`].
         ///
-        /// Applies the bitwise AND to each pair of corresponding bits. For `bool` this is
+        /// Applies the bitwise AND to each pair of corresponding bits. For `bool8` this is
         /// equivalent to logical AND (`&&`).
         BitAnd,
         /// Bitwise AND with another value.
@@ -21,7 +22,7 @@ pub(crate) mod _traits {
     define_scalar_op2_trait!(
         /// Bitwise OR operation, like [`core::ops::BitOr`].
         ///
-        /// Applies the bitwise OR to each pair of corresponding bits. For `bool` this is
+        /// Applies the bitwise OR to each pair of corresponding bits. For `bool8` this is
         /// equivalent to logical OR (`||`).
         BitOr,
         /// Bitwise OR with another value.
@@ -31,7 +32,7 @@ pub(crate) mod _traits {
     define_scalar_op2_trait!(
         /// Bitwise XOR operation, like [`core::ops::BitXor`].
         ///
-        /// Applies the bitwise XOR to each pair of corresponding bits. For `bool` this is
+        /// Applies the bitwise XOR to each pair of corresponding bits. For `bool8` this is
         /// equivalent to logical XOR.
         BitXor,
         /// Bitwise XOR with another value.
@@ -41,7 +42,7 @@ pub(crate) mod _traits {
     define_scalar_op1_trait!(
         /// Bitwise NOT operation, like [`core::ops::Not`].
         ///
-        /// Flips every bit. For `bool` this is equivalent to logical NOT.
+        /// Flips every bit. For `bool8` this is equivalent to logical NOT.
         Not,
         /// Bitwise NOT of the value.
         not,
@@ -57,7 +58,7 @@ pub(crate) mod _traits {
                 }
             );
             impl_scalar_op2!(
-                impl $Trait for [bool] {
+                impl $Trait for [bool8] {
                     fn $f = |a, b| a $op b,
                 }
             );
@@ -74,7 +75,7 @@ pub(crate) mod _traits {
         }
     );
     impl_scalar_op1!(
-        impl Not for [bool] {
+        impl Not for [bool8] {
             fn not = |x| !x,
         }
     );
@@ -427,6 +428,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
+    /// use jix::scalar::bool8;
     /// use jix::Array;
     /// use ndarray::array;
     ///
@@ -435,9 +437,9 @@ define_op1!(
     /// assert_eq!(result, array![0b11110000, 0b00001111, 0xFF]);
     ///
     /// // For bool arrays, bitwise NOT is equivalent to logical NOT.
-    /// let b = Array::compact_ndarray(&array![true, false])?;
+    /// let b = Array::compact_ndarray(&array![bool8::TRUE, bool8::FALSE])?;
     /// let result = (!b).to_ndarray()?;
-    /// assert_eq!(result, array![false, true]);
+    /// assert_eq!(result, array![bool8::FALSE, bool8::TRUE]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Not,

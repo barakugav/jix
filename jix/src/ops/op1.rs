@@ -1370,7 +1370,7 @@ pub(crate) mod tests {
         ($op_method:ident, |$arg:ident| $body:expr, $dtype:ident, $strategy:ident) => {
             paste::paste! {
                 #[test]
-                fn [<$op_method _ $dtype>]() {
+                fn [<$op_method _ $dtype:lower>]() {
                     crate::ops::op1::tests::check_op1::<$dtype>(
                         <$dtype as crate::util::ScalarStrategy>::$strategy(),
                         |nd, za| {

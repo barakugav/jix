@@ -16,6 +16,9 @@
 //! The [`struct@f16`] and [`Complex<T>`] types are available under the  **`half`** and
 //! **`num-complex`** crate features, respectively.
 
+mod bool;
+pub use bool::bool8;
+
 #[cfg(feature = "half")]
 pub use half::f16;
 

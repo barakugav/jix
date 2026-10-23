@@ -55,7 +55,7 @@ impl crate::dtype::Dtype {
                     schema::ScalarKind::F64 => crate::dtype::ScalarKind::F64,
                     schema::ScalarKind::ComplexF32 => crate::dtype::ScalarKind::ComplexF32,
                     schema::ScalarKind::ComplexF64 => crate::dtype::ScalarKind::ComplexF64,
-                    schema::ScalarKind::Bool => crate::dtype::ScalarKind::Bool,
+                    schema::ScalarKind::Bool8 => crate::dtype::ScalarKind::Bool8,
                     schema::ScalarKind::Unspecified => {
                         bail!(InvalidArchive, "unknown dtype scalar kind (unspecified)");
                     }
@@ -143,7 +143,7 @@ impl crate::dtype::Dtype {
                     crate::dtype::ScalarKind::F64 => schema::ScalarKind::F64,
                     crate::dtype::ScalarKind::ComplexF32 => schema::ScalarKind::ComplexF32,
                     crate::dtype::ScalarKind::ComplexF64 => schema::ScalarKind::ComplexF64,
-                    crate::dtype::ScalarKind::Bool => schema::ScalarKind::Bool,
+                    crate::dtype::ScalarKind::Bool8 => schema::ScalarKind::Bool8,
                 } as i32,
                 endianness: {
                     assert!(cfg!(target_endian = "little"));
@@ -420,7 +420,7 @@ mod tests {
             ScalarKind::F64,
             ScalarKind::ComplexF32,
             ScalarKind::ComplexF64,
-            ScalarKind::Bool,
+            ScalarKind::Bool8,
         ];
         for &kind in cases {
             let original = Dtype::new_scalar(kind);

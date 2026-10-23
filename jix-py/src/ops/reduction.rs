@@ -1,3 +1,4 @@
+use jix_core::scalar::bool8;
 use jix_core::scalar::{f16, Complex};
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
@@ -156,7 +157,7 @@ define_reduction_op!(
     max,
     Max,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        [bool8, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
         None
     }
 );
@@ -193,7 +194,7 @@ define_reduction_op!(
     min,
     Min,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        [bool8, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
         None
     }
 );
@@ -232,7 +233,7 @@ define_reduction_op!(
     ArgMax,
     single_dim = true,
     dispatch = {
-        [bool, u8, i8, u16, i16, i32, u32, i64, u64, f16, f32, f64],
+        [bool8, u8, i8, u16, i16, i32, u32, i64, u64, f16, f32, f64],
         None
     }
 );
@@ -269,7 +270,7 @@ define_reduction_op!(
     ArgMin,
     single_dim = true,
     dispatch = {
-        [bool, u8, i8, u16, i16, i32, u32, i64, u64, f16, f32, f64],
+        [bool8, u8, i8, u16, i16, i32, u32, i64, u64, f16, f32, f64],
         None
     }
 );
@@ -307,7 +308,7 @@ define_reduction_op!(
     sum,
     Sum,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        [bool8, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
         None
     }
 );
@@ -380,7 +381,7 @@ define_reduction_op!(
     mean,
     Mean,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        [bool8, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
         None
     }
 );
@@ -418,7 +419,7 @@ define_reduction_op!(
     var,
     Variance,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        [bool8, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
         None
     },
     extra_args = (ddof: f64 = 0.0)
@@ -456,7 +457,7 @@ define_reduction_op!(
     std,
     StandardDeviation,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        [bool8, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
         None
     },
     extra_args = (ddof: f64 = 0.0)
@@ -492,7 +493,7 @@ define_reduction_op!(
     all,
     All,
     dispatch = {
-        [bool],
+        [bool8],
         Unsafe
     }
 );
@@ -527,7 +528,7 @@ define_reduction_op!(
     any,
     Any,
     dispatch = {
-        [bool],
+        [bool8],
         Unsafe
     }
 );

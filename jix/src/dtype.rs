@@ -22,7 +22,7 @@
 //! - **Integers**: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
 //! - **Floats**: `f16`, `f32`, `f64`
 //! - **Complex**: `Complex<f32>`, `Complex<f64>`
-//! - **Boolean**: `bool`
+//! - **Boolean**: `bool8`
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -30,6 +30,7 @@ use std::hint::assert_unchecked;
 use std::mem::ManuallyDrop;
 
 use crate::error::{bail, ensure, error, Error, Result};
+use crate::scalar::bool8;
 #[cfg(feature = "half")]
 use crate::scalar::f16;
 #[cfg(feature = "num-complex")]
@@ -146,7 +147,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 ///
 /// | Scalar kind | itemsize | alignment |
 /// |-------------|----------|-----------|
-/// | `I8` / `U8` / `Bool` | 1 | 1 |
+/// | `I8` / `U8` / `Bool8` | 1 | 1 |
 /// | `I16` / `U16` / `F16` | 2 | 2 |
 /// | `I32` / `U32` / `F32` | 4 | 4 |
 /// | `I64` / `U64` / `F64` | 8 | 8 |
@@ -347,8 +348,8 @@ pub enum ScalarKind {
     ComplexF32,
     /// [`Complex<f64>`] dtype, as two consecutive `f64` values for the real and imaginary parts.
     ComplexF64,
-    /// [`bool`] dtype, as a single byte with value 0 or 1.
-    Bool,
+    /// [`bool8`](crate::scalar::bool8) dtype, a single byte that is false when zero and true otherwise.
+    Bool8,
 }
 /// The endianness of a scalar.
 #[allow(unused)]
@@ -894,7 +895,7 @@ impl std::fmt::Display for Dtype {
                 ScalarKind::F64 => f.write_str("f64"),
                 ScalarKind::ComplexF32 => f.write_str("Complex<f32>"),
                 ScalarKind::ComplexF64 => f.write_str("Complex<f64>"),
-                ScalarKind::Bool => f.write_str("bool"),
+                ScalarKind::Bool8 => f.write_str("bool8"),
             }
         } else {
             <_ as std::fmt::Debug>::fmt(self, f)
@@ -948,7 +949,7 @@ impl ScalarKind {
             Self::F64 => 8,
             Self::ComplexF32 => 8,
             Self::ComplexF64 => 16,
-            Self::Bool => 1,
+            Self::Bool8 => 1,
         }
     }
 
@@ -969,7 +970,7 @@ impl ScalarKind {
             Self::F64 => 8,
             Self::ComplexF32 => 4,
             Self::ComplexF64 => 8,
-            Self::Bool => 1,
+            Self::Bool8 => 1,
         };
         Alignment::new(align).unwrap()
     }
@@ -1016,10 +1017,10 @@ impl ScalarKind {
 
     /// Check if this scalar is a boolean type.
     ///
-    /// Returns true for `bool`.
+    /// Returns true for `bool8`.
     #[inline]
     pub fn is_bool(&self) -> bool {
-        matches!(self, Self::Bool)
+        matches!(self, Self::Bool8)
     }
 
     /// Try to convert this scalar to a signed integer type, if it is an integer type.
@@ -1164,6 +1165,9 @@ impl std::fmt::Debug for OwnedFields {
 /// alignment and inner fields of the type. Types implementing this should most likely be annotated with `#[repr(C)]`
 /// or `#[repr(C, packed)]`, for aligned and packed fields respectively.
 /// The type must not contain any padding bytes.
+///
+/// Every bit pattern must be a valid value of the type, as arrays are read from files and foreign
+/// buffers without validation. This is why `bool` is not `Dtyped`; use [`bool8`] instead.
 pub unsafe trait Dtyped: Copy + Send + Sync + Sized + 'static {
     /// Get the dtype representing the type layout and inner fields.
     const DTYPE: Dtype;
@@ -1196,7 +1200,7 @@ impl_dtyped_scalar!(f64, F64);
 impl_dtyped_scalar!(Complex<f32>, ComplexF32);
 #[cfg(feature = "num-complex")]
 impl_dtyped_scalar!(Complex<f64>, ComplexF64);
-impl_dtyped_scalar!(bool, Bool);
+impl_dtyped_scalar!(bool8, Bool8);
 
 unsafe impl<T: Dtyped, const N: usize> Dtyped for [T; N] {
     const DTYPE: Dtype = {
@@ -1289,7 +1293,7 @@ mod tests {
                 true,
                 false,
             ),
-            (ScalarKind::Bool, "bool", false, false, false, false, true),
+            (ScalarKind::Bool8, "bool8", false, false, false, false, true),
         ];
         for &(kind, name, signed, unsigned, float, complex, boolean) in cases {
             assert_eq!(Dtype::new_scalar(kind).to_string(), name);
@@ -1344,7 +1348,7 @@ mod tests {
             (ScalarKind::F64, 8, 8),
             (ScalarKind::ComplexF32, 8, 4),
             (ScalarKind::ComplexF64, 16, 8),
-            (ScalarKind::Bool, 1, 1),
+            (ScalarKind::Bool8, 1, 1),
         ];
         for &(kind, expected_size, expected_align) in cases {
             let expected_align = Alignment::new(expected_align).unwrap();

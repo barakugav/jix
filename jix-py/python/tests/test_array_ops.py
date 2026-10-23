@@ -741,6 +741,16 @@ def test_write_and_read_bool_array():
         np.testing.assert_array_equal(loaded.numpy(), arr)
 
 
+def test_non_canonical_bool_bytes_are_true():
+    # A NumPy bool array can hold any byte, any non-zero one is True
+    arr = np.array([0, 1, 2, 255], dtype=np.uint8).view(bool)
+    a = jix.asarray(arr)
+    expected = np.array([False, True, True, True])
+    np.testing.assert_array_equal((~a).numpy(), ~expected)
+    np.testing.assert_array_equal((a == True).numpy(), expected)
+    assert a.sum().item() == 3
+
+
 def test_read_array_mmap():
     arr = np.arange(50, dtype=np.float64)
     za = jix.compact(arr)

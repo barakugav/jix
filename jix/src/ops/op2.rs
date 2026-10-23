@@ -325,6 +325,7 @@ pub(crate) use define_op2;
 
 pub(crate) mod _traits {
     use crate::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+    use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
@@ -1237,10 +1238,10 @@ pub(crate) mod _traits {
     where
         T: Copy
             + Into<f64>
-            + crate::scalar::IsFinite<Output = bool>
-            + crate::scalar::IsNan<Output = bool>,
+            + crate::scalar::IsFinite<Output = bool8>
+            + crate::scalar::IsNan<Output = bool8>,
     {
-        if !p.is_finite() && !a.is_nan() && !b.is_nan() {
+        if bool::from(!p.is_finite() & !a.is_nan() & !b.is_nan()) {
             *status |= float_pow_error(a, b, p);
         }
         p
@@ -1813,12 +1814,12 @@ pub(crate) mod tests {
         ($op_method:ident, |$a:ident, $b:ident| $body:expr, $dtype:ident, $strategy:ident) => {
             paste::paste! {
                 // `$body` is shared across all dtypes this macro is invoked with. For ops
-                // like `greater`/`less` that are also instantiated at `bool`, an ordering
+                // like `greater`/`less` that are also instantiated at `bool8`, an ordering
                 // comparison such as `a > b` is a plain boolean comparison there rather than
                 // a numeric one (clippy::bool_comparison).
                 #[test]
                 #[allow(clippy::bool_comparison)]
-                fn [<$op_method _ $dtype>]() {
+                fn [<$op_method _ $dtype:lower>]() {
                     crate::ops::op2::tests::check_op2::<$dtype>(
                         <$dtype as crate::util::ScalarStrategy>::$strategy(),
                         |nd_a, nd_b, za, zb| {

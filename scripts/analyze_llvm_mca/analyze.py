@@ -163,7 +163,7 @@ class Kernel:
 
 # Element types: short name and size.
 TYPES = {
-    "bool": ("bool", 1),
+    "jix::scalar::bool::bool8": ("bool", 1),  # short name kept, to compare with runs before `Bool8`
     "i8": ("i8", 1),
     "u8": ("u8", 1),
     "i16": ("i16", 2),

@@ -1395,7 +1395,7 @@ mod tests {
     #[test]
     fn read_layout_order_takes_the_costliest_input_in_where() {
         let cond = Array::compact_ndarray(
-            &ndarray::Array::from_shape_vec([4, 3], vec![true; 12]).unwrap(),
+            &ndarray::Array::from_shape_vec([4, 3], vec![crate::scalar::bool8::TRUE; 12]).unwrap(),
         )
         .unwrap();
         let c_order = compact_2d_i32([4, 3]);

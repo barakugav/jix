@@ -1,3 +1,5 @@
+use jix_core::scalar::bool8;
+
 use crate::ops::common::{define_op1, define_op2};
 
 define_op2!(
@@ -42,7 +44,7 @@ define_op2!(
     logical_and,
     And,
     dispatch = {
-        [bool],
+        [bool8],
         Unsafe
     }
 );
@@ -79,7 +81,7 @@ define_op2!(
     logical_or,
     Or,
     dispatch = {
-        [bool],
+        [bool8],
         Unsafe
     }
 );
@@ -116,7 +118,7 @@ define_op2!(
     logical_xor,
     Xor,
     dispatch = {
-        [bool],
+        [bool8],
         Unsafe
     }
 );
@@ -151,7 +153,7 @@ define_op1!(
     logical_not,
     Not,
     dispatch = {
-        [bool],
+        [bool8],
         Unsafe
     }
 );
@@ -192,7 +194,7 @@ define_op2!(
     bitwise_and,
     And,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64],
+        [bool8, u8, i8, u16, i16, u32, i32, u64, i64],
         Safe
     }
 );
@@ -232,7 +234,7 @@ define_op2!(
     bitwise_or,
     Or,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64],
+        [bool8, u8, i8, u16, i16, u32, i32, u64, i64],
         Safe
     }
 );
@@ -272,7 +274,7 @@ define_op2!(
     bitwise_xor,
     Xor,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64],
+        [bool8, u8, i8, u16, i16, u32, i32, u64, i64],
         Safe
     }
 );
@@ -305,7 +307,7 @@ define_op1!(
     bitwise_not,
     Not,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64],
+        [bool8, u8, i8, u16, i16, u32, i32, u64, i64],
         None
     }
 );
