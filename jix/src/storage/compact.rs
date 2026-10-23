@@ -182,7 +182,7 @@ where
     pub(crate) blocks: BlockTable<S, ET>,
     shape: DimDyn,
 
-    spec: ArraySpecOwned,
+    pub(crate) spec: ArraySpecOwned,
 }
 impl<S, ET> ArrayBlockTableStorageBase<S, ET>
 where
@@ -204,6 +204,19 @@ where
         )?;
         // Reading a compact element is more expensive than reading a plain element (1).
         spec.dynamic_mut().element_cost = 8.0;
+        let block_shape = spec.as_ref().block_shape();
+        debug_assert_eq!(
+            block_shape.iter().map(|&b| b as u64).product::<u64>(),
+            blocks.block_size as u64
+        );
+        debug_assert_eq!(
+            shape_slice
+                .iter()
+                .zip(block_shape)
+                .map(|(&s, &b)| s.div_ceil(b as u64))
+                .product::<u64>(),
+            blocks.nblocks()
+        );
         Ok(Self {
             blocks,
             shape,
