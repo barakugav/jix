@@ -427,7 +427,8 @@ impl BlockTableStorageRead for Owned {
             InvalidArchive,
             "section size is not a multiple of item size"
         );
-        let len = section.size as usize / size_of::<T>();
+        let len = usize::try_from(section.size / size_of::<T>() as u64)
+            .map_err(|_| error!(InvalidArchive, "section size {} is too large", section.size))?;
 
         reader
             .seek_relative_to_base(section.offset)
