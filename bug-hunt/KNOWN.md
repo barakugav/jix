@@ -26,7 +26,7 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-21-pilot/findings/F002.md; repro in that run's repros/.
 
 ## K3: Padded struct dtypes: NdCopier copies elements as [u32;2]/[u64;2], reading uninit padding
-- Status: open (found in run 2026-10-21-pilot as F003)
+- Status: fixed in 6f8e220 (#88) (found in run 2026-10-21-pilot as F003)
 - Location: jix/src/util/nd_copy.rs:31
 - Notes: bug-hunt/runs/2026-10-21-pilot/findings/F003.md; repro in that run's repros/.
 
@@ -86,7 +86,7 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-22-trial2/findings/F001.md; repro in that run's repros/.
 
 ## K15: numpy bool arrays with bytes other than 0/1 are wrapped zero-copy and read as Rust bool (UB); reductions, comparisons, bitwise ops and where silently return wrong results
-- Status: open (found in run 2026-10-22-trial2 as F002, high)
+- Status: fixed in 7e93487 (#89) (found in run 2026-10-22-trial2 as F002, high)
 - Location: jix-py/src/ops/common/operand.rs:183
 - Notes: bug-hunt/runs/2026-10-22-trial2/findings/F002.md; repro in that run's repros/.
 
@@ -221,7 +221,7 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-22-trial2/findings/F028.md; repro in that run's repros/.
 
 ## K42: Struct layout validation sums field ends in unchecked u16; a field list past 65535 wraps and validates against a tiny itemsize, so SubDtype reads up to 64 KiB OOB (crafted .jix -> SIGSEGV in release; also reachable from 100% safe Rust via from_fields + a safe user ArrayStorage)
-- Status: open (found in run 2026-10-23-batch3 as F001, high)
+- Status: fixed in 6f8e220 (#88) (found in run 2026-10-23-batch3 as F001, high)
 - Location: jix/src/dtype.rs:673
 - Notes: bug-hunt/runs/2026-10-23-batch3/findings/F001.md; repro in that run's repros/.
 
@@ -231,7 +231,7 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-23-batch3/findings/F002.md; repro in that run's repros/.
 
 ## K44: A Strict-valid .jix array of bool (or a struct with a bool field) whose bytes are not 0/1 decodes into typed Rust bool: UB from safe code (Miri-confirmed), and where/cast/not/sum/any give inconsistent results
-- Status: open (found in run 2026-10-23-batch3 as F003, high)
+- Status: fixed in 7e93487 (#89) (found in run 2026-10-23-batch3 as F003, high)
 - Location: jix/src/storage/block.rs:201
 - Notes: bug-hunt/runs/2026-10-23-batch3/findings/F003.md; repro in that run's repros/. Archive-decode trigger of the bool-validity problem; K15 covers the numpy trigger.
 

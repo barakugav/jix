@@ -196,6 +196,10 @@ Pub(crate) unsafe fns and who establishes their preconditions:
 - Fewer lanes are used when the itemsize exceeds the SIMD width (K30). IntoType has no
   assert_unchecked any more. MapMultiple checks shape overflow with the output itemsize (K19).
 
+### Changed in 6f8e220 (#88) and 7e93487 (#89) - supersedes conflicting statements above
+- #89: elementwise_pipeline.rs and scalar/simd.rs / traits_util.rs changed for `bool8` (bool-output
+  kernels, mask packing). A mask built from a raw bool8 byte must normalize it first.
+
 ## Hot spots
 
 - N_OPERANDS / operands() agreement for every node (Op1, Op2, Where `ops/where_op.rs:371-387`,

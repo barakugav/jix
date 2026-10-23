@@ -183,6 +183,10 @@ finalize pass (1117-1259) turns states into outputs. Scalar-level traits (`jix::
 ### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
 - Kernels that need indices (ArgMax / ArgMin) assert they run over a single reduced dim (K41).
 
+### Changed in 6f8e220 (#88) and 7e93487 (#89) - supersedes conflicting statements above
+- #89: all / any / sum / argmax over booleans now use `bool8` (~120 lines changed). sum(bool8) must
+  count non-zero bytes, not add raw byte values; argmax / max must compare truthiness.
+
 ## Hot spots
 
 1. Init vs merge is keyed ONLY on the stream position: `init = base_item_idx == 0` (640) for

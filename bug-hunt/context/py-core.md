@@ -167,6 +167,11 @@ Line numbers in this doc refer to bb1ee2c.
   numpy operand on the left defers to jix's reflected op. numpy() documents its memory order as
   implementation-defined, and that out= must not overlap any numpy array in the lazy chain.
 
+### Changed in 6f8e220 (#88) and 7e93487 (#89) - supersedes conflicting statements above
+- #89: numpy bool arrays map to `bool8` and are wrapped zero-copy with any byte values (K15 fixed);
+  results come back as numpy bool. #88: numpy structured dtypes with padding are rejected
+  (jix-py/src/dtype.rs reworked, test_struct_dtype.py added).
+
 ## Hot spots
 
 - Stride rebuild in `numpy()` (`array.rs:563-592`): it pops `np_arr.strides()` from the end

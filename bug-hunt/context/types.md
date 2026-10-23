@@ -153,6 +153,14 @@ types the macro is):
 - jix-py's dtype_from_numpy debug_assert is relaxed for packed structs of 1-byte-aligned fields;
   big-endian numpy dtypes are rejected with an error.
 
+### Changed in 6f8e220 (#88) and 7e93487 (#89) - supersedes conflicting statements above
+- #88: struct dtypes cannot contain padding. `check_no_padding` (checked adds) requires fields to
+  tile the element back to back, and `#[derive(Dtyped)]` rejects padded structs at compile time
+  (K3, K42 fixed). dtype.rs was largely rewritten (~430 lines): re-read it.
+- #89: the boolean element type is `jix::scalar::bool8` (jix/src/scalar/bool.rs, repr(transparent)
+  u8, 0 = false, any other byte = true); `bool` is no longer `Dtyped`. Every Dtyped type must accept
+  every bit pattern. The archive dtype proto changed for it.
+
 ## Hot spots
 
 - Layout arithmetic in dtype.rs:476-506 and 653-717: every `expected_offset += itemsize` and
