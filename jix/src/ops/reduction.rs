@@ -1441,6 +1441,8 @@ pub(crate) mod _traits {
         const IS_PRECISE: bool;
         /// Return the initial accumulator (zero).
         fn init() -> Self::Output;
+        /// Return the sum of an empty stream (zero).
+        fn empty() -> Self::Output;
         /// Fold `item` into the running sum.
         fn update(state: Self::Output, item: Self) -> Self::Output;
         /// [`update`](Self::update) on each lane, vectorized with `simd` where the types have
@@ -1482,6 +1484,10 @@ pub(crate) mod _traits {
                 #[inline(always)]
                 fn init() -> Self::Output {
                     <f32 as crate::scalar::Cast<Self::Output>>::cast(-0.0)
+                }
+                #[inline(always)]
+                fn empty() -> Self::Output {
+                    <f32 as crate::scalar::Cast<Self::Output>>::cast(0.0)
                 }
                 #[inline(always)]
                 fn update(state: Self::Output, item: Self) -> Self::Output {
@@ -2421,11 +2427,10 @@ where
 
     #[inline(always)]
     fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
-        let mut state = <T as crate::scalar::Sum>::init();
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, None);
+        match init_item {
+            Some((item, _idx)) => self.update_state(<T as crate::scalar::Sum>::init(), item, None),
+            None => <T as crate::scalar::Sum>::empty(), // +0.0 and no init()'s -0.0
         }
-        state
     }
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
@@ -4388,6 +4393,26 @@ pub(crate) mod tests {
             err <= 64.0,
             "f32 sum lost {err} (got {got}, exact {exact}) - is the run still folded pairwise?",
         );
+    }
+
+    #[test]
+    fn sum_empty_float_is_positive_zero() {
+        let a = Array::compact_ndarray(&ndarray::Array2::<f64>::zeros((3, 0))).unwrap();
+        let s = a.sum(1usize).to_ndarray::<Ix1>().unwrap();
+        assert!(s.iter().all(|v| v.to_bits() == 0.0f64.to_bits()), "{s:?}");
+        let a = Array::compact_ndarray(&ndarray::Array1::<f32>::zeros(0)).unwrap();
+        let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
+        assert_eq!(s.to_bits(), 0.0f32.to_bits());
+        #[cfg(feature = "num-complex")]
+        {
+            let a = Array::compact_ndarray(&ndarray::Array1::<complex_f64>::zeros(0)).unwrap();
+            let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
+            assert_eq!((s.re.to_bits(), s.im.to_bits()), (0, 0));
+        }
+        // A non-empty sum of -0.0 keeps its sign.
+        let a = Array::compact_ndarray(&array![-0.0f64, -0.0]).unwrap();
+        let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
+        assert_eq!(s.to_bits(), (-0.0f64).to_bits());
     }
 
     #[test]
