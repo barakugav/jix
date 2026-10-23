@@ -42,16 +42,24 @@ pub(crate) mod _traits {
                 #[inline(always)]
                 fn cast(self) -> $dst_type {
                     #![allow(clippy::redundant_locals)]
-                    let value = self;
-                    let value = impl_cast!(@scalar_from $src_type, value);
-                    let value = impl_cast!(@scalar_to $dst_type, value);
-                    value
+                    impl_cast!(@scalar $src_type => $dst_type, self)
                 }
 
                 impl_cast!(@bulk $src_type => $dst_type, bulk=$bulk);
             }
         };
 
+        // special cases:
+        //   f64 -> f32 -> f16 rounds twice;  prefer from_f64
+        (@scalar f64 => f16, $value:expr) => { f16::from_f64($value) };
+        //   f16 -> f32 -> f64 is correct but may be slower;  prefer to_f64
+        (@scalar f16 => f64, $value:expr) => { ($value).to_f64() };
+        (@scalar $src_type:ident => $dst_type:ident, $value:expr) => {{
+            let value = $value;
+            let value = impl_cast!(@scalar_from $src_type, value);
+            let value = impl_cast!(@scalar_to $dst_type, value);
+            value
+        }};
         (@scalar_from bool,        $value:expr) => { ($value) as i8 };
         (@scalar_from f16,         $value:expr) => { ($value).to_f32() };
         (@scalar_from $type:ident, $value:expr) => { $value };
@@ -555,7 +563,12 @@ mod tests {
             })+
         }
     }
-        impl_cast_to_f16!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
+        impl_cast_to_f16!(i8, i16, i32, i64, u8, u16, u32, u64, f32);
+        impl CastTo<f16> for f64 {
+            fn cast_to(self) -> f16 {
+                f16::from_f64(self)
+            }
+        }
         impl CastTo<f16> for bool {
             fn cast_to(self) -> f16 {
                 f16::from_f32(self as u8 as f32)
@@ -777,6 +790,18 @@ mod tests {
             &Array::compact_ndarray(&nd_bool).unwrap().cast::<f32>(),
             &expected_bool_f32,
         );
+    }
+
+    // 1 + 2^-11 + 2^-40 is just above the midpoint of the f16 neighbours 1 and 1 + 2^-10, but
+    // rounds to that midpoint in f32, so going through f32 ties down to 1. `half::f16::from_f64`
+    // rounds once only on aarch64 (on x86 it also goes through f32).
+    #[cfg(all(feature = "half", target_arch = "aarch64"))]
+    #[test]
+    fn cast_f64_to_f16_rounds_once() {
+        use crate::scalar::Cast;
+        let x = 1.0 + 2f64.powi(-11) + 2f64.powi(-40);
+        let got: f16 = x.cast();
+        assert_eq!(got.to_f64(), 1.0 + 2f64.powi(-10));
     }
 
     // f16 (feature-gated): both directions with i32/f32/f64, plus the f16 -> f16 identity.
