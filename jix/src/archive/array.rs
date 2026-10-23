@@ -342,6 +342,9 @@ where
     /// **For any other array** (lazy views, op chains, plain buffers), each block is read from
     /// the source and compressed according to `params` before being written.
     ///
+    /// As with [`write_to`](Array::write_to), the writer must support seeking back, so it must not
+    /// be a file opened in append mode.
+    ///
     /// # Streaming pipeline example
     ///
     /// The following reads a large array from disk via mmap, applies some lazy operations,
@@ -621,6 +624,17 @@ mod tests {
             );
             assert!(result.is_err());
         }
+    }
+
+    #[test]
+    fn write_to_append_mode_file_is_an_error() {
+        let a = Array::compact_ndarray(&ndarray::array![1u8, 2, 3, 4]).unwrap();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let writer = std::fs::OpenOptions::new()
+            .append(true)
+            .open(file.path())
+            .unwrap();
+        assert!(a.write_to(writer).is_err());
     }
 
     #[test]

@@ -233,6 +233,14 @@ where
         self.writer
             .write_all(unsafe { value_as_bytes(&table_of_contents) })
             .map_err(Error::io)?;
+        self.writer.flush().map_err(Error::io)?;
+        ensure!(
+            // An append-mode writer ignores the seeks above and writes at the end instead
+            self.writer.stream_position().map_err(Error::io)?
+                == self.toc_offset + size_of_val(&table_of_contents) as u64,
+            InvalidArgument,
+            "the writer did not write at the position it seeked to, is it in append mode?"
+        );
         self.writer
             .seek(SeekFrom::Start(
                 self.block_data_offset + self.block_data_total_len,
