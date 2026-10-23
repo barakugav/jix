@@ -401,6 +401,7 @@ define_op2!(
     EqualKernel,
     crate::scalar::Equal::equal,
     simd: equal_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise inequality test (`a != b`).
@@ -434,6 +435,7 @@ define_op2!(
     NotEqualKernel,
     crate::scalar::NotEqual::not_equal,
     simd: not_equal_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 
 // Defines `$Op<S1, S2>`, a comparison evaluated as the mirrored comparison `$Inner` with the
@@ -614,6 +616,7 @@ define_op2!(
     LessKernel,
     crate::scalar::Less::less,
     simd: less_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise less-than-or-equal test (`a <= b`).
@@ -647,6 +650,7 @@ define_op2!(
     LessEqualKernel,
     crate::scalar::LessEqual::less_equal,
     simd: less_equal_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 
 define_op2!(
@@ -682,6 +686,7 @@ define_op2!(
     MaximumKernel,
     crate::scalar::Maximum::maximum,
     simd: maximum_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise minimum of two arrays.
@@ -716,6 +721,7 @@ define_op2!(
     MinimumKernel,
     crate::scalar::Minimum::minimum,
     simd: minimum_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 
 /// Element-wise clamp of `a` to the range `[min, max]`, where `min` and `max` are arrays.
@@ -863,6 +869,13 @@ where
                 PMin::MAX_ITEMSIZE,
                 PMax::MAX_ITEMSIZE,
             ]);
+            // Like the binary kernels, the max and min of `clamp` leave out the mixed loops.
+            const INNER_LOOPS: InnerLoops = InnerLoops::and_all(&[
+                InnerLoops::CONTIGUOUS,
+                P::INNER_LOOPS,
+                PMin::INNER_LOOPS,
+                PMax::INNER_LOOPS,
+            ]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -979,6 +992,8 @@ struct ApproxEqKernel<T: crate::scalar::ApproxEq> {
 }
 impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
     type Output = bool;
+
+    const INNER_LOOPS: InnerLoops = InnerLoops::CONTIGUOUS;
 
     #[inline(always)]
     fn apply(&self, a: T, b: T, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {

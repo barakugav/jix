@@ -167,7 +167,7 @@ pub(crate) mod prelude {
     pub(crate) use crate::storage::{
         check_out_buf, materialize_out_buf, max_itemsize, n_operands_sum,
         read_data_and_map_strides, ArraySpec, ArrayStorageInfo, ArrayStorageTyped, BlockSize,
-        ElementwisePipeline, ElementwisePipelineImpl, Operand, StridedBuf,
+        ElementwisePipeline, ElementwisePipelineImpl, InnerLoops, Operand, StridedBuf,
     };
     pub(crate) use crate::util::{
         array_from_fn_inline, calc_block_end, default_logical_strides, default_strides,

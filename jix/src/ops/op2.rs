@@ -10,6 +10,9 @@ pub(crate) struct Op2<S1, S2, K> {
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
 
+    /// The inner loops worth compiling for the kernel.
+    const INNER_LOOPS: InnerLoops = InnerLoops::ALL;
+
     fn apply(&self, a: T1, b: T2, status: &mut ArithmeticOpStatus) -> Self::Output;
 
     #[inline(always)]
@@ -150,6 +153,8 @@ where
             const N_OPERANDS: Option<usize> = n_operands_sum(&[P1::N_OPERANDS, P2::N_OPERANDS]);
             const MAX_ITEMSIZE: usize =
                 max_itemsize(&[size_of::<T>(), P1::MAX_ITEMSIZE, P2::MAX_ITEMSIZE]);
+            const INNER_LOOPS: InnerLoops =
+                InnerLoops::and_all(&[K::INNER_LOOPS, P1::INNER_LOOPS, P2::INNER_LOOPS]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -224,6 +229,7 @@ macro_rules! define_op2 {
         $Kernel:ident,
         crate::scalar::$trait:ident::$kernel_fn:ident $(($status:ident))?,
         simd: $bulk_fn:ident,
+        $(inner_loops: $inner_loops:expr,)?
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -233,6 +239,8 @@ macro_rules! define_op2 {
             T2: Copy + 'static,
         {
             type Output = <T1 as crate::scalar::$trait<T2>>::Output;
+
+            $(const INNER_LOOPS: crate::storage::InnerLoops = $inner_loops;)?
 
             #[inline(always)]
             fn apply(&self, a: T1, b: T2, status: &mut ArithmeticOpStatus) -> Self::Output {
@@ -1285,6 +1293,7 @@ define_op2!(
     AddKernel,
     crate::scalar::Add::add,
     simd: add_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::Add::add,
 );
 define_op2!(
@@ -1312,6 +1321,7 @@ define_op2!(
     SubKernel,
     crate::scalar::Sub::sub,
     simd: sub_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::Sub::sub,
 );
 define_op2!(
@@ -1339,6 +1349,7 @@ define_op2!(
     MulKernel,
     crate::scalar::Mul::mul,
     simd: mul_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::Mul::mul,
 );
 
@@ -1367,6 +1378,7 @@ define_op2!(
     DivKernel,
     crate::scalar::Div::div(status),
     simd: div_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::Div::div,
 );
 define_op2!(
@@ -1398,6 +1410,7 @@ define_op2!(
     DivideTruncKernel,
     crate::scalar::DivideTrunc::divide_trunc(status),
     simd: divide_trunc_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise floored division of two arrays.
@@ -1428,6 +1441,7 @@ define_op2!(
     DivideFloorKernel,
     crate::scalar::DivideFloor::divide_floor(status),
     simd: divide_floor_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise Euclidean division of two arrays.
@@ -1458,6 +1472,7 @@ define_op2!(
     DivideEuclidKernel,
     crate::scalar::DivideEuclid::divide_euclid(status),
     simd: divide_euclid_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise truncated remainder of two arrays (`a % b`).
@@ -1486,6 +1501,7 @@ define_op2!(
     RemainderTruncKernel,
     crate::scalar::RemainderTrunc::remainder_trunc(status),
     simd: remainder_trunc_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::Rem::rem,
 );
 define_op2!(
@@ -1511,6 +1527,7 @@ define_op2!(
     RemainderFloorKernel,
     crate::scalar::RemainderFloor::remainder_floor(status),
     simd: remainder_floor_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise Euclidean remainder of two arrays.
@@ -1535,6 +1552,7 @@ define_op2!(
     RemainderEuclidKernel,
     crate::scalar::RemainderEuclid::remainder_euclid(status),
     simd: remainder_euclid_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise exponentiation (`a` raised to the power `b`).
@@ -1566,6 +1584,7 @@ define_op2!(
     PowKernel,
     crate::scalar::Pow::pow(status),
     simd: pow_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 
 impl<S> Array<S>

@@ -183,6 +183,12 @@ An op typically exists in two places that must stay in sync: the Rust implementa
 Python dispatch wrapper under `jix-py/src/ops/`. After changing the Python surface, regenerate stubs
 with `maturin generate-stubs --out python`.
 
+An element-wise kernel also picks the inner loop variants compiled for it, `InnerLoops`
+(`jix/src/storage/elementwise_pipeline.rs`, `inner_loops:` in `define_op1!`/`define_op2!`): `ALL` for
+vectorized unary kernels, `CONTIGUOUS` for binary ones, `STRIDED` for per-element scalar ones such as
+libm calls. A pipeline compiles only the variants all its kernels ask for. Every variant is a full
+copy of the fused loop, so this weighs directly on build time and binary size.
+
 ## Testing Conventions
 
 - **Rust:** tests are inline `#[cfg(test)] mod tests` blocks inside the source files (no top-level

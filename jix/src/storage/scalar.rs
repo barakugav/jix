@@ -6,7 +6,7 @@ use crate::error::{check_dtype, check_get_range, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, ElementwisePipeline,
-    ElementwisePipelineImpl, Operand, StridedBuf, Ty,
+    ElementwisePipelineImpl, InnerLoops, Operand, StridedBuf, Ty,
 };
 use crate::util::dim_arr;
 use crate::{
@@ -157,6 +157,7 @@ where
             // The value lives in the node, so there is nothing to walk.
             const N_OPERANDS: Option<usize> = Some(0);
             const MAX_ITEMSIZE: usize = size_of::<T>();
+            const INNER_LOOPS: InnerLoops = InnerLoops::ALL;
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {

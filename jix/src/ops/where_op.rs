@@ -381,6 +381,13 @@ where
                 PX::MAX_ITEMSIZE,
                 PY::MAX_ITEMSIZE,
             ]);
+            // Like the binary kernels, the select leaves out the mixed loops.
+            const INNER_LOOPS: InnerLoops = InnerLoops::and_all(&[
+                InnerLoops::CONTIGUOUS,
+                PC::INNER_LOOPS,
+                PX::INNER_LOOPS,
+                PY::INNER_LOOPS,
+            ]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {

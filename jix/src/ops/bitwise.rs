@@ -345,6 +345,7 @@ define_op2!(
     AndKernel,
     crate::scalar::BitAnd::bitand,
     simd: bitand_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::BitAnd::bitand,
 );
 define_op2!(
@@ -378,6 +379,7 @@ define_op2!(
     OrKernel,
     crate::scalar::BitOr::bitor,
     simd: bitor_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::BitOr::bitor,
 );
 define_op2!(
@@ -412,6 +414,7 @@ define_op2!(
     XorKernel,
     crate::scalar::BitXor::bitxor,
     simd: bitxor_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::BitXor::bitxor,
 );
 
@@ -478,6 +481,7 @@ define_op2!(
     BitwiseShiftLeftKernel,
     crate::scalar::Shl::shl,
     simd: shl_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 
 define_op2!(
@@ -511,6 +515,7 @@ define_op2!(
     BitwiseShiftRightKernel,
     crate::scalar::Shr::shr,
     simd: shr_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise bitwise left rotation (`a.rotate_left(b as u32)`).
@@ -544,6 +549,7 @@ define_op2!(
     BitwiseRotateLeftKernel,
     crate::scalar::RotateLeft::rotate_left,
     simd: rotate_left_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 
 define_op2!(
@@ -578,6 +584,7 @@ define_op2!(
     BitwiseRotateRightKernel,
     crate::scalar::RotateRight::rotate_right,
     simd: rotate_right_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op1!(
     /// Counts the number of set bits (`1`s) in each element.

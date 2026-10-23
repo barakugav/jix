@@ -9,6 +9,9 @@ pub(crate) struct Op1<S, K> {
 pub(crate) trait Op1Kernel<T> {
     type Output;
 
+    /// The inner loops worth compiling for the kernel.
+    const INNER_LOOPS: InnerLoops = InnerLoops::ALL;
+
     fn apply(&self, x: T, status: &mut ArithmeticOpStatus) -> Self::Output;
 
     #[inline(always)]
@@ -94,6 +97,7 @@ where
         {
             const N_OPERANDS: Option<usize> = P::N_OPERANDS;
             const MAX_ITEMSIZE: usize = max_itemsize(&[size_of::<T>(), P::MAX_ITEMSIZE]);
+            const INNER_LOOPS: InnerLoops = K::INNER_LOOPS.and(P::INNER_LOOPS);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -169,6 +173,7 @@ macro_rules! define_op1 {
         $Kernel:ident,
         crate::scalar::$trait:ident::$kernel_fn:ident $(($status:ident))?,
         simd: $bulk_fn:ident,
+        $(inner_loops: $inner_loops:expr,)?
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -177,6 +182,8 @@ macro_rules! define_op1 {
             T: crate::scalar::$trait + Copy + 'static,
         {
             type Output = <T as crate::scalar::$trait>::Output;
+
+            $(const INNER_LOOPS: crate::storage::InnerLoops = $inner_loops;)?
 
             #[inline(always)]
             fn apply(&self, x: T, status: &mut ArithmeticOpStatus) -> Self::Output {
@@ -892,6 +899,7 @@ define_op1!(
     ExpKernel,
     crate::scalar::Exp::exp(status),
     simd: exp_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the natural logarithm (`ln x`) of each element.
@@ -931,6 +939,7 @@ define_op1!(
     LnKernel,
     crate::scalar::Ln::ln(status),
     simd: ln_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the sine of each element (input in radians).
@@ -961,6 +970,7 @@ define_op1!(
     SinKernel,
     crate::scalar::Sin::sin(status),
     simd: sin_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the cosine of each element (input in radians).
@@ -992,6 +1002,7 @@ define_op1!(
     CosKernel,
     crate::scalar::Cos::cos(status),
     simd: cos_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the tangent of each element (input in radians).
@@ -1022,6 +1033,7 @@ define_op1!(
     TanKernel,
     crate::scalar::Tan::tan(status),
     simd: tan_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
@@ -1060,6 +1072,7 @@ define_op1!(
     AsinKernel,
     crate::scalar::Asin::asin(status),
     simd: asin_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
@@ -1098,6 +1111,7 @@ define_op1!(
     AcosKernel,
     crate::scalar::Acos::acos(status),
     simd: acos_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
@@ -1128,6 +1142,7 @@ define_op1!(
     AtanKernel,
     crate::scalar::Atan::atan,
     simd: atan_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Returns the sign of each element.
