@@ -77,7 +77,12 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
 
         let k = self.dim as usize;
         let shift = self.shift;

@@ -297,7 +297,12 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         self.read_as_elementwise_pipeline::<O>(index, context)?
             .to_buf(index, context, out)
     }

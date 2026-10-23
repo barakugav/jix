@@ -126,7 +126,12 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         let ndim = self.slice.as_ref().len();
 
         // Fast path: all dims have step == 1. Map index [a, b) to inner [start + a, start + b) and forward.

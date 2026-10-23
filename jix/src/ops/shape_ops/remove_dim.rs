@@ -157,7 +157,12 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         unsafe {
             read_data_and_map_strides(
                 &self.array,

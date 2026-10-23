@@ -333,7 +333,12 @@ where
     // of kernel, dimension, dtype, and backing storage.
 
     check_get_range(outer_shape, index)?;
-    check_out_buf(out.as_deref(), outer_shape)?;
+    check_out_buf(
+        out.as_deref(),
+        outer_shape,
+        index,
+        output_dtype.itemsize() as usize,
+    )?;
     let out_shape_usize = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
     let mut out = materialize_out_buf(
         out,

@@ -279,7 +279,12 @@ impl<'a> StridedBuf<'a> {
     }
 }
 
-pub(crate) fn check_out_buf(out: Option<&StridedBuf>, array_shape: &[u64]) -> Result<()> {
+pub(crate) fn check_out_buf(
+    out: Option<&StridedBuf>,
+    array_shape: &[u64],
+    index: &[Range<u64>],
+    itemsize: usize,
+) -> Result<()> {
     let Some(out) = out else { return Ok(()) };
     ensure!(
         out.strides().len() == array_shape.len(),
@@ -293,6 +298,30 @@ pub(crate) fn check_out_buf(out: Option<&StridedBuf>, array_shape: &[u64]) -> Re
         InvalidArgument,
         "out buffer must be a writable destination, not a read-only view"
     );
+    ensure!(
+        index.len() == array_shape.len(),
+        InvalidIndex,
+        "index has {} dimensions but array has {}",
+        index.len(),
+        array_shape.len()
+    );
+    // The furthest byte the region touches must lie inside `out`.
+    if index.iter().all(|r| r.end > r.start) {
+        let span = index
+            .iter()
+            .zip(out.strides())
+            .try_fold(itemsize as u64, |acc, (r, &s)| {
+                (s as u64)
+                    .checked_mul(r.end - r.start - 1)?
+                    .checked_add(acc)
+            });
+        let len = out.data().0.len();
+        ensure!(
+            span.is_some_and(|span| span <= len as u64),
+            InvalidArgument,
+            "out buffer of {len} bytes is too small for the region {index:?}"
+        );
+    }
     Ok(())
 }
 
@@ -364,5 +393,32 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
         let inner_buf = unsafe { std::mem::transmute::<StridedBuf<'_>, StridedBuf<'a>>(inner_buf) };
         let out_strides = inner2outer_strides_fn(inner_buf.strides());
         Ok(unsafe { inner_buf.with_strides(out_strides.as_ref()) })
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
+mod tests {
+    use ndarray::array;
+
+    use crate::codec::ReadContext;
+    use crate::Array;
+
+    #[test]
+    fn out_smaller_than_the_region_is_rejected() {
+        let ctx = ReadContext::default();
+        // A 1-byte writable pull result, reused as `out` of a 4-byte read.
+        let small = Array::plain_ndarray(array![1u8, 2]).unwrap().flip(0);
+        let mut out = small.to_ndarray_buf(&[0..1], &ctx, None).unwrap();
+        let big = || Array::plain_ndarray(array![1u8, 2, 3, 4]).unwrap();
+        let ctx2 = ReadContext::default();
+        assert!(big()
+            .to_ndarray_buf(&[0..4], &ctx2, Some(&mut out))
+            .is_err());
+        assert!(big()
+            .flip(0)
+            .to_ndarray_buf(&[0..4], &ctx2, Some(&mut out))
+            .is_err());
+        assert!(big().to_ndarray_buf(&[1..2], &ctx2, Some(&mut out)).is_ok());
     }
 }

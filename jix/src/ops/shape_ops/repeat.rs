@@ -104,7 +104,12 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
 
         let ndim = self.new_shape.ndim();
         let dtype = self.dtype();

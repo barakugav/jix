@@ -430,7 +430,12 @@ impl<T> Array<Compact<Ty<T>>> {
                 context: &'a ReadContext,
                 out: Option<&'a mut StridedBuf<'_>>,
             ) -> Result<StridedBuf<'a>> {
-                check_out_buf(out.as_deref(), self.shape())?;
+                check_out_buf(
+                    out.as_deref(),
+                    self.shape(),
+                    index,
+                    self.dtype().itemsize() as usize,
+                )?;
                 let ndim = self.shape().len();
                 let read_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
                 let read_shape_usize = D::vec(ndim, |dim| read_shape[dim] as usize);
@@ -956,7 +961,12 @@ impl<S: ArrayStorage> Array<S> {
         let shape = self.shape();
         let dtype = self.dtype();
         debug_assert!(check_get_range(shape, index).is_ok());
-        check_out_buf(out.as_deref(), shape)?;
+        check_out_buf(
+            out.as_deref(),
+            shape,
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
 
         let spec = self.storage.spec();

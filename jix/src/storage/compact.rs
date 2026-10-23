@@ -276,8 +276,8 @@ where
     {
         let shape = self.shape();
         check_get_range(shape, index)?;
-        check_out_buf(out.as_deref(), shape)?;
         let dtype = self.blocks.dtype();
+        check_out_buf(out.as_deref(), shape, index, dtype.itemsize() as usize)?;
         let out_shape = dim_arr(shape.len(), |d| (index[d].end - index[d].start) as usize);
         let nitems = out_shape.as_ref().iter().product::<usize>();
         let mut out = materialize_out_buf(

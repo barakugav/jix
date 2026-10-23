@@ -260,7 +260,12 @@ where
         //      needed.
         // -----------------------------------------------------------------------
         check_get_range(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         let dtype = self.dtype();
         let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let mut out = materialize_out_buf(
