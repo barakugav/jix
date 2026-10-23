@@ -158,7 +158,7 @@ impl<R> ArchiveReader<R> {
             Some(length) => length,
             None => return Ok(None),
         };
-        let msg_bytes = self.read_slice(length as usize)?;
+        let msg_bytes = self.read_slice(length)?;
         Ok(Some(M::decode(msg_bytes)?))
     }
 
@@ -207,14 +207,20 @@ impl<R> ArchiveReader<R> {
         })
     }
 
-    fn read_slice(&mut self, len: usize) -> std::io::Result<&[u8]>
+    fn read_slice(&mut self, len: u64) -> std::io::Result<&[u8]>
     where
         R: Read,
     {
-        // fill with 0 is a bit of waste, but rust Read trait implementor can potentially read from the given buffer
         self.tmp_buf.clear();
-        self.tmp_buf.resize(len, 0);
-        self.reader.read_exact(self.tmp_buf.as_mut_slice())?;
+        let n = (&mut self.reader)
+            .take(len)
+            .read_to_end(&mut self.tmp_buf)?;
+        if n as u64 != len {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "unexpected end of file while reading message",
+            ));
+        }
         Ok(self.tmp_buf.as_slice())
     }
 
@@ -347,6 +353,15 @@ mod tests {
                 size: total_size
             })
             .is_ok());
+    }
+
+    #[test]
+    fn huge_message_length_is_an_error() {
+        // A length prefix of 2^62 with no bytes after it.
+        let mut reader =
+            reader_after_metadata(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x40]);
+        let err = reader.read_message::<schema::FileMetadata>().unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
     }
 
     /// A reader positioned just past the file metadata that `ArchiveWriter::new` writes, with
