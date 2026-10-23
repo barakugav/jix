@@ -266,8 +266,11 @@ impl<R> ArchiveReader<R> {
     }
 
     pub(crate) fn check_section_bounds(&self, section: &Section) -> Result<()> {
+        let end = u64::try_from(section.offset)
+            .ok()
+            .and_then(|o| o.checked_add(section.size));
         ensure!(
-            0 <= section.offset && section.offset as u64 + section.size <= self.total_size,
+            end.is_some_and(|end| end <= self.total_size),
             InvalidArchive,
             "section is out of archive bounds"
         );
@@ -321,6 +324,29 @@ mod tests {
             let err = reader.read_uleb128().unwrap_err();
             assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         }
+    }
+
+    #[test]
+    fn section_bounds_overflow_is_an_error() {
+        let mut reader = reader_after_metadata(&[]);
+        let total_size = 100;
+        reader.total_size = total_size;
+        for (offset, size) in [
+            (i64::MAX, (1 << 63) + 2),
+            (1, u64::MAX),
+            (-1, 1),
+            (0, total_size + 1),
+        ] {
+            assert!(reader
+                .check_section_bounds(&Section { offset, size })
+                .is_err());
+        }
+        assert!(reader
+            .check_section_bounds(&Section {
+                offset: 0,
+                size: total_size
+            })
+            .is_ok());
     }
 
     /// A reader positioned just past the file metadata that `ArchiveWriter::new` writes, with
