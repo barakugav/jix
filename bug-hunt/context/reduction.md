@@ -180,6 +180,9 @@ finalize pass (1117-1259) turns states into outputs. Scalar-level traits (`jix::
 - `reduce_unordered` closures must be associative + commutative (2975-2990); there is a test
   that each cell does exactly `n - 1` closure calls (each item folded exactly once).
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- Kernels that need indices (ArgMax / ArgMin) assert they run over a single reduced dim (K41).
+
 ## Hot spots
 
 1. Init vs merge is keyed ONLY on the stream position: `init = base_item_idx == 0` (640) for

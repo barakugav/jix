@@ -162,6 +162,11 @@ released in `numpy()`/`compact`/`write_array`), `archive.rs:417`.
 - mmap reads check section bounds against the mapped file (KNOWN K5, fixed).
 Line numbers in this doc refer to bb1ee2c.
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- Big-endian numpy dtypes raise. A Python bool index raises. `Array.__array_ufunc__ = None`, so a
+  numpy operand on the left defers to jix's reflected op. numpy() documents its memory order as
+  implementation-defined, and that out= must not overlap any numpy array in the lazy chain.
+
 ## Hot spots
 
 - Stride rebuild in `numpy()` (`array.rs:563-592`): it pops `np_arr.strides()` from the end

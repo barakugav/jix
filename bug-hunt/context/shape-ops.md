@@ -150,6 +150,11 @@ fixed dims, scale weights, layout order) for the read-tiling heuristics.
 - Block shape, fixed dims and scale weights are performance hints only (storage/params.rs:526-590); wrong values
   there are not correctness bugs (layout order is the exception, see Contracts).
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- Every shape op's read_data passes (index, itemsize) to `check_out_buf`, which now checks out's
+  extent. Concatenate checks the concat-dim sum for overflow. Repeat no longer multiplies the stride
+  of a length-1 out dim. Dims are capped at i64::MAX (affects roll's rem_euclid, slice resolve).
+
 ## Hot spots
 - Push-mode offsets: for each split op, does every inner read land at `out + sum(offset_d * out_stride_d)` with the
   correct per-dim stride, and do the pieces tile the region exactly once? Check with permuted / padded `out`

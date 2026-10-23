@@ -148,6 +148,11 @@ types the macro is):
   InvalidOperation is raised (error.rs:326-346).
 - `scalar_kind()` ignoring inner shape is documented (dtype.rs:719-722).
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- `check_shape_overflow` caps dims at i64::MAX; `check_region_size` bounds 32-bit read regions.
+- jix-py's dtype_from_numpy debug_assert is relaxed for packed structs of 1-byte-aligned fields;
+  big-endian numpy dtypes are rejected with an error.
+
 ## Hot spots
 
 - Layout arithmetic in dtype.rs:476-506 and 653-717: every `expected_offset += itemsize` and

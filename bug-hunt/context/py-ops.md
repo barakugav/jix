@@ -181,6 +181,12 @@ OverflowError directly.
 - `params={"block_shape": [...9 entries]}` raises instead of PanicException (try_block_shape).
 Line numbers in this doc refer to bb1ee2c; jix-py/src/ops/op1.rs and shape_ops.rs moved the most.
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- Slices with start == dim length are allowed (zero-length dims too). reshape(-1) of a zero-size
+  array infers 0. permute_dims with more than 8 entries raises. NDIM_MAX items plus an Ellipsis are
+  accepted. A huge slice stop clamped by PySlice_Unpack is treated as stop = len.
+- uint64 vs int64 comparisons use exact kernels. jix-py/src/ops/common/mod.rs shrank (~60 lines).
+
 ## Hot spots
 
 1. Dispatch tables (op1/op2/cmp/bitwise/reduction): is the order right for every input pair, and

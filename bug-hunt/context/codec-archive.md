@@ -195,6 +195,13 @@ Unsafe fns with preconditions:
   wheels are release (no `overflow-checks` override in `jix/Cargo.toml`), so overflow panics seen
   in tests are silent wraps in production.
 
+### Changed in c009869 (#87) - supersedes conflicting statements above (line numbers above refer to bb1ee2c)
+- Block locations are stored with alignment 1 and the writer no longer pads (block.proto changed),
+  so mmap works at any file offset (K7 fixed). Section bounds are checked against the mapping.
+- Buffers handed to a user `Read` impl are zero-filled first (K4 fixed).
+- The decoded block size is checked before the filters run (K1 / K17 fixed). Block sizes are
+  bounded to 2**30 items (K18 / K24 fixed). archive/array.rs grew ~58 lines of validation.
+
 ## Hot spots
 
 - Short decompression: what does a release build return when a block decodes to fewer bytes
