@@ -26,6 +26,12 @@ for arg in "$@"; do
     esac
 done
 
+echo "== Cleanup: stale incremental caches and test binaries of earlier runs (they grow by GBs)"
+for T in jix/target/debug target-i686/i686-unknown-linux-musl/debug; do
+    rm -rf "$T/incremental" "$T"/.fingerprint/repro_* "$T"/.fingerprint/hunt_*
+    rm -f "$T"/deps/repro_* "$T"/deps/hunt_*
+done
+
 SMOKE=jix/tests/hunt_setup_smoke.rs
 mkdir -p jix/tests
 cp bug-hunt/templates/repro_template.rs "$SMOKE"
