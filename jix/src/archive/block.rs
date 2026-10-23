@@ -410,7 +410,7 @@ impl BlockTableStorageRead for Owned {
     /// Read `section` into a heap-allocated `Vec<T>`.
     ///
     /// Allocates a zeroed buffer, reads the raw bytes from
-    /// `reader` into it, then transmutes `Vec<MaybeUninit<T>>` to `Vec<T>`.
+    /// `reader` into it, then converts the `Vec<MaybeUninit<T>>` to `Vec<T>` in place.
     fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
@@ -436,7 +436,10 @@ impl BlockTableStorageRead for Owned {
                 cast_slice_mut::<MaybeUninit<T>, u8>(data.as_mut_slice())
             })
             .map_err(Error::io)?;
-        Ok(unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(data) })
+        let mut data = std::mem::ManuallyDrop::new(data);
+        Ok(unsafe {
+            Vec::from_raw_parts(data.as_mut_ptr().cast::<T>(), data.len(), data.capacity())
+        })
     }
 }
 
