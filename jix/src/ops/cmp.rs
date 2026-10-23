@@ -126,6 +126,8 @@ pub(crate) mod _traits {
                 fn $f:ident = $op:tt,
                 fn $f_bulk:ident = $simd_f:ident,
                 bool: |$a:ident, $b:ident| $bool:expr,
+                u64_i64: |$ua:ident, $ib:ident| $u64_i64:expr,
+                i64_u64: |$ia:ident, $ub:ident| $i64_u64:expr,
             }
         ) => {
             define_scalar_op2_trait!(
@@ -144,6 +146,18 @@ pub(crate) mod _traits {
                 impl $Trait for [bool] {
                     type Output = bool;
                     fn $f = |$a, $b| $bool,
+                }
+            );
+            impl_scalar_op2!(
+                impl $Trait for [u64] x [i64] {
+                    type Output = bool;
+                    fn $f = |$ua, $ib| $u64_i64,
+                }
+            );
+            impl_scalar_op2!(
+                impl $Trait for [i64] x [u64] {
+                    type Output = bool;
+                    fn $f = |$ia, $ub| $i64_u64,
                 }
             );
             #[cfg(feature = "half")]
@@ -189,6 +203,8 @@ pub(crate) mod _traits {
             fn equal = ==,
             fn equal_bulk = simd_eq,
             bool: |a, b| a == b,
+            u64_i64: |a, b| b >= 0 && a == b as u64,
+            i64_u64: |a, b| a >= 0 && a as u64 == b,
         }
     );
     cmp_op2!(@complex
@@ -208,6 +224,8 @@ pub(crate) mod _traits {
             fn not_equal = !=,
             fn not_equal_bulk = simd_ne,
             bool: |a, b| a != b,
+            u64_i64: |a, b| b < 0 || a != b as u64,
+            i64_u64: |a, b| a < 0 || a as u64 != b,
         }
     );
     cmp_op2!(@complex
@@ -227,6 +245,8 @@ pub(crate) mod _traits {
             fn less = <,
             fn less_bulk = simd_lt,
             bool: |a, b| !a & b,
+            u64_i64: |a, b| b >= 0 && a < b as u64,
+            i64_u64: |a, b| a < 0 || (a as u64) < b,
         }
     );
     cmp_op2!(
@@ -241,6 +261,8 @@ pub(crate) mod _traits {
             fn less_equal = <=,
             fn less_equal_bulk = simd_le,
             bool: |a, b| !a | b,
+            u64_i64: |a, b| b >= 0 && a <= b as u64,
+            i64_u64: |a, b| a < 0 || a as u64 <= b,
         }
     );
 
@@ -789,7 +811,12 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         self.read_as_elementwise_pipeline::<S::Item>(index, context)?
             .to_buf(index, context, out)
     }
@@ -1097,6 +1124,43 @@ mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::scalar::Complex<f64>;
     use crate::ops::op2::tests::test_op2;
+
+    #[test]
+    fn u64_vs_i64_is_exact() {
+        use ndarray::Array1;
+
+        use crate::ops::{Equal, Greater, GreaterEqual, Less, LessEqual, NotEqual};
+        use crate::Array;
+
+        let us = [
+            0,
+            1,
+            (1 << 53) + 1,
+            i64::MAX as u64,
+            i64::MAX as u64 + 1,
+            u64::MAX,
+        ];
+        let is = [i64::MIN, -1, 0, 1, (1 << 53), (1 << 53) + 1, i64::MAX];
+        let (mut a, mut b) = (vec![], vec![]);
+        for &u in &us {
+            for &i in &is {
+                a.push(u);
+                b.push(i);
+            }
+        }
+        let u = || Array::compact_ndarray(&Array1::from(a.clone())).unwrap();
+        let i = || Array::compact_ndarray(&Array1::from(b.clone())).unwrap();
+        let pairs = || a.iter().zip(&b).map(|(&u, &i)| (u as i128, i as i128));
+        macro_rules! check {
+            ($($Op:ident: $op:tt),*) => {$(
+                let expected = pairs().map(|(u, i)| u $op i).collect::<Vec<_>>();
+                assert_eq!($Op::new_array(u(), i()).unwrap().to_ndarray::<Ix1>().unwrap().to_vec(), expected);
+                let expected = pairs().map(|(u, i)| i $op u).collect::<Vec<_>>();
+                assert_eq!($Op::new_array(i(), u()).unwrap().to_ndarray::<Ix1>().unwrap().to_vec(), expected);
+            )*};
+        }
+        check!(Equal: ==, NotEqual: !=, Less: <, LessEqual: <=, Greater: >, GreaterEqual: >=);
+    }
 
     /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
     /// their scalar semantics, on every SIMD level of the CPU, over edge cases (NaN included).

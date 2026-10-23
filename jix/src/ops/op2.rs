@@ -1,6 +1,5 @@
 use crate::ops::common::define_array_op2_method;
 use crate::ops::prelude::*;
-use crate::util::assert_unchecked_eq;
 
 pub(crate) struct Op2<S1, S2, K> {
     pub(crate) a: S1,
@@ -106,7 +105,12 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         self.read_as_elementwise_pipeline::<K::Output>(index, context)?
             .to_buf(index, context, out)
     }
@@ -178,9 +182,8 @@ where
     }
     #[inline(always)]
     fn shape(&self) -> &[u64] {
-        let shape = self.a.shape();
-        unsafe { assert_unchecked_eq!(shape, self.b.shape()) };
-        shape
+        debug_assert_eq!(self.a.shape(), self.b.shape());
+        self.a.shape()
     }
 
     #[inline(always)]
@@ -1591,6 +1594,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 pub(crate) mod tests {
     /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
     /// their scalar semantics (release builds: wrapping), on every SIMD level of the CPU, over edge

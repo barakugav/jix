@@ -1,5 +1,3 @@
-use crate::dtype::Dtyped;
-
 macro_rules! define_array_op1_method {
     ($method:ident : $Op:ident, $($trait:ident)::+) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
@@ -41,19 +39,6 @@ macro_rules! define_array_op2_method {
 }
 
 pub(crate) use {define_array_op1_method, define_array_op2_method};
-
-pub(crate) trait LanesInfo {
-    const LANES: usize;
-}
-impl<T: Dtyped> LanesInfo for T {
-    const LANES: usize = {
-        if size_of::<T>() == 0 {
-            1024
-        } else {
-            (128 / size_of::<T>()).next_power_of_two()
-        }
-    };
-}
 
 /// An argument that specifies a set of dim indices.
 ///

@@ -158,7 +158,12 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_get_range_ndim(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         let dtype = self.dtype();
         let (itemsize, alignment) = (dtype.itemsize() as usize, dtype.alignment().as_usize());
 

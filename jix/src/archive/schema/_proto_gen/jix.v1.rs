@@ -199,10 +199,9 @@ pub mod block_table_header {
         /// The compressed block data is stored in a single contiguous buffer, but the blocks within it
         /// may appear in any order ("contiguous" refers to the data buffer, not to block ordering).
         /// The body is two contiguous sections: one for the block locations and one for the compressed
-        /// block data. The locations section holds (nblocks + 1) / 2 entries, each packing two blocks'
-        /// (offset: \[u64; 2\], len: \[u32; 2\]) locations into one 24-byte entry (avoiding the padding a
-        /// lone u64 + u32 would incur); block i occupies the `len` bytes of block_data starting at
-        /// `offset`. Blocks need not be contiguous or in order.
+        /// block data. The locations section holds nblocks packed 12-byte (offset: u64, len: u32)
+        /// entries, one per block, with no padding or alignment; block i occupies the `len` bytes of
+        /// block_data starting at `offset`. Blocks need not be contiguous or in order.
         /// A table with { offset: i64, size: u64 } (C struct) rows exists immediately after this message,
         /// with the first row describing the block locations section and the second row describing the
         /// compressed block data section.

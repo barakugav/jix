@@ -89,3 +89,17 @@ def test_error_field_not_found():
     za = jix.asarray(pts)
     with pytest.raises(Exception):
         jix.dtype_sub_field(za, "z")
+
+
+@pytest.mark.parametrize(
+    "dt",
+    [
+        np.dtype([("r", "u1"), ("g", "u1"), ("b", "u1")]),
+        np.dtype([("rgb", [("r", "u1"), ("g", "u1")]), ("w", "<i4")]),
+    ],
+)
+def test_packed_struct_of_byte_fields_round_trips(dt):
+    a = np.zeros(4, dt)
+    a.view(np.uint8)[:] = np.arange(a.nbytes, dtype=np.uint8)
+    for fn in (jix.asarray, jix.compact):
+        assert fn(a).numpy().tobytes() == a.tobytes()

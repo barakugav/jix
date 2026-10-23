@@ -795,7 +795,7 @@ mod tests {
         fn sort_by_strides(strides: &[&[usize]], dims: &mut [DimIdx]) {
             dims_sort_by(dims, |d1, d2| {
                 for s in strides {
-                    match s[d1 as usize].cmp(&s[d2 as usize]) {
+                    match s[d1].cmp(&s[d2]) {
                         Ordering::Less => return Some(Ordering::Greater),
                         Ordering::Equal => {}
                         Ordering::Greater => return Some(Ordering::Less),

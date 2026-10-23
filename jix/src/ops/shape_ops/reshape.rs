@@ -61,6 +61,7 @@ impl<S> Reshape<S> {
             InvalidShapeOperation,
             "cannot reshape array of shape {orig_shape:?} into shape {new_shape:?}"
         );
+        check_shape_overflow(&new_shape, array.dtype().itemsize() as _)?;
 
         let orig_logical_strides = default_logical_strides(&orig_shape);
         let new_logical_strides = default_logical_strides(&new_shape);
@@ -259,7 +260,12 @@ where
         //      needed.
         // -----------------------------------------------------------------------
         check_get_range(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         let dtype = self.dtype();
         let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let mut out = materialize_out_buf(

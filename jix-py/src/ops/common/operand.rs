@@ -280,7 +280,7 @@ impl Operand {
                         }
                         Some(Precision::P4) => create_scalar_array(value as f32, &shape, params),
                         Some(Precision::P2) => {
-                            create_scalar_array(f16::from_f32(value as f32), &shape, params)
+                            create_scalar_array(f16::from_f64(value), &shape, params)
                         }
                         Some(_) => unreachable!(),
                     },

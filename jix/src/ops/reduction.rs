@@ -137,6 +137,10 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
             ensure!(!is_reduced[d], InvalidArgument, "duplicate dim {d}");
             is_reduced[d] = true;
         }
+        debug_assert!(
+            !K::NEEDS_INDICES || dims.len() <= 1,
+            "index-tracking reductions support a single reduced dim"
+        );
 
         if !K::SUPPORTS_EMPTY
             && array
@@ -333,7 +337,12 @@ where
     // of kernel, dimension, dtype, and backing storage.
 
     check_get_range(outer_shape, index)?;
-    check_out_buf(out.as_deref(), outer_shape)?;
+    check_out_buf(
+        out.as_deref(),
+        outer_shape,
+        index,
+        output_dtype.itemsize() as usize,
+    )?;
     let out_shape_usize = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
     let mut out = materialize_out_buf(
         out,
@@ -3076,6 +3085,7 @@ where
     const SUPPORTS_EMPTY: bool = false;
     const NEEDS_FINALIZE: bool = false;
     const PREFER_TREE_MERGE: bool = true;
+    const NEEDS_INDICES: bool = false;
 }
 impl<S, F> ArrayStorage for Reduce<S, F>
 where
@@ -3405,6 +3415,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 pub(crate) mod tests {
     use std::rc::Rc;
 
@@ -3813,35 +3824,6 @@ pub(crate) mod tests {
         crate::util::assert_array_matches(&zaf.view().argmax(0usize), &array![1u64, 1, 1]);
         // row 0 ties col 0/col 1 at 2.5, row 1 ties col 0/col 1 at 3.0 -> first col (0) wins.
         crate::util::assert_array_matches(&zaf.view().argmax(1usize), &array![0u64, 0]);
-    }
-
-    #[test]
-    fn multi_dim_argmax_reports_the_true_stream_position() {
-        use crate::Array;
-
-        // `ArgMax` is `single_dim`, so a multi-dim argmax is only reachable by building the
-        // `ReductionOp` directly. Argmax is the one kernel whose result depends on an element's
-        // position in the reduced stream, which makes it the probe for how that position is
-        // computed.
-        //
-        // Two reduced dims and a read window small enough that the reduced extent spans many
-        // tiles, so the stream position has to be carried across them. The maximum sits at
-        // `(1, 0)`, whose row-major position in the reduced stream is `1 * N + 0`.
-        const N: usize = 1 << 12;
-        let mut nd = ndarray::Array2::<i32>::zeros((2, N));
-        nd[[1, 0]] = 1;
-        let mut params = crate::ArrayParams::new();
-        params.read_size((256, 1024));
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
-
-        let op = super::ReductionOp::<_, _>::new(
-            za.into_storage(),
-            super::ArgMaxKernel {},
-            [0usize, 1].as_slice(),
-        )
-        .unwrap();
-        let got = Array::from_storage(op).to_ndarray().unwrap();
-        assert_eq!(got[ndarray::IxDyn(&[])], N as u64);
     }
 
     #[test]

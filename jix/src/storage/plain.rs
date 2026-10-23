@@ -452,7 +452,12 @@ where
     ) -> Result<StridedBuf<'a>> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
 
         let ndim = self.shape.ndim();
         let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);

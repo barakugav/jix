@@ -75,7 +75,12 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
 
         let ndim = index.len();
         let dtype = self.dtype();

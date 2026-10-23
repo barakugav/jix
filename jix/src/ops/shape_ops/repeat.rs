@@ -104,7 +104,12 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
 
         let ndim = self.new_shape.ndim();
         let dtype = self.dtype();
@@ -178,7 +183,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             // (n * dst_strides[k], dst_strides[k]).
             let mut dst_strides_split = dim_arr(ndim + 1, |_| 0);
             dst_strides_split[..k].copy_from_slice(&out_strides[..k]);
-            dst_strides_split[k] = out_strides[k] * n as usize;
+            dst_strides_split[k] = out_strides[k].wrapping_mul(n as usize); // Wraps only when g_len == 1
             dst_strides_split[k + 1..].copy_from_slice(&out_strides[k..]);
 
             // src slice: tmp_buf from (g_range.start) along the inner k dim to its end.
@@ -283,6 +288,27 @@ mod tests {
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_len1_out_dim_with_large_stride_times_repeats() {
+        // Out dim 0 has length 1, so its stride * repeats (2^64) is never used.
+        let a = Array::compact_ndarray(&array![[1u8, 2, 3, 4]]).unwrap();
+        let r = a.repeat(1u64 << 50, 0);
+        let mut backing = vec![0u8; 1 << 14];
+        let ctx = ReadContext::default();
+        // SAFETY: shape [1, 4] at strides [16384, 1] touches bytes 0..4 of `backing`.
+        let mut out = unsafe {
+            crate::storage::StridedBuf::from_raw_parts_mut(
+                backing.as_mut_ptr(),
+                &[1, 4],
+                &[1usize << 14, 1],
+                1,
+            )
+        };
+        r.to_ndarray_buf(&[5..6, 0..4], &ctx, Some(&mut out))
+            .unwrap();
+        assert_eq!(&backing[..4], &[1, 2, 3, 4]);
+    }
 
     fn make(vals: Vec<i32>, shape: impl IntoDimension) -> Array<Compact<Ty<i32>>> {
         let shape = shape.into_dimension().unwrap();

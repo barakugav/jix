@@ -7,6 +7,8 @@ Mixed-dtype section verifies the automatic casting / dispatch rules:
   same-rank impl; scalars with precision (np.int32, np.float32) match precisely.
 """
 
+import operator
+
 import numpy as np
 import pytest
 from hypothesis import given
@@ -88,6 +90,16 @@ def test_add_custom_inputs():
     zac = jix.compact(dc)
     check(zac + complex(1, 1), dc + complex(1, 1))
     check(zac + [1 + 1j, 2 + 2j], dc + np.array([1 + 1j, 2 + 2j]))
+
+
+def test_numpy_operand_on_the_left_defers_to_jix():
+    a = np.array([1, 2, 3], dtype=np.int32)
+    za = jix.compact(np.array([10, 20, 30], dtype=np.int32))
+    for op in [operator.add, operator.sub, operator.mul, operator.lt, operator.eq, operator.and_]:
+        r = op(a, za)
+        assert isinstance(r, jix.Array)
+        np.testing.assert_array_equal(r.numpy(), op(a, za.numpy()))
+    assert (np.int16(3) + jix.compact(np.array([1], dtype=np.int8))).dtype == np.int16
 
 
 def test_subtract_concrete():

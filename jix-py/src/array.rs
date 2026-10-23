@@ -474,23 +474,27 @@ impl Array {
     ///     this, and the result is undefined behavior - corrupted values, or a crash.
     ///
     ///     The overlap arises when the array, or anything in its lazy chain, was built by
-    ///     [`jix.asarray()`][jix.asarray] over the very NumPy array being passed as `out`:
-    ///     `asarray` wraps that buffer instead of copying it, so the read would be scattering
-    ///     decoded elements into the same bytes it is still reading from.
+    ///     with the very NumPy array being passed as `out`. [`jix.asarray()`][jix.asarray]
+    ///     wraps that buffer instead of copying it, so the read would be scattering
+    ///     decoded elements into the same bytes it is still reading from. Using numpy
+    ///     arrays in ops (like `a + x`, `a - x.T`) can also trigger this overlap if `x` is
+    ///     used as `out`.
     ///
     ///     ```python
     ///     x = np.arange(12, dtype=np.int32).reshape(3, 4)
     ///     a = jix.asarray(x)      # a is a view of x's buffer - no copy
     ///
     ///     (a + 1).numpy(out=x)    # UNDEFINED - do not do this
+    ///     (c + x).numpy(out=x)    # UNDEFINED too: x is wrapped without a copy
     ///     x[...] = (a + 1).numpy()  # do this instead
     ///     ```
     ///
     /// Returns:
     ///     A NumPy array with the same dtype as `self`, and the shape determined by the `index`
     ///         argument (or `self.shape` when no index is supplied). Without `out`, a brand-new
-    ///         C-contiguous (row-major) allocation the caller owns outright; with `out`, that same
-    ///         object.
+    ///         allocation is created (with implementation defined memory layout, but mostly it
+    ///         try to follow the source array's memory order like NumPy `order='K'`).
+    ///         With `out`, that same object.
     ///
     /// Raises:
     ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds,
@@ -1458,6 +1462,11 @@ impl Array {
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::remove_dim(slf, dim)
     }
+
+    // Opts out of NumPy ufuncs
+    #[classattr]
+    #[allow(non_upper_case_globals)]
+    const __array_ufunc__: Option<()> = None;
 }
 
 /// Compact any array-like object to a new [`jix.Array`][jix.Array] by compressing it into new blocks.

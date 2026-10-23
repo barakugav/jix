@@ -1,7 +1,6 @@
 use std::marker::PhantomData;
 
 use crate::ops::prelude::*;
-use crate::util::assert_unchecked_eq;
 
 /// A lazy storage adapter that re-tags an array's element-type parameter without copying data.
 ///
@@ -85,7 +84,7 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         if let Some(dtype) = ET::DTYPE {
-            unsafe { assert_unchecked_eq!(self.inner.dtype(), &dtype) };
+            debug_assert_eq!(self.inner.dtype(), &dtype);
         }
         self.inner.read_data(index, context, out)
     }
@@ -100,7 +99,7 @@ where
         T: Dtyped,
     {
         if let Some(dtype) = ET::DTYPE {
-            unsafe { assert_unchecked_eq!(self.inner.dtype(), &dtype) };
+            debug_assert_eq!(self.inner.dtype(), &dtype);
         }
         self.inner.read_as_elementwise_pipeline(index, context)
     }

@@ -2,7 +2,7 @@ use jix_core::ops::{Broadcast, InsertDim, SliceItem, SliceSpec};
 use jix_core::{ArrayAny, NDIM_MAX};
 use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyEllipsis, PySlice, PyTuple};
+use pyo3::types::{PyBool, PyEllipsis, PySlice, PyTuple};
 
 use crate::ops::asarray_simple;
 use crate::ops::common::{operands_dtype_promotion_vec, Operand};
@@ -237,6 +237,8 @@ pub(crate) fn parse_basic_index<'py>(
 ) -> PyResult<ParsedBasicIndex> {
     let ndim = shape.len();
 
+    // One extra slot for an Ellipsis
+    type RawIdx<T> = arrayvec::ArrayVec<T, { NDIM_MAX + 1 }>;
     enum RawIdxItem<'a> {
         Int(i64),
         Slice(&'a Bound<'a, PySlice>),
@@ -247,19 +249,20 @@ pub(crate) fn parse_basic_index<'py>(
         Some(index) => {
             if let Ok(tup) = index.cast::<PyTuple>() {
                 let tup = tup.as_slice();
-                if tup.len() > NDIM_MAX {
+
+                if tup.len() > NDIM_MAX + 1 {
                     return Err(PyIndexError::new_err(format!(
                         "too many indices for array: array is {ndim}-dimensional, \
                          but {len} were indexed",
                         len = tup.len()
                     )));
                 }
-                tup.iter().collect::<DimArray<_>>()
+                tup.iter().collect::<RawIdx<_>>()
             } else {
-                [index].into_iter().collect::<DimArray<_>>()
+                [index].into_iter().collect::<RawIdx<_>>()
             }
         }
-        None => DimArray::new(),
+        None => RawIdx::new(),
     };
     let raw = raw
         .into_iter()
@@ -270,14 +273,16 @@ pub(crate) fn parse_basic_index<'py>(
             if let Ok(slice) = item.cast::<PySlice>() {
                 return Ok(RawIdxItem::Slice(slice));
             }
-            if let Ok(i) = item.extract::<i64>() {
+            if !item.is_instance_of::<PyBool>()
+                && let Ok(i) = item.extract::<i64>()
+            {
                 return Ok(RawIdxItem::Int(i));
             }
             Err(PyTypeError::new_err(
                 "only integers, slices (`:`), and ellipsis (`...`) are valid indices",
             ))
         })
-        .collect::<PyResult<DimArray<_>>>()?;
+        .collect::<PyResult<RawIdx<_>>>()?;
 
     let ellipsis_count = raw
         .iter()
@@ -339,7 +344,7 @@ pub(crate) fn parse_basic_index<'py>(
                 let stop = s.stop as i64;
                 let start_norm = if start < 0 { start + len } else { start };
                 let stop_norm = if stop < 0 { stop + len } else { stop };
-                if start_norm < 0 || start_norm >= len {
+                if start_norm < 0 || start_norm > len {
                     return Err(PyIndexError::new_err(format!(
                         "slice start {start} is out of bounds for dim {dim_cursor} with size {len}"
                     )));
@@ -765,7 +770,7 @@ pub fn reshape<'py>(
         }
         if let Some(inferred_dim) = inferred_dim {
             let array_size = array.shape().iter().product::<u64>();
-            if array_size == 0 || known_size == 0 || !array_size.is_multiple_of(known_size) {
+            if known_size == 0 || !array_size.is_multiple_of(known_size) {
                 return Err(PyValueError::new_err("Cannot infer dimension size"));
             }
             new_shape[inferred_dim] = (array_size / known_size) as i64;
@@ -817,8 +822,7 @@ pub fn reshape<'py>(
 #[pyfunction]
 pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
-    let size = py_arr.get().arr.shape().iter().product::<u64>();
-    reshape(&py_arr, ItemOrTuple::Item(size as i64))
+    reshape(&py_arr, ItemOrTuple::Item(-1))
 }
 
 /// Joins a sequence of arrays along an existing dim.

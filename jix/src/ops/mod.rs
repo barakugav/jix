@@ -139,7 +139,6 @@ pub use complex::*;
 
 mod common;
 pub use common::DimsArg;
-pub(crate) use common::LanesInfo;
 
 pub(crate) mod _traits {
     pub use super::bitwise::_traits::*;

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::error::{ensure, Result};
-use crate::util::{assert_unchecked_eq, SendSyncPtr};
+use crate::util::{assert_unchecked_eq, SendSyncPtr, Unaligned};
 use crate::ElementType;
 
 const _: () = const {
@@ -17,21 +17,36 @@ const _: () = const {
 /// Size of a block along one dimension.
 pub type BlockSize = u32;
 
-/// Packed locations of two blocks within the compressed data buffer.
-///
-/// A block's location is an `(offset, len)` pair. A naive `{ offset: u64, len: u32 }` struct would
-/// be padded to 16 bytes (8-byte alignment), wasting the 4 bytes saved by storing `len` as a `u32`
-/// rather than a `u64`. Block lengths always fit in `u32`, so two blocks are packed into one
-/// 24-byte entry instead - 12 bytes per block, no padding. Block `2i` uses lane `[0]`, block
-/// `2i + 1` uses lane `[1]`; an array of these holds `(nblocks + 1) >> 1` entries (when `nblocks`
-/// is odd, the spare lane of the last entry is left zero and never read).
+/// Location of one block within the compressed data buffer: its compressed bytes are the `len`
+/// bytes starting at `offset`. Block lengths always fit in `u32`. The fields have alignment 1, so
+/// the struct has no padding (12 bytes) and a memory-mapped archive can be read in place at any
+/// file offset.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub(crate) struct BlockLocation2 {
-    /// Byte offset into the data buffer where each block's compressed data begins.
-    pub(crate) offset: [u64; 2],
-    /// Byte length of each block's compressed data.
-    pub(crate) len: [u32; 2],
+pub(crate) struct BlockLocation {
+    /// Byte offset into the data buffer where the block's compressed data begins.
+    offset: Unaligned<u64>,
+    /// Byte length of the block's compressed data.
+    len: Unaligned<u32>,
+}
+const _: () = assert!(size_of::<BlockLocation>() == 12 && align_of::<BlockLocation>() == 1);
+impl BlockLocation {
+    #[inline]
+    pub(crate) fn new(offset: u64, len: u32) -> Self {
+        Self {
+            offset: Unaligned::new(offset),
+            len: Unaligned::new(len),
+        }
+    }
+    #[inline(always)]
+    pub(crate) fn offset(&self) -> u64 {
+        self.offset.get()
+    }
+
+    #[inline(always)]
+    pub(crate) fn len(&self) -> u32 {
+        self.len.get()
+    }
 }
 
 /// Compressed 1D storage of typed items, divided into independently-encoded fixed-size blocks.
@@ -43,9 +58,8 @@ pub(crate) struct BlockLocation2 {
 ///
 /// Internally the compressed bytes of all blocks live in a single contiguous byte buffer
 /// (`block_data`), but the blocks may be stored in any order within it. A parallel array of
-/// [`BlockLocation2`] entries (`blocks_loc`) records where each block's data lives: block `i`
-/// occupies `blocks_loc[i >> 1].len[i & 1]` bytes of `block_data` starting at
-/// `blocks_loc[i >> 1].offset[i & 1]`. This enables O(1) random access to any block without
+/// [`BlockLocation`] entries (`blocks_loc`) records where each block's data lives: block `i`
+/// occupies `blocks_loc[i].len` bytes of `block_data` starting at `blocks_loc[i].offset`. This enables O(1) random access to any block without
 /// scanning the compressed data.
 ///
 /// # Storage backends
@@ -60,14 +74,14 @@ pub(crate) struct BlockLocation2 {
 ///
 /// - `block_size > 0`
 /// - `nitems % block_size == 0`
-/// - `blocks_loc.len() == (nblocks + 1) >> 1`
+/// - `blocks_loc.len() == nblocks`
 /// - every block's location satisfies `offset + len <= block_data.len()`
 pub(crate) struct BlockTable<S, ET>
 where
     S: BlockTableStorage,
 {
     pub(crate) block_data: S::Data<u8>,
-    pub(crate) blocks_loc: S::Data<BlockLocation2>,
+    pub(crate) blocks_loc: S::Data<BlockLocation>,
 
     pub(crate) nitems: u64,
     element_type: ET,
@@ -87,12 +101,10 @@ where
     /// # Arguments
     ///
     /// - `block_data` - concatenated compressed bytes for all blocks.
-    /// - `blocks_loc` - packed block locations, two blocks per [`BlockLocation2`] entry; must have
-    ///   length `(nblocks + 1) >> 1`. Block `i`'s compressed bytes are the `len` bytes of
-    ///   `block_data` starting at `offset`, where `(offset, len)` is lane `i & 1` of entry `i >> 1`.
-    ///   Every block must satisfy `offset + len <= block_data.len()`; blocks need not be contiguous
+    /// - `blocks_loc` - one [`BlockLocation`] per block; block `i`'s compressed bytes are the `len`
+    ///   bytes of `block_data` starting at `offset` of entry `i`. Every block must satisfy `offset + len <= block_data.len()`; blocks need not be contiguous
     ///   or in order.
-    /// - `nblocks` - number of blocks (the parity that `blocks_loc.len()` alone cannot recover).
+    /// - `nblocks` - number of blocks; must equal `blocks_loc.len()`.
     /// - `block_size` - number of items per block (must be `> 0`).
     /// - `decoder_config` - codec and dtype configuration used when decoding blocks.
     ///
@@ -102,7 +114,7 @@ where
     /// - `block_size == 0`
     pub(crate) fn new(
         block_data: S::Data<u8>,
-        blocks_loc: S::Data<BlockLocation2>,
+        blocks_loc: S::Data<BlockLocation>,
         nblocks: u64,
         block_size: BlockSize,
         decoder_config: DecoderCodecConfig,
@@ -113,11 +125,9 @@ where
         ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
         let nitems = nblocks * block_size as u64;
         let data_len = block_data.as_ref().len() as u64;
-        debug_assert_eq!(blocks_loc.as_ref().len() as u64, (nblocks + 1) >> 1);
-        debug_assert!((0..nblocks).all(|i| {
-            let loc = &blocks_loc.as_ref()[(i >> 1) as usize];
-            let lane = (i & 1) as usize;
-            let (offset, len) = (loc.offset[lane], loc.len[lane] as u64);
+        debug_assert_eq!(blocks_loc.as_ref().len() as u64, nblocks);
+        debug_assert!(blocks_loc.as_ref().iter().all(|loc| {
+            let (offset, len) = (loc.offset(), loc.len() as u64);
             offset <= data_len && len <= data_len - offset
         }));
         let element_type = ET::from_dtype(decoder_config.dtype.clone())?;
@@ -149,9 +159,8 @@ where
     /// Byte offset and length of block `block_idx`'s compressed data within `block_data`.
     #[inline(always)]
     pub(crate) fn block_location(&self, block_idx: u64) -> (u64, BlockSize) {
-        let loc = &self.blocks_loc.as_ref()[(block_idx >> 1) as usize];
-        let lane = (block_idx & 1) as usize;
-        (loc.offset[lane], loc.len[lane])
+        let loc = &self.blocks_loc.as_ref()[block_idx as usize];
+        (loc.offset(), loc.len())
     }
 
     /// Decompress one block into `buf`.
@@ -189,13 +198,7 @@ where
         let block_data = &self.block_data.as_ref()[offset as usize..][..len as usize];
 
         let decoder = context.decoder(&self.decoder_config);
-        let nbytes = decoder.decode(block_data, buf)?;
-        ensure!(
-            nbytes == b_size_bytes,
-            InvalidArchive,
-            "Unexpected decoded block size: got {nbytes}, expected {b_size_bytes}"
-        );
-        Ok(())
+        decoder.decode(block_data, buf)
     }
 
     pub(crate) fn as_ref(&self) -> BlockTable<Borrowed<'_>, ET>
@@ -260,7 +263,7 @@ pub(crate) trait BlockTableBuilder {
 /// Accumulates compressed blocks into heap `Vec`s and produces a [`BlockTable<Owned>`].
 pub(crate) struct OwnedBlockTableBuilder {
     block_data: Vec<u8>,
-    blocks_loc: Vec<BlockLocation2>,
+    blocks_loc: Vec<BlockLocation>,
     block_size: BlockSize,
     decoder_config: DecoderCodecConfig,
     nblocks: u64,
@@ -274,7 +277,7 @@ impl OwnedBlockTableBuilder {
     ) -> Result<Self> {
         Ok(Self {
             block_data: Vec::new(),
-            blocks_loc: vec![BlockLocation2::default(); ((nblocks + 1) >> 1) as usize],
+            blocks_loc: vec![BlockLocation::default(); nblocks as usize],
             block_size,
             decoder_config,
             nblocks,
@@ -304,10 +307,7 @@ impl BlockTableBuilder for OwnedBlockTableBuilder {
     fn write_compressed_block(&mut self, block_index: u64, compressed: &[u8]) -> Result<()> {
         let offset = self.block_data.len() as u64;
         self.block_data.extend_from_slice(compressed);
-        let loc = &mut self.blocks_loc[(block_index >> 1) as usize];
-        let lane = (block_index & 1) as usize;
-        loc.offset[lane] = offset;
-        loc.len[lane] = compressed.len() as u32;
+        self.blocks_loc[block_index as usize] = BlockLocation::new(offset, compressed.len() as u32);
         Ok(())
     }
 
@@ -369,7 +369,7 @@ impl<ET> BlockTable<Owned, ET> {
 
         let nblocks = nitems / block_size as usize;
         let mut block_data = Vec::<u8>::new();
-        let mut blocks_loc = vec![BlockLocation2::default(); (nblocks + 1) >> 1];
+        let mut blocks_loc = vec![BlockLocation::default(); nblocks];
         for (block_idx, plain_data) in data.chunks(b_size_bytes).enumerate() {
             ensure!(
                 plain_data.len() == b_size_bytes,
@@ -387,9 +387,7 @@ impl<ET> BlockTable<Owned, ET> {
             let blk_cdata_len = encoder.encode(plain_data, blk_buf)?;
             debug_assert!(blk_cdata_len <= max_blk_cdata_len);
             unsafe { block_data.set_len(block_data_len + blk_cdata_len) };
-            let loc = &mut blocks_loc[block_idx >> 1];
-            loc.offset[block_idx & 1] = block_data_len as u64;
-            loc.len[block_idx & 1] = blk_cdata_len as u32;
+            blocks_loc[block_idx] = BlockLocation::new(block_data_len as u64, blk_cdata_len as u32);
         }
 
         let decoder_config = DecoderCodecConfig {

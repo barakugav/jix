@@ -10,7 +10,6 @@ use crate::buf_pool::PoolBuf;
 use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{ArithmeticOpStatus, Result};
-use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
@@ -684,13 +683,20 @@ fn inner_loop_per_level<
     simd: S,
 ) {
     let lanes = const {
-        let lanes = if IN_CONTIGUOUS && OUT_CONTIGUOUS {
+        let lanes = if IN_CONTIGUOUS && OUT_CONTIGUOUS && P::MAX_ITEMSIZE <= S::u8s::LEN {
             let per_vector = prev_power_of_two(S::u8s::LEN / P::MAX_ITEMSIZE);
             let used_simd_registers = if cfg!(target_arch = "x86") { 4 } else { 8 };
             used_simd_registers * per_vector
         } else {
             const STRIDED_LANES: usize = 4;
-            const_min(<T as LanesInfo>::LANES, STRIDED_LANES)
+            let lanes = {
+                if size_of::<T>() == 0 {
+                    1024
+                } else {
+                    (128 / size_of::<T>()).next_power_of_two()
+                }
+            };
+            const_min(lanes, STRIDED_LANES)
         };
         assert!(lanes.is_power_of_two() && lanes <= 512);
         lanes

@@ -126,7 +126,12 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         let ndim = self.is_broadcast.as_ref().len();
 
         let inner_index = dim_arr(ndim, |dim| {

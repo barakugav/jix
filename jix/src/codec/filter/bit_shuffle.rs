@@ -500,7 +500,7 @@ mod tests {
         let buf_pool = BufferPool::new();
 
         let mut optimized_out = vec![0u8; src.len()];
-        BitShuffleFilter::default().encode(src, &mut optimized_out, &dtype, &buf_pool);
+        BitShuffleFilter.encode(src, &mut optimized_out, &dtype, &buf_pool);
 
         let mut trivial_out = vec![0u8; src.len()];
         bit_shuffle_trivial(src, &mut trivial_out, typesize);

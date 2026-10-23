@@ -185,13 +185,14 @@ pub(crate) fn check_dtype_size_nonzero(dtype: &Dtype) -> Result<()> {
 #[inline]
 pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
     let product = shape.iter().cloned().chain([itemsize]).try_shape_product();
-    if product.is_none() {
+    if product.is_none() || shape.iter().any(|&d| d > i64::MAX as u64) {
         #[cold]
         #[inline(never)]
         fn shape_overflow_fail(shape: &[u64], itemsize: u64) -> Result<()> {
             bail!(
                 InvalidShapeOperation,
-                "shape has overflowed u64 product with itemsize {itemsize}: {shape:?}"
+                "shape {shape:?} with itemsize {itemsize} overflows: dims must be at most \
+                 i64::MAX and the byte size must fit in u64"
             );
         }
         return shape_overflow_fail(shape, itemsize);
@@ -242,28 +243,48 @@ pub(crate) fn check_get_buffer_size(
     index: &[Range<u64>],
     dtype: &Dtype,
     buf: &mut [u8],
-) -> Result<usize> {
-    let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
-    let required_size = nitems * dtype.itemsize() as usize;
+) -> Result<()> {
+    let required_size = index
+        .iter()
+        .map(|r| r.end - r.start)
+        .chain([dtype.itemsize() as u64])
+        .try_shape_product();
     let buf_len = buf.len();
 
-    if buf_len != required_size {
+    if Some(buf_len as u64) != required_size {
         #[cold]
         #[inline(never)]
         fn buffer_size_fail(
             buf_len: usize,
-            required_size: usize,
+            required_size: u64,
             index: &[Range<u64>],
             dtype: &Dtype,
-        ) -> Result<usize> {
+        ) -> Result<()> {
             bail!(
                 InvalidBufferSize,
                 "Unexpected buffer size {buf_len} requested index {index:?} with dtype {dtype} (required size: {required_size})"
             );
         }
-        return buffer_size_fail(buf_len, required_size, index, dtype);
+        return buffer_size_fail(buf_len, required_size.unwrap_or(u64::MAX), index, dtype);
     }
-    Ok(nitems)
+    Ok(())
+}
+
+#[inline]
+pub(crate) fn check_region_size(index: &[Range<u64>], itemsize: usize) -> Result<()> {
+    if cfg!(target_pointer_width = "32") {
+        let bytes = index
+            .iter()
+            .map(|r| r.end - r.start)
+            .chain([itemsize as u64])
+            .try_shape_product();
+        ensure!(
+            bytes.is_some_and(|b| b <= isize::MAX as u64),
+            InvalidShapeOperation,
+            "read region {index:?} with itemsize {itemsize} does not fit in memory"
+        );
+    }
+    Ok(())
 }
 
 /// An arithmetic error an element-wise operation can hit while computing its output.
@@ -419,6 +440,7 @@ impl From<ArithmeticErrorKind> for ArithmeticOpStatus {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
     use crate::dtype::Dtyped;
@@ -449,6 +471,9 @@ mod tests {
         assert!(check_shape_overflow(&[1000, 1000], 4).is_ok());
         let err = check_shape_overflow(&[u64::MAX, 2], 4).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidShapeOperation);
+        assert!(check_shape_overflow(&[i64::MAX as u64], 1).is_ok());
+        let err = check_shape_overflow(&[i64::MAX as u64 + 1], 1).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidShapeOperation);
     }
 
     #[test]
@@ -465,14 +490,20 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn read_region_must_fit_in_memory_on_32_bit() {
+        assert!(check_region_size(&[0..1 << 30, 0..1], 1).is_ok());
+        assert!(check_region_size(&[0..1 << 30, 0..2], 1).is_err());
+        let mut buf = [];
+        assert!(check_get_buffer_size(&[0..1 << 32], &u8::DTYPE, &mut buf).is_err());
+    }
+
+    #[test]
     fn check_get_buffer_size_requires_the_exact_size() {
         let dtype = i32::DTYPE;
         let index = [0..2, 0..3];
         let mut exact = [0u8; 24];
-        assert_eq!(
-            check_get_buffer_size(&index, &dtype, &mut exact).unwrap(),
-            6
-        );
+        assert!(check_get_buffer_size(&index, &dtype, &mut exact).is_ok());
         let mut short = [0u8; 8];
         let err = check_get_buffer_size(&index, &dtype, &mut short).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidBufferSize);

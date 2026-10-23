@@ -67,6 +67,17 @@ CASES = [
     ((2, 1, 3, 4), (Ellipsis, 2)),
     ((2, 1, 3, 4), (Ellipsis, 1, 2)),
     ((1, 1, 4), (Ellipsis, 2)),
+    # empty slices at the end of a dim, and slices of a zero-length dim
+    ((3, 4), slice(3, None)),
+    ((3, 4), slice(3, 3)),
+    ((3, 4), (slice(None), slice(4, None))),
+    ((0, 3), slice(None)),
+    ((0, 3), slice(0, 0)),
+    ((0, 3), (slice(None), 0)),
+    # NDIM_MAX items plus an ellipsis
+    ((2,) * 8, (0,) * 8 + (Ellipsis,)),
+    ((2,) * 8, (Ellipsis,) + (slice(None),) * 8),
+    ((2,) * 8, (1,) * 4 + (Ellipsis,) + (1,) * 4),
 ]
 
 
@@ -135,3 +146,29 @@ def test_out_with_a_reversed_length_one_dim_is_accepted():
     assert dst.strides[0] < 0
     a.numpy(out=dst)
     np.testing.assert_array_equal(dst, np_a)
+
+
+def test_numpy_result_follows_source_memory_order():
+    f = np.asfortranarray(arange((3, 4)))
+    assert jix.compact(f).numpy().flags.c_contiguous
+    got = jix.asarray(f).numpy()
+    assert got.flags.f_contiguous
+    np.testing.assert_array_equal(got, f)
+
+
+def test_too_many_indices_raises():
+    a = jix.compact(arange((2,) * 8))
+    for index in [(0,) * 9, (0,) * 9 + (Ellipsis,)]:
+        with pytest.raises(IndexError):
+            a[index]
+
+
+@pytest.mark.parametrize("index", [True, False, (0, True), np.True_])
+def test_bool_index_raises(index):
+    a = jix.compact(arange((3, 4)))
+    with pytest.raises(TypeError):
+        a[index]
+    with pytest.raises(TypeError):
+        a.numpy(index)
+    with pytest.raises(TypeError):
+        jix.slice(a, index)

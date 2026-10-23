@@ -57,7 +57,12 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         self.read_as_elementwise_pipeline::<K::Output>(index, context)?
             .to_buf(index, context, out)
     }
@@ -1774,7 +1779,7 @@ pub(crate) mod tests {
             (-inf, &[InvalidOperation]),
             (nan, &[]),
             (0.0, &[]),
-            (1.5707963267948966, &[]),
+            (std::f64::consts::FRAC_PI_2, &[]),
             (60000.0, &[]),
         ];
         check!("sin", Sin::sin, trig);

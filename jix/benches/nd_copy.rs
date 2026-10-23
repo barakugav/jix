@@ -124,15 +124,15 @@ fn bench_nd_copy(c: &mut Criterion) {
 
     for case in &cases {
         let nitems: usize = case.shape.iter().product();
-        let src_elems = strided_span_bytes(&case.shape, &case.src_strides, size_of::<i32>())
+        let src_elems = strided_span_bytes(case.shape, &case.src_strides, size_of::<i32>())
             .div_ceil(size_of::<i32>());
-        let dst_elems = strided_span_bytes(&case.shape, &case.dst_strides, size_of::<i32>())
+        let dst_elems = strided_span_bytes(case.shape, &case.dst_strides, size_of::<i32>())
             .div_ceil(size_of::<i32>());
         let src = (0..src_elems).map(|i| i as i32).collect::<Vec<_>>();
         let mut dst = vec![0; dst_elems];
 
         group.throughput(Throughput::Bytes((nitems * size_of::<i32>()) as u64));
-        group.bench_function(BenchmarkId::from_parameter(&case.name), |b| {
+        group.bench_function(BenchmarkId::from_parameter(case.name), |b| {
             b.iter(|| unsafe {
                 nd_copy(
                     std::slice::from_raw_parts(
@@ -143,7 +143,7 @@ fn bench_nd_copy(c: &mut Criterion) {
                         black_box(dst.as_mut_ptr()).cast::<u8>(),
                         dst_elems * size_of::<i32>(),
                     ),
-                    &case.shape,
+                    case.shape,
                     &case.src_strides,
                     &case.dst_strides,
                     &dtype,

@@ -165,7 +165,12 @@ where
         let shape = self.shape();
         let dtype = self.dtype();
         check_get_range(shape, index)?;
-        check_out_buf(out.as_deref(), shape)?;
+        check_out_buf(
+            out.as_deref(),
+            shape,
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         let output_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let mut out = materialize_out_buf(
             out,

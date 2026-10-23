@@ -79,7 +79,6 @@ impl<S: ArrayStorage> Slice<S> {
         })?;
         let no_steps = slice.iter().all(|ds| ds.step == 1);
 
-        let slice = dim_arr(ndim, |dim| slice[dim].clone());
         let shape = DimDyn::from_fn(ndim, |dim| slice[dim].len());
 
         let inner_spec = array.spec();
@@ -127,7 +126,12 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-        check_out_buf(out.as_deref(), self.shape())?;
+        check_out_buf(
+            out.as_deref(),
+            self.shape(),
+            index,
+            self.dtype().itemsize() as usize,
+        )?;
         let ndim = self.slice.as_ref().len();
 
         // Fast path: all dims have step == 1. Map index [a, b) to inner [start + a, start + b) and forward.
