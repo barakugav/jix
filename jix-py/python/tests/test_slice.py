@@ -233,6 +233,21 @@ def test_slice_stop_out_of_bounds_raises():
         jix.slice(a, slice(0, 10))
 
 
+@pytest.mark.parametrize(
+    "index", [slice(0, 2**63 - 1), slice(0, 2**63), slice(0, 2**100), slice(2**100, None), slice(-(2**100), None)]
+)
+def test_slice_huge_bounds_raise(index):
+    a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
+    with pytest.raises(IndexError):
+        a[index]
+
+
+def test_slice_numpy_int_bounds():
+    np_a = np.arange(12, dtype=np.int32).reshape(3, 4)
+    a = jix.compact(np_a)
+    np.testing.assert_array_equal(a[np.int64(1) : np.uint8(3)], np_a[1:3])
+
+
 def test_slice_start_greater_than_stop_raises():
     """Strict bounds: reversed slices (post-normalization) are rejected."""
     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))

@@ -3,7 +3,9 @@ use std::mem::{ManuallyDrop, MaybeUninit};
 use jix_core::NDIM_MAX;
 use numpy::npyffi::{npy_intp, PyArray_Dims};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
-use pyo3::exceptions::{PyFloatingPointError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{
+    PyFloatingPointError, PyIndexError, PyRuntimeError, PyTypeError, PyValueError,
+};
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
@@ -17,18 +19,26 @@ pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 /// numpy-style clamping performed by [`PySlice::indices`][pyo3::types::PySliceMethods::indices].
 #[inline]
 pub(crate) fn slice_unpack(slice: &Bound<'_, PySlice>, length: i64) -> PyResult<PySliceIndices> {
-    let mut start: pyo3::ffi::Py_ssize_t = 0;
-    let mut stop: pyo3::ffi::Py_ssize_t = 0;
-    let mut step: pyo3::ffi::Py_ssize_t = 0;
+    use pyo3::ffi::Py_ssize_t;
+    let Ok(length) = Py_ssize_t::try_from(length) else {
+        return Err(PyIndexError::new_err(format!(
+            "cannot slice a dim of length {length} on this platform"
+        )));
+    };
+    let mut start: Py_ssize_t = 0;
+    let mut stop: Py_ssize_t = 0;
+    let mut step: Py_ssize_t = 0;
     // SAFETY: `slice` is a live `PySlice` and the out-pointers are valid and non-null.
     // `PySlice_Unpack` writes through them on success and sets a Python error on failure.
     if unsafe { pyo3::ffi::PySlice_Unpack(slice.as_ptr(), &mut start, &mut stop, &mut step) } < 0 {
         return Err(PyErr::fetch(slice.py()));
     }
-    // An omitted forward `stop` unpacks to the max sentinel; substitute the dim length
-    // (its Python default) so it is not later mistaken for an out-of-range bound.
-    if stop == pyo3::ffi::Py_ssize_t::MAX {
-        stop = length as pyo3::ffi::Py_ssize_t;
+    if stop == Py_ssize_t::MAX
+        && unsafe {
+            (*slice.as_ptr().cast::<pyo3::ffi::PySliceObject>()).stop == pyo3::ffi::Py_None()
+        }
+    {
+        stop = length;
     }
     Ok(PySliceIndices::new(start, stop, step))
 }
