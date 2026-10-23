@@ -107,6 +107,7 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
         return Ok(array); // no-op, same dtype
     }
     if let Some((src, dst)) = array.dtype().try_to_scalar().zip(dtype.try_to_scalar()) {
+        use jix_core::scalar::bool8;
         use jix_core::scalar::{f16, Complex};
 
         macro_rules! cast_typed {
@@ -132,7 +133,7 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
                     ScalarKind::F64 => cast_typed!($src_type, f64),
                     ScalarKind::ComplexF32 => cast_typed!($src_type, Complex<f32>),
                     ScalarKind::ComplexF64 => cast_typed!($src_type, Complex<f64>),
-                    ScalarKind::Bool => cast_typed!($src_type, bool),
+                    ScalarKind::Bool8 => cast_typed!($src_type, bool8),
                 }
             };
         }
@@ -152,7 +153,7 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
                     ScalarKind::F64 => {}
                     ScalarKind::ComplexF32 => cast_typed!($src_type, Complex<f32>),
                     ScalarKind::ComplexF64 => cast_typed!($src_type, Complex<f64>),
-                    ScalarKind::Bool => cast_typed!($src_type, bool),
+                    ScalarKind::Bool8 => cast_typed!($src_type, bool8),
                 }
             };
         }
@@ -170,7 +171,7 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
             ScalarKind::F64 => cast_num!(f64),
             ScalarKind::ComplexF32 => cast_complex!(Complex<f32>),
             ScalarKind::ComplexF64 => cast_complex!(Complex<f64>),
-            ScalarKind::Bool => cast_num!(bool),
+            ScalarKind::Bool8 => cast_num!(bool8),
         };
     }
     Err(PyTypeError::new_err(format!(

@@ -70,7 +70,10 @@ def test_kernel_names():
     assert a.elementwise_kernel(f"{ew}::inner_loop::<f32, {add}, true, true>").name == "add_f32"
     assert a.elementwise_kernel(f"{ew}::inner_loop::<f32, {add}, true, false>") is None
     less = f"{op2}<{leaf}, {leaf}, jix::ops::cmp::LessKernel, f32, f32>"
-    assert a.elementwise_kernel(f"{ew}::inner_loop::<bool, {less}, true, true>").name == "less_f32_bool"
+    assert (
+        a.elementwise_kernel(f"{ew}::inner_loop::<jix::scalar::bool::bool8, {less}, true, true>").name
+        == "less_f32_bool"
+    )
     clamp = (
         "<jix::ops::cmp::Clamp<_, _, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
         f"::ClampPipeline<{leaf}, {leaf}, {leaf}, f32>"

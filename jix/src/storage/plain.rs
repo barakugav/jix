@@ -526,6 +526,7 @@ mod tests {
     use ndarray::{array, s, ArrayD, Ix3};
 
     use crate::codec::ReadContext;
+    use crate::scalar::bool8;
     use crate::Array;
 
     // -----------------------------------------------------------------------
@@ -612,7 +613,7 @@ mod tests {
 
     #[test]
     fn owned_read_bool() {
-        let nd = array![[true, false], [false, true]];
+        let nd = array![[bool8::TRUE, bool8::FALSE], [bool8::FALSE, bool8::TRUE]];
         let got = Array::plain_ndarray(nd.clone())
             .unwrap()
             .to_ndarray()

@@ -99,7 +99,8 @@ pub enum ScalarKind {
     F64 = 11,
     ComplexF32 = 12,
     ComplexF64 = 13,
-    Bool = 14,
+    /// u8, zero is false, any other byte is true.
+    Bool8 = 14,
 }
 impl ScalarKind {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -122,7 +123,7 @@ impl ScalarKind {
             Self::F64 => "SCALAR_KIND_F64",
             Self::ComplexF32 => "SCALAR_KIND_COMPLEX_F32",
             Self::ComplexF64 => "SCALAR_KIND_COMPLEX_F64",
-            Self::Bool => "SCALAR_KIND_BOOL",
+            Self::Bool8 => "SCALAR_KIND_BOOL8",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -142,7 +143,7 @@ impl ScalarKind {
             "SCALAR_KIND_F64" => Some(Self::F64),
             "SCALAR_KIND_COMPLEX_F32" => Some(Self::ComplexF32),
             "SCALAR_KIND_COMPLEX_F64" => Some(Self::ComplexF64),
-            "SCALAR_KIND_BOOL" => Some(Self::Bool),
+            "SCALAR_KIND_BOOL8" => Some(Self::Bool8),
             _ => None,
         }
     }

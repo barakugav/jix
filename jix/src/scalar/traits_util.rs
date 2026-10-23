@@ -45,24 +45,24 @@ macro_rules! impl_scalar_op1 {
     (
         @impl_one
         impl $Trait:ident for $t:ty {
-            type Output = bool;
+            type Output = bool8;
             fn $f:ident = |$x:ident| $f_expr:expr,
             fn $f_bulk:ident = |$v:ident| $f_bulk_expr:expr,
         }
     ) => {
         impl $Trait for $t {
-            type Output = bool;
+            type Output = crate::scalar::bool8;
             #[inline(always)]
-            fn $f(self) -> bool {
+            fn $f(self) -> crate::scalar::bool8 {
                 let $x = self;
-                $f_expr
+                crate::scalar::bool8::from($f_expr)
             }
 
             #[inline(always)]
             fn $f_bulk<const N: usize, S: fearless_simd::Simd>(
                 xs: [Self; N],
                 simd: S,
-            ) -> [bool; N] {
+            ) -> [crate::scalar::bool8; N] {
                 #[allow(unused_imports)]
                 use fearless_simd::{SimdBase, SimdFloat};
                 crate::scalar::simd::map_vectors_to_bools::<Self, N, S>(
@@ -215,18 +215,18 @@ macro_rules! impl_scalar_op2 {
     (
         @impl_one
         impl $Trait:ident<$rhs:ty> for $t:ty {
-            type Output = bool;
+            type Output = bool8;
             fn $f:ident = |$a:ident, $b:ident| $f_expr:expr,
             fn $f_bulk:ident = |$va:ident, $vb:ident| $f_bulk_expr:expr,
         }
     ) => {
         impl $Trait<$rhs> for $t {
-            type Output = bool;
+            type Output = crate::scalar::bool8;
             #[inline(always)]
-            fn $f(self, rhs: $rhs) -> bool {
+            fn $f(self, rhs: $rhs) -> crate::scalar::bool8 {
                 let $a = self;
                 let $b = rhs;
-                $f_expr
+                crate::scalar::bool8::from($f_expr)
             }
 
             #[inline(always)]
@@ -234,7 +234,7 @@ macro_rules! impl_scalar_op2 {
                 xs: [Self; N],
                 ys: [$rhs; N],
                 simd: S,
-            ) -> [bool; N] {
+            ) -> [crate::scalar::bool8; N] {
                 #[allow(unused_imports)]
                 use fearless_simd::SimdBase;
                 crate::scalar::simd::map_vectors2_to_bools::<Self, N, S>(

@@ -21,7 +21,7 @@ pub(crate) trait ReductionOpKernel<T> {
     type State;
 
     /// Build the initial accumulator. `init_item` is the first stream element together with
-    /// its TRUE global stream position (0-based), or `None` when the kernel was invoked on an
+    /// its true global stream position (0-based), or `None` when the kernel was invoked on an
     /// empty reduction. Kernels with [`SUPPORTS_EMPTY`](Self::SUPPORTS_EMPTY) set to
     /// `false` may unwrap `init_item` - the caller guarantees it is `Some` for those kernels.
     ///
@@ -1387,6 +1387,7 @@ macro_rules! define_reduction_op {
 /// Max/Min do **not** appear here - those ops are bounded directly by the element-wise
 /// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`].
 pub(crate) mod _traits {
+    use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
@@ -1428,11 +1429,11 @@ pub(crate) mod _traits {
     /// Scalar kernel trait for the element-wise `sum` reduction.
     ///
     /// Integer types accumulate into a wider output to reduce overflow risk (`i8..=i64 ->
-    /// i64`; `u8..=u64` and `bool -> u64`), which wraps on overflow. Floating-point and complex
+    /// i64`; `u8..=u64` and `bool8 -> u64`), which wraps on overflow. Floating-point and complex
     /// types keep their input width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`,
     /// ...), matching NumPy.
     pub trait Sum {
-        /// The sum element type: `i64`/`u64` for integers and `bool`, otherwise the input type.
+        /// The sum element type: `i64`/`u64` for integers and `bool8`, otherwise the input type.
         type Output;
         /// Whether summing this type is exact: `true` for the integer accumulators, whose
         /// result does not depend on how the stream is grouped, `false` for the float and
@@ -1511,7 +1512,7 @@ pub(crate) mod _traits {
     impl_sum!(Complex<f32>, Complex<f32>, is_precise = false);
     #[cfg(feature = "num-complex")]
     impl_sum!(Complex<f64>, Complex<f64>, is_precise = false);
-    impl_sum!(bool, u64, is_precise = true, simd = "enabled");
+    impl_sum!(bool8, u64, is_precise = true, simd = "enabled");
 
     /// Scalar kernel trait for the element-wise `product` reduction.
     ///
@@ -1664,8 +1665,8 @@ pub(crate) mod _traits {
             }
         )*};
     }
-    impl_arg!(ArgMax, >=, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
-    impl_arg!(ArgMin, <=, [bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
+    impl_arg!(ArgMax, >=, [bool8, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
+    impl_arg!(ArgMin, <=, [bool8, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64]);
     #[cfg(feature = "half")]
     impl_arg!(ArgMax, >=, [f16]);
     #[cfg(feature = "half")]
@@ -1673,14 +1674,14 @@ pub(crate) mod _traits {
 
     /// Scalar kernel trait for the element-wise `mean` reduction.
     ///
-    /// The mean is computed as the sum divided by the count. Integer and `bool` inputs promote
+    /// The mean is computed as the sum divided by the count. Integer and `bool8` inputs promote
     /// to `f64`; floating-point and complex inputs keep their input width (`f16 -> f16`,
     /// `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...), matching NumPy.
     ///
     /// The count is tracked **outside** the accumulator: callers thread the number of
     /// folded items into [`finalize`](Self::finalize) themselves.
     pub trait Mean {
-        /// The output element type: `f64` for integer and `bool` inputs, otherwise the input type.
+        /// The output element type: `f64` for integer and `bool8` inputs, otherwise the input type.
         type Output;
         /// Accumulator state - the running sum.
         type State;
@@ -1764,7 +1765,7 @@ pub(crate) mod _traits {
     impl_mean!(Complex<f32>, Complex<f64>, Complex<f64>, Complex<f32>);
     #[cfg(feature = "num-complex")]
     impl_mean!(Complex<f64>, Complex<f64>, Complex<f64>, Complex<f64>);
-    impl_mean!(bool, u64, f64, f64);
+    impl_mean!(bool8, u64, f64, f64);
 
     /// Welford accumulator used by [`Variance`]
     #[derive(Clone, Copy)]
@@ -1787,7 +1788,7 @@ pub(crate) mod _traits {
     ///
     /// [`finalize`]: Variance::finalize
     pub trait Variance {
-        /// The output element type - always a real `Float`: `f64` for integer and `bool`
+        /// The output element type - always a real `Float`: `f64` for integer and `bool8`
         /// inputs, the input width for real floats (`f16`/`f32`/`f64`), and the real component
         /// type for complex inputs (`Complex<f32> -> f32`, `Complex<f64> -> f64`).
         type Output;
@@ -2036,7 +2037,7 @@ pub(crate) mod _traits {
         is_complex = true,
     );
     impl_variance!(
-        bool => f64,
+        bool8 => f64,
         MeanT = f64,
         is_complex = false,
     );
@@ -2368,7 +2369,7 @@ define_reduction_op!(
     /// | Input dtype | Output dtype |
     /// |-------------|--------------|
     /// | `i8`, `i16`, `i32`, `i64` | `i64` |
-    /// | `u8`, `u16`, `u32`, `u64`, `bool` | `u64` |
+    /// | `u8`, `u16`, `u32`, `u64`, `bool8` | `u64` |
     /// | `f16` | `f16` |
     /// | `f32` | `f32` |
     /// | `f64` | `f64` |
@@ -2377,7 +2378,7 @@ define_reduction_op!(
     ///
     /// Integer inputs are widened to a 64-bit accumulator to reduce overflow on large
     /// reductions; floating-point and complex inputs keep their width, matching NumPy (except
-    /// `bool`, which jix sums into `u64` whereas NumPy uses `int64`).
+    /// `bool8`, which jix sums into `u64` whereas NumPy uses `int64`).
     /// An empty reduction (zero elements along the reduced dims) returns `0`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -2470,7 +2471,7 @@ define_reduction_op!(
     /// | `Complex<f64>` | `Complex<f64>` |
     ///
     /// Integer inputs are widened to a 64-bit accumulator to reduce overflow on large
-    /// reductions; floating-point and complex inputs keep their width, matching NumPy. `bool`
+    /// reductions; floating-point and complex inputs keep their width, matching NumPy. `bool8`
     /// is not supported (NumPy would promote it to `int64`).
     /// An empty reduction (zero elements along the reduced dims) returns `1`.
     ///
@@ -2551,7 +2552,7 @@ where
 define_reduction_op!(
     /// Reduces one or more dims by computing the arithmetic mean.
     ///
-    /// Integer and `bool` inputs promote to `f64`; floating-point and complex inputs keep
+    /// Integer and `bool8` inputs promote to `f64`; floating-point and complex inputs keep
     /// their input width (`f16 -> f16`, `f32 -> f32`, `f64 -> f64`, `Complex<f32> ->
     /// Complex<f32>`, `Complex<f64> -> Complex<f64>`), matching NumPy.
     ///
@@ -2633,7 +2634,7 @@ where
 define_reduction_op!(
     /// Reduces one or more dims by computing the variance.
     ///
-    /// The variance is real-valued and its dtype matches NumPy: integer and `bool` inputs
+    /// The variance is real-valued and its dtype matches NumPy: integer and `bool8` inputs
     /// promote to `f64`, real floats keep their width (`f16 -> f16`, `f32 -> f32`, `f64 ->
     /// f64`), and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
     /// `Complex<f64> -> f64`), computing `E[|x - mean|^2]`.
@@ -2736,7 +2737,7 @@ define_reduction_op!(
     /// Reduces one or more dims by computing the standard deviation.
     ///
     /// The standard deviation is real-valued and follows the same dtype rules as [`Variance`]:
-    /// integer and `bool` inputs promote to `f64`, real floats keep their width, and complex
+    /// integer and `bool8` inputs promote to `f64`, real floats keep their width, and complex
     /// inputs reduce to their real component type (`Complex<f32> -> f32`, `Complex<f64> ->
     /// f64`), computing `sqrt(E[|x - mean|^2])`.
     ///
@@ -2840,7 +2841,7 @@ where
 define_reduction_op!(
     /// Reduces one or more dims by testing whether all elements are `true`.
     ///
-    /// The input array must contain `bool` elements. Output dtype is `bool`.
+    /// The input array must contain `bool8` elements. Output dtype is `bool8`.
     /// Returns `true` only when every element is `true`. An empty reduction returns `true`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -2850,49 +2851,49 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
+    /// use jix::scalar::bool8;
     /// use jix::Array;
     /// use ndarray::{array, Ix0};
     ///
-    /// let nd = array![[true, false, true], [true, true, true]];
+    /// let nd = array![[bool8::TRUE, bool8::FALSE, bool8::TRUE], [bool8::TRUE, bool8::TRUE, bool8::TRUE]];
     ///
     /// // All elements true? -> false (contains false)
     /// let all_true = Array::compact_ndarray(&nd)?
     ///     .all((0, 1)).to_ndarray::<Ix0>()?;
-    /// assert_eq!(all_true[[]], false);
+    /// assert_eq!(all_true[[]], bool8::FALSE);
     ///
     /// // All true along dim 0 (per column) -> shape [3]
     /// let col_all = Array::compact_ndarray(&nd)?
     ///     .all(0).to_ndarray()?;
-    /// assert_eq!(col_all, array![true, false, true]);
+    /// assert_eq!(col_all, array![bool8::TRUE, bool8::FALSE, bool8::TRUE]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     All,
     AllKernel,
     where {
-        S: ArrayStorageTyped<Item = bool>,
+        S: ArrayStorageTyped<Item = bool8>,
     }
-    output = bool,
+    output = bool8,
 );
-impl ReductionOpKernel<bool> for AllKernel {
-    type Output = bool;
-    type State = bool;
+impl ReductionOpKernel<bool8> for AllKernel {
+    type Output = bool8;
+    type State = bool8;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(bool, Option<u64>)>) -> Self::State {
-        let mut state = true;
+    fn init_state(&self, init_item: Option<(bool8, Option<u64>)>) -> Self::State {
+        let mut state = crate::scalar::bool8::TRUE;
         if let Some((item, _idx)) = init_item {
             state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: bool, _idx: Option<u64>) -> Self::State {
-        // & instead of &&, the compiler auto vectorize it better
+    fn update_state(&self, state: Self::State, item: bool8, _idx: Option<u64>) -> Self::State {
         state & item
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
-        a && b
+        a & b
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -2907,7 +2908,7 @@ impl ReductionOpKernel<bool> for AllKernel {
 define_reduction_op!(
     /// Reduces one or more dims by testing whether any element is `true`.
     ///
-    /// The input array must contain `bool` elements. Output dtype is `bool`.
+    /// The input array must contain `bool8` elements. Output dtype is `bool8`.
     /// Returns `true` when at least one element is `true`. An empty reduction returns `false`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -2917,49 +2918,49 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
+    /// use jix::scalar::bool8;
     /// use jix::Array;
     /// use ndarray::{array, Ix0};
     ///
-    /// let nd = array![[false, false, false], [true, true, true]];
+    /// let nd = array![[bool8::FALSE, bool8::FALSE, bool8::FALSE], [bool8::TRUE, bool8::TRUE, bool8::TRUE]];
     ///
     /// // Any element true? -> true
     /// let any_true = Array::compact_ndarray(&nd)?
     ///     .any((0, 1)).to_ndarray::<Ix0>()?;
-    /// assert_eq!(any_true[[]], true);
+    /// assert_eq!(any_true[[]], bool8::TRUE);
     ///
     /// // Any true along dim 0 (per column) -> shape [3]
     /// let col_any = Array::compact_ndarray(&nd)?
     ///     .any(0).to_ndarray()?;
-    /// assert_eq!(col_any, array![true, true, true]);
+    /// assert_eq!(col_any, array![bool8::TRUE, bool8::TRUE, bool8::TRUE]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Any,
     AnyKernel,
     where {
-        S: ArrayStorageTyped<Item = bool>,
+        S: ArrayStorageTyped<Item = bool8>,
     }
-    output = bool,
+    output = bool8,
 );
-impl ReductionOpKernel<bool> for AnyKernel {
-    type Output = bool;
-    type State = bool;
+impl ReductionOpKernel<bool8> for AnyKernel {
+    type Output = bool8;
+    type State = bool8;
 
     #[inline(always)]
-    fn init_state(&self, init_item: Option<(bool, Option<u64>)>) -> Self::State {
-        let mut state = false;
+    fn init_state(&self, init_item: Option<(bool8, Option<u64>)>) -> Self::State {
+        let mut state = crate::scalar::bool8::FALSE;
         if let Some((item, _idx)) = init_item {
             state = self.update_state(state, item, None);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: Self::State, item: bool, _idx: Option<u64>) -> Self::State {
-        // | instead of || the compiler auto vectorize it better
+    fn update_state(&self, state: Self::State, item: bool8, _idx: Option<u64>) -> Self::State {
         state | item
     }
     #[inline(always)]
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
-        a || b
+        a | b
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -3371,13 +3372,13 @@ where
     define_array_reduction_method!(
         all: All,
         where {
-            S: ArrayStorageTyped<Item = bool>,
+            S: ArrayStorageTyped<Item = bool8>,
         }
     );
     define_array_reduction_method!(
         any: Any,
         where {
-            S: ArrayStorageTyped<Item = bool>,
+            S: ArrayStorageTyped<Item = bool8>,
         }
     );
 
@@ -3419,6 +3420,8 @@ where
 pub(crate) mod tests {
     use std::rc::Rc;
 
+    use crate::scalar::bool8;
+
     use ndarray::{array, ArrayD, Ix0, Ix1, IxDyn};
 
     #[cfg(feature = "half")]
@@ -3442,7 +3445,7 @@ pub(crate) mod tests {
     /// A reduction reads its input block-by-block, so a floating accumulator reassociates and can
     /// land a few ULP away from a sequential reference fold. Float and complex reductions are
     /// therefore compared with [`ApproxEq`], using a per-dtype tolerance (looser for the narrower
-    /// `f32` / `Complex<f32>`, tighter for `f64` / `Complex<f64>`). Integer and `bool` reductions
+    /// `f32` / `Complex<f32>`, tighter for `f64` / `Complex<f64>`). Integer and `bool8` reductions
     /// are exact and compared bit-for-bit.
     ///
     /// `f16` only ever surfaces here as a `max` / `min` result (its `sum`/`product`/`mean` value
@@ -3465,7 +3468,7 @@ pub(crate) mod tests {
             }
         )*};
     }
-    reduction_compare_exact!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
+    reduction_compare_exact!(i8, i16, i32, i64, u8, u16, u32, u64, bool8);
     #[cfg(feature = "half")]
     reduction_compare_exact!(f16);
 
@@ -3614,12 +3617,12 @@ pub(crate) mod tests {
         ) => {
             paste::paste! {
                 // `$body` is shared across all dtypes this macro is invoked with, including
-                // `bool` (where ordering comparisons like `x > m` are boolean, not numeric)
+                // `bool8` (where ordering comparisons like `x > m` are boolean, not numeric)
                 // and same-width integer arms (where a widening cast like `x as u64` is a
                 // no-op for the widest dtype in the list).
                 #[test]
                 #[allow(clippy::bool_comparison, clippy::unnecessary_cast)]
-                fn [<$op_method _ $dtype>]() {
+                fn [<$op_method _ $dtype:lower>]() {
                     crate::ops::reduction::tests::check_reduction::<$dtype>(
                         proptest::strategy::Strategy::boxed(
                             crate::ops::reduction::tests::array_strategy_for_reduction::<$dtype>(
@@ -3751,7 +3754,7 @@ pub(crate) mod tests {
     test_reduction!(
         max,
         |items| { items.reduce(|m, x| if x > m { x } else { m }).unwrap() },
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool8],
         any_strategy,
         #[cfg(feature = "half")]
         [f16]
@@ -4034,7 +4037,13 @@ pub(crate) mod tests {
     test_reduction!(
         sum,
         |items| { items.fold(0u64, |m, x| m.wrapping_add(x as u64)) },
-        [u8, u16, u32, u64, bool],
+        [u8, u16, u32, u64],
+        any_strategy
+    );
+    test_reduction!(
+        sum,
+        |items| { items.fold(0u64, |m, x| m + bool::from(x) as u64) },
+        [bool8],
         any_strategy
     );
     test_reduction!(
@@ -4543,7 +4552,7 @@ pub(crate) mod tests {
         ($f:path, $dtype:ident, $strategy:ident) => {
             paste::paste! {
                 #[test]
-                fn [<reduce_unordered_ $dtype>]() {
+                fn [<reduce_unordered_ $dtype:lower>]() {
                     check_reduction::<$dtype>(
                         proptest::strategy::Strategy::boxed(
                             array_strategy_for_reduction::<$dtype>(
@@ -4569,7 +4578,7 @@ pub(crate) mod tests {
     // `xor` is exact and has no built-in op counterpart, so it pins the whole custom-closure
     // path (lane seeding, lane tree merge, cross-tile merge) without needing a tolerance.
     test_reduce_unordered_dtype!(xor, [i8, i16, i32, i64], any_strategy);
-    test_reduce_unordered_dtype!(xor, [u8, u16, u32, u64, bool], any_strategy);
+    test_reduce_unordered_dtype!(xor, [u8, u16, u32, u64, bool8], any_strategy);
     // Floats have no `xor`; `maximum` is the exact order-independent stand-in. `any_strategy`
     // never yields `NaN` for floats, so `>` is a total order here and the reference agrees
     // exactly (this is also the only group `f16` can join - see `ReductionCompare`).
@@ -4836,7 +4845,7 @@ pub(crate) mod tests {
     // test_reduction!(
     //     all,
     //     |items| { items.fold(true, |m, x| m && <_ as crate::scalar::Cast<bool>>::cast(x)) },
-    //     [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+    //     [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool8],
     //     logical_op_strategy,
     //     #[cfg(feature = "half")]
     //     [f16],
@@ -4846,7 +4855,7 @@ pub(crate) mod tests {
     // test_reduction!(
     //     any,
     //     |items| { items.fold(false, |m, x| m || <_ as crate::scalar::Cast<bool>>::cast(x)) },
-    //     [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+    //     [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool8],
     //     logical_op_strategy,
     //     #[cfg(feature = "half")]
     //     [f16],

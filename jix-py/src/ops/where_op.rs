@@ -68,7 +68,7 @@ pub fn r#where<'py>(
 
     let condition = condition
         .into_array()?
-        .into_typed::<bool>()
+        .into_typed::<jix_core::scalar::bool8>()
         .into_py_result()?;
     let x_py = x.into_py_array(py)?;
     let np_dtype = x_py.get().numpy_dtype(py)?;

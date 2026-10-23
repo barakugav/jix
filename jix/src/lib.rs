@@ -160,7 +160,7 @@
 //!
 //! - *Scalar dtypes* cover all primitive numeric and boolean types:
 //!   `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`, `f64`,
-//!   `Complex<f32>`, `Complex<f64>`, `bool`.
+//!   `Complex<f32>`, `Complex<f64>`, `bool8`.
 //! - *Struct dtypes* group named fields with explicit byte offsets (C aligned or packed layout),
 //!   enabling NumPy-style structured dtypes.
 //!

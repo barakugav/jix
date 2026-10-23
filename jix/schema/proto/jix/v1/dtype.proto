@@ -44,7 +44,8 @@ enum ScalarKind {
   SCALAR_KIND_F64 = 11;
   SCALAR_KIND_COMPLEX_F32 = 12;
   SCALAR_KIND_COMPLEX_F64 = 13;
-  SCALAR_KIND_BOOL = 14;
+  // u8, zero is false, any other byte is true.
+  SCALAR_KIND_BOOL8 = 14;
 }
 
 // Endianness of a scalar
