@@ -205,6 +205,12 @@ SIMD/scalar split - the same element can go through either path:
 - MapMultiple::new checks shape overflow with the output itemsize. Op2::shape has no
   assert_unchecked any more.
 
+### Changed in 6f8e220 (#88) and 7e93487 (#89) - supersedes conflicting statements above
+- #89: bool ops now take and produce `bool8`. cmp.rs (~220 lines), cast.rs, where_op.rs (~175),
+  logical1.rs, bitwise.rs and map.rs were rewritten for it. Check every kernel that reads the raw
+  byte: a non-0/1 true value (2, 0xFF) must behave like 1 (bitwise and/xor, not, casts, SIMD masks,
+  comparisons, where's condition).
+
 ## Hot spots
 
 - SIMD vs scalar equality. Most SIMD tests compare with `==` via `same_value` (util/test_util.rs:1357-
