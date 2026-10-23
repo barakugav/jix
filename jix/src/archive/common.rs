@@ -245,16 +245,6 @@ impl<R> ArchiveReader<R> {
     //     Ok(buf)
     // }
 
-    pub(crate) fn read_section_into(&mut self, section: &Section, buf: &mut [u8]) -> io::Result<()>
-    where
-        R: Read + Seek,
-    {
-        assert_eq!(buf.len() as u64, section.size);
-        self.seek_relative_to_base(section.offset)?;
-        self.reader.read_exact(buf)?;
-        Ok(())
-    }
-
     pub(crate) fn read_file_meta(&mut self) -> io::Result<schema::FileMetadata>
     where
         R: Read,

@@ -596,6 +596,29 @@ mod tests {
     }
 
     #[test]
+    fn huge_section_size_without_len_is_an_error() {
+        let a = Array::compact_ndarray(&ndarray::array![0u8, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        let mut bytes = Cursor::new(Vec::new());
+        a.write_to(&mut bytes).unwrap();
+        let mut bytes = bytes.into_inner();
+        // Skip the magic and the three messages to the [blocks_loc, block_data] sections.
+        let mut toc = 4;
+        for _ in 0..3 {
+            let len = prost::decode_length_delimiter(&bytes[toc..]).unwrap();
+            toc += prost::length_delimiter_len(len) + len;
+        }
+        // A 16 TiB block_data section in a ~100 byte stream.
+        bytes[toc + 24..toc + 32].copy_from_slice(&(1u64 << 44).to_le_bytes());
+        let result = Array::read_from_reader(
+            Cursor::new(bytes),
+            None,
+            ArrayParams::default(),
+            ArchiveValidation::Strict,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn reader_is_never_handed_uninit_bytes() {
         // A safe `Read` may look at `buf` before filling it; it must only ever see zeros.
         struct Snoop(Cursor<Vec<u8>>, bool);
