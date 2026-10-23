@@ -4978,14 +4978,19 @@ pub(crate) mod tests {
         use crate::Array;
 
         // A reduction kernel picks its own output type, so it is another way a fresh dtype reaches an
-        // array without passing through `ArrayParams::tune` (a lazy view never re-tunes). `[i32; 0]`
+        // array without passing through `ArrayParams::tune` (a lazy view never re-tunes). `Empty`
         // is a `Dtyped` type with itemsize 0.
         //
         // `Fold` is the user-facing op that exposes a caller-chosen accumulator, but it is commented
         // out pending the reduction merge, so the kernel is spelled out here instead.
+        #[derive(Copy, Clone, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
+        #[repr(C)]
+        struct Empty {}
+
         struct ZeroSizedOutputKernel;
         impl super::ReductionOpKernel<i32> for ZeroSizedOutputKernel {
-            type Output = [i32; 0];
+            type Output = Empty;
             type State = ();
             fn init_state(&self, _init_item: Option<(i32, Option<u64>)>) -> Self::State {}
             fn update_state(
@@ -4997,7 +5002,7 @@ pub(crate) mod tests {
             }
             fn merge_states(&self, _a: Self::State, _b: Self::State) -> Self::State {}
             fn finalize_state(&self, _state: Self::State, _nitems: u64) -> Self::Output {
-                []
+                Empty {}
             }
             const SUPPORTS_EMPTY: bool = true;
             const PREFER_TREE_MERGE: bool = false;

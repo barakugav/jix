@@ -822,9 +822,7 @@ impl Dtype {
     /// # Errors
     ///
     /// Returns `InvalidArgument` if the new shape has more than [`DTYPE_MAX_NDIM`] dimensions,
-    /// contains a zero dimension, or overflows [`Itemsize`]. Also errors when the dtype's *current*
-    /// shape has zero elements (only `<[T; 0]>::DTYPE`), since the per-element itemsize can no
-    /// longer be divided back out.
+    /// contains a zero dimension, or overflows [`Itemsize`].
     pub fn set_shape(&mut self, shape: &[Itemsize]) -> Result<()> {
         let shape = DtypeShape::from_slice(shape).ok_or_else(|| {
             error!(
@@ -843,15 +841,6 @@ impl Dtype {
             "Dtype shape has zero elements"
         );
         let current_shape_size = self.shape().iter().cloned().product::<Itemsize>();
-        // A zero-element current shape leaves no way to recover the per-element itemsize (it was
-        // multiplied by zero). Only `[T; 0]` builds such a dtype - every other constructor rejects
-        // a zero shape dim - so bail instead of guessing.
-        ensure!(
-            current_shape_size != 0,
-            InvalidArgument,
-            "Cannot set the shape of a dtype whose current shape has zero elements: {:?}",
-            self.shape()
-        );
         assert!(self.itemsize().is_multiple_of(current_shape_size));
         let base_itemsize = self.itemsize() / current_shape_size;
         *self.itemsize_mut() = base_itemsize
@@ -1165,6 +1154,16 @@ impl std::fmt::Debug for OwnedFields {
 ///
 /// Every bit pattern must be a valid value of the type, as arrays are read from files and foreign
 /// buffers without validation. This is why `bool` is not `Dtyped`; use [`bool8`] instead.
+///
+/// The dtype must be one that [`Dtype::new_struct`] / [`Dtype::set_shape`] accept: the shape has no
+/// zero dims, its product fits [`Itemsize`], and a zero-sized dtype has no shape. This is why
+/// `[T; N]` is `Dtyped` only for `N > 0` and a non-zero-sized `T`:
+///
+/// ```rust,compile_fail
+/// use jix::dtype::Dtyped;
+///
+/// let _ = <[u32; 0]>::DTYPE;
+/// ```
 pub unsafe trait Dtyped: Copy + Send + Sync + Sized + 'static {
     /// Get the dtype representing the type layout and inner fields.
     const DTYPE: Dtype;
@@ -1202,6 +1201,11 @@ impl_dtyped_scalar!(bool8, Bool8);
 unsafe impl<T: Dtyped, const N: usize> Dtyped for [T; N] {
     const DTYPE: Dtype = {
         let mut dtype = T::DTYPE;
+        assert!(N > 0, "Dtyped is not supported for zero-length arrays");
+        assert!(
+            size_of::<T>() > 0,
+            "Dtyped is not supported for arrays of zero-sized types"
+        );
         assert!(
             N < Itemsize::MAX as usize,
             "Array size exceeds maximum supported dtype shape size of Itemsize::MAX"
@@ -1934,20 +1938,6 @@ mod tests {
         assert!(d.set_shape(&[Itemsize::MAX, Itemsize::MAX]).is_err());
     }
 
-    // `[T; 0]` is the only dtype whose *current* shape contains a zero, so it is the only input
-    // for which the old itemsize cannot be divided back out. It must error, not divide by zero.
-    #[test]
-    fn set_shape_on_zero_element_shape_errors() {
-        let mut d = <[i32; 0] as Dtyped>::DTYPE;
-        assert_eq!(d.shape(), &[0]);
-        assert_eq!(d.itemsize(), 0);
-        assert!(d.set_shape(&[2]).is_err());
-        assert!(d.set_shape(&[]).is_err());
-        // The dtype is left untouched by the failed calls.
-        assert_eq!(d.shape(), &[0]);
-        assert_eq!(d.itemsize(), 0);
-    }
-
     // ---- Zero-itemsize dtypes ----
 
     #[test]
@@ -1982,15 +1972,6 @@ mod tests {
         d.set_shape(&[2, 3]).unwrap();
         assert_eq!(d.shape(), &[2, 3]);
         assert_eq!(d.itemsize(), 0);
-    }
-
-    #[test]
-    fn zero_size_array_dtype() {
-        let d = <[i32; 0] as Dtyped>::DTYPE;
-        assert_eq!(d.itemsize(), 0);
-        assert_eq!(d.shape(), &[0]);
-        assert_eq!(d.alignment().as_usize(), 4);
-        assert_eq!(d.scalar_kind(), Some(ScalarKind::I32));
     }
 
     #[test]

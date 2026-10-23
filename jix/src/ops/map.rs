@@ -775,15 +775,19 @@ mod tests {
     //
     // A mapping op is the one place an array's dtype comes from a caller-chosen type rather than
     // from an input array, so the output dtype has to be checked here. Leaf storages are gated by
-    // `ArrayParams::tune`, but a lazy view never re-tunes. `[i32; 0]` is a `Dtyped` type with
-    // itemsize 0.
+    // `ArrayParams::tune`, but a lazy view never re-tunes.
+
+    #[derive(Copy, Clone, crate::dtype::Dtyped)]
+    #[dtyped(crate = "crate")]
+    #[repr(C)]
+    struct Empty {}
 
     #[test]
     fn map_rejects_zero_itemsize_output() {
         use crate::ops::Map;
 
         let za = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
-        let err = Map::new_array(za, |_: i32| -> [i32; 0] { [] })
+        let err = Map::new_array(za, |_: i32| Empty {})
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
@@ -795,7 +799,7 @@ mod tests {
 
         let a = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
         let b = Array::compact_ndarray(&array![4i32, 5, 6]).unwrap();
-        let err = Map2::new_array(a, b, |_: i32, _: i32| -> [i32; 0] { [] })
+        let err = Map2::new_array(a, b, |_: i32, _: i32| Empty {})
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
@@ -807,7 +811,7 @@ mod tests {
 
         let a = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
         let b = Array::compact_ndarray(&array![4i32, 5, 6]).unwrap();
-        let err = MapMultiple::new((a, b), |_| -> [i32; 0] { [] })
+        let err = MapMultiple::new((a, b), |_| Empty {})
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);

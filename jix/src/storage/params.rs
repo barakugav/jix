@@ -1895,7 +1895,7 @@ mod tests {
 
     // ---- Zero-itemsize dtypes ----
     //
-    // `Dtype` supports itemsize 0 (an empty struct, `[T; 0]`), but an array of such a dtype does
+    // `Dtype` supports itemsize 0 (an empty struct), but an array of such a dtype does
     // not: the block layout is derived by dividing a byte budget by the itemsize. `tune` is the
     // single gate every leaf storage passes through, so it is where the rejection belongs.
 
@@ -1959,12 +1959,17 @@ mod tests {
         );
     }
 
-    // `[i32; 0]` is a `Dtyped` type with itemsize 0, so it reaches `tune` through `T::DTYPE`
+    // An empty struct is a `Dtyped` type with itemsize 0, so it reaches `tune` through `T::DTYPE`
     // rather than through a caller-supplied runtime dtype.
     #[test]
     fn compact_fn_rejects_zero_itemsize_element() {
+        #[derive(Copy, Clone, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
+        #[repr(C)]
+        struct Empty {}
+
         let result =
-            Array::<crate::storage::Compact<crate::Ty<[i32; 0]>>>::compact_fn([4u64], |_| []);
+            Array::<crate::storage::Compact<crate::Ty<Empty>>>::compact_fn([4u64], |_| Empty {});
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::UnsupportedDtype
