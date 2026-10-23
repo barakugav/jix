@@ -1830,7 +1830,7 @@ Sections:
 5. Coverage: one line per hunter from its coverage note; then a list of everything hunters said they skipped or only skimmed.
 6. Open questions from hunters, grouped by theme.
 
-Before writing the report, clean up this run's test files in jix/tests/ so the crate's test suite stays clean: mkdir -p ${RUN_DIR}/repros, MOVE every jix/tests/repro_${RS}__*.rs into ${RUN_DIR}/repros/ (keep the file names), and delete jix/tests/hunt_${RS}__*.rs (hunter scratch). Touch no other file in jix/tests/ - other runs may be using them. Python repros are already in ${RUN_DIR}/repros/. In the report, say how to re-run a repro: copy it back to jix/tests/ and run \`cargo test --manifest-path jix/Cargo.toml --all-features --test <name>\`. Do not modify tracked files.
+Before writing the report, clean up this run's test files in jix/tests/ so the crate's test suite stays clean: mkdir -p ${RUN_DIR}/repros, MOVE every jix/tests/repro_${RS}__*.rs into ${RUN_DIR}/repros/ (keep the file names), and delete jix/tests/hunt_${RS}__*.rs (hunter scratch). Touch no other file in jix/tests/ - other runs may be using them. Also free the disk these tests used: delete jix/target/debug/deps/{repro,hunt}_${RS}__* and target-i686/i686-unknown-linux-musl/debug/deps/{repro,hunt}_${RS}__* (test binaries), the matching .fingerprint/{repro,hunt}_${RS}__* dirs next to deps/, and any scratch/target-* dirs under ${RUN_DIR}/scratch/. Python repros are already in ${RUN_DIR}/repros/. In the report, say how to re-run a repro: copy it back to jix/tests/ and run \`cargo test --manifest-path jix/Cargo.toml --all-features --test <name>\`. Do not modify tracked files.
 
 Verified findings:
 ${JSON.stringify(summary, null, 1)}
