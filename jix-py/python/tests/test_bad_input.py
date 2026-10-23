@@ -153,3 +153,18 @@ def test_reader_returning_too_many_bytes():
 def test_writer_reporting_too_many_bytes():
     with pytest.raises(RuntimeError, match="write"):
         jix.write_array(_array(), _OverWriter())
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: jix.asarray(np.arange(3, dtype=">i4")),
+        lambda: jix.compact(np.arange(3, dtype=">f8")),
+        lambda: jix.asarray(np.zeros(2, [("a", ">i4")])),
+        lambda: jix.cast(jix.compact(np.arange(3)), ">f8"),
+        lambda: jix.compact(np.arange(3, dtype=">i4")) + 1,
+    ],
+)
+def test_big_endian_dtype_raises(make):
+    with pytest.raises(ValueError, match="big-endian"):
+        make()

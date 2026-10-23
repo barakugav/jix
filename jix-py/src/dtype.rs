@@ -135,6 +135,12 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dt
 
     let dtype = if !numpy_base.has_fields() {
         // scalar
+        if numpy_base.byteorder() == b'>' {
+            return Err(PyValueError::new_err(format!(
+                "Unsupported dtype: big-endian {numpy_base:?}; convert it to native byte order \
+                 first, e.g. with `x.astype(x.dtype.newbyteorder('='))`"
+            )));
+        }
         let scalar_kind = match (numpy_base.kind() as char, base_itemsize) {
             ('b', 1) => Ok(ScalarKind::Bool),
             ('b', itemsize) => Err(PyValueError::new_err(format!(
