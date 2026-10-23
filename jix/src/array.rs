@@ -541,16 +541,16 @@ impl<S: ArrayStorage> Array<S> {
     /// See [`Dtype`] for details on the supported dtypes and their properties.
     ///
     /// ```rust
-    /// use jix::Array;
+    /// use jix::{Array, Bool8, FALSE, TRUE};
     /// use jix::dtype::Dtyped;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
     /// assert_eq!(a.dtype(), &f32::DTYPE);
     ///
-    /// let bools = array![[false, true]];
+    /// let bools = array![[FALSE, TRUE]];
     /// let b = Array::plain_ndarray_ref(&bools)?;
-    /// assert_eq!(b.dtype(), &bool::DTYPE);
+    /// assert_eq!(b.dtype(), &Bool8::DTYPE);
     ///
     /// #[derive(Copy, Clone, Dtyped)]
     /// #[repr(C)]

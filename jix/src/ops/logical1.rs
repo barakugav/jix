@@ -6,6 +6,9 @@ pub(crate) mod _traits {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op1_trait, impl_scalar_op1};
+    // only the non-SIMD `f16` arm names it, the SIMD arms get it from `impl_scalar_op1`
+    #[cfg(feature = "half")]
+    use crate::Bool8;
 
     /// Define the float classification scalar trait `$Trait` as `f32`'s `$f`.
     macro_rules! classify_op1 {
@@ -21,7 +24,7 @@ pub(crate) mod _traits {
             );
             impl_scalar_op1!(
                 impl $Trait for [f32, f64] {
-                    type Output = bool;
+                    type Output = Bool8;
                     fn $f = |x| x.$f(),
                     fn $f_bulk = |x| x.$f(),
                 }
@@ -29,8 +32,8 @@ pub(crate) mod _traits {
             #[cfg(feature = "half")]
             impl_scalar_op1!(
                 impl $Trait for [f16] {
-                    type Output = bool;
-                    fn $f = |x| x.$f(),
+                    type Output = Bool8;
+                    fn $f = |x| x.$f().into(),
                 }
             );
         };
@@ -38,7 +41,7 @@ pub(crate) mod _traits {
     classify_op1!(
         /// NaN test operation, as [`f32::is_nan`].
         ///
-        /// Output dtype is `bool`.
+        /// Output dtype is `Bool8`.
         ///
         /// Returns `true` if the element is `NaN`, `false` otherwise.
         IsNan,
@@ -49,7 +52,7 @@ pub(crate) mod _traits {
     classify_op1!(
         /// Finiteness test operation, as [`f32::is_finite`].
         ///
-        /// Output dtype is `bool`.
+        /// Output dtype is `Bool8`.
         ///
         /// Returns `true` if the element is a finite number, `false` for `+/-inf` and `NaN`.
         IsFinite,
@@ -60,7 +63,7 @@ pub(crate) mod _traits {
     classify_op1!(
         /// Infinity test operation, as [`f32::is_infinite`].
         ///
-        /// Output dtype is `bool`.
+        /// Output dtype is `Bool8`.
         ///
         /// Returns `true` only for `+inf` and `-inf`; returns `false` for finite values and `NaN`.
         IsInfinite,
@@ -82,17 +85,17 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, FALSE, TRUE};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![f32::NAN, 1.0f32, f32::INFINITY, -1.0f32])?;
     /// let result = a.is_nan().to_ndarray()?;
-    /// assert_eq!(result, array![true, false, false, false]);
+    /// assert_eq!(result, array![TRUE, FALSE, FALSE, FALSE]);
     ///
     /// // Shape is preserved for 2-D input.
     /// let b = Array::compact_ndarray(&array![[f32::NAN, 1.0f32], [2.0f32, f32::NAN]])?;
     /// let result = b.is_nan().to_ndarray()?;
-    /// assert_eq!(result, array![[true, false], [false, true]]);
+    /// assert_eq!(result, array![[TRUE, FALSE], [FALSE, TRUE]]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     IsNan,
@@ -113,17 +116,17 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, FALSE, TRUE};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![1.0f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY])?;
     /// let result = a.is_finite().to_ndarray()?;
-    /// assert_eq!(result, array![true, false, false, false]);
+    /// assert_eq!(result, array![TRUE, FALSE, FALSE, FALSE]);
     ///
     /// // Shape is preserved for 2-D input.
     /// let b = Array::compact_ndarray(&array![[1.0f32, f32::INFINITY], [f32::NAN, -2.0f32]])?;
     /// let result = b.is_finite().to_ndarray()?;
-    /// assert_eq!(result, array![[true, false], [false, true]]);
+    /// assert_eq!(result, array![[TRUE, FALSE], [FALSE, TRUE]]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     IsFinite,
@@ -144,17 +147,17 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, FALSE, TRUE};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![f32::INFINITY, f32::NEG_INFINITY, f32::NAN, 1.0f32])?;
     /// let result = a.is_infinite().to_ndarray()?;
-    /// assert_eq!(result, array![true, true, false, false]);
+    /// assert_eq!(result, array![TRUE, TRUE, FALSE, FALSE]);
     ///
     /// // Shape is preserved for 2-D input.
     /// let b = Array::compact_ndarray(&array![[f32::INFINITY, 0.0f32], [-1.0f32, f32::NEG_INFINITY]])?;
     /// let result = b.is_infinite().to_ndarray()?;
-    /// assert_eq!(result, array![[true, false], [false, true]]);
+    /// assert_eq!(result, array![[TRUE, FALSE], [FALSE, TRUE]]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     IsInfinite,
@@ -175,6 +178,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ops::op1::tests::test_op1;
+    use crate::Bool8;
 
     /// The `apply_bulk` of the kernels of this module against their scalar semantics, on every
     /// SIMD level of the CPU, over edge cases.
@@ -192,7 +196,7 @@ mod tests {
                     let what = concat!(stringify!($kernel), " ", stringify!($t));
                     assert_same_elements(
                         $kernel.apply_bulk(xs, &mut Default::default(), simd),
-                        |i| $f(xs[i]),
+                        |i| Bool8::from($f(xs[i])),
                         what,
                     );
                 };
@@ -214,7 +218,7 @@ mod tests {
     // full domain is valid; output is bool so NaN inputs produce well-defined bool results
     test_op1!(
         is_nan,
-        |a| a.is_nan(),
+        |a| Bool8::from(a.is_nan()),
         [f32, f64],
         maybe_non_finite_strategy,
         #[cfg(feature = "half")]
@@ -227,12 +231,12 @@ mod tests {
         // Edge inputs: NaN, +inf, -inf, 0.0, 1.0 - only 0.0 and 1.0 are finite.
         let nd = ndarray::array![f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, 1.0];
         let za = Array::compact_ndarray(&nd).unwrap();
-        let expected = nd.mapv(|a: f32| a.is_finite());
+        let expected = nd.mapv(|a: f32| Bool8::from(a.is_finite()));
         crate::util::assert_array_matches(&za.view().is_finite(), &expected);
 
         let nd64 = ndarray::array![f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, 1.0];
         let za64 = Array::compact_ndarray(&nd64).unwrap();
-        let expected64 = nd64.mapv(|a: f64| a.is_finite());
+        let expected64 = nd64.mapv(|a: f64| Bool8::from(a.is_finite()));
         crate::util::assert_array_matches(&za64.view().is_finite(), &expected64);
 
         #[cfg(feature = "half")]
@@ -245,7 +249,7 @@ mod tests {
                 f16::from_f32(1.0)
             ];
             let zah = Array::compact_ndarray(&ndh).unwrap();
-            let expectedh = ndh.mapv(|a: f16| a.is_finite());
+            let expectedh = ndh.mapv(|a: f16| Bool8::from(a.is_finite()));
             crate::util::assert_array_matches(&zah.view().is_finite(), &expectedh);
         }
     }
@@ -256,12 +260,12 @@ mod tests {
         // Edge inputs: NaN, +inf, -inf, 0.0, 1.0 - only +inf/-inf are infinite.
         let nd = ndarray::array![f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, 1.0];
         let za = Array::compact_ndarray(&nd).unwrap();
-        let expected = nd.mapv(|a: f32| a.is_infinite());
+        let expected = nd.mapv(|a: f32| Bool8::from(a.is_infinite()));
         crate::util::assert_array_matches(&za.view().is_infinite(), &expected);
 
         let nd64 = ndarray::array![f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, 1.0];
         let za64 = Array::compact_ndarray(&nd64).unwrap();
-        let expected64 = nd64.mapv(|a: f64| a.is_infinite());
+        let expected64 = nd64.mapv(|a: f64| Bool8::from(a.is_infinite()));
         crate::util::assert_array_matches(&za64.view().is_infinite(), &expected64);
 
         #[cfg(feature = "half")]
@@ -274,7 +278,7 @@ mod tests {
                 f16::from_f32(1.0)
             ];
             let zah = Array::compact_ndarray(&ndh).unwrap();
-            let expectedh = ndh.mapv(|a: f16| a.is_infinite());
+            let expectedh = ndh.mapv(|a: f16| Bool8::from(a.is_infinite()));
             crate::util::assert_array_matches(&zah.view().is_infinite(), &expectedh);
         }
     }

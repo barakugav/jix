@@ -78,7 +78,7 @@ pub(crate) trait ScalarStrategy:
     /// ~33 % of generated pairs are equal, so both the `true` and `false` branches of
     /// `equal`/`not_equal` are exercised. For float types the set includes `NaN` to cover
     /// the `NaN != NaN` (IEEE 754) edge case. Defaults to `any_strategy` for types where
-    /// equal pairs happen naturally (e.g. `bool` has only 2 values -> 50 % hit rate).
+    /// equal pairs happen naturally (e.g. `Bool8` has only 2 values -> 50 % hit rate).
     fn comparable_strategy() -> BoxedStrategy<Self> {
         Self::any_strategy()
     }
@@ -345,13 +345,13 @@ impl ScalarStrategy for f64 {
         prop_oneof![Just(0.0f64), Just(1.0f64), Just(2.4f64), Just(f64::NAN)].boxed()
     }
 }
-impl ScalarStrategy for bool {
+impl ScalarStrategy for crate::Bool8 {
     fn any_strategy() -> BoxedStrategy<Self> {
-        any::<bool>().boxed()
+        any::<bool>().prop_map(crate::Bool8::from).boxed()
     }
 
     fn op_safe_non_zero_strategy() -> BoxedStrategy<Self> {
-        Just(true).boxed()
+        Just(crate::TRUE).boxed()
     }
 }
 

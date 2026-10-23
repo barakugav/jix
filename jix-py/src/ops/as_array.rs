@@ -86,6 +86,7 @@ pub(crate) fn any_to_core_array<'py>(value: &Bound<'py, PyAny>) -> PyResult<Arra
 mod tests {
     use jix_core::dtype::Dtyped;
     use jix_core::scalar::Complex;
+    use jix_core::{Bool8, FALSE, TRUE};
     use ndarray::{array, Array0, ArrayD};
     use numpy::PyArray;
     use pyo3::prelude::*;
@@ -131,9 +132,9 @@ mod tests {
     fn test_python_bool() {
         Python::attach(|py| {
             let val = true.into_pyobject(py).unwrap();
-            let data = collect::<bool>(val.as_any());
+            let data = collect::<Bool8>(val.as_any());
             assert_eq!(data.ndim(), 0);
-            assert!(*data.first().unwrap());
+            assert_eq!(*data.first().unwrap(), TRUE);
         });
     }
 
@@ -194,9 +195,9 @@ mod tests {
     #[test]
     fn test_0d_bool() {
         Python::attach(|py| {
-            let data = collect::<bool>(&np0(py, false));
+            let data = collect::<Bool8>(&np0(py, false));
             assert_eq!(data.ndim(), 0);
-            assert!(!*data.first().unwrap());
+            assert_eq!(*data.first().unwrap(), FALSE);
         });
     }
 

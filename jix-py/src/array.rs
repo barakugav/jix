@@ -1752,7 +1752,7 @@ impl ContextGuard<'_> {
 #[cfg(test)]
 mod tests {
     use jix_core::dtype::Dtyped;
-    use jix_core::Array as CoreArray;
+    use jix_core::{Array as CoreArray, FALSE, TRUE};
     use ndarray::{array, ArrayD};
     use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
     use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
@@ -1840,8 +1840,14 @@ mod tests {
 
     #[test]
     fn test_numpy_bool_1d() {
-        let original = array![true, false, true, true, false, true];
-        assert_eq!(roundtrip(&original), original);
+        // `Bool8` is not a `numpy::Element`, read the NumPy array back as `bool`
+        let original = array![TRUE, FALSE, TRUE, TRUE, FALSE, TRUE];
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &original);
+            let np = py_arr.get().numpy(py, None, None).unwrap().0;
+            let typed = np.cast_into::<PyArrayDyn<bool>>().unwrap();
+            assert_eq!(typed.to_owned_array(), original.mapv(bool::from).into_dyn());
+        });
     }
 
     #[test]

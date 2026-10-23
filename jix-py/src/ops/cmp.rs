@@ -2,6 +2,7 @@ use std::sync::LazyLock;
 
 use jix_core::dtype::Dtyped;
 use jix_core::scalar::{f16, Complex};
+use jix_core::Bool8;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
@@ -54,7 +55,7 @@ define_op2!(
     dispatch = {
         [
             u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64,
-            Complex<f32>, Complex<f64>, bool
+            Complex<f32>, Complex<f64>, Bool8
         ],
         Safe
     }
@@ -97,7 +98,7 @@ define_op2!(
     dispatch = {
         [
             u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64,
-            Complex<f32>, Complex<f64>, bool
+            Complex<f32>, Complex<f64>, Bool8
         ],
         Safe
     }
@@ -138,7 +139,7 @@ define_op2!(
     greater,
     Greater,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool],
+        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, Bool8],
         Safe
     }
 );
@@ -178,7 +179,7 @@ define_op2!(
     greater_equal,
     GreaterEqual,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool],
+        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, Bool8],
         Safe
     }
 );
@@ -218,7 +219,7 @@ define_op2!(
     less,
     Less,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool],
+        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, Bool8],
         Safe
     }
 );
@@ -258,7 +259,7 @@ define_op2!(
     less_equal,
     LessEqual,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool],
+        [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, Bool8],
         Safe
     }
 );
@@ -306,7 +307,7 @@ define_op2!(
     maximum,
     Maximum,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        [Bool8, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
         Safe
     }
 );
@@ -354,7 +355,7 @@ define_op2!(
     minimum,
     Minimum,
     dispatch = {
-        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        [Bool8, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
         Safe
     }
 );
@@ -443,7 +444,7 @@ pub fn clamp<'py>(
                 clamp_op_descriptor::<f16>(),
                 clamp_op_descriptor::<f32>(),
                 clamp_op_descriptor::<f64>(),
-                clamp_op_descriptor::<bool>(),
+                clamp_op_descriptor::<Bool8>(),
             ],
         )
     });
@@ -534,13 +535,13 @@ pub fn isclose<'py>(
 
     fn cast_tol<T>(scalar: Scalar) -> PyResult<T>
     where
-        bool: jix_core::scalar::Cast<T>,
+        Bool8: jix_core::scalar::Cast<T>,
         u64: jix_core::scalar::Cast<T>,
         i64: jix_core::scalar::Cast<T>,
         f64: jix_core::scalar::Cast<T>,
     {
         Ok(match scalar {
-            Scalar::Bool(v) => <bool as jix_core::scalar::Cast<T>>::cast(v),
+            Scalar::Bool(v) => <Bool8 as jix_core::scalar::Cast<T>>::cast(v),
             Scalar::UInt(v) => <u64 as jix_core::scalar::Cast<T>>::cast(v),
             Scalar::Int(v) => <i64 as jix_core::scalar::Cast<T>>::cast(v),
             Scalar::Float(v) => <f64 as jix_core::scalar::Cast<T>>::cast(v),
@@ -555,7 +556,7 @@ pub fn isclose<'py>(
     fn float_descriptor<T>() -> OpFnDescriptor<2, ApproxEqualArgs>
     where
         T: Dtyped + jix_core::scalar::ApproxEq<AbsoluteTolerance = T, RelativeTolerance = T>,
-        bool: jix_core::scalar::Cast<T>,
+        Bool8: jix_core::scalar::Cast<T>,
         u64: jix_core::scalar::Cast<T>,
         i64: jix_core::scalar::Cast<T>,
         f64: jix_core::scalar::Cast<T>,
@@ -573,7 +574,7 @@ pub fn isclose<'py>(
         F: Copy + Send + Sync + 'static,
         Complex<F>: Dtyped
             + jix_core::scalar::ApproxEq<AbsoluteTolerance = Complex<F>, RelativeTolerance = F>,
-        bool: jix_core::scalar::Cast<F>,
+        Bool8: jix_core::scalar::Cast<F>,
         u64: jix_core::scalar::Cast<F>,
         i64: jix_core::scalar::Cast<F>,
         f64: jix_core::scalar::Cast<F>,

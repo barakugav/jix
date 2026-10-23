@@ -2,6 +2,7 @@
 
 use crate::error::ArithmeticOpStatus;
 use crate::util::{array_from_fn_inline, ArrayExt};
+use crate::Bool8;
 use fearless_simd::{Simd, SimdBase, SimdElement};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -299,10 +300,10 @@ where
 #[inline(always)]
 pub(crate) fn map_vectors_to_bools<T, const N: usize, S>(
     xs: [T; N],
-    f_scalar: impl Fn(T) -> bool,
+    f_scalar: impl Fn(T) -> Bool8,
     f_simd: impl Fn(T::V<S>) -> <T::V<S> as SimdBase<S>>::Mask,
     simd: S,
-) -> [bool; N]
+) -> [Bool8; N]
 where
     T: SimdElementExt,
     S: Simd,
@@ -324,10 +325,10 @@ where
 pub(crate) fn map_vectors2_to_bools<T, const N: usize, S>(
     xs: [T; N],
     ys: [T; N],
-    f_scalar: impl Fn(T, T) -> bool,
+    f_scalar: impl Fn(T, T) -> Bool8,
     f_simd: impl Fn(T::V<S>, T::V<S>) -> <T::V<S> as SimdBase<S>>::Mask,
     simd: S,
-) -> [bool; N]
+) -> [Bool8; N]
 where
     T: SimdElementExt,
     S: Simd,
@@ -348,10 +349,10 @@ where
 
 #[inline(always)]
 fn map_masks_to_bools<T, const N: usize, S>(
-    f_scalar: impl Fn(usize) -> bool,
+    f_scalar: impl Fn(usize) -> Bool8,
     f_mask: impl Fn(usize) -> <T::V<S> as SimdBase<S>>::Mask,
     simd: S,
-) -> [bool; N]
+) -> [Bool8; N]
 where
     T: SimdElementExt,
     S: Simd,
@@ -379,7 +380,7 @@ where
     );
     ys.map_inline(
         #[inline(always)]
-        |y| y != 0,
+        |y| Bool8::from(y != 0),
     )
 }
 

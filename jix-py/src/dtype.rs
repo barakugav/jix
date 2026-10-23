@@ -18,7 +18,7 @@ pub(crate) fn dtype_to_numpy<'py>(
     let numpy_dtype = if let Some(scalar) = dtype.scalar_kind() {
         assert!(cfg!(target_endian = "little"));
         match scalar {
-            ScalarKind::Bool => PyArrayDescr::of::<bool>(py),
+            ScalarKind::Bool8 => PyArrayDescr::of::<bool>(py),
             ScalarKind::I8 => PyArrayDescr::of::<i8>(py),
             ScalarKind::I16 => PyArrayDescr::of::<i16>(py),
             ScalarKind::I32 => PyArrayDescr::of::<i32>(py),
@@ -142,7 +142,7 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dt
             )));
         }
         let scalar_kind = match (numpy_base.kind() as char, base_itemsize) {
-            ('b', 1) => Ok(ScalarKind::Bool),
+            ('b', 1) => Ok(ScalarKind::Bool8),
             ('b', itemsize) => Err(PyValueError::new_err(format!(
                 "Unsupported bool itemsize: {itemsize}"
             ))),
@@ -260,7 +260,7 @@ mod tests {
     fn test_from_numpy_bool() {
         Python::attach(|py| {
             let dtype = from_str(py, "bool").unwrap();
-            assert_eq!(dtype, Dtype::new_scalar(ScalarKind::Bool));
+            assert_eq!(dtype, Dtype::new_scalar(ScalarKind::Bool8));
         });
     }
 
@@ -603,7 +603,7 @@ mod tests {
     fn test_to_numpy_all_scalars() {
         Python::attach(|py| {
             let cases: &[(ScalarKind, usize, usize)] = &[
-                (ScalarKind::Bool, 1, 1),
+                (ScalarKind::Bool8, 1, 1),
                 (ScalarKind::I8, 1, 1),
                 (ScalarKind::I16, 2, 2),
                 (ScalarKind::I32, 4, 4),
@@ -744,7 +744,7 @@ mod tests {
     fn test_roundtrip_all_scalars() {
         Python::attach(|py| {
             for scalar in [
-                ScalarKind::Bool,
+                ScalarKind::Bool8,
                 ScalarKind::I8,
                 ScalarKind::I16,
                 ScalarKind::I32,

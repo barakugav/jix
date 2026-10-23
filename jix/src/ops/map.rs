@@ -35,7 +35,7 @@ where
 ///
 /// # Examples
 /// ```
-/// use jix::Array;
+/// use jix::{Array, Bool8, FALSE, TRUE};
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
@@ -44,8 +44,8 @@ where
 ///
 /// // Change element type in the mapping function
 /// let b = Array::compact_ndarray(&array![0.0f32, 1.5, -2.0])?;
-/// let result = b.map(|x: f32| x > 0.0).to_ndarray()?;
-/// assert_eq!(result, array![false, true, false]);
+/// let result = b.map(|x: f32| Bool8::from(x > 0.0)).to_ndarray()?;
+/// assert_eq!(result, array![FALSE, TRUE, FALSE]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct Map<S, F>(Op1<S, F>);
@@ -204,18 +204,18 @@ where
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
-/// Combine a heterogeneous tuple of inputs (the closure receives `(i32, f32, bool)`):
+/// Combine a heterogeneous tuple of inputs (the closure receives `(i32, f32, Bool8)`):
 ///
 /// ```
-/// use jix::Array;
+/// use jix::{Array, Bool8, FALSE, TRUE};
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
 /// let b = Array::compact_ndarray(&array![0.5f32, 1.5, 2.5])?;
-/// let c = Array::compact_ndarray(&array![true, false, true])?;
+/// let c = Array::compact_ndarray(&array![TRUE, FALSE, TRUE])?;
 ///
-/// let result = jix::ops::map_multiple((a, b, c), |(x, y, flag): (i32, f32, bool)| {
-///     if flag { x as f32 + y } else { x as f32 * y }
+/// let result = jix::ops::map_multiple((a, b, c), |(x, y, flag): (i32, f32, Bool8)| {
+///     if flag.into() { x as f32 + y } else { x as f32 * y }
 /// })
 ///     .to_ndarray()?;
 /// assert_eq!(result, array![1.5f32, 3.0, 5.5]);
@@ -420,6 +420,7 @@ mod tests {
 
     use crate::array::Array;
     use crate::util::arr_params;
+    use crate::{Bool8, FALSE, TRUE};
 
     #[test]
     fn map_multiple_widening_shape_overflow_is_an_error() {
@@ -463,8 +464,8 @@ mod tests {
     fn map_type_change_f32_to_bool() {
         let a = array![0.0f32, 1.0, -1.0, 0.0];
         let za = Array::compact_ndarray_with(&a, arr_params(&[4])).unwrap();
-        let actual = za.map(|x: f32| x != 0.0).to_ndarray().unwrap();
-        let expected = a.mapv(|x| x != 0.0);
+        let actual = za.map(|x: f32| Bool8::from(x != 0.0)).to_ndarray().unwrap();
+        let expected = a.mapv(|x| Bool8::from(x != 0.0));
         assert_eq!(actual, expected);
     }
 
@@ -639,20 +640,16 @@ mod tests {
         // Tuple variant with three different dtypes - the case a homogeneous sequence cannot express.
         let a = Array::compact_ndarray_with(&array![1i32, 2, 3], arr_params(&[3])).unwrap();
         let b = Array::compact_ndarray_with(&array![0.5f32, 1.5, 2.5], arr_params(&[3])).unwrap();
-        let c = Array::compact_ndarray_with(&array![true, false, true], arr_params(&[3])).unwrap();
-        let actual =
-            crate::ops::map_multiple(
-                (a, b, c),
-                |(x, y, flag): (i32, f32, bool)| {
-                    if flag {
-                        x as f32 + y
-                    } else {
-                        x as f32 - y
-                    }
-                },
-            )
-            .to_ndarray()
-            .unwrap();
+        let c = Array::compact_ndarray_with(&array![TRUE, FALSE, TRUE], arr_params(&[3])).unwrap();
+        let actual = crate::ops::map_multiple((a, b, c), |(x, y, flag): (i32, f32, Bool8)| {
+            if flag.into() {
+                x as f32 + y
+            } else {
+                x as f32 - y
+            }
+        })
+        .to_ndarray()
+        .unwrap();
         assert_eq!(actual, array![1.5f32, 0.5, 5.5]);
     }
 

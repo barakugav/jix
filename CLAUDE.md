@@ -148,11 +148,13 @@ the archive, so readers never need to know them in advance.
 ### Type system (`jix/src/dtype.rs`)
 
 Runtime `Dtype` records kind/size/alignment per element. Supports **scalar dtypes** (`i8..i64`,
-`u8..u64`, `f16`, `f32/f64`, `Complex<f32>/Complex<f64>`, `bool`), **struct dtypes** (named fields
+`u8..u64`, `f16`, `f32/f64`, `Complex<f32>/Complex<f64>`, `Bool8`), **struct dtypes** (named fields
 with byte offsets, NumPy-style), and an **inner shape** (a small fixed sub-array per element). The
 `Dtyped` trait maps a Rust type to its `Dtype`; `#[derive(Dtyped)]` (from `jix-macros`) implements it
 for `#[repr(C)]` structs. `f16`/`Complex` live in `jix::scalar` and are gated behind the `half` /
-`num-complex` features.
+`num-complex` features. Every bit pattern of a `Dtyped` type must be valid, as arrays are read from
+files and NumPy buffers unvalidated, so the boolean element type is `jix::Bool8` (zero is false, any
+other byte true) and not `bool`; examples use the `jix::TRUE` / `jix::FALSE` constants.
 
 ### Serialization (`.jix` files, `jix/src/archive/`)
 

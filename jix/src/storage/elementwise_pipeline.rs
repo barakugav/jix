@@ -1888,7 +1888,8 @@ mod tests {
 
     #[test]
     fn where_pipeline_keeps_three_operands() {
-        let nd_c = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i + j) % 2 == 0);
+        let nd_c =
+            ndarray::Array2::from_shape_fn((4, 5), |(i, j)| crate::Bool8::from((i + j) % 2 == 0));
         let nd_x = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as i32);
         let nd_y = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| -((i * 5 + j) as i32));
         let selected = crate::ops::where_condition(
@@ -1984,14 +1985,15 @@ mod tests {
         let index = full_index(&[4u64, 5]);
         let nd_i = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as i32);
         let nd_f = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i as f32) - (j as f32) * 0.25);
-        let nd_b = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i + j) % 2 == 0);
+        let nd_b =
+            ndarray::Array2::from_shape_fn((4, 5), |(i, j)| crate::Bool8::from((i + j) % 2 == 0));
         let mixed = crate::ops::map_multiple(
             (
                 crate::Array::compact_ndarray(&nd_i).unwrap(),
                 crate::Array::compact_ndarray(&nd_f).unwrap(),
                 crate::Array::compact_ndarray(&nd_b).unwrap(),
             ),
-            |(x, y, flag): (i32, f32, bool)| if flag { x as f32 + y } else { y },
+            |(x, y, flag): (i32, f32, crate::Bool8)| if flag.into() { x as f32 + y } else { y },
         );
         assert_eq!(operand_count::<_, f32>(&mixed.storage, &index), 3);
         assert_eq!(
@@ -2072,7 +2074,8 @@ mod tests {
         assert_eq!(declared_max_itemsize::<_, f64>(&widened.storage, &index), 8);
 
         let mixed = crate::ops::where_condition(
-            crate::Array::compact_ndarray(&ndarray::Array2::from_elem((4, 5), true)).unwrap(),
+            crate::Array::compact_ndarray(&ndarray::Array2::from_elem((4, 5), crate::TRUE))
+                .unwrap(),
             arr().cast::<i16>(),
             arr().cast::<i16>(),
         );
@@ -2095,7 +2098,9 @@ mod tests {
             crate::Array::compact_ndarray(&nd).unwrap()
         };
         let flags = || {
-            let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i + j) % 2 == 0);
+            let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| {
+                crate::Bool8::from((i + j) % 2 == 0)
+            });
             crate::Array::compact_ndarray(&nd).unwrap()
         };
 

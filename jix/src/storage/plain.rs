@@ -526,7 +526,7 @@ mod tests {
     use ndarray::{array, s, ArrayD, Ix3};
 
     use crate::codec::ReadContext;
-    use crate::Array;
+    use crate::{Array, FALSE, TRUE};
 
     // -----------------------------------------------------------------------
     /// Reading an empty region whose start sits at the end of a dim must not compute an
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn owned_read_bool() {
-        let nd = array![[true, false], [false, true]];
+        let nd = array![[TRUE, FALSE], [FALSE, TRUE]];
         let got = Array::plain_ndarray(nd.clone())
             .unwrap()
             .to_ndarray()

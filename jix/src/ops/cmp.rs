@@ -9,6 +9,7 @@ pub(crate) mod _traits {
     use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    use crate::Bool8;
 
     define_scalar_op2_trait!(
         /// Maximum operation with NaN-propagating semantics for floating-point types.
@@ -28,7 +29,7 @@ pub(crate) mod _traits {
         ///
         /// Of `+0.0` and `-0.0` either may be returned, as with [`f32::max`].
         ///
-        /// For integer and `bool` types the implementation delegates to [`std::cmp::max`], which is
+        /// For integer and `Bool8` types the implementation delegates to [`std::cmp::max`], which is
         /// equivalent. The trait therefore provides a single uniform interface usable across all
         /// supported numeric dtypes.
         Maximum,
@@ -43,7 +44,7 @@ pub(crate) mod _traits {
         }
     );
     impl_scalar_op2!(
-        impl Maximum for [bool] {
+        impl Maximum for [Bool8] {
             fn maximum = |a, b| std::cmp::max(a, b),
         }
     );
@@ -82,7 +83,7 @@ pub(crate) mod _traits {
         ///
         /// Of `+0.0` and `-0.0` either may be returned, as with [`f32::min`].
         ///
-        /// For integer and `bool` types the implementation delegates to [`std::cmp::min`], which is
+        /// For integer and `Bool8` types the implementation delegates to [`std::cmp::min`], which is
         /// equivalent. The trait therefore provides a single uniform interface usable across all
         /// supported numeric dtypes.
         Minimum,
@@ -97,7 +98,7 @@ pub(crate) mod _traits {
         }
     );
     impl_scalar_op2!(
-        impl Minimum for [bool] {
+        impl Minimum for [Bool8] {
             fn minimum = |a, b| std::cmp::min(a, b),
         }
     );
@@ -137,34 +138,34 @@ pub(crate) mod _traits {
             );
             impl_scalar_op2!(
                 impl $Trait for [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64] {
-                    type Output = bool;
+                    type Output = Bool8;
                     fn $f = |a, b| a $op b,
                     fn $f_bulk = |a, b| a.$simd_f(b),
                 }
             );
             impl_scalar_op2!(
-                impl $Trait for [bool] {
-                    type Output = bool;
-                    fn $f = |$a, $b| $bool,
+                impl $Trait for [Bool8] {
+                    type Output = Bool8;
+                    fn $f = |$a, $b| ($bool).into(),
                 }
             );
             impl_scalar_op2!(
                 impl $Trait for [u64] x [i64] {
-                    type Output = bool;
-                    fn $f = |$ua, $ib| $u64_i64,
+                    type Output = Bool8;
+                    fn $f = |$ua, $ib| ($u64_i64).into(),
                 }
             );
             impl_scalar_op2!(
                 impl $Trait for [i64] x [u64] {
-                    type Output = bool;
-                    fn $f = |$ia, $ub| $i64_u64,
+                    type Output = Bool8;
+                    fn $f = |$ia, $ub| ($i64_u64).into(),
                 }
             );
             #[cfg(feature = "half")]
             impl_scalar_op2!(
                 impl $Trait for [f16] {
-                    type Output = bool;
-                    fn $f = |a, b| a $op b,
+                    type Output = Bool8;
+                    fn $f = |a, b| (a $op b).into(),
                 }
             );
         };
@@ -177,15 +178,15 @@ pub(crate) mod _traits {
             #[cfg(feature = "num-complex")]
             impl_scalar_op2!(
                 impl $Trait for [Complex<f32>, Complex<f64>] {
-                    type Output = bool;
-                    fn $f = |a, b| a $op b,
+                    type Output = Bool8;
+                    fn $f = |a, b| (a $op b).into(),
                 }
             );
             #[cfg(all(feature = "half", feature = "num-complex"))]
             impl_scalar_op2!(
                 impl $Trait for [Complex<f16>] {
-                    type Output = bool;
-                    fn $f = |a, b| a $op b,
+                    type Output = Bool8;
+                    fn $f = |a, b| (a $op b).into(),
                 }
             );
         };
@@ -193,7 +194,7 @@ pub(crate) mod _traits {
     cmp_op2!(
         /// Equality operation, as [`PartialEq::eq`].
         ///
-        /// Output dtype is `bool`.
+        /// Output dtype is `Bool8`.
         ///
         /// For **float** types, `NaN != NaN` per IEEE 754: comparing two `NaN` values
         /// returns `false`.
@@ -215,7 +216,7 @@ pub(crate) mod _traits {
     cmp_op2!(
         /// Inequality operation, as [`PartialEq::ne`].
         ///
-        /// Output dtype is `bool`.
+        /// Output dtype is `Bool8`.
         ///
         /// For **float** types, `NaN != NaN` returns `true` per IEEE 754.
         /// For **complex** types, returns `true` if either the real or imaginary component differs.
@@ -236,10 +237,10 @@ pub(crate) mod _traits {
     cmp_op2!(
         /// Less-than operation, as [`PartialOrd::lt`].
         ///
-        /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
+        /// Complex types are not supported as they have no total ordering. Output dtype is `Bool8`.
         ///
         /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
-        /// For **bool**: `false < true`.
+        /// For **Bool8**: `FALSE < TRUE`.
         impl Less {
             /// Test whether the value is less than another value.
             fn less = <,
@@ -252,10 +253,10 @@ pub(crate) mod _traits {
     cmp_op2!(
         /// Less-than-or-equal operation, as [`PartialOrd::le`].
         ///
-        /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
+        /// Complex types are not supported as they have no total ordering. Output dtype is `Bool8`.
         ///
         /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
-        /// For **bool**: `false <= true`, and both `false <= false` and `true <= true` hold.
+        /// For **Bool8**: `FALSE <= TRUE`, and both `FALSE <= FALSE` and `TRUE <= TRUE` hold.
         impl LessEqual {
             /// Test whether the value is less than or equal to another value.
             fn less_equal = <=,
@@ -303,7 +304,7 @@ pub(crate) mod _traits {
             rtol: &Self::RelativeTolerance,
             atol: &Self::AbsoluteTolerance,
             simd: S,
-        ) -> [bool; N]
+        ) -> [Bool8; N]
         where
             Self: Sized,
         {
@@ -312,7 +313,7 @@ pub(crate) mod _traits {
                 xs,
                 ys,
                 #[inline(always)]
-                |_, x, y| x.approx_eq(&y, rtol, atol),
+                |_, x, y| x.approx_eq(&y, rtol, atol).into(),
             )
         }
     }
@@ -382,19 +383,19 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, FALSE, TRUE};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
     /// let b = Array::compact_ndarray(&array![1i32, 0, 3])?;
     /// let result = a.equal(b).to_ndarray()?;
-    /// assert_eq!(result, array![true, false, true]);
+    /// assert_eq!(result, array![TRUE, FALSE, TRUE]);
     ///
     /// // NaN != NaN per IEEE 754.
     /// let c = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
     /// let d = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
     /// let result = c.equal(d).to_ndarray()?;
-    /// assert_eq!(result, array![false, true]);
+    /// assert_eq!(result, array![FALSE, TRUE]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Equal,
@@ -415,19 +416,19 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, FALSE, TRUE};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
     /// let b = Array::compact_ndarray(&array![1i32, 0, 3])?;
     /// let result = a.not_equal(b).to_ndarray()?;
-    /// assert_eq!(result, array![false, true, false]);
+    /// assert_eq!(result, array![FALSE, TRUE, FALSE]);
     ///
     /// // NaN != NaN is true per IEEE 754.
     /// let c = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
     /// let d = Array::compact_ndarray(&array![f32::NAN, 2.0f32])?;
     /// let result = c.not_equal(d).to_ndarray()?;
-    /// assert_eq!(result, array![true, true]);
+    /// assert_eq!(result, array![TRUE, TRUE]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     NotEqual,
@@ -536,19 +537,19 @@ define_swapped_cmp!(
     ///
     /// # Examples
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, FALSE, TRUE};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![3i32, 1, 2])?;
     /// let b = Array::compact_ndarray(&array![1i32, 1, 3])?;
     /// let result = a.greater(b).to_ndarray()?;
-    /// assert_eq!(result, array![true, false, false]);
+    /// assert_eq!(result, array![TRUE, FALSE, FALSE]);
     ///
-    /// // true > false for bool dtype.
-    /// let c = Array::compact_ndarray(&array![true, false, true])?;
-    /// let d = Array::compact_ndarray(&array![false, false, true])?;
+    /// // TRUE > FALSE for Bool8 dtype.
+    /// let c = Array::compact_ndarray(&array![TRUE, FALSE, TRUE])?;
+    /// let d = Array::compact_ndarray(&array![FALSE, FALSE, TRUE])?;
     /// let result = c.greater(d).to_ndarray()?;
-    /// assert_eq!(result, array![true, false, false]);
+    /// assert_eq!(result, array![TRUE, FALSE, FALSE]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Greater = Less(LessKernel, crate::scalar::Less),
@@ -566,19 +567,19 @@ define_swapped_cmp!(
     ///
     /// # Examples
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, FALSE, TRUE};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![3i32, 1, 2])?;
     /// let b = Array::compact_ndarray(&array![1i32, 1, 3])?;
     /// let result = a.greater_equal(b).to_ndarray()?;
-    /// assert_eq!(result, array![true, true, false]);
+    /// assert_eq!(result, array![TRUE, TRUE, FALSE]);
     ///
     /// // true >= false and false >= false hold.
-    /// let c = Array::compact_ndarray(&array![true, false, true])?;
-    /// let d = Array::compact_ndarray(&array![false, false, true])?;
+    /// let c = Array::compact_ndarray(&array![TRUE, FALSE, TRUE])?;
+    /// let d = Array::compact_ndarray(&array![FALSE, FALSE, TRUE])?;
     /// let result = c.greater_equal(d).to_ndarray()?;
-    /// assert_eq!(result, array![true, true, true]);
+    /// assert_eq!(result, array![TRUE, TRUE, TRUE]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     GreaterEqual = LessEqual(LessEqualKernel, crate::scalar::LessEqual),
@@ -595,19 +596,19 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, FALSE, TRUE};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![1i32, 1, 3])?;
     /// let b = Array::compact_ndarray(&array![3i32, 1, 2])?;
     /// let result = a.less(b).to_ndarray()?;
-    /// assert_eq!(result, array![true, false, false]);
+    /// assert_eq!(result, array![TRUE, FALSE, FALSE]);
     ///
-    /// // false < true for bool dtype.
-    /// let c = Array::compact_ndarray(&array![false, false, true])?;
-    /// let d = Array::compact_ndarray(&array![true, false, true])?;
+    /// // FALSE < TRUE for Bool8 dtype.
+    /// let c = Array::compact_ndarray(&array![FALSE, FALSE, TRUE])?;
+    /// let d = Array::compact_ndarray(&array![TRUE, FALSE, TRUE])?;
     /// let result = c.less(d).to_ndarray()?;
-    /// assert_eq!(result, array![true, false, false]);
+    /// assert_eq!(result, array![TRUE, FALSE, FALSE]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Less,
@@ -628,19 +629,19 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, FALSE, TRUE};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![1i32, 1, 3])?;
     /// let b = Array::compact_ndarray(&array![3i32, 1, 2])?;
     /// let result = a.less_equal(b).to_ndarray()?;
-    /// assert_eq!(result, array![true, true, false]);
+    /// assert_eq!(result, array![TRUE, TRUE, FALSE]);
     ///
     /// // false <= true and true <= true hold.
-    /// let c = Array::compact_ndarray(&array![false, false, true])?;
-    /// let d = Array::compact_ndarray(&array![true, false, true])?;
+    /// let c = Array::compact_ndarray(&array![FALSE, FALSE, TRUE])?;
+    /// let d = Array::compact_ndarray(&array![TRUE, FALSE, TRUE])?;
     /// let result = c.less_equal(d).to_ndarray()?;
-    /// assert_eq!(result, array![true, true, true]);
+    /// assert_eq!(result, array![TRUE, TRUE, TRUE]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     LessEqual,
@@ -925,7 +926,7 @@ where
 
 /// Element-wise approximate equality test.
 ///
-/// Produces a `bool` array that is `true` at each position where the corresponding elements of
+/// Produces a `Bool8` array that is `true` at each position where the corresponding elements of
 /// the two input arrays are within the specified tolerances:
 /// `|a - b| <= max(atol, rtol * max(|a|, |b|))`.
 ///
@@ -942,32 +943,32 @@ where
 /// # Examples
 ///
 /// ```
-/// use jix::Array;
+/// use jix::{Array, FALSE, TRUE};
 /// use ndarray::array;
 ///
 /// // atol=0.02 covers the 0.01 gap; the 1.0 difference in the third element does not fit.
 /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
 /// let b = Array::compact_ndarray(&array![1.0f32, 2.01, 4.0])?;
 /// let result = a.approx_equal(b, 0.0, 0.02).to_ndarray()?;
-/// assert_eq!(result, array![true, true, false]);
+/// assert_eq!(result, array![TRUE, TRUE, FALSE]);
 ///
 /// // rtol=0.1 accepts a ~9 % relative difference but rejects an ~11 % one.
 /// let c = Array::compact_ndarray(&array![100.0f32, 1.0])?;
 /// let d = Array::compact_ndarray(&array![109.0f32, 1.12])?;
 /// let result = c.approx_equal(d, 0.1, 0.0).to_ndarray()?;
-/// assert_eq!(result, array![true, false]);
+/// assert_eq!(result, array![TRUE, FALSE]);
 ///
 /// // NaN inputs always produce false.
 /// let e = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
 /// let f = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
 /// let result = e.approx_equal(f, 0.0, 0.0).to_ndarray()?;
-/// assert_eq!(result, array![false, true]);
+/// assert_eq!(result, array![FALSE, TRUE]);
 ///
 /// // Same infinities are equal; opposite signs are not.
 /// let g = Array::compact_ndarray(&array![f32::INFINITY, f32::NEG_INFINITY])?;
 /// let h = Array::compact_ndarray(&array![f32::INFINITY, f32::INFINITY])?;
 /// let result = g.approx_equal(h, 0.0, 0.0).to_ndarray()?;
-/// assert_eq!(result, array![true, false]);
+/// assert_eq!(result, array![TRUE, FALSE]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct ApproxEq<S1, S2>(Op2<S1, S2, ApproxEqKernel<S1::Item>>)
@@ -978,11 +979,11 @@ struct ApproxEqKernel<T: crate::scalar::ApproxEq> {
     atol: <T as crate::scalar::ApproxEq>::AbsoluteTolerance,
 }
 impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
-    type Output = bool;
+    type Output = Bool8;
 
     #[inline(always)]
     fn apply(&self, a: T, b: T, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
-        a.approx_eq(&b, &self.rtol, &self.atol)
+        a.approx_eq(&b, &self.rtol, &self.atol).into()
     }
 
     #[inline(always)]
@@ -1033,7 +1034,7 @@ where
     S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
     S2: ArrayStorageTyped<Item = S1::Item>,
 {
-    type ElementType = Ty<bool>;
+    type ElementType = Ty<Bool8>;
     crate::storage::impl_array_storage_forward!(<S1, S2>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -1112,6 +1113,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::{Bool8, FALSE, TRUE};
     use ndarray::Ix1;
 
     #[cfg(feature = "half")]
@@ -1153,9 +1155,9 @@ mod tests {
         let pairs = || a.iter().zip(&b).map(|(&u, &i)| (u as i128, i as i128));
         macro_rules! check {
             ($($Op:ident: $op:tt),*) => {$(
-                let expected = pairs().map(|(u, i)| u $op i).collect::<Vec<_>>();
+                let expected = pairs().map(|(u, i)| Bool8::from(u $op i)).collect::<Vec<_>>();
                 assert_eq!($Op::new_array(u(), i()).unwrap().to_ndarray::<Ix1>().unwrap().to_vec(), expected);
-                let expected = pairs().map(|(u, i)| i $op u).collect::<Vec<_>>();
+                let expected = pairs().map(|(u, i)| Bool8::from(i $op u)).collect::<Vec<_>>();
                 assert_eq!($Op::new_array(i(), u()).unwrap().to_ndarray::<Ix1>().unwrap().to_vec(), expected);
             )*};
         }
@@ -1206,10 +1208,10 @@ mod tests {
                 };
             }
             simd.vectorize(|| {
-                all!(EqualKernel, |x, y| x == y);
-                all!(NotEqualKernel, |x, y| x != y);
-                all!(LessKernel, |x, y| x < y);
-                all!(LessEqualKernel, |x, y| x <= y);
+                all!(EqualKernel, |x, y| Bool8::from(x == y));
+                all!(NotEqualKernel, |x, y| Bool8::from(x != y));
+                all!(LessKernel, |x, y| Bool8::from(x < y));
+                all!(LessEqualKernel, |x, y| Bool8::from(x <= y));
                 all!(MaximumKernel, Maximum::maximum);
                 all!(MinimumKernel, Minimum::minimum);
                 // Not just a NaN: the one NaN, whichever operand's it was (`-NaN` included).
@@ -1246,8 +1248,8 @@ mod tests {
     // Output is bool, so NaN in float inputs is safe for assert_array_matches.
     test_op2!(
         equal,
-        |a, b| a == b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        |a, b| Bool8::from(a == b),
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8],
         comparable_strategy,
         #[cfg(feature = "half")]
         [f16],
@@ -1265,7 +1267,9 @@ mod tests {
         let b = ndarray::array![1i32, 5, 3, 0];
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
-        let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a != b);
+        let expected = ndarray::Zip::from(&a)
+            .and(&b)
+            .map_collect(|&a, &b| Bool8::from(a != b));
         crate::util::assert_array_matches(&za.view().not_equal(zb.view()), &expected);
 
         // float path: NaN != NaN is true; same infinities are equal (so not_equal is false).
@@ -1275,7 +1279,7 @@ mod tests {
         let zfb = Array::compact_ndarray(&fb).unwrap();
         let fexp = ndarray::Zip::from(&fa)
             .and(&fb)
-            .map_collect(|&a, &b| a != b);
+            .map_collect(|&a, &b| Bool8::from(a != b));
         crate::util::assert_array_matches(&zfa.view().not_equal(zfb.view()), &fexp);
     }
 
@@ -1283,13 +1287,13 @@ mod tests {
     // Integers: any_strategy (no overflow). Floats: maybe_non_finite covers NaN -> false paths.
     test_op2!(
         greater,
-        |a, b| a > b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        |a, b| Bool8::from(a > b),
+        [i8, i16, i32, i64, u8, u16, u32, u64, Bool8],
         any_strategy
     );
     test_op2!(
         greater,
-        |a, b| a > b,
+        |a, b| Bool8::from(a > b),
         [f32, f64],
         maybe_non_finite_strategy,
         #[cfg(feature = "half")]
@@ -1304,7 +1308,9 @@ mod tests {
         let b = ndarray::array![1i32, 1, 2, 3];
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
-        let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a >= b);
+        let expected = ndarray::Zip::from(&a)
+            .and(&b)
+            .map_collect(|&a, &b| Bool8::from(a >= b));
         crate::util::assert_array_matches(&za.view().greater_equal(zb.view()), &expected);
 
         // float path: NaN comparisons are false; inf ordering and inf >= inf (true).
@@ -1314,29 +1320,29 @@ mod tests {
         let zfb = Array::compact_ndarray(&fb).unwrap();
         let fexp = ndarray::Zip::from(&fa)
             .and(&fb)
-            .map_collect(|&a, &b| a >= b);
+            .map_collect(|&a, &b| Bool8::from(a >= b));
         crate::util::assert_array_matches(&zfa.view().greater_equal(zfb.view()), &fexp);
 
         // bool path: true>=false, false>=false, true>=true, false>=true.
-        let ba = ndarray::array![true, false, true, false];
-        let bb = ndarray::array![false, false, true, true];
+        let ba = ndarray::array![TRUE, FALSE, TRUE, FALSE];
+        let bb = ndarray::array![FALSE, FALSE, TRUE, TRUE];
         let zba = Array::compact_ndarray(&ba).unwrap();
         let zbb = Array::compact_ndarray(&bb).unwrap();
         let bexp = ndarray::Zip::from(&ba)
             .and(&bb)
-            .map_collect(|&a, &b| a >= b);
+            .map_collect(|&a, &b| Bool8::from(a >= b));
         crate::util::assert_array_matches(&zba.view().greater_equal(zbb.view()), &bexp);
     }
 
     test_op2!(
         greater_equal,
-        |a, b| a >= b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        |a, b| Bool8::from(a >= b),
+        [i8, i16, i32, i64, u8, u16, u32, u64, Bool8],
         any_strategy
     );
     test_op2!(
         greater_equal,
-        |a, b| a >= b,
+        |a, b| Bool8::from(a >= b),
         [f32, f64],
         maybe_non_finite_strategy,
         #[cfg(feature = "half")]
@@ -1413,7 +1419,9 @@ mod tests {
         let b = ndarray::array![3i32, 1, 1, -1];
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
-        let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a < b);
+        let expected = ndarray::Zip::from(&a)
+            .and(&b)
+            .map_collect(|&a, &b| Bool8::from(a < b));
         crate::util::assert_array_matches(&za.view().less(zb.view()), &expected);
 
         // float path: NaN comparisons are false; -inf < finite, inf < inf is false.
@@ -1421,15 +1429,19 @@ mod tests {
         let fb = ndarray::array![1.0f32, f32::NAN, 1.0, f32::INFINITY];
         let zfa = Array::compact_ndarray(&fa).unwrap();
         let zfb = Array::compact_ndarray(&fb).unwrap();
-        let fexp = ndarray::Zip::from(&fa).and(&fb).map_collect(|&a, &b| a < b);
+        let fexp = ndarray::Zip::from(&fa)
+            .and(&fb)
+            .map_collect(|&a, &b| Bool8::from(a < b));
         crate::util::assert_array_matches(&zfa.view().less(zfb.view()), &fexp);
 
         // bool path: false<true (true), true<false (false), equal values are false.
-        let ba = ndarray::array![false, true, true, false];
-        let bb = ndarray::array![true, false, true, false];
+        let ba = ndarray::array![FALSE, TRUE, TRUE, FALSE];
+        let bb = ndarray::array![TRUE, FALSE, TRUE, FALSE];
         let zba = Array::compact_ndarray(&ba).unwrap();
         let zbb = Array::compact_ndarray(&bb).unwrap();
-        let bexp = ndarray::Zip::from(&ba).and(&bb).map_collect(|&a, &b| a < b);
+        let bexp = ndarray::Zip::from(&ba)
+            .and(&bb)
+            .map_collect(|&a, &b| Bool8::from(a < b));
         crate::util::assert_array_matches(&zba.view().less(zbb.view()), &bexp);
     }
 
@@ -1441,7 +1453,9 @@ mod tests {
         let b = ndarray::array![2i32, 2, 1, 5];
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
-        let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a <= b);
+        let expected = ndarray::Zip::from(&a)
+            .and(&b)
+            .map_collect(|&a, &b| Bool8::from(a <= b));
         crate::util::assert_array_matches(&za.view().less_equal(zb.view()), &expected);
 
         // float path: NaN <= x is false; inf ordering.
@@ -1451,13 +1465,13 @@ mod tests {
         let zfb = Array::compact_ndarray(&fb).unwrap();
         let fexp = ndarray::Zip::from(&fa)
             .and(&fb)
-            .map_collect(|&a, &b| a <= b);
+            .map_collect(|&a, &b| Bool8::from(a <= b));
         crate::util::assert_array_matches(&zfa.view().less_equal(zfb.view()), &fexp);
 
         // bool path on a 2x2 shape with a non-default 1x1 block shape, so a
         // block-boundary bug in the ordering kernel would still show up.
-        let ba = ndarray::array![[false, true], [true, false]];
-        let bb = ndarray::array![[true, false], [true, true]];
+        let ba = ndarray::array![[FALSE, TRUE], [TRUE, FALSE]];
+        let bb = ndarray::array![[TRUE, FALSE], [TRUE, TRUE]];
         let mut params_a = crate::ArrayParams::new();
         params_a.block_shape(&[1u32, 1]);
         let mut params_b = crate::ArrayParams::new();
@@ -1466,7 +1480,7 @@ mod tests {
         let zbb = Array::compact_ndarray_with(&bb, params_b).unwrap();
         let bexp = ndarray::Zip::from(&ba)
             .and(&bb)
-            .map_collect(|&a, &b| a <= b);
+            .map_collect(|&a, &b| Bool8::from(a <= b));
         crate::util::assert_array_matches(&zba.view().less_equal(zbb.view()), &bexp);
     }
 
@@ -1479,12 +1493,12 @@ mod tests {
             + core::ops::Sub<Output = T>
             + core::ops::Mul<Output = T>
             + crate::scalar::Abs<Output = T>
-            + crate::scalar::IsInfinite<Output = bool>,
+            + crate::scalar::IsInfinite<Output = Bool8>,
     {
         if a == b {
             return true;
         }
-        if a.is_infinite() || b.is_infinite() {
+        if bool::from(a.is_infinite() | b.is_infinite()) {
             return false;
         }
         let diff = (a - b).abs();
@@ -1540,7 +1554,7 @@ mod tests {
             let result = za.approx_equal(zb, rtol, atol);
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_b)
-                .map_collect(|&a, &b| ref_approx_eq(a, b, rtol, atol));
+                .map_collect(|&a, &b| Bool8::from(ref_approx_eq(a, b, rtol, atol)));
             crate::util::assert_array_matches(&result, &expected);
         }
 
@@ -1559,7 +1573,7 @@ mod tests {
             let result = za.approx_equal(zb, rtol, atol);
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_b)
-                .map_collect(|&a, &b| ref_approx_eq(a, b, rtol, atol));
+                .map_collect(|&a, &b| Bool8::from(ref_approx_eq(a, b, rtol, atol)));
             crate::util::assert_array_matches(&result, &expected);
         }
     }
@@ -1583,7 +1597,7 @@ mod tests {
             let result = za.approx_equal(zb, rtol, atol);
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_b)
-                .map_collect(|&a, &b| ref_approx_eq(a, b, rtol, atol));
+                .map_collect(|&a, &b| Bool8::from(ref_approx_eq(a, b, rtol, atol)));
             crate::util::assert_array_matches(&result, &expected);
         }
     }
@@ -1608,8 +1622,10 @@ mod tests {
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_b)
                 .map_collect(|a, b| {
-                    ref_approx_eq(a.re, b.re, rtol, atol_re)
-                        && ref_approx_eq(a.im, b.im, rtol, atol_im)
+                    Bool8::from(
+                        ref_approx_eq(a.re, b.re, rtol, atol_re)
+                            && ref_approx_eq(a.im, b.im, rtol, atol_im),
+                    )
                 });
             crate::util::assert_array_matches(&result, &expected);
         }
@@ -1632,8 +1648,10 @@ mod tests {
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_b)
                 .map_collect(|a, b| {
-                    ref_approx_eq(a.re, b.re, rtol, atol_re)
-                        && ref_approx_eq(a.im, b.im, rtol, atol_im)
+                    Bool8::from(
+                        ref_approx_eq(a.re, b.re, rtol, atol_re)
+                            && ref_approx_eq(a.im, b.im, rtol, atol_im),
+                    )
                 });
             crate::util::assert_array_matches(&result, &expected);
         }
@@ -1644,7 +1662,7 @@ mod tests {
     test_op2!(
         maximum,
         |a, b| Maximum::maximum(a, b),
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        [i8, i16, i32, i64, u8, u16, u32, u64, Bool8],
         any_strategy
     );
     test_op2!(

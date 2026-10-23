@@ -11,4 +11,3 @@
 - move ReadContext
 - optimize nd copy of structs
 - work on Dimension public API
-- Dtyped of bool is wrong

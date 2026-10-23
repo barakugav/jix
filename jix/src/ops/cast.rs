@@ -5,6 +5,7 @@ pub(crate) mod _traits {
     use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    use crate::Bool8;
 
     /// Cast a scalar value to another scalar type.
     ///
@@ -14,8 +15,8 @@ pub(crate) mod _traits {
     /// - Between any two complex types: `Complex<f16>` (requires the `half` feature), `Complex<f32>`, `Complex<f64>`.
     /// - From any integer to floating-point type, or vice versa.
     /// - From any integer or floating-point type to a complex type. A complex value can only be
-    ///   cast to another complex type or to `bool` - not to a real integer or floating-point type.
-    /// - Between `bool` and any other scalar, and vice versa: zero -> `false`, any non-zero value -> `true`.
+    ///   cast to another complex type or to `Bool8` - not to a real integer or floating-point type.
+    /// - Between `Bool8` and any other scalar, and vice versa: zero -> `FALSE`, any non-zero value -> `TRUE`.
     pub trait Cast<T> {
         /// Casts `self` to `T`.
         fn cast(self) -> T;
@@ -60,10 +61,13 @@ pub(crate) mod _traits {
             let value = impl_cast!(@scalar_to $dst_type, value);
             value
         }};
-        (@scalar_from bool,        $value:expr) => { ($value) as i8 };
+        (@scalar_from Bool8,       $value:expr) => { bool::from($value) as i8 };
         (@scalar_from f16,         $value:expr) => { ($value).to_f32() };
         (@scalar_from $type:ident, $value:expr) => { $value };
-        (@scalar_to   bool,        $value:expr) => { ($value) != (0 as _) };
+        (@scalar_to   Bool8,       $value:expr) => {{
+            let is_nonzero: bool = ($value) != (0 as _);
+            Bool8::from(is_nonzero)
+        }};
         (@scalar_to   f16,         $value:expr) => { f16::from_f32(($value) as f32) };
         (@scalar_to   $type:ident, $value:expr) => { ($value) as $type };
 
@@ -118,26 +122,26 @@ pub(crate) mod _traits {
 
     macro_rules! impl_cast_to_bool {
         // TODO much faster: self.to_bits() & 0x7fff != 0
-        (f16) => { impl_cast!(f16 => bool, bulk=("disabled")); };
-        (bool) => { impl_cast!(bool => bool, bulk=("disabled")); };
+        (f16) => { impl_cast!(f16 => Bool8, bulk=("disabled")); };
+        (Bool8) => { impl_cast!(Bool8 => Bool8, bulk=("disabled")); };
         ($src_type:ident) => {
-            impl Cast<bool> for $src_type {
+            impl Cast<Bool8> for $src_type {
                 #[inline(always)]
-                fn cast(self) -> bool {
-                    self != (0 as $src_type)
+                fn cast(self) -> Bool8 {
+                    Bool8::from(self != (0 as $src_type))
                 }
 
                 #[inline(always)]
                 fn cast_bulk<const N: usize, S: fearless_simd::Simd>(
                     xs: [Self; N],
                     simd: S,
-                ) -> [bool; N] {
+                ) -> [Bool8; N] {
                     use fearless_simd::SimdBase;
                     type V<S> = <$src_type as simd::SimdElementExt>::V<S>;
                     let zero = <V<S> as SimdBase<S>>::splat(simd, 0 as $src_type);
                     crate::scalar::simd::map_vectors_to_bools::<Self, N, S>(
                         xs,
-                        #[inline(always)] |x| <Self as Cast<bool>>::cast(x),
+                        #[inline(always)] |x| <Self as Cast<Bool8>>::cast(x),
                         #[inline(always)] |v| v.simd_ne(zero),
                         simd,
                     )
@@ -276,7 +280,7 @@ pub(crate) mod _traits {
     });
     #[cfg(feature = "half")]
     impl_cast_num!(f16 { i8, i16, i32, i64, u8, u16, u32, u64, f32, f64: bulk="disabled"; });
-    impl_cast_num!(bool { i8, i16, i32, i64, u8, u16, u32, u64, f32, f64: bulk="disabled"; });
+    impl_cast_num!(Bool8 { i8, i16, i32, i64, u8, u16, u32, u64, f32, f64: bulk="disabled"; });
 
     #[cfg(feature = "num-complex")]
     macro_rules! impl_cast_complex_to_complex {
@@ -300,10 +304,10 @@ pub(crate) mod _traits {
             impl_cast_complex_to_complex!($src_type, f32);
             impl_cast_complex_to_complex!($src_type, f64);
 
-            impl Cast<bool> for Complex<$src_type> {
+            impl Cast<Bool8> for Complex<$src_type> {
                 #[inline(always)]
-                fn cast(self) -> bool {
-                    self != (<_ as crate::scalar::Cast<Self>>::cast(false))
+                fn cast(self) -> Bool8 {
+                    Bool8::from(self != (<_ as crate::scalar::Cast<Self>>::cast(crate::FALSE)))
                 }
             }
         };
@@ -374,8 +378,8 @@ pub(crate) mod _traits {
 /// - Between any two complex types: `Complex<f32>`, `Complex<f64>`.
 /// - From any integer to floating-point type, or vice versa.
 /// - From any integer or floating-point type to a complex type. A complex value can only be
-///   cast to another complex type or to `bool` - not to a real integer or floating-point type.
-/// - Between `bool` and any other scalar, and vice versa: zero -> `false`, any non-zero value -> `true`.
+///   cast to another complex type or to `Bool8` - not to a real integer or floating-point type.
+/// - Between `Bool8` and any other scalar, and vice versa: zero -> `FALSE`, any non-zero value -> `TRUE`.
 ///
 /// The cast is checked via the [`Cast<T>`](crate::scalar::Cast) trait bound on the source element
 /// type; unsupported source-to-target type pairs are rejected at compile time.
@@ -391,7 +395,7 @@ pub(crate) mod _traits {
 /// # Examples
 /// ```
 /// use jix::dtype::Dtyped;
-/// use jix::Array;
+/// use jix::{Array, Bool8, FALSE, TRUE};
 /// use ndarray::array;
 ///
 /// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
@@ -400,8 +404,8 @@ pub(crate) mod _traits {
 ///
 /// // Zero -> false, non-zero -> true
 /// let zb = Array::compact_ndarray(&array![0i32, 1, -2, 0])?;
-/// let result = zb.cast::<bool>().to_ndarray()?;
-/// assert_eq!(result, array![false, true, true, false]);
+/// let result = zb.cast::<Bool8>().to_ndarray()?;
+/// assert_eq!(result, array![FALSE, TRUE, TRUE, FALSE]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct Cast<S, T>(crate::ops::op1::Op1<S, CastKernel<T>>);
@@ -478,6 +482,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::{Bool8, FALSE, TRUE};
 
     #[test]
     fn cast_rejects_widened_shape_overflow() {
@@ -506,24 +511,24 @@ mod tests {
         fn cast_to(self) -> T;
     }
     macro_rules! impl_cast_as_single {
-        (bool => bool) => {
-            impl CastTo<bool> for bool {
-                fn cast_to(self) -> bool {
+        (Bool8 => Bool8) => {
+            impl CastTo<Bool8> for Bool8 {
+                fn cast_to(self) -> Bool8 {
                     self
                 }
             }
         };
-        (bool => $dst:ty) => {
-            impl CastTo<$dst> for bool {
+        (Bool8 => $dst:ty) => {
+            impl CastTo<$dst> for Bool8 {
                 fn cast_to(self) -> $dst {
-                    self as i8 as $dst
+                    bool::from(self) as i8 as $dst
                 }
             }
         };
-        ($src:ty => bool) => {
-            impl CastTo<bool> for $src {
-                fn cast_to(self) -> bool {
-                    self != (0 as $src)
+        ($src:ty => Bool8) => {
+            impl CastTo<Bool8> for $src {
+                fn cast_to(self) -> Bool8 {
+                    Bool8::from(self != (0 as $src))
                 }
             }
         };
@@ -540,17 +545,17 @@ mod tests {
             $(impl_cast_as_single!($src => $dst);)+
         };
     }
-    impl_cast_as!(i8   => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
-    impl_cast_as!(i16  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
-    impl_cast_as!(i32  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
-    impl_cast_as!(i64  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
-    impl_cast_as!(u8   => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
-    impl_cast_as!(u16  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
-    impl_cast_as!(u32  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
-    impl_cast_as!(u64  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
-    impl_cast_as!(f32  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
-    impl_cast_as!(f64  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
-    impl_cast_as!(bool => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool);
+    impl_cast_as!(i8   => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
+    impl_cast_as!(i16  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
+    impl_cast_as!(i32  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
+    impl_cast_as!(i64  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
+    impl_cast_as!(u8   => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
+    impl_cast_as!(u16  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
+    impl_cast_as!(u32  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
+    impl_cast_as!(u64  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
+    impl_cast_as!(f32  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
+    impl_cast_as!(f64  => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
+    impl_cast_as!(Bool8 => i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8);
 
     #[cfg(feature = "half")]
     mod f16_impls {
@@ -569,9 +574,9 @@ mod tests {
                 f16::from_f64(self)
             }
         }
-        impl CastTo<f16> for bool {
+        impl CastTo<f16> for Bool8 {
             fn cast_to(self) -> f16 {
-                f16::from_f32(self as u8 as f32)
+                f16::from_f32(bool::from(self) as u8 as f32)
             }
         }
         macro_rules! impl_cast_from_f16 {
@@ -582,9 +587,9 @@ mod tests {
             }
         }
         impl_cast_from_f16!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
-        impl CastTo<bool> for f16 {
-            fn cast_to(self) -> bool {
-                self.to_f32() != 0.0
+        impl CastTo<Bool8> for f16 {
+            fn cast_to(self) -> Bool8 {
+                Bool8::from(self.to_f32() != 0.0)
             }
         }
         impl CastTo<f16> for f16 {
@@ -661,7 +666,7 @@ mod tests {
     test_cast_pair!(i32, f64);
     test_cast_pair!(f64, i32);
     // to-bool: zero -> false, any nonzero -> true.
-    test_cast_pair!(i32, bool);
+    test_cast_pair!(i32, Bool8);
     // identity cast (same src and dst dtype).
     test_cast_pair!(f32, f32);
 
@@ -748,24 +753,24 @@ mod tests {
         // i8 -> bool: zero is false; the negative and positive extremes are both true.
         let nd_i8 = ndarray::array![[i8::MIN, -1, 0], [1, 100, i8::MAX]];
         let za_i8 = Array::compact_ndarray(&nd_i8).unwrap();
-        let expected_i8_bool = nd_i8.mapv(CastTo::<bool>::cast_to);
-        crate::util::assert_array_matches(&za_i8.cast::<bool>(), &expected_i8_bool);
+        let expected_i8_bool = nd_i8.mapv(CastTo::<Bool8>::cast_to);
+        crate::util::assert_array_matches(&za_i8.cast::<Bool8>(), &expected_i8_bool);
 
         // u8 -> bool: zero is false; any nonzero, including the dtype max, is true.
         let nd_u8 = ndarray::array![[0u8, 1, 128], [200, 254, u8::MAX]];
         let za_u8 = Array::compact_ndarray(&nd_u8).unwrap();
-        let expected_u8_bool = nd_u8.mapv(CastTo::<bool>::cast_to);
-        crate::util::assert_array_matches(&za_u8.cast::<bool>(), &expected_u8_bool);
+        let expected_u8_bool = nd_u8.mapv(CastTo::<Bool8>::cast_to);
+        crate::util::assert_array_matches(&za_u8.cast::<Bool8>(), &expected_u8_bool);
 
         // f32 -> bool: 0.0 and -0.0 are both false (IEEE -0.0 == 0.0); any nonzero,
         // including the extremes, is true.
         let nd_f32 = ndarray::array![[0.0f32, -0.0, 1.5], [-1.5, f32::MIN, f32::MAX]];
         let za_f32 = Array::compact_ndarray(&nd_f32).unwrap();
-        let expected_f32_bool = nd_f32.mapv(CastTo::<bool>::cast_to);
-        crate::util::assert_array_matches(&za_f32.cast::<bool>(), &expected_f32_bool);
+        let expected_f32_bool = nd_f32.mapv(CastTo::<Bool8>::cast_to);
+        crate::util::assert_array_matches(&za_f32.cast::<Bool8>(), &expected_f32_bool);
 
-        // bool -> i8 / u8 / i32 / f32: false -> 0, true -> 1 (shared `bool => i8 => dst` path).
-        let nd_bool = ndarray::array![[false, true], [true, false]];
+        // Bool8 -> i8 / u8 / i32 / f32: FALSE -> 0, TRUE -> 1 (shared `Bool8 => i8 => dst` path).
+        let nd_bool = ndarray::array![[FALSE, TRUE], [TRUE, FALSE]];
 
         let expected_bool_i8 = nd_bool.mapv(CastTo::<i8>::cast_to);
         crate::util::assert_array_matches(
@@ -981,7 +986,7 @@ mod tests {
             simd.vectorize(|| {
                 cases!(
                     i8, i16, i32, i64, u8, u16, u32, u64, f32, f64
-                        => [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool]
+                        => [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Bool8]
                 );
             });
         }

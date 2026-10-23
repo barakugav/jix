@@ -6,7 +6,7 @@ use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 
 use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
 use jix_core::scalar::{f16, Complex};
-use jix_core::{Array as CoreArray, ArrayAny, ArrayParams};
+use jix_core::{Array as CoreArray, ArrayAny, ArrayParams, Bool8};
 
 use crate::dtype::dtype_from_numpy;
 use crate::ops::cast_impl;
@@ -60,7 +60,10 @@ impl Operand {
         if !is_np_generic {
             let mut scalar = None;
             if let Ok(value) = value.cast::<PyBool>() {
-                scalar = Some((Scalar::Bool(value.extract()?), Some(Precision::P1)));
+                scalar = Some((
+                    Scalar::Bool(value.extract::<bool>()?.into()),
+                    Some(Precision::P1),
+                ));
             } else if let Ok(value) = value.cast::<PyInt>() {
                 let Ok(int) = value.extract::<i64>() else {
                     return Err(PyOverflowError::new_err(format!(
@@ -150,7 +153,10 @@ impl Operand {
                     let im = item.getattr("imag")?.extract::<f64>()?;
                     (Scalar::Complex(Complex::new(re, im)), Some(Precision::P8))
                 }
-                ScalarKind::Bool => (Scalar::Bool(item.extract::<bool>()?), Some(Precision::P1)),
+                ScalarKind::Bool8 => (
+                    Scalar::Bool(item.extract::<bool>()?.into()),
+                    Some(Precision::P1),
+                ),
             };
             return Ok(Self::Scalar {
                 value,
@@ -351,7 +357,7 @@ pub(crate) fn scalar_kind_to_rank_precision(kind: ScalarKind) -> (Rank, Option<P
 
 #[derive(Debug)]
 pub(crate) enum Scalar {
-    Bool(bool),
+    Bool(Bool8),
     UInt(u64),
     Int(i64),
     Float(f64),
@@ -390,7 +396,7 @@ impl Scalar {
             | ScalarKind::F64
             | ScalarKind::ComplexF32
             | ScalarKind::ComplexF64
-            | ScalarKind::Bool => true,
+            | ScalarKind::Bool8 => true,
         };
         if in_bounds {
             Ok(())
@@ -413,7 +419,7 @@ impl Scalar {
             ($value:expr) => {{
                 let value = $value;
                 match kind {
-                    ScalarKind::Bool => Self::Bool(cast_to::<bool>(value)),
+                    ScalarKind::Bool8 => Self::Bool(cast_to::<Bool8>(value)),
                     ScalarKind::I8 => Self::Int(cast_to::<i8>(value) as i64),
                     ScalarKind::I16 => Self::Int(cast_to::<i16>(value) as i64),
                     ScalarKind::I32 => Self::Int(cast_to::<i32>(value) as i64),
@@ -440,7 +446,7 @@ impl Scalar {
             Self::Float(value) => cast_num!(value),
             // A complex value can only be cast to another complex type or to `bool`.
             Self::Complex(value) => match kind {
-                ScalarKind::Bool => Self::Bool(cast_to::<bool>(value)),
+                ScalarKind::Bool8 => Self::Bool(cast_to::<Bool8>(value)),
                 ScalarKind::ComplexF32 => {
                     Self::Complex(cast_to::<Complex<f64>>(cast_to::<Complex<f32>>(value)))
                 }

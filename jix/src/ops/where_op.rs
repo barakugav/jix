@@ -5,7 +5,7 @@ use crate::ops::prelude::*;
 ///
 /// # Panics
 ///
-/// Panics if `condition` is not `bool`, `x` and `y` differ in dtype, or any two arrays differ
+/// Panics if `condition` is not `Bool8`, `x` and `y` differ in dtype, or any two arrays differ
 /// in shape.
 #[track_caller]
 pub fn where_condition<SC, SX, SY>(
@@ -14,7 +14,7 @@ pub fn where_condition<SC, SX, SY>(
     y: Array<SY>,
 ) -> Array<Where<SC, SX, SY>>
 where
-    SC: ArrayStorageTyped<Item = bool>,
+    SC: ArrayStorageTyped<Item = Bool8>,
     SX: ArrayStorage,
     SY: ArrayStorage<ElementType = SX::ElementType>,
 {
@@ -26,7 +26,7 @@ where
 /// For each index `i`, the output is `x[i]` if `condition[i]` is `true`, otherwise `y[i]`.
 /// Semantics match `numpy.where(condition, x, y)`.
 ///
-/// `condition` must have dtype `bool`. `x` and `y` must have the same dtype. All three arrays
+/// `condition` must have dtype `Bool8`. `x` and `y` must have the same dtype. All three arrays
 /// must have the same shape. Output dtype equals the dtype of `x` and `y`. Output shape equals
 /// the input shape.
 ///
@@ -38,17 +38,17 @@ where
 /// # Examples
 /// ```
 /// use jix::ops::where_condition;
-/// use jix::Array;
+/// use jix::{Array, FALSE, TRUE};
 /// use ndarray::{array, Ix2};
 ///
-/// let cond = Array::compact_ndarray(&array![true, false, true, false])?;
+/// let cond = Array::compact_ndarray(&array![TRUE, FALSE, TRUE, FALSE])?;
 /// let x = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 /// let y = Array::compact_ndarray(&array![10i32, 20, 30, 40])?;
 /// let result = where_condition(cond, x, y).to_ndarray()?;
 /// assert_eq!(result, array![1, 20, 3, 40]);
 ///
 /// // 2-D arrays
-/// let cond = Array::compact_ndarray(&array![[true, false], [false, true]])?;
+/// let cond = Array::compact_ndarray(&array![[TRUE, FALSE], [FALSE, TRUE]])?;
 /// let x = Array::compact_ndarray(&array![[1.0f64, 2.0], [3.0, 4.0]])?;
 /// let y = Array::compact_ndarray(&array![[10.0f64, 20.0], [30.0, 40.0]])?;
 /// let result = where_condition(cond, x, y).to_ndarray::<Ix2>()?;
@@ -66,14 +66,14 @@ pub struct Where<SC, SX, SY> {
 }
 impl<SC, SX, SY> Where<SC, SX, SY>
 where
-    SC: ArrayStorageTyped<Item = bool>,
+    SC: ArrayStorageTyped<Item = Bool8>,
     SX: ArrayStorage,
     SY: ArrayStorage<ElementType = SX::ElementType>,
 {
     /// Constructs a [`Where`] storage. See the struct docs for semantics and examples.
     pub fn new(condition: SC, x: SX, y: SY) -> Result<Self> {
         ensure!(
-            condition.dtype() == &bool::DTYPE,
+            condition.dtype() == &Bool8::DTYPE,
             UnsupportedDtype,
             "where condition must have boolean dtype, got {}",
             condition.dtype()
@@ -144,7 +144,7 @@ where
 }
 impl<SC, SX, SY> ArrayStorage for Where<SC, SX, SY>
 where
-    SC: ArrayStorageTyped<Item = bool>,
+    SC: ArrayStorageTyped<Item = Bool8>,
     SX: ArrayStorage,
     SY: ArrayStorage<ElementType = SX::ElementType>,
 {
@@ -191,7 +191,7 @@ where
             [
                 (dtype.itemsize(), dtype.alignment()),
                 (dtype.itemsize(), dtype.alignment()),
-                (1, Alignment::of::<bool>()),
+                (1, Alignment::of::<Bool8>()),
             ],
         );
         let aligned = !REQUIRE_ALIGNED || {
@@ -205,7 +205,7 @@ where
         type InnerLoopFn = unsafe fn(
             PtrMutNoalias<'_, u8>,
             PtrNoalias<'_, u8>,
-            PtrNoalias<'_, bool>,
+            PtrNoalias<'_, Bool8>,
             usize,
             [usize; 3],
             usize,
@@ -235,7 +235,7 @@ where
 
         let mut out_buf = PtrMutNoalias::<u8>::from_slice(out_buf);
         let y_buf = PtrNoalias::<u8>::from_slice(y_buf);
-        let condition = PtrNoalias::<bool>::from_slice(condition);
+        let condition = PtrNoalias::<Bool8>::from_slice(condition);
         iter.foreach_inner_1d(
             move |[out_offset, y_offset, cond_offset], len, strides| unsafe {
                 inner_loop_fn(
@@ -253,7 +253,7 @@ where
         unsafe fn inner_loop<T: Copy, const LANES: usize, const CONTIGUOUS: bool>(
             x: PtrMutNoalias<u8>,
             y: PtrNoalias<u8>,
-            condition: PtrNoalias<bool>,
+            condition: PtrNoalias<Bool8>,
             len: usize,
             strides: [usize; 3],
             itemsize: usize,
@@ -262,7 +262,7 @@ where
             if CONTIGUOUS {
                 debug_assert_eq!(x_stride, size_of::<T>());
                 debug_assert_eq!(y_stride, size_of::<T>());
-                debug_assert_eq!(cond_stride, size_of::<bool>());
+                debug_assert_eq!(cond_stride, size_of::<Bool8>());
             }
             assert_eq!(itemsize, size_of::<T>());
             let x = x.as_mut_ptr().cast::<T>();
@@ -281,11 +281,11 @@ where
                             .read_maybe_aligned::<REQUIRE_ALIGNED>();
                         let cond_chunk = condition
                             .add(i)
-                            .cast::<[bool; LANES]>()
+                            .cast::<[Bool8; LANES]>()
                             .read_maybe_aligned::<REQUIRE_ALIGNED>();
                         let mut out = x_chunk;
                         for k in 0..LANES {
-                            out[k] = if cond_chunk[k] {
+                            out[k] = if bool::from(cond_chunk[k]) {
                                 x_chunk[k]
                             } else {
                                 y_chunk[k]
@@ -307,7 +307,7 @@ where
                     };
                     let x_val = x.read_maybe_aligned::<REQUIRE_ALIGNED>();
                     let y_val = y.read_maybe_aligned::<REQUIRE_ALIGNED>();
-                    let val = if cond.read_maybe_aligned::<REQUIRE_ALIGNED>() {
+                    let val = if bool::from(cond.read_maybe_aligned::<REQUIRE_ALIGNED>()) {
                         x_val
                     } else {
                         y_val
@@ -322,7 +322,7 @@ where
         unsafe fn inner_loop_generic(
             x: PtrMutNoalias<u8>,
             y: PtrNoalias<u8>,
-            condition: PtrNoalias<bool>,
+            condition: PtrNoalias<Bool8>,
             len: usize,
             strides: [usize; 3],
             itemsize: usize,
@@ -334,7 +334,7 @@ where
             unsafe {
                 for i in 0..len {
                     let cond = condition.byte_add(i * cond_stride).read();
-                    if !cond {
+                    if !bool::from(cond) {
                         let x = x.byte_add(i * x_stride);
                         let y = y.byte_add(i * y_stride);
                         x.copy_from_nonoverlapping(y, itemsize);
@@ -357,7 +357,7 @@ where
     {
         let condition = self
             .condition
-            .read_as_elementwise_pipeline::<bool>(index, context)?;
+            .read_as_elementwise_pipeline::<Bool8>(index, context)?;
         let x = self.x.read_as_elementwise_pipeline::<T>(index, context)?;
         let y = self.y.read_as_elementwise_pipeline::<T>(index, context)?;
 
@@ -368,7 +368,7 @@ where
         }
         impl<T, PC, PX, PY> ElementwisePipelineImpl<T> for WherePipeline<PC, PX, PY>
         where
-            PC: ElementwisePipelineImpl<bool>,
+            PC: ElementwisePipelineImpl<Bool8>,
             PX: ElementwisePipelineImpl<T>,
             PY: ElementwisePipelineImpl<T>,
             T: Copy,
@@ -404,7 +404,7 @@ where
                 };
                 let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS, _>(offset, status, simd) };
                 let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS, _>(offset, status, simd) };
-                array_from_fn_inline(|i| if condition[i] { x[i] } else { y[i] })
+                array_from_fn_inline(|i| if bool::from(condition[i]) { x[i] } else { y[i] })
             }
         }
 
@@ -461,10 +461,11 @@ mod tests {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::util::ScalarStrategy;
+    use crate::{Bool8, FALSE, TRUE};
 
     #[test]
     fn rejects_invalid_index() {
-        let cond = ndarray::Array2::from_shape_fn((2, 3), |(i, j)| (i + j) % 2 == 0);
+        let cond = ndarray::Array2::from_shape_fn((2, 3), |(i, j)| Bool8::from((i + j) % 2 == 0));
         let x = ndarray::Array2::from_shape_fn((2, 3), |(i, j)| (i * 10 + j) as i32);
         let y = x.mapv(|v| -v);
         let w = where_condition(
@@ -484,10 +485,10 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn strategy2<T>() -> impl Strategy<
         Value = (
-            ndarray::ArrayD<bool>,
+            ndarray::ArrayD<Bool8>,
             ndarray::ArrayD<T>,
             ndarray::ArrayD<T>,
-            crate::util::TestArray<bool>,
+            crate::util::TestArray<Bool8>,
             crate::util::TestArray<T>,
             crate::util::TestArray<T>,
         ),
@@ -498,9 +499,9 @@ mod tests {
         crate::util::shape_strategy()
             .prop_flat_map(|shape| {
                 (
-                    crate::util::array_strategy_from_shape::<bool>(
+                    crate::util::array_strategy_from_shape::<Bool8>(
                         Just(shape.clone()),
-                        <bool as ScalarStrategy>::any_strategy(),
+                        <Bool8 as ScalarStrategy>::any_strategy(),
                     ),
                     crate::util::array_strategy_from_shape::<T>(
                         Just(shape.clone()),
@@ -522,7 +523,7 @@ mod tests {
     /// else { y }` reference. Shared by the concrete per-byte-width tests below, which only
     /// differ in the fixed input arrays.
     fn check_where_concrete<T, InD>(
-        cond: &ndarray::Array<bool, InD>,
+        cond: &ndarray::Array<Bool8, InD>,
         x: &ndarray::Array<T, InD>,
         y: &ndarray::Array<T, InD>,
         block_shape: Option<&[usize]>,
@@ -545,7 +546,7 @@ mod tests {
         let expected = ndarray::Zip::from(cond)
             .and(x)
             .and(y)
-            .map_collect(|&c, &x, &y| if c { x } else { y });
+            .map_collect(|&c, &x, &y| if c.into() { x } else { y });
         crate::util::assert_array_matches(&where_condition(za_cond, za_x, za_y), &expected);
     }
 
@@ -563,7 +564,7 @@ mod tests {
                         let expected_vals: Vec<$dtype> = nd_cond
                             .iter()
                             .zip(nd_x.iter().zip(nd_y.iter()))
-                            .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
+                            .map(|(&c, (&xi, &yi))| if c.into() { xi } else { yi })
                             .collect();
                         let expected = ndarray::ArrayD::from_shape_vec(
                             nd_cond.shape().to_vec(),
@@ -603,21 +604,21 @@ mod tests {
     #[test]
     fn where_1byte_concrete() {
         // (1,1) branch, shared with the kept `i8` proptest: u8 and bool.
-        let cond = array![true, true, true, false, false, false, true, false];
+        let cond = array![TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, TRUE, FALSE];
 
         let x_u8 = array![0u8, 1, 100, u8::MAX, 0xAA, 5, 6, 7];
         let y_u8 = array![u8::MAX, 0, 0xAA, 1, 100, 50, 60, 70];
         check_where_concrete(&cond, &x_u8, &y_u8, None);
 
-        let x_bool = array![true, true, false, false, true, false, true, false];
-        let y_bool = array![false, false, true, true, false, true, false, true];
+        let x_bool = array![TRUE, TRUE, FALSE, FALSE, TRUE, FALSE, TRUE, FALSE];
+        let y_bool = array![FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, FALSE, TRUE];
         check_where_concrete(&cond, &x_bool, &y_bool, None);
     }
 
     #[test]
     fn where_2byte_concrete() {
         // (2,2) branch, shared with the kept `i16` proptest: u16 and (feature-gated) f16.
-        let cond = array![true, true, true, false, false, false, true, false];
+        let cond = array![TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, TRUE, FALSE];
 
         let x_u16 = array![0u16, 1, 100, u16::MAX, 0xAAAA, 5, 6, 7];
         let y_u16 = array![u16::MAX, 0, 0xAAAA, 1, 100, 50, 60, 70];
@@ -653,7 +654,7 @@ mod tests {
     fn where_4byte_concrete() {
         // (4,4) branch, shared with the kept `i32` proptest: u32 and f32. Also exercises a
         // non-default 2-D block shape to cross block boundaries.
-        let cond = ndarray::array![[true, true, false], [false, true, false]];
+        let cond = ndarray::array![[TRUE, TRUE, FALSE], [FALSE, TRUE, FALSE]];
 
         let x_u32 = ndarray::array![[0u32, 1, u32::MAX], [0xAAAAAAAAu32, 100, 200]];
         let y_u32 = ndarray::array![[u32::MAX, 0, 1], [100, 0xAAAAAAAAu32, 300]];
@@ -673,7 +674,7 @@ mod tests {
     #[test]
     fn where_8byte_concrete() {
         // (8,8) branch, shared with the kept `i64` proptest: u64 and f64.
-        let cond = array![true, true, true, false, false, false, true, false];
+        let cond = array![TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, TRUE, FALSE];
 
         let x_u64 = array![0u64, 1, 100, u64::MAX, 0xAAAAAAAAAAAAAAAA, 5, 6, 7];
         let y_u64 = array![u64::MAX, 0, 0xAAAAAAAAAAAAAAAA, 1, 100, 50, 60, 70];
@@ -707,7 +708,7 @@ mod tests {
     fn where_complex_f32_concrete() {
         // (8,4) mixed branch: Complex<f32> is 8 bytes wide but only 4-byte aligned, distinct
         // from the (8,8) branch that i64/u64/f64 hit above.
-        let cond = array![true, true, false, false, true, false];
+        let cond = array![TRUE, TRUE, FALSE, FALSE, TRUE, FALSE];
         let x = array![
             complex_f32 { re: 0.0, im: 0.0 },
             complex_f32 { re: -1.5, im: 2.5 },
@@ -740,7 +741,7 @@ mod tests {
     #[test]
     fn where_complex_f64_concrete() {
         // (16,8) mixed branch: Complex<f64> is 16 bytes wide but only 8-byte aligned.
-        let cond = array![true, true, false, false, true, false];
+        let cond = array![TRUE, TRUE, FALSE, FALSE, TRUE, FALSE];
         let x = array![
             complex_f64 { re: 0.0, im: 0.0 },
             complex_f64 { re: -1.5, im: 2.5 },
@@ -782,7 +783,7 @@ mod tests {
     /// non-multiple of the dtype's alignment drives the unaligned inner loop.
     #[track_caller]
     fn check_where_strided<T, InD>(
-        cond: &ndarray::Array<bool, InD>,
+        cond: &ndarray::Array<Bool8, InD>,
         x: &ndarray::Array<T, InD>,
         y: &ndarray::Array<T, InD>,
         inner_gap: usize,
@@ -848,7 +849,7 @@ mod tests {
             }
             let off = base_offset + (0..ndim).map(|d| coord[d] * byte_strides[d]).sum::<usize>();
             let got = unsafe { bytes.as_ptr().add(off).cast::<T>().read_unaligned() };
-            assert_eq!(got, if c { xi } else { yi }, "coord {coord:?}");
+            assert_eq!(got, if c.into() { xi } else { yi }, "coord {coord:?}");
             is_slot_byte[off..off + itemsize].fill(true);
         }
         for (i, &b) in bytes.iter().enumerate() {
@@ -864,14 +865,14 @@ mod tests {
     fn strided_inputs<T: Clone>(
         f: impl Fn(i64) -> T,
     ) -> (
-        ndarray::Array2<bool>,
+        ndarray::Array2<Bool8>,
         ndarray::Array2<T>,
         ndarray::Array2<T>,
     ) {
         let cond = ndarray::Array2::from_shape_fn((3, 4), |(r, c)| match r {
-            0 => true,
-            1 => false,
-            _ => c % 2 == 0,
+            0 => TRUE,
+            1 => FALSE,
+            _ => Bool8::from(c % 2 == 0),
         });
         let x = ndarray::Array2::from_shape_fn((3, 4), |(r, c)| f((r * 4 + c) as i64));
         let y = ndarray::Array2::from_shape_fn((3, 4), |(r, c)| f(-1 - (r * 4 + c) as i64));
@@ -965,7 +966,9 @@ mod tests {
 
     #[test]
     fn where_strided_output_3d() {
-        let cond = ndarray::Array3::from_shape_fn((2, 3, 4), |(i, j, k)| (i + j + k) % 3 != 0);
+        let cond = ndarray::Array3::from_shape_fn((2, 3, 4), |(i, j, k)| {
+            Bool8::from((i + j + k) % 3 != 0)
+        });
         let x = ndarray::Array3::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let y =
             ndarray::Array3::from_shape_fn((2, 3, 4), |(i, j, k)| -1 - (i * 12 + j * 4 + k) as i32);
@@ -978,7 +981,7 @@ mod tests {
 
     #[test]
     fn x_y_dtype_mismatch_fails() {
-        let cond = Array::compact_ndarray(&array![true, false, true]).unwrap();
+        let cond = Array::compact_ndarray(&array![TRUE, FALSE, TRUE]).unwrap();
         let x = Array::compact_ndarray(&array![1i32, 2, 3])
             .unwrap()
             .into_type_dyn();
@@ -990,7 +993,7 @@ mod tests {
 
     #[test]
     fn shape_mismatch_condition_vs_x_fails() {
-        let cond = Array::compact_ndarray(&array![true, false]).unwrap();
+        let cond = Array::compact_ndarray(&array![TRUE, FALSE]).unwrap();
         let x = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
         let y = Array::compact_ndarray(&array![4i32, 5, 6]).unwrap();
         assert!(Where::new_array(cond, x, y).is_err());
@@ -998,7 +1001,7 @@ mod tests {
 
     #[test]
     fn shape_mismatch_x_vs_y_fails() {
-        let cond = Array::compact_ndarray(&array![true, false, true]).unwrap();
+        let cond = Array::compact_ndarray(&array![TRUE, FALSE, TRUE]).unwrap();
         let x = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
         let y = Array::compact_ndarray(&array![4i32, 5]).unwrap();
         assert!(Where::new_array(cond, x, y).is_err());
@@ -1008,7 +1011,7 @@ mod tests {
 
     #[test]
     fn all_true_selects_x() {
-        let cond = Array::compact_ndarray(&array![true, true, true, true]).unwrap();
+        let cond = Array::compact_ndarray(&array![TRUE, TRUE, TRUE, TRUE]).unwrap();
         let x = Array::compact_ndarray(&array![1i32, 2, 3, 4]).unwrap();
         let y = Array::compact_ndarray(&array![10i32, 20, 30, 40]).unwrap();
         let result = where_condition(cond, x, y).to_ndarray().unwrap();
@@ -1017,7 +1020,7 @@ mod tests {
 
     #[test]
     fn all_false_selects_y() {
-        let cond = Array::compact_ndarray(&array![false, false, false, false]).unwrap();
+        let cond = Array::compact_ndarray(&array![FALSE, FALSE, FALSE, FALSE]).unwrap();
         let x = Array::compact_ndarray(&array![1i32, 2, 3, 4]).unwrap();
         let y = Array::compact_ndarray(&array![10i32, 20, 30, 40]).unwrap();
         let result = where_condition(cond, x, y).to_ndarray().unwrap();
@@ -1035,7 +1038,7 @@ mod tests {
             b: i32,
         }
 
-        let cond = Array::compact_ndarray(&array![true, false, true]).unwrap();
+        let cond = Array::compact_ndarray(&array![TRUE, FALSE, TRUE]).unwrap();
         let x = Array::compact_ndarray(&array![
             Pair { a: 1, b: 2 },
             Pair { a: 3, b: 4 },
