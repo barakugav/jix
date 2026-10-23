@@ -11,3 +11,4 @@
 - move ReadContext
 - optimize nd copy of structs
 - work on Dimension public API
+- avoid calling check_get_range many times

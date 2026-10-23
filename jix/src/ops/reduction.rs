@@ -335,8 +335,6 @@ where
 {
     // This method accept some &dyn fns to avoid monomorphizing the whole method for every combination
     // of kernel, dimension, dtype, and backing storage.
-
-    check_get_range(outer_shape, index)?;
     check_out_buf(
         out.as_deref(),
         outer_shape,

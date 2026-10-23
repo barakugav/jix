@@ -259,7 +259,6 @@ where
         //      its C-order position in `dst`, so no temporary buffer or extra copy is
         //      needed.
         // -----------------------------------------------------------------------
-        check_get_range(self.shape(), index)?;
         check_out_buf(
             out.as_deref(),
             self.shape(),
