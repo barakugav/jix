@@ -59,7 +59,8 @@ impl<'a> StridedBuf<'a> {
     /// # Safety
     ///
     /// `data` must be valid for reads according to the `shape`, `strides` and `itemsize`, and it
-    /// must remain valid for the lifetime `'a`
+    /// must remain valid for the lifetime `'a`. The memory must not be mutated during `'a`. `data`
+    /// must be non-null even for an empty region, e.g. `NonNull::dangling()`.
     #[inline]
     pub unsafe fn from_raw_parts(
         data: *const u8,
@@ -77,7 +78,10 @@ impl<'a> StridedBuf<'a> {
     /// # Safety
     ///
     /// `data` must be valid for reads and writes according to the `shape`, `strides` and
-    /// `itemsize`, and it must remain valid for the lifetime `'a`.
+    /// `itemsize`, and it must remain valid for the lifetime `'a`. The memory must not be accessed
+    /// through any other pointer during `'a`: when used as the `out` of a read, it must not overlap
+    /// memory read by any array in the lazy chain (e.g. a [`Plain`](crate::storage::Plain) over the
+    /// same buffer). `data` must be non-null even for an empty region, e.g. `NonNull::dangling()`.
     /// The caller should ensure there are no two different indices that result in the same byte
     /// offset (i.e. the strides must not alias, broadcasted dimensions are not allowed).
     #[inline]
