@@ -573,6 +573,21 @@ where
 //     unsafe { *ptr }
 // }
 
+/// A `T` stored with alignment 1, so it can be read in place at any byte offset.
+#[repr(C, packed)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Unaligned<T>(T);
+impl<T: Copy> Unaligned<T> {
+    #[inline(always)]
+    pub(crate) fn new(value: T) -> Self {
+        Self(value)
+    }
+    #[inline(always)]
+    pub(crate) fn get(self) -> T {
+        self.0
+    }
+}
+
 #[inline]
 pub(crate) unsafe fn value_from_io<T>(mut src: impl std::io::Read) -> std::io::Result<T>
 where

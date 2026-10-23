@@ -1078,6 +1078,38 @@ mod tests {
 
     #[cfg(not(miri))]
     #[test]
+    fn mmap_read_at_any_file_offset() {
+        // An archive moved to any byte offset (embedded, concatenated) must still map in place.
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        compact((0..40).map(|x| x as f64).collect(), [40], &[8])
+            .write_to(&mut bytes)
+            .unwrap();
+        let bytes = bytes.into_inner();
+        for offset in 0..8u64 {
+            let tmp = tempfile::NamedTempFile::new().unwrap();
+            let mut data = vec![0xAAu8; offset as usize];
+            data.extend_from_slice(&bytes);
+            std::fs::write(tmp.path(), data).unwrap();
+            let got = unsafe {
+                Array::read_from_file_mmap(
+                    tmp.path(),
+                    offset,
+                    bytes.len() as u64,
+                    ArrayParams::default(),
+                    ArchiveValidation::default(),
+                )
+                .unwrap()
+            }
+            .into_typed::<f64>()
+            .unwrap()
+            .to_ndarray::<ndarray::Ix1>()
+            .unwrap();
+            assert_eq!(got.to_vec(), (0..40).map(|x| x as f64).collect::<Vec<_>>());
+        }
+    }
+
+    #[cfg(not(miri))]
+    #[test]
     fn mmap_read_many_blocks_3d_i32() {
         // [10, 11, 12] with blocks [2, 3, 4] -> 5*4*3 = 60 blocks; all dims padded.
         let vals: Vec<i32> = (0..10 * 11 * 12i32).collect();

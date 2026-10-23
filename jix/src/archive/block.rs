@@ -8,17 +8,17 @@ use crate::codec::{Codec, DecoderCodecConfig, Filter, MAX_FILTERS};
 use crate::dtype::Dtype;
 use crate::error::{bail, ensure, error, Error, Result};
 use crate::storage::block::{
-    BlockLocation2, BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage, Mmap, MmapData,
+    BlockLocation, BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage, Mmap, MmapData,
     Owned,
 };
 use crate::util::arrayvec::ArrayVec;
-use crate::util::{cast_slice, cast_slice_mut, value_as_bytes, value_from_io, Idx, SendSyncPtr};
+use crate::util::{cast_slice, cast_slice_mut, value_as_bytes, value_from_io, SendSyncPtr};
 use crate::{ArchiveValidation, ElementType, TypeDyn};
 
 /// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
 ///
 /// [`BlockTable::read_content`] calls `read_section` twice - once for `block_data` (`T = u8`)
-/// and once for `blocks_loc` (`T = BlockLocation2`) - delegating all I/O and lifetime management to
+/// and once for `blocks_loc` (`T = BlockLocation`) - delegating all I/O and lifetime management to
 /// the storage-specific implementation:
 ///
 /// - [`Owned`] - reads the section bytes into a freshly allocated `Vec<T>`.
@@ -104,21 +104,20 @@ where
 /// ```text
 /// [ protobuf BlockTableHeader ]
 /// [ TOC placeholder: 2 * Section (overwritten by finalize) ]
-/// [ alignment padding to 8-byte boundary ]
-/// [ blocks_loc:   ((nblocks + 1) >> 1) * BlockLocation2  (two blocks packed per entry) ]
+/// [ blocks_loc:    nblocks * BlockLocation ]
 /// [ block_data:    concatenated compressed block bytes ]
 /// ```
 pub(crate) struct BlockArchiveWriter<'w, W> {
     writer: &'w mut ArchiveWriter<W>,
     /// Absolute offset of the TOC placeholder, overwritten by `finalize`.
     toc_offset: u64,
-    /// Absolute offset where the `blocks_loc` section begins (8-byte aligned).
+    /// Absolute offset where the `blocks_loc` section begins.
     blocks_loc_offset: u64,
     /// Absolute offset where the `block_data` section begins.
     block_data_offset: u64,
-    /// Packed block locations indexed by logical block index. Written to the locations section in
+    /// Block locations indexed by logical block index. Written to the locations section in
     /// `finalize`, since blocks may arrive out of order.
-    blocks_loc: Vec<BlockLocation2>,
+    blocks_loc: Vec<BlockLocation>,
     /// Total bytes of compressed block data written so far (the running data-section offset).
     block_data_total_len: u64,
 }
@@ -168,21 +167,8 @@ where
             .write_all(unsafe { value_as_bytes(&table_of_contents) })
             .map_err(Error::io)?;
 
-        let blocks_loc_offset = {
-            let current_offset = writer.stream_position().map_err(Error::io)?;
-            let blocks_loc_offset =
-                current_offset.ceil_to_multiple(align_of::<BlockLocation2>() as u64);
-            let padding = (blocks_loc_offset - current_offset) as usize;
-            if padding > 0 {
-                let padding_buf = [0u8; align_of::<BlockLocation2>()];
-                writer
-                    .write_all(&padding_buf[..padding])
-                    .map_err(Error::io)?;
-            }
-            blocks_loc_offset
-        };
-        let block_data_offset =
-            blocks_loc_offset + ((nblocks + 1) >> 1) * size_of::<BlockLocation2>() as u64;
+        let blocks_loc_offset = writer.stream_position().map_err(Error::io)?;
+        let block_data_offset = blocks_loc_offset + nblocks * size_of::<BlockLocation>() as u64;
 
         // Seek to data section; the loop writes there without seeking.
         writer
@@ -194,7 +180,7 @@ where
             toc_offset,
             blocks_loc_offset,
             block_data_offset,
-            blocks_loc: vec![BlockLocation2::default(); ((nblocks + 1) >> 1) as usize],
+            blocks_loc: vec![BlockLocation::default(); nblocks as usize],
             block_data_total_len: 0,
         })
     }
@@ -215,10 +201,7 @@ where
         self.writer.write_all(compressed).map_err(Error::io)?;
         self.block_data_total_len += compressed.len() as u64;
 
-        let loc = &mut self.blocks_loc[(block_index >> 1) as usize];
-        let lane = (block_index & 1) as usize;
-        loc.offset[lane] = offset;
-        loc.len[lane] = compressed.len() as u32;
+        self.blocks_loc[block_index as usize] = BlockLocation::new(offset, compressed.len() as u32);
         Ok(())
     }
 
@@ -231,13 +214,13 @@ where
             .seek(SeekFrom::Start(self.blocks_loc_offset))
             .map_err(Error::io)?;
         self.writer
-            .write_all(unsafe { cast_slice::<BlockLocation2, u8>(self.blocks_loc.as_slice()) })
+            .write_all(unsafe { cast_slice::<BlockLocation, u8>(self.blocks_loc.as_slice()) })
             .map_err(Error::io)?;
 
         let table_of_contents = [
             Section {
                 offset: self.blocks_loc_offset as i64 - self.writer.base_offset as i64,
-                size: self.blocks_loc.len() as u64 * size_of::<BlockLocation2>() as u64,
+                size: self.blocks_loc.len() as u64 * size_of::<BlockLocation>() as u64,
             },
             Section {
                 offset: self.block_data_offset as i64 - self.writer.base_offset as i64,
@@ -362,7 +345,7 @@ where
 
                 let block_data = storage.read_section(reader, block_data_section)?;
                 let blocks_loc =
-                    storage.read_section::<BlockLocation2, _>(reader, blocks_loc_section)?;
+                    storage.read_section::<BlockLocation, _>(reader, blocks_loc_section)?;
                 (block_data, blocks_loc)
             }
             None => bail!(
@@ -380,11 +363,10 @@ where
             header.nitems
         );
         let nblocks = header.nitems / block_size as u64;
-        let expected_blocks_loc_len = (nblocks + 1) >> 1;
         ensure!(
-            blocks_loc.as_ref().len() as u64 == expected_blocks_loc_len,
+            blocks_loc.as_ref().len() as u64 == nblocks,
             InvalidArchive,
-            "block locations length {} does not match expected {expected_blocks_loc_len} for {nblocks} blocks",
+            "block locations length {} does not match {nblocks} blocks",
             blocks_loc.as_ref().len()
         );
 
@@ -398,10 +380,8 @@ where
             let blocks_loc = blocks_loc.as_ref();
             // Each block's (offset, len) location must lie within the data section. Blocks may be
             // stored in any order, so there is no cross-block ordering to check.
-            let valid = (0..nblocks).all(|i| {
-                let loc = &blocks_loc[(i >> 1) as usize];
-                let lane = (i & 1) as usize;
-                let (offset, len) = (loc.offset[lane], loc.len[lane] as u64);
+            let valid = blocks_loc.iter().all(|loc| {
+                let (offset, len) = (loc.offset(), loc.len() as u64);
                 offset <= data_len && len <= data_len - offset
             });
             ensure!(
