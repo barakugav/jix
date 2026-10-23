@@ -420,7 +420,7 @@ impl Dtype {
     /// # Arguments
     ///
     /// * `fields` - A vector of field definitions, where each field is represented as a tuple of
-    ///   (name, offset, dtype). Names should be unique. Offsets are in bytes from the start of the struct.
+    ///   (name, offset, dtype). Names must be unique. Offsets are in bytes from the start of the struct.
     ///
     /// The fields must cover every byte of the struct without gaps or overlap; padding is not
     /// supported and has to be given as an explicit field. The itemsize is the end of the last
@@ -478,15 +478,6 @@ impl Dtype {
     /// assert_eq!(StudentPacked::DTYPE, student_packed_dtype);
     /// ```
     pub fn from_fields(fields: Vec<(String, Itemsize, Dtype)>) -> Result<Self> {
-        let mut seen_names = HashSet::new();
-        for (name, _offset, _dtype) in &fields {
-            ensure!(
-                seen_names.insert(name),
-                InvalidArgument,
-                "duplicate field name `{name}` in struct dtype"
-            );
-        }
-
         let mut fields = fields;
         fields.sort_by_key(|(_name, offset, _dtype)| *offset);
         let fields = fields
@@ -498,7 +489,7 @@ impl Dtype {
         let itemsize = fields
             .last()
             .map_or(0, |(_name, offset, dtype)| offset + dtype.itemsize());
-        Self::check_no_padding(&fields, itemsize)?;
+        Self::check_fields(&fields, itemsize)?;
 
         let max_alignment = Self::max_field_alignment(&fields);
         let (alignment, is_aligned) = if Self::is_aligned_struct(&fields, itemsize, max_alignment) {
@@ -525,7 +516,7 @@ impl Dtype {
     /// # Arguments
     ///
     /// * `fields` - A vector of field definitions, where each field is represented as a tuple of
-    ///   (name, offset, dtype). Names should be unique. Offsets are in bytes from the start of the struct.
+    ///   (name, offset, dtype). Names must be unique. Offsets are in bytes from the start of the struct.
     /// * `shape` - The shape of the dtype, as a slice of dimensions. The total number of elements
     ///   in the shape must not exceed `Itemsize::MAX`. The shape can be empty, which means a single
     ///   element of the dtype. The number of dimensions in the shape must not exceed [`DTYPE_MAX_NDIM`].
@@ -616,7 +607,7 @@ impl Dtype {
             .into_iter()
             .map(|(name, offset, dtype)| (Cow::Owned(name), offset, dtype))
             .collect::<Box<_>>();
-        Self::check_no_padding(&fields, element_itemsize)?;
+        Self::check_fields(&fields, element_itemsize)?;
 
         let is_aligned = if Self::is_aligned_struct(&fields, element_itemsize, alignment) {
             true
@@ -660,12 +651,18 @@ impl Dtype {
         const { &T::DTYPE }
     }
 
-    fn check_no_padding(
+    fn check_fields(
         fields: &[(Cow<'static, str>, Itemsize, Dtype)],
         itemsize: Itemsize,
     ) -> Result<()> {
+        let mut seen_names = HashSet::new();
         let mut expected_offset: Itemsize = 0;
         for (name, offset, dtype) in fields {
+            ensure!(
+                seen_names.insert(name),
+                InvalidArgument,
+                "duplicate field name `{name}` in struct dtype"
+            );
             ensure!(
                 *offset == expected_offset,
                 InvalidArgument,
@@ -1517,6 +1514,20 @@ mod tests {
     }
 
     // ---- new_struct ----
+
+    #[test]
+    fn new_struct_duplicate_names_errors() {
+        let result = Dtype::new_struct(
+            vec![
+                ("x".to_string(), 0, i32::DTYPE),
+                ("x".to_string(), 4, i32::DTYPE),
+            ],
+            &[],
+            8,
+            4.try_into().unwrap(),
+        );
+        assert!(result.is_err());
+    }
 
     #[test]
     fn new_struct_packed_explicit() {
