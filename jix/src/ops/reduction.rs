@@ -2443,7 +2443,7 @@ where
     fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
         match init_item {
             Some((item, _idx)) => self.update_state(<T as crate::scalar::Sum>::init(), item, None),
-            None => <T as crate::scalar::Sum>::empty(), // +0.0 and no init()'s -0.0
+            None => <T as crate::scalar::Sum>::empty(), // +0.0 and not init()'s -0.0
         }
     }
     #[inline(always)]
