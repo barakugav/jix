@@ -47,7 +47,7 @@ const MODULE_UNITS = [
     ],
     "title": "Dtype representation, struct layout validation, set_shape, equality",
     "files": [
-      "jix/src/dtype.rs:1-941"
+      "jix/src/dtype.rs:1-932"
     ],
     "consult": [
       "jix/src/util/mod.rs",
@@ -73,8 +73,8 @@ const MODULE_UNITS = [
     ],
     "title": "Dtyped trait contract, scalar and array impls, derive macro, ElementType",
     "files": [
-      "jix/src/dtype.rs:942-1199",
-      "jix-macros/src/lib.rs:1-285",
+      "jix/src/dtype.rs:933-1218",
+      "jix-macros/src/lib.rs:1-315",
       "jix/src/element_type.rs:1-90"
     ],
     "consult": [
@@ -374,7 +374,7 @@ const MODULE_UNITS = [
     ],
     "title": "Scalar kernel traits: Sum, Product, ArgMax/ArgMin, Mean, Variance (Welford/Chan)",
     "files": [
-      "jix/src/ops/reduction.rs:1379-2043"
+      "jix/src/ops/reduction.rs:1379-2044"
     ],
     "consult": [
       "jix/src/ops/cast.rs",
@@ -401,7 +401,7 @@ const MODULE_UNITS = [
     "title": "Per-op kernel impls and flags, define_reduction_op macros, Reduce, Array methods",
     "files": [
       "jix/src/ops/reduction.rs:1272-1377",
-      "jix/src/ops/reduction.rs:2045-3416"
+      "jix/src/ops/reduction.rs:2046-3417"
     ],
     "consult": [
       "jix/src/ops/cmp.rs",
@@ -558,11 +558,11 @@ const MODULE_UNITS = [
     "title": "Pipeline operands, output layout, and generic op plumbing (Map/MapMultiple/IntoType/MaybeCompact)",
     "files": [
       "jix/src/storage/elementwise_pipeline.rs:730-981",
-      "jix/src/ops/map.rs:1-416",
+      "jix/src/ops/map.rs:1-418",
       "jix/src/ops/into_type.rs:1-148",
       "jix/src/ops/maybe_compact.rs:1-118",
       "jix/src/ops/common.rs:1-185",
-      "jix/src/ops/mod.rs:1-181"
+      "jix/src/ops/mod.rs:1-182"
     ],
     "consult": [
       "jix/src/storage/core_trait.rs",
@@ -594,9 +594,10 @@ const MODULE_UNITS = [
     ],
     "title": "SIMD scalar layer: map_vectors helpers, mask packing, scalar op trait macros",
     "files": [
-      "jix/src/scalar/simd.rs:1-406",
+      "jix/src/scalar/bool.rs:1-101",
+      "jix/src/scalar/simd.rs:1-407",
       "jix/src/scalar/traits_util.rs:1-333",
-      "jix/src/scalar/mod.rs:1-27"
+      "jix/src/scalar/mod.rs:1-30"
     ],
     "consult": [
       "jix/src/ops/op1.rs",
@@ -626,7 +627,7 @@ const MODULE_UNITS = [
       "jix-py/src/ops/common/dispatch.rs:1-400",
       "jix-py/src/ops/common/dtype_promote.rs:1-143",
       "jix-py/src/ops/common/mod.rs:1-154",
-      "jix-py/src/ops/mod.rs:43-181"
+      "jix-py/src/ops/mod.rs:43-182"
     ],
     "consult": [
       "jix-py/src/ops/common/operand.rs",
@@ -652,7 +653,7 @@ const MODULE_UNITS = [
     ],
     "title": "Operand conversion (Python/numpy -> Scalar/Plain), scalar casts, broadcasting, asarray",
     "files": [
-      "jix-py/src/ops/common/operand.rs:1-458",
+      "jix-py/src/ops/common/operand.rs:1-461",
       "jix-py/src/ops/common/broadcast.rs:1-106",
       "jix-py/src/ops/as_array.rs:1-84",
       "jix-py/src/util.rs:346-469"
@@ -711,8 +712,8 @@ const MODULE_UNITS = [
     ],
     "title": "Comparison, clamp, isclose, bitwise/logical, where, is_nan/real/imag, dtype_sub_field",
     "files": [
-      "jix-py/src/ops/cmp.rs:1-624",
-      "jix-py/src/ops/bitwise.rs:1-703",
+      "jix-py/src/ops/cmp.rs:1-625",
+      "jix-py/src/ops/bitwise.rs:1-705",
       "jix-py/src/ops/where_op.rs:1-83",
       "jix-py/src/ops/logical1.rs:1-88",
       "jix-py/src/ops/complex.rs:1-88",
@@ -809,7 +810,7 @@ const MODULE_UNITS = [
     "title": "numpy <-> jix dtype mapping, zero-copy Plain wrapping, numpy-dtype caching, type-hint extractors",
     "files": [
       "jix-py/src/dtype.rs:1-219",
-      "jix-py/src/ops/common/operand.rs:17-198",
+      "jix-py/src/ops/common/operand.rs:18-199",
       "jix-py/src/ops/as_array.rs:1-84",
       "jix-py/src/ops/mod.rs:37-103",
       "jix-py/src/type_hint.rs:1-125"
@@ -1177,7 +1178,7 @@ const MODULE_UNITS = [
     ],
     "title": "Array front-end: to_ndarray / to_ndarray_sub / to_ndarray_slice / to_ndarray_buf + request splitting, compact_with / compact_into_builder, misc Array methods",
     "files": [
-      "jix/src/array.rs:516-1732"
+      "jix/src/array.rs:516-1733"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -1235,7 +1236,7 @@ const MODULE_UNITS = [
     ],
     "title": "Binary arithmetic kernels: add/sub/mul, int and float divide/remainder (trunc/floor/euclid), f16/complex div, pow and error classification",
     "files": [
-      "jix/src/ops/op2.rs:326-1595"
+      "jix/src/ops/op2.rs:326-1596"
     ],
     "consult": [
       "jix/src/scalar/traits_util.rs",
@@ -1262,7 +1263,7 @@ const MODULE_UNITS = [
     "title": "Unary math kernels (sign/abs/square/neg/floor/ceil/round/sqrt/exp/ln/trig), float classification, complex real/imag",
     "files": [
       "jix/src/ops/op1.rs:267-1259",
-      "jix/src/ops/logical1.rs:1-174",
+      "jix/src/ops/logical1.rs:1-179",
       "jix/src/ops/complex.rs:1-156"
     ],
     "consult": [
@@ -1289,11 +1290,11 @@ const MODULE_UNITS = [
     ],
     "title": "Comparisons, swapped Greater/GreaterEqual, Maximum/Minimum, Clamp, ApproxEq",
     "files": [
-      "jix/src/ops/cmp.rs:1-1112"
+      "jix/src/ops/cmp.rs:1-1120"
     ],
     "consult": [
       "jix/src/ops/op2.rs:1-325",
-      "jix/src/scalar/simd.rs:299-384",
+      "jix/src/scalar/simd.rs:300-385",
       "jix/src/scalar/traits_util.rs:200-329"
     ],
     "focus": [
@@ -1312,8 +1313,8 @@ const MODULE_UNITS = [
     ],
     "title": "Bitwise/shift/rotate/count kernels and the Cast op with SIMD conversion chains",
     "files": [
-      "jix/src/ops/bitwise.rs:1-784",
-      "jix/src/ops/cast.rs:1-478"
+      "jix/src/ops/bitwise.rs:1-786",
+      "jix/src/ops/cast.rs:1-487"
     ],
     "consult": [
       "jix/src/scalar/simd.rs",
@@ -1339,7 +1340,7 @@ const MODULE_UNITS = [
     ],
     "title": "Where (unsafe strided select loops), Transmute (unsafe relabel), SubDtype (struct field views)",
     "files": [
-      "jix/src/ops/where_op.rs:1-450",
+      "jix/src/ops/where_op.rs:1-451",
       "jix/src/ops/transmute.rs:1-151",
       "jix/src/ops/sub_dtype.rs:1-197"
     ],
@@ -1348,7 +1349,7 @@ const MODULE_UNITS = [
       "jix/src/util/nd_iter_unordered.rs",
       "jix/src/storage/elementwise_pipeline.rs:731-865",
       "jix/src/storage/core_trait.rs:56-135",
-      "jix/src/dtype.rs:440-720",
+      "jix/src/dtype.rs:461-710",
       "jix/src/util/mod.rs:622-682"
     ],
     "focus": [
@@ -1418,9 +1419,9 @@ const CONCEPT_UNITS = [
     id: 'concept-dtype-layout',
     title: 'Dtype layout and bit validity: bool, struct, inner shape, f16, complex',
     ctx: ['types', 'elementwise-ops', 'codec-archive', 'py-core'],
-    start: ['jix/src/dtype.rs', 'jix/src/ops/transmute.rs', 'jix/src/ops/sub_dtype.rs', 'grep -n "check_dtype\\|into_typed" -r jix/src jix-py/src'],
+    start: ['jix/src/dtype.rs', 'jix/src/scalar/bool.rs (bool8, #89)', 'jix/src/ops/transmute.rs', 'jix/src/ops/sub_dtype.rs', 'grep -n "check_dtype\\|into_typed" -r jix/src jix-py/src', 'grep -n "bool8\\|as bool\\|: bool" -r jix/src'],
     focus: [
-      'Where are bytes from an untrusted or unvalidated source (archive file, numpy buffer, transmute, sub_dtype view, stale pool memory) read as bool or another type with invalid bit patterns?',
+      'Where are bytes from an untrusted or unvalidated source (archive file, numpy buffer, transmute, sub_dtype view, stale pool memory) read as a Rust bool or another type with invalid bit patterns? And since #89 made the element type bool8 (any byte valid, non-zero = true): which kernels still assume a bool8 byte is 0 or 1 (bitwise ops, sums, casts, SIMD masks, comparisons)?',
       'Dtype equality / compatibility checks that gate unsafe reinterpretation (into_typed, check_dtype, transmute, sub_dtype, Python dispatch): can two dtypes pass but differ in layout (field order, offsets, padding, inner shape, nested structs, alignment)?',
       'Struct dtypes with itemsize != alignment, padding, or odd itemsizes (3, 6, 12) through copy kernels, shuffles, casts and reductions.',
       'Inner-shape dtypes through shape ops and element-wise ops: is the inner shape treated as part of the element everywhere?',
