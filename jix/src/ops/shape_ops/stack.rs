@@ -164,7 +164,6 @@ where
     ) -> Result<StridedBuf<'a>> {
         let shape = self.shape();
         let dtype = self.dtype();
-        check_get_range(shape, index)?;
         check_out_buf(
             out.as_deref(),
             shape,

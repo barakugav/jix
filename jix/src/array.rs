@@ -962,7 +962,6 @@ impl<S: ArrayStorage> Array<S> {
     ) -> Result<StridedBuf<'a>> {
         let shape = self.shape();
         let dtype = self.dtype();
-        debug_assert!(check_get_range(shape, index).is_ok());
         check_out_buf(
             out.as_deref(),
             shape,

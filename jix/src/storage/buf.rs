@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::buf_pool::PoolBuf;
 use crate::dtype::Dtype;
-use crate::error::{check_region_size, ensure, Result};
+use crate::error::{check_get_range, check_region_size, ensure, Result};
 use crate::util::{
     default_strides_slice, strided_span_bytes, strides_for_layout_order, DimArray, SliceExt,
 };
@@ -285,6 +285,7 @@ pub(crate) fn check_out_buf(
     index: &[Range<u64>],
     itemsize: usize,
 ) -> Result<()> {
+    check_get_range(array_shape, index)?;
     check_region_size(index, itemsize)?;
     let Some(out) = out else { return Ok(()) };
     ensure!(
@@ -298,13 +299,6 @@ pub(crate) fn check_out_buf(
         out.is_writable(),
         InvalidArgument,
         "out buffer must be a writable destination, not a read-only view"
-    );
-    ensure!(
-        index.len() == array_shape.len(),
-        InvalidIndex,
-        "index has {} dimensions but array has {}",
-        index.len(),
-        array_shape.len()
     );
     // The furthest byte the region touches must lie inside `out`.
     if index.iter().all(|r| r.end > r.start) {
@@ -421,5 +415,29 @@ mod tests {
             .to_ndarray_buf(&[0..4], &ctx2, Some(&mut out))
             .is_err());
         assert!(big().to_ndarray_buf(&[1..2], &ctx2, Some(&mut out)).is_ok());
+    }
+
+    #[test]
+    #[allow(clippy::reversed_empty_ranges)]
+    fn reversed_index_is_invalid_index() {
+        let ctx = ReadContext::default();
+        let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]]).unwrap();
+        let kind = |s: &dyn crate::ArrayStorage| {
+            s.read_data(&[0..2, 2..1], &ctx, None)
+                .err()
+                .map(|e| e.kind())
+        };
+        assert_eq!(
+            kind((-a.view()).storage()),
+            Some(crate::error::ErrorKind::InvalidIndex)
+        );
+        assert_eq!(
+            kind((a.view() + a.view()).storage()),
+            Some(crate::error::ErrorKind::InvalidIndex)
+        );
+        assert_eq!(
+            kind(a.view().permute_dims(&[1, 0]).storage()),
+            Some(crate::error::ErrorKind::InvalidIndex)
+        );
     }
 }

@@ -15,7 +15,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dimension::dim_arr;
 use crate::dtype::Dtype;
-use crate::error::{check_get_range, Result};
+use crate::error::Result;
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ElementType, StridedBuf};
@@ -275,7 +275,6 @@ where
         ET: ElementType,
     {
         let shape = self.shape();
-        check_get_range(shape, index)?;
         let dtype = self.blocks.dtype();
         check_out_buf(out.as_deref(), shape, index, dtype.itemsize() as usize)?;
         let out_shape = dim_arr(shape.len(), |d| (index[d].end - index[d].start) as usize);
