@@ -95,6 +95,11 @@ pub(crate) fn numpy_empty<'py>(
 ) -> PyResult<Bound<'py, PyUntypedArray>> {
     let py = dtype.py();
     let ndim = shape.len();
+    if shape.iter().any(|&d| d > npy_intp::MAX as u64) {
+        return Err(PyValueError::new_err(format!(
+            "array of shape {shape:?} is too big"
+        )));
+    }
     let shape = dim_arr(ndim, |dim| shape[dim] as npy_intp);
     let is_fortran = false;
     let np_arr = unsafe {

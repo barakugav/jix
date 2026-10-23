@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::buf_pool::PoolBuf;
 use crate::dtype::Dtype;
-use crate::error::{ensure, Result};
+use crate::error::{check_region_size, ensure, Result};
 use crate::util::{
     default_strides_slice, strided_span_bytes, strides_for_layout_order, DimArray, SliceExt,
 };
@@ -285,6 +285,7 @@ pub(crate) fn check_out_buf(
     index: &[Range<u64>],
     itemsize: usize,
 ) -> Result<()> {
+    check_region_size(index, itemsize)?;
     let Some(out) = out else { return Ok(()) };
     ensure!(
         out.strides().len() == array_shape.len(),

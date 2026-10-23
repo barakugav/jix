@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{check_get_buffer_size, check_get_range, check_region_size, ensure, Result};
 use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
@@ -764,6 +764,7 @@ impl<S: ArrayStorage> Array<S> {
             );
         }
         let itemsize = self.dtype().itemsize() as usize;
+        check_region_size(index, itemsize)?;
         let mut out_shape = D::zeros(ndim);
         for dim in 0..ndim {
             out_shape[dim] = (index[dim].end - index[dim].start) as usize;
