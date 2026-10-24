@@ -190,6 +190,13 @@ Provided by this subsystem / required of every `read_data` impl (core_trait.rs:7
   the itemsize exceeds the SIMD width.
 - Python numpy(out=...) documents that out must not overlap any numpy array in the lazy chain.
 
+### Changed in 4d11918 (#90) - supersedes conflicting statements above
+- `ArrayStorage` is sealed: every impl needs an `ArrayStorageImpl` marker, so user code cannot
+  implement it and the unsafe code may trust read_data's buffers (K50 fixed).
+- `check_out_buf` calls `check_get_range` before anything else (K61). Pull buffers whose strides
+  alias (0-stride broadcast) are returned read-only (K58). Plain constructors return an error for
+  negative strides (K45). `StridedBuf::from_raw_parts(_mut)` documents its full safety contract.
+
 ## Hot spots
 
 - Push-mode buffer size: is there ANY path from safe code that makes a push write past `out`'s

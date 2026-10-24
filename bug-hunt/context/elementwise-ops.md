@@ -211,6 +211,10 @@ SIMD/scalar split - the same element can go through either path:
   byte: a non-0/1 true value (2, 0xFF) must behave like 1 (bitwise and/xor, not, casts, SIMD masks,
   comparisons, where's condition).
 
+### Changed in 4d11918 (#90) - supersedes conflicting statements above
+- Float `pow` with an integer exponent uses `powf`, not `powi` (K51). power(x, 2) -> Square still
+  drops the overflow flag (K60, acknowledged in todo.md).
+
 ## Hot spots
 
 - SIMD vs scalar equality. Most SIMD tests compare with `==` via `same_value` (util/test_util.rs:1357-

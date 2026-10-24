@@ -206,6 +206,13 @@ Unsafe fns with preconditions:
 - #89 / #88: the dtype proto gained `bool8` and struct dtypes from files must be padding-free;
   arrays of bool8 read from files are valid for any byte (K44 fixed).
 
+### Changed in 4d11918 (#90) - supersedes conflicting statements above
+- Untrusted lengths are no longer allocated up front: array reads grow the buffer as they go,
+  sections are read in chunks, uleb128 lengths are capped at 10 bytes, section bounds use checked
+  arithmetic, and u64 -> usize conversions are checked (K46-K48, K55, K56 fixed).
+- Writing an archive to a file opened in append mode returns an error (K49). Vec<MaybeUninit<T>>
+  is converted with from_raw_parts (K63). archive/array.rs (~90 lines) and common.rs (~85) changed.
+
 ## Hot spots
 
 - Short decompression: what does a release build return when a block decodes to fewer bytes

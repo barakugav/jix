@@ -161,6 +161,10 @@ types the macro is):
   u8, 0 = false, any other byte = true); `bool` is no longer `Dtyped`. Every Dtyped type must accept
   every bit pattern. The archive dtype proto changed for it.
 
+### Changed in 4d11918 (#90) - supersedes conflicting statements above
+- `Dtype::new_struct` rejects duplicate field names (K52). `[T; 0]` and arrays of zero-sized types
+  are not `Dtyped` (K53). dtype.rs changed ~90 lines.
+
 ## Hot spots
 
 - Layout arithmetic in dtype.rs:476-506 and 653-717: every `expected_offset += itemsize` and
