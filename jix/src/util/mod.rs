@@ -26,6 +26,12 @@ pub(crate) use nd_iter_unordered_dyn::*;
 mod bitmap;
 pub(crate) use bitmap::*;
 
+mod sealed {
+    /// Seals a public trait: only types in this crate can implement it.
+    pub trait Sealed {}
+}
+pub(crate) use sealed::Sealed;
+
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
