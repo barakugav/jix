@@ -67,6 +67,7 @@ impl<S: ArrayStorage> Roll<S> {
     }
 }
 
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Roll<S> {}
 impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     type ElementType = S::ElementType;
 
@@ -76,7 +77,6 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_get_range(self.shape(), index)?;
         check_out_buf(
             out.as_deref(),
             self.shape(),

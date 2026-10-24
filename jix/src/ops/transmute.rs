@@ -106,6 +106,7 @@ where
         unsafe { Self::new(array.into_storage(), new_type).map(Array::from_storage) }
     }
 }
+impl<S, ET> crate::storage::ArrayStorageImpl for Transmute<S, ET> {}
 impl<S, ET> ArrayStorage for Transmute<S, ET>
 where
     S: ArrayStorage,

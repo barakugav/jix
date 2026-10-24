@@ -65,6 +65,7 @@ impl<S: ArrayStorage> Flip<S> {
     }
 }
 
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Flip<S> {}
 impl<S: ArrayStorage> ArrayStorage for Flip<S> {
     type ElementType = S::ElementType;
 
@@ -74,7 +75,6 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_get_range(self.shape(), index)?;
         check_out_buf(
             out.as_deref(),
             self.shape(),

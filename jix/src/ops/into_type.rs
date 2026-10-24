@@ -69,6 +69,12 @@ where
         Self::new(array.into_storage()).map(Array::from_storage)
     }
 }
+impl<S, ET> crate::storage::ArrayStorageImpl for IntoType<S, ET>
+where
+    S: ArrayStorage,
+    ET: ElementType,
+{
+}
 impl<S, ET> ArrayStorage for IntoType<S, ET>
 where
     S: ArrayStorage,

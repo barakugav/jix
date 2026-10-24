@@ -116,6 +116,7 @@ impl<S: ArrayStorage> Slice<S> {
     }
 }
 
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Slice<S> {}
 impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     type ElementType = S::ElementType;
 
@@ -125,7 +126,6 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_get_range(self.shape(), index)?;
         check_out_buf(
             out.as_deref(),
             self.shape(),

@@ -189,6 +189,8 @@ impl<T> Array<Compact<Ty<T>>> {
     ///
     /// - [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) - `array.ndim()` exceeds
     ///   [`NDIM_MAX`](crate::NDIM_MAX).
+    /// - [`InvalidArgument`](crate::error::ErrorKind::InvalidArgument) - `array` has a negative
+    ///   stride (e.g. a reversed axis).
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - compression fails.
     ///
     /// # Examples
@@ -415,6 +417,7 @@ impl<T> Array<Compact<Ty<T>>> {
             f: F,
             spec: ArraySpecOwned,
         }
+        impl<T, D, F> crate::storage::ArrayStorageImpl for FnStorage<T, D, F> {}
         impl<T, D, F> ArrayStorage for FnStorage<T, D, F>
         where
             T: Dtyped,
@@ -962,7 +965,6 @@ impl<S: ArrayStorage> Array<S> {
     ) -> Result<StridedBuf<'a>> {
         let shape = self.shape();
         let dtype = self.dtype();
-        debug_assert!(check_get_range(shape, index).is_ok());
         check_out_buf(
             out.as_deref(),
             shape,

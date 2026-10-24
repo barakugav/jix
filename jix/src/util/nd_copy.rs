@@ -51,6 +51,9 @@ impl NdCopier {
     ///   from the start (all byte strides are non-negative). A shorter range is undefined
     ///   behavior even though no explicit bounds checks run.
     /// - The `src` and `dst` regions must not overlap.
+    /// - `dtype` must have the same itemsize and alignment as the dtype passed to
+    ///   [`new`](Self::new). The copy is sized by that dtype, and a mismatch is only caught by a
+    ///   `debug_assert`.
     #[inline(always)]
     pub(crate) unsafe fn copy(
         &self,

@@ -87,6 +87,7 @@ impl<T> Scalar<T> {
     }
 }
 
+impl<T> crate::storage::ArrayStorageImpl for Scalar<T> {}
 impl<T> ArrayStorage for Scalar<T>
 where
     T: Dtyped,
@@ -100,7 +101,6 @@ where
         _context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_get_range(self.shape(), index)?;
         check_out_buf(
             out.as_deref(),
             self.shape(),

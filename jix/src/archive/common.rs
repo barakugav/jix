@@ -158,7 +158,7 @@ impl<R> ArchiveReader<R> {
             Some(length) => length,
             None => return Ok(None),
         };
-        let msg_bytes = self.read_slice(length as usize)?;
+        let msg_bytes = self.read_slice(length)?;
         Ok(Some(M::decode(msg_bytes)?))
     }
 
@@ -167,7 +167,7 @@ impl<R> ArchiveReader<R> {
         R: Read,
     {
         let mut x: u64 = 0;
-        for i in 0.. {
+        for i in 0..10 {
             let b = match self.read_byte()? {
                 Some(b) => b,
                 None => {
@@ -181,6 +181,12 @@ impl<R> ArchiveReader<R> {
                     }
                 }
             };
+            if i == 9 && b > 1 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "uleb128 does not fit in u64",
+                ));
+            }
             x |= u64::from(b & 0x7F) << (i * 7);
             if b < 0x80 {
                 return Ok(Some(x));
@@ -201,14 +207,20 @@ impl<R> ArchiveReader<R> {
         })
     }
 
-    fn read_slice(&mut self, len: usize) -> std::io::Result<&[u8]>
+    fn read_slice(&mut self, len: u64) -> std::io::Result<&[u8]>
     where
         R: Read,
     {
-        // fill with 0 is a bit of waste, but rust Read trait implementor can potentially read from the given buffer
         self.tmp_buf.clear();
-        self.tmp_buf.resize(len, 0);
-        self.reader.read_exact(self.tmp_buf.as_mut_slice())?;
+        let n = (&mut self.reader)
+            .take(len)
+            .read_to_end(&mut self.tmp_buf)?;
+        if n as u64 != len {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "unexpected end of file while reading message",
+            ));
+        }
         Ok(self.tmp_buf.as_slice())
     }
 
@@ -233,16 +245,6 @@ impl<R> ArchiveReader<R> {
     //     Ok(buf)
     // }
 
-    pub(crate) fn read_section_into(&mut self, section: &Section, buf: &mut [u8]) -> io::Result<()>
-    where
-        R: Read + Seek,
-    {
-        assert_eq!(buf.len() as u64, section.size);
-        self.seek_relative_to_base(section.offset)?;
-        self.reader.read_exact(buf)?;
-        Ok(())
-    }
-
     pub(crate) fn read_file_meta(&mut self) -> io::Result<schema::FileMetadata>
     where
         R: Read,
@@ -260,8 +262,11 @@ impl<R> ArchiveReader<R> {
     }
 
     pub(crate) fn check_section_bounds(&self, section: &Section) -> Result<()> {
+        let end = u64::try_from(section.offset)
+            .ok()
+            .and_then(|o| o.checked_add(section.size));
         ensure!(
-            0 <= section.offset && section.offset as u64 + section.size <= self.total_size,
+            end.is_some_and(|end| end <= self.total_size),
             InvalidArchive,
             "section is out of archive bounds"
         );
@@ -299,6 +304,53 @@ mod tests {
     fn uleb128_that_never_terminates_is_an_error() {
         let mut reader = reader_after_metadata(&[0x80]);
         let err = reader.read_uleb128().unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn uleb128_longer_than_u64_is_an_error() {
+        let max = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
+        let mut reader = reader_after_metadata(&max);
+        assert_eq!(reader.read_uleb128().unwrap(), Some(u64::MAX));
+        for bytes in [
+            &[0x80; 10][..],
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02],
+        ] {
+            let mut reader = reader_after_metadata(bytes);
+            let err = reader.read_uleb128().unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        }
+    }
+
+    #[test]
+    fn section_bounds_overflow_is_an_error() {
+        let mut reader = reader_after_metadata(&[]);
+        let total_size = 100;
+        reader.total_size = total_size;
+        for (offset, size) in [
+            (i64::MAX, (1 << 63) + 2),
+            (1, u64::MAX),
+            (-1, 1),
+            (0, total_size + 1),
+        ] {
+            assert!(reader
+                .check_section_bounds(&Section { offset, size })
+                .is_err());
+        }
+        assert!(reader
+            .check_section_bounds(&Section {
+                offset: 0,
+                size: total_size
+            })
+            .is_ok());
+    }
+
+    #[test]
+    fn huge_message_length_is_an_error() {
+        // A length prefix of 2^62 with no bytes after it.
+        let mut reader =
+            reader_after_metadata(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x40]);
+        let err = reader.read_message::<schema::FileMetadata>().unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
     }
 

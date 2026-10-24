@@ -213,6 +213,12 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
     }
 }
 
+impl<S, K> crate::storage::ArrayStorageImpl for ReductionOp<S, K>
+where
+    S: ArrayStorageTyped,
+    K: ReductionOpKernel<S::Item, Output: Dtyped>,
+{
+}
 impl<S, K> ArrayStorage for ReductionOp<S, K>
 where
     S: ArrayStorageTyped,
@@ -335,8 +341,6 @@ where
 {
     // This method accept some &dyn fns to avoid monomorphizing the whole method for every combination
     // of kernel, dimension, dtype, and backing storage.
-
-    check_get_range(outer_shape, index)?;
     check_out_buf(
         out.as_deref(),
         outer_shape,
@@ -1317,6 +1321,11 @@ macro_rules! define_reduction_op {
             }
         }
 
+        impl<S> crate::storage::ArrayStorageImpl for $Op<S>
+        where
+            $($where_)+
+        {
+        }
         impl<S> crate::ArrayStorage for $Op<S>
         where
             $($where_)+
@@ -1360,6 +1369,11 @@ macro_rules! define_reduction_op {
             }
         }
 
+        impl<S> crate::storage::ArrayStorageImpl for $Op<S>
+        where
+            $($where_)+
+        {
+        }
         impl<S> crate::ArrayStorage for $Op<S>
         where
             $($where_)+
@@ -1441,6 +1455,8 @@ pub(crate) mod _traits {
         const IS_PRECISE: bool;
         /// Return the initial accumulator (zero).
         fn init() -> Self::Output;
+        /// Return the sum of an empty stream (zero).
+        fn empty() -> Self::Output;
         /// Fold `item` into the running sum.
         fn update(state: Self::Output, item: Self) -> Self::Output;
         /// [`update`](Self::update) on each lane, vectorized with `simd` where the types have
@@ -1482,6 +1498,10 @@ pub(crate) mod _traits {
                 #[inline(always)]
                 fn init() -> Self::Output {
                     <f32 as crate::scalar::Cast<Self::Output>>::cast(-0.0)
+                }
+                #[inline(always)]
+                fn empty() -> Self::Output {
+                    <f32 as crate::scalar::Cast<Self::Output>>::cast(0.0)
                 }
                 #[inline(always)]
                 fn update(state: Self::Output, item: Self) -> Self::Output {
@@ -2421,11 +2441,10 @@ where
 
     #[inline(always)]
     fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State {
-        let mut state = <T as crate::scalar::Sum>::init();
-        if let Some((item, _idx)) = init_item {
-            state = self.update_state(state, item, None);
+        match init_item {
+            Some((item, _idx)) => self.update_state(<T as crate::scalar::Sum>::init(), item, None),
+            None => <T as crate::scalar::Sum>::empty(), // +0.0 and not init()'s -0.0
         }
-        state
     }
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: T, _idx: Option<u64>) -> Self::State {
@@ -3088,6 +3107,12 @@ where
     const PREFER_TREE_MERGE: bool = true;
     const NEEDS_INDICES: bool = false;
 }
+impl<S, F> crate::storage::ArrayStorageImpl for Reduce<S, F>
+where
+    S: ArrayStorageTyped,
+    F: Fn(S::Item, S::Item) -> S::Item,
+{
+}
 impl<S, F> ArrayStorage for Reduce<S, F>
 where
     S: ArrayStorageTyped,
@@ -3243,6 +3268,7 @@ where
     const PREFER_TREE_MERGE: bool = true;
     const NEEDS_INDICES: bool = false;
 }
+impl<S, B, F> crate::storage::ArrayStorageImpl for Fold<S, B, F> {}
 impl<S, B, F> ArrayStorage for Fold<S, B, F>
 where
     S: ArrayStorageTyped,
@@ -4391,6 +4417,26 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sum_empty_float_is_positive_zero() {
+        let a = Array::compact_ndarray(&ndarray::Array2::<f64>::zeros((3, 0))).unwrap();
+        let s = a.sum(1usize).to_ndarray::<Ix1>().unwrap();
+        assert!(s.iter().all(|v| v.to_bits() == 0.0f64.to_bits()), "{s:?}");
+        let a = Array::compact_ndarray(&ndarray::Array1::<f32>::zeros(0)).unwrap();
+        let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
+        assert_eq!(s.to_bits(), 0.0f32.to_bits());
+        #[cfg(feature = "num-complex")]
+        {
+            let a = Array::compact_ndarray(&ndarray::Array1::<complex_f64>::zeros(0)).unwrap();
+            let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
+            assert_eq!((s.re.to_bits(), s.im.to_bits()), (0, 0));
+        }
+        // A non-empty sum of -0.0 keeps its sign.
+        let a = Array::compact_ndarray(&array![-0.0f64, -0.0]).unwrap();
+        let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
+        assert_eq!(s.to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
     fn sum_f32_long_runs_with_tails() {
         // Runs around and past `PAIRWISE_SPLIT_THRESHOLD`, most not a multiple of the lanes: the tree folds
         // the body, then the tail is folded after it. Small integers sum exactly in any order, so
@@ -4955,14 +5001,19 @@ pub(crate) mod tests {
         use crate::Array;
 
         // A reduction kernel picks its own output type, so it is another way a fresh dtype reaches an
-        // array without passing through `ArrayParams::tune` (a lazy view never re-tunes). `[i32; 0]`
+        // array without passing through `ArrayParams::tune` (a lazy view never re-tunes). `Empty`
         // is a `Dtyped` type with itemsize 0.
         //
         // `Fold` is the user-facing op that exposes a caller-chosen accumulator, but it is commented
         // out pending the reduction merge, so the kernel is spelled out here instead.
+        #[derive(Copy, Clone, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
+        #[repr(C)]
+        struct Empty {}
+
         struct ZeroSizedOutputKernel;
         impl super::ReductionOpKernel<i32> for ZeroSizedOutputKernel {
-            type Output = [i32; 0];
+            type Output = Empty;
             type State = ();
             fn init_state(&self, _init_item: Option<(i32, Option<u64>)>) -> Self::State {}
             fn update_state(
@@ -4974,7 +5025,7 @@ pub(crate) mod tests {
             }
             fn merge_states(&self, _a: Self::State, _b: Self::State) -> Self::State {}
             fn finalize_state(&self, _state: Self::State, _nitems: u64) -> Self::Output {
-                []
+                Empty {}
             }
             const SUPPORTS_EMPTY: bool = true;
             const PREFER_TREE_MERGE: bool = false;

@@ -233,6 +233,14 @@ where
         self.writer
             .write_all(unsafe { value_as_bytes(&table_of_contents) })
             .map_err(Error::io)?;
+        self.writer.flush().map_err(Error::io)?;
+        ensure!(
+            // An append-mode writer ignores the seeks above and writes at the end instead
+            self.writer.stream_position().map_err(Error::io)?
+                == self.toc_offset + size_of_val(&table_of_contents) as u64,
+            InvalidArgument,
+            "the writer did not write at the position it seeked to, is it in append mode?"
+        );
         self.writer
             .seek(SeekFrom::Start(
                 self.block_data_offset + self.block_data_total_len,
@@ -409,8 +417,8 @@ where
 impl BlockTableStorageRead for Owned {
     /// Read `section` into a heap-allocated `Vec<T>`.
     ///
-    /// Allocates a zeroed buffer, reads the raw bytes from
-    /// `reader` into it, then transmutes `Vec<MaybeUninit<T>>` to `Vec<T>`.
+    /// Reads the raw bytes from `reader` into a zeroed buffer, then converts the
+    /// `Vec<MaybeUninit<T>>` to `Vec<T>` in place.
     fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
@@ -427,16 +435,24 @@ impl BlockTableStorageRead for Owned {
             InvalidArchive,
             "section size is not a multiple of item size"
         );
-        let len = section.size as usize / size_of::<T>();
+        let len = usize::try_from(section.size / size_of::<T>() as u64)
+            .map_err(|_| error!(InvalidArchive, "section size {} is too large", section.size))?;
 
-        // ::zeroed() is a bit of waste, but rust Read trait implementor can potentially read from the given buffer
-        let mut data = vec![MaybeUninit::<T>::zeroed(); len];
         reader
-            .read_section_into(&section, unsafe {
-                cast_slice_mut::<MaybeUninit<T>, u8>(data.as_mut_slice())
-            })
+            .seek_relative_to_base(section.offset)
             .map_err(Error::io)?;
-        Ok(unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(data) })
+        let mut data = Vec::<MaybeUninit<T>>::new();
+        // read in chunks, as we treat the section length as potentially untrusted and large.
+        while data.len() < len {
+            let start = data.len();
+            data.resize((start * 2).max(4096).min(len), MaybeUninit::zeroed());
+            let chunk = unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(&mut data[start..]) };
+            reader.reader_mut().read_exact(chunk).map_err(Error::io)?;
+        }
+        let mut data = std::mem::ManuallyDrop::new(data);
+        Ok(unsafe {
+            Vec::from_raw_parts(data.as_mut_ptr().cast::<T>(), data.len(), data.capacity())
+        })
     }
 }
 

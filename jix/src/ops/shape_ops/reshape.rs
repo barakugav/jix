@@ -158,6 +158,7 @@ impl<S> Reshape<S> {
         Self::new(array.into_storage(), shape).map(Array::from_storage)
     }
 }
+impl<S> crate::storage::ArrayStorageImpl for Reshape<S> {}
 impl<S> ArrayStorage for Reshape<S>
 where
     S: ArrayStorage,
@@ -259,7 +260,6 @@ where
         //      its C-order position in `dst`, so no temporary buffer or extra copy is
         //      needed.
         // -----------------------------------------------------------------------
-        check_get_range(self.shape(), index)?;
         check_out_buf(
             out.as_deref(),
             self.shape(),

@@ -84,6 +84,12 @@ def test_write_array_open_file(tmp_path):
     assert p.stat().st_size > 0
 
 
+def test_write_array_append_mode_file_raises(tmp_path):
+    a = make_array([5, 6, 7, 8], dtype=np.int64)
+    with open(tmp_path / "out.jix", "ab") as f, pytest.raises(Exception, match="append mode"):
+        jix.write_array(a, f)
+
+
 def test_write_array_bytesio_roundtrip():
     a = make_array([1.0, 2.0, 3.0, 4.0])
     buf = io.BytesIO()

@@ -420,7 +420,7 @@ impl Dtype {
     /// # Arguments
     ///
     /// * `fields` - A vector of field definitions, where each field is represented as a tuple of
-    ///   (name, offset, dtype). Names should be unique. Offsets are in bytes from the start of the struct.
+    ///   (name, offset, dtype). Names must be unique. Offsets are in bytes from the start of the struct.
     ///
     /// The fields must cover every byte of the struct without gaps or overlap; padding is not
     /// supported and has to be given as an explicit field. The itemsize is the end of the last
@@ -478,15 +478,6 @@ impl Dtype {
     /// assert_eq!(StudentPacked::DTYPE, student_packed_dtype);
     /// ```
     pub fn from_fields(fields: Vec<(String, Itemsize, Dtype)>) -> Result<Self> {
-        let mut seen_names = HashSet::new();
-        for (name, _offset, _dtype) in &fields {
-            ensure!(
-                seen_names.insert(name),
-                InvalidArgument,
-                "duplicate field name `{name}` in struct dtype"
-            );
-        }
-
         let mut fields = fields;
         fields.sort_by_key(|(_name, offset, _dtype)| *offset);
         let fields = fields
@@ -498,7 +489,7 @@ impl Dtype {
         let itemsize = fields
             .last()
             .map_or(0, |(_name, offset, dtype)| offset + dtype.itemsize());
-        Self::check_no_padding(&fields, itemsize)?;
+        Self::check_fields(&fields, itemsize)?;
 
         let max_alignment = Self::max_field_alignment(&fields);
         let (alignment, is_aligned) = if Self::is_aligned_struct(&fields, itemsize, max_alignment) {
@@ -525,7 +516,7 @@ impl Dtype {
     /// # Arguments
     ///
     /// * `fields` - A vector of field definitions, where each field is represented as a tuple of
-    ///   (name, offset, dtype). Names should be unique. Offsets are in bytes from the start of the struct.
+    ///   (name, offset, dtype). Names must be unique. Offsets are in bytes from the start of the struct.
     /// * `shape` - The shape of the dtype, as a slice of dimensions. The total number of elements
     ///   in the shape must not exceed `Itemsize::MAX`. The shape can be empty, which means a single
     ///   element of the dtype. The number of dimensions in the shape must not exceed [`DTYPE_MAX_NDIM`].
@@ -616,7 +607,7 @@ impl Dtype {
             .into_iter()
             .map(|(name, offset, dtype)| (Cow::Owned(name), offset, dtype))
             .collect::<Box<_>>();
-        Self::check_no_padding(&fields, element_itemsize)?;
+        Self::check_fields(&fields, element_itemsize)?;
 
         let is_aligned = if Self::is_aligned_struct(&fields, element_itemsize, alignment) {
             true
@@ -660,12 +651,18 @@ impl Dtype {
         const { &T::DTYPE }
     }
 
-    fn check_no_padding(
+    fn check_fields(
         fields: &[(Cow<'static, str>, Itemsize, Dtype)],
         itemsize: Itemsize,
     ) -> Result<()> {
+        let mut seen_names = HashSet::new();
         let mut expected_offset: Itemsize = 0;
         for (name, offset, dtype) in fields {
+            ensure!(
+                seen_names.insert(name),
+                InvalidArgument,
+                "duplicate field name `{name}` in struct dtype"
+            );
             ensure!(
                 *offset == expected_offset,
                 InvalidArgument,
@@ -825,9 +822,7 @@ impl Dtype {
     /// # Errors
     ///
     /// Returns `InvalidArgument` if the new shape has more than [`DTYPE_MAX_NDIM`] dimensions,
-    /// contains a zero dimension, or overflows [`Itemsize`]. Also errors when the dtype's *current*
-    /// shape has zero elements (only `<[T; 0]>::DTYPE`), since the per-element itemsize can no
-    /// longer be divided back out.
+    /// contains a zero dimension, or overflows [`Itemsize`].
     pub fn set_shape(&mut self, shape: &[Itemsize]) -> Result<()> {
         let shape = DtypeShape::from_slice(shape).ok_or_else(|| {
             error!(
@@ -846,15 +841,6 @@ impl Dtype {
             "Dtype shape has zero elements"
         );
         let current_shape_size = self.shape().iter().cloned().product::<Itemsize>();
-        // A zero-element current shape leaves no way to recover the per-element itemsize (it was
-        // multiplied by zero). Only `[T; 0]` builds such a dtype - every other constructor rejects
-        // a zero shape dim - so bail instead of guessing.
-        ensure!(
-            current_shape_size != 0,
-            InvalidArgument,
-            "Cannot set the shape of a dtype whose current shape has zero elements: {:?}",
-            self.shape()
-        );
         assert!(self.itemsize().is_multiple_of(current_shape_size));
         let base_itemsize = self.itemsize() / current_shape_size;
         *self.itemsize_mut() = base_itemsize
@@ -1168,6 +1154,16 @@ impl std::fmt::Debug for OwnedFields {
 ///
 /// Every bit pattern must be a valid value of the type, as arrays are read from files and foreign
 /// buffers without validation. This is why `bool` is not `Dtyped`; use [`bool8`] instead.
+///
+/// The dtype must be one that [`Dtype::new_struct`] / [`Dtype::set_shape`] accept: the shape has no
+/// zero dims, its product fits [`Itemsize`], and a zero-sized dtype has no shape. This is why
+/// `[T; N]` is `Dtyped` only for `N > 0` and a non-zero-sized `T`:
+///
+/// ```rust,compile_fail
+/// use jix::dtype::Dtyped;
+///
+/// let _ = <[u32; 0]>::DTYPE;
+/// ```
 pub unsafe trait Dtyped: Copy + Send + Sync + Sized + 'static {
     /// Get the dtype representing the type layout and inner fields.
     const DTYPE: Dtype;
@@ -1205,6 +1201,11 @@ impl_dtyped_scalar!(bool8, Bool8);
 unsafe impl<T: Dtyped, const N: usize> Dtyped for [T; N] {
     const DTYPE: Dtype = {
         let mut dtype = T::DTYPE;
+        assert!(N > 0, "Dtyped is not supported for zero-length arrays");
+        assert!(
+            size_of::<T>() > 0,
+            "Dtyped is not supported for arrays of zero-sized types"
+        );
         assert!(
             N < Itemsize::MAX as usize,
             "Array size exceeds maximum supported dtype shape size of Itemsize::MAX"
@@ -1517,6 +1518,20 @@ mod tests {
     }
 
     // ---- new_struct ----
+
+    #[test]
+    fn new_struct_duplicate_names_errors() {
+        let result = Dtype::new_struct(
+            vec![
+                ("x".to_string(), 0, i32::DTYPE),
+                ("x".to_string(), 4, i32::DTYPE),
+            ],
+            &[],
+            8,
+            4.try_into().unwrap(),
+        );
+        assert!(result.is_err());
+    }
 
     #[test]
     fn new_struct_packed_explicit() {
@@ -1923,20 +1938,6 @@ mod tests {
         assert!(d.set_shape(&[Itemsize::MAX, Itemsize::MAX]).is_err());
     }
 
-    // `[T; 0]` is the only dtype whose *current* shape contains a zero, so it is the only input
-    // for which the old itemsize cannot be divided back out. It must error, not divide by zero.
-    #[test]
-    fn set_shape_on_zero_element_shape_errors() {
-        let mut d = <[i32; 0] as Dtyped>::DTYPE;
-        assert_eq!(d.shape(), &[0]);
-        assert_eq!(d.itemsize(), 0);
-        assert!(d.set_shape(&[2]).is_err());
-        assert!(d.set_shape(&[]).is_err());
-        // The dtype is left untouched by the failed calls.
-        assert_eq!(d.shape(), &[0]);
-        assert_eq!(d.itemsize(), 0);
-    }
-
     // ---- Zero-itemsize dtypes ----
 
     #[test]
@@ -1971,15 +1972,6 @@ mod tests {
         d.set_shape(&[2, 3]).unwrap();
         assert_eq!(d.shape(), &[2, 3]);
         assert_eq!(d.itemsize(), 0);
-    }
-
-    #[test]
-    fn zero_size_array_dtype() {
-        let d = <[i32; 0] as Dtyped>::DTYPE;
-        assert_eq!(d.itemsize(), 0);
-        assert_eq!(d.shape(), &[0]);
-        assert_eq!(d.alignment().as_usize(), 4);
-        assert_eq!(d.scalar_kind(), Some(ScalarKind::I32));
     }
 
     #[test]

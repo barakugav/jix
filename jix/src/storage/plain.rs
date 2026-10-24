@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_range, check_ndim, ensure, Result};
+use crate::error::{check_ndim, ensure, error, Result};
 use crate::storage::params::{
     read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned,
 };
@@ -211,7 +211,7 @@ impl<T> Array<Plain<Vec<T>, Ty<T>>> {
     /// # Errors
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
-    /// maximum supported ndim.
+    /// maximum supported ndim, or if it has a negative stride (e.g. a reversed axis).
     pub fn plain_ndarray<D2>(arr: ndarray::Array<T, D2>) -> Result<Self>
     where
         T: Dtyped,
@@ -234,7 +234,7 @@ impl<T> Array<Plain<Vec<T>, Ty<T>>> {
     /// # Errors
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
-    /// maximum supported ndim.
+    /// maximum supported ndim, or if it has a negative stride (e.g. a reversed axis).
     pub fn plain_ndarray_with<D2>(arr: ndarray::Array<T, D2>, params: ArrayParams) -> Result<Self>
     where
         T: Dtyped,
@@ -242,11 +242,7 @@ impl<T> Array<Plain<Vec<T>, Ty<T>>> {
     {
         let shape = shape_from_ndarray(arr.shape())?;
 
-        let strides = arr
-            .strides()
-            .iter()
-            .map(|&s| usize::try_from(s).unwrap() * size_of::<T>())
-            .collect::<DimArray<_>>();
+        let strides = strides_from_ndarray::<T>(arr.strides())?;
 
         let (allocation, allocation_offset) = arr.into_raw_vec_and_offset();
         let mut data_ptr = allocation.as_ptr();
@@ -283,11 +279,7 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     {
         let shape = shape_from_ndarray(arr.shape())?;
 
-        let strides = arr
-            .strides()
-            .iter()
-            .map(|&s| s as usize * size_of::<T>())
-            .collect::<DimArray<_>>();
+        let strides = strides_from_ndarray::<T>(arr.strides())?;
 
         let data_ptr = arr.as_ptr().cast::<u8>();
 
@@ -299,7 +291,7 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     /// No element data is copied. The resulting array shares memory with
     /// `arr` and is valid for its lifetime `'a`. Any layout supported by
     /// ndarray (C-order, Fortran-order, non-contiguous slices, transposed
-    /// views, etc.) is handled correctly.
+    /// views, etc.) is handled correctly, except negative strides.
     ///
     /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
     /// ndarrays as `Array`, for example to participate in math operations with compressed arrays.
@@ -311,7 +303,7 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     /// # Errors
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
-    /// maximum supported ndim.
+    /// maximum supported ndim, or if it has a negative stride (e.g. a reversed axis).
     pub fn plain_ndarray_ref<S, D2>(arr: &'a ndarray::ArrayBase<S, D2>) -> Result<Self>
     where
         S: ndarray::Data<Elem = T>,
@@ -335,7 +327,7 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     /// # Errors
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
-    /// maximum supported ndim.
+    /// maximum supported ndim, or if it has a negative stride (e.g. a reversed axis).
     pub fn plain_ndarray_ref_with<S, D2>(
         arr: &'a ndarray::ArrayBase<S, D2>,
         params: ArrayParams,
@@ -437,6 +429,7 @@ impl<ET> Array<Plain<&(), ET>> {
     }
 }
 
+impl<A, ET> crate::storage::ArrayStorageImpl for Plain<A, ET> {}
 impl<A, ET> ArrayStorage for Plain<A, ET>
 where
     ET: ElementType,
@@ -451,7 +444,6 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         let dtype = self.dtype();
-        check_get_range(self.shape(), index)?;
         check_out_buf(
             out.as_deref(),
             self.shape(),
@@ -521,6 +513,17 @@ fn shape_from_ndarray(shape: &[usize]) -> Result<DimDyn> {
     Ok(DimDyn::from_fn(shape.len(), |i| shape[i] as u64))
 }
 
+fn strides_from_ndarray<T>(strides: &[isize]) -> Result<DimArray<usize>> {
+    strides
+        .iter()
+        .map(|&s| {
+            let s = usize::try_from(s)
+                .map_err(|_| error!(InvalidArgument, "Negative strides are not supported"))?;
+            Ok(s * size_of::<T>())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use ndarray::{array, s, ArrayD, Ix3};
@@ -542,6 +545,33 @@ mod tests {
         let got = a.to_ndarray_sub::<Ix3>(&[2..2, 0..3, 1..4], &ctx).unwrap();
         assert_eq!(got.shape(), &[0, 3, 3]);
         assert_eq!(got.len(), 0);
+    }
+
+    #[test]
+    fn negative_strides_are_an_error() {
+        use crate::error::ErrorKind;
+
+        let base = array![[1i32, 2, 3], [4, 5, 6]];
+        let reversed = base.slice(s![..;-1, ..]);
+        let kind = |r: crate::error::Result<()>| r.unwrap_err().kind();
+        assert_eq!(
+            kind(Array::plain_ndarray_view(reversed).map(|_| ())),
+            ErrorKind::InvalidArgument
+        );
+        assert_eq!(
+            kind(Array::plain_ndarray_ref(&reversed).map(|_| ())),
+            ErrorKind::InvalidArgument
+        );
+        assert_eq!(
+            kind(Array::compact_ndarray(&reversed).map(|_| ())),
+            ErrorKind::InvalidArgument
+        );
+        let mut owned = array![[1i32, 2, 3]];
+        owned.invert_axis(ndarray::Axis(0));
+        assert_eq!(
+            kind(Array::plain_ndarray(owned).map(|_| ())),
+            ErrorKind::InvalidArgument
+        );
     }
 
     // plain_ndarray (owned)
