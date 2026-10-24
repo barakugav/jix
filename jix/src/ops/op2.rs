@@ -1156,8 +1156,8 @@ pub(crate) mod _traits {
     }
 
     define_scalar_op2_trait!(
-        /// Exponentiation operation: as [`i32::wrapping_pow`] for integers, [`f32::powi`] and
-        /// [`f32::powf`] for floats.
+        /// Exponentiation operation: as [`i32::wrapping_pow`] for integers, [`f32::powf`] for
+        /// floats.
         ///
         /// Integer results wrap on overflow. A negative exponent of an integer base gives `0`
         /// and sets [`ArithmeticErrorKind::InvalidOperation`].
@@ -1201,7 +1201,15 @@ pub(crate) mod _traits {
     );
     impl_scalar_op2!(
         impl Pow for [f32, f64] x [i8, u8, i16, u16, i32] {
-            fn pow = |a, b, status| float_power(a.powi(b as i32), a, b as Self, status),
+            fn pow = |a, b, status| {
+                let p = match b {
+                    0 => 1.0,
+                    1 => a,
+                    2 => a * a,
+                    _ => a.powf(b as Self),
+                };
+                float_power(p, a, b as Self, status)
+            },
         }
     );
     impl_scalar_op2!(
@@ -1218,8 +1226,15 @@ pub(crate) mod _traits {
     impl_scalar_op2!(
         impl Pow for [f16] x [i8, u8, i16, u16, i32] {
             fn pow = |a, b, status| {
-                let p = f16::from_f32(a.to_f32().powi(b as i32));
-                float_power(p.to_f32(), a.to_f32(), b as f32, status);
+                let a = a.to_f32();
+                let p = match b {
+                    0 => 1.0,
+                    1 => a,
+                    2 => a * a,
+                    _ => a.powf(b as f32),
+                };
+                let p = f16::from_f32(p);
+                float_power(p.to_f32(), a, b as f32, status);
                 p
             },
         }
@@ -1968,6 +1983,33 @@ pub(crate) mod tests {
         let za = Array::compact_ndarray(&f16s(&[4.0, 2.0, 0.0, 8.0])).unwrap();
         let zb = Array::compact_ndarray(&f16s(&[0.5, 10.0, 0.0, -1.0])).unwrap();
         crate::util::assert_array_matches(&za.pow(zb), &f16s(&[2.0, 1024.0, 1.0, 0.125]));
+    }
+
+    #[test]
+    fn pow_float_by_int_matches_powf() {
+        use crate::Array;
+
+        // powi would flush 2^-1074 to 0 (2^1074 overflows) and drift for large exponents.
+        let za = Array::compact_ndarray(&ndarray::array![2.0f64, 1.0001, 1.5, 3.0]).unwrap();
+        let zb = Array::compact_ndarray(&ndarray::array![-1074i32, 10000, 100, 2]).unwrap();
+        let expected = ndarray::array![
+            2.0f64.powf(-1074.0),
+            1.0001f64.powf(10000.0),
+            1.5f64.powf(100.0),
+            9.0
+        ];
+        assert_eq!(za.pow(zb).to_ndarray::<ndarray::Ix1>().unwrap(), expected);
+        assert!(expected[0] > 0.0);
+
+        // Exponents 0..=2 take the multiplication shortcut, 3 goes through powf: a * a * a in f32
+        // would overflow on the first value, powf gives the rounded exact cube.
+        let a = ndarray::array![6.9814636e12f32, -1.5, 0.1, -1.5, 0.0];
+        let b = ndarray::array![3i32, 3, 2, 1, 0];
+        let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a.powf(b as f32));
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
+        assert_eq!(za.pow(zb).to_ndarray::<ndarray::Ix1>().unwrap(), expected);
+        assert!(expected[0].is_finite());
     }
 
     // mul, complex arm: full complex multiplication `(a+bi)*(c+di) = (ac-bd) + (ad+bc)i`,
