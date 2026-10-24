@@ -433,6 +433,7 @@ pub fn clamp<'py>(
         OpDescriptor::new(
             "clamp",
             vec![
+                clamp_op_descriptor::<bool8>(),
                 clamp_op_descriptor::<u8>(),
                 clamp_op_descriptor::<i8>(),
                 clamp_op_descriptor::<u16>(),
@@ -444,7 +445,6 @@ pub fn clamp<'py>(
                 clamp_op_descriptor::<f16>(),
                 clamp_op_descriptor::<f32>(),
                 clamp_op_descriptor::<f64>(),
-                clamp_op_descriptor::<bool8>(),
             ],
         )
     });

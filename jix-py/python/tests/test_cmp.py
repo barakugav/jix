@@ -186,7 +186,7 @@ def test_minimum_concrete():
 
 # clamp: prop tests against numpy.clip, plus explicit edge-case tests.
 
-_clamp_dtypes = ints + uints + floats
+_clamp_dtypes = ints + uints + floats + [np.bool_]
 
 
 @pytest.mark.parametrize("dtype", _clamp_dtypes)
