@@ -1926,12 +1926,13 @@ pub(crate) mod _traits {
                 }
                 #[inline(always)]
                 fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output {
-                    let denom = nitems as f64 - ddof;
-                    let res = if denom <= 0.0 {
-                        f64::NAN
+                    let m2 = if state.m2 >= 0.0 {
+                        state.m2
                     } else {
-                        state.m2 / denom
+                        f64::INFINITY // m2 negative is caused by overflow
                     };
+                    let denom = nitems as f64 - ddof;
+                    let res = if denom > 0.0 { m2 / denom } else { f64::NAN };
                     <_ as crate::scalar::Cast<Self::Output>>::cast(res)
                 }
             }
@@ -4434,6 +4435,31 @@ pub(crate) mod tests {
         let a = Array::compact_ndarray(&array![-0.0f64, -0.0]).unwrap();
         let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
         assert_eq!(s.to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
+    fn var_std_overflowing_deviation_is_inf() {
+        let a = Array::compact_ndarray(&array![1e308f64, -1e308]).unwrap();
+        assert_eq!(
+            a.view().var(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]],
+            f64::INFINITY
+        );
+        assert_eq!(
+            a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]],
+            f64::INFINITY
+        );
+        #[cfg(feature = "num-complex")]
+        {
+            let a = Array::compact_ndarray(&array![
+                complex_f64::new(0.0, 1e308),
+                complex_f64::new(0.0, -1e308)
+            ])
+            .unwrap();
+            assert_eq!(
+                a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]],
+                f64::INFINITY
+            );
+        }
     }
 
     #[test]
