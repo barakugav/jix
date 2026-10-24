@@ -140,7 +140,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
                 index[dim].clone()
             }
         });
-        let inner = self.array.read_data(inner_index.as_ref(), context, None)?;
+        let mut inner = self.array.read_data(inner_index.as_ref(), context, None)?;
 
         let inner_strides = inner.strides();
         let broadcasted_strides = dim_arr(ndim, |dim| {
@@ -152,7 +152,10 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         });
 
         match out {
-            None => Ok(unsafe { inner.with_strides(broadcasted_strides.as_ref()) }),
+            None => {
+                inner.make_readonly();
+                Ok(unsafe { inner.with_strides(broadcasted_strides.as_ref()) })
+            }
             Some(out) => {
                 let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
                 let (src, _) = inner.data();
