@@ -51,7 +51,7 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-21-pilot/findings/F007.md; repro in that run's repros/.
 
 ## K8: i686 Linux: alignment hard-coded to 8 for f64/i64/u64/c128 while the ABI says 4
-- Status: open (found in run 2026-10-21-pilot as F008)
+- Status: open, tracked in todo.md: i686 is a known gap (found in run 2026-10-21-pilot as F008)
 - Location: jix-py/src/dtype.rs:80, jix/src/dtype.rs:967
 - Notes: bug-hunt/runs/2026-10-21-pilot/findings/F008.md; repro in that run's repros/.
 
@@ -146,7 +146,7 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-22-trial2/findings/F013.md; repro in that run's repros/.
 
 ## K27: Complex division uses num-complex's unscaled textbook formula: NaN/inf/0 or ~1e-5 relative error for finite operands with |divisor| beyond sqrt(MAX) or below sqrt(MIN_POSITIVE)
-- Status: open (found in run 2026-10-22-trial2 as F014, medium)
+- Status: intended - textbook division is accepted, like the num-complex one (found in run 2026-10-22-trial2 as F014, medium)
 - Location: jix/src/ops/op2.rs:781
 - Notes: bug-hunt/runs/2026-10-22-trial2/findings/F014.md; repro in that run's repros/. See K74 (run 2026-10-24-batch4 F009: same formula in the complex mean).
 
@@ -311,7 +311,7 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-23-batch3/findings/F018.md; repro in that run's repros/. Fixed by documenting the full safety contract.
 
 ## K60: jix.power(x, 2) / x ** 2 is routed to Square and silently drops the float Overflow report that the jix.power docstring promises (f16/f32/f64)
-- Status: open, acknowledged in todo.md (#90): "jix.power(x, 2) on floats is routed to Square and dont have the overflow check" (found in run 2026-10-23-batch3 as F019, low)
+- Status: intended - x ** 2 on floats is a plain square, without the Pow overflow report (found in run 2026-10-23-batch3 as F019, low)
 - Location: jix-py/src/ops/op2.rs:688
 - Notes: bug-hunt/runs/2026-10-23-batch3/findings/F019.md; repro in that run's repros/.
 
@@ -356,7 +356,7 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F003.md; repro in that run's repros/.
 
 ## K69: Reshape reads every split/merge reshape (flatten, [N]->[a,b], block-aligned splits) one element at a time, decompressing a whole block per element: 400-5000x slower reads
-- Status: open (found in run 2026-10-24-batch4 as F004, medium)
+- Status: open, tracked in todo.md as a performance item, not a bug (found in run 2026-10-24-batch4 as F004, medium)
 - Location: jix/src/ops/shape_ops/reshape.rs:296
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F004.md; repro in that run's repros/.
 
@@ -396,7 +396,7 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F011.md; repro in that run's repros/.
 
 ## K77: A stepped Slice over a non-plain inner makes one inner read per output position of the stepped dims, decompressing whole blocks each time: step-2 slices read 200-2100x slower than the whole array
-- Status: open (found in run 2026-10-24-batch4 as F012, medium)
+- Status: open, tracked in todo.md as a performance item, not a bug (found in run 2026-10-24-batch4 as F012, medium)
 - Location: jix/src/ops/shape_ops/slice.rs:181
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F012.md; repro in that run's repros/. Same read-amplification pattern as K69 (F004).
 
