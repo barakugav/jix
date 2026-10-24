@@ -181,6 +181,9 @@ All strides are `usize` (bytes, or elements for `(1,1)` layouts) and never negat
 - #88: struct dtypes have no padding any more, so NdCopier's integer-typed copies of struct elements
   no longer read uninitialized bytes (K3 fixed).
 
+### Changed in 4d11918 (#90) - supersedes conflicting statements above
+- `NdCopier::copy` documents that its dtype must match the one given to `new` (K54).
+
 ## Hot spots
 
 - Coalescing (nd_iter_unordered.rs:129-150, _dyn.rs:91-107): can any combination of 0 strides,

@@ -172,6 +172,9 @@ Line numbers in this doc refer to bb1ee2c.
   results come back as numpy bool. #88: numpy structured dtypes with padding are rejected
   (jix-py/src/dtype.rs reworked, test_struct_dtype.py added).
 
+### Changed in 4d11918 (#90) - supersedes conflicting statements above
+- write_array rejects append-mode files and no longer lists gzip.GzipFile as supported (K49, K57).
+
 ## Hot spots
 
 - Stride rebuild in `numpy()` (`array.rs:563-592`): it pops `np_arr.strides()` from the end
