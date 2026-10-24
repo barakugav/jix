@@ -242,7 +242,7 @@ impl<T> Array<Plain<Vec<T>, Ty<T>>> {
     {
         let shape = shape_from_ndarray(arr.shape())?;
 
-        let strides = strides_from_ndarray::<T>(arr.strides())?;
+        let strides = strides_from_ndarray::<T>(arr.shape(), arr.strides())?;
 
         let (allocation, allocation_offset) = arr.into_raw_vec_and_offset();
         let mut data_ptr = allocation.as_ptr();
@@ -279,7 +279,7 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     {
         let shape = shape_from_ndarray(arr.shape())?;
 
-        let strides = strides_from_ndarray::<T>(arr.strides())?;
+        let strides = strides_from_ndarray::<T>(arr.shape(), arr.strides())?;
 
         let data_ptr = arr.as_ptr().cast::<u8>();
 
@@ -513,10 +513,12 @@ fn shape_from_ndarray(shape: &[usize]) -> Result<DimDyn> {
     Ok(DimDyn::from_fn(shape.len(), |i| shape[i] as u64))
 }
 
-fn strides_from_ndarray<T>(strides: &[isize]) -> Result<DimArray<usize>> {
-    strides
-        .iter()
-        .map(|&s| {
+fn strides_from_ndarray<T>(shape: &[usize], strides: &[isize]) -> Result<DimArray<usize>> {
+    std::iter::zip(shape, strides)
+        .map(|(&len, &s)| {
+            if len <= 1 {
+                return Ok(size_of::<T>()); // allow any stride on 0 or 1 len dim
+            }
             let s = usize::try_from(s)
                 .map_err(|_| error!(InvalidArgument, "Negative strides are not supported"))?;
             Ok(s * size_of::<T>())
@@ -567,11 +569,17 @@ mod tests {
             ErrorKind::InvalidArgument
         );
         let mut owned = array![[1i32, 2, 3]];
-        owned.invert_axis(ndarray::Axis(0));
+        owned.invert_axis(ndarray::Axis(1));
         assert_eq!(
             kind(Array::plain_ndarray(owned).map(|_| ())),
             ErrorKind::InvalidArgument
         );
+
+        // A length-1 dim is never stepped, its negative stride is fine.
+        let mut owned = array![[1i32, 2, 3]];
+        owned.invert_axis(ndarray::Axis(0));
+        let a = Array::plain_ndarray(owned).unwrap();
+        assert_eq!(a.to_ndarray().unwrap(), array![[1, 2, 3]]);
     }
 
     // plain_ndarray (owned)
