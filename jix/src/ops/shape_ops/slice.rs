@@ -252,21 +252,27 @@ pub struct SliceSpec {
 
 impl SliceSpec {
     /// Constructs a `SliceSpec` from a slice of [`SliceItem`]s, one per dimension.
-    pub fn new(slice: &[SliceItem]) -> Self {
-        Self {
-            slice: slice.iter().cloned().collect(),
-        }
+    ///
+    /// # Errors
+    ///
+    /// - [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) - more than
+    ///   [`NDIM_MAX`](crate::NDIM_MAX) items.
+    pub fn new(slice: &[SliceItem]) -> Result<Self> {
+        Self::try_from(slice)
     }
 }
 
-impl<I> From<&[I]> for SliceSpec
+impl<I> TryFrom<&[I]> for SliceSpec
 where
     I: Into<SliceItem> + Clone,
 {
-    fn from(slice: &[I]) -> Self {
-        Self {
+    type Error = crate::Error;
+
+    fn try_from(slice: &[I]) -> Result<Self> {
+        check_ndim(slice.len())?;
+        Ok(Self {
             slice: slice.iter().map(|item| item.clone().into()).collect(),
-        }
+        })
     }
 }
 
@@ -610,6 +616,13 @@ mod tests {
     }
 
     #[test]
+    fn slice_spec_too_many_items_errors() {
+        let items = [SliceItem::new(None, None, 1); crate::NDIM_MAX + 1];
+        assert!(super::SliceSpec::new(&items).is_err());
+        assert!(super::SliceSpec::try_from(&[..; crate::NDIM_MAX + 1][..]).is_err());
+    }
+
+    #[test]
     fn stepped_slice_huge_step_plain() {
         let s = plain6x4().slice((SliceItem::new(Some(1), None, i64::MAX), ..));
         assert_eq!(s.shape(), &[1, 4]);
@@ -817,7 +830,7 @@ mod tests {
     fn try_slice_one_dim(arr: Array<Compact<Ty<i32>>>, item: SliceItem) -> super::Result<()> {
         super::Slice::new_array(
             arr,
-            super::SliceSpec::new(&[item, SliceItem::new(None, None, 1)]),
+            super::SliceSpec::new(&[item, SliceItem::new(None, None, 1)]).unwrap(),
         )
         .map(|_| ())
     }
@@ -902,7 +915,7 @@ mod tests {
             }
             let expected = expected.as_standard_layout().into_owned();
             crate::util::assert_array_matches(
-                &za.slice(super::SliceSpec::new(&items)),
+                &za.slice(super::SliceSpec::new(&items).unwrap()),
                 &expected,
             );
         }
