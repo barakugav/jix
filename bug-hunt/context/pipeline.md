@@ -200,6 +200,9 @@ Pub(crate) unsafe fns and who establishes their preconditions:
 - #89: elementwise_pipeline.rs and scalar/simd.rs / traits_util.rs changed for `bool8` (bool-output
   kernels, mask packing). A mask built from a raw bool8 byte must normalize it first.
 
+### Changed in 4d11918 (#90) - supersedes conflicting statements above
+- `ArrayStorage` is sealed (`ArrayStorageImpl`), so the pipeline may trust read_data's buffers.
+
 ## Hot spots
 
 - N_OPERANDS / operands() agreement for every node (Op1, Op2, Where `ops/where_op.rs:371-387`,

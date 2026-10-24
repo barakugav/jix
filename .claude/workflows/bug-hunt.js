@@ -47,7 +47,7 @@ const MODULE_UNITS = [
     ],
     "title": "Dtype representation, struct layout validation, set_shape, equality",
     "files": [
-      "jix/src/dtype.rs:1-932"
+      "jix/src/dtype.rs:1-918"
     ],
     "consult": [
       "jix/src/util/mod.rs",
@@ -73,7 +73,7 @@ const MODULE_UNITS = [
     ],
     "title": "Dtyped trait contract, scalar and array impls, derive macro, ElementType",
     "files": [
-      "jix/src/dtype.rs:933-1218",
+      "jix/src/dtype.rs:919-1219",
       "jix-macros/src/lib.rs:1-315",
       "jix/src/element_type.rs:1-90"
     ],
@@ -132,7 +132,7 @@ const MODULE_UNITS = [
     ],
     "title": "Compact nd read path (read_data / read_data_slow) and BlockTable decode/build/mmap backends",
     "files": [
-      "jix/src/storage/compact.rs:1-495",
+      "jix/src/storage/compact.rs:1-508",
       "jix/src/storage/block.rs:1-453"
     ],
     "consult": [
@@ -202,7 +202,7 @@ const MODULE_UNITS = [
     ],
     "title": "NdCopier strided n-d copy kernels, fill_contiguous, PtrNoalias and span helpers",
     "files": [
-      "jix/src/util/nd_copy.rs:1-444",
+      "jix/src/util/nd_copy.rs:1-447",
       "jix/src/util/mod.rs:107-190",
       "jix/src/util/mod.rs:658-815"
     ],
@@ -319,8 +319,8 @@ const MODULE_UNITS = [
     ],
     "title": "ReductionOp construction, bulk/tile streaming loop, state-buffer choice and finalize pass",
     "files": [
-      "jix/src/ops/reduction.rs:1-626",
-      "jix/src/ops/reduction.rs:1128-1270"
+      "jix/src/ops/reduction.rs:1-630",
+      "jix/src/ops/reduction.rs:1132-1274"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -349,7 +349,7 @@ const MODULE_UNITS = [
     "title": "Kernel trait contract and the fold inner loops (one-cell, pairwise tree, multi-cell, SIMD vs strided)",
     "files": [
       "jix/src/ops/reduction.rs:18-118",
-      "jix/src/ops/reduction.rs:628-1126"
+      "jix/src/ops/reduction.rs:632-1130"
     ],
     "consult": [
       "jix/src/util/nd_iter_unordered.rs",
@@ -374,7 +374,7 @@ const MODULE_UNITS = [
     ],
     "title": "Scalar kernel traits: Sum, Product, ArgMax/ArgMin, Mean, Variance (Welford/Chan)",
     "files": [
-      "jix/src/ops/reduction.rs:1379-2044"
+      "jix/src/ops/reduction.rs:1393-2064"
     ],
     "consult": [
       "jix/src/ops/cast.rs",
@@ -400,8 +400,8 @@ const MODULE_UNITS = [
     ],
     "title": "Per-op kernel impls and flags, define_reduction_op macros, Reduce, Array methods",
     "files": [
-      "jix/src/ops/reduction.rs:1272-1377",
-      "jix/src/ops/reduction.rs:2046-3417"
+      "jix/src/ops/reduction.rs:1276-1391",
+      "jix/src/ops/reduction.rs:2066-3443"
     ],
     "consult": [
       "jix/src/ops/cmp.rs",
@@ -526,7 +526,7 @@ const MODULE_UNITS = [
     ],
     "title": "Element-wise pipeline driver: to_buf, static/dyn type-erased loops, staging, inner loops",
     "files": [
-      "jix/src/storage/elementwise_pipeline.rs:1-728"
+      "jix/src/storage/elementwise_pipeline.rs:1-732"
     ],
     "consult": [
       "jix/src/util/nd_iter_unordered.rs",
@@ -557,10 +557,10 @@ const MODULE_UNITS = [
     ],
     "title": "Pipeline operands, output layout, and generic op plumbing (Map/MapMultiple/IntoType/MaybeCompact)",
     "files": [
-      "jix/src/storage/elementwise_pipeline.rs:730-981",
-      "jix/src/ops/map.rs:1-418",
-      "jix/src/ops/into_type.rs:1-148",
-      "jix/src/ops/maybe_compact.rs:1-118",
+      "jix/src/storage/elementwise_pipeline.rs:734-993",
+      "jix/src/ops/map.rs:1-440",
+      "jix/src/ops/into_type.rs:1-154",
+      "jix/src/ops/maybe_compact.rs:1-119",
       "jix/src/ops/common.rs:1-185",
       "jix/src/ops/mod.rs:1-182"
     ],
@@ -839,7 +839,7 @@ const MODULE_UNITS = [
     ],
     "title": "read_array/write_array, PyReader/PyWriter adapters, mmap, errstate/warnings, module/package shim",
     "files": [
-      "jix-py/src/archive.rs:1-500",
+      "jix-py/src/archive.rs:1-501",
       "jix-py/src/error.rs:1-196",
       "jix-py/src/lib.rs:1-98",
       "jix-py/python/jix/__init__.py:1-46"
@@ -928,8 +928,8 @@ const MODULE_UNITS = [
     ],
     "title": "Archive reader/writer core: sections, TOC, block-table (de)serialization for Owned and Mmap storage, version word",
     "files": [
-      "jix/src/archive/common.rs:1-271",
-      "jix/src/archive/block.rs:1-487",
+      "jix/src/archive/common.rs:1-276",
+      "jix/src/archive/block.rs:1-503",
       "jix/src/archive/version.rs:1-129",
       "jix/src/archive/mod.rs:1-48"
     ],
@@ -960,7 +960,7 @@ const MODULE_UNITS = [
     ],
     "title": "Array-level archive API and header validation, protobuf dtype conversions",
     "files": [
-      "jix/src/archive/array.rs:1-542",
+      "jix/src/archive/array.rs:1-559",
       "jix/src/archive/schema/conversions.rs:1-174",
       "jix/src/archive/schema/mod.rs:1-8"
     ],
@@ -993,10 +993,10 @@ const MODULE_UNITS = [
     "files": [
       "jix/src/ops/shape_ops/mod.rs:1-192",
       "jix/src/ops/shape_ops/permute_dims.rs:1-176",
-      "jix/src/ops/shape_ops/insert_dim.rs:1-235",
-      "jix/src/ops/shape_ops/remove_dim.rs:1-220",
-      "jix/src/ops/shape_ops/broadcast.rs:1-206",
-      "jix/src/storage/buf.rs:351-399"
+      "jix/src/ops/shape_ops/insert_dim.rs:1-236",
+      "jix/src/ops/shape_ops/remove_dim.rs:1-221",
+      "jix/src/ops/shape_ops/broadcast.rs:1-209",
+      "jix/src/storage/buf.rs:370-418"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -1081,8 +1081,8 @@ const MODULE_UNITS = [
     ],
     "title": "Multi-array joins: Concatenate and Stack (with ArraySequence glue)",
     "files": [
-      "jix/src/ops/shape_ops/concatenate.rs:1-318",
-      "jix/src/ops/shape_ops/stack.rs:1-266",
+      "jix/src/ops/shape_ops/concatenate.rs:1-321",
+      "jix/src/ops/shape_ops/stack.rs:1-269",
       "jix/src/util/arr_sequence.rs:1-93",
       "jix/src/util/arr_sequence.rs:600-664"
     ],
@@ -1110,10 +1110,10 @@ const MODULE_UNITS = [
     ],
     "title": "ArrayStorage trait, StridedBuf and out-buffer helpers, forwarders (View/Box/Rc/Arc/&dyn), ArrayStorageAny, info",
     "files": [
-      "jix/src/storage/core_trait.rs:1-173",
-      "jix/src/storage/buf.rs:1-399",
-      "jix/src/storage/mod.rs:1-298",
-      "jix/src/storage/any.rs:1-113",
+      "jix/src/storage/core_trait.rs:1-179",
+      "jix/src/storage/buf.rs:1-418",
+      "jix/src/storage/mod.rs:1-302",
+      "jix/src/storage/any.rs:1-114",
       "jix/src/storage/info.rs:1-74"
     ],
     "consult": [
@@ -1146,9 +1146,9 @@ const MODULE_UNITS = [
     ],
     "title": "Plain and Scalar backends, ndarray constructors, compact_ndarray / compact_nd_ptr / compact_fn (FnStorage)",
     "files": [
-      "jix/src/storage/plain.rs:1-523",
+      "jix/src/storage/plain.rs:1-526",
       "jix/src/storage/scalar.rs:1-199",
-      "jix/src/array.rs:177-514"
+      "jix/src/array.rs:177-517"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -1178,7 +1178,7 @@ const MODULE_UNITS = [
     ],
     "title": "Array front-end: to_ndarray / to_ndarray_sub / to_ndarray_slice / to_ndarray_buf + request splitting, compact_with / compact_into_builder, misc Array methods",
     "files": [
-      "jix/src/array.rs:516-1733"
+      "jix/src/array.rs:519-1735"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -1210,8 +1210,8 @@ const MODULE_UNITS = [
     ],
     "title": "Op1/Op2 storage wrappers and define_op1/define_op2 plumbing",
     "files": [
-      "jix/src/ops/op1.rs:1-266",
-      "jix/src/ops/op2.rs:1-325"
+      "jix/src/ops/op1.rs:1-268",
+      "jix/src/ops/op2.rs:1-327"
     ],
     "consult": [
       "jix/src/scalar/traits_util.rs",
@@ -1236,7 +1236,7 @@ const MODULE_UNITS = [
     ],
     "title": "Binary arithmetic kernels: add/sub/mul, int and float divide/remainder (trunc/floor/euclid), f16/complex div, pow and error classification",
     "files": [
-      "jix/src/ops/op2.rs:326-1596"
+      "jix/src/ops/op2.rs:328-1613"
     ],
     "consult": [
       "jix/src/scalar/traits_util.rs",
@@ -1262,15 +1262,15 @@ const MODULE_UNITS = [
     ],
     "title": "Unary math kernels (sign/abs/square/neg/floor/ceil/round/sqrt/exp/ln/trig), float classification, complex real/imag",
     "files": [
-      "jix/src/ops/op1.rs:267-1259",
+      "jix/src/ops/op1.rs:269-1261",
       "jix/src/ops/logical1.rs:1-179",
-      "jix/src/ops/complex.rs:1-156"
+      "jix/src/ops/complex.rs:1-158"
     ],
     "consult": [
       "jix/src/scalar/traits_util.rs",
       "jix/src/scalar/simd.rs",
       "jix/src/error.rs",
-      "jix/src/ops/op1.rs:1-266",
+      "jix/src/ops/op1.rs:1-268",
       "jix-py/src/ops/op2.rs"
     ],
     "focus": [
@@ -1290,10 +1290,10 @@ const MODULE_UNITS = [
     ],
     "title": "Comparisons, swapped Greater/GreaterEqual, Maximum/Minimum, Clamp, ApproxEq",
     "files": [
-      "jix/src/ops/cmp.rs:1-1120"
+      "jix/src/ops/cmp.rs:1-1128"
     ],
     "consult": [
-      "jix/src/ops/op2.rs:1-325",
+      "jix/src/ops/op2.rs:1-327",
       "jix/src/scalar/simd.rs:300-385",
       "jix/src/scalar/traits_util.rs:200-329"
     ],
@@ -1314,7 +1314,7 @@ const MODULE_UNITS = [
     "title": "Bitwise/shift/rotate/count kernels and the Cast op with SIMD conversion chains",
     "files": [
       "jix/src/ops/bitwise.rs:1-786",
-      "jix/src/ops/cast.rs:1-487"
+      "jix/src/ops/cast.rs:1-488"
     ],
     "consult": [
       "jix/src/scalar/simd.rs",
@@ -1341,15 +1341,15 @@ const MODULE_UNITS = [
     "title": "Where (unsafe strided select loops), Transmute (unsafe relabel), SubDtype (struct field views)",
     "files": [
       "jix/src/ops/where_op.rs:1-451",
-      "jix/src/ops/transmute.rs:1-151",
+      "jix/src/ops/transmute.rs:1-152",
       "jix/src/ops/sub_dtype.rs:1-197"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
       "jix/src/util/nd_iter_unordered.rs",
-      "jix/src/storage/elementwise_pipeline.rs:731-865",
-      "jix/src/storage/core_trait.rs:56-135",
-      "jix/src/dtype.rs:461-710",
+      "jix/src/storage/elementwise_pipeline.rs:735-869",
+      "jix/src/storage/core_trait.rs:63-141",
+      "jix/src/dtype.rs:461-707",
       "jix/src/util/mod.rs:622-682"
     ],
     "focus": [

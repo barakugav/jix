@@ -187,6 +187,9 @@ finalize pass (1117-1259) turns states into outputs. Scalar-level traits (`jix::
 - #89: all / any / sum / argmax over booleans now use `bool8` (~120 lines changed). sum(bool8) must
   count non-zero bytes, not add raw byte values; argmax / max must compare truthiness.
 
+### Changed in 4d11918 (#90) - supersedes conflicting statements above
+- An empty float / complex sum returns +0.0 (K62). reduction.rs changed ~70 lines.
+
 ## Hot spots
 
 1. Init vs merge is keyed ONLY on the stream position: `init = base_item_idx == 0` (640) for

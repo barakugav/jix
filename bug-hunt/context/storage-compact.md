@@ -193,6 +193,10 @@ Unsafe fns / preconditions:
   re-read them rather than trusting line numbers here.
 - On 32-bit, read regions must fit isize::MAX bytes (`check_region_size`, error.rs).
 
+### Changed in 4d11918 (#90) - supersedes conflicting statements above
+- Reading an archive keeps the file's block shape even when the caller's params would re-tune it
+  (K43 fixed). compact.rs / params.rs changed slightly.
+
 ## Hot spots
 
 - Direct decode into `out` (compact.rs:429-437, 464-471): `lead_dim` = first dim with block > 1;
