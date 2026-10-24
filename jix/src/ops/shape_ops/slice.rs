@@ -320,14 +320,16 @@ macro_rules! impl_from_range {
         impl From<$range_ty> for SliceItem {
             fn from(r: $range_ty) -> Self {
                 use std::ops::RangeBounds;
+                let to_i64 = |x| i64::try_from(x).unwrap_or(i64::MAX);
                 let start = match r.start_bound() {
-                    Bound::Included(&s) => Some(s as i64),
-                    Bound::Excluded(&s) => Some(s as i64 + 1),
+                    Bound::Included(&s) => Some(to_i64(s)),
+                    Bound::Excluded(&s) => Some(to_i64(s).saturating_add(1)),
                     Bound::Unbounded => None,
                 };
                 let end = match r.end_bound() {
-                    Bound::Included(&e) => Some(e as i64 + 1),
-                    Bound::Excluded(&e) => Some(e as i64),
+                    Bound::Included(&e) if to_i64(e) == -1 => None,
+                    Bound::Included(&e) => Some(to_i64(e).saturating_add(1)),
+                    Bound::Excluded(&e) => Some(to_i64(e)),
                     Bound::Unbounded => None,
                 };
                 Self::new(start, end, 1)
@@ -593,6 +595,18 @@ mod tests {
             }
         }
         assert_eq!(got, vec![9, 10, 17, 18]);
+    }
+
+    #[test]
+    fn slice_item_from_range_bounds() {
+        let a = make2d(arange(24), 4, 6);
+        let s = a.slice((..=-1, -2..=-1));
+        assert_eq!(
+            s.to_ndarray().unwrap(),
+            array![[4, 5], [10, 11], [16, 17], [22, 23]].into_dyn()
+        );
+        assert_eq!(SliceItem::from(0u64..u64::MAX).end, Some(i64::MAX));
+        assert_eq!(SliceItem::from(..=i64::MAX).end, Some(i64::MAX));
     }
 
     #[test]
