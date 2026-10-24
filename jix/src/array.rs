@@ -189,6 +189,8 @@ impl<T> Array<Compact<Ty<T>>> {
     ///
     /// - [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) - `array.ndim()` exceeds
     ///   [`NDIM_MAX`](crate::NDIM_MAX).
+    /// - [`InvalidArgument`](crate::error::ErrorKind::InvalidArgument) - `array` has a negative
+    ///   stride (e.g. a reversed axis).
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - compression fails.
     ///
     /// # Examples
