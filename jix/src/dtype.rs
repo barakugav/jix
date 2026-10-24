@@ -486,9 +486,9 @@ impl Dtype {
             .collect::<Box<_>>();
 
         // No padding, so the fields end exactly at the itemsize.
-        let itemsize = fields
-            .last()
-            .map_or(0, |(_name, offset, dtype)| offset + dtype.itemsize());
+        let itemsize = fields.last().map_or(0, |(_name, offset, dtype)| {
+            offset.saturating_add(dtype.itemsize())
+        });
         Self::check_fields(&fields, itemsize)?;
 
         let max_alignment = Self::max_field_alignment(&fields);
@@ -1514,6 +1514,17 @@ mod tests {
             ("a".to_string(), 0, u8::DTYPE),
             ("b".to_string(), 3, f64::DTYPE),
         ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn from_fields_itemsize_overflow_errors() {
+        let result = Dtype::from_fields(vec![
+            ("a".to_string(), 0, <[u8; 65000]>::DTYPE),
+            ("b".to_string(), 65000, <[u8; 1000]>::DTYPE),
+        ]);
+        assert!(result.is_err());
+        let result = Dtype::from_fields(vec![("x".to_string(), u16::MAX, u16::DTYPE)]);
         assert!(result.is_err());
     }
 
