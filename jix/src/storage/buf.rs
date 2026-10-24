@@ -51,6 +51,7 @@ enum StridedBufData<'a> {
     Slice(&'a [u8]),
     SliceMut(&'a mut [u8]),
     PoolBuf { buf: PoolBuf<'a>, offset: usize },
+    PoolBufMut { buf: PoolBuf<'a>, offset: usize },
 }
 
 impl<'a> StridedBuf<'a> {
@@ -134,14 +135,26 @@ impl<'a> StridedBuf<'a> {
     #[inline]
     pub(crate) unsafe fn from_pool(buf: PoolBuf<'a>, strides: &[usize]) -> Self {
         Self {
-            data: StridedBufData::PoolBuf { buf, offset: 0 },
+            data: StridedBufData::PoolBufMut { buf, offset: 0 },
             strides: strides.to_dim_vec::<DimDyn>(),
         }
     }
 
     #[inline]
     pub(crate) fn is_writable(&self) -> bool {
-        !matches!(self.data, StridedBufData::Slice(_))
+        matches!(
+            self.data,
+            StridedBufData::SliceMut(_) | StridedBufData::PoolBufMut { .. }
+        )
+    }
+
+    #[inline]
+    pub(crate) fn make_readonly(&mut self) {
+        self.data = match std::mem::replace(&mut self.data, StridedBufData::Slice(&[])) {
+            StridedBufData::SliceMut(s) => StridedBufData::Slice(s),
+            StridedBufData::PoolBufMut { buf, offset } => StridedBufData::PoolBuf { buf, offset },
+            data => data,
+        };
     }
 
     /// The byte stride of each dimension.
@@ -171,7 +184,8 @@ impl<'a> StridedBuf<'a> {
         let data = match &self.data {
             StridedBufData::Slice(s) => *s,
             StridedBufData::SliceMut(s) => &**s,
-            StridedBufData::PoolBuf { buf, offset } => &buf.as_slice()[*offset..],
+            StridedBufData::PoolBuf { buf, offset }
+            | StridedBufData::PoolBufMut { buf, offset } => &buf.as_slice()[*offset..],
         };
         (data, self.strides.as_ref())
     }
@@ -181,8 +195,10 @@ impl<'a> StridedBuf<'a> {
         let strides = self.strides.as_ref();
         let data = match &mut self.data {
             StridedBufData::SliceMut(s) => &mut **s,
-            StridedBufData::PoolBuf { buf, offset } => &mut buf.as_mut_slice()[*offset..],
-            StridedBufData::Slice(_) => panic!("data_mut on a read-only StridedBuf view"),
+            StridedBufData::PoolBufMut { buf, offset } => &mut buf.as_mut_slice()[*offset..],
+            StridedBufData::Slice(_) | StridedBufData::PoolBuf { .. } => {
+                panic!("data_mut on a read-only StridedBuf view")
+            }
         };
         (data, strides)
     }
@@ -207,7 +223,8 @@ impl<'a> StridedBuf<'a> {
     ///
     /// # Safety
     ///
-    /// Same contract as [`from_slice_mut`](Self::from_slice_mut).
+    /// Same contract as [`from_slice_mut`](Self::from_slice_mut) for a writable buffer. Call
+    /// [`make_readonly`](Self::make_readonly) first to relabel with aliasing strides.
     #[inline]
     pub(crate) unsafe fn with_strides(mut self, strides: &[usize]) -> Self {
         self.strides = strides.to_dim_vec::<DimDyn>();
@@ -255,6 +272,10 @@ impl<'a> StridedBuf<'a> {
             StridedBufData::Slice(s) => StridedBufData::Slice(&s[n..]),
             StridedBufData::SliceMut(s) => StridedBufData::SliceMut(&mut s[n..]),
             StridedBufData::PoolBuf { buf, offset } => StridedBufData::PoolBuf {
+                buf,
+                offset: offset + n,
+            },
+            StridedBufData::PoolBufMut { buf, offset } => StridedBufData::PoolBufMut {
                 buf,
                 offset: offset + n,
             },
@@ -419,6 +440,30 @@ mod tests {
             .to_ndarray_buf(&[0..4], &ctx2, Some(&mut out))
             .is_err());
         assert!(big().to_ndarray_buf(&[1..2], &ctx2, Some(&mut out)).is_ok());
+    }
+
+    #[test]
+    fn aliasing_pull_result_is_not_accepted_as_out() {
+        let ctx = ReadContext::default();
+        let b = Array::plain_ndarray(array![[1.0f32], [2.0]])
+            .unwrap()
+            .flip(0)
+            .broadcast(&[2, 4]);
+        let n = -Array::plain_ndarray(array![[1.0f32]])
+            .unwrap()
+            .broadcast(&[2, 4]);
+        let x = Array::plain_ndarray(array![[1.0f32, 2., 3., 4.], [5., 6., 7., 8.]]).unwrap();
+        for mut out in [
+            b.to_ndarray_buf(&[0..2, 0..4], &ctx, None).unwrap(),
+            n.to_ndarray_buf(&[0..2, 0..4], &ctx, None).unwrap(),
+        ] {
+            assert!(out.data_ptr_mut().is_none());
+            let ctx2 = ReadContext::default();
+            assert!(x
+                .view()
+                .to_ndarray_buf(&[0..2, 0..4], &ctx2, Some(&mut out))
+                .is_err());
+        }
     }
 
     #[test]
