@@ -1762,8 +1762,7 @@ pub(crate) mod _traits {
                         return None;
                     }
                     let state = <_ as crate::scalar::Cast<$FinalizeT>>::cast(state);
-                    let nitems = <_ as crate::scalar::Cast<$FinalizeT>>::cast(nitems);
-                    let mean = state / nitems;
+                    let mean = state / nitems as f64;
                     Some(<_ as crate::scalar::Cast<Self::Output>>::cast(mean))
                 }
             }
@@ -1778,7 +1777,7 @@ pub(crate) mod _traits {
     impl_mean!(u32, u64, f64, f64);
     impl_mean!(u64, f64, f64, f64);
     #[cfg(feature = "half")]
-    impl_mean!(f16, f32, f32, f16);
+    impl_mean!(f16, f32, f64, f16);
     impl_mean!(f32, f64, f64, f32);
     impl_mean!(f64, f64, f64, f64);
     #[cfg(feature = "num-complex")]
@@ -4200,7 +4199,7 @@ pub(crate) mod tests {
                     sum += <_ as crate::scalar::Cast<Complex<f64>>>::cast(x);
                     count += 1;
                 }
-                sum / Complex::new(count as f64, 0.0)
+                sum / count as f64
             }
         },
         [complex_f32, complex_f64],
@@ -4460,6 +4459,18 @@ pub(crate) mod tests {
                 f64::INFINITY
             );
         }
+    }
+
+    #[cfg(feature = "num-complex")]
+    #[test]
+    fn mean_complex_near_max() {
+        let a = Array::compact_ndarray(&array![
+            complex_f64::new(1.7e308, -1.7e308),
+            complex_f64::new(0.0, 0.0)
+        ])
+        .unwrap();
+        let m = a.mean(0usize).to_ndarray::<Ix0>().unwrap()[[]];
+        assert_eq!(m, complex_f64::new(0.85e308, -0.85e308));
     }
 
     #[test]

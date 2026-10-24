@@ -188,9 +188,8 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
             .map(|x| x.ok_or(()))
             .into_iter()
             .try_collect_array::<_, _, IN_N>()
-            .transpose()
-            .unwrap()
-            .ok();
+            .ok()
+            .flatten();
 
         if let Some(mut in_dtypes) = in_dtypes {
             cast_python_scalars_to_default_precision(&mut in_dtypes);
