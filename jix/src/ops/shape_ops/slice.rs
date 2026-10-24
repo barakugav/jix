@@ -157,8 +157,13 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 first..(last + 1)
             });
             let inner = self.array.read_data(inner_box.as_ref(), context, None)?;
+            let itemsize = self.dtype().itemsize() as usize;
             let out_strides = dim_arr(ndim, |dim| {
-                inner.strides()[dim] * self.slice[dim].step as usize
+                if out_shape[dim] <= 1 {
+                    itemsize // avoid (stride*step) overflow, dim is not stepped
+                } else {
+                    inner.strides()[dim] * self.slice[dim].step as usize
+                }
             });
             return Ok(unsafe { inner.with_strides(out_strides.as_ref()) });
         }
@@ -588,6 +593,17 @@ mod tests {
             }
         }
         assert_eq!(got, vec![9, 10, 17, 18]);
+    }
+
+    #[test]
+    fn stepped_slice_huge_step_plain() {
+        let s = plain6x4().slice((SliceItem::new(Some(1), None, i64::MAX), ..));
+        assert_eq!(s.shape(), &[1, 4]);
+        // The elementwise op pulls its input, taking the plain fast path.
+        assert_eq!(
+            (-s).to_ndarray().unwrap(),
+            array![[-4, -5, -6, -7]].into_dyn()
+        );
     }
 
     #[test]
