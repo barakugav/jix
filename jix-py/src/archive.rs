@@ -158,8 +158,9 @@ pub fn read_array(
 /// Args:
 ///     array: The array to write.
 ///     path_or_writer: A file path or any seekable binary file-like object with `.write()`,
-///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle,
-///         `gzip.GzipFile`).
+///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle). The writer
+///         must support seeking backwards. For the same reason a file object opened in append
+///         mode (`"ab"`) raises; use `append=True` with a path instead.
 ///     append: When `False` (default), the file is created anew and must not already exist.
 ///         When `True`, the array is appended to an existing file (or a new one is created).
 ///         Ignored when `path_or_writer` is a file-like object.

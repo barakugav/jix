@@ -71,6 +71,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         T: Dtyped,
         Self: Sized,
     {
+        let is_pull = out.is_none();
         let mut out = materialize_pipeline_out_buf(
             index,
             &mut self.operands(),
@@ -116,6 +117,9 @@ pub(crate) trait ElementwisePipelineImpl<T> {
 
         to_buf_fn(self, index, &mut out, context)?;
 
+        if is_pull {
+            make_readonly_if_aliasing(index, &mut out);
+        }
         Ok(out)
     }
 }
@@ -944,6 +948,14 @@ fn pick_output_layout<'s>(
         }
     }
     (strides, real_dims)
+}
+
+/// A pull buffer has stride 0 on the dims it collapsed, so its elements alias
+#[inline(never)]
+fn make_readonly_if_aliasing(index: &[Range<u64>], out: &mut StridedBuf<'_>) {
+    if (index.iter().zip(out.strides())).any(|(r, &s)| s == 0 && r.end - r.start > 1) {
+        out.make_readonly();
+    }
 }
 
 pub(crate) const fn n_operands_sum(counts: &[Option<usize>]) -> Option<usize> {

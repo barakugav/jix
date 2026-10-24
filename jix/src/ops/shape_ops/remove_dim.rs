@@ -144,6 +144,7 @@ where
     }
 }
 
+impl<S> crate::storage::ArrayStorageImpl for RemoveDim<S> {}
 impl<S> ArrayStorage for RemoveDim<S>
 where
     S: ArrayStorage,

@@ -11,3 +11,6 @@
 - move ReadContext
 - optimize nd copy of structs
 - work on Dimension public API
+- avoid calling check_get_range many times
+- jix.power(x, 2) on floats is routed to Square and dont have the overflow check
+- pull mode to_ndarray_buf splits large reads of O(1) lazy views and copies the whole region

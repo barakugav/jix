@@ -52,6 +52,7 @@ use crate::dtype::Dtyped;
 use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
 
 pub(crate) mod core_trait;
+pub(crate) use core_trait::ArrayStorageImpl;
 
 mod compact;
 pub use compact::*;
@@ -112,6 +113,7 @@ impl<'a, S> View<'a, S> {
         Self(storage)
     }
 }
+impl<'a, S> crate::storage::ArrayStorageImpl for View<'a, S> {}
 impl<'a, S> ArrayStorage for View<'a, S>
 where
     S: ArrayStorage,
@@ -138,6 +140,7 @@ macro_rules! impl_array_storage_smart_ptr {
         });
     };
     ($ptr:ident, { $($change_items:tt)* }) => {
+        impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for $ptr<S> {}
         impl<S: ArrayStorage> ArrayStorage for $ptr<S> {
             type ElementType = S::ElementType;
 
@@ -205,6 +208,7 @@ impl_array_storage_smart_ptr!(Box, {
 impl_array_storage_smart_ptr!(Rc);
 impl_array_storage_smart_ptr!(Arc);
 
+impl crate::storage::ArrayStorageImpl for &dyn ArrayStorage {}
 impl ArrayStorage for &dyn ArrayStorage {
     type ElementType = crate::TypeDyn;
 

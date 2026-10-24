@@ -150,6 +150,10 @@ where
         Self::new(arrays, dim).map(Array::from_storage)
     }
 }
+impl<ArraysT> crate::storage::ArrayStorageImpl for Stack<ArraysT> where
+    ArraysT: ArraySequence + ArraySequenceElementType
+{
+}
 impl<ArraysT> ArrayStorage for Stack<ArraysT>
 where
     ArraysT: ArraySequence + ArraySequenceElementType,
@@ -164,7 +168,6 @@ where
     ) -> Result<StridedBuf<'a>> {
         let shape = self.shape();
         let dtype = self.dtype();
-        check_get_range(shape, index)?;
         check_out_buf(
             out.as_deref(),
             shape,

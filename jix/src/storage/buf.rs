@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::buf_pool::PoolBuf;
 use crate::dtype::Dtype;
-use crate::error::{check_region_size, ensure, Result};
+use crate::error::{check_get_range, check_region_size, ensure, Result};
 use crate::util::{
     default_strides_slice, strided_span_bytes, strides_for_layout_order, DimArray, SliceExt,
 };
@@ -51,6 +51,7 @@ enum StridedBufData<'a> {
     Slice(&'a [u8]),
     SliceMut(&'a mut [u8]),
     PoolBuf { buf: PoolBuf<'a>, offset: usize },
+    PoolBufMut { buf: PoolBuf<'a>, offset: usize },
 }
 
 impl<'a> StridedBuf<'a> {
@@ -59,7 +60,8 @@ impl<'a> StridedBuf<'a> {
     /// # Safety
     ///
     /// `data` must be valid for reads according to the `shape`, `strides` and `itemsize`, and it
-    /// must remain valid for the lifetime `'a`
+    /// must remain valid for the lifetime `'a`. The memory must not be mutated during `'a`. `data`
+    /// must be non-null even for an empty region, e.g. `NonNull::dangling()`.
     #[inline]
     pub unsafe fn from_raw_parts(
         data: *const u8,
@@ -77,7 +79,10 @@ impl<'a> StridedBuf<'a> {
     /// # Safety
     ///
     /// `data` must be valid for reads and writes according to the `shape`, `strides` and
-    /// `itemsize`, and it must remain valid for the lifetime `'a`.
+    /// `itemsize`, and it must remain valid for the lifetime `'a`. The memory must not be accessed
+    /// through any other pointer during `'a`: when used as the `out` of a read, it must not overlap
+    /// memory read by any array in the lazy chain (e.g. a [`Plain`](crate::storage::Plain) over the
+    /// same buffer). `data` must be non-null even for an empty region, e.g. `NonNull::dangling()`.
     /// The caller should ensure there are no two different indices that result in the same byte
     /// offset (i.e. the strides must not alias, broadcasted dimensions are not allowed).
     #[inline]
@@ -130,14 +135,26 @@ impl<'a> StridedBuf<'a> {
     #[inline]
     pub(crate) unsafe fn from_pool(buf: PoolBuf<'a>, strides: &[usize]) -> Self {
         Self {
-            data: StridedBufData::PoolBuf { buf, offset: 0 },
+            data: StridedBufData::PoolBufMut { buf, offset: 0 },
             strides: strides.to_dim_vec::<DimDyn>(),
         }
     }
 
     #[inline]
     pub(crate) fn is_writable(&self) -> bool {
-        !matches!(self.data, StridedBufData::Slice(_))
+        matches!(
+            self.data,
+            StridedBufData::SliceMut(_) | StridedBufData::PoolBufMut { .. }
+        )
+    }
+
+    #[inline]
+    pub(crate) fn make_readonly(&mut self) {
+        self.data = match std::mem::replace(&mut self.data, StridedBufData::Slice(&[])) {
+            StridedBufData::SliceMut(s) => StridedBufData::Slice(s),
+            StridedBufData::PoolBufMut { buf, offset } => StridedBufData::PoolBuf { buf, offset },
+            data => data,
+        };
     }
 
     /// The byte stride of each dimension.
@@ -167,7 +184,8 @@ impl<'a> StridedBuf<'a> {
         let data = match &self.data {
             StridedBufData::Slice(s) => *s,
             StridedBufData::SliceMut(s) => &**s,
-            StridedBufData::PoolBuf { buf, offset } => &buf.as_slice()[*offset..],
+            StridedBufData::PoolBuf { buf, offset }
+            | StridedBufData::PoolBufMut { buf, offset } => &buf.as_slice()[*offset..],
         };
         (data, self.strides.as_ref())
     }
@@ -177,8 +195,10 @@ impl<'a> StridedBuf<'a> {
         let strides = self.strides.as_ref();
         let data = match &mut self.data {
             StridedBufData::SliceMut(s) => &mut **s,
-            StridedBufData::PoolBuf { buf, offset } => &mut buf.as_mut_slice()[*offset..],
-            StridedBufData::Slice(_) => panic!("data_mut on a read-only StridedBuf view"),
+            StridedBufData::PoolBufMut { buf, offset } => &mut buf.as_mut_slice()[*offset..],
+            StridedBufData::Slice(_) | StridedBufData::PoolBuf { .. } => {
+                panic!("data_mut on a read-only StridedBuf view")
+            }
         };
         (data, strides)
     }
@@ -203,7 +223,8 @@ impl<'a> StridedBuf<'a> {
     ///
     /// # Safety
     ///
-    /// Same contract as [`from_slice_mut`](Self::from_slice_mut).
+    /// Same contract as [`from_slice_mut`](Self::from_slice_mut) for a writable buffer. Call
+    /// [`make_readonly`](Self::make_readonly) first to relabel with aliasing strides.
     #[inline]
     pub(crate) unsafe fn with_strides(mut self, strides: &[usize]) -> Self {
         self.strides = strides.to_dim_vec::<DimDyn>();
@@ -254,6 +275,10 @@ impl<'a> StridedBuf<'a> {
                 buf,
                 offset: offset + n,
             },
+            StridedBufData::PoolBufMut { buf, offset } => StridedBufData::PoolBufMut {
+                buf,
+                offset: offset + n,
+            },
         };
         StridedBuf { data, strides }
     }
@@ -285,6 +310,7 @@ pub(crate) fn check_out_buf(
     index: &[Range<u64>],
     itemsize: usize,
 ) -> Result<()> {
+    check_get_range(array_shape, index)?;
     check_region_size(index, itemsize)?;
     let Some(out) = out else { return Ok(()) };
     ensure!(
@@ -298,13 +324,6 @@ pub(crate) fn check_out_buf(
         out.is_writable(),
         InvalidArgument,
         "out buffer must be a writable destination, not a read-only view"
-    );
-    ensure!(
-        index.len() == array_shape.len(),
-        InvalidIndex,
-        "index has {} dimensions but array has {}",
-        index.len(),
-        array_shape.len()
     );
     // The furthest byte the region touches must lie inside `out`.
     if index.iter().all(|r| r.end > r.start) {
@@ -421,5 +440,53 @@ mod tests {
             .to_ndarray_buf(&[0..4], &ctx2, Some(&mut out))
             .is_err());
         assert!(big().to_ndarray_buf(&[1..2], &ctx2, Some(&mut out)).is_ok());
+    }
+
+    #[test]
+    fn aliasing_pull_result_is_not_accepted_as_out() {
+        let ctx = ReadContext::default();
+        let b = Array::plain_ndarray(array![[1.0f32], [2.0]])
+            .unwrap()
+            .flip(0)
+            .broadcast(&[2, 4]);
+        let n = -Array::plain_ndarray(array![[1.0f32]])
+            .unwrap()
+            .broadcast(&[2, 4]);
+        let x = Array::plain_ndarray(array![[1.0f32, 2., 3., 4.], [5., 6., 7., 8.]]).unwrap();
+        for mut out in [
+            b.to_ndarray_buf(&[0..2, 0..4], &ctx, None).unwrap(),
+            n.to_ndarray_buf(&[0..2, 0..4], &ctx, None).unwrap(),
+        ] {
+            assert!(out.data_ptr_mut().is_none());
+            let ctx2 = ReadContext::default();
+            assert!(x
+                .view()
+                .to_ndarray_buf(&[0..2, 0..4], &ctx2, Some(&mut out))
+                .is_err());
+        }
+    }
+
+    #[test]
+    #[allow(clippy::reversed_empty_ranges)]
+    fn reversed_index_is_invalid_index() {
+        let ctx = ReadContext::default();
+        let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]]).unwrap();
+        let kind = |s: &dyn crate::ArrayStorage| {
+            s.read_data(&[0..2, 2..1], &ctx, None)
+                .err()
+                .map(|e| e.kind())
+        };
+        assert_eq!(
+            kind((-a.view()).storage()),
+            Some(crate::error::ErrorKind::InvalidIndex)
+        );
+        assert_eq!(
+            kind((a.view() + a.view()).storage()),
+            Some(crate::error::ErrorKind::InvalidIndex)
+        );
+        assert_eq!(
+            kind(a.view().permute_dims(&[1, 0]).storage()),
+            Some(crate::error::ErrorKind::InvalidIndex)
+        );
     }
 }

@@ -11,7 +11,7 @@ use crate::codec::{DecoderCodecConfig, ReadContext};
 use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
-use crate::util::{dim_arr, Idx, IterExt};
+use crate::util::{dim_arr, DimBitmap, Idx, IterExt};
 use crate::{ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, TypeDyn};
 
 impl Array<Compact<TypeDyn>> {
@@ -342,6 +342,9 @@ where
     /// **For any other array** (lazy views, op chains, plain buffers), each block is read from
     /// the source and compressed according to `params` before being written.
     ///
+    /// As with [`write_to`](Array::write_to), the writer must support seeking back, so it must not
+    /// be a file opened in append mode.
+    ///
     /// # Streaming pipeline example
     ///
     /// The following reads a large array from disk via mmap, applies some lazy operations,
@@ -534,9 +537,23 @@ where
             expected_nblocks
         );
 
+        // Tune with every dim fixed so the file's block shape is kept. The caller's flags are
+        // only hints for how downstream ops rescale it.
         params.block_shape = Some(block_shape);
-
-        Self::new(blocks, shape, params)
+        let fixed_dims = params
+            .block_shape_fixed_dims
+            .replace(DimBitmap::filled(ndim, true));
+        let mut array = Self::new(blocks, shape, params)?;
+        if let Some(fixed_dims) = fixed_dims {
+            ensure!(
+                fixed_dims.len() == ndim,
+                InvalidArgument,
+                "ndim does not match block_shape_fixed_dims length: expected {ndim}, got {}",
+                fixed_dims.len()
+            );
+            array.spec.dynamic_mut().block_shape_fixed_dims = fixed_dims;
+        }
+        Ok(array)
     }
 }
 
@@ -550,6 +567,75 @@ mod tests {
     use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
     use crate::{ArchiveValidation, Array, ArrayParams, Dimension, IntoDimension, Ty};
+
+    #[test]
+    fn read_keeps_the_file_block_shape() {
+        let src = ndarray::Array2::from_shape_fn((64, 64), |(i, j)| (i * 64 + j) as i32);
+        let mut p = ArrayParams::new();
+        p.block_shape(&[8, 32]);
+        let a = Array::compact_ndarray_with(&src, p).unwrap();
+        let mut bytes = Cursor::new(Vec::new());
+        a.write_to(&mut bytes).unwrap();
+
+        let mut p = ArrayParams::new();
+        p.block_shape_fixed_dims(&[false, false]).block_size(1024);
+        let a = Array::read_from_reader(
+            Cursor::new(bytes.into_inner()),
+            None,
+            p,
+            ArchiveValidation::Strict,
+        )
+        .unwrap();
+        assert_eq!(a.storage().0.block_shape(), &[8, 32]);
+        let fixed_dims = a.storage().0.spec.as_ref().block_shape_fixed_dims();
+        assert_eq!((fixed_dims.get(0), fixed_dims.get(1)), (false, false));
+        assert_eq!(
+            a.into_typed::<i32>()
+                .unwrap()
+                .to_ndarray::<ndarray::Ix2>()
+                .unwrap(),
+            src
+        );
+    }
+
+    #[test]
+    fn huge_section_size_without_len_is_an_error() {
+        let a = Array::compact_ndarray(&ndarray::array![0u8, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        let mut bytes = Cursor::new(Vec::new());
+        a.write_to(&mut bytes).unwrap();
+        let bytes = bytes.into_inner();
+        // Skip the magic and the three messages to the [blocks_loc, block_data] sections.
+        let mut toc = 4;
+        for _ in 0..3 {
+            let len = prost::decode_length_delimiter(&bytes[toc..]).unwrap();
+            toc += prost::length_delimiter_len(len) + len;
+        }
+        // A 16 TiB block_data section in a ~100 byte stream, and one whose size only matches the
+        // real one when truncated to 32 bits.
+        let size = u64::from_le_bytes(bytes[toc + 24..toc + 32].try_into().unwrap());
+        for bad_size in [1u64 << 44, (1 << 32) + size] {
+            let mut bytes = bytes.clone();
+            bytes[toc + 24..toc + 32].copy_from_slice(&bad_size.to_le_bytes());
+            let result = Array::read_from_reader(
+                Cursor::new(bytes),
+                None,
+                ArrayParams::default(),
+                ArchiveValidation::Strict,
+            );
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn write_to_append_mode_file_is_an_error() {
+        let a = Array::compact_ndarray(&ndarray::array![1u8, 2, 3, 4]).unwrap();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let writer = std::fs::OpenOptions::new()
+            .append(true)
+            .open(file.path())
+            .unwrap();
+        assert!(a.write_to(writer).is_err());
+    }
 
     #[test]
     fn reader_is_never_handed_uninit_bytes() {

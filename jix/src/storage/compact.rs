@@ -15,7 +15,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dimension::dim_arr;
 use crate::dtype::Dtype;
-use crate::error::{check_get_range, Result};
+use crate::error::Result;
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ElementType, StridedBuf};
@@ -105,6 +105,7 @@ pub struct CompactBorrowed<'a, ET>(
 pub struct CompactMmap<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, ET>);
 macro_rules! impl_array_storage {
     ($ty:ident < $($lt:lifetime,)? ET >) => {
+        impl<$($lt,)? ET> crate::storage::ArrayStorageImpl for $ty<$($lt,)? ET> {}
         impl<$($lt,)? ET> ArrayStorage for $ty<$($lt,)? ET>
         where
             ET: crate::ElementType,
@@ -182,7 +183,7 @@ where
     pub(crate) blocks: BlockTable<S, ET>,
     shape: DimDyn,
 
-    spec: ArraySpecOwned,
+    pub(crate) spec: ArraySpecOwned,
 }
 impl<S, ET> ArrayBlockTableStorageBase<S, ET>
 where
@@ -204,6 +205,19 @@ where
         )?;
         // Reading a compact element is more expensive than reading a plain element (1).
         spec.dynamic_mut().element_cost = 8.0;
+        let block_shape = spec.as_ref().block_shape();
+        debug_assert_eq!(
+            block_shape.iter().map(|&b| b as u64).product::<u64>(),
+            blocks.block_size as u64
+        );
+        debug_assert_eq!(
+            shape_slice
+                .iter()
+                .zip(block_shape)
+                .map(|(&s, &b)| s.div_ceil(b as u64))
+                .product::<u64>(),
+            blocks.nblocks()
+        );
         Ok(Self {
             blocks,
             shape,
@@ -275,7 +289,6 @@ where
         ET: ElementType,
     {
         let shape = self.shape();
-        check_get_range(shape, index)?;
         let dtype = self.blocks.dtype();
         check_out_buf(out.as_deref(), shape, index, dtype.itemsize() as usize)?;
         let out_shape = dim_arr(shape.len(), |d| (index[d].end - index[d].start) as usize);

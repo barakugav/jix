@@ -82,7 +82,8 @@ uv pip install -r scripts/dev_requirements.txt   # maturin, pytest, pytest-xdist
 
 ### `Array<S: ArrayStorage>` - the generic core
 
-`ArrayStorage` (`jix/src/storage/core_trait.rs`) exposes exactly three things: `shape()`, `dtype()`,
+`ArrayStorage` (`jix/src/storage/core_trait.rs`, sealed: every impl also needs an empty
+`impl crate::storage::ArrayStorageImpl for X {}` marker) exposes exactly three things: `shape()`, `dtype()`,
 and `read_data(index_ranges, ctx, out)` which reads a rectangular sub-region and returns it as a
 `StridedBuf` - a block of bytes plus one byte stride per dimension (`jix/src/storage/buf.rs`).
 **Everything** - arithmetic, slicing, reductions, serialization - is built on top of these three.

@@ -168,6 +168,10 @@ where
         Self::new(arrays, dim).map(Array::from_storage)
     }
 }
+impl<ArraysT> crate::storage::ArrayStorageImpl for Concatenate<ArraysT> where
+    ArraysT: ArraySequence + ArraySequenceElementType
+{
+}
 impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
 where
     ArraysT: ArraySequence + ArraySequenceElementType,
@@ -196,7 +200,6 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         let dtype = self.dtype();
-        check_get_range(self.shape(), index)?;
         check_out_buf(
             out.as_deref(),
             self.shape(),
