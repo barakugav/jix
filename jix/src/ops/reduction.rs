@@ -174,7 +174,7 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
             .filter(|&dim| is_reduced[dim])
             .map(|dim| array.shape()[dim])
             .product::<u64>();
-        let element_cost = (spec.element_cost() as f64 * (reduced_prod + 4) as f64) as f32;
+        let element_cost = (spec.element_cost() as f64 * (reduced_prod as f64 + 4.0)) as f32;
         let dim_orig2new = |d: usize| (d - (0..d).filter(|&j| is_reduced[j]).count()) as DimIdx;
         let read_shape_scale_weight = spec
             .read_shape_scale_weight()
@@ -4434,6 +4434,14 @@ pub(crate) mod tests {
         let a = Array::compact_ndarray(&array![-0.0f64, -0.0]).unwrap();
         let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
         assert_eq!(s.to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
+    fn reduce_huge_lazy_shape() {
+        let a = Array::compact_ndarray(&array![[1u8]]).unwrap();
+        let a = crate::ops::Broadcast::new_array(a, &[i64::MAX as u64, 2]).unwrap();
+        let s = crate::ops::Max::new_array(a, (0, 1)).unwrap();
+        assert_eq!(s.shape(), &[] as &[u64]);
     }
 
     #[test]
