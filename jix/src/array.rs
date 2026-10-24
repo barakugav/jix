@@ -575,8 +575,8 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// This is the simplest way to materialize a jix array into a standard in-memory ndarray.
     /// All blocks of the underlying compact storage are decompressed and the elements are
-    /// returned in a contiguous row-major (C-order) ndarray with the same shape and element
-    /// type as the source.
+    /// returned in an ndarray with the same shape and element type as the source. The memory
+    /// layout of the returned array is an implementation detail and may vary.
     ///
     /// For a lazy view (e.g. `Array<Add<Mul<Compact, _>, _>>`), `to_ndarray` walks the entire
     /// operation pipeline: each composed op is evaluated on the fly as data flows out of the
