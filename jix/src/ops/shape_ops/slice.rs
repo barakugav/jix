@@ -116,6 +116,7 @@ impl<S: ArrayStorage> Slice<S> {
     }
 }
 
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Slice<S> {}
 impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     type ElementType = S::ElementType;
 

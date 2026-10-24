@@ -437,6 +437,7 @@ impl<ET> Array<Plain<&(), ET>> {
     }
 }
 
+impl<A, ET> crate::storage::ArrayStorageImpl for Plain<A, ET> {}
 impl<A, ET> ArrayStorage for Plain<A, ET>
 where
     ET: ElementType,

@@ -150,6 +150,10 @@ where
         Self::new(arrays, dim).map(Array::from_storage)
     }
 }
+impl<ArraysT> crate::storage::ArrayStorageImpl for Stack<ArraysT> where
+    ArraysT: ArraySequence + ArraySequenceElementType
+{
+}
 impl<ArraysT> ArrayStorage for Stack<ArraysT>
 where
     ArraysT: ArraySequence + ArraySequenceElementType,

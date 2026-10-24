@@ -168,6 +168,10 @@ where
         Self::new(arrays, dim).map(Array::from_storage)
     }
 }
+impl<ArraysT> crate::storage::ArrayStorageImpl for Concatenate<ArraysT> where
+    ArraysT: ArraySequence + ArraySequenceElementType
+{
+}
 impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
 where
     ArraysT: ArraySequence + ArraySequenceElementType,

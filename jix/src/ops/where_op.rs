@@ -143,6 +143,7 @@ where
             .map(Array::from_storage)
     }
 }
+impl<SC, SX, SY> crate::storage::ArrayStorageImpl for Where<SC, SX, SY> {}
 impl<SC, SX, SY> ArrayStorage for Where<SC, SX, SY>
 where
     SC: ArrayStorageTyped<Item = bool8>,

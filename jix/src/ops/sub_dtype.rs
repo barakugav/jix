@@ -105,6 +105,7 @@ where
         Self::new(array.into_storage(), sub_field).map(Array::from_storage)
     }
 }
+impl<S, ET> crate::storage::ArrayStorageImpl for SubDtype<S, ET> {}
 impl<S, ET> ArrayStorage for SubDtype<S, ET>
 where
     S: ArrayStorage,

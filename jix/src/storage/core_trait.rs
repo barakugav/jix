@@ -8,6 +8,12 @@ use crate::storage::{
 };
 use crate::{ElementType, TypeDyn};
 
+mod sealed {
+    /// Seals [`ArrayStorage`](super::ArrayStorage).
+    pub trait ArrayStorageImpl {}
+}
+pub(crate) use sealed::ArrayStorageImpl;
+
 /// The backing data source of an [`Array<S>`](crate::Array).
 ///
 /// `Array<S>` is generic over its storage `S: ArrayStorage`, which provides three pieces
@@ -53,7 +59,7 @@ use crate::{ElementType, TypeDyn};
 /// carry zero heap allocation or virtual dispatch overhead. The full static type of an
 /// expression - e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` - is resolved by the compiler,
 /// and only the final `read_data` call touches actual bytes.
-pub trait ArrayStorage {
+pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// The compile-time element type of arrays backed by this storage.
     ///
     /// Either [`Ty<T>`](crate::Ty) - element type `T` is known at compile time - or [`TypeDyn`](crate::TypeDyn) - element

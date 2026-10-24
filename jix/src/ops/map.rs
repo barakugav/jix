@@ -71,6 +71,13 @@ impl<S, F> Map<S, F> {
         Self::new(array.into_storage(), map_fn).map(Array::from_storage)
     }
 }
+impl<S, O, F> crate::storage::ArrayStorageImpl for Map<S, F>
+where
+    S: ArrayStorageTyped,
+    O: Dtyped,
+    F: Fn(S::Item) -> O,
+{
+}
 impl<S, O, F> ArrayStorage for Map<S, F>
 where
     S: ArrayStorageTyped,
@@ -131,6 +138,14 @@ impl<S1, S2, F> Map2<S1, S2, F> {
     {
         Self::new(a.into_storage(), b.into_storage(), map_fn).map(Array::from_storage)
     }
+}
+impl<S1, S2, O, F> crate::storage::ArrayStorageImpl for Map2<S1, S2, F>
+where
+    S1: ArrayStorageTyped,
+    S2: ArrayStorageTyped,
+    O: Dtyped,
+    F: Fn(S1::Item, S2::Item) -> O,
+{
 }
 impl<S1, S2, O, F> ArrayStorage for Map2<S1, S2, F>
 where
@@ -283,6 +298,13 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
             spec,
         })
     }
+}
+impl<ArraysT, O, F> crate::storage::ArrayStorageImpl for MapMultiple<ArraysT, F>
+where
+    ArraysT: ArraySequence + ArraySequenceTyped,
+    F: Fn(ArraysT::ItemSequence<'_>) -> O,
+    O: Dtyped,
+{
 }
 impl<ArraysT, O, F> ArrayStorage for MapMultiple<ArraysT, F>
 where

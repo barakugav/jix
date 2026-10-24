@@ -111,6 +111,7 @@ impl<S: ArrayStorage> Tile<S> {
     }
 }
 
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Tile<S> {}
 impl<S: ArrayStorage> ArrayStorage for Tile<S> {
     type ElementType = S::ElementType;
 

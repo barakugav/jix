@@ -90,6 +90,7 @@ impl<S1, S2, K> Op2<S1, S2, K> {
     }
 }
 
+impl<S1, S2, K> crate::storage::ArrayStorageImpl for Op2<S1, S2, K> {}
 impl<S1, S2, K> ArrayStorage for Op2<S1, S2, K>
 where
     S1: ArrayStorageTyped,
@@ -272,6 +273,7 @@ macro_rules! define_op2 {
                 Self::new(a.into_storage(), b.into_storage()).map(crate::Array::from_storage)
             }
         }
+        impl<S1, S2> crate::storage::ArrayStorageImpl for $Op<S1, S2> {}
         impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
             S1: crate::storage::ArrayStorageTyped,

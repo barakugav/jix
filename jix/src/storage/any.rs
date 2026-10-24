@@ -43,6 +43,7 @@ impl ArrayStorageAny {
         }
     }
 }
+impl crate::storage::ArrayStorageImpl for ArrayStorageAny {}
 impl ArrayStorage for ArrayStorageAny {
     type ElementType = TypeDyn;
 

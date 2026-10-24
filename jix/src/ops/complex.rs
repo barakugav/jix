@@ -52,6 +52,7 @@ where
         Self::new(array.into_storage()).map(Array::from_storage)
     }
 }
+impl<S, T> crate::storage::ArrayStorageImpl for Real<S, T> {}
 impl<S, T> ArrayStorage for Real<S, T>
 where
     S: ArrayStorageTyped<Item = Complex<T>>,
@@ -119,6 +120,7 @@ where
         Self::new(array.into_storage()).map(Array::from_storage)
     }
 }
+impl<S, T> crate::storage::ArrayStorageImpl for Imaginary<S, T> {}
 impl<S, T> ArrayStorage for Imaginary<S, T>
 where
     S: ArrayStorageTyped<Item = Complex<T>>,

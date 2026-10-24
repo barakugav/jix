@@ -105,6 +105,7 @@ pub struct CompactBorrowed<'a, ET>(
 pub struct CompactMmap<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, ET>);
 macro_rules! impl_array_storage {
     ($ty:ident < $($lt:lifetime,)? ET >) => {
+        impl<$($lt,)? ET> crate::storage::ArrayStorageImpl for $ty<$($lt,)? ET> {}
         impl<$($lt,)? ET> ArrayStorage for $ty<$($lt,)? ET>
         where
             ET: crate::ElementType,

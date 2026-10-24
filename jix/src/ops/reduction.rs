@@ -213,6 +213,12 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
     }
 }
 
+impl<S, K> crate::storage::ArrayStorageImpl for ReductionOp<S, K>
+where
+    S: ArrayStorageTyped,
+    K: ReductionOpKernel<S::Item, Output: Dtyped>,
+{
+}
 impl<S, K> ArrayStorage for ReductionOp<S, K>
 where
     S: ArrayStorageTyped,
@@ -1315,6 +1321,11 @@ macro_rules! define_reduction_op {
             }
         }
 
+        impl<S> crate::storage::ArrayStorageImpl for $Op<S>
+        where
+            $($where_)+
+        {
+        }
         impl<S> crate::ArrayStorage for $Op<S>
         where
             $($where_)+
@@ -1358,6 +1369,11 @@ macro_rules! define_reduction_op {
             }
         }
 
+        impl<S> crate::storage::ArrayStorageImpl for $Op<S>
+        where
+            $($where_)+
+        {
+        }
         impl<S> crate::ArrayStorage for $Op<S>
         where
             $($where_)+
@@ -3091,6 +3107,12 @@ where
     const PREFER_TREE_MERGE: bool = true;
     const NEEDS_INDICES: bool = false;
 }
+impl<S, F> crate::storage::ArrayStorageImpl for Reduce<S, F>
+where
+    S: ArrayStorageTyped,
+    F: Fn(S::Item, S::Item) -> S::Item,
+{
+}
 impl<S, F> ArrayStorage for Reduce<S, F>
 where
     S: ArrayStorageTyped,
@@ -3246,6 +3268,7 @@ where
     const PREFER_TREE_MERGE: bool = true;
     const NEEDS_INDICES: bool = false;
 }
+impl<S, B, F> crate::storage::ArrayStorageImpl for Fold<S, B, F> {}
 impl<S, B, F> ArrayStorage for Fold<S, B, F>
 where
     S: ArrayStorageTyped,

@@ -466,6 +466,7 @@ macro_rules! define_swapped_cmp {
             }
         }
 
+        impl<S1, S2> crate::storage::ArrayStorageImpl for $Op<S1, S2> {}
         impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
             S1: ArrayStorageTyped,
@@ -802,6 +803,7 @@ where
         Self::new(a.into_storage(), min.into_storage(), max.into_storage()).map(Array::from_storage)
     }
 }
+impl<S, SMin, SMax> crate::storage::ArrayStorageImpl for Clamp<S, SMin, SMax> {}
 impl<S, SMin, SMax> ArrayStorage for Clamp<S, SMin, SMax>
 where
     S: ArrayStorageTyped,
@@ -1035,6 +1037,12 @@ where
     {
         Self::new(a.into_storage(), b.into_storage(), rtol, atol).map(Array::from_storage)
     }
+}
+impl<S1, S2> crate::storage::ArrayStorageImpl for ApproxEq<S1, S2>
+where
+    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
+    S2: ArrayStorageTyped<Item = S1::Item>,
+{
 }
 impl<S1, S2> ArrayStorage for ApproxEq<S1, S2>
 where
