@@ -108,33 +108,39 @@ bug-hunt/
 ## Cost and time
 
 Measured, in input-token equivalents (cache reads weighted 0.1, cache writes 1.25; output is
-negligible):
+negligible), from the subagent transcripts. A transcript logs an assistant message once per
+content block, every copy carrying the same usage, so count each message id once (the numbers
+recorded here before batch4 summed every copy and were ~1.8x too high).
 
 | run | units | agents | findings | cost | per unit | wall time (2 at a time) |
 |-----|------:|-------:|---------:|-----:|---------:|------------------------:|
-| pilot (util-memory, concept-alignment) | 4 | 19 | 13 | 24.5M | 6.1M | 61 min |
-| trial2 (mixed complexity) | 8 | 38 | 28 | 38.4M | 4.8M | 125 min |
-| batch3 (#87 code, 2 untouched subsystems) | 8 | 34 | 23 (+1 intended) | 48.2M | 6.0M | 138 min |
+| pilot (util-memory, concept-alignment) | 4 | 19 | 13 | 13.4M | 3.4M | 61 min |
+| trial2 (mixed complexity) | 8 | 38 | 28 | 21.1M | 2.6M | 125 min |
+| batch3 (#87 code, 2 untouched subsystems) | 8 | 34 | 23 (+1 intended) | 26.2M | 3.3M | 138 min |
+| batch4 (#90 code, module units only) | 8 | 28 | 18 | 18.8M | 2.4M | 91 min |
 
-- A hunter costs 1.4-5.3M. The cost follows how much code it traces, not how "complex" the code
-  is: concept hunters and the differential tester cost the most, and Python wrappers the least.
-- A verifier costs ~0.3-1.5M, one per distinct finding. Bug density was ~3.5 per unit in both
-  runs, so the units that are "simple" to hunt are not much cheaper overall: py-ops-shape-ops had
-  the cheapest hunter and 8 findings.
+- A hunter costs 0.7-3.6M; the Rust differential tester is the outlier at 6.0M (168 turns). The
+  cost follows how much code it traces, not how "complex" the code is: concept hunters and the
+  differential testers cost the most, Python wrappers and shape ops the least.
+- A verifier costs ~0.1-0.9M, one per distinct finding, so verification is 30-40% of a run.
+  Bug density was 3.3, 3.5, 2.9 and 2.25 per unit in the four runs, so the units that are
+  "simple" to hunt are not much cheaper overall: py-ops-shape-ops had the cheapest hunter and 8
+  findings.
 - Each agent takes ~6.5 min of wall time at 2 agents in parallel.
-- Yield per token differs a lot by kind (findings / cost): module units are the best value
-  (codec-archive-archive-io 8 / 2.2M, py-ops-shape-ops 8 / 1.4M); concept units 2 each for
-  2.3-6.6M; the dynamic testers are bimodal (Python 11 / 5.2M, Rust 2 / 10.4M with 293 turns).
+- Yield per token differs a lot by kind (findings / hunter cost): module units are the best value
+  (codec-archive-archive-io 8 / 0.9M, py-ops-shape-ops 8 / 0.7M, shape-ops-slice-reshape 5 /
+  1.0M); concept units 2 each for 1.2-3.6M; the dynamic testers are bimodal (Python 11 / 2.8M,
+  Rust 2 / 6.0M). pipeline-simd was the first hunter with no finding (1.75M, a bit-exact SIMD
+  differential on every x86 level).
 - Builds leave GBs behind (incremental caches, per-repro test binaries): batch3 ended with 3 GB of
   disk free. setup.sh and the report stage now delete them.
 
-Remaining after these two runs: 35 module + 10 concept + 1 dynamic = 46 units, so about 46 x 4.8M
-= ~220M input-equivalent tokens and ~230 agents, i.e. ~12 hours on a 4-core container (2 agents at
-a time) or ~2 hours with 14 at a time. The workflow runs at most `min(16, CPUs - 2)` agents at
-once. To go faster on a small machine, split the run into batches with `units` and different
-`runId`s and launch them concurrently (scratch file names are run-scoped, so batches do not
-collide). Memory is the other limit: building the Python extension needs several GB, so do not
-run `setup.sh` next to a hunt.
+Remaining after batch4: 21 module + 9 concept = 30 units. At ~3M and ~3.5 agents per unit, that
+is ~90M input-equivalent tokens and ~105 agents, i.e. ~6 hours on a 4-core container (2 agents
+at a time). The workflow runs at most `min(16, CPUs - 2)` agents at once. To go faster on a small
+machine, split the run into batches with `units` and different `runId`s and launch them
+concurrently (scratch file names are run-scoped, so batches do not collide). Memory is the other
+limit: building the Python extension needs several GB, so do not run `setup.sh` next to a hunt.
 
 An interrupted run can be resumed: re-invoke the workflow with `resumeFromRunId` and the same
 arguments; finished agents return their cached results.
@@ -164,10 +170,19 @@ arguments; finished agents return their cached results.
   codec-archive-archive-io, types-dtype-layout, util-nd-copier, elementwise-ops-op2-arith-div-pow,
   concept-push-pull, dynamic-rust-differential: 23 confirmed (4 high), 1 intended, including a
   regression from #87 (F020). Recorded as K42-K65 in `KNOWN.md`.
+- `2026-10-24-batch4` (after #90) - units pipeline-simd, elementwise-ops-bitwise-cast,
+  elementwise-ops-where-transmute-subdtype, reduction-op-kernels, storage-core-array-read-paths,
+  storage-core-leaf-backends, shape-ops-slice-reshape, py-ops-cmp-bitwise-where: 18 confirmed
+  (1 high), 0 refuted. Nine extend earlier fixes or repeat their pattern at a new site (F006
+  reopens K28; F005 is K50 for `ElementType`). pipeline-simd found nothing. Recorded as K66-K83
+  in `KNOWN.md`.
 - Next: everything else, with
   `skip: ["util-memory", "concept-alignment", "reduction-fold-loops", "pipeline-driver",
   "shape-ops-copy-ops", "codec-archive-codec-pipeline", "elementwise-ops-cmp-clamp-approx",
   "py-ops-shape-ops", "concept-integer-width", "dynamic-python-differential",
   "storage-core-buf-contract", "storage-compact-read-path", "codec-archive-archive-io",
   "types-dtype-layout", "util-nd-copier", "elementwise-ops-op2-arith-div-pow", "concept-push-pull",
-  "dynamic-rust-differential"]`.
+  "dynamic-rust-differential", "pipeline-simd", "elementwise-ops-bitwise-cast",
+  "elementwise-ops-where-transmute-subdtype", "reduction-op-kernels",
+  "storage-core-array-read-paths", "storage-core-leaf-backends", "shape-ops-slice-reshape",
+  "py-ops-cmp-bitwise-where"]`.

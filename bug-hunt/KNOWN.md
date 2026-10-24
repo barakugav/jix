@@ -93,7 +93,7 @@ Format: one entry per issue.
 ## K16: 32-bit: read regions over 4 GiB / 2^32 elements are sized with truncating `as usize` and wrapping usize products (pull allocation, to_ndarray_slice length check, to_ndarray shape, pipeline region), causing a heap overflow from safe code. This is K2's 32-bit part, which its fix did not cover.
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F003, high)
 - Location: jix/src/storage/buf.rs:312
-- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F003.md; repro in that run's repros/. Covers the 32-bit part of K2 that the #86 fix did not cover.
+- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F003.md; repro in that run's repros/. Covers the 32-bit part of K2 that the #86 fix did not cover. See K81 (run 2026-10-24-batch4 F016: empty regions with huge dims are not covered).
 
 ## K17: K1 fix is incomplete: Decoder::decode runs the filter chain over a short zstd decompression before read_block checks the length, so a failed read writes uninitialized or stale pool bytes into the caller's out buffer
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F004, high)
@@ -148,12 +148,12 @@ Format: one entry per issue.
 ## K27: Complex division uses num-complex's unscaled textbook formula: NaN/inf/0 or ~1e-5 relative error for finite operands with |divisor| beyond sqrt(MAX) or below sqrt(MIN_POSITIVE)
 - Status: open (found in run 2026-10-22-trial2 as F014, medium)
 - Location: jix/src/ops/op2.rs:781
-- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F014.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F014.md; repro in that run's repros/. See K74 (run 2026-10-24-batch4 F009: same formula in the complex mean).
 
 ## K28: f64 -> f16 conversion double-rounds through f32 (Array::cast, Complex<f64>->Complex<f16>, jix.cast/asarray(dtype=f16), Python floats mixed with f16 arrays)
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F015, medium)
 - Location: jix/src/ops/cast.rs:59
-- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F015.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F015.md; repro in that run's repros/. See K71 (run 2026-10-24-batch4 F006: the fix is incomplete, f16::from_f64 still mis-rounds without std).
 
 ## K29: slice_unpack resolves slice bounds through Py_ssize_t: on 32-bit CPython a dim longer than 2^31-1 gives a silently wrong slice; on 64-bit, stops >= 2^63-1 bypass the strict bounds check
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F016, medium)
@@ -163,7 +163,7 @@ Format: one entry per issue.
 ## K30: Contiguous inner-loop lane count ignores element width (prev_power_of_two(0)==1 keeps 8 lanes), so wide Dtyped elements overflow a 2 MiB thread stack and abort
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F017, low)
 - Location: jix/src/storage/elementwise_pipeline.rs:688
-- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F017.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F017.md; repro in that run's repros/. See K72 (run 2026-10-24-batch4 F007: same defect in the reduction fold).
 
 ## K31: Python numpy(out=x) never checks that x overlaps a buffer the array reads: &mut [u8] over memory a live &[u8] input covers (UB) and order-dependent wrong values, also without any explicit asarray
 - Status: intended - documented in c009869 (#87): out= must not overlap any numpy array in the lazy chain (found in run 2026-10-22-trial2 as F018, medium)
@@ -193,7 +193,7 @@ Format: one entry per issue.
 ## K36: Repeat computes out_strides[k] * repeats even when the output dim k has length 1 (stride never stepped), so it overflows: debug-build panic on valid out= buffers, release result correct
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F023, low)
 - Location: jix/src/ops/shape_ops/repeat.rs:181
-- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F023.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F023.md; repro in that run's repros/. See K78 (run 2026-10-24-batch4 F013: same defect in Slice's plain fast path).
 
 ## K37: A numpy operand on the left of an operator with a jix.Array never reaches jix's reflected op: ndarray gives an object ndarray of whole jix arrays and comparisons raise; numpy scalar gives a different dtype
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F024, low)
@@ -213,7 +213,7 @@ Format: one entry per issue.
 ## K40: Array.numpy() docstring promises a C-contiguous result, but the allocation follows read_layout_order (F-order for Fortran asarray / permuted inputs)
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F027, low)
 - Location: jix-py/src/array.rs:491
-- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F027.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F027.md; repro in that run's repros/. See K82 (run 2026-10-24-batch4 F017: same doc promise on the Rust to_ndarray).
 
 ## K41: Multi-cell fold feeds ArgMax/ArgMin update out of stream order (permuted reduced dims, or C-order with reduced dims split across tiles): multi-dim argmax returns a later tie/NaN (latent, crate-internal)
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F028, low)
@@ -223,7 +223,7 @@ Format: one entry per issue.
 ## K42: Struct layout validation sums field ends in unchecked u16; a field list past 65535 wraps and validates against a tiny itemsize, so SubDtype reads up to 64 KiB OOB (crafted .jix -> SIGSEGV in release; also reachable from 100% safe Rust via from_fields + a safe user ArrayStorage)
 - Status: fixed in 6f8e220 (#88) (found in run 2026-10-23-batch3 as F001, high)
 - Location: jix/src/dtype.rs:673
-- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F001.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F001.md; repro in that run's repros/. See K83 (run 2026-10-24-batch4 F018: one unchecked u16 add left in Dtype::from_fields).
 
 ## K43: Archive read keeps the caller's block_shape_fixed_dims, so tune rescales the file's block shape and blocks are decoded with the wrong geometry (silently wrong values, panic, or every read failing; write_to then persists a corrupt Strict-valid file)
 - Status: fixed in 4d11918 (#90) (found in run 2026-10-23-batch3 as F002, high)
@@ -238,7 +238,7 @@ Format: one entry per issue.
 ## K45: Safe ndarray Plain/compact constructors accept negative strides (reversed views): `s as usize * size_of::<T>()` wraps (plain.rs:289); debug panics, release returns a wrong window when the wrapped span is 0 and violates from_raw_parts/get_unchecked preconditions; the owned variant panics on unwrap (plain.rs:248)
 - Status: fixed in 4d11918 (#90) (found in run 2026-10-23-batch3 as F004, high)
 - Location: jix/src/storage/plain.rs:289
-- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F004.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F004.md; repro in that run's repros/. See K80 (run 2026-10-24-batch4 F015: the fix also rejects negative strides on length-0/1 dims).
 
 ## K46: check_section_bounds adds section offset + size unchecked: a crafted TOC panics (debug: add overflow; release: capacity overflow in Owned::read_section) instead of returning InvalidArchive, also from default Python read_array
 - Status: fixed in 4d11918 (#90) (found in run 2026-10-23-batch3 as F005, medium)
@@ -263,7 +263,7 @@ Format: one entry per issue.
 ## K50: ArrayStorage is a safe, unsealed trait, but jix's unsafe code trusts its read_data buffers: a user storage with no unsafe causes OOB reads (default elementwise pipeline, pull) and uninitialized reads (to_ndarray_sub assume_init, push)
 - Status: fixed in 4d11918 (#90) (found in run 2026-10-23-batch3 as F009, medium)
 - Location: jix/src/storage/core_trait.rs:134
-- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F009.md; repro in that run's repros/. ArrayStorage is now sealed (ArrayStorageImpl marker), so user storages can no longer reach the unsafe code.
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F009.md; repro in that run's repros/. ArrayStorage is now sealed (ArrayStorageImpl marker), so user storages can no longer reach the unsafe code. See K70 (run 2026-10-24-batch4 F005: ElementType is still unsealed).
 
 ## K51: Float base ** integer exponent uses powi: error grows with |n| (tens to thousands of ulps) and representable subnormal results are flushed to 0, silently
 - Status: fixed in 4d11918 (#90) (found in run 2026-10-23-batch3 as F010, medium)
@@ -339,3 +339,93 @@ Format: one entry per issue.
 - Status: intended (run 2026-10-23-batch3 F023; pinned by test_power_promotes_uint64_exponent_to_float64)
 - Location: jix/src/ops/op2.rs:1173
 - Notes: doc nit - the #81 docstring rewrite dropped the explicit u64-exponent sentence.
+
+## K66: Array.numpy() gives wrong values, including uninitialized bytes, for dtypes with an inner shape: numpy expands the sub-array descr into trailing dims and their strides are taken as the array's strides (permuted layouts raise, numpy(out=) never works)
+- Status: open (found in run 2026-10-24-batch4 as F001, high)
+- Location: jix-py/src/array.rs:570
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F001.md; repro in that run's repros/.
+
+## K67: Welford variance goes negative/NaN when |x - mean| overflows f64 (var([1e308, -1e308]) = -inf, numpy inf); std fails a debug_assert (PanicException in the dev extension) and returns NaN silently in release
+- Status: open (found in run 2026-10-24-batch4 as F002, medium)
+- Location: jix/src/ops/reduction.rs:1874
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F002.md; repro in that run's repros/.
+
+## K68: Rust range -> SliceItem: inclusive end -1 (`..=-1`, `0..=-1`) silently selects nothing and `-k..=-1` errors (Array::slice panics); u64/usize bounds >= 2^63 wrap to end-relative indices; `..=i64::MAX` overflows
+- Status: open (found in run 2026-10-24-batch4 as F003, medium)
+- Location: jix/src/ops/shape_ops/slice.rs:324
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F003.md; repro in that run's repros/.
+
+## K69: Reshape reads every split/merge reshape (flatten, [N]->[a,b], block-aligned splits) one element at a time, decompressing a whole block per element: 400-5000x slower reads
+- Status: open (found in run 2026-10-24-batch4 as F004, medium)
+- Location: jix/src/ops/shape_ops/reshape.rs:296
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F004.md; repro in that run's repros/.
+
+## K70: ElementType is a safe, unsealed trait, but Plain/BlockTable/SubDtype/Transmute take their dtype from a user ET::dtype() without checking it: heap OOB read (Plain::read_data, SubDtype) and assert_unchecked(false) (BlockTable::decoder_config via write_to) from safe code
+- Status: open (found in run 2026-10-24-batch4 as F005, medium)
+- Location: jix/src/element_type.rs:16
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F005.md; repro in that run's repros/. Same kind of bug as K50 (ArrayStorage, sealed in #90); ElementType was left unsealed.
+
+## K71: f64 -> f16 via half::f16::from_f64 (no_std software fallback) still mis-rounds on every shipped target except macOS arm64, about 8x as often as the pre-K28-fix double rounding through f32
+- Status: open (found in run 2026-10-24-batch4 as F006, medium)
+- Location: jix/src/ops/cast.rs:55
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F006.md; repro in that run's repros/. Incomplete K28 fix. The in-tree test is gated to aarch64 and the property oracle calls the same function.
+
+## K72: reduce_unordered over wide Dtyped elements overflows a 2 MiB thread stack and aborts: the one-cell reduction fold keeps 16 (strided) / 8 (contiguous) lanes of T whatever the element width
+- Status: open (found in run 2026-10-24-batch4 as F007, low)
+- Location: jix/src/ops/reduction.rs:768
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F007.md; repro in that run's repros/. The K30 defect in the reduction fold, which the K30 fix did not touch.
+
+## K73: ReductionOp::new adds 4 to the reduced element count unchecked: reducing 2+ dims of a lazy 1-byte-dtype shape with more than 2^64 - 5 reduced elements panics in debug builds (release only wraps a cost heuristic)
+- Status: open (found in run 2026-10-24-batch4 as F008, low)
+- Location: jix/src/ops/reduction.rs:177
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F008.md; repro in that run's repros/.
+
+## K74: Complex mean divides the sum by Complex(n, 0) with num-complex's textbook division, so sum * n overflows: mean([1.7e308+0j, 0j]) = inf+0j, mean of 1e6 copies of 1e302+1e302j = inf+infj (numpy and the f64 mean are finite)
+- Status: open (found in run 2026-10-24-batch4 as F009, low)
+- Location: jix/src/ops/reduction.rs:1766
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F009.md; repro in that run's repros/. The K27 formula at a separate call site; a K27 fix in op2.rs does not cover it.
+
+## K75: clamp(bool, min, max) returns uint8 while one-bound clamp, maximum and minimum return bool: bool8 is last in the two-bound clamp dispatch table
+- Status: open (found in run 2026-10-24-batch4 as F010, low)
+- Location: jix-py/src/ops/cmp.rs:447
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F010.md; repro in that run's repros/.
+
+## K76: bitwise_rotate_left/right with a Python int value: all-Python-int calls raise TypeError (the shifts work), and a Python int value next to a typed u32 count is rotated as int8 (-128 for 64, OverflowError for 200)
+- Status: open (found in run 2026-10-24-batch4 as F011, low)
+- Location: jix-py/src/ops/bitwise.rs:432
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F011.md; repro in that run's repros/.
+
+## K77: A stepped Slice over a non-plain inner makes one inner read per output position of the stepped dims, decompressing whole blocks each time: step-2 slices read 200-2100x slower than the whole array
+- Status: open (found in run 2026-10-24-batch4 as F012, medium)
+- Location: jix/src/ops/shape_ops/slice.rs:181
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F012.md; repro in that run's repros/. Same read-amplification pattern as K69 (F004).
+
+## K78: Slice plain pull fast path computes inner_stride * step unchecked: a step larger than the dim (output length 1) overflows - debug panic, release wraps a stride that is never stepped
+- Status: open (found in run 2026-10-24-batch4 as F013, low)
+- Location: jix/src/ops/shape_ops/slice.rs:161
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F013.md; repro in that run's repros/. The K36 defect at a site the K36 fix did not cover; on 32-bit a step of ~1e6 suffices.
+
+## K79: SliceSpec::new / From<&[I]> panic (ArrayVec capacity) on more than 8 items, before the fallible Slice::new can return InvalidIndex
+- Status: open (found in run 2026-10-24-batch4 as F014, low)
+- Location: jix/src/ops/shape_ops/slice.rs:252
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F014.md; repro in that run's repros/. Same kind of bug as K12 / K32.
+
+## K80: A negative stride on a never-stepped (length 0/1) dim is rejected on input (Rust ndarray constructors, Python asarray/compact/operands), although numpy reports the array C-contiguous and numpy(out=) accepts the same layout; the same line multiplies a huge length-1 stride unchecked (debug panic)
+- Status: open (found in run 2026-10-24-batch4 as F015, low)
+- Location: jix/src/storage/plain.rs:520
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F015.md; repro in that run's repros/. Gap in the K45 fix.
+
+## K81: to_ndarray_sub sizes its ndarray with a per-dim `as usize` and bounds the region only on 32-bit, via the element product (0 for an empty region): empty regions with huge dims get a truncated shape on i686 (Ok [0, 5] for [0, 2^32+5]) and panic inside ndarray on 64-bit
+- Status: open (found in run 2026-10-24-batch4 as F016, low)
+- Location: jix/src/array.rs:774
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F016.md; repro in that run's repros/. Gap in the K16 fix (empty regions).
+
+## K82: Array::to_ndarray docs promise a contiguous row-major (C-order) result, but the result follows read_layout_order (F-order for permuted views and F-order Plain sources)
+- Status: open (found in run 2026-10-24-batch4 as F017, low)
+- Location: jix/src/array.rs:577
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F017.md; repro in that run's repros/. Rust counterpart of K40; docs-only fix.
+
+## K83: Dtype::from_fields computes the struct itemsize with an unchecked u16 add before check_fields, so debug builds panic instead of returning Err on oversized or malformed field lists
+- Status: open (found in run 2026-10-24-batch4 as F018, low)
+- Location: jix/src/dtype.rs:491
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F018.md; repro in that run's repros/. An unchecked add the K42 fix left behind; release returns the correct Err.
