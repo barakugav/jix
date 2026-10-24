@@ -51,6 +51,7 @@ where
         Self::new(array.into_storage(), params, context).map(Array::from_storage)
     }
 }
+impl<S> crate::storage::ArrayStorageImpl for MaybeCompact<S> where S: ArrayStorage {}
 impl<S> ArrayStorage for MaybeCompact<S>
 where
     S: ArrayStorage,

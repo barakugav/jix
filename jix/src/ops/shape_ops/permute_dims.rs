@@ -110,6 +110,7 @@ impl<S: ArrayStorage> PermuteDims<S> {
     }
 }
 
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for PermuteDims<S> {}
 impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
     type ElementType = S::ElementType;
 

@@ -65,6 +65,7 @@ impl<S: ArrayStorage> Flip<S> {
     }
 }
 
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Flip<S> {}
 impl<S: ArrayStorage> ArrayStorage for Flip<S> {
     type ElementType = S::ElementType;
 

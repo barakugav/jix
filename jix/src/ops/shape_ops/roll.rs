@@ -67,6 +67,7 @@ impl<S: ArrayStorage> Roll<S> {
     }
 }
 
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Roll<S> {}
 impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     type ElementType = S::ElementType;
 

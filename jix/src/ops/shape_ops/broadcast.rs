@@ -115,6 +115,7 @@ where
     }
 }
 
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Broadcast<S> {}
 impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     type ElementType = S::ElementType;
 

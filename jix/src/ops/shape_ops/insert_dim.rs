@@ -147,6 +147,7 @@ where
     }
 }
 
+impl<S> crate::storage::ArrayStorageImpl for InsertDim<S> where S: ArrayStorage {}
 impl<S> ArrayStorage for InsertDim<S>
 where
     S: ArrayStorage,

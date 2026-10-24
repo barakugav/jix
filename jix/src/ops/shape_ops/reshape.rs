@@ -158,6 +158,7 @@ impl<S> Reshape<S> {
         Self::new(array.into_storage(), shape).map(Array::from_storage)
     }
 }
+impl<S> crate::storage::ArrayStorageImpl for Reshape<S> {}
 impl<S> ArrayStorage for Reshape<S>
 where
     S: ArrayStorage,

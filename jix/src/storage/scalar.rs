@@ -87,6 +87,7 @@ impl<T> Scalar<T> {
     }
 }
 
+impl<T> crate::storage::ArrayStorageImpl for Scalar<T> {}
 impl<T> ArrayStorage for Scalar<T>
 where
     T: Dtyped,

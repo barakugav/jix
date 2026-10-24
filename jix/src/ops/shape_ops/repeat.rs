@@ -94,6 +94,7 @@ impl<S: ArrayStorage> Repeat<S> {
     }
 }
 
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Repeat<S> {}
 impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
     type ElementType = S::ElementType;
 

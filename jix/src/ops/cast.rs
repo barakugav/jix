@@ -453,6 +453,7 @@ where
         Self::new(array.into_storage()).map(Array::from_storage)
     }
 }
+impl<S, T> crate::storage::ArrayStorageImpl for Cast<S, T> {}
 impl<S, T> ArrayStorage for Cast<S, T>
 where
     S: ArrayStorageTyped,

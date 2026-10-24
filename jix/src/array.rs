@@ -415,6 +415,7 @@ impl<T> Array<Compact<Ty<T>>> {
             f: F,
             spec: ArraySpecOwned,
         }
+        impl<T, D, F> crate::storage::ArrayStorageImpl for FnStorage<T, D, F> {}
         impl<T, D, F> ArrayStorage for FnStorage<T, D, F>
         where
             T: Dtyped,
