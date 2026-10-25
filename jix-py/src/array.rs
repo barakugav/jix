@@ -217,11 +217,11 @@ impl Array {
 
     fn check_output_array(
         &self,
-        py: Python<'_>,
         out: &Bound<'_, PyUntypedArray>,
+        np_dtype: &Bound<'_, PyArrayDescr>,
         out_shape: &[u64],
     ) -> PyResult<()> {
-        let expected_dtype = self.numpy_dtype(py)?;
+        let expected_dtype = np_dtype.base();
         let out_dtype = out.dtype();
         if !out_dtype.is_equiv_to(&expected_dtype) {
             return Err(PyValueError::new_err(format!(
@@ -283,6 +283,17 @@ impl Array {
                      dtype alignment {alignment}"
                 )));
             }
+        }
+        // Each element is written as one packed block, so its inner dims must be C-contiguous.
+        let mut inner_stride = expected_dtype.itemsize() as isize;
+        for dim in (out_shape.len() - np_dtype.ndim()..out_shape.len()).rev() {
+            if out.shape()[dim] > 1 && out.strides()[dim] != inner_stride {
+                return Err(PyValueError::new_err(format!(
+                    "out has stride {} on inner dim {dim}, expected {inner_stride}",
+                    out.strides()[dim]
+                )));
+            }
+            inner_stride *= out.shape()[dim] as isize;
         }
         Ok(())
     }
@@ -529,6 +540,13 @@ impl Array {
     ) -> PyResult<NdArray<'py>> {
         let out = out.map(|out| out.0);
         let (index, out_shape, drop_dims) = self.parse_index(index)?;
+        // NumPy expands an inner shape of the dtype into trailing dims of its base dtype.
+        let np_dtype = self.numpy_dtype(py)?;
+        let np_shape = out_shape
+            .iter()
+            .copied()
+            .chain(np_dtype.shape().into_iter().map(|d| d as u64))
+            .collect::<Vec<_>>();
 
         let itemsize = self.arr.dtype().itemsize() as usize;
         let ndim = index.len();
@@ -553,11 +571,12 @@ impl Array {
                     .iter()
                     .filter(|&&dim| !drop_dims[dim as usize])
                     .map(|&dim| np_dim[dim as usize])
-                    .collect::<DimArray<_>>();
-                numpy_empty_ordered(self.numpy_dtype(py)?, &out_shape, &order)?
+                    .chain(out_shape.len()..np_shape.len())
+                    .collect::<Vec<_>>();
+                numpy_empty_ordered(np_dtype.base(), &np_shape, &order)?
             }
             Some(np_arr) => {
-                self.check_output_array(py, &np_arr, &out_shape)?;
+                self.check_output_array(&np_arr, &np_dtype, &np_shape)?;
                 np_arr
             }
         };
@@ -567,7 +586,7 @@ impl Array {
         // `np_arr` keeps one source of truth, whether it is the caller's `out=` or our own
         // allocation above.
         let strides = {
-            let mut np_strides = np_arr.strides().iter().rev();
+            let mut np_strides = np_arr.strides()[..out_shape.len()].iter().rev();
             let mut strides = dim_arr(ndim, |_| 0usize);
             for dim in (0..ndim).rev() {
                 if drop_dims[dim] {
