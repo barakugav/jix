@@ -92,5 +92,9 @@ harness = false
 name = "normalize"
 harness = false
 
+[[bench]]
+name = "nd_iter"
+harness = false
+
 [lib]
 bench = false
