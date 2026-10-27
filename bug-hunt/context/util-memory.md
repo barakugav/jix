@@ -208,6 +208,11 @@ wrappers used by every hot inner loop, raw POD I/O).
 - `IterExt::try_shape_product` (zero dims cannot hide an overflow) and `check_region_size`
   (32-bit) are new. `value_from_io` and the archive readers zero-fill before calling `Read` (K4).
 
+### Changed in 691e11b (#91) - supersedes conflicting statements above
+- util/mod.rs adds the crate-private `Sealed` trait (seals `ElementType`) and removes
+  `Idx::div_ceil` / `Idx::ceil_to_multiple`; callers use std `next_multiple_of`. Line numbers in
+  util/mod.rs after line 30 moved by -6.
+
 ## Hot spots
 - PoolBuf full-capacity slices: does any consumer of `PoolBuf::as_*slice` or `StridedBuf::data()/data_mut()` on a
   pool-backed buffer use `.len()` as the logical size (copy_from_slice, compress, fill, length asserts)?

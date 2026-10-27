@@ -165,6 +165,13 @@ types the macro is):
 - `Dtype::new_struct` rejects duplicate field names (K52). `[T; 0]` and arrays of zero-sized types
   are not `Dtyped` (K53). dtype.rs changed ~90 lines.
 
+### Changed in 691e11b (#91) - supersedes conflicting statements above
+- `Dtype::from_fields` computes the itemsize with `saturating_add` before `check_fields`, so an
+  oversized field list returns Err in debug builds too (K83).
+- `ElementType` is sealed (K70).
+- `Idx::ceil_to_multiple` / `Idx::div_ceil` are gone; the derive macro and the crate use std
+  `next_multiple_of` (in the derive it runs in const eval, so an overflow is a compile error).
+
 ## Hot spots
 
 - Layout arithmetic in dtype.rs:476-506 and 653-717: every `expected_offset += itemsize` and

@@ -191,6 +191,12 @@ Line numbers in this doc refer to bb1ee2c; jix-py/src/ops/op1.rs and shape_ops.r
 - #89: bitwise / cmp / where / reduction wrappers dispatch on `bool8` (jix-py ops changed). Check that
   numpy bool inputs holding bytes other than 0/1 give numpy's results.
 
+### Changed in 691e11b (#91) - supersedes conflicting statements above
+- Two-bound `clamp` lists bool8 first, so `clamp(bool, min, max)` stays bool (K75).
+- `slice` uses the fallible `SliceSpec::new(..)?`. `OpDescriptor`'s input-dtype collection no longer
+  unwraps (dispatch.rs:186-192).
+- Open and tracked in todo.md: `bitwise_rotate_left/right` promotion of Python ints (K76).
+
 ## Hot spots
 
 1. Dispatch tables (op1/op2/cmp/bitwise/reduction): is the order right for every input pair, and

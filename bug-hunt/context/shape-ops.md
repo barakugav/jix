@@ -155,6 +155,15 @@ fixed dims, scale weights, layout order) for the read-tiling heuristics.
   extent. Concatenate checks the concat-dim sum for overflow. Repeat no longer multiplies the stride
   of a length-1 out dim. Dims are capped at i64::MAX (affects roll's rem_euclid, slice resolve).
 
+### Changed in 691e11b (#91) - supersedes conflicting statements above
+- Slice's plain pull fast path and Repeat use stride = itemsize for an output dim of length <= 1
+  instead of multiplying the inner stride by the step / repeat count (K78).
+- `SliceSpec::new` returns `Result` (TooManyDimensions for more than NDIM_MAX items) and
+  `From<&[I]>` became `TryFrom<&[I]>` (K79).
+- Range -> `SliceItem` (slice.rs:324-344): an inclusive end of -1 means "to the end" (`None`);
+  bounds convert with `i64::try_from`, saturating at i64::MAX instead of wrapping, and the `+ 1`
+  of an inclusive end saturates (K68).
+
 ## Hot spots
 - Push-mode offsets: for each split op, does every inner read land at `out + sum(offset_d * out_stride_d)` with the
   correct per-dim stride, and do the pieces tile the region exactly once? Check with permuted / padded `out`

@@ -197,6 +197,16 @@ Provided by this subsystem / required of every `read_data` impl (core_trait.rs:7
   alias (0-stride broadcast) are returned read-only (K58). Plain constructors return an error for
   negative strides (K45). `StridedBuf::from_raw_parts(_mut)` documents its full safety contract.
 
+### Changed in 691e11b (#91) - supersedes conflicting statements above
+- `ElementType` is sealed (`crate::util::Sealed`): only `Ty<T>` and `TypeDyn` implement it (K70).
+- Plain ndarray constructors accept any stride, negative included, on a dim of length <= 1 and
+  replace it with the itemsize (`strides_from_ndarray`, plain.rs:516-527) (K80). Negative strides on
+  longer dims are still rejected.
+- `to_ndarray_sub` checks `prod(max(extent, 1)) * itemsize <= isize::MAX` on every target and
+  returns InvalidShapeOperation otherwise (array.rs:775-784) (K81).
+- `Array::to_ndarray` no longer promises C order; the layout is documented as an implementation
+  detail (K82).
+
 ## Hot spots
 
 - Push-mode buffer size: is there ANY path from safe code that makes a push write past `out`'s
