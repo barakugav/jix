@@ -190,6 +190,16 @@ finalize pass (1117-1259) turns states into outputs. Scalar-level traits (`jix::
 ### Changed in 4d11918 (#90) - supersedes conflicting statements above
 - An empty float / complex sum returns +0.0 (K62). reduction.rs changed ~70 lines.
 
+### Changed in 691e11b (#91) - supersedes conflicting statements above
+- `ReductionOp::new` computes the element cost in f64, with no u64 add (K73).
+- The one-cell fold caps its lane count at `prev_power_of_two(4096 / max(size_of T, size_of State))`
+  on both paths; the strided path now also goes through `fold_one_cell_per_simd` (K72).
+- Mean divides the sum by the count as a real f64, so the complex mean no longer forms `sum * n`
+  (K74). The f16 mean finalizes in f64.
+- Variance finalize: an `m2` that is not `>= 0.0` (overflow made it negative) becomes +inf, so
+  `var([1e308, -1e308])` and its `std` are +inf (K67). The test is `>= 0.0`, so a NaN `m2`
+  (NaN or inf input) also becomes +inf - a regression, recorded as K84.
+
 ## Hot spots
 
 1. Init vs merge is keyed ONLY on the stream position: `init = base_item_idx == 0` (640) for

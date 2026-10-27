@@ -213,6 +213,9 @@ Unsafe fns with preconditions:
 - Writing an archive to a file opened in append mode returns an error (K49). Vec<MaybeUninit<T>>
   is converted with from_raw_parts (K63). archive/array.rs (~90 lines) and common.rs (~85) changed.
 
+### Changed in 691e11b (#91) - supersedes conflicting statements above
+- archive/array.rs uses std `next_multiple_of` instead of the removed `Idx::ceil_to_multiple`.
+
 ## Hot spots
 
 - Short decompression: what does a release build return when a block decodes to fewer bytes

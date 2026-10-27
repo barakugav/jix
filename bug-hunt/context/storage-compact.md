@@ -197,6 +197,10 @@ Unsafe fns / preconditions:
 - Reading an archive keeps the file's block shape even when the caller's params would re-tune it
   (K43 fixed). compact.rs / params.rs changed slightly.
 
+### Changed in 691e11b (#91) - supersedes conflicting statements above
+- params.rs uses std `next_multiple_of` instead of the removed `Idx::ceil_to_multiple` (same
+  overflow behavior: panics with overflow checks, wraps without).
+
 ## Hot spots
 
 - Direct decode into `out` (compact.rs:429-437, 464-471): `lead_dim` = first dim with block > 1;
