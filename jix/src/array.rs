@@ -1399,7 +1399,7 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
         chunk_buf.clear();
         chunk_buf.reserve(chunk_bytes);
         unsafe { chunk_buf.set_len(chunk_bytes) };
-        let chunk_strides = default_strides(&chunk_size, itemsize);
+        let chunk_strides = default_strides(chunk_size, itemsize);
         storage.read_data(
             read_range.as_ref(),
             context,
@@ -1417,7 +1417,7 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
         }))
         .with_block_offset_size_ext(
             &D::vec(ndim, |_| 0),
-            &chunk_size,
+            chunk_size,
             D::vec(ndim, |dim| block_shape[dim] as u64),
         )
         .build();

@@ -56,7 +56,7 @@ impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffset<D, S> {
 ///
 /// Like [`NdIterExtStridesOffset`] but for a fixed number of operands sharing one index walk: on
 /// each dimension change every offset is advanced by `(after - before) * strides[operand][dim]`, and
-/// [`value`](NdIterExtension::value) yields `[S; N]`.
+/// [`value`](NdIterExtension::value) lends out the `[S; N]` offsets.
 pub(crate) struct NdIterExtStridesOffsetMulti<D: Dimension, S, const N: usize> {
     strides: [D::Vec<S>; N],
     offsets: [S; N],
@@ -74,7 +74,7 @@ impl<D: Dimension, S: Idx, const N: usize> NdIterExtension
     for NdIterExtStridesOffsetMulti<D, S, N>
 {
     type Item<'a>
-        = [S; N]
+        = &'a [S; N]
     where
         Self: 'a;
 
@@ -95,7 +95,7 @@ impl<D: Dimension, S: Idx, const N: usize> NdIterExtension
 
     #[inline(always)]
     fn value(&self) -> Self::Item<'_> {
-        self.offsets
+        &self.offsets
     }
 
     #[inline(always)]

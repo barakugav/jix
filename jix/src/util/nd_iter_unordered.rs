@@ -292,7 +292,7 @@ fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
         NdIter::builder(outer_shape)
             .with_strides_offset_multi_ext(outer_strides, [0usize; N_OPERANDS])
             .build()
-            .for_each(|_, offsets| inner_loop(offsets, inner_len, inner_strides));
+            .for_each(|_, offsets| inner_loop(*offsets, inner_len, inner_strides));
     }
 }
 
