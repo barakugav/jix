@@ -23,7 +23,7 @@ Format: one entry per issue.
 ## K2: Pull-mode buffer size product(shape)*itemsize wraps after an itemsize-widening op (cast/Op2/Map skip check_shape_overflow)
 - Status: fixed in 5b3a9f5 (#86) (found in run 2026-10-21-pilot as F002)
 - Location: jix/src/storage/buf.rs:312
-- Notes: bug-hunt/runs/2026-10-21-pilot/findings/F002.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-21-pilot/findings/F002.md; repro in that run's repros/. See K88 (run 2026-10-27-batch5 F004: jix-py still calls the unwrapping Array::cast).
 
 ## K3: Padded struct dtypes: NdCopier copies elements as [u32;2]/[u64;2], reading uninit padding
 - Status: fixed in 6f8e220 (#88) (found in run 2026-10-21-pilot as F003)
@@ -78,7 +78,7 @@ Format: one entry per issue.
 ## K13: A leading 0 dim hides an overflowing shape product in try_product
 - Status: fixed in 5b3a9f5 (#86) (found in run 2026-10-21-pilot as F013)
 - Location: jix/src/util/mod.rs:145
-- Notes: bug-hunt/runs/2026-10-21-pilot/findings/F013.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-21-pilot/findings/F013.md; repro in that run's repros/. See K101 (run 2026-10-27-batch5 F017: the reader's zeros-as-1 padded-shape check rejects empty arrays the writer accepts).
 
 ## K14: Safe-API UB: a writable pull result can be reused as `out` of a larger read; `out` extent is never checked, so Plain/Compact/Flip/Repeat/Tile write past it
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F001, critical)
@@ -103,7 +103,7 @@ Format: one entry per issue.
 ## K18: 32-bit: block byte size block_size * itemsize is never bounded to usize; every consumer wraps it the same way, so the size checks pass and block reads go out of bounds (wrong data, then SIGSEGV), from safe compact_with and from a Strict-valid archive
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F005, high)
 - Location: jix/src/storage/compact.rs:395
-- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F005.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-22-trial2/findings/F005.md; repro in that run's repros/. See K105 (run 2026-10-27-batch5 F021: the 1 GiB block cap rejects block shapes a widening view inherits).
 
 ## K19: MapMultiple::new skips check_shape_overflow with the output itemsize (incomplete fix of K2); a widening map_multiple pull read overflows the heap (SIGSEGV in release)
 - Status: fixed in c009869 (#87) (found in run 2026-10-22-trial2 as F006, high)
@@ -303,7 +303,7 @@ Format: one entry per issue.
 ## K58: Writable pull results with aliasing 0 strides (Broadcast pull, elementwise-pipeline pull) break the from_pool/with_strides no-aliasing contract and are accepted back as `out` by check_out_buf, so push reads return Ok with the region not in out
 - Status: fixed in 4d11918 (#90) (found in run 2026-10-23-batch3 as F017, low)
 - Location: jix/src/ops/shape_ops/broadcast.rs:156
-- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F017.md; repro in that run's repros/. New trigger next to K14 (fixed): 0-stride writable pull results are still accepted as out.
+- Notes: bug-hunt/runs/2026-10-23-batch3/findings/F017.md; repro in that run's repros/. New trigger next to K14 (fixed): 0-stride writable pull results are still accepted as out. See K103 (run 2026-10-27-batch5 F019: check_out_buf still has no aliasing check).
 
 ## K59: StridedBuf::from_raw_parts(_mut) Safety sections omit non-null (even for an empty region) and exclusive access / no overlap with any input: calls meeting the documented contract are UB (debug abort, Miri SB error)
 - Status: fixed in 4d11918 (#90) (found in run 2026-10-23-batch3 as F018, low)
@@ -343,7 +343,7 @@ Format: one entry per issue.
 ## K66: Array.numpy() gives wrong values, including uninitialized bytes, for dtypes with an inner shape: numpy expands the sub-array descr into trailing dims and their strides are taken as the array's strides (permuted layouts raise, numpy(out=) never works)
 - Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F001, high)
 - Location: jix-py/src/array.rs:570
-- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F001.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F001.md; repro in that run's repros/. See K89 (run 2026-10-27-batch5 F005 and F015 (K99): the new numpy() shapes overflow 8-entry buffers, and plain() changed shape and dtype).
 
 ## K67: Welford variance goes negative/NaN when |x - mean| overflows f64 (var([1e308, -1e308]) = -inf, numpy inf); std fails a debug_assert (PanicException in the dev extension) and returns NaN silently in release
 - Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F002, medium)
@@ -434,3 +434,118 @@ Format: one entry per issue.
 - Status: open (found while rebasing onto 691e11b (#91))
 - Location: jix/src/ops/reduction.rs:1933
 - Notes: The #91 variance finalize maps every `m2` that is not `>= 0.0` to +inf, to turn an overflowed (negative) m2 into inf. A NaN m2 also fails `>= 0.0`, so `var([nan, 1.0])`, `std([1.0, nan, 2.0])` and `var([inf, 1.0])` return inf; numpy, and jix before #91, give nan. Same through Python (`jix.var`, `jix.std`) and for complex inputs. The sign of m2 alone cannot tell overflow from a NaN / inf input (F002 also had finite inputs giving a NaN m2), so the fix needs another signal, e.g. a non-finite-input flag in the state or a finite mean.
+
+## K85: 32-bit: the reduction's temp state buffer size `out_nitems * size_of::<State>()` wraps, so var/std states are written far past a few-byte pool buffer (heap overflow, SIGSEGV from safe read_data / compact_with)
+- Status: open (found in run 2026-10-27-batch5 as F001, high)
+- Location: jix/src/ops/reduction.rs:516
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F001.md; repro in that run's repros/. check_region_size bounds the region by the output itemsize only. Reproduced on i686: debug panics at the multiply, release SIGSEGV.
+
+## K86: 32-bit: the reduction driver computes reduced-stream positions in usize; a reduction over 2^32+ items silently drops everything before the last tile at position k*2^32 (all kernels), and argmax indices are truncated mod 2^32
+- Status: open (found in run 2026-10-27-batch5 as F002, medium)
+- Location: jix/src/ops/reduction.rs:588
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F002.md; repro in that run's repros/.
+
+## K87: MapMultiple::new panics (index out of bounds in combine_hints) on an empty array sequence instead of returning Err like Stack::new / Concatenate::new
+- Status: open (found in run 2026-10-27-batch5 as F003, low)
+- Location: jix/src/ops/map.rs:256
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F003.md; repro in that run's repros/. Same kind of bug as K79.
+
+## K88: Widening cast of a huge lazy array raises PanicException instead of RuntimeError: jix-py cast_impl calls the panicking convenience Array::cast
+- Status: open (found in run 2026-10-27-batch5 as F004, low)
+- Location: jix-py/src/ops/mod.rs:116
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F004.md; repro in that run's repros/. Since the K2 fix made Cast::new fallible.
+
+## K89: Array.numpy() / __getitem__ / plain() panic (ArrayVec capacity) when the array's ndim plus its dtype's inner ndim exceeds 8 (item() is not affected)
+- Status: open (found in run 2026-10-27-batch5 as F005, medium)
+- Location: jix-py/src/util.rs:103
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F005.md; repro in that run's repros/. Regression from the K66 fix (#91): numpy shapes now have up to NDIM_MAX + DTYPE_MAX_NDIM entries.
+
+## K90: Array.numpy_dtype holds the per-Array std::sync::Mutex while dtype_to_numpy runs Python code (py.import -> builtins.__import__); if that code yields the GIL to a thread using the same Array, or uses the same Array itself, the process hangs forever
+- Status: open (found in run 2026-10-27-batch5 as F006, medium)
+- Location: jix-py/src/array.rs:301
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F006.md; repro in that run's repros/. GIL builds need an __import__ hook and an aligned struct dtype; the free-threaded deadlock is argued from the code only.
+
+## K91: Broadcast reads and evaluates its inner row for an EMPTY request (broadcast dim 0..0 becomes inner 0..1), so zero-element reads raise spurious arithmetic errors, do O(row) work, or abort
+- Status: open (found in run 2026-10-27-batch5 as F007, medium)
+- Location: jix/src/ops/shape_ops/broadcast.rs:137
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F007.md; repro in that run's repros/. From Python through concatenate with a zero-length broadcast member.
+
+## K92: jix.log(x, base), jix.log2 and jix.log10 round three times: exact powers come out 1 ulp low (log10(1000) = 2.9999999999999996, f16 log2(32) = 4.996), up to 2.7 ulp error in f64
+- Status: open (found in run 2026-10-27-batch5 as F008, medium)
+- Location: jix-py/src/ops/op1.rs:362
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F008.md; repro in that run's repros/.
+
+## K93: NdIterExtBlockOffsetSize doc prescribes block_end = end.div_ceil(b), which visits a phantom size-0 block for an empty range with an unaligned begin; every caller uses calc_block_end instead (latent, crate-internal doc)
+- Status: open (found in run 2026-10-27-batch5 as F009, low)
+- Location: jix/src/util/iter/block.rs:12
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F009.md; repro in that run's repros/.
+
+## K94: std of f16/f32/complex64 casts the f64 variance to the narrow output dtype before sqrt, giving inf, 0, or results tens of ulps off where the correctly rounded std is representable
+- Status: open (found in run 2026-10-27-batch5 as F010, low)
+- Location: jix/src/ops/reduction.rs:2853
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F010.md; repro in that run's repros/. NumPy gives the same values. Answers batch4's open question on std.
+
+## K95: RemoveDim::new / new_array panics (dim_arr NDIM_MAX assert) on a DimsArg with more than 8 entries instead of returning Err
+- Status: open (found in run 2026-10-27-batch5 as F011, low)
+- Location: jix/src/ops/shape_ops/remove_dim.rs:58
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F011.md; repro in that run's repros/. Same kind of bug as K12 / K32 / K79; Python is protected by normalize_dims.
+
+## K96: asarray / compact / cast with dtype= silently wrap out-of-range Python ints (asarray(300, dtype=uint8) -> 44, compact([-1, 5], dtype=uint32) -> [4294967295, 5]), while every jix op bounds-checks Python ints and raises OverflowError
+- Status: open (found in run 2026-10-27-batch5 as F012, low)
+- Location: jix-py/src/ops/as_array.rs:60
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F012.md; repro in that run's repros/. Also the reverse: asarray(2**63, dtype=uint64) raises although the value fits.
+
+## K97: numpy(out=) accepts self-overlapping destinations (positive strides that alias), breaking StridedBuf::from_raw_parts_mut's no-alias precondition; reductions folded into such an out leave values that belong to no output cell
+- Status: open (found in run 2026-10-27-batch5 as F013, low)
+- Location: jix-py/src/array.rs:266
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F013.md; repro in that run's repros/. No UB found. The self-overlapping out question left open by trial2 and batch3.
+
+## K98: numpy(out=) with an empty out that has a negative stride on an extent>1 dim (or a huge stride) panics in debug builds: the stride rebuild runs before the nitems==0 early return
+- Status: open (found in run 2026-10-27-batch5 as F014, low)
+- Location: jix-py/src/array.rs:607
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F014.md; repro in that run's repros/.
+
+## K99: Array.plain() of a dtype with an inner shape returns a different array: the inner dims become array dims and the dtype becomes the base dtype, contradicting its docstring and compact()
+- Status: open (found in run 2026-10-27-batch5 as F015, low)
+- Location: jix-py/src/array.rs:733
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F015.md; repro in that run's repros/. The K66 fix (#91) changed numpy(), which plain() goes through.
+
+## K100: read_from rounds untrusted header dims up with unchecked next_multiple_of: a dim within b - 1 of u64::MAX panics in debug builds (Rust and dev Python) instead of returning InvalidArchive; release wraps and returns InvalidShapeOperation
+- Status: open (found in run 2026-10-27-batch5 as F016, low)
+- Location: jix/src/archive/array.rs:490
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F016.md; repro in that run's repros/. Same kind of bug as K55 / K83.
+
+## K101: An empty array that jix writes cannot be read back when its padded shape product (zero dims counted as 1) overflows u64 - the archive reader is stricter than the writer
+- Status: open (found in run 2026-10-27-batch5 as F017, low)
+- Location: jix/src/archive/array.rs:493
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F017.md; repro in that run's repros/. Regression from the K13 fix (#86).
+
+## K102: Archive reader truncates u64 header fields to u32 before validating them, so a block dim or block_size of 2^32 + 2 is silently read as 2 (also under Strict validation)
+- Status: open (found in run 2026-10-27-batch5 as F018, low)
+- Location: jix/src/archive/array.rs:471
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F018.md; repro in that run's repros/.
+
+## K103: check_out_buf still accepts a writable out whose strides alias over the requested region (InsertDim pull results with 0 strides, any pool-backed pull reused for a wider region), so push reads return Ok with the region not in out
+- Status: open (found in run 2026-10-27-batch5 as F019, low)
+- Location: jix/src/storage/buf.rs:307
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F019.md; repro in that run's repros/. Incomplete K58 fix. Reported at jix/src/ops/shape_ops/insert_dim.rs:188; the defect is in check_out_buf.
+
+## K104: The f32 element_cost hint has no upper bound, so it becomes +inf; a zero-length concatenate member then turns it into NaN (0 * inf), and the next multi-input constructor panics in max_cost_layout_order (partial_cmp().unwrap())
+- Status: open (found in run 2026-10-27-batch5 as F020, low)
+- Location: jix/src/storage/params.rs:912
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F020.md; repro in that run's repros/. Debug builds panic earlier, at the is_finite debug_assert at array.rs:1662.
+
+## K105: A widening element-wise view keeps the source's explicit block shape (in elements, all fixed), so compact()/write_to() with default params fails with InvalidArgument once that block is over 1 GiB at the wider itemsize
+- Status: open (found in run 2026-10-27-batch5 as F021, low)
+- Location: jix/src/ops/op1.rs:36
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F021.md; repro in that run's repros/. Since the 1 GiB block cap added with the K18 fix (#87).
+
+## K106: f16 tan(+-177.5) rounds to +-inf with no Overflow report: Tan's error set has no overflow condition while the f16 kernel rounds the f32 result to f16
+- Status: open (found in run 2026-10-27-batch5 as F022, low)
+- Location: jix/src/ops/op1.rs:674
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F022.md; repro in that run's repros/.
+
+## K107: jix.log silently accepts an invalid base (1, 0, -0.0, negative): every element becomes inf/NaN/signed zero with no error, despite the documented 'positive and not 1' precondition
+- Status: open (found in run 2026-10-27-batch5 as F023, low)
+- Location: jix-py/src/ops/op1.rs:378
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F023.md; repro in that run's repros/. For f16, a valid base within ~1.5e-5 of 1 overflows the multiplier to inf.
