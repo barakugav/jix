@@ -16,8 +16,8 @@ use crate::{DimVec, Dimension};
 /// bounds.
 ///
 /// Each iteration step yields `(block_idx, (inner_offset, block_size))` where
-/// `inner_offset` and `block_size` are per-dimension vecs, lent out by the extension, describing
-/// which elements of the current block fall inside the requested range. Interior blocks (fully covered) always have
+/// `inner_offset` and `block_size` are per-dimension slices describing which elements of the
+/// current block fall inside the requested range. Interior blocks (fully covered) always have
 /// `inner_offset = 0` and `block_size = block_shape`; border blocks carry their partial values.
 pub(crate) struct NdIterExtBlockOffsetSize<D: Dimension> {
     /// The size of a full block in each dimension.
@@ -95,7 +95,7 @@ where
     D: Dimension,
 {
     type Item<'a>
-        = (&'a D::Vec<u64>, &'a D::Vec<u64>)
+        = (D::Vec<u64>, D::Vec<u64>)
     where
         Self: 'a;
     #[inline(always)]
@@ -126,7 +126,7 @@ where
 
     #[inline(always)]
     fn value(&self) -> Self::Item<'_> {
-        (&self.inner_offset, &self.current_block_size)
+        (self.inner_offset.clone(), self.current_block_size.clone())
     }
 
     #[inline(always)]
@@ -179,11 +179,9 @@ mod tests {
         block_size: Vec<u64>,
     }
 
-    fn collect(
-        mut iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>>,
-    ) -> Vec<BlocksIterItemOwned> {
+    fn collect(iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>>) -> Vec<BlocksIterItemOwned> {
         let mut out = Vec::new();
-        while let Some((block_idx, (inner_offset, block_size))) = iter.next() {
+        for (block_idx, (inner_offset, block_size)) in iter {
             out.push(BlocksIterItemOwned {
                 block_idx: block_idx.as_ref().to_vec(),
                 inner_offset: inner_offset.as_ref().to_vec(),

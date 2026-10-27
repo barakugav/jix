@@ -456,7 +456,7 @@ fn read_data_slow<ActualD: Dimension>(
     });
     let block_grid_shape = ActualD::vec(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
 
-    let mut block_iter = NdIter::builder_with_begin(block_begin, block_end)
+    let block_iter = NdIter::builder_with_begin(block_begin, block_end)
         .with_logical_global_index_ext(block_grid_shape.as_ref())
         .with_block_offset_size_ext(
             &ActualD::vec(ndim, |dim| index[dim].start),
@@ -464,9 +464,7 @@ fn read_data_slow<ActualD: Dimension>(
             block_shape_u64.clone(),
         )
         .build();
-    while let Some((block_idx, (block_global_id, (block_inner_offset, block_size)))) =
-        block_iter.next()
-    {
+    for (block_idx, (block_global_id, (block_inner_offset, block_size))) in block_iter {
         // Map the active region's start to its position in the output array.
         let out_start = (0..ndim)
             .map(|dim| {

@@ -465,7 +465,7 @@ where
         (0..inner_ndim).all(|d| !is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
         "reduced dim must produce at most one bulk-block",
     );
-    let mut bulk_iter = NdIter::builder_with_begin(bulk_grid_begin, bulk_grid_end)
+    let bulk_iter = NdIter::builder_with_begin(bulk_grid_begin, bulk_grid_end)
         .with_block_offset_size_ext(
             &InnerD::vec(inner_ndim, |dim| inner_range_full[dim].start),
             &InnerD::vec(inner_ndim, |dim| inner_range_full[dim].end),
@@ -537,7 +537,7 @@ where
         })
     };
 
-    while let Some((bulk_idx, (bulk_inner_offset, bulk_size))) = bulk_iter.next() {
+    for (bulk_idx, (bulk_inner_offset, bulk_size)) in bulk_iter {
         // The bulk's absolute element range, used as the tile iterator's universe.
         let bulk_begin = InnerD::vec(inner_ndim, |dim| {
             bulk_idx[dim] * bulk_shape[dim] + bulk_inner_offset[dim]
@@ -557,7 +557,7 @@ where
                 .all(|d| { is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
             "non-reduced dim must produce at most one tile per bulk",
         );
-        let mut tile_iter = NdIter::builder_with_begin(tile_grid_begin, tile_grid_end)
+        let tile_iter = NdIter::builder_with_begin(tile_grid_begin, tile_grid_end)
             .with_block_offset_size_ext(
                 &bulk_begin,
                 &bulk_end,
@@ -565,7 +565,7 @@ where
             )
             .build();
 
-        while let Some((tile_idx, (tile_inner_offset, tile_size))) = tile_iter.next() {
+        for (tile_idx, (tile_inner_offset, tile_size)) in tile_iter {
             let tile = InnerD::vec(inner_ndim, |dim| {
                 let start = tile_idx[dim] * tile_shape[dim] + tile_inner_offset[dim];
                 start..start + tile_size[dim]

@@ -1064,7 +1064,7 @@ fn to_ndarray_buf_slow_dyn<'a, D: Dimension>(
         calc_block_end(index[dim].start, index[dim].end, read_shape[dim])
     });
     // NdIter that yields blocks of size <= read_shape
-    let mut block_iter = NdIter::builder_with_begin(block_begin, block_end)
+    let block_iter = NdIter::builder_with_begin(block_begin, block_end)
         .with_block_offset_size_ext(
             &D::vec(ndim, |dim| index[dim].start),
             &D::vec(ndim, |dim| index[dim].end),
@@ -1074,7 +1074,7 @@ fn to_ndarray_buf_slow_dyn<'a, D: Dimension>(
 
     let (out_buf, out_strides) = out.data_mut();
 
-    while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
+    for (block_idx, (block_inner_offset, block_size)) in block_iter {
         let inner_index = D::vec(ndim, |dim| {
             let start = block_idx[dim] * read_shape[dim] + block_inner_offset[dim];
             let end = start + block_size[dim];
@@ -1382,14 +1382,14 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
 
     // Outer loop over chunks. The extension yields each chunk's active element extent, clamped
     // to the array at the high boundary.
-    let mut chunk_iter = NdIter::builder(chunk_grid_shape)
+    let chunk_iter = NdIter::builder(chunk_grid_shape)
         .with_block_offset_size_ext(
             &D::vec(ndim, |_| 0),
             &D::vec(ndim, |dim| shape[dim]),
             chunk_shape.clone(),
         )
         .build();
-    while let Some((chunk_idx, (chunk_inner_offset, chunk_size))) = chunk_iter.next() {
+    for (chunk_idx, (chunk_inner_offset, chunk_size)) in chunk_iter {
         debug_assert!(chunk_inner_offset.as_ref().iter().all(|&off| off == 0));
         let read_range = D::vec(ndim, |dim| {
             let start = chunk_idx[dim] * chunk_shape[dim];
@@ -1399,7 +1399,7 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
         chunk_buf.clear();
         chunk_buf.reserve(chunk_bytes);
         unsafe { chunk_buf.set_len(chunk_bytes) };
-        let chunk_strides = default_strides(chunk_size, itemsize);
+        let chunk_strides = default_strides(&chunk_size, itemsize);
         storage.read_data(
             read_range.as_ref(),
             context,
@@ -1412,18 +1412,16 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
             .sum::<u64>();
 
         // Inner loop over the target blocks within the chunk.
-        let mut block_iter = NdIter::builder(D::vec(ndim, |dim| {
+        let block_iter = NdIter::builder(D::vec(ndim, |dim| {
             chunk_size[dim].div_ceil(block_shape[dim] as u64)
         }))
         .with_block_offset_size_ext(
             &D::vec(ndim, |_| 0),
-            chunk_size,
+            &chunk_size,
             D::vec(ndim, |dim| block_shape[dim] as u64),
         )
         .build();
-        while let Some((block_in_chunk_idx, (block_inner_offset, block_active_size))) =
-            block_iter.next()
-        {
+        for (block_in_chunk_idx, (block_inner_offset, block_active_size)) in block_iter {
             debug_assert!(block_inner_offset.as_ref().iter().all(|&off| off == 0));
             // Logical (C-order) index of this block in the full grid.
             let block_index = chunk_offset_base

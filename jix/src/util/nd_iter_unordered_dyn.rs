@@ -195,7 +195,8 @@ impl NdIterUnorderedDyn {
 }
 
 /// The `nd_iter_unordered_nd_walk` of [`NdIterUnordered`](crate::NdIterUnordered), instantiated per
-/// outer rank only - whatever the number of operands. The offsets are lent out as a slice.
+/// outer rank only - whatever the number of operands. The offsets are lent out as a slice, so the
+/// outer `NdIter` here is the lending kind.
 #[allow(clippy::type_complexity)]
 #[inline(never)]
 fn nd_iter_unordered_nd_walk<OuterD: Dimension>(

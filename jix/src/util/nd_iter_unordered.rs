@@ -289,13 +289,12 @@ fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
         let outer_shape = OuterD::vec(ndim - 1, |k| shape[k] as u64);
         let outer_strides: [_; N_OPERANDS] =
             std::array::from_fn(|i| OuterD::vec(ndim - 1, |k| strides[i][k]));
-        NdIter::builder(outer_shape)
+        let iter = NdIter::builder(outer_shape)
             .with_strides_offset_multi_ext(outer_strides, [0usize; N_OPERANDS])
-            .build()
-            // `map` to owned offsets: the walk then steps to the next row before calling
-            // `inner_loop` rather than after it, as the old by-value iterator did
-            .map(|_, &offsets| offsets)
-            .for_each(|offsets| inner_loop(offsets, inner_len, inner_strides));
+            .build();
+        for (_, offsets) in iter {
+            inner_loop(offsets, inner_len, inner_strides);
+        }
     }
 }
 
