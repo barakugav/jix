@@ -13,7 +13,9 @@ use crate::error::{check_dtype, Result};
 /// - [`TypeDyn`] - the element type is only available at runtime. Arrays loaded from disk
 ///   start with this. Call [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert
 ///   the expected element type and recover compile-time tracking.
-pub trait ElementType: Clone + Send + Sync {
+///
+/// This trait is sealed, it cannot be implemented outside this crate.
+pub trait ElementType: Clone + Send + Sync + crate::util::Sealed {
     /// `Some(dtype)` when the element type is statically known ([`Ty<T>`]),
     /// `None` for [`TypeDyn`].
     const DTYPE: Option<Dtype>;
@@ -38,6 +40,7 @@ pub trait ElementType: Clone + Send + Sync {
 /// element type and recover [`ArrayStorageTyped`](crate::ArrayStorage).
 #[derive(Clone)]
 pub struct TypeDyn(Dtype);
+impl crate::util::Sealed for TypeDyn {}
 impl ElementType for TypeDyn {
     const DTYPE: Option<Dtype> = None;
 
@@ -71,6 +74,7 @@ impl<T> Ty<T> {
         Self(PhantomData)
     }
 }
+impl<T> crate::util::Sealed for Ty<T> {}
 impl<T> ElementType for Ty<T>
 where
     T: Dtyped,

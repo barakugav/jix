@@ -174,7 +174,7 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
             .filter(|&dim| is_reduced[dim])
             .map(|dim| array.shape()[dim])
             .product::<u64>();
-        let element_cost = (spec.element_cost() as f64 * (reduced_prod + 4) as f64) as f32;
+        let element_cost = (spec.element_cost() as f64 * (reduced_prod as f64 + 4.0)) as f32;
         let dim_orig2new = |d: usize| (d - (0..d).filter(|&j| is_reduced[j]).count()) as DimIdx;
         let read_shape_scale_weight = spec
             .read_shape_scale_weight()
@@ -807,11 +807,11 @@ where
 
     let mut state = if CONTIGUOUS {
         fearless_simd::dispatch!(SimdLevel::new(), simd => {
-            fold_one_cell_per_simd(&ctx, inner_len, simd)
+            fold_one_cell_per_simd::<T, K, CONTIGUOUS, _>(&ctx, inner_len, simd)
         })
     } else {
         crate::scalar::simd::dispatch_baseline!(simd => {
-            fold_one_cell_impl::<T, K, ONE_CELL_LANES, CONTIGUOUS, _>(&ctx, inner_len, simd)
+            fold_one_cell_per_simd::<T, K, CONTIGUOUS, _>(&ctx, inner_len, simd)
         })
     };
     let state_ref = unsafe { &mut *states_buf.as_mut_ptr().cast::<MaybeUninit<K::State>>() };
@@ -823,7 +823,7 @@ where
 }
 
 #[inline(always)]
-fn fold_one_cell_per_simd<T, K, S: Simd>(
+fn fold_one_cell_per_simd<T, K, const CONTIGUOUS: bool, S: Simd>(
     ctx: &FoldOneCellCtx<'_, T, K>,
     len: usize,
     simd: S,
@@ -833,13 +833,18 @@ where
     K: ReductionOpKernel<T>,
 {
     let lanes = const {
-        let lanes = if let Some(lanes) = K::ONE_CELL_LANES {
+        let lanes = if !CONTIGUOUS {
+            ONE_CELL_LANES
+        } else if let Some(lanes) = K::ONE_CELL_LANES {
             lanes
         } else {
             let per_vector = prev_power_of_two(S::u8s::LEN / size_of::<K::State>());
             let lanes = 8 * per_vector;
             const_max(const_min(lanes, PAIRWISE_SPLIT_THRESHOLD / 2), 8)
         };
+        let lane_bytes = const_max(const_max(size_of::<T>(), size_of::<K::State>()), 1);
+        let max_lanes = prev_power_of_two(4096 / lane_bytes);
+        let lanes = const_min(lanes, max_lanes);
         assert!(lanes.is_power_of_two() && lanes <= 512);
         lanes
     };
@@ -847,7 +852,7 @@ where
     macro_rules! dispatch_lanes {
         ($($lanes:literal)*) => {
             match lanes {
-                $($lanes => fold_one_cell_impl::<T, K, $lanes, true, S>(ctx, len, simd),)*
+                $($lanes => fold_one_cell_impl::<T, K, $lanes, CONTIGUOUS, S>(ctx, len, simd),)*
                 _ => unreachable!(),
             }
         };
@@ -1762,8 +1767,7 @@ pub(crate) mod _traits {
                         return None;
                     }
                     let state = <_ as crate::scalar::Cast<$FinalizeT>>::cast(state);
-                    let nitems = <_ as crate::scalar::Cast<$FinalizeT>>::cast(nitems);
-                    let mean = state / nitems;
+                    let mean = state / nitems as f64;
                     Some(<_ as crate::scalar::Cast<Self::Output>>::cast(mean))
                 }
             }
@@ -1778,7 +1782,7 @@ pub(crate) mod _traits {
     impl_mean!(u32, u64, f64, f64);
     impl_mean!(u64, f64, f64, f64);
     #[cfg(feature = "half")]
-    impl_mean!(f16, f32, f32, f16);
+    impl_mean!(f16, f32, f64, f16);
     impl_mean!(f32, f64, f64, f32);
     impl_mean!(f64, f64, f64, f64);
     #[cfg(feature = "num-complex")]
@@ -1926,12 +1930,13 @@ pub(crate) mod _traits {
                 }
                 #[inline(always)]
                 fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output {
-                    let denom = nitems as f64 - ddof;
-                    let res = if denom <= 0.0 {
-                        f64::NAN
+                    let m2 = if state.m2 >= 0.0 {
+                        state.m2
                     } else {
-                        state.m2 / denom
+                        f64::INFINITY // m2 negative is caused by overflow
                     };
+                    let denom = nitems as f64 - ddof;
+                    let res = if denom > 0.0 { m2 / denom } else { f64::NAN };
                     <_ as crate::scalar::Cast<Self::Output>>::cast(res)
                 }
             }
@@ -4199,7 +4204,7 @@ pub(crate) mod tests {
                     sum += <_ as crate::scalar::Cast<Complex<f64>>>::cast(x);
                     count += 1;
                 }
-                sum / Complex::new(count as f64, 0.0)
+                sum / count as f64
             }
         },
         [complex_f32, complex_f64],
@@ -4434,6 +4439,51 @@ pub(crate) mod tests {
         let a = Array::compact_ndarray(&array![-0.0f64, -0.0]).unwrap();
         let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
         assert_eq!(s.to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
+    fn var_std_overflowing_deviation_is_inf() {
+        let a = Array::compact_ndarray(&array![1e308f64, -1e308]).unwrap();
+        assert_eq!(
+            a.view().var(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]],
+            f64::INFINITY
+        );
+        assert_eq!(
+            a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]],
+            f64::INFINITY
+        );
+        #[cfg(feature = "num-complex")]
+        {
+            let a = Array::compact_ndarray(&array![
+                complex_f64::new(0.0, 1e308),
+                complex_f64::new(0.0, -1e308)
+            ])
+            .unwrap();
+            assert_eq!(
+                a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]],
+                f64::INFINITY
+            );
+        }
+    }
+
+    #[cfg(feature = "num-complex")]
+    #[test]
+    fn mean_complex_near_max() {
+        let a = Array::compact_ndarray(&array![
+            complex_f64::new(1.7e308, -1.7e308),
+            complex_f64::new(0.0, 0.0)
+        ])
+        .unwrap();
+        let m = a.mean(0usize).to_ndarray::<Ix0>().unwrap()[[]];
+        assert_eq!(m, complex_f64::new(0.85e308, -0.85e308));
+    }
+
+    #[test]
+    fn reduce_huge_lazy_shape() {
+        let a = Array::compact_ndarray(&array![[1u8]]).unwrap();
+        let a = crate::ops::Broadcast::new_array(a, &[i64::MAX as u64, 2]).unwrap();
+        let s = crate::ops::Max::new_array(a, (0, 1)).unwrap();
+        assert_eq!(s.shape(), &[] as &[u64]);
     }
 
     #[test]
@@ -4673,6 +4723,35 @@ pub(crate) mod tests {
         let r = a.view().reduce_unordered(0usize, |a, b| a.wrapping_add(b));
         assert_eq!(r.dtype(), &<i8 as Dtyped>::DTYPE);
         assert_eq!(r.to_ndarray::<Ix0>().unwrap()[[]], 6i8);
+    }
+
+    #[test]
+    fn reduce_unordered_wide_elements_fit_the_stack() {
+        const W: usize = 16000;
+        let combine = |a: [u8; W], b: [u8; W]| std::array::from_fn(|i| a[i].wrapping_add(b[i]));
+        let run = move || {
+            let data = ndarray::Array1::from(vec![[1u8; W]; 64]);
+            // Strided one-cell fold.
+            let a = Array::plain_ndarray_view(data.slice(ndarray::s![..;2])).unwrap();
+            let r = a
+                .reduce_unordered(0usize, combine)
+                .to_ndarray::<Ix0>()
+                .unwrap();
+            assert!(r[[]].iter().all(|&b| b == 32));
+            // Contiguous one-cell fold.
+            let a = Array::plain_ndarray_view(data.view()).unwrap();
+            let r = a
+                .reduce_unordered(0usize, combine)
+                .to_ndarray::<Ix0>()
+                .unwrap();
+            assert!(r[[]].iter().all(|&b| b == 64));
+        };
+        // Without the lanes cap this needs more than 8 MiB in debug builds.
+        let thread = std::thread::Builder::new()
+            .stack_size(8 << 20)
+            .spawn(run)
+            .unwrap();
+        thread.join().unwrap();
     }
 
     #[test]

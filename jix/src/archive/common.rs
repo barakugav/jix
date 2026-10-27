@@ -71,7 +71,7 @@ impl<W> ArchiveWriter<W> {
     //     W: Write + Seek,
     // {
     //     let offset = self.stream_position()?;
-    //     let padded_offset = offset.ceil_to_multiple(alignment as u64);
+    //     let padded_offset = offset.next_multiple_of(alignment as u64);
     //     let padding = padded_offset - offset;
     //     if padding > 0 {
     //         self.tmp_buf.clear();

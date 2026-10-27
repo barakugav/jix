@@ -494,7 +494,7 @@ impl ArrayParams {
                 .rev()
                 .map(|m| m * multiple_of)
                 .find(|&block_len| {
-                    let padding = dim_len.ceil_to_multiple(block_len) - dim_len;
+                    let padding = dim_len.next_multiple_of(block_len) - dim_len;
                     padding <= dim_len / 8
                 })
                 .unwrap_or(multiple_of)

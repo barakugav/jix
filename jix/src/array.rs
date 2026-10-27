@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, check_region_size, ensure, Result};
+use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
@@ -575,8 +575,8 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// This is the simplest way to materialize a jix array into a standard in-memory ndarray.
     /// All blocks of the underlying compact storage are decompressed and the elements are
-    /// returned in a contiguous row-major (C-order) ndarray with the same shape and element
-    /// type as the source.
+    /// returned in an ndarray with the same shape and element type as the source. The memory
+    /// layout of the returned array is an implementation detail and may vary.
     ///
     /// For a lazy view (e.g. `Array<Add<Mul<Compact, _>, _>>`), `to_ndarray` walks the entire
     /// operation pipeline: each composed op is evaluated on the fly as data flows out of the
@@ -598,6 +598,8 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - the result
+    ///   does not fit in memory.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
@@ -695,6 +697,8 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` is out of bounds or
     ///   has a different number of dimensions than the array.
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - the result
+    ///   does not fit in memory.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
@@ -768,7 +772,16 @@ impl<S: ArrayStorage> Array<S> {
             );
         }
         let itemsize = self.dtype().itemsize() as usize;
-        check_region_size(index, itemsize)?;
+        let alloc_bytes = index
+            .iter()
+            .map(|r| (r.end - r.start).max(1))
+            .chain([itemsize as u64])
+            .try_shape_product();
+        ensure!(
+            alloc_bytes.is_some_and(|b| b <= isize::MAX as u64),
+            InvalidShapeOperation,
+            "read region {index:?} with itemsize {itemsize} does not fit in memory"
+        );
         let mut out_shape = D::zeros(ndim);
         for dim in 0..ndim {
             out_shape[dim] = (index[dim].end - index[dim].start) as usize;
@@ -2384,6 +2397,13 @@ mod tests {
         assert_eq!(t, ndarray::array![[1i32, 4], [2, 5], [3, 6]]);
         assert_eq!(t.strides(), &[1, 3]);
         assert!(t.as_slice().is_none());
+    }
+
+    #[test]
+    fn to_ndarray_empty_region_too_large_errors() {
+        let a = Array::compact_ndarray(&ndarray::array![[[7u8]]]).unwrap();
+        let a = a.broadcast(&[0, 1 << 62, 3]);
+        assert!(a.to_ndarray::<ndarray::IxDyn>().is_err());
     }
 
     #[test]

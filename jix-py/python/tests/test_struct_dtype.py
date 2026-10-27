@@ -141,6 +141,24 @@ def test_sub_field_of_struct_with_explicit_padding():
     np.testing.assert_array_equal(jix.dtype_sub_field(ja, "grade").numpy(), a["grade"])
 
 
+def test_sub_array_field_reads_as_trailing_dims():
+    # Like numpy, the inner shape of the dtype comes back as trailing dims of the base dtype.
+    a = np.zeros((2, 4), np.dtype([("id", "<u4"), ("pos", "<f4", (3,))]))
+    a["pos"] = np.arange(24, dtype=np.float32).reshape(2, 4, 3)
+    pos = jix.dtype_sub_field(jix.compact(a), "pos")
+    assert pos.numpy().dtype == np.float32
+    np.testing.assert_array_equal(pos.numpy(), a["pos"])
+    np.testing.assert_array_equal(pos[1, 1:3], a["pos"][1, 1:3])
+    pos_t = jix.dtype_sub_field(jix.permute_dims(jix.compact(a), [1, 0]), "pos")
+    np.testing.assert_array_equal(pos_t.numpy(), a["pos"].transpose(1, 0, 2))
+
+    out = np.zeros((2, 4, 3), np.float32)
+    assert pos.numpy(out=out) is out
+    np.testing.assert_array_equal(out, a["pos"])
+    with pytest.raises(ValueError, match="inner dim"):
+        pos.numpy(out=np.zeros((2, 4, 3), np.float32, order="F"))
+
+
 @st.composite
 def _packed_struct_dtype(draw):
     n = draw(st.integers(1, 6))

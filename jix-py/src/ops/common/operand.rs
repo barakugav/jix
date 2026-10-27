@@ -168,10 +168,11 @@ impl Operand {
             .iter()
             .map(|&d| d as u64)
             .collect::<DimArray<_>>();
-        let strides = array
-            .strides()
-            .iter()
-            .map(|&s| {
+        let strides = std::iter::zip(&shape, array.strides())
+            .map(|(&len, &s)| {
+                if len <= 1 {
+                    return Ok(dtype.itemsize() as usize); // allow any stride on 0 or 1 len dim
+                }
                 usize::try_from(s)
                     .map_err(|_| PyValueError::new_err("Negative strides are not supported"))
             })

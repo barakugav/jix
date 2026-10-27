@@ -100,6 +100,10 @@ def test_shape_rejects_ndarray():
 def test_negative_strides_raise_value_error(fn):
     with pytest.raises(ValueError, match="Negative strides"):
         fn(np.arange(4)[::-1])
+    # A length-1 dim is never stepped, its negative stride is fine.
+    x = np.arange(3).reshape(1, 3)[::-1]
+    np.testing.assert_array_equal(fn(x).numpy(), x)
+    np.testing.assert_array_equal((jix.asarray(np.ones((1, 3))) + x).numpy(), x + 1)
 
 
 # ---------------------------------------------------------------------------

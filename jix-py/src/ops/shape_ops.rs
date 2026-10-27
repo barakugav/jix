@@ -200,7 +200,7 @@ pub fn slice<'py>(
     let arr = py_arr.get().to_core();
     let parsed = parse_basic_index(arr.shape(), Some(index))?;
 
-    let spec = SliceSpec::new(parsed.items.as_slice());
+    let spec = SliceSpec::new(parsed.items.as_slice()).into_py_result()?;
     let sliced = jix_core::ops::Slice::new_array(arr, spec)
         .into_py_result()?
         .into_any();

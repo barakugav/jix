@@ -157,8 +157,13 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 first..(last + 1)
             });
             let inner = self.array.read_data(inner_box.as_ref(), context, None)?;
+            let itemsize = self.dtype().itemsize() as usize;
             let out_strides = dim_arr(ndim, |dim| {
-                inner.strides()[dim] * self.slice[dim].step as usize
+                if out_shape[dim] <= 1 {
+                    itemsize // avoid (stride*step) overflow, dim is not stepped
+                } else {
+                    inner.strides()[dim] * self.slice[dim].step as usize
+                }
             });
             return Ok(unsafe { inner.with_strides(out_strides.as_ref()) });
         }
@@ -247,21 +252,27 @@ pub struct SliceSpec {
 
 impl SliceSpec {
     /// Constructs a `SliceSpec` from a slice of [`SliceItem`]s, one per dimension.
-    pub fn new(slice: &[SliceItem]) -> Self {
-        Self {
-            slice: slice.iter().cloned().collect(),
-        }
+    ///
+    /// # Errors
+    ///
+    /// - [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) - more than
+    ///   [`NDIM_MAX`](crate::NDIM_MAX) items.
+    pub fn new(slice: &[SliceItem]) -> Result<Self> {
+        Self::try_from(slice)
     }
 }
 
-impl<I> From<&[I]> for SliceSpec
+impl<I> TryFrom<&[I]> for SliceSpec
 where
     I: Into<SliceItem> + Clone,
 {
-    fn from(slice: &[I]) -> Self {
-        Self {
+    type Error = crate::Error;
+
+    fn try_from(slice: &[I]) -> Result<Self> {
+        check_ndim(slice.len())?;
+        Ok(Self {
             slice: slice.iter().map(|item| item.clone().into()).collect(),
-        }
+        })
     }
 }
 
@@ -315,14 +326,16 @@ macro_rules! impl_from_range {
         impl From<$range_ty> for SliceItem {
             fn from(r: $range_ty) -> Self {
                 use std::ops::RangeBounds;
+                let to_i64 = |x| i64::try_from(x).unwrap_or(i64::MAX);
                 let start = match r.start_bound() {
-                    Bound::Included(&s) => Some(s as i64),
-                    Bound::Excluded(&s) => Some(s as i64 + 1),
+                    Bound::Included(&s) => Some(to_i64(s)),
+                    Bound::Excluded(&s) => Some(to_i64(s).saturating_add(1)),
                     Bound::Unbounded => None,
                 };
                 let end = match r.end_bound() {
-                    Bound::Included(&e) => Some(e as i64 + 1),
-                    Bound::Excluded(&e) => Some(e as i64),
+                    Bound::Included(&e) if to_i64(e) == -1 => None,
+                    Bound::Included(&e) => Some(to_i64(e).saturating_add(1)),
+                    Bound::Excluded(&e) => Some(to_i64(e)),
                     Bound::Unbounded => None,
                 };
                 Self::new(start, end, 1)
@@ -591,6 +604,36 @@ mod tests {
     }
 
     #[test]
+    fn slice_item_from_range_bounds() {
+        let a = make2d(arange(24), 4, 6);
+        let s = a.slice((..=-1, -2..=-1));
+        assert_eq!(
+            s.to_ndarray().unwrap(),
+            array![[4, 5], [10, 11], [16, 17], [22, 23]].into_dyn()
+        );
+        assert_eq!(SliceItem::from(0u64..u64::MAX).end, Some(i64::MAX));
+        assert_eq!(SliceItem::from(..=i64::MAX).end, Some(i64::MAX));
+    }
+
+    #[test]
+    fn slice_spec_too_many_items_errors() {
+        let items = [SliceItem::new(None, None, 1); crate::NDIM_MAX + 1];
+        assert!(super::SliceSpec::new(&items).is_err());
+        assert!(super::SliceSpec::try_from(&[..; crate::NDIM_MAX + 1][..]).is_err());
+    }
+
+    #[test]
+    fn stepped_slice_huge_step_plain() {
+        let s = plain6x4().slice((SliceItem::new(Some(1), None, i64::MAX), ..));
+        assert_eq!(s.shape(), &[1, 4]);
+        // The elementwise op pulls its input, taking the plain fast path.
+        assert_eq!(
+            (-s).to_ndarray().unwrap(),
+            array![[-4, -5, -6, -7]].into_dyn()
+        );
+    }
+
+    #[test]
     fn full_read_strided_both_dims() {
         let got = make2d(arange(24), 4, 6)
             .slice((SliceItem::new(None, None, 2), SliceItem::new(None, None, 2)))
@@ -787,7 +830,7 @@ mod tests {
     fn try_slice_one_dim(arr: Array<Compact<Ty<i32>>>, item: SliceItem) -> super::Result<()> {
         super::Slice::new_array(
             arr,
-            super::SliceSpec::new(&[item, SliceItem::new(None, None, 1)]),
+            super::SliceSpec::new(&[item, SliceItem::new(None, None, 1)]).unwrap(),
         )
         .map(|_| ())
     }
@@ -872,7 +915,7 @@ mod tests {
             }
             let expected = expected.as_standard_layout().into_owned();
             crate::util::assert_array_matches(
-                &za.slice(super::SliceSpec::new(&items)),
+                &za.slice(super::SliceSpec::new(&items).unwrap()),
                 &expected,
             );
         }

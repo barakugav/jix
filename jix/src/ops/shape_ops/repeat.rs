@@ -183,7 +183,11 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             // (n * dst_strides[k], dst_strides[k]).
             let mut dst_strides_split = dim_arr(ndim + 1, |_| 0);
             dst_strides_split[..k].copy_from_slice(&out_strides[..k]);
-            dst_strides_split[k] = out_strides[k].wrapping_mul(n as usize); // Wraps only when g_len == 1
+            dst_strides_split[k] = if g_len <= 1 {
+                dtype.itemsize() as usize // avoid (stride*n) overflow, dim is not stepped
+            } else {
+                out_strides[k] * n as usize
+            };
             dst_strides_split[k + 1..].copy_from_slice(&out_strides[k..]);
 
             // src slice: tmp_buf from (g_range.start) along the inner k dim to its end.

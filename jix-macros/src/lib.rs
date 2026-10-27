@@ -183,18 +183,13 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
             quote::quote! {
                 const BASE_OFFSET: #jix_crate::dtype::Itemsize = 0;
 
-                const fn ceil_to_multiple(x: #jix_crate::dtype::Itemsize, m: #jix_crate::dtype::Itemsize) -> #jix_crate::dtype::Itemsize {
-                    assert!(m > 0);
-                    x.div_ceil(m) * m
-                }
-
                 #(
                     const #var_field_dtype: #jix_crate::dtype::Dtype = <#field_types as #jix_crate::dtype::Dtyped>::DTYPE;
 
                     const #var_field_offset: #jix_crate::dtype::Itemsize = {
                         let mut offset = #var_prev_field_offset;
                         if ! #is_packed {
-                            offset = ceil_to_multiple(offset, align_of::<#field_types>() as #jix_crate::dtype::Itemsize);
+                            offset = offset.next_multiple_of(align_of::<#field_types>() as #jix_crate::dtype::Itemsize);
                         }
                         offset
                     };
@@ -218,7 +213,7 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                         }
                     } )*
 
-                    total_size = ceil_to_multiple(total_size, alignment as #jix_crate::dtype::Itemsize);
+                    total_size = total_size.next_multiple_of(alignment as #jix_crate::dtype::Itemsize);
                 }
                 let alignment = #jix_crate::dtype::Alignment::new(alignment as usize).unwrap();
 
