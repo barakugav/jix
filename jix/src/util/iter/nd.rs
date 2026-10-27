@@ -112,8 +112,10 @@ where
     /// Turns the iterator into an [`Iterator`] over `f(index, value)`.
     ///
     /// `f` borrows the index and the extensions' value for the duration of a single call only, so
-    /// its output cannot borrow from them.
-    #[allow(unused)]
+    /// its output cannot borrow from them. Prefer it over [`for_each`](Self::for_each) when the
+    /// consumer works on owned values anyway: its internal iteration ([`Iterator::for_each`],
+    /// [`Iterator::fold`], ...) steps to the next position before handing the current value on,
+    /// so the step overlaps with the consumer's work instead of following it.
     #[inline(always)]
     pub(crate) fn map<R, F>(self, f: F) -> NdIterMap<D, E, F>
     where
@@ -175,14 +177,8 @@ where
     /// Calls `f` on every remaining item, as [`next`](Self::next) would yield them.
     #[inline(always)]
     pub(crate) fn for_each(mut self, mut f: impl FnMut(&D::Vec<u64>, E::Item<'_>)) {
-        match self.state {
-            NdIterState::Fresh => {}
-            NdIterState::Yielded => {
-                if !self.advance() {
-                    return;
-                }
-            }
-            NdIterState::Exhausted => return,
+        if !self.resume() {
+            return;
         }
         // A do-while over the positions, with no state to check on each step.
         loop {
@@ -190,6 +186,18 @@ where
             if !self.advance() {
                 return;
             }
+        }
+    }
+
+    /// Moves to the first item not yielded yet, returning `false` if there is none.
+    ///
+    /// For the internal iterations, which consume the iterator and so never update `state`.
+    #[inline(always)]
+    fn resume(&mut self) -> bool {
+        match self.state {
+            NdIterState::Fresh => true,
+            NdIterState::Yielded => self.advance(),
+            NdIterState::Exhausted => false,
         }
     }
 
@@ -245,6 +253,28 @@ where
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.iter.size_hint()
+    }
+
+    #[inline(always)]
+    fn fold<B, G>(self, init: B, mut g: G) -> B
+    where
+        G: FnMut(B, R) -> B,
+    {
+        let NdIterMap { mut iter, mut f } = self;
+        if !iter.resume() {
+            return init;
+        }
+        let mut acc = init;
+        // A do-while like `NdIter::for_each`, but the item is owned, so the iterator steps past it
+        // before `g` runs: the step overlaps with `g` instead of following it.
+        loop {
+            let item = f(&iter.current_idx, iter.extensions.value());
+            let more = iter.advance();
+            acc = g(acc, item);
+            if !more {
+                return acc;
+            }
+        }
     }
 }
 
@@ -828,6 +858,19 @@ mod tests {
             }
             let via_map: Vec<Vec<u64>> = iter.clone().map(|idx, ()| idx.to_vec()).collect();
             assert_eq!(via_map, all[consumed..], "map after {consumed} item(s)");
+            // `collect` drives `next`; `fold` has its own loop.
+            let via_fold =
+                iter.clone()
+                    .map(|idx, ()| idx.to_vec())
+                    .fold(Vec::new(), |mut v, idx| {
+                        v.push(idx);
+                        v
+                    });
+            assert_eq!(
+                via_fold,
+                all[consumed..],
+                "map + fold after {consumed} item(s)"
+            );
             let mut via_for_each = Vec::new();
             iter.for_each(|idx, ()| via_for_each.push(idx.to_vec()));
             assert_eq!(

@@ -292,7 +292,10 @@ fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
         NdIter::builder(outer_shape)
             .with_strides_offset_multi_ext(outer_strides, [0usize; N_OPERANDS])
             .build()
-            .for_each(|_, offsets| inner_loop(*offsets, inner_len, inner_strides));
+            // `map` to owned offsets: the walk then steps to the next row before calling
+            // `inner_loop` rather than after it, as the old by-value iterator did
+            .map(|_, &offsets| offsets)
+            .for_each(|offsets| inner_loop(offsets, inner_len, inner_strides));
     }
 }
 
