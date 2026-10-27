@@ -74,8 +74,8 @@ const MODULE_UNITS = [
     "title": "Dtyped trait contract, scalar and array impls, derive macro, ElementType",
     "files": [
       "jix/src/dtype.rs:919-1219",
-      "jix-macros/src/lib.rs:1-315",
-      "jix/src/element_type.rs:1-90"
+      "jix-macros/src/lib.rs:1-310",
+      "jix/src/element_type.rs:1-94"
     ],
     "consult": [
       "jix-macros/tests/derive_external.rs",
@@ -169,7 +169,7 @@ const MODULE_UNITS = [
     "title": "ArrayParams::tune, block-shape auto selection, ArraySpec read hints and scale_read_shape",
     "files": [
       "jix/src/storage/params.rs:1-983",
-      "jix/src/util/mod.rs:411-532"
+      "jix/src/util/mod.rs:405-526"
     ],
     "consult": [
       "jix/src/array.rs",
@@ -203,8 +203,8 @@ const MODULE_UNITS = [
     "title": "NdCopier strided n-d copy kernels, fill_contiguous, PtrNoalias and span helpers",
     "files": [
       "jix/src/util/nd_copy.rs:1-447",
-      "jix/src/util/mod.rs:107-190",
-      "jix/src/util/mod.rs:658-815"
+      "jix/src/util/mod.rs:101-184",
+      "jix/src/util/mod.rs:652-809"
     ],
     "consult": [
       "jix/src/util/nd_iter_unordered.rs",
@@ -266,7 +266,7 @@ const MODULE_UNITS = [
       "jix/src/util/iter/nd.rs:1-520",
       "jix/src/util/iter/block.rs:1-142",
       "jix/src/util/iter/strides.rs:1-174",
-      "jix/src/util/mod.rs:630-639"
+      "jix/src/util/mod.rs:624-633"
     ],
     "consult": [
       "jix/src/storage/compact.rs",
@@ -320,7 +320,7 @@ const MODULE_UNITS = [
     "title": "ReductionOp construction, bulk/tile streaming loop, state-buffer choice and finalize pass",
     "files": [
       "jix/src/ops/reduction.rs:1-630",
-      "jix/src/ops/reduction.rs:1132-1274"
+      "jix/src/ops/reduction.rs:1137-1279"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -349,7 +349,7 @@ const MODULE_UNITS = [
     "title": "Kernel trait contract and the fold inner loops (one-cell, pairwise tree, multi-cell, SIMD vs strided)",
     "files": [
       "jix/src/ops/reduction.rs:18-118",
-      "jix/src/ops/reduction.rs:632-1130"
+      "jix/src/ops/reduction.rs:632-1135"
     ],
     "consult": [
       "jix/src/util/nd_iter_unordered.rs",
@@ -374,7 +374,7 @@ const MODULE_UNITS = [
     ],
     "title": "Scalar kernel traits: Sum, Product, ArgMax/ArgMin, Mean, Variance (Welford/Chan)",
     "files": [
-      "jix/src/ops/reduction.rs:1393-2064"
+      "jix/src/ops/reduction.rs:1398-2069"
     ],
     "consult": [
       "jix/src/ops/cast.rs",
@@ -400,8 +400,8 @@ const MODULE_UNITS = [
     ],
     "title": "Per-op kernel impls and flags, define_reduction_op macros, Reduce, Array methods",
     "files": [
-      "jix/src/ops/reduction.rs:1276-1391",
-      "jix/src/ops/reduction.rs:2066-3443"
+      "jix/src/ops/reduction.rs:1281-1396",
+      "jix/src/ops/reduction.rs:2071-3448"
     ],
     "consult": [
       "jix/src/ops/cmp.rs",
@@ -491,7 +491,7 @@ const MODULE_UNITS = [
     ],
     "title": "util/mod.rs helpers: strides/spans, cast_slice, AlternatingBuffers, scale_read_shape, SendSyncPtr, PtrNoalias/PtrMutNoalias, POD I/O, aligned access",
     "files": [
-      "jix/src/util/mod.rs:1-843"
+      "jix/src/util/mod.rs:1-837"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -624,7 +624,7 @@ const MODULE_UNITS = [
     ],
     "title": "Runtime dtype dispatch, cast rules, promotion target, op macros, cast()",
     "files": [
-      "jix-py/src/ops/common/dispatch.rs:1-400",
+      "jix-py/src/ops/common/dispatch.rs:1-399",
       "jix-py/src/ops/common/dtype_promote.rs:1-143",
       "jix-py/src/ops/common/mod.rs:1-154",
       "jix-py/src/ops/mod.rs:43-182"
@@ -653,7 +653,7 @@ const MODULE_UNITS = [
     ],
     "title": "Operand conversion (Python/numpy -> Scalar/Plain), scalar casts, broadcasting, asarray",
     "files": [
-      "jix-py/src/ops/common/operand.rs:1-461",
+      "jix-py/src/ops/common/operand.rs:1-462",
       "jix-py/src/ops/common/broadcast.rs:1-106",
       "jix-py/src/ops/as_array.rs:1-84",
       "jix-py/src/util.rs:346-469"
@@ -774,9 +774,9 @@ const MODULE_UNITS = [
     ],
     "title": "Array.numpy / __getitem__ / out= / compact / read context and basic-index parsing",
     "files": [
-      "jix-py/src/array.rs:1-302",
-      "jix-py/src/array.rs:400-741",
-      "jix-py/src/array.rs:1604-1751",
+      "jix-py/src/array.rs:1-313",
+      "jix-py/src/array.rs:411-760",
+      "jix-py/src/array.rs:1623-1770",
       "jix-py/src/util.rs:1-170",
       "jix-py/src/util.rs:368-379"
     ],
@@ -810,7 +810,7 @@ const MODULE_UNITS = [
     "title": "numpy <-> jix dtype mapping, zero-copy Plain wrapping, numpy-dtype caching, type-hint extractors",
     "files": [
       "jix-py/src/dtype.rs:1-219",
-      "jix-py/src/ops/common/operand.rs:18-199",
+      "jix-py/src/ops/common/operand.rs:18-200",
       "jix-py/src/ops/as_array.rs:1-84",
       "jix-py/src/ops/mod.rs:37-103",
       "jix-py/src/type_hint.rs:1-125"
@@ -869,8 +869,8 @@ const MODULE_UNITS = [
     ],
     "title": "Array getters/dunder forwarding, __str__, and util helpers (dims normalization, ItemOrTuple, array_try_map, UnsafeSend)",
     "files": [
-      "jix-py/src/array.rs:302-400",
-      "jix-py/src/array.rs:742-1470",
+      "jix-py/src/array.rs:313-411",
+      "jix-py/src/array.rs:761-1489",
       "jix-py/src/util.rs:172-366",
       "jix-py/src/util.rs:380-469"
     ],
@@ -1024,7 +1024,7 @@ const MODULE_UNITS = [
     ],
     "title": "Slice (steps, negative bounds, Plain fast path) and Reshape (dim matching and per-iteration reads)",
     "files": [
-      "jix/src/ops/shape_ops/slice.rs:1-410",
+      "jix/src/ops/shape_ops/slice.rs:1-423",
       "jix/src/ops/shape_ops/reshape.rs:1-417"
     ],
     "consult": [
@@ -1054,7 +1054,7 @@ const MODULE_UNITS = [
     "files": [
       "jix/src/ops/shape_ops/flip.rs:1-190",
       "jix/src/ops/shape_ops/roll.rs:1-180",
-      "jix/src/ops/shape_ops/repeat.rs:1-278",
+      "jix/src/ops/shape_ops/repeat.rs:1-282",
       "jix/src/ops/shape_ops/tile.rs:1-340"
     ],
     "consult": [
@@ -1146,7 +1146,7 @@ const MODULE_UNITS = [
     ],
     "title": "Plain and Scalar backends, ndarray constructors, compact_ndarray / compact_nd_ptr / compact_fn (FnStorage)",
     "files": [
-      "jix/src/storage/plain.rs:1-526",
+      "jix/src/storage/plain.rs:1-528",
       "jix/src/storage/scalar.rs:1-199",
       "jix/src/array.rs:177-517"
     ],
@@ -1178,7 +1178,7 @@ const MODULE_UNITS = [
     ],
     "title": "Array front-end: to_ndarray / to_ndarray_sub / to_ndarray_slice / to_ndarray_buf + request splitting, compact_with / compact_into_builder, misc Array methods",
     "files": [
-      "jix/src/array.rs:519-1735"
+      "jix/src/array.rs:519-1748"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -1350,7 +1350,7 @@ const MODULE_UNITS = [
       "jix/src/storage/elementwise_pipeline.rs:735-869",
       "jix/src/storage/core_trait.rs:63-141",
       "jix/src/dtype.rs:461-707",
-      "jix/src/util/mod.rs:622-682"
+      "jix/src/util/mod.rs:616-676"
     ],
     "focus": [
       "Where::read_data unsafe loops (where_op.rs:153-342): offsets and strides from NdIterUnordered over three buffers with different layouts (0-stride cond/y), the (itemsize, alignment) to typed-loop table, the `aligned` logic when REQUIRE_ALIGNED, contiguous chunking and tail",

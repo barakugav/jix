@@ -341,17 +341,17 @@ Format: one entry per issue.
 - Notes: doc nit - the #81 docstring rewrite dropped the explicit u64-exponent sentence.
 
 ## K66: Array.numpy() gives wrong values, including uninitialized bytes, for dtypes with an inner shape: numpy expands the sub-array descr into trailing dims and their strides are taken as the array's strides (permuted layouts raise, numpy(out=) never works)
-- Status: open (found in run 2026-10-24-batch4 as F001, high)
+- Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F001, high)
 - Location: jix-py/src/array.rs:570
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F001.md; repro in that run's repros/.
 
 ## K67: Welford variance goes negative/NaN when |x - mean| overflows f64 (var([1e308, -1e308]) = -inf, numpy inf); std fails a debug_assert (PanicException in the dev extension) and returns NaN silently in release
-- Status: open (found in run 2026-10-24-batch4 as F002, medium)
+- Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F002, medium)
 - Location: jix/src/ops/reduction.rs:1874
-- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F002.md; repro in that run's repros/.
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F002.md; repro in that run's repros/. The fix maps a NaN m2 to +inf too, so NaN / inf inputs now give inf: see K84.
 
 ## K68: Rust range -> SliceItem: inclusive end -1 (`..=-1`, `0..=-1`) silently selects nothing and `-k..=-1` errors (Array::slice panics); u64/usize bounds >= 2^63 wrap to end-relative indices; `..=i64::MAX` overflows
-- Status: open (found in run 2026-10-24-batch4 as F003, medium)
+- Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F003, medium)
 - Location: jix/src/ops/shape_ops/slice.rs:324
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F003.md; repro in that run's repros/.
 
@@ -361,9 +361,9 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F004.md; repro in that run's repros/.
 
 ## K70: ElementType is a safe, unsealed trait, but Plain/BlockTable/SubDtype/Transmute take their dtype from a user ET::dtype() without checking it: heap OOB read (Plain::read_data, SubDtype) and assert_unchecked(false) (BlockTable::decoder_config via write_to) from safe code
-- Status: open (found in run 2026-10-24-batch4 as F005, medium)
+- Status: fixed in 691e11b (#91): ElementType is sealed (found in run 2026-10-24-batch4 as F005, medium)
 - Location: jix/src/element_type.rs:16
-- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F005.md; repro in that run's repros/. Same kind of bug as K50 (ArrayStorage, sealed in #90); ElementType was left unsealed.
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F005.md; repro in that run's repros/. Same kind of bug as K50 (ArrayStorage, sealed in #90); ElementType was left unsealed. The repro no longer compiles (sealed trait), which is the fix.
 
 ## K71: f64 -> f16 via half::f16::from_f64 (no_std software fallback) still mis-rounds on every shipped target except macOS arm64, about 8x as often as the pre-K28-fix double rounding through f32
 - Status: open (found in run 2026-10-24-batch4 as F006, medium)
@@ -371,27 +371,27 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F006.md; repro in that run's repros/. Incomplete K28 fix. The in-tree test is gated to aarch64 and the property oracle calls the same function.
 
 ## K72: reduce_unordered over wide Dtyped elements overflows a 2 MiB thread stack and aborts: the one-cell reduction fold keeps 16 (strided) / 8 (contiguous) lanes of T whatever the element width
-- Status: open (found in run 2026-10-24-batch4 as F007, low)
+- Status: fixed in release builds in 691e11b (#91); debug builds still abort (found in run 2026-10-24-batch4 as F007, low)
 - Location: jix/src/ops/reduction.rs:768
-- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F007.md; repro in that run's repros/. The K30 defect in the reduction fold, which the K30 fix did not touch.
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F007.md; repro in that run's repros/. The K30 defect in the reduction fold, which the K30 fix did not touch. After #91 the repro passes with --release (652 KiB for both one-cell cases, the multi-cell control 396 KiB), but debug builds now need 7.8 MiB (contiguous) / 8.9 MiB (strided), up from 2.1-5.7 MiB: `dispatch_lanes!` in fold_one_cell_per_simd (reduction.rs:852-860) matches on the const lane count and all ten `#[inline(always)]` arms (1..512 lanes) are probably inlined into one frame, which debug builds do not prune.
 
 ## K73: ReductionOp::new adds 4 to the reduced element count unchecked: reducing 2+ dims of a lazy 1-byte-dtype shape with more than 2^64 - 5 reduced elements panics in debug builds (release only wraps a cost heuristic)
-- Status: open (found in run 2026-10-24-batch4 as F008, low)
+- Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F008, low)
 - Location: jix/src/ops/reduction.rs:177
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F008.md; repro in that run's repros/.
 
 ## K74: Complex mean divides the sum by Complex(n, 0) with num-complex's textbook division, so sum * n overflows: mean([1.7e308+0j, 0j]) = inf+0j, mean of 1e6 copies of 1e302+1e302j = inf+infj (numpy and the f64 mean are finite)
-- Status: open (found in run 2026-10-24-batch4 as F009, low)
+- Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F009, low)
 - Location: jix/src/ops/reduction.rs:1766
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F009.md; repro in that run's repros/. The K27 formula at a separate call site; a K27 fix in op2.rs does not cover it.
 
 ## K75: clamp(bool, min, max) returns uint8 while one-bound clamp, maximum and minimum return bool: bool8 is last in the two-bound clamp dispatch table
-- Status: open (found in run 2026-10-24-batch4 as F010, low)
+- Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F010, low)
 - Location: jix-py/src/ops/cmp.rs:447
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F010.md; repro in that run's repros/.
 
 ## K76: bitwise_rotate_left/right with a Python int value: all-Python-int calls raise TypeError (the shifts work), and a Python int value next to a typed u32 count is rotated as int8 (-128 for 64, OverflowError for 200)
-- Status: open (found in run 2026-10-24-batch4 as F011, low)
+- Status: open, tracked in todo.md (#91): "bitwise_rotate_left/right type promotion is wrong, (int,int) raise" (found in run 2026-10-24-batch4 as F011, low)
 - Location: jix-py/src/ops/bitwise.rs:432
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F011.md; repro in that run's repros/.
 
@@ -401,31 +401,36 @@ Format: one entry per issue.
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F012.md; repro in that run's repros/. Same read-amplification pattern as K69 (F004).
 
 ## K78: Slice plain pull fast path computes inner_stride * step unchecked: a step larger than the dim (output length 1) overflows - debug panic, release wraps a stride that is never stepped
-- Status: open (found in run 2026-10-24-batch4 as F013, low)
+- Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F013, low)
 - Location: jix/src/ops/shape_ops/slice.rs:161
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F013.md; repro in that run's repros/. The K36 defect at a site the K36 fix did not cover; on 32-bit a step of ~1e6 suffices.
 
 ## K79: SliceSpec::new / From<&[I]> panic (ArrayVec capacity) on more than 8 items, before the fallible Slice::new can return InvalidIndex
-- Status: open (found in run 2026-10-24-batch4 as F014, low)
+- Status: fixed in 691e11b (#91): SliceSpec::new returns Result, From<&[I]> became TryFrom (found in run 2026-10-24-batch4 as F014, low)
 - Location: jix/src/ops/shape_ops/slice.rs:252
-- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F014.md; repro in that run's repros/. Same kind of bug as K12 / K32.
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F014.md; repro in that run's repros/. Same kind of bug as K12 / K32. The repro no longer compiles (API change), which is the fix; covered by the in-tree test slice_spec_too_many_items_errors.
 
 ## K80: A negative stride on a never-stepped (length 0/1) dim is rejected on input (Rust ndarray constructors, Python asarray/compact/operands), although numpy reports the array C-contiguous and numpy(out=) accepts the same layout; the same line multiplies a huge length-1 stride unchecked (debug panic)
-- Status: open (found in run 2026-10-24-batch4 as F015, low)
+- Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F015, low)
 - Location: jix/src/storage/plain.rs:520
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F015.md; repro in that run's repros/. Gap in the K45 fix.
 
 ## K81: to_ndarray_sub sizes its ndarray with a per-dim `as usize` and bounds the region only on 32-bit, via the element product (0 for an empty region): empty regions with huge dims get a truncated shape on i686 (Ok [0, 5] for [0, 2^32+5]) and panic inside ndarray on 64-bit
-- Status: open (found in run 2026-10-24-batch4 as F016, low)
+- Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F016, low)
 - Location: jix/src/array.rs:774
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F016.md; repro in that run's repros/. Gap in the K16 fix (empty regions).
 
 ## K82: Array::to_ndarray docs promise a contiguous row-major (C-order) result, but the result follows read_layout_order (F-order for permuted views and F-order Plain sources)
-- Status: open (found in run 2026-10-24-batch4 as F017, low)
+- Status: fixed in 691e11b (#91) (docs no longer promise C order) (found in run 2026-10-24-batch4 as F017, low)
 - Location: jix/src/array.rs:577
-- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F017.md; repro in that run's repros/. Rust counterpart of K40; docs-only fix.
+- Notes: bug-hunt/runs/2026-10-24-batch4/findings/F017.md; repro in that run's repros/. Rust counterpart of K40; docs-only fix. Delete the repro: it asserts C order, which is no longer promised.
 
 ## K83: Dtype::from_fields computes the struct itemsize with an unchecked u16 add before check_fields, so debug builds panic instead of returning Err on oversized or malformed field lists
-- Status: open (found in run 2026-10-24-batch4 as F018, low)
+- Status: fixed in 691e11b (#91) (found in run 2026-10-24-batch4 as F018, low)
 - Location: jix/src/dtype.rs:491
 - Notes: bug-hunt/runs/2026-10-24-batch4/findings/F018.md; repro in that run's repros/. An unchecked add the K42 fix left behind; release returns the correct Err.
+
+## K84: var/std of data containing NaN or inf returns +inf instead of NaN (regression from the K67 fix)
+- Status: open (found while rebasing onto 691e11b (#91))
+- Location: jix/src/ops/reduction.rs:1933
+- Notes: The #91 variance finalize maps every `m2` that is not `>= 0.0` to +inf, to turn an overflowed (negative) m2 into inf. A NaN m2 also fails `>= 0.0`, so `var([nan, 1.0])`, `std([1.0, nan, 2.0])` and `var([inf, 1.0])` return inf; numpy, and jix before #91, give nan. Same through Python (`jix.var`, `jix.std`) and for complex inputs. The sign of m2 alone cannot tell overflow from a NaN / inf input (F002 also had finite inputs giving a NaN m2), so the fix needs another signal, e.g. a non-finite-input flag in the state or a finite mean.

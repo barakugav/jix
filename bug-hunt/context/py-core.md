@@ -175,6 +175,13 @@ Line numbers in this doc refer to bb1ee2c.
 ### Changed in 4d11918 (#90) - supersedes conflicting statements above
 - write_array rejects append-mode files and no longer lists gzip.GzipFile as supported (K49, K57).
 
+### Changed in 691e11b (#91) - supersedes conflicting statements above
+- `Array.numpy()` of a dtype with an inner shape allocates the base dtype with the inner dims
+  appended to the shape, and takes the array's strides from the first `ndim` numpy dims.
+  `numpy(out=)` must have those trailing inner dims, C-contiguous (`check_output_array`) (K66).
+- Operand inputs accept any stride, negative included, on a dim of length <= 1 (operand.rs:171-178)
+  (K80). This supersedes the "negative strides rejected even on extent<=1 dims" statements above.
+
 ## Hot spots
 
 - Stride rebuild in `numpy()` (`array.rs:563-592`): it pops `np_arr.strides()` from the end
