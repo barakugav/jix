@@ -19,7 +19,10 @@ pub(crate) struct NdIter<D: Dimension, E> {
     /// The index of the item to be yielded next
     current_idx: D::Vec<u64>,
     exhausted: bool,
-    pub(crate) extensions: E,
+    /// Passed [`check_ndim`](NdIterExtension::check_ndim) for this iterator's ndim, which the
+    /// unchecked [`on_increase`](NdIterExtension::on_increase) and
+    /// [`on_decrease`](NdIterExtension::on_decrease) calls rely on, so it must not be swapped out.
+    extensions: E,
 }
 
 impl<D, E> NdIter<D, E>
@@ -48,6 +51,7 @@ where
         let begin_slice = begin.as_ref();
         let end_slice = end.as_ref();
         let ndim = begin_slice.len();
+        // Not a debug assertion: `advance_dim` and the extensions index by dim unchecked.
         assert!(
             begin_slice.len() == ndim
                 && end_slice.len() == ndim
@@ -77,7 +81,8 @@ where
             macro_rules! carry_ladder {
                 ($this:ident, $ndim:ident $(, $dim:literal)*) => {
                     $(
-                        if $dim < $ndim && $this.advance_dim($dim) {
+                        // SAFETY: `$dim < $ndim`, checked first.
+                        if $dim < $ndim && unsafe { $this.advance_dim($dim) } {
                             return true;
                         }
                     )*
@@ -87,7 +92,8 @@ where
         } else {
             let ndim = self.counters.as_ref().len();
             for dim in (0..ndim).rev() {
-                if self.advance_dim(dim) {
+                // SAFETY: `dim < ndim`.
+                if unsafe { self.advance_dim(dim) } {
                     return true;
                 }
             }
@@ -96,27 +102,42 @@ where
     }
 
     /// Advance the iterator along a single dim, returning `false` if the dim wrapped back to `begin`.
+    ///
+    /// # Safety
+    ///
+    /// `dim` must be less than the iterator's ndim.
     #[inline(always)]
-    fn advance_dim(&mut self, dim: usize) -> bool {
+    unsafe fn advance_dim(&mut self, dim: usize) -> bool {
+        debug_assert!(dim < self.counters.as_ref().len());
+        // SAFETY: the constructor gives every per-dim vec the iterator's ndim as its length, and
+        // nothing resizes them.
+        let (counter, idx, dim_len) = unsafe {
+            (
+                self.counters.as_mut().get_unchecked_mut(dim),
+                self.current_idx.as_mut().get_unchecked_mut(dim),
+                *self.shape.as_ref().get_unchecked(dim),
+            )
+        };
         // `counters[dim]` counts the current position too, so it is >= 1 here and cannot underflow.
-        debug_assert!(self.counters[dim] >= 1);
-        let remaining = self.counters[dim] - 1;
-        self.counters[dim] = remaining;
+        debug_assert!(*counter >= 1);
+        let remaining = *counter - 1;
+        *counter = remaining;
 
         if remaining != 0 {
-            let after = self.current_idx[dim] + 1;
-            self.current_idx[dim] = after;
-            self.extensions.on_increase(dim, after, 1);
+            let after = *idx + 1;
+            *idx = after;
+            // SAFETY: the extensions passed `check_ndim` for the iterator's ndim.
+            unsafe { self.extensions.on_increase(dim, after, 1) };
             return true;
         }
 
         // dim overflow, reset to begin
-        let dim_len = self.shape[dim];
         let diff = dim_len - 1;
-        let begin = self.current_idx[dim] - diff;
-        self.counters[dim] = dim_len;
-        self.current_idx[dim] = begin;
-        self.extensions.on_decrease(dim, begin, diff);
+        let begin = *idx - diff;
+        *counter = dim_len;
+        *idx = begin;
+        // SAFETY: the extensions passed `check_ndim` for the iterator's ndim.
+        unsafe { self.extensions.on_decrease(dim, begin, diff) };
         false
     }
 
@@ -197,12 +218,27 @@ pub(crate) trait NdIterExtension {
     /// are reported (as decreases) before the dim that was incremented. All of a step's changes
     /// arrive before [`value`](NdIterExtension::value) is called, and the last element's step also
     /// reports the wrap that runs off the end of the walk.
-    fn on_increase(&mut self, dim: usize, after: u64, diff: u64);
-    fn on_decrease(&mut self, dim: usize, after: u64, diff: u64);
+    ///
+    /// # Safety
+    ///
+    /// `dim` must be less than an `ndim` that [`check_ndim`](NdIterExtension::check_ndim) accepted.
+    unsafe fn on_increase(&mut self, dim: usize, after: u64, diff: u64);
+    /// Called when dimension `dim` moves back to `after`, a change of `diff` positions.
+    ///
+    /// # Safety
+    ///
+    /// Same as [`on_increase`](NdIterExtension::on_increase).
+    unsafe fn on_decrease(&mut self, dim: usize, after: u64, diff: u64);
 
     /// Returns the current derived value after all index changes have been applied.
     fn value(&self) -> Self::Item<'_>;
 
+    /// Returns whether the extension can follow a walk over `ndim` dims.
+    ///
+    /// [`on_increase`](NdIterExtension::on_increase) and
+    /// [`on_decrease`](NdIterExtension::on_decrease) may index the extension's per-dim data by
+    /// `dim` unchecked, relying on this: it must reject any `ndim` that would make that out of
+    /// bounds.
     fn check_ndim(&self, ndim: usize) -> bool;
 
     /// The merged extension type of `Self` and `E`.
@@ -252,9 +288,9 @@ where
 impl NdIterExtension for () {
     type Item<'a> = ();
     #[inline(always)]
-    fn on_increase(&mut self, _dim: usize, _after: u64, _diff: u64) {}
+    unsafe fn on_increase(&mut self, _dim: usize, _after: u64, _diff: u64) {}
     #[inline(always)]
-    fn on_decrease(&mut self, _dim: usize, _after: u64, _diff: u64) {}
+    unsafe fn on_decrease(&mut self, _dim: usize, _after: u64, _diff: u64) {}
     #[inline(always)]
     fn value(&self) {}
     #[inline(always)]
@@ -279,12 +315,18 @@ where
     where
         Self: 'a;
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, after: u64, diff: u64) {
-        self.0.on_increase(dim, after, diff);
+    unsafe fn on_increase(&mut self, dim: usize, after: u64, diff: u64) {
+        // SAFETY: a tuple passes `check_ndim` only if every member does.
+        unsafe {
+            self.0.on_increase(dim, after, diff);
+        }
     }
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, after: u64, diff: u64) {
-        self.0.on_decrease(dim, after, diff);
+    unsafe fn on_decrease(&mut self, dim: usize, after: u64, diff: u64) {
+        // SAFETY: a tuple passes `check_ndim` only if every member does.
+        unsafe {
+            self.0.on_decrease(dim, after, diff);
+        }
     }
     #[inline(always)]
     fn value(&self) -> Self::Item<'_> {
@@ -311,14 +353,20 @@ where
     where
         Self: 'a;
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, after: u64, diff: u64) {
-        self.0.on_increase(dim, after, diff);
-        self.1.on_increase(dim, after, diff);
+    unsafe fn on_increase(&mut self, dim: usize, after: u64, diff: u64) {
+        // SAFETY: a tuple passes `check_ndim` only if every member does.
+        unsafe {
+            self.0.on_increase(dim, after, diff);
+            self.1.on_increase(dim, after, diff);
+        }
     }
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, after: u64, diff: u64) {
-        self.0.on_decrease(dim, after, diff);
-        self.1.on_decrease(dim, after, diff);
+    unsafe fn on_decrease(&mut self, dim: usize, after: u64, diff: u64) {
+        // SAFETY: a tuple passes `check_ndim` only if every member does.
+        unsafe {
+            self.0.on_decrease(dim, after, diff);
+            self.1.on_decrease(dim, after, diff);
+        }
     }
     #[inline(always)]
     fn value(&self) -> Self::Item<'_> {
@@ -347,16 +395,22 @@ where
         Self: 'a;
 
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, after: u64, diff: u64) {
-        self.0.on_increase(dim, after, diff);
-        self.1.on_increase(dim, after, diff);
-        self.2.on_increase(dim, after, diff);
+    unsafe fn on_increase(&mut self, dim: usize, after: u64, diff: u64) {
+        // SAFETY: a tuple passes `check_ndim` only if every member does.
+        unsafe {
+            self.0.on_increase(dim, after, diff);
+            self.1.on_increase(dim, after, diff);
+            self.2.on_increase(dim, after, diff);
+        }
     }
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, after: u64, diff: u64) {
-        self.0.on_decrease(dim, after, diff);
-        self.1.on_decrease(dim, after, diff);
-        self.2.on_decrease(dim, after, diff);
+    unsafe fn on_decrease(&mut self, dim: usize, after: u64, diff: u64) {
+        // SAFETY: a tuple passes `check_ndim` only if every member does.
+        unsafe {
+            self.0.on_decrease(dim, after, diff);
+            self.1.on_decrease(dim, after, diff);
+            self.2.on_decrease(dim, after, diff);
+        }
     }
     #[inline(always)]
     fn value(&self) -> Self::Item<'_> {
@@ -559,10 +613,10 @@ mod tests {
     impl NdIterExtension for ChangeLog {
         // number of on_increase/decrease calls so far when value() is called
         type Item<'a> = usize;
-        fn on_increase(&mut self, dim: usize, after: u64, _diff: u64) {
+        unsafe fn on_increase(&mut self, dim: usize, after: u64, _diff: u64) {
             self.log.push((dim, after));
         }
-        fn on_decrease(&mut self, dim: usize, after: u64, _diff: u64) {
+        unsafe fn on_decrease(&mut self, dim: usize, after: u64, _diff: u64) {
             self.log.push((dim, after));
         }
         fn value(&self) -> usize {

@@ -31,12 +31,16 @@ impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffset<D, S> {
         Self: 'a;
 
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, _after: u64, diff: u64) {
-        self.offset += S::from_u64(diff) * self.strides[dim];
+    unsafe fn on_increase(&mut self, dim: usize, _after: u64, diff: u64) {
+        // SAFETY: `check_ndim` checked the strides' length, and the caller passes `dim` below it.
+        let stride = unsafe { *self.strides.as_ref().get_unchecked(dim) };
+        self.offset += S::from_u64(diff) * stride;
     }
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, _after: u64, diff: u64) {
-        self.offset -= S::from_u64(diff) * self.strides[dim];
+    unsafe fn on_decrease(&mut self, dim: usize, _after: u64, diff: u64) {
+        // SAFETY: as in `on_increase`.
+        let stride = unsafe { *self.strides.as_ref().get_unchecked(dim) };
+        self.offset -= S::from_u64(diff) * stride;
     }
 
     #[inline(always)]
@@ -79,17 +83,22 @@ impl<D: Dimension, S: Idx, const N: usize> NdIterExtension
         Self: 'a;
 
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, _after: u64, diff: u64) {
+    unsafe fn on_increase(&mut self, dim: usize, _after: u64, diff: u64) {
         let diff = S::from_u64(diff);
         for i in 0..N {
-            self.offsets[i] += diff * self.strides[i][dim];
+            // SAFETY: `check_ndim` checked every operand's strides' length, and the caller passes
+            // `dim` below it.
+            let stride = unsafe { *self.strides[i].as_ref().get_unchecked(dim) };
+            self.offsets[i] += diff * stride;
         }
     }
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, _after: u64, diff: u64) {
+    unsafe fn on_decrease(&mut self, dim: usize, _after: u64, diff: u64) {
         let diff = S::from_u64(diff);
         for i in 0..N {
-            self.offsets[i] -= diff * self.strides[i][dim];
+            // SAFETY: as in `on_increase`.
+            let stride = unsafe { *self.strides[i].as_ref().get_unchecked(dim) };
+            self.offsets[i] -= diff * stride;
         }
     }
 
@@ -130,17 +139,20 @@ impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffsetMultiDyn<D,
         Self: 'a;
 
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, _after: u64, diff: u64) {
+    unsafe fn on_increase(&mut self, dim: usize, _after: u64, diff: u64) {
         let diff = S::from_u64(diff);
         for (offset, strides) in self.offsets.iter_mut().zip(self.strides.iter()) {
-            *offset += diff * strides[dim];
+            // SAFETY: `check_ndim` checked every operand's strides' length, and the caller passes
+            // `dim` below it.
+            *offset += diff * unsafe { *strides.as_ref().get_unchecked(dim) };
         }
     }
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, _after: u64, diff: u64) {
+    unsafe fn on_decrease(&mut self, dim: usize, _after: u64, diff: u64) {
         let diff = S::from_u64(diff);
         for (offset, strides) in self.offsets.iter_mut().zip(self.strides.iter()) {
-            *offset -= diff * strides[dim];
+            // SAFETY: as in `on_increase`.
+            *offset -= diff * unsafe { *strides.as_ref().get_unchecked(dim) };
         }
     }
 

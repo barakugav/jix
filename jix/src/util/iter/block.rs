@@ -99,29 +99,48 @@ where
     where
         Self: 'a;
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, after: u64, _diff: u64) {
-        let (low, high) = &self.borders[dim];
+    unsafe fn on_increase(&mut self, dim: usize, after: u64, _diff: u64) {
+        // SAFETY: `check_ndim` checked the length of every per-dim vec, and the caller passes
+        // `dim` below it.
+        let ((low, high), block_len) = unsafe {
+            (
+                self.borders.as_ref().get_unchecked(dim),
+                *self.block_shape.as_ref().get_unchecked(dim),
+            )
+        };
         let (offset, size) = if after != high.index {
             debug_assert_ne!(after, low.index);
-            (0, self.block_shape[dim])
+            (0, block_len)
         } else {
             (high.inner_offset, high.length)
         };
-        self.inner_offset[dim] = offset;
-        self.current_block_size[dim] = size;
+        // SAFETY: as above.
+        unsafe {
+            *self.inner_offset.as_mut().get_unchecked_mut(dim) = offset;
+            *self.current_block_size.as_mut().get_unchecked_mut(dim) = size;
+        }
     }
 
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, after: u64, _diff: u64) {
-        let (low, high) = &self.borders[dim];
+    unsafe fn on_decrease(&mut self, dim: usize, after: u64, _diff: u64) {
+        // SAFETY: as in `on_increase`.
+        let ((low, high), block_len) = unsafe {
+            (
+                self.borders.as_ref().get_unchecked(dim),
+                *self.block_shape.as_ref().get_unchecked(dim),
+            )
+        };
         let (offset, size) = if after != low.index {
             debug_assert_ne!(after, high.index);
-            (0, self.block_shape[dim])
+            (0, block_len)
         } else {
             (low.inner_offset, low.length)
         };
-        self.inner_offset[dim] = offset;
-        self.current_block_size[dim] = size;
+        // SAFETY: as above.
+        unsafe {
+            *self.inner_offset.as_mut().get_unchecked_mut(dim) = offset;
+            *self.current_block_size.as_mut().get_unchecked_mut(dim) = size;
+        }
     }
 
     #[inline(always)]
