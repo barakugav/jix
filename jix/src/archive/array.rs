@@ -11,7 +11,7 @@ use crate::codec::{DecoderCodecConfig, ReadContext};
 use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
-use crate::util::{dim_arr, DimBitmap, Idx, IterExt};
+use crate::util::{dim_arr, DimBitmap, IterExt};
 use crate::{ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, TypeDyn};
 
 impl Array<Compact<TypeDyn>> {
@@ -487,7 +487,7 @@ where
                 if s == 0 {
                     0
                 } else {
-                    s.ceil_to_multiple(b)
+                    s.next_multiple_of(b)
                 }
             })
             .try_shape_product()

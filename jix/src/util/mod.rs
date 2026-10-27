@@ -63,14 +63,7 @@ pub(crate) trait Idx:
     fn u64(self) -> u64;
     fn from_u64(n: u64) -> Self;
 
-    fn div_ceil(self, rhs: Self) -> Self;
     fn checked_mul(self, rhs: Self) -> Option<Self>;
-
-    #[inline(always)]
-    fn ceil_to_multiple(self, m: Self) -> Self {
-        debug_assert!(m > Self::ZERO);
-        self.div_ceil(m) * m
-    }
 
     #[inline(always)]
     fn floor_to_multiple(self, m: Self) -> Self {
@@ -91,11 +84,6 @@ macro_rules! impl_idx_for_primitive {
             #[inline(always)]
             fn from_u64(n: u64) -> Self {
                 n as $t
-            }
-
-            #[inline(always)]
-            fn div_ceil(self, rhs: Self) -> Self {
-                self.div_ceil(rhs)
             }
 
             #[inline(always)]
