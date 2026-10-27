@@ -188,9 +188,9 @@ mod tests {
     #[test]
     fn strides_offset_1d_stride_1() {
         let ext = NdIterExtStridesOffset::new(dv(&[1usize]), 0);
-        let iter = NdIter::new(dv(&[8u64]), ext);
+        let mut iter = NdIter::new(dv(&[8u64]), ext);
         let mut i = 0usize;
-        for (_, offset) in iter {
+        while let Some((_, offset)) = iter.next() {
             assert_eq!(offset, i, "step {i}");
             i += 1;
         }
@@ -201,9 +201,9 @@ mod tests {
     fn strides_offset_1d_larger_stride() {
         let stride = 8usize;
         let ext = NdIterExtStridesOffset::new(dv(&[stride]), 0);
-        let iter = NdIter::new(dv(&[8u64]), ext);
+        let mut iter = NdIter::new(dv(&[8u64]), ext);
         let mut i = 0usize;
-        for (_, offset) in iter {
+        while let Some((_, offset)) = iter.next() {
             assert_eq!(offset, i * stride, "step {i}");
             i += 1;
         }
@@ -216,9 +216,9 @@ mod tests {
         let cols = 4usize;
         let elem = 4usize; // e.g. f32
         let ext = NdIterExtStridesOffset::new(dv(&[cols * elem, elem]), 0);
-        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
+        let mut iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
         let mut flat = 0usize;
-        for (_, offset) in iter {
+        while let Some((_, offset)) = iter.next() {
             assert_eq!(offset, flat * elem, "flat index {flat}");
             flat += 1;
         }
@@ -232,12 +232,12 @@ mod tests {
         let rows = 2usize;
         let cols = 3usize;
         let ext = NdIterExtStridesOffset::new(dv(&[1, rows]), 0);
-        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
+        let mut iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
         // Iteration order is row-major by *index*, but the offsets follow the column-major layout:
         // [0,0]=0, [0,1]=2, [0,2]=4, [1,0]=1, [1,1]=3, [1,2]=5
         let expected_offsets: &[usize] = &[0, 2, 4, 1, 3, 5];
         let mut i = 0usize;
-        for (_, offset) in iter {
+        while let Some((_, offset)) = iter.next() {
             assert_eq!(offset, expected_offsets[i], "step {i}");
             i += 1;
         }
@@ -250,10 +250,10 @@ mod tests {
         // Initial offset = 1*4 + 1*1 = 5.
         // Expected traversal offsets: [1,1]=5, [1,2]=6, [2,1]=9, [2,2]=10.
         let ext = NdIterExtStridesOffset::new(dv(&[4usize, 1]), 4 + 1);
-        let iter = NdIter::new_with_begin(dv(&[1u64, 1]), dv(&[3u64, 3]), ext);
+        let mut iter = NdIter::new_with_begin(dv(&[1u64, 1]), dv(&[3u64, 3]), ext);
         let expected: &[usize] = &[5, 6, 9, 10];
         let mut i = 0;
-        for (_, offset) in iter {
+        while let Some((_, offset)) = iter.next() {
             assert_eq!(offset, expected[i], "step {i}");
             i += 1;
         }
@@ -272,7 +272,7 @@ mod tests {
         // The offset type is generic over `Idx`, not just `usize`.
         let ext = NdIterExtStridesOffset::new(dv(&[3u64, 1]), 0u64);
         let iter = NdIter::new(dv(&[2u64, 3]), ext);
-        let offsets: Vec<u64> = iter.map(|(_, offset)| offset).collect();
+        let offsets: Vec<u64> = iter.map(|_, offset| offset).collect();
         assert_eq!(offsets, vec![0, 1, 2, 3, 4, 5]);
     }
 
@@ -283,9 +283,9 @@ mod tests {
         let cols = 4usize;
         let mut data = vec![0u32; rows * cols];
         let ext = NdIterExtStridesOffset::new(dv(&[cols, 1]), 0);
-        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
+        let mut iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
         let mut flat = 0u32;
-        for (_, offset) in iter {
+        while let Some((_, offset)) = iter.next() {
             assert_eq!(offset, flat as usize, "flat index {flat}");
             data[offset] = flat * 10 + 7;
             flat += 1;
@@ -301,9 +301,9 @@ mod tests {
     #[test]
     fn strides_offset_dim1_static() {
         let ext = NdIterExtStridesOffset::new([1usize], 0);
-        let iter = NdIter::<Dim<1>, _>::new([8u64], ext);
+        let mut iter = NdIter::<Dim<1>, _>::new([8u64], ext);
         let mut i = 0usize;
-        for (_, offset) in iter {
+        while let Some((_, offset)) = iter.next() {
             assert_eq!(offset, i, "step {i}");
             i += 1;
         }
@@ -316,9 +316,9 @@ mod tests {
         let cols = 4usize;
         let elem = 4usize;
         let ext = NdIterExtStridesOffset::new([cols * elem, elem], 0);
-        let iter = NdIter::<Dim<2>, _>::new([rows as u64, cols as u64], ext);
+        let mut iter = NdIter::<Dim<2>, _>::new([rows as u64, cols as u64], ext);
         let mut flat = 0usize;
-        for (_, offset) in iter {
+        while let Some((_, offset)) = iter.next() {
             assert_eq!(offset, flat * elem, "flat index {flat}");
             flat += 1;
         }

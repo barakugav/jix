@@ -190,10 +190,10 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 out_shape[dim]
             }
         });
-        let iter = NdIter::builder(iter_shape)
+        let mut iter = NdIter::builder(iter_shape)
             .with_strides_offset_ext(out_strides.to_dim_vec::<DimDyn>(), 0)
             .build();
-        for (idx, dst_byte_offset) in iter {
+        while let Some((idx, dst_byte_offset)) = iter.next() {
             let inner_index = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
                 if ds.step == 1 {

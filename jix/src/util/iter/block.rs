@@ -179,9 +179,11 @@ mod tests {
         block_size: Vec<u64>,
     }
 
-    fn collect(iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>>) -> Vec<BlocksIterItemOwned> {
+    fn collect(
+        mut iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>>,
+    ) -> Vec<BlocksIterItemOwned> {
         let mut out = Vec::new();
-        for (block_idx, (inner_offset, block_size)) in iter {
+        while let Some((block_idx, (inner_offset, block_size))) = iter.next() {
             out.push(BlocksIterItemOwned {
                 block_idx: block_idx.as_ref().to_vec(),
                 inner_offset: inner_offset.as_ref().to_vec(),

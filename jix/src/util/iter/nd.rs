@@ -8,6 +8,10 @@ use crate::{DimVec, Dimension};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
 ///
+/// A lending iterator: [`next`](Self::next) borrows the current index out of the iterator instead
+/// of cloning it, so it is not an [`Iterator`]. Drive it with `while let Some(..) = iter.next()`,
+/// [`for_each`](Self::for_each), or turn it into one with [`map`](Self::map).
+///
 /// Extensions are supported via the generic parameter `E`, see [`NdIterExtension`].
 /// The iterator notifies the extension on each index change, allowing extensions to track derived
 /// state (e.g. a pointer into a strided buffer) without recomputing it from scratch.
@@ -16,10 +20,19 @@ pub(crate) struct NdIter<D: Dimension, E> {
     shape: D::Vec<u64>,
     /// Positions left on each dim
     counters: D::Vec<u64>,
-    /// The index of the item to be yielded next
+    /// The index of the item last yielded, or of the first one before the first `next`
     current_idx: D::Vec<u64>,
-    exhausted: bool,
+    state: NdIterState,
     pub(crate) extensions: E,
+}
+
+#[derive(Clone, Copy)]
+enum NdIterState {
+    /// `current_idx` is the first item, not yielded yet.
+    Fresh,
+    /// `current_idx` was yielded, the iterator must advance before yielding again.
+    Yielded,
+    Exhausted,
 }
 
 impl<D, E> NdIter<D, E>
@@ -65,9 +78,48 @@ where
             shape,
             counters,
             current_idx: begin,
-            exhausted: nitems == 0,
+            state: if nitems == 0 {
+                NdIterState::Exhausted
+            } else {
+                NdIterState::Fresh
+            },
             extensions,
         }
+    }
+
+    /// Advances to the next index and lends it out, along with the extensions' value there.
+    ///
+    /// Returns `None` once exhausted, and on every call after that.
+    #[inline(always)]
+    pub(crate) fn next(&mut self) -> Option<(&D::Vec<u64>, E::Item<'_>)> {
+        match self.state {
+            NdIterState::Fresh => {}
+            NdIterState::Yielded => {
+                if !self.advance() {
+                    self.state = NdIterState::Exhausted;
+                    return None;
+                }
+            }
+            NdIterState::Exhausted => return None,
+        }
+        // Stored after `advance` on every yield, not only when leaving `Fresh`: `advance` writes
+        // the per-dim vecs at runtime indices, which the compiler cannot tell apart from `state`.
+        // Storing it last lets the next call's check use this value instead of reloading it.
+        self.state = NdIterState::Yielded;
+        Some((&self.current_idx, self.extensions.value()))
+    }
+
+    /// Turns the iterator into an [`Iterator`] over `f(index, value)`.
+    ///
+    /// `f` borrows the index and the extensions' value for the duration of a single call only, so
+    /// its output cannot borrow from them.
+    #[allow(unused)]
+    #[inline(always)]
+    pub(crate) fn map<R, F>(self, f: F) -> NdIterMap<D, E, F>
+    where
+        F: FnMut(&D::Vec<u64>, E::Item<'_>) -> R,
+    {
+        NdIterMap { iter: self, f }
     }
 
     /// Advance the iterator to the next index, returning `false` if the iterator is exhausted.
@@ -120,11 +172,19 @@ where
         false
     }
 
+    /// Calls `f` on every remaining item, as [`next`](Self::next) would yield them.
     #[inline(always)]
     pub(crate) fn for_each(mut self, mut f: impl FnMut(&D::Vec<u64>, E::Item<'_>)) {
-        if self.exhausted {
-            return;
+        match self.state {
+            NdIterState::Fresh => {}
+            NdIterState::Yielded => {
+                if !self.advance() {
+                    return;
+                }
+            }
+            NdIterState::Exhausted => return,
         }
+        // A do-while over the positions, with no state to check on each step.
         loop {
             f(&self.current_idx, self.extensions.value());
             if !self.advance() {
@@ -133,11 +193,23 @@ where
         }
     }
 
+    /// The number of items left to yield, as [`Iterator::size_hint`] reports it.
     #[inline]
-    fn remaining(&self) -> u64 {
-        if self.exhausted {
-            return 0;
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = match self.state {
+            NdIterState::Fresh => self.remaining_from_current(),
+            NdIterState::Yielded => self.remaining_from_current() - 1,
+            NdIterState::Exhausted => 0,
+        };
+        match usize::try_from(remaining) {
+            Ok(len) => (len, Some(len)),
+            Err(_) => (usize::MAX, None),
         }
+    }
+
+    /// The number of positions from `current_idx` (inclusive) to the end of the walk.
+    #[inline]
+    fn remaining_from_current(&self) -> u64 {
         let (shape, counters) = (self.shape.as_ref(), self.counters.as_ref());
         let mut remaining = 1;
         let mut dim_volume = 1;
@@ -150,32 +222,29 @@ where
     }
 }
 
-impl<D, E, I> Iterator for NdIter<D, E>
+/// The [`Iterator`] returned by [`NdIter::map`].
+pub(crate) struct NdIterMap<D: Dimension, E, F> {
+    iter: NdIter<D, E>,
+    f: F,
+}
+
+impl<D, E, F, R> Iterator for NdIterMap<D, E, F>
 where
     D: Dimension,
-    // `NdIter` is a real [`Iterator`] whenever its extension's item does not borrow from it.
-    E: 'static + for<'a> NdIterExtension<Item<'a> = I>,
+    E: NdIterExtension,
+    F: FnMut(&D::Vec<u64>, E::Item<'_>) -> R,
 {
-    type Item = (D::Vec<u64>, I);
+    type Item = R;
 
     #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.exhausted {
-            return None;
-        }
-        // `I` does not borrow from the extension, so the item can be read off the current
-        // position before we call `advance` - the same do-while shape as `for_each`.
-        let item = (DimVec::clone(&self.current_idx), self.extensions.value());
-        self.exhausted = !self.advance();
-        Some(item)
+    fn next(&mut self) -> Option<R> {
+        let (idx, value) = self.iter.next()?;
+        Some((self.f)(idx, value))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match usize::try_from(self.remaining()) {
-            Ok(len) => (len, Some(len)),
-            Err(_) => (usize::MAX, None),
-        }
+        self.iter.size_hint()
     }
 }
 
@@ -195,8 +264,9 @@ pub(crate) trait NdIterExtension {
     ///
     /// A single step delivers its changes right to left, so the dims that wrapped back to `begin`
     /// are reported (as decreases) before the dim that was incremented. All of a step's changes
-    /// arrive before [`value`](NdIterExtension::value) is called, and the last element's step also
-    /// reports the wrap that runs off the end of the walk.
+    /// arrive before [`value`](NdIterExtension::value) is called, and the step past the last
+    /// element (the [`NdIter::next`] that returns `None`) also reports the wrap that runs off the
+    /// end of the walk.
     fn on_increase(&mut self, dim: usize, after: u64, diff: u64);
     fn on_decrease(&mut self, dim: usize, after: u64, diff: u64);
 
@@ -239,7 +309,7 @@ where
 
     /// Returns the next multi-dimensional index, or `None` when exhausted.
     #[inline(always)]
-    pub(crate) fn next(&mut self) -> Option<D::Vec<u64>> {
+    pub(crate) fn next(&mut self) -> Option<&D::Vec<u64>> {
         Some(self.0.next()?.0)
     }
 }
@@ -522,7 +592,7 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
 mod tests {
 
     use super::*;
-    use crate::util::iter::strides::NdIterExtStridesOffset;
+    use crate::util::iter::strides::{NdIterExtStridesOffset, NdIterExtStridesOffsetMultiDyn};
     use crate::util::DimArray;
     use crate::{Dim, DimDyn, SliceExt};
 
@@ -714,7 +784,9 @@ mod tests {
 
     #[test]
     fn size_hint_sizes_the_collect_allocation() {
-        let out: Vec<_> = NdIter::<Dim<2>, _>::new([3u64, 4], ()).collect();
+        let out: Vec<_> = NdIter::<Dim<2>, _>::new([3u64, 4], ())
+            .map(|idx, ()| *idx)
+            .collect();
         assert_eq!(out.len(), 12);
         assert_eq!(
             out.capacity(),
@@ -724,11 +796,52 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
+    // Lending: next / map / for_each
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn map_accepts_a_borrowing_extension() {
+        // The multi-dyn extension lends its offsets as a slice; `map` gets to copy them out.
+        let ext = NdIterExtStridesOffsetMultiDyn::<DimDyn, _>::new(
+            vec![dv(&[3usize, 1]), dv(&[1, 2])],
+            vec![0, 0],
+        );
+        let got: Vec<(Vec<u64>, Vec<usize>)> = NdIter::new(dv(&[2u64, 3]), ext)
+            .map(|idx, offsets| (idx.as_ref().to_vec(), offsets.to_vec()))
+            .collect();
+        // Operand 0 is row-major (strides [3, 1]), operand 1 column-major (strides [1, 2]).
+        let expected: Vec<(Vec<u64>, Vec<usize>)> =
+            [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]
+                .map(|(i, j)| (vec![i as u64, j as u64], vec![3 * i + j, i + 2 * j]))
+                .to_vec();
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn map_and_for_each_resume_after_next() {
+        // Both pick up right after the last item `next` yielded, mid-row and at a row's end.
+        let all = collect_indices(NdIter::<Dim<2>, _>::new([3u64, 4], ()));
+        for consumed in 0..=all.len() {
+            let mut iter = NdIter::<Dim<2>, _>::new([3u64, 4], ());
+            for _ in 0..consumed {
+                iter.next();
+            }
+            let via_map: Vec<Vec<u64>> = iter.clone().map(|idx, ()| idx.to_vec()).collect();
+            assert_eq!(via_map, all[consumed..], "map after {consumed} item(s)");
+            let mut via_for_each = Vec::new();
+            iter.for_each(|idx, ()| via_for_each.push(idx.to_vec()));
+            assert_eq!(
+                via_for_each,
+                all[consumed..],
+                "for_each after {consumed} item(s)"
+            );
+        }
+    }
+
+    // ---------------------------------------------------------------------------
     // NdIter with new_with_begin
     // ---------------------------------------------------------------------------
 
-    /// Generic over an abstract `E`, so the `Iterator` impl (which needs a single concrete item
-    /// type for every lifetime) does not apply here - drive the lending `for_each` instead.
     fn collect_indices<D: Dimension, E: NdIterExtension>(iter: NdIter<D, E>) -> Vec<Vec<u64>> {
         let mut out = Vec::new();
         iter.for_each(|idx, _| out.push(idx.as_ref().to_vec()));
@@ -825,10 +938,14 @@ mod tests {
 
     #[test]
     fn on_change_called_once_for_innermost_advance() {
-        // The walk yields first and carries afterwards, so the notifications a step produces
-        // describe the move *out* of the index it just yielded. Here: [0,0] -> [0,1].
+        // The walk carries first and yields afterwards, so the notifications a step produces
+        // describe the move *into* the index it yields. Here: [0,0] -> [0,1].
         let mut iter = NdIter::<Dim<2>, _>::new([3u64, 4], ChangeLog::new());
-        iter.next(); // emit [0,0], then carry to [0,1]
+        iter.next(); // emit [0,0]
+        assert!(iter.extensions.log.is_empty());
+        let (idx, n_changes) = iter.next().unwrap(); // carry to [0,1], then emit it
+        assert_eq!(*idx, [0, 1]);
+        assert_eq!(n_changes, 1, "the carry arrives before the value is read");
         assert_eq!(iter.extensions.log, vec![(1usize, 1)]);
     }
 
@@ -837,11 +954,11 @@ mod tests {
         // Carrying out of [0,3] into [1,0]: dim 1 resets, then the carry moves left and dim 0
         // increments.
         let mut iter = NdIter::<Dim<2>, _>::new([3u64, 4], ChangeLog::new());
-        for _ in 0..3 {
+        for _ in 0..4 {
             iter.next();
-        } // emit [0,0], [0,1], [0,2]
+        } // emit [0,0], [0,1], [0,2], [0,3]
         let before = iter.extensions.log.len();
-        iter.next(); // emit [0,3], then carry to [1,0]
+        iter.next(); // carry to [1,0], then emit it
         let new: Vec<_> = iter.extensions.log[before..].to_vec();
         assert_eq!(new, vec![(1, 0), (0, 1)]);
     }
@@ -850,11 +967,11 @@ mod tests {
     fn on_change_all_smaller_dims_reset_in_order() {
         // Shape [2,3,4]: the carry resets dims 2 and 1 on its way left, then increments dim 0.
         let mut iter = NdIter::<Dim<3>, _>::new([2u64, 3, 4], ChangeLog::new());
-        for _ in 0..(3 * 4 - 1) {
+        for _ in 0..(3 * 4) {
             iter.next();
-        } // emit up to [0,2,2]
+        } // emit up to [0,2,3]
         let before = iter.extensions.log.len();
-        iter.next(); // emit [0,2,3], then carry to [1,0,0]
+        iter.next(); // carry to [1,0,0], then emit it
         let new: Vec<_> = iter.extensions.log[before..].to_vec();
         assert_eq!(new, vec![(2, 0), (1, 0), (0, 1)]);
     }
@@ -863,12 +980,12 @@ mod tests {
     fn on_change_reset_targets_begin_not_zero() {
         // begin=[1,2], end=[3,5]: when dim 0 wraps, dim 1 should reset to 2 (begin), not 0.
         let mut iter = NdIter::<Dim<2>, _>::new_with_begin([1u64, 2], [3u64, 5], ChangeLog::new());
-        // emit [1,2], [1,3] - up to the element before the last of the first row
-        for _ in 0..2 {
+        // emit [1,2], [1,3], [1,4] - the whole first row
+        for _ in 0..3 {
             iter.next();
         }
         let before = iter.extensions.log.len();
-        iter.next(); // emit [1,4], then carry to [2,2]
+        iter.next(); // carry to [2,2], then emit it
         let new: Vec<_> = iter.extensions.log[before..].to_vec();
         assert_eq!(new[0], (1, 2), "dim 1 resets to begin=2, not 0");
         assert_eq!(new[1], (0, 2), "dim 0: 1->2");
@@ -876,7 +993,8 @@ mod tests {
 
     #[test]
     fn on_change_total_call_count_for_full_2d_traversal() {
-        // Every one of the R*C emitted elements is followed by a carry:
+        // Every one of the R*C emitted elements is followed by a carry, the last one by the
+        // `next` that returns `None`:
         //   R*(C-1) of them advance dim 1 only                        -> 1 change each,
         //   R-1 of them end a row, wrapping dim 1 and bumping dim 0   -> 2 changes each,
         //   and the very last one wraps both dims off the end         -> 2 changes.
@@ -907,9 +1025,9 @@ mod tests {
             NdIterExtStridesOffset::new(dv(&[3usize, 1]), 0),
             NdIterExtStridesOffset::new(dv(&[6usize, 2]), 0),
         );
-        let iter = NdIter::new(dv(&[2u64, 3]), ext);
+        let mut iter = NdIter::new(dv(&[2u64, 3]), ext);
         let mut flat = 0usize;
-        for (_, (oa, ob)) in iter {
+        while let Some((_, (oa, ob))) = iter.next() {
             assert_eq!(oa, flat, "a step {flat}");
             assert_eq!(ob, flat * 2, "b step {flat}");
             flat += 1;
@@ -925,7 +1043,7 @@ mod tests {
         );
         let mut iter = NdIter::new(dv(&[4u64]), ext);
         let mut offsets: Vec<usize> = Vec::new();
-        for (_, (offset, _)) in iter.by_ref() {
+        while let Some((_, (offset, _))) = iter.next() {
             offsets.push(offset);
         }
         // One carry per emitted element: three that advance dim 0, plus the final one that
@@ -943,9 +1061,9 @@ mod tests {
             NdIterExtStridesOffset::new(dv(&[1usize]), 0),
             NdIterExtStridesOffset::new(dv(&[1usize]), 0),
         );
-        let iter = NdIter::new(dv(&[4u64]), ext);
+        let mut iter = NdIter::new(dv(&[4u64]), ext);
         let mut count = 0usize;
-        for (_, (off_a, off_b, off_c)) in iter {
+        while let Some((_, (off_a, off_b, off_c))) = iter.next() {
             assert_eq!(off_a, count, "step {count}: a");
             assert_eq!(off_a, off_b, "step {count}: a vs b");
             assert_eq!(off_a, off_c, "step {count}: a vs c");
@@ -960,8 +1078,8 @@ mod tests {
 
     #[test]
     fn unit_extension_yields_unit_items() {
-        let iter = NdIter::<Dim<2>, _>::new([2u64, 2], ());
-        for (_, item) in iter {
+        let mut iter = NdIter::<Dim<2>, _>::new([2u64, 2], ());
+        while let Some((_, item)) = iter.next() {
             let _: () = item;
         }
     }
@@ -989,11 +1107,11 @@ mod tests {
     fn builder_single_ext_yields_bare_item() {
         // A single extension appends onto `()`, so the item is the bare offset (not a 1-tuple):
         // `offset` below binds directly to `usize` with no tuple destructuring.
-        let iter = NdIter::builder(dv(&[2u64, 3]))
+        let mut iter = NdIter::builder(dv(&[2u64, 3]))
             .with_strides_offset_ext(dv(&[3usize, 1]), 0)
             .build();
         let mut flat = 0usize;
-        for (_, offset) in iter {
+        while let Some((_, offset)) = iter.next() {
             let _: usize = offset;
             assert_eq!(offset, flat, "step {flat}");
             flat += 1;
@@ -1004,12 +1122,12 @@ mod tests {
     #[test]
     fn builder_two_exts_yield_flat_pair_in_call_order() {
         // dst has stride 2, and a different offset type than src.
-        let iter = NdIter::builder(dv(&[2u64, 3]))
+        let mut iter = NdIter::builder(dv(&[2u64, 3]))
             .with_strides_offset_ext(dv(&[3usize, 1]), 0usize)
             .with_strides_offset_ext(dv(&[6u64, 2]), 0u64)
             .build();
         let mut flat = 0usize;
-        for (_, (src, dst)) in iter {
+        while let Some((_, (src, dst))) = iter.next() {
             let _: usize = src;
             let _: u64 = dst;
             assert_eq!(src, flat, "src step {flat}");
@@ -1026,7 +1144,7 @@ mod tests {
             .with_strides_offset_ext(dv(&[3usize, 1]), 0)
             .with_strides_offset_ext(dv(&[6usize, 2]), 0)
             .build()
-            .map(|(_, pair)| pair)
+            .map(|_, pair| pair)
             .collect();
         let manual: Vec<(usize, usize)> = NdIter::new(
             dv(&[2u64, 3]),
@@ -1035,20 +1153,20 @@ mod tests {
                 NdIterExtStridesOffset::new(dv(&[6usize, 2]), 0),
             ),
         )
-        .map(|(_, pair)| pair)
+        .map(|_, pair| pair)
         .collect();
         assert_eq!(built, manual);
     }
 
     #[test]
     fn builder_three_exts_yield_flat_triple() {
-        let iter = NdIter::builder(dv(&[4u64]))
+        let mut iter = NdIter::builder(dv(&[4u64]))
             .with_strides_offset_ext(dv(&[1usize]), 0)
             .with_strides_offset_ext(dv(&[1usize]), 0)
             .with_strides_offset_ext(dv(&[1usize]), 0)
             .build();
         let mut count = 0usize;
-        for (_, (off_a, off_b, off_c)) in iter {
+        while let Some((_, (off_a, off_b, off_c))) = iter.next() {
             assert_eq!(off_a, count, "step {count}: a");
             assert_eq!(off_a, off_b, "step {count}: a vs b");
             assert_eq!(off_a, off_c, "step {count}: a vs c");

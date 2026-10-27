@@ -132,11 +132,11 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
             }
         });
 
-        let iter = NdIter::builder(iter_shape)
+        let mut iter = NdIter::builder(iter_shape)
             .with_strides_offset_ext(src_ptr_strides, 0)
             .build();
         let nd_copy = NdCopier::new(dtype);
-        for (idx, src_off) in iter {
+        while let Some((idx, src_off)) = iter.next() {
             // The output position on a flipped dim mirrors the source position:
             // out_idx = L-1 - src_idx, placed at the destination's own strides.
             let dst_off = (0..ndim)
