@@ -23,8 +23,9 @@ Node contract (`ElementwisePipelineImpl<T>`, elementwise_pipeline.rs:29-63, pub(
 `ElementwisePipeline` has it as a private bound so external crates cannot implement it):
 - `N_OPERANDS` (:31): exact number of `&Operand` yielded by `operands()`, or `None`. Static path:
   `to_buf` picks `to_buf_impl::<1 + n>` for 1+n <= 16 (:83-116), else `to_buf_impl_dyn`.
-  `to_buf_impl` fills `[&Operand; N]` with `operand_iter.next().unwrap()` (:137) - overcount panics;
-  undercount is only `debug_assert!` (:138): the extra operands never get a cursor, keep
+  `to_buf_impl` fills `[&Operand; N]` with `operand_iter.next().unwrap()` (:137) - if `N_OPERANDS`
+  overcounts (`operands()` yields fewer) the unwrap panics; if it undercounts (`operands()` yields
+  more) that is only `debug_assert!`ed (:138): the extra operands never get a cursor, keep
   `current_ptr == null` (:770) and a release build reads `null + offset`. Combinators:
   `n_operands_sum` / `n_operands_mul` (:943-974); `Constant` = Some(0); Vec/slice sequences = None.
 - `MAX_ITEMSIZE` (:35): max size of leaves, every intermediate value and the output. Only sizes the
