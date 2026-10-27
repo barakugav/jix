@@ -1,0 +1,88 @@
+   Compiling jix v0.0.6 (/home/user/jix/jix)
+warning: linker stderr: clang: argument unused during compilation: '-no-pie' [-Wunused-command-line-argument]
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `jix` (test "repro_2026_10_27_batch5__f002") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 3.12s
+     Running tests/repro_2026_10_27_batch5__f002.rs (target-i686/i686-unknown-linux-musl/release/deps/repro_2026_10_27_batch5__f002-dfe77755c0a87c42)
+
+running 5 tests
+test argmax_index_past_2pow32 ... 
+thread 'argmax_index_past_2pow32' (20538) panicked at tests/repro_2026_10_27_batch5__f002.rs:62:5:
+assertion `left == right` failed
+  left: 16
+ right: 4294967312
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::panicking::assert_failed_inner
+   3: core::panicking::assert_failed::<u64, u64>
+   4: <repro_2026_10_27_batch5__f002::argmax_index_past_2pow32::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test mean_one_dim_longer_than_2pow32 ... 
+thread 'mean_one_dim_longer_than_2pow32' (20539) panicked at tests/repro_2026_10_27_batch5__f002.rs:33:5:
+assertion `left == right` failed
+  left: 3.7252903e-9
+ right: 1.0
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::panicking::assert_failed_inner
+   3: core::panicking::assert_failed::<f32, f32>
+   4: <repro_2026_10_27_batch5__f002::mean_one_dim_longer_than_2pow32::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test sum_multi_cell_layout_longer_than_2pow32 ... 
+thread 'sum_multi_cell_layout_longer_than_2pow32' (20565) panicked at tests/repro_2026_10_27_batch5__f002.rs:52:5:
+assertion `left == right` failed
+  left: [16, 16], shape=[2], strides=[1], layout=CFcf (0xf), const ndim=1
+ right: [4294967312, 4294967312], shape=[2], strides=[1], layout=CFcf (0xf), const ndim=1
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::panicking::assert_failed_inner
+   3: core::panicking::assert_failed::<ndarray::ArrayBase<ndarray::data_repr::OwnedRepr<u64>, ndarray::dimension::dim::Dim<[usize; 1]>, u64>, ndarray::ArrayBase<ndarray::data_repr::OwnedRepr<u64>, ndarray::dimension::dim::Dim<[usize; 1]>, u64>>
+   4: <repro_2026_10_27_batch5__f002::sum_multi_cell_layout_longer_than_2pow32::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test sum_one_dim_longer_than_2pow32 ... 
+thread 'sum_one_dim_longer_than_2pow32' (20670) panicked at tests/repro_2026_10_27_batch5__f002.rs:25:5:
+assertion `left == right` failed
+  left: 16
+ right: 4294967312
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::panicking::assert_failed_inner
+   3: core::panicking::assert_failed::<u64, u64>
+   4: <repro_2026_10_27_batch5__f002::sum_one_dim_longer_than_2pow32::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test sum_two_dims_more_than_2pow32_items ... 
+thread 'sum_two_dims_more_than_2pow32_items' (20672) panicked at tests/repro_2026_10_27_batch5__f002.rs:44:5:
+assertion `left == right` failed
+  left: 65536
+ right: 4295032832
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::panicking::assert_failed_inner
+   3: core::panicking::assert_failed::<u64, u64>
+   4: <repro_2026_10_27_batch5__f002::sum_two_dims_more_than_2pow32_items::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+
+failures:
+
+failures:
+    argmax_index_past_2pow32
+    mean_one_dim_longer_than_2pow32
+    sum_multi_cell_layout_longer_than_2pow32
+    sum_one_dim_longer_than_2pow32
+    sum_two_dims_more_than_2pow32_items
+
+test result: FAILED. 0 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 56.25s
+
+error: test failed, to rerun pass `--test repro_2026_10_27_batch5__f002`

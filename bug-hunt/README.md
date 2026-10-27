@@ -118,25 +118,26 @@ recorded here before batch4 summed every copy and were ~1.8x too high).
 | trial2 (mixed complexity) | 8 | 38 | 28 | 21.1M | 2.6M | 125 min |
 | batch3 (#87 code, 2 untouched subsystems) | 8 | 34 | 23 (+1 intended) | 26.2M | 3.3M | 138 min |
 | batch4 (#90 code, module units only) | 8 | 28 | 18 | 18.8M | 2.4M | 91 min |
+| batch5 (#91 code, module units only) | 12 | 37 | 23 | 26.8M | 2.2M | 122 min |
 
 - A hunter costs 0.7-3.6M; the Rust differential tester is the outlier at 6.0M (168 turns). The
   cost follows how much code it traces, not how "complex" the code is: concept hunters and the
   differential testers cost the most, Python wrappers and shape ops the least.
 - A verifier costs ~0.1-0.9M, one per distinct finding, so verification is 30-40% of a run.
-  Bug density was 3.3, 3.5, 2.9 and 2.25 per unit in the four runs, so the units that are
+  Bug density was 3.3, 3.5, 2.9, 2.25 and 1.9 per unit in the five runs, so the units that are
   "simple" to hunt are not much cheaper overall: py-ops-shape-ops had the cheapest hunter and 8
   findings.
 - Each agent takes ~6.5 min of wall time at 2 agents in parallel.
 - Yield per token differs a lot by kind (findings / hunter cost): module units are the best value
   (codec-archive-archive-io 8 / 0.9M, py-ops-shape-ops 8 / 0.7M, shape-ops-slice-reshape 5 /
-  1.0M); concept units 2 each for 1.2-3.6M; the dynamic testers are bimodal (Python 11 / 2.8M,
+  1.0M, py-core-read-path 5 / 1.7M); concept units 2 each for 1.2-3.6M; the dynamic testers are bimodal (Python 11 / 2.8M,
   Rust 2 / 6.0M). pipeline-simd was the first hunter with no finding (1.75M, a bit-exact SIMD
   differential on every x86 level).
 - Builds leave GBs behind (incremental caches, per-repro test binaries): batch3 ended with 3 GB of
   disk free. setup.sh and the report stage now delete them.
 
-Remaining after batch4: 21 module + 9 concept = 30 units. At ~3M and ~3.5 agents per unit, that
-is ~90M input-equivalent tokens and ~105 agents, i.e. ~6 hours on a 4-core container (2 agents
+Remaining after batch5: 9 module + 9 concept = 18 units. At ~3M and ~3.5 agents per unit, that
+is ~55M input-equivalent tokens and ~65 agents, i.e. ~3.5 hours on a 4-core container (2 agents
 at a time). The workflow runs at most `min(16, CPUs - 2)` agents at once. To go faster on a small
 machine, split the run into batches with `units` and different `runId`s and launch them
 concurrently (scratch file names are run-scoped, so batches do not collide). Memory is the other
@@ -176,7 +177,17 @@ arguments; finished agents return their cached results.
   (1 high), 0 refuted. Nine extend earlier fixes or repeat their pattern at a new site (F006
   reopens K28; F005 is K50 for `ElementType`). pipeline-simd found nothing. Recorded as K66-K83
   in `KNOWN.md`.
-- Next: everything else, with
+- `2026-10-27-batch5` (after #91) - units elementwise-ops-kernel-framework,
+  elementwise-ops-op1-unary-classify-complex, pipeline-nodes, reduction-driver,
+  reduction-scalar-traits, util-nd-iter-unordered, util-nd-iter-ordered, shape-ops-forwarders,
+  shape-ops-join, py-core-read-path, py-ops-operand-broadcast, codec-archive-array-format-dtype:
+  23 confirmed (1 high: a 32-bit heap overflow in var/std), 0 refuted, including 2 regressions from
+  #91's numpy() fix (F005, F015) and an incomplete K58 fix (F019). Recorded as K85-K107 in
+  `KNOWN.md`.
+- Next: the 9 remaining module units (types-dtyped-derive, types-dims-errors,
+  storage-compact-params, util-nd-arr-sequence, py-ops-dispatch-promotion, py-ops-arith-wrappers,
+  py-core-numpy-wrap-dtype, py-core-archive-errstate, py-core-array-surface-util) and the 9 concept
+  units, with
   `skip: ["util-memory", "concept-alignment", "reduction-fold-loops", "pipeline-driver",
   "shape-ops-copy-ops", "codec-archive-codec-pipeline", "elementwise-ops-cmp-clamp-approx",
   "py-ops-shape-ops", "concept-integer-width", "dynamic-python-differential",
@@ -185,4 +196,8 @@ arguments; finished agents return their cached results.
   "dynamic-rust-differential", "pipeline-simd", "elementwise-ops-bitwise-cast",
   "elementwise-ops-where-transmute-subdtype", "reduction-op-kernels",
   "storage-core-array-read-paths", "storage-core-leaf-backends", "shape-ops-slice-reshape",
-  "py-ops-cmp-bitwise-where"]`.
+  "py-ops-cmp-bitwise-where", "elementwise-ops-kernel-framework",
+  "elementwise-ops-op1-unary-classify-complex", "pipeline-nodes", "reduction-driver",
+  "reduction-scalar-traits", "util-nd-iter-unordered", "util-nd-iter-ordered",
+  "shape-ops-forwarders", "shape-ops-join", "py-core-read-path", "py-ops-operand-broadcast",
+  "codec-archive-array-format-dtype"]`.
