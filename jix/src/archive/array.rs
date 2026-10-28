@@ -463,6 +463,11 @@ where
         check_ndim(ndim)?;
         let shape = DimDyn::from_slice(header.shape.as_slice());
         ensure!(
+            shape.as_slice().iter().all(|&s| s <= i64::MAX as u64),
+            InvalidArchive,
+            "array shape {shape:?} has a dim larger than i64::MAX"
+        );
+        ensure!(
             header.block_shape.len() == ndim,
             InvalidArchive,
             "array block_shape has different ndim {} than shape {ndim}",
@@ -622,6 +627,13 @@ mod tests {
         assert!(read_edited(&a, |_, _| {}).is_ok());
         assert!(read_edited(&a, |h, _| h.block_shape[0] = (1 << 32) + 2).is_err());
         assert!(read_edited(&a, |_, b| b.block_size = (1 << 32) + 2).is_err());
+    }
+
+    #[test]
+    fn header_dims_over_i64_are_rejected() {
+        let a = Array::compact_ndarray_with(&ndarray::array![0u8, 1, 2, 3], arr_params(&[2]));
+        let a = a.unwrap();
+        assert!(read_edited(&a, |h, _| h.shape[0] = u64::MAX).is_err());
     }
 
     #[test]
