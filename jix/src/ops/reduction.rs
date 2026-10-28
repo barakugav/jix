@@ -513,6 +513,7 @@ where
         let state_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_buf_len) };
         (state_buf, DimArray::from_slice(out_strides).unwrap())
     } else {
+        check_region_size(index, kernel_state_sizeof)?; // states may be bigger than the output
         let state_buf_len = out_nitems * kernel_state_sizeof;
         tmp_state_buf = context.allocate_buf(state_buf_len, kernel_state_alignof);
         (
@@ -5119,5 +5120,17 @@ pub(crate) mod tests {
         .map(|_| ())
         .unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn var_state_buffer_must_fit_in_memory_on_32_bit() {
+        use crate::ArrayStorage;
+        // The 4-byte output fits, the 24-byte states do not.
+        let n = (1u64 << 32) / 24 + 1;
+        let a = Array::compact_ndarray(&array![[1.0f32]]).unwrap();
+        let v = a.broadcast(&[n, 1]).var(1, 0.0);
+        let ctx = crate::codec::ReadContext::default();
+        assert!(v.storage().read_data(&[0..n], &ctx, None).is_err());
     }
 }
