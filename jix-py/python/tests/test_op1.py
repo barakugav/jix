@@ -128,6 +128,12 @@ def test_log_base10_concrete():
             check_op1_concrete(jix.log10, np.log10, [(dtype, values)], rtol=rtol)
 
 
+@pytest.mark.parametrize("base", [1.0, 0.0, -0.0, -2.0])
+def test_log_invalid_base(base):
+    with pytest.raises(ValueError, match="base"):
+        jix.log(np.array([2.0]), base=base)
+
+
 def test_sin_concrete():
     # 0, +/-pi/2, pi, and a couple of interior op_safe_strategy values.
     values = [0.0, np.pi / 2, np.pi, -np.pi / 2, 1.0, -1.0]

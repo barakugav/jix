@@ -373,6 +373,12 @@ pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<
             ],
         )
     });
+    if base.is_some_and(|b| b <= 0.0 || b == 1.0) {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "log base must be a positive number other than 1, got {}",
+            base.unwrap()
+        )));
+    }
     let array = Operand::from_any(array)?;
     let args = LogArgs {
         multiplier: base.map(|b| 1.0 / b.ln()),
