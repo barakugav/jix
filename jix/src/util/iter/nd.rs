@@ -146,8 +146,50 @@ where
         if self.exhausted {
             return;
         }
+        if D::NDIM.is_none() {
+            return self.for_each_by_row(f);
+        }
+        // With a static ndim the compiler turns this do-while into a loop nest by itself.
         loop {
             f(&self.current_idx, self.extensions.value());
+            if !self.advance() {
+                return;
+            }
+        }
+    }
+
+    /// [`for_each`](Self::for_each) for a runtime ndim, a row at a time: a counted innermost loop
+    /// over the rest of the current row, like hand-written nested loops, and the carry over the
+    /// outer dims once per row. Stepping a runtime ndim through [`advance`](Self::advance) instead
+    /// goes through the carry loop, in memory, at every position.
+    #[inline(always)]
+    fn for_each_by_row(mut self, mut f: impl FnMut(&D::Vec<u64>, E::Item<'_>)) {
+        debug_assert!(!self.exhausted);
+        let Some(last) = self.counters.as_ref().len().checked_sub(1) else {
+            // 0-d: a single item
+            f(&self.current_idx, self.extensions.value());
+            return;
+        };
+        loop {
+            // SAFETY: `last` is below the ndim.
+            let row_left = unsafe { *self.counters.as_ref().get_unchecked(last) };
+            // `f` only gets a shared borrow of the index, so the position along the row is kept in
+            // a local: stored on each step, but never read back from memory.
+            // SAFETY: as above.
+            let mut pos = unsafe { *self.current_idx.as_ref().get_unchecked(last) };
+            for _ in 1..row_left {
+                f(&self.current_idx, self.extensions.value());
+                pos += 1;
+                // SAFETY: as above, and the extensions passed `check_ndim` for the ndim.
+                unsafe {
+                    *self.current_idx.as_mut().get_unchecked_mut(last) = pos;
+                    self.extensions.on_increase(last, pos, 1);
+                }
+            }
+            f(&self.current_idx, self.extensions.value());
+            // The row's last position: `advance` wraps the innermost dim and carries.
+            // SAFETY: as above.
+            unsafe { *self.counters.as_mut().get_unchecked_mut(last) = 1 };
             if !self.advance() {
                 return;
             }
@@ -1006,6 +1048,54 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 4);
+    }
+
+    // ---------------------------------------------------------------------------
+    // for_each by row (runtime ndim)
+    // ---------------------------------------------------------------------------
+
+    /// Snapshots every notification so far, so each yielded item records what the extension saw.
+    struct LogSnapshot(Vec<(usize, u64, bool)>);
+    impl NdIterExtension for LogSnapshot {
+        type Item<'a> = Vec<(usize, u64, bool)>;
+        unsafe fn on_increase(&mut self, dim: usize, after: u64, _diff: u64) {
+            self.0.push((dim, after, true));
+        }
+        unsafe fn on_decrease(&mut self, dim: usize, after: u64, _diff: u64) {
+            self.0.push((dim, after, false));
+        }
+        fn value(&self) -> Self::Item<'_> {
+            self.0.clone()
+        }
+        fn check_ndim(&self, _ndim: usize) -> bool {
+            true
+        }
+        impl_merge_extension!();
+    }
+
+    #[test]
+    fn for_each_by_row_matches_next() {
+        // A runtime-ndim `for_each` walks a row at a time; it must yield the same items, with the
+        // extension notified the same way, as stepping with `next`.
+        let ranges: [(&[u64], &[u64]); 7] = [
+            (&[], &[]),
+            (&[0], &[5]),
+            (&[2], &[3]),
+            (&[1, 2], &[3, 5]),
+            (&[0, 0, 0], &[2, 1, 3]),
+            (&[2, 0, 1], &[4, 3, 2]),
+            (&[0, 1], &[3, 1]),
+        ];
+        for (begin, end) in ranges {
+            let make = || NdIter::new_with_begin(dv(begin), dv(end), LogSnapshot(Vec::new()));
+            let mut by_next = Vec::new();
+            for (idx, log) in make() {
+                by_next.push((idx.as_ref().to_vec(), log));
+            }
+            let mut by_row = Vec::new();
+            make().for_each(|idx, log| by_row.push((idx.as_ref().to_vec(), log)));
+            assert_eq!(by_row, by_next, "begin={begin:?} end={end:?}");
+        }
     }
 
     // ---------------------------------------------------------------------------

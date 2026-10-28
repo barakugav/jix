@@ -292,8 +292,15 @@ fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
         let iter = NdIter::builder(outer_shape)
             .with_strides_offset_multi_ext(outer_strides, [0usize; N_OPERANDS])
             .build();
-        for (_, offsets) in iter {
-            inner_loop(offsets, inner_len, inner_strides);
+        if OuterD::NDIM.is_some() {
+            // A static rank: the per-step `next` loop measured fastest for this call-heavy walk
+            // (walking by row kept fewer of `inner_loop`'s arguments in registers).
+            for (_, offsets) in iter {
+                inner_loop(offsets, inner_len, inner_strides);
+            }
+        } else {
+            // A runtime rank: `for_each` walks it a row at a time.
+            iter.for_each(|_, offsets| inner_loop(offsets, inner_len, inner_strides));
         }
     }
 }
