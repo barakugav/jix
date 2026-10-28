@@ -253,16 +253,15 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
     {
         check_dtype_size_nonzero(Dtype::new_ref::<O>())?;
         let narrays = arrays.narrays();
-        if narrays > 0 {
-            let shape = arrays.shape(0);
-            ensure!(
-                (1..narrays).all(|i| arrays.shape(i) == shape),
-                InvalidArgument,
-                "MapMultiple shape mismatch: {:?}",
-                (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
-            );
-            check_shape_overflow(shape, O::DTYPE.itemsize() as _)?;
-        }
+        ensure!(narrays > 0, InvalidShapeOperation, "cannot map zero arrays");
+        let shape = arrays.shape(0);
+        ensure!(
+            (1..narrays).all(|i| arrays.shape(i) == shape),
+            InvalidArgument,
+            "MapMultiple shape mismatch: {:?}",
+            (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
+        );
+        check_shape_overflow(shape, O::DTYPE.itemsize() as _)?;
         let (element_cost, read_shape_scale_weight, read_layout_order) = {
             let inputs = (0..narrays)
                 .map(|i| {
@@ -427,7 +426,7 @@ where
 ///
 /// # Panics
 ///
-/// Panics if the input arrays do not all have the same shape.
+/// Panics if there are no input arrays or they do not all have the same shape.
 #[track_caller]
 pub fn map_multiple<ArraysT, O, F>(arrays: ArraysT, map_fn: F) -> Array<MapMultiple<ArraysT, F>>
 where
@@ -457,6 +456,12 @@ mod tests {
         };
         assert!(crate::ops::MapMultiple::new(vec![a()], |xs: &[u8]| xs[0] as f64).is_err());
         assert!(crate::ops::MapMultiple::new([a()], |xs: [u8; 1]| xs[0] as u64).is_err());
+    }
+
+    #[test]
+    fn map_multiple_no_arrays_is_an_error() {
+        let arrays: Vec<Array<crate::storage::Compact<crate::Ty<f32>>>> = vec![];
+        assert!(crate::ops::MapMultiple::new(arrays, |xs: &[f32]| xs.len() as f32).is_err());
     }
 
     #[test]
