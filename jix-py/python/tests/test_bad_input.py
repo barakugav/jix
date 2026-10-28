@@ -58,6 +58,14 @@ def test_cast_none():
         jix.cast(_array(), None)
 
 
+def test_widening_cast_shape_overflow():
+    # 2**62 bytes as uint8, more than 2**64 bytes as float64.
+    big = jix.broadcast(jix.asarray(np.zeros(1, np.uint8)), (2**62,))
+    for fn in [lambda: jix.cast(big, np.float64), lambda: big + 1.5, lambda: jix.stack([big, 1.5])]:
+        with pytest.raises(RuntimeError, match="overflows"):
+            fn()
+
+
 # ---------------------------------------------------------------------------
 # dims take an int or a tuple of ints; shapes also take a list
 # ---------------------------------------------------------------------------
