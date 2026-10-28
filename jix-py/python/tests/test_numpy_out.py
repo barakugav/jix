@@ -216,6 +216,13 @@ def test_out_empty(shape, index):
     assert dst.shape == expected.shape
 
 
+@pytest.mark.parametrize("strides", [(24, -8), (-8, 2**63 - 8)])
+def test_out_empty_with_any_strides(strides):
+    # Unlike np.empty, an explicit-strides view keeps its strides when empty.
+    dst = np.ndarray((0, 3), np.float64, buffer=np.zeros(8), offset=16, strides=strides)
+    assert jix.compact(np.zeros((0, 3))).numpy(out=dst) is dst
+
+
 # ---------------------------------------------------------------------------
 # Rejected destinations
 # ---------------------------------------------------------------------------

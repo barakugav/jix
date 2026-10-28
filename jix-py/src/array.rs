@@ -581,6 +581,11 @@ impl Array {
             }
         };
 
+        let nitems = read_shape.iter().product::<usize>();
+        if nitems == 0 {
+            return Ok(NdArray(np_arr));
+        }
+
         // `to_ndarray_buf` wants one stride per *array* dimension, but an integer index item drops
         // its dim from `np_arr`. Put a stride back for each dropped dim. Reading them back off
         // `np_arr` keeps one source of truth, whether it is the caller's `out=` or our own
@@ -615,11 +620,6 @@ impl Array {
             }
             strides
         };
-
-        let nitems = read_shape.iter().product::<usize>();
-        if nitems == 0 {
-            return Ok(NdArray(np_arr));
-        }
 
         let data_span = strided_span_bytes(&read_shape, &strides, itemsize);
         // SAFETY: `np_arr` is a live NumPy array whose memory covers every element reachable
