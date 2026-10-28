@@ -1,6 +1,6 @@
 #![allow(clippy::assertions_on_constants)]
 
-use jix_core::dtype::{Alignment, Dtype, Itemsize, ScalarKind, DTYPE_MAX_NDIM};
+use jix_core::dtype::{Alignment, Dtype, Itemsize, ScalarKind, DTYPE_NDIM_MAX};
 use numpy::{PyArrayDescr, PyArrayDescrMethods};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -100,7 +100,7 @@ pub(crate) fn numpy_descr_from_any<'py>(
 
 pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dtype> {
     let shape = numpy_dtype.shape();
-    if shape.len() > DTYPE_MAX_NDIM {
+    if shape.len() > DTYPE_NDIM_MAX {
         return Err(PyValueError::new_err(format!(
             "Unsupported dtype: too many dimensions: {}",
             shape.len()
@@ -403,7 +403,7 @@ mod tests {
         });
     }
 
-    // Too many dimensions (> DTYPE_MAX_NDIM = 4)
+    // Too many dimensions (> DTYPE_NDIM_MAX = 4)
     #[test]
     fn test_from_numpy_scalar_shape_too_many_dims() {
         Python::attach(|py| {
