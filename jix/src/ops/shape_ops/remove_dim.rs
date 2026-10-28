@@ -55,8 +55,8 @@ where
 
         // Validate dim indices and check for duplicates.
         let mut is_removed = DimArray::<bool>::from_iter(std::iter::repeat_n(false, input_ndim));
-        let dims = dim_arr(dim.len(), |i| dim.get(i));
-        for &d in &dims {
+        for i in 0..dim.len() {
+            let d = dim.get(i);
             ensure!(
                 d < input_ndim,
                 InvalidShapeOperation,
@@ -407,6 +407,8 @@ mod tests {
     fn error_duplicate_dim() {
         let a = make3d(arange(6), 1, 2, 3);
         assert!(super::RemoveDim::new_array(a, [0, 0]).is_err());
+        let a = make3d(arange(6), 1, 2, 3);
+        assert!(super::RemoveDim::new_array(a, &[0usize; NDIM_MAX + 1][..]).is_err());
     }
 
     #[allow(clippy::type_complexity)]
