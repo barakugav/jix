@@ -159,6 +159,16 @@ def test_sub_array_field_reads_as_trailing_dims():
         pos.numpy(out=np.zeros((2, 4, 3), np.float32, order="F"))
 
 
+def test_sub_array_field_more_than_8_numpy_dims():
+    a = np.zeros((1, 1, 1, 1, 1, 2), np.dtype([("a", "<i4", (2, 2, 2)), ("b", "<i4")]))
+    a["a"] = np.arange(16, dtype=np.int32).reshape(a["a"].shape)
+    f = jix.dtype_sub_field(jix.compact(a), "a")
+    np.testing.assert_array_equal(f.numpy(), a["a"])
+    np.testing.assert_array_equal(f[...], a["a"])
+    perm = (5, 4, 3, 2, 1, 0)
+    np.testing.assert_array_equal(jix.permute_dims(f, perm).numpy(), a["a"].transpose(*perm, 6, 7, 8))
+
+
 @st.composite
 def _packed_struct_dtype(draw):
     n = draw(st.integers(1, 6))
