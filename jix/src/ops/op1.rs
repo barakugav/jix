@@ -540,12 +540,18 @@ pub(crate) mod _traits {
             impl_scalar_op1!(
                 impl $Trait for [f16] {
                     fn $f = |x, status| {
-                        let r = f16::from_f32(x.to_f32().$f());
+                        let r32 = x.to_f32().$f();
+                        let r = f16::from_f32(r32);
                         #[allow(unused_variables)]
                         let ($x, $r) = (x.to_f32(), r.to_f32());
                         #[allow(clippy::double_comparisons)]
-                        if $($cond)||+ {
+                        if $($cond)||+ || r.is_infinite() {
                             *status |= float_op1!(@error $x, $r, $($kind: $cond),+);
+                            // Rounding a finite f32 result to f16 can overflow
+                            status.set_if(
+                                ArithmeticErrorKind::Overflow,
+                                r.is_infinite() && r32.is_finite(),
+                            );
                         }
                         r
                     },
@@ -667,6 +673,7 @@ pub(crate) mod _traits {
         /// Tangent operation, as [`f32::tan`].
         ///
         /// An infinite input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`].
+        /// An `f16` result that rounds to infinity sets [`ArithmeticErrorKind::Overflow`].
         Tan,
         /// Compute the tangent (input in radians), reporting an arithmetic error to `status`.
         tan(status),
@@ -1787,6 +1794,13 @@ pub(crate) mod tests {
         check!("sin", Sin::sin, trig);
         check!("cos", Cos::cos, trig);
         check!("tan", Tan::tan, trig);
+        // Only f16 rounds a finite tan to inf.
+        #[cfg(feature = "half")]
+        check::<f16>(
+            "tan",
+            Tan::tan,
+            &[(177.5, &[Overflow]), (-177.5, &[Overflow])],
+        );
         let arc: Cases = &[
             (1.5, &[InvalidOperation]),
             (-1.5, &[InvalidOperation]),
