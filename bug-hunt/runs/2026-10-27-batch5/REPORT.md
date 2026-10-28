@@ -149,7 +149,7 @@ Fix: use u64 positions or an explicit first-tile flag, or return an Err when the
 
 **F005** (medium; Python).
 Since #91, `numpy()` allocates with the outer shape followed by the dtype's inner dims, up to 12 entries. `numpy_empty` and `numpy_empty_ordered` collect that shape into an ArrayVec of capacity 8. So `numpy()`, `a[...]` and `plain()` raise PanicException for any array whose ndim plus inner ndim exceeds 8, e.g. 6 + 3. This happens in release builds too. `numpy(out=)` works.
-Fix: size those buffers for `NDIM_MAX + DTYPE_MAX_NDIM`.
+Fix: size those buffers for `NDIM_MAX + DTYPE_NDIM_MAX`.
 
 **F006** (medium; Python).
 `numpy_dtype` keeps the per-Array std Mutex locked across the call to `dtype_to_numpy`. For aligned struct dtypes, that function calls `py.import`, which runs `builtins.__import__`. Python code running there can yield the GIL to another thread that uses the same Array, or read the Array itself. Either way the process hangs forever; gdb shows the GIL and the Mutex taken in opposite orders. The free-threaded stop-the-world deadlock is argued from the code only.

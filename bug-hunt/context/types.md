@@ -108,7 +108,7 @@ types the macro is):
 - Itemsize u16: max 65535 bytes per element incl. inner shape; offsets are u16; all layout sums in
   dtype.rs are UNCHECKED u16 adds (S1). Max dtype alignment reachable via safe constructors is 8
   (struct alignment must equal a field max); larger only via manual `unsafe impl`.
-- Inner shape: <= DTYPE_MAX_NDIM = 4 (`DtypeShape::from_slice` returns None); archive from_proto
+- Inner shape: <= DTYPE_NDIM_MAX = 4 (`DtypeShape::from_slice` returns None); archive from_proto
   first checks `<= NDIM_MAX` (8) then relies on set_shape/new_struct for the 4 limit.
   `[T; N]` prepends N; `set_shape` replaces the whole shape.
 - bool: 1 byte, alignment 1, valid values 0/1 only (doc dtype.rs:338); no decode-time validation.

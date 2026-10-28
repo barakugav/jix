@@ -336,7 +336,7 @@ mod tests {
             schema::ScalarKind::U8,
             1,
             1,
-            vec![1, 1, 1, 1, 1], // 5 dims > DTYPE_MAX_NDIM=4
+            vec![1, 1, 1, 1, 1], // 5 dims > DTYPE_NDIM_MAX=4
         );
         assert!(Dtype::from_proto(&proto).is_err());
     }

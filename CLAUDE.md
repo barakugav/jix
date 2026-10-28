@@ -207,7 +207,7 @@ with `maturin generate-stubs --out python`.
   missing doc comments on public items - are hard errors in CI but only warnings locally. Reproduce
   locally with `RUSTFLAGS="-D warnings" cargo <cmd>`.
 - **Little-endian targets only** - enforced by a compile-time assertion.
-- **Max 8 array dimensions** (`NDIM_MAX`); **max 4 inner dtype dimensions** (`DTYPE_MAX_NDIM`).
+- **Max 8 array dimensions** (`NDIM_MAX`); **max 4 inner dtype dimensions** (`DTYPE_NDIM_MAX`).
 - **Rust edition 2024, MSRV 1.89.0.** Element types must be `Copy + Send + Sync + 'static` and not
   `Drop`.
 - Formatting: rustfmt `max_width = 100` (`.rustfmt.toml`); ruff `line-length = 120` (`.ruff.toml`).

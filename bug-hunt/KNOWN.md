@@ -458,7 +458,7 @@ Format: one entry per issue.
 ## K89: Array.numpy() / __getitem__ / plain() panic (ArrayVec capacity) when the array's ndim plus its dtype's inner ndim exceeds 8 (item() is not affected)
 - Status: open (found in run 2026-10-27-batch5 as F005, medium)
 - Location: jix-py/src/util.rs:103
-- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F005.md; repro in that run's repros/. Regression from the K66 fix (#91): numpy shapes now have up to NDIM_MAX + DTYPE_MAX_NDIM entries.
+- Notes: bug-hunt/runs/2026-10-27-batch5/findings/F005.md; repro in that run's repros/. Regression from the K66 fix (#91): numpy shapes now have up to NDIM_MAX + DTYPE_NDIM_MAX entries.
 
 ## K90: Array.numpy_dtype holds the per-Array std::sync::Mutex while dtype_to_numpy runs Python code (py.import -> builtins.__import__); if that code yields the GIL to a thread using the same Array, or uses the same Array itself, the process hangs forever
 - Status: open (found in run 2026-10-27-batch5 as F006, medium)
