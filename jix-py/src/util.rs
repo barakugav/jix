@@ -14,6 +14,7 @@ use pyo3::types::{PySlice, PyTuple};
 use pyo3::{type_hint_subscript, type_hint_union};
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
+pub(crate) type NumpyDimArray<T> = arrayvec::ArrayVec<T, 32>;
 
 /// Resolves a Python `slice` against a sequence of length `length`, WITHOUT the
 /// numpy-style clamping performed by [`PySlice::indices`][pyo3::types::PySliceMethods::indices].
@@ -94,13 +95,15 @@ pub(crate) fn numpy_empty<'py>(
     shape: &[u64],
 ) -> PyResult<Bound<'py, PyUntypedArray>> {
     let py = dtype.py();
-    let ndim = shape.len();
     if shape.iter().any(|&d| d > npy_intp::MAX as u64) {
         return Err(PyValueError::new_err(format!(
             "array of shape {shape:?} is too big"
         )));
     }
-    let shape = dim_arr(ndim, |dim| shape[dim] as npy_intp);
+    let shape = shape
+        .iter()
+        .map(|&d| d as npy_intp)
+        .collect::<NumpyDimArray<_>>();
     let is_fortran = false;
     let np_arr = unsafe {
         numpy::PY_ARRAY_API.PyArray_Empty(
@@ -127,10 +130,16 @@ pub(crate) fn numpy_empty_ordered<'py>(
     }
     let py = dtype.py();
     let ndim = shape.len();
-    let arr = numpy_empty(dtype, dim_arr(ndim, |i| shape[order[i]]).as_slice())?;
+    let arr = numpy_empty(
+        dtype,
+        &order
+            .iter()
+            .map(|&d| shape[d])
+            .collect::<NumpyDimArray<_>>(),
+    )?;
 
     // Dim `d` of the result is allocation dim `i`, where `order[i] == d`.
-    let mut permute = dim_arr(ndim, |_| 0 as npy_intp);
+    let mut permute = (0..ndim).map(|_| 0).collect::<NumpyDimArray<npy_intp>>();
     for (i, &d) in order.iter().enumerate() {
         permute[d] = i as npy_intp;
     }
