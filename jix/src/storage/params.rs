@@ -5,9 +5,9 @@ use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight};
-use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt};
-
-const MAX_BLOCK_SIZE_BYTES: u64 = 1 << 30;
+use crate::{
+    dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt, BLOCK_SIZE_BYTES_MAX,
+};
 
 /// Target byte range for a single read region.
 ///
@@ -351,7 +351,7 @@ impl ArrayParams {
         if block_size.is_none() && (block_shape.is_none() || !fixed_block_shape) {
             block_size = Some(cache_sizes.l1_data as u64);
         }
-        let block_size = block_size.map(|n| n.min(MAX_BLOCK_SIZE_BYTES));
+        let block_size = block_size.map(|n| n.min(BLOCK_SIZE_BYTES_MAX));
         // Compute block shape
         let mut block_shape = block_shape.unwrap_or_else(|| {
             Self::scale_block_shape(
@@ -407,10 +407,10 @@ impl ArrayParams {
             .chain([itemsize])
             .try_shape_product();
         ensure!(
-            block_bytes.is_some_and(|n| n <= MAX_BLOCK_SIZE_BYTES),
+            block_bytes.is_some_and(|n| n <= BLOCK_SIZE_BYTES_MAX),
             InvalidArgument,
             "block_shape {block_shape:?} with itemsize {itemsize} is larger than the maximum of \
-             {MAX_BLOCK_SIZE_BYTES} bytes per block"
+             {BLOCK_SIZE_BYTES_MAX} bytes per block"
         );
         // Update block_size to block_shape.product() if it is not specified
         let block_size = block_size

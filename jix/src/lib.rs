@@ -419,6 +419,8 @@ pub use error::Error;
 /// Create one with [`Array::into_any`].
 pub type ArrayAny = Array<storage::ArrayStorageAny>;
 
+const BLOCK_SIZE_BYTES_MAX: u64 = 1 << 30;
+
 #[doc(hidden)]
 pub mod __private {
     pub use crate::storage::params::flags::ArraySpecFlags;
