@@ -1,7 +1,6 @@
 use numpy::{PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 
 use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
@@ -12,7 +11,7 @@ use jix_core::{Array as CoreArray, ArrayAny, ArrayParams};
 use crate::dtype::dtype_from_numpy;
 use crate::ops::cast_impl;
 use crate::ops::common::{Precision, Rank};
-use crate::util::{check_ndim, DimArray, IntoPyResult};
+use crate::util::{check_ndim, numpy_items, DimArray, IntoPyResult};
 use crate::Array;
 
 pub(crate) enum Operand {
@@ -42,19 +41,8 @@ impl Operand {
         let py = value.py();
 
         let (np_generic, np_asarray) = {
-            struct NumpyItems {
-                generic: Py<PyAny>,
-                asarray: Py<PyAny>,
-            }
-            static NUMPY_ITEMS: PyOnceLock<NumpyItems> = PyOnceLock::new();
-            let np_items = NUMPY_ITEMS.get_or_try_init::<_, PyErr>(py, || {
-                let np = numpy::get_array_module(py)?;
-                Ok(NumpyItems {
-                    generic: np.getattr("generic")?.unbind(),
-                    asarray: np.getattr("asarray")?.unbind(),
-                })
-            })?;
-            (np_items.generic.bind(py), np_items.asarray.bind(py))
+            let items = numpy_items(py)?;
+            (items.generic.bind(py), items.asarray.bind(py))
         };
 
         let is_np_generic = value.is_instance(np_generic)?;

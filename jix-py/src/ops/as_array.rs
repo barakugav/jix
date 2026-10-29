@@ -1,11 +1,12 @@
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{IntoPyDict, PyDict};
 
 use crate::array::{resolve_array_params, Array};
 use crate::dtype::{dtype_from_numpy, numpy_descr_from_any};
 use crate::ops::cast_impl;
 use crate::ops::common::Operand;
+use crate::util::numpy_items;
 
 /// Convert any array-like object to a [`jix.Array`][jix.Array].
 ///
@@ -57,10 +58,23 @@ pub fn asarray<'py>(
 ) -> PyResult<Bound<'py, Array>> {
     let py = value.py();
     let params = resolve_array_params(py, params)?;
-    let mut py_arr = Operand::from_any_with_params(value, params, false)?.into_py_array(py)?;
+    let np_dtype = dtype
+        .map(|dtype| numpy_descr_from_any(py, dtype))
+        .transpose()?;
 
-    if let Some(dtype) = dtype {
-        let np_dtype = &numpy_descr_from_any(py, dtype)?;
+    let value_is_array =
+        value.is_instance_of::<Array>() || value.is_instance_of::<numpy::PyUntypedArray>();
+    let value = match &np_dtype {
+        Some(np_dtype) if !value_is_array => {
+            let kwargs = [("dtype", np_dtype)].into_py_dict(py)?;
+            let asarray = numpy_items(py)?.asarray.bind(py);
+            asarray.call((value,), Some(&kwargs))?
+        }
+        _ => value.clone(),
+    };
+    let mut py_arr = Operand::from_any_with_params(&value, params, false)?.into_py_array(py)?;
+
+    if let Some(np_dtype) = &np_dtype {
         let dtype = dtype_from_numpy(np_dtype)?;
         let array = cast_impl(py_arr.get().arr.clone(), &dtype)?;
         py_arr = Bound::new(
