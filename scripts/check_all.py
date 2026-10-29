@@ -132,6 +132,17 @@ def build_checks() -> list[Check]:
             "rustdoc:jix",
             "docs",
             ["cargo", "doc", "--no-deps", "--all-features", "--manifest-path", str(CRATES["jix"])],
+            env={**os.environ, "RUSTDOCFLAGS": "-D warnings"},
+        )
+    )
+    # mkdocs renders the Python API from the .pyi stubs, so regenerate them first.
+    checks.append(
+        Check(
+            "stubs",
+            "docs",
+            ["maturin", "generate-stubs", "--out", "python"],
+            cwd=ROOT / "jix-py",
+            env=VENV_ENV,
         )
     )
     checks.append(

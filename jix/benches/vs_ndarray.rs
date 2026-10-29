@@ -17,8 +17,8 @@ use std::ops::Neg;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use jix::storage::Compact;
-use jix::{Array, ArrayParams, DimDyn, Filter, Ty};
-use ndarray::{ArrayD, Axis, Slice};
+use jix::{Array, ArrayParams, Filter, Ty};
+use ndarray::{ArrayD, Axis, IxDyn, Slice};
 
 use crate::common::{create_data, Profile};
 
@@ -30,7 +30,7 @@ const SEED: u64 = 0x5eed_1234_abcd_ef01;
 const SAMPLES: usize = 10;
 
 /// Block-compressed storage with the settings the report pins: zstd level 3, byte-shuffle.
-fn compact<T>(data: &ArrayD<T>, block_shape: Option<&[u32]>) -> Array<Compact<Ty<T>, DimDyn>>
+fn compact<T>(data: &ArrayD<T>, block_shape: Option<&[u32]>) -> Array<Compact<Ty<T>>>
 where
     T: jix::dtype::Dtyped + Copy + Send + Sync + 'static,
 {
@@ -103,13 +103,21 @@ fn bench_read(c: &mut Criterion) {
         let mut iter = regions.iter().cycle();
         group.bench_function(BenchmarkId::new("jix-plain", case), |b| {
             let ctx = plain.read_ctx();
-            b.iter(|| plain.to_ndarray_sub(iter.next().unwrap(), &ctx).unwrap());
+            b.iter(|| {
+                plain
+                    .to_ndarray_sub::<IxDyn>(iter.next().unwrap(), &ctx)
+                    .unwrap()
+            });
         });
 
         let mut iter = regions.iter().cycle();
         group.bench_function(BenchmarkId::new("jix", case), |b| {
             let ctx = array.read_ctx();
-            b.iter(|| array.to_ndarray_sub(iter.next().unwrap(), &ctx).unwrap());
+            b.iter(|| {
+                array
+                    .to_ndarray_sub::<IxDyn>(iter.next().unwrap(), &ctx)
+                    .unwrap()
+            });
         });
     }
     group.finish();
@@ -129,10 +137,10 @@ macro_rules! bench_negate {
             b.iter(|| data.map(|&x| x.neg()));
         });
         $group.bench_function(BenchmarkId::new("jix-plain", $case), |b| {
-            b.iter(|| plain.view().neg().to_ndarray().unwrap());
+            b.iter(|| plain.view().neg().to_ndarray::<IxDyn>().unwrap());
         });
         $group.bench_function(BenchmarkId::new("jix", $case), |b| {
-            b.iter(|| array.view().neg().to_ndarray().unwrap());
+            b.iter(|| array.view().neg().to_ndarray::<IxDyn>().unwrap());
         });
     }};
 }
@@ -154,10 +162,18 @@ macro_rules! bench_add {
             });
         });
         $group.bench_function(BenchmarkId::new("jix-plain", $case), |b| {
-            b.iter(|| (plain_l.view() + plain_r.view()).to_ndarray().unwrap());
+            b.iter(|| {
+                (plain_l.view() + plain_r.view())
+                    .to_ndarray::<IxDyn>()
+                    .unwrap()
+            });
         });
         $group.bench_function(BenchmarkId::new("jix", $case), |b| {
-            b.iter(|| (compact_l.view() + compact_r.view()).to_ndarray().unwrap());
+            b.iter(|| {
+                (compact_l.view() + compact_r.view())
+                    .to_ndarray::<IxDyn>()
+                    .unwrap()
+            });
         });
     }};
 }
@@ -173,10 +189,10 @@ macro_rules! bench_sum_axis {
             b.iter(|| data.sum_axis(Axis(axis)));
         });
         $group.bench_function(BenchmarkId::new("jix-plain", $case), |b| {
-            b.iter(|| plain.view().sum(axis).to_ndarray().unwrap());
+            b.iter(|| plain.view().sum(axis).to_ndarray::<IxDyn>().unwrap());
         });
         $group.bench_function(BenchmarkId::new("jix", $case), |b| {
-            b.iter(|| array.view().sum(axis).to_ndarray().unwrap());
+            b.iter(|| array.view().sum(axis).to_ndarray::<IxDyn>().unwrap());
         });
     }};
 }
@@ -190,10 +206,10 @@ macro_rules! bench_sum_all {
             b.iter(|| data.sum());
         });
         $group.bench_function(BenchmarkId::new("jix-plain", $case), |b| {
-            b.iter(|| plain.view().sum((0, 1)).to_ndarray().unwrap());
+            b.iter(|| plain.view().sum((0, 1)).to_ndarray::<IxDyn>().unwrap());
         });
         $group.bench_function(BenchmarkId::new("jix", $case), |b| {
-            b.iter(|| array.view().sum((0, 1)).to_ndarray().unwrap());
+            b.iter(|| array.view().sum((0, 1)).to_ndarray::<IxDyn>().unwrap());
         });
     }};
 }
@@ -330,10 +346,18 @@ macro_rules! bench_chain_len {
             b.iter(|| ndarray_chain($a_data, $b_data, $steps));
         });
         $group.bench_function(BenchmarkId::new("jix-plain", case), |b| {
-            b.iter(|| jix_chain!($a_plain, $b_plain, $steps).to_ndarray().unwrap());
+            b.iter(|| {
+                jix_chain!($a_plain, $b_plain, $steps)
+                    .to_ndarray::<IxDyn>()
+                    .unwrap()
+            });
         });
         $group.bench_function(BenchmarkId::new("jix", case), |b| {
-            b.iter(|| jix_chain!($a_arr, $b_arr, $steps).to_ndarray().unwrap());
+            b.iter(|| {
+                jix_chain!($a_arr, $b_arr, $steps)
+                    .to_ndarray::<IxDyn>()
+                    .unwrap()
+            });
         });
     }};
 }
@@ -420,9 +444,9 @@ fn bench_chain(c: &mut Criterion) {
                 let std = plain
                     .view()
                     .std(axis, 0.0)
-                    .insert_axis(axis)
+                    .insert_dim(axis)
                     .broadcast(&shape);
-                (plain.view() / std).to_ndarray().unwrap()
+                (plain.view() / std).to_ndarray::<IxDyn>().unwrap()
             });
         });
         group.bench_function(BenchmarkId::new("jix", &case), |b| {
@@ -430,9 +454,9 @@ fn bench_chain(c: &mut Criterion) {
                 let std = array
                     .view()
                     .std(axis, 0.0)
-                    .insert_axis(axis)
+                    .insert_dim(axis)
                     .broadcast(&shape);
-                (array.view() / std).to_ndarray().unwrap()
+                (array.view() / std).to_ndarray::<IxDyn>().unwrap()
             });
         });
     }
@@ -479,9 +503,9 @@ macro_rules! bench_axis_order {
                 plain
                     .view()
                     .slice((0..shape[0] as i64, 0..shape[1] as i64, 0..keep as i64))
-                    .permute_axes(axes)
+                    .permute_dims(axes)
                     .neg()
-                    .to_ndarray()
+                    .to_ndarray::<IxDyn>()
                     .unwrap()
             });
         });

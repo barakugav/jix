@@ -2,8 +2,7 @@
 loads), grouping symbols by generic template and by crate.
 
 This exists because the two obvious tools do not work here:
-  * `cargo bloat` cannot target a `cdylib` - it falls back to the crate's only
-    `[[bin]]` (`generate_pyi`) and reports that instead.
+  * `cargo bloat` cannot target a `cdylib`, and jix-py builds nothing else.
   * macOS `nm` always prints size 0 for Mach-O symbols.
 
 So we recover per-symbol sizes from *address deltas*: sort defined symbols by
