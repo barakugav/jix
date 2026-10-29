@@ -1361,6 +1361,61 @@ const MODULE_UNITS = [
       "SubDtype::new: field lookup, nested struct fields, inner-shape fields, zero-size fields; element_type_change keeps the offset",
       "Transmute: itemsize-only check; bool and struct targets; source padding bytes; alignment increase; element_type_change keeps the transmuted dtype; confirm no path hands back the inner Compact with the old dtype (as_compact is not forwarded)"
     ]
+  },
+  {
+    "id": "py-ops-reduction-wrappers",
+    "ctx": [
+      "py-ops",
+      "reduction"
+    ],
+    "title": "Python reduction API: sum/prod/max/min/argmax/argmin/mean/var/std/all/any wrappers, dims and keepdim handling",
+    "files": [
+      "jix-py/src/ops/reduction.rs:1-534"
+    ],
+    "consult": [
+      "jix/src/ops/reduction.rs",
+      "jix-py/src/ops/common/dispatch.rs",
+      "jix-py/src/ops/common/dtype_promote.rs",
+      "jix-py/src/util.rs",
+      "jix-py/python/tests/test_reduction.py",
+      "jix-py/python/tests/test_errstate.py"
+    ],
+    "focus": [
+      "keepdim_after_multi_reduction / keepdim_after_reduction (reduction.rs:8-25): with dim=None, negative or duplicated dims, 0-d inputs and ndim-8 inputs, is every kept dim reinserted at the right place, and can it panic or exceed NDIM_MAX?",
+      "Dispatch tables: does each op's output dtype match its docstring and NumPy (sum/prod: signed -> int64, unsigned -> uint64, bool; mean/var/std: int and bool -> float64, f16 stays f16, complex var/std -> real)? Is any input dtype routed through a lossy Safe-cast entry, or missing from a table that its docstring lists?",
+      "argmax/argmin: with dim=None, is the returned index the C-order flat index NumPy returns, also for permuted / F-order / sliced inputs? NaN, ties, bool, empty input and its error kind.",
+      "ddof: negative, NaN, inf, ddof >= n, int vs float - results and errors compared with NumPy.",
+      "Python scalars, 0-d arrays, empty arrays with and without dim, out-of-range or duplicated dims: errors are clean Python exceptions, never PanicException.",
+      "all/any are documented as bool-only: what does a non-bool input do (TypeError, silent cast, wrong result)? Do any/all treat every nonzero bool8 byte as true?",
+      "errstate: are float overflow / invalid statuses from the reductions reported consistently with the element-wise ops? Integer sum/prod wrapping is intended (#81)."
+    ]
+  },
+  {
+    "id": "util-test-infra",
+    "ctx": [
+      "util-memory",
+      "storage-core"
+    ],
+    "title": "Shared Rust test strategies and assertions (test_util), the public bench nd_copy helper",
+    "files": [
+      "jix/src/util/test_util.rs:1-1429",
+      "jix/src/util/bench_util.rs:1-29"
+    ],
+    "consult": [
+      "jix-py/python/tests/tests_util.py",
+      "jix/src/util/mod.rs",
+      "jix/src/util/nd_copy.rs",
+      "bug-hunt/KNOWN.md"
+    ],
+    "focus": [
+      "This is test infrastructure: a finding here matters when it lets library bugs through. If a gap demonstrably hides a real library bug, report the library bug itself (with a repro); otherwise report the gap at low severity.",
+      "Can assert_array_matches / assert_array_matches_approx / assert_same_elements / same_value pass vacuously or compare the wrong thing: shape or dtype not checked, empty arrays, NaN == NaN, -0.0 vs 0.0, tolerances too loose for f16/f32, only a prefix compared?",
+      "Do the proptest strategies (shape_strategy, block_shape_strategy, array_strategy_*, carray_*, sub_range_strategy, ScalarStrategy) ever generate the cases the library has broken on (see KNOWN.md): ndim 0 and 8, zero-length and length-1 dims, non-C layouts, offset / unaligned buffers, NaN / inf / -0.0 / MIN / MAX / subnormals, block shapes equal to or larger than the dims? List the gaps.",
+      "assert_read_rejects_invalid_index: does it cover every invalid index (wrong ndim, reversed range, end > len, huge values)?",
+      "for_each_simd_level / SimdTestValues: does every SIMD level the code dispatches to actually run on an x86_64 CI host, or is one skipped silently? Do the test values hit lane tails and mid-range values?",
+      "bench_util::nd_copy is a public (doc-hidden) unsafe fn: is its Safety contract complete compared with NdCopier's real preconditions (alignment, itemsize, overlap, zero strides)?",
+      "Python tests_util.py is meant to mirror test_util.rs: where do the generated edge cases diverge?"
+    ]
   }
 ]
 
