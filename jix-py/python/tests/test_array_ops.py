@@ -76,6 +76,18 @@ def test_asarray_dtype_unsupported_cast_raises():
         jix.asarray(np.array([1 + 2j, 3 + 4j]), dtype="float64")
 
 
+@pytest.mark.parametrize("fn", [lambda v, d: jix.asarray(v, dtype=d), lambda v, d: jix.compact(v, dtype=d), jix.cast])
+def test_python_ints_are_range_checked_at_the_dtype(fn):
+    # Python ints have no dtype to cast from, so like numpy they must fit the requested one.
+    for value, dtype in [(300, np.uint8), (-1, np.uint8), ([0, 255, 256], np.uint8), ([[128]], np.int8)]:
+        with pytest.raises(OverflowError):
+            fn(value, dtype)
+    assert fn(2**63, np.uint64).numpy() == 2**63
+    np.testing.assert_array_equal(fn([0, 255], np.uint8).numpy(), [0, 255])
+    # Typed values are cast, wrapping like numpy's astype.
+    assert fn(np.int64(300), np.uint8).numpy() == 44
+
+
 # ---------------------------------------------------------------------------
 # cast
 # ---------------------------------------------------------------------------

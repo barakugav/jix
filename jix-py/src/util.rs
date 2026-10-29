@@ -9,6 +9,7 @@ use pyo3::exceptions::{
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::slice::PySliceIndices;
 use pyo3::types::{PySlice, PyTuple};
 use pyo3::{type_hint_subscript, type_hint_union};
@@ -176,6 +177,21 @@ pub(crate) fn numpy_reshape<'py>(
     };
 
     unsafe { Bound::from_owned_ptr_or_err(py, np_arr).map(|ob| ob.cast_into_unchecked()) }
+}
+
+pub(crate) struct NumpyItems {
+    pub(crate) generic: Py<PyAny>,
+    pub(crate) asarray: Py<PyAny>,
+}
+pub(crate) fn numpy_items(py: Python) -> PyResult<&'static NumpyItems> {
+    static NUMPY_ITEMS: PyOnceLock<NumpyItems> = PyOnceLock::new();
+    NUMPY_ITEMS.get_or_try_init(py, || {
+        let np = numpy::get_array_module(py)?;
+        Ok(NumpyItems {
+            generic: np.getattr("generic")?.unbind(),
+            asarray: np.getattr("asarray")?.unbind(),
+        })
+    })
 }
 
 #[inline]
