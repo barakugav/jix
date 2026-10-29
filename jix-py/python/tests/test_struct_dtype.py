@@ -6,6 +6,8 @@ as raw bytes). A layout that needs padding is accepted only when the padding is 
 """
 
 import io
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -157,6 +159,24 @@ def test_sub_array_field_reads_as_trailing_dims():
     np.testing.assert_array_equal(out, a["pos"])
     with pytest.raises(ValueError, match="inner dim"):
         pos.numpy(out=np.zeros((2, 4, 3), np.float32, order="F"))
+
+
+def test_numpy_dtype_import_hook_can_use_the_array():
+    # The numpy dtype of an aligned struct imports numpy, running any Python __import__ hook. A
+    # subprocess, so that a deadlock fails on the timeout.
+    code = """
+import builtins, numpy as np, jix
+arr = jix.compact(np.zeros(4, np.dtype([("a", "i4"), ("b", "i4")], align=True)))
+orig_import = builtins.__import__
+def hook(name, *args, **kwargs):
+    if name == "numpy":
+        builtins.__import__ = orig_import
+        arr[0]
+    return orig_import(name, *args, **kwargs)
+builtins.__import__ = hook
+assert arr.dtype.isalignedstruct
+"""
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=60)
 
 
 def test_sub_array_field_more_than_8_numpy_dims():
