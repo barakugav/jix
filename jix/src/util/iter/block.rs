@@ -9,7 +9,7 @@ use crate::{DimVec, Dimension};
 /// Append it via the builder's `with_block_offset_size_ext`, passing the element-space
 /// `[begin, end)` range and the `block_shape`. Iteration happens in block space, whose bounds are:
 ///    - `block_begin[d] = begin[d] / block_shape[d]`
-///    - `block_end[d]   = end[d].div_ceil(block_shape[d])`
+///    - `block_end[d]   = calc_block_end(begin[d], end[d], block_shape[d])`
 ///
 /// so start the builder with
 /// [`NdIter::builder_with_begin`](crate::util::iter::NdIter::builder_with_begin) using those

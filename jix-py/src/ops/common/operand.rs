@@ -1,7 +1,6 @@
-use numpy::{PyUntypedArray, PyUntypedArrayMethods};
+use numpy::{PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 
 use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
@@ -12,7 +11,7 @@ use jix_core::{Array as CoreArray, ArrayAny, ArrayParams};
 use crate::dtype::dtype_from_numpy;
 use crate::ops::cast_impl;
 use crate::ops::common::{Precision, Rank};
-use crate::util::{check_ndim, DimArray, IntoPyResult};
+use crate::util::{check_ndim, numpy_items, DimArray, IntoPyResult};
 use crate::Array;
 
 pub(crate) enum Operand {
@@ -42,19 +41,8 @@ impl Operand {
         let py = value.py();
 
         let (np_generic, np_asarray) = {
-            struct NumpyItems {
-                generic: Py<PyAny>,
-                asarray: Py<PyAny>,
-            }
-            static NUMPY_ITEMS: PyOnceLock<NumpyItems> = PyOnceLock::new();
-            let np_items = NUMPY_ITEMS.get_or_try_init::<_, PyErr>(py, || {
-                let np = numpy::get_array_module(py)?;
-                Ok(NumpyItems {
-                    generic: np.getattr("generic")?.unbind(),
-                    asarray: np.getattr("asarray")?.unbind(),
-                })
-            })?;
-            (np_items.generic.bind(py), np_items.asarray.bind(py))
+            let items = numpy_items(py)?;
+            (items.generic.bind(py), items.asarray.bind(py))
         };
 
         let is_np_generic = value.is_instance(np_generic)?;
@@ -161,40 +149,7 @@ impl Operand {
             });
         }
 
-        // array
-        check_ndim(array.ndim())?;
-        let shape = array
-            .shape()
-            .iter()
-            .map(|&d| d as u64)
-            .collect::<DimArray<_>>();
-        let strides = std::iter::zip(&shape, array.strides())
-            .map(|(&len, &s)| {
-                if len <= 1 {
-                    return Ok(dtype.itemsize() as usize); // allow any stride on 0 or 1 len dim
-                }
-                usize::try_from(s)
-                    .map_err(|_| PyValueError::new_err("Negative strides are not supported"))
-            })
-            .collect::<PyResult<DimArray<_>>>()?;
-        let data_ptr = {
-            let arr_ptr = unsafe { &*array.as_array_ptr() };
-            arr_ptr.fields.data.cast_const().cast::<u8>()
-        };
-        let array = array.unbind();
-        let storage = unsafe {
-            jix_core::storage::Plain::new(
-                array,
-                data_ptr,
-                shape.as_slice(),
-                &strides,
-                dtype,
-                params,
-            )
-        };
-        let storage = storage.into_py_result()?;
-
-        Ok(Self::Array(CoreArray::from_storage(storage).into_any()))
+        Ok(Self::Array(plain_from_numpy(array, dtype, params)?))
     }
 
     pub(crate) fn cast(self, kind: ScalarKind) -> PyResult<Self> {
@@ -458,5 +413,132 @@ impl Scalar {
                 }
             },
         })
+    }
+}
+
+pub(crate) fn plain_from_numpy(
+    array: Bound<'_, PyUntypedArray>,
+    dtype: Dtype,
+    params: ArrayParams,
+) -> PyResult<ArrayAny> {
+    let mut ndim = array.ndim();
+
+    let dtype_shape_ndim = dtype.shape().len();
+    if dtype_shape_ndim > 0 {
+        ndim = array.ndim().checked_sub(dtype_shape_ndim).ok_or_else(|| {
+            PyValueError::new_err("Array has fewer dimensions than the dtype inner shape")
+        })?;
+
+        // make sure the trailing dims of the array match the dtype inner shape
+        let inner_shape = &array.shape()[ndim..];
+        if inner_shape
+            .iter()
+            .copied()
+            .ne(dtype.shape().iter().map(|&d| d as usize))
+        {
+            return Err(PyValueError::new_err(format!(
+                "Array shape {:?} is not compatible with dtype inner shape {:?}",
+                array.shape(),
+                dtype.shape()
+            )));
+        }
+        // make sure the trailing dims (corresponding to the dtype inner shape) of the array are C-contiguous
+        if !array.is_c_contiguous() {
+            let inner_strides = &array.strides()[ndim..];
+            let mut expected_stride = array.dtype().itemsize();
+            for (&stride, &d_len) in inner_strides.iter().rev().zip(inner_shape.iter().rev()) {
+                if d_len <= 1 {
+                    continue;
+                }
+                if usize::try_from(stride) != Ok(expected_stride) {
+                    return Err(PyValueError::new_err(
+                        "Array is not C-contiguous in the inner shape",
+                    ));
+                }
+                expected_stride *= d_len;
+            }
+        }
+    }
+
+    check_ndim(ndim)?;
+
+    let shape = array.shape()[..ndim]
+        .iter()
+        .map(|&d| d as u64)
+        .collect::<DimArray<_>>();
+    let strides = shape
+        .iter()
+        .zip(array.strides())
+        .map(|(&d_len, &stride)| {
+            if d_len <= 1 {
+                return Ok(dtype.itemsize() as usize); // allow any stride on 0 or 1 len dim
+            }
+            usize::try_from(stride)
+                .map_err(|_| PyValueError::new_err("Negative strides are not supported"))
+        })
+        .collect::<PyResult<DimArray<_>>>()?;
+    let data_ptr = {
+        let arr_ptr = unsafe { &*array.as_array_ptr() };
+        arr_ptr.fields.data.cast_const().cast::<u8>()
+    };
+    let array = array.unbind();
+    let storage = unsafe {
+        jix_core::storage::Plain::new(array, data_ptr, shape.as_slice(), &strides, dtype, params)
+    };
+    Ok(CoreArray::from_storage(storage.into_py_result()?).into_any())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CStr;
+
+    use jix_core::dtype::{Dtype, Dtyped, Itemsize};
+    use jix_core::ArrayParams;
+    use numpy::PyUntypedArray;
+    use pyo3::types::{PyAnyMethods, PyDict};
+    use pyo3::{Bound, Python};
+
+    use super::plain_from_numpy;
+
+    /// `i32` with the inner shape `shape`.
+    fn i32_dtype(shape: &[Itemsize]) -> Dtype {
+        let mut dtype = i32::DTYPE;
+        dtype.set_shape(shape).unwrap();
+        dtype
+    }
+
+    /// The NumPy array `x` set by `code`.
+    fn np_array<'py>(py: Python<'py>, code: &CStr) -> Bound<'py, PyUntypedArray> {
+        let locals = PyDict::new(py);
+        py.run(code, None, Some(&locals)).unwrap();
+        locals.get_item("x").unwrap().cast_into().unwrap()
+    }
+
+    #[test]
+    fn plain_from_numpy_inner_shape() {
+        Python::attach(|py| {
+            let plain = |code: &CStr, shape: &[Itemsize]| {
+                plain_from_numpy(np_array(py, code), i32_dtype(shape), ArrayParams::default())
+            };
+            let base = "import numpy as np; a = np.arange(72, dtype=np.int32).reshape(3, 4, 2, 3)";
+            let code = |x: &str| std::ffi::CString::new(format!("{base}; x = {x}")).unwrap();
+
+            let ok = plain(&code("a"), &[2, 3]).unwrap();
+            assert_eq!(ok.shape(), [3, 4]);
+            // outer dims in any order, inner dims C-contiguous
+            let ok = plain(&code("a.transpose(1, 0, 2, 3)"), &[2, 3]).unwrap();
+            assert_eq!(ok.shape(), [4, 3]);
+            // inner dims not C-contiguous
+            assert!(plain(&code("a.transpose(0, 1, 3, 2)"), &[3, 2]).is_err());
+            assert!(plain(&code("a[..., ::2]"), &[2, 2]).is_err());
+            // trailing dims do not match the inner shape
+            assert!(plain(&code("a"), &[3, 2]).is_err());
+            // fewer dims than the inner shape - must error, not underflow
+            assert!(plain(&code("a[0, 0, 0]"), &[2, 3]).is_err());
+            // a length-1 inner dim may have any stride, as NumPy allows
+            let x = "np.lib.stride_tricks.as_strided(a, (4, 3, 1, 3), (12, 96, 1000, 4))";
+            let ok = plain(&code(x), &[1, 3]).unwrap();
+            assert_eq!(ok.shape(), [4, 3]);
+        });
     }
 }

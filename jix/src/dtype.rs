@@ -127,8 +127,8 @@ pub type Itemsize = u16;
 /// The maximum number of dimensions allowed in a dtype shape.
 ///
 /// Note this is not the shape of the array, but rather the inner shape of a dtype.
-pub const DTYPE_MAX_NDIM: usize = 4;
-type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
+pub const DTYPE_NDIM_MAX: usize = 4;
+type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 
 /// Runtime descriptor of an element type: captures all layout information needed to interpret
 /// the raw bytes stored in an [`Array`](crate::Array).
@@ -221,7 +221,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// # Inner Shape
 ///
 /// Both scalar and struct dtypes can carry an *inner shape*: a small, fixed-size sub-array of
-/// up to [`DTYPE_MAX_NDIM`] dimensions baked into each logical element. This is how Rust
+/// up to [`DTYPE_NDIM_MAX`] dimensions baked into each logical element. This is how Rust
 /// fixed-size arrays (`[T; N]`) are represented, and how NumPy sub-array dtypes are encoded.
 ///
 /// The inner shape **multiplies the itemsize** but does not add dimensions to the containing
@@ -278,7 +278,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 ///
 /// - **Little-endian only** - jix enforces little-endian at compile time; big-endian targets
 ///   will not compile.
-/// - **Inner shape dimensions** - at most [`DTYPE_MAX_NDIM`] (currently 4).
+/// - **Inner shape dimensions** - at most [`DTYPE_NDIM_MAX`] (currently 4).
 /// - **Itemsize limit** - stored as [`Itemsize`] (`u16`); the total bytes per element must not
 ///   exceed `u16::MAX`.
 /// - **No padding** - struct fields must cover every byte of the element; padding has to be an
@@ -519,7 +519,7 @@ impl Dtype {
     ///   (name, offset, dtype). Names must be unique. Offsets are in bytes from the start of the struct.
     /// * `shape` - The shape of the dtype, as a slice of dimensions. The total number of elements
     ///   in the shape must not exceed `Itemsize::MAX`. The shape can be empty, which means a single
-    ///   element of the dtype. The number of dimensions in the shape must not exceed [`DTYPE_MAX_NDIM`].
+    ///   element of the dtype. The number of dimensions in the shape must not exceed [`DTYPE_NDIM_MAX`].
     /// * `itemsize` - The itemsize of the dtype in bytes. Must be a multiple of the product of the
     ///   shape dimensions.
     /// * `alignment` - The alignment of the dtype in bytes. Must be a power of two and less than
@@ -584,7 +584,7 @@ impl Dtype {
         let shape = DtypeShape::from_slice(shape).ok_or_else(|| {
             error!(
                 InvalidArgument,
-                "Dtype shape length exceeds the maximum supported dim number {}", DTYPE_MAX_NDIM
+                "Dtype shape length exceeds the maximum supported dim number {}", DTYPE_NDIM_MAX
             )
         })?;
         let shape_prod = shape
@@ -814,20 +814,20 @@ impl Dtype {
 
     /// Set the shape of the dtype, updating the itemsize accordingly.
     ///
-    /// The maximum number of dimensions allowed in the shape is [`DTYPE_MAX_NDIM`].
+    /// The maximum number of dimensions allowed in the shape is [`DTYPE_NDIM_MAX`].
     /// The product of the shape dimensions must not exceed [`Itemsize::MAX`].
     ///
     /// The itemsize will be updated to `itemsize *= new_shape.product() / old_shape.product()`.
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArgument` if the new shape has more than [`DTYPE_MAX_NDIM`] dimensions,
+    /// Returns `InvalidArgument` if the new shape has more than [`DTYPE_NDIM_MAX`] dimensions,
     /// contains a zero dimension, or overflows [`Itemsize`].
     pub fn set_shape(&mut self, shape: &[Itemsize]) -> Result<()> {
         let shape = DtypeShape::from_slice(shape).ok_or_else(|| {
             error!(
                 InvalidArgument,
-                "Dtype shape length exceeds the maximum supported dim number {}", DTYPE_MAX_NDIM
+                "Dtype shape length exceeds the maximum supported dim number {}", DTYPE_NDIM_MAX
             )
         })?;
         let shape_prod = shape
@@ -1654,7 +1654,7 @@ mod tests {
 
     #[test]
     fn new_struct_too_many_dims_errors() {
-        // DTYPE_MAX_NDIM = 4; five dimensions must be rejected.
+        // DTYPE_NDIM_MAX = 4; five dimensions must be rejected.
         assert!(Dtype::new_struct(
             vec![("a".to_string(), 0, u8::DTYPE)],
             &[1, 1, 1, 1, 1],
@@ -1666,7 +1666,7 @@ mod tests {
 
     #[test]
     fn new_struct_max_dims_works() {
-        // Exactly DTYPE_MAX_NDIM = 4 dimensions should succeed.
+        // Exactly DTYPE_NDIM_MAX = 4 dimensions should succeed.
         let dtype = Dtype::new_struct(
             vec![("a".to_string(), 0, u8::DTYPE)],
             &[1, 2, 3, 4],

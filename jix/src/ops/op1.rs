@@ -540,12 +540,18 @@ pub(crate) mod _traits {
             impl_scalar_op1!(
                 impl $Trait for [f16] {
                     fn $f = |x, status| {
-                        let r = f16::from_f32(x.to_f32().$f());
+                        let r32 = x.to_f32().$f();
+                        let r = f16::from_f32(r32);
                         #[allow(unused_variables)]
                         let ($x, $r) = (x.to_f32(), r.to_f32());
                         #[allow(clippy::double_comparisons)]
-                        if $($cond)||+ {
+                        if $($cond)||+ || r.is_infinite() {
                             *status |= float_op1!(@error $x, $r, $($kind: $cond),+);
+                            // Rounding a finite f32 result to f16 can overflow
+                            status.set_if(
+                                ArithmeticErrorKind::Overflow,
+                                r.is_infinite() && r32.is_finite(),
+                            );
                         }
                         r
                     },
@@ -644,6 +650,22 @@ pub(crate) mod _traits {
         errors = |x, r| { DivideByZero: x == 0.0, InvalidOperation: x < 0.0 }
     );
     float_op1!(
+        /// Base-2 logarithm operation, as [`f32::log2`]. Errors as [`Ln`].
+        Log2,
+        /// Compute the base-2 logarithm, reporting an arithmetic error to `status`.
+        log2(status),
+        log2_bulk,
+        errors = |x, r| { DivideByZero: x == 0.0, InvalidOperation: x < 0.0 }
+    );
+    float_op1!(
+        /// Base-10 logarithm operation, as [`f32::log10`]. Errors as [`Ln`].
+        Log10,
+        /// Compute the base-10 logarithm, reporting an arithmetic error to `status`.
+        log10(status),
+        log10_bulk,
+        errors = |x, r| { DivideByZero: x == 0.0, InvalidOperation: x < 0.0 }
+    );
+    float_op1!(
         /// Sine operation, as [`f32::sin`].
         ///
         /// An infinite input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`].
@@ -667,6 +689,7 @@ pub(crate) mod _traits {
         /// Tangent operation, as [`f32::tan`].
         ///
         /// An infinite input produces `NaN` and sets [`ArithmeticErrorKind::InvalidOperation`].
+        /// An `f16` result that rounds to infinity sets [`ArithmeticErrorKind::Overflow`].
         Tan,
         /// Compute the tangent (input in radians), reporting an arithmetic error to `status`.
         tan(status),
@@ -933,6 +956,54 @@ define_op1!(
     LnKernel,
     crate::scalar::Ln::ln(status),
     simd: ln_bulk,
+);
+define_op1!(
+    /// Computes the base-2 logarithm of each element.
+    ///
+    /// See [`jix::scalar::Log2`](crate::scalar::Log2) scalar trait for the per-element semantics.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, the operation is also available as
+    /// [`Array::log2()`](crate::Array::log2).
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![1.0f64, 8.0, 0.5])?;
+    /// assert_eq!(a.log2().to_ndarray()?, array![0.0, 3.0, -1.0]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    Log2,
+    Log2Kernel,
+    crate::scalar::Log2::log2(status),
+    simd: log2_bulk,
+);
+define_op1!(
+    /// Computes the base-10 logarithm of each element.
+    ///
+    /// See [`jix::scalar::Log10`](crate::scalar::Log10) scalar trait for the per-element semantics.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, the operation is also available as
+    /// [`Array::log10()`](crate::Array::log10).
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![1.0f64, 1000.0, 0.01])?;
+    /// assert_eq!(a.log10().to_ndarray()?, array![0.0, 3.0, -2.0]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    Log10,
+    Log10Kernel,
+    crate::scalar::Log10::log10(status),
+    simd: log10_bulk,
 );
 define_op1!(
     /// Computes the sine of each element (input in radians).
@@ -1249,6 +1320,8 @@ where
     define_array_op1_method!(square: Square, crate::scalar::Square);
     define_array_op1_method!(exp: Exp, crate::scalar::Exp);
     define_array_op1_method!(ln: Ln, crate::scalar::Ln);
+    define_array_op1_method!(log2: Log2, crate::scalar::Log2);
+    define_array_op1_method!(log10: Log10, crate::scalar::Log10);
     define_array_op1_method!(sin: Sin, crate::scalar::Sin);
     define_array_op1_method!(cos: Cos, crate::scalar::Cos);
     define_array_op1_method!(tan: Tan, crate::scalar::Tan);
@@ -1714,6 +1787,25 @@ pub(crate) mod tests {
         for_each_simd_level!(check);
     }
 
+    #[test]
+    fn log2_log10_of_exact_powers_are_exact() {
+        use crate::scalar::{Log10, Log2};
+        let mut status = Default::default();
+        for k in -60..=60 {
+            assert_eq!(Log2::log2(2f64.powi(k), &mut status), k as f64);
+            assert_eq!(Log2::log2(2f32.powi(k / 3), &mut status), (k / 3) as f32);
+        }
+        for k in 0..=22 {
+            assert_eq!(Log10::log10(10f64.powi(k), &mut status), k as f64);
+        }
+        #[cfg(feature = "half")]
+        for k in -14..=15 {
+            let x = crate::scalar::f16::from_f32(2f32.powi(k));
+            assert_eq!(Log2::log2(x, &mut status).to_f32(), k as f32);
+        }
+        assert!(status.is_ok());
+    }
+
     /// The errors of the float functions that report them, on edge cases.
     #[test]
     fn float_op1_errors() {
@@ -1721,7 +1813,7 @@ pub(crate) mod tests {
         use crate::error::ArithmeticOpStatus;
         #[cfg(feature = "half")]
         use crate::scalar::f16;
-        use crate::scalar::{Acos, Asin, Cast, Cos, Exp, Ln, Sin, Tan};
+        use crate::scalar::{Acos, Asin, Cast, Cos, Exp, Ln, Log10, Log2, Sin, Tan};
 
         type Cases<'a> = &'a [(f64, &'a [ArithmeticErrorKind])];
         fn check<T>(name: &str, f: fn(T, &mut ArithmeticOpStatus) -> T, cases: Cases<'_>)
@@ -1758,6 +1850,8 @@ pub(crate) mod tests {
             (nan, &[]),
         ];
         check!("ln", Ln::ln, ln);
+        check!("log2", Log2::log2, ln);
+        check!("log10", Log10::log10, ln);
         let exp: Cases = &[
             (1000.0, &[Overflow]),
             (-1000.0, &[]),
@@ -1787,6 +1881,13 @@ pub(crate) mod tests {
         check!("sin", Sin::sin, trig);
         check!("cos", Cos::cos, trig);
         check!("tan", Tan::tan, trig);
+        // Only f16 rounds a finite tan to inf.
+        #[cfg(feature = "half")]
+        check::<f16>(
+            "tan",
+            Tan::tan,
+            &[(177.5, &[Overflow]), (-177.5, &[Overflow])],
+        );
         let arc: Cases = &[
             (1.5, &[InvalidOperation]),
             (-1.5, &[InvalidOperation]),

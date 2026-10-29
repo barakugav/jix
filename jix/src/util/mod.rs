@@ -46,11 +46,13 @@ pub(crate) trait Idx:
     + PartialOrd
     + Ord
     + core::ops::Add<Output = Self>
-    + core::ops::Sub<Output = Self>
     + core::ops::AddAssign
+    + core::ops::Sub<Output = Self>
     + core::ops::SubAssign
     + core::ops::Mul<Output = Self>
+    + core::ops::MulAssign
     + core::ops::Div<Output = Self>
+    + core::ops::DivAssign
     + core::ops::Rem<Output = Self>
     + core::fmt::Display
     + core::fmt::Debug
@@ -162,7 +164,7 @@ pub(crate) fn strides_for_layout_order<Ix: Idx>(
     for &d in layout_order.iter().rev() {
         let d = d as usize;
         strides[d] = acc;
-        acc = acc * shape[d];
+        acc *= shape[d];
     }
     strides
 }

@@ -18,7 +18,7 @@ use pyo3::exceptions::{
 use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
-use crate::ops::asarray_simple;
+use crate::ops::plain_from_numpy;
 use crate::util::{
     dim_arr, maybe_detach, numpy_empty_ordered, strided_span_bytes, DimArray, IntoPyResult,
     ItemOrTuple,
@@ -295,19 +295,41 @@ impl Array {
             }
             inner_stride *= out.shape()[dim] as isize;
         }
+        // In stride order, each stepped dim must step past the span of the smaller ones.
+        let mut dims = (out.strides().iter().zip(out.shape()))
+            .filter(|&(_, &len)| len > 1)
+            .map(|(&stride, &len)| (stride as usize, len))
+            .collect::<Vec<_>>();
+        dims.sort_unstable();
+        let mut span = expected_dtype.itemsize();
+        for (stride, len) in dims {
+            if stride < span {
+                return Err(PyValueError::new_err(
+                    "out array elements overlap, two of them share memory",
+                ));
+            }
+            span += stride * (len - 1);
+        }
         Ok(())
     }
 
     pub(crate) fn numpy_dtype<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
-        let mut cache = self
-            .cache
-            .lock()
-            .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))?;
-
-        if cache.numpy_dtype.is_none() {
-            cache.numpy_dtype = Some(dtype_to_numpy(py, self.arr.dtype())?.unbind());
+        let get_cache = || {
+            self.cache
+                .lock()
+                .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))
+        };
+        if let Some(dtype) = &get_cache()?.numpy_dtype {
+            return Ok(dtype.bind(py).clone());
         }
-        Ok(cache.numpy_dtype.as_ref().unwrap().bind(py).clone())
+
+        // call dtype_to_numpy while NOT holding the lock
+        let dtype = dtype_to_numpy(py, self.arr.dtype())?;
+
+        get_cache()?
+            .numpy_dtype
+            .get_or_insert_with(|| dtype.clone().unbind());
+        Ok(dtype)
     }
 }
 #[pymethods]
@@ -471,9 +493,10 @@ impl Array {
     ///         be writeable.
     ///
     ///         The destination does not have to be C-contiguous - almost any strided view works.
-    ///         Two kinds of view are rejected: reversed ones (a negative stride, e.g. `big[::-1]`)
-    ///         and broadcast ones (a zero stride over a dim longer than 1). The destination must
-    ///         also be aligned to the dtype.
+    ///         Three kinds of view are rejected: reversed ones (a negative stride, e.g. `big[::-1]`),
+    ///         broadcast ones (a zero stride over a dim longer than 1) and ones whose elements
+    ///         overlap (e.g. a `sliding_window_view`). The destination must also be aligned to the
+    ///         dtype.
     ///
     ///         When `out` is given it is returned as-is, so `arr.numpy(out=dst) is dst`.
     ///
@@ -581,6 +604,11 @@ impl Array {
             }
         };
 
+        let nitems = read_shape.iter().product::<usize>();
+        if nitems == 0 {
+            return Ok(NdArray(np_arr));
+        }
+
         // `to_ndarray_buf` wants one stride per *array* dimension, but an integer index item drops
         // its dim from `np_arr`. Put a stride back for each dropped dim. Reading them back off
         // `np_arr` keeps one source of truth, whether it is the caller's `out=` or our own
@@ -615,11 +643,6 @@ impl Array {
             }
             strides
         };
-
-        let nitems = read_shape.iter().product::<usize>();
-        if nitems == 0 {
-            return Ok(NdArray(np_arr));
-        }
 
         let data_span = strided_span_bytes(&read_shape, &strides, itemsize);
         // SAFETY: `np_arr` is a live NumPy array whose memory covers every element reachable
@@ -689,7 +712,9 @@ impl Array {
     ///
     /// Identical to `numpy()`, except the decoded elements are wrapped as a plain
     /// [`jix.Array`][jix.Array] - a view over a freshly-allocated buffer, with no block compression -
-    /// rather than returned as a NumPy array. Equivalent to `jix.asarray(self.numpy(index))`.
+    /// rather than returned as a NumPy array. Equivalent to `jix.asarray(self.numpy(index))`,
+    /// except that a dtype with an inner shape stays the dtype, while NumPy expands it into
+    /// trailing dims.
     ///
     /// Like [`compact()`][jix.Array.compact], `plain()` materializes an intermediate array: it
     /// breaks the lazy operation chain - or a shape view such as the output of
@@ -730,8 +755,13 @@ impl Array {
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, Array>> {
-        let np_arr = self.numpy(py, index, None)?;
-        asarray_simple(&np_arr)
+        let np_arr = self.numpy(py, index, None)?.0;
+        let params = resolve_array_params(py, None)?;
+        let array = plain_from_numpy(np_arr, self.arr.dtype().clone(), params)?;
+        Bound::new(
+            py,
+            Array::from_core_with_np_dtype(array, self.numpy_dtype(py)?.unbind()),
+        )
     }
 
     /// Read elements from the array (or a sub-region of it) and return them as a NumPy array.

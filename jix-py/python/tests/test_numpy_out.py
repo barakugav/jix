@@ -216,6 +216,13 @@ def test_out_empty(shape, index):
     assert dst.shape == expected.shape
 
 
+@pytest.mark.parametrize("strides", [(24, -8), (-8, 2**63 - 8)])
+def test_out_empty_with_any_strides(strides):
+    # Unlike np.empty, an explicit-strides view keeps its strides when empty.
+    dst = np.ndarray((0, 3), np.float64, buffer=np.zeros(8), offset=16, strides=strides)
+    assert jix.compact(np.zeros((0, 3))).numpy(out=dst) is dst
+
+
 # ---------------------------------------------------------------------------
 # Rejected destinations
 # ---------------------------------------------------------------------------
@@ -263,6 +270,19 @@ def test_out_rejects_broadcast_views():
     assert dst.flags.writeable
     with pytest.raises(ValueError, match="stride"):
         a.numpy(out=dst)
+
+
+def test_out_rejects_overlapping_views():
+    a = jix.compact(np.arange(1, 25, dtype=np.int64).reshape(2, 4, 3))
+    windows = np.lib.stride_tricks.sliding_window_view(np.zeros(6, np.int64), 3, writeable=True)
+    with pytest.raises(ValueError, match="overlap"):
+        a.sum(dim=0).numpy(out=windows)
+    as_strided = np.lib.stride_tricks.as_strided
+    with pytest.raises(ValueError, match="overlap"):
+        a.numpy(0, out=as_strided(np.zeros(16, np.int64), shape=(4, 3), strides=(16, 8)))
+    # Interleaved but disjoint.
+    dst = as_strided(np.zeros(12, np.int64), shape=(4, 3), strides=(8, 32))
+    np.testing.assert_array_equal(a.numpy(0, out=dst), a.numpy(0))
 
 
 def test_out_rejects_non_arrays():

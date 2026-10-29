@@ -1,4 +1,5 @@
 mod common;
+pub(crate) use common::plain_from_numpy;
 
 mod as_array;
 pub use as_array::*;
@@ -39,7 +40,7 @@ use jix_core::ArrayAny;
 use pyo3::prelude::*;
 
 use crate::array::Array;
-use crate::dtype::{dtype_from_numpy, numpy_descr_from_any};
+use crate::util::IntoPyResult;
 #[pyfunction]
 /// Casts each element of `array` to a new dtype.
 ///
@@ -89,17 +90,7 @@ pub fn cast<'py>(
     array: &Bound<'py, PyAny>,
     dtype: &Bound<'_, PyAny>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = crate::ops::asarray_simple(array)?;
-    let array = &py_arr.get().arr;
-    let np_dtype = &numpy_descr_from_any(dtype.py(), dtype)?;
-    let dtype = dtype_from_numpy(np_dtype)?;
-
-    let array = cast_impl(array.clone(), &dtype)?;
-
-    Bound::new(
-        py_arr.py(),
-        Array::from_core_with_np_dtype(array, np_dtype.clone().unbind()),
-    )
+    crate::ops::asarray(array, Some(dtype), None)
 }
 #[inline(never)]
 pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
@@ -113,7 +104,8 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
         macro_rules! cast_typed {
             ($src_type:ty, $dst_type:ty) => {{
                 let array = array.into_typed::<$src_type>().unwrap();
-                let array = array.cast::<$dst_type>();
+                let array =
+                    jix_core::ops::Cast::<_, $dst_type>::new_array(array).into_py_result()?;
                 return Ok(array.into_any());
             }};
         }

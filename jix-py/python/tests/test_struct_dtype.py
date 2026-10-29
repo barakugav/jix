@@ -6,6 +6,8 @@ as raw bytes). A layout that needs padding is accepted only when the padding is 
 """
 
 import io
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -157,6 +159,64 @@ def test_sub_array_field_reads_as_trailing_dims():
     np.testing.assert_array_equal(out, a["pos"])
     with pytest.raises(ValueError, match="inner dim"):
         pos.numpy(out=np.zeros((2, 4, 3), np.float32, order="F"))
+
+
+def test_sub_array_field_plain_keeps_the_dtype():
+    dt = np.dtype([("a", "<i4", (3,)), ("b", "<i4")])
+    a = np.zeros((2, 2), dt)
+    a["a"] = np.arange(12, dtype=np.int32).reshape(2, 2, 3)
+    f = jix.dtype_sub_field(jix.compact(a), "a")
+    p = f.plain()
+    assert (p.shape, p.dtype) == (f.shape, f.dtype)
+    np.testing.assert_array_equal(p.numpy(), a["a"])
+    p = f.plain(1)
+    assert (p.shape, p.dtype) == ((2,), f.dtype)
+    np.testing.assert_array_equal(p.numpy(), a["a"][1])
+    # 8 array dims, the most jix supports, plus the inner dim.
+    f = jix.dtype_sub_field(jix.compact(np.zeros((1,) * 7 + (2,), dt)), "a")
+    assert f.plain().shape == f.shape
+
+
+def test_sub_array_field_plain_of_non_c_order_read():
+    # numpy() allocates in the storage's read order, so the read of a permuted view is not
+    # C-contiguous, while each inner sub-array still is.
+    dt = np.dtype([("a", "<i4", (2, 3)), ("b", "<i4")])
+    a = np.zeros((3, 4), dt)
+    a["a"] = np.arange(72, dtype=np.int32).reshape(3, 4, 2, 3)
+    f = jix.permute_dims(jix.dtype_sub_field(jix.compact(a), "a"), (1, 0))
+    assert not f.numpy().flags.c_contiguous
+    p = f.plain()
+    assert (p.shape, p.dtype) == (f.shape, f.dtype)
+    np.testing.assert_array_equal(p.numpy(), a["a"].transpose(1, 0, 2, 3))
+    np.testing.assert_array_equal(f.plain((slice(1, 3), 2)).numpy(), a["a"][2, 1:3])
+
+
+def test_numpy_dtype_import_hook_can_use_the_array():
+    # The numpy dtype of an aligned struct imports numpy, running any Python __import__ hook. A
+    # subprocess, so that a deadlock fails on the timeout.
+    code = """
+import builtins, numpy as np, jix
+arr = jix.compact(np.zeros(4, np.dtype([("a", "i4"), ("b", "i4")], align=True)))
+orig_import = builtins.__import__
+def hook(name, *args, **kwargs):
+    if name == "numpy":
+        builtins.__import__ = orig_import
+        arr[0]
+    return orig_import(name, *args, **kwargs)
+builtins.__import__ = hook
+assert arr.dtype.isalignedstruct
+"""
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=60)
+
+
+def test_sub_array_field_more_than_8_numpy_dims():
+    a = np.zeros((1, 1, 1, 1, 1, 2), np.dtype([("a", "<i4", (2, 2, 2)), ("b", "<i4")]))
+    a["a"] = np.arange(16, dtype=np.int32).reshape(a["a"].shape)
+    f = jix.dtype_sub_field(jix.compact(a), "a")
+    np.testing.assert_array_equal(f.numpy(), a["a"])
+    np.testing.assert_array_equal(f[...], a["a"])
+    perm = (5, 4, 3, 2, 1, 0)
+    np.testing.assert_array_equal(jix.permute_dims(f, perm).numpy(), a["a"].transpose(*perm, 6, 7, 8))
 
 
 @st.composite

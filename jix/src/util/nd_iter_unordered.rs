@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 
 use crate::dtype::{Alignment, Itemsize};
 use crate::util::iter::NdIter;
+use crate::util::Idx;
 use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
 /// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d regions,
@@ -29,25 +30,27 @@ use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimens
 /// [`foreach_inner_1d`](Self::foreach_inner_1d) to drive that loop once per outer position as
 /// `inner_loop(offsets, inner_len, inner_strides)`, where `offsets`/`inner_strides` are
 /// `[_; N_OPERANDS]` indexed like the input `strides`/`layouts`.
-pub(crate) struct NdIterUnordered<const N_OPERANDS: usize> {
+///
+/// `I` is the integer type of the shape, the strides and the yielded offsets (`usize` or `u64`).
+pub(crate) struct NdIterUnordered<I: Idx, const N_OPERANDS: usize> {
     /// Post-permutation, post-coalescing shape; always rank >= 1 (a scalar region becomes `[1]`, an
     /// empty region `[0]`).
-    shape: DimArray<usize>,
+    shape: DimArray<I>,
     /// Per-operand strides aligned with `shape`, each in its operand's own stride unit.
-    strides: [DimArray<usize>; N_OPERANDS],
+    strides: [DimArray<I>; N_OPERANDS],
     /// Per-operand: every stride is a multiple of the operand's alignment.
     is_strides_aligned: [bool; N_OPERANDS],
     /// Per-operand: the innermost run is contiguous (inner stride == element size).
     is_contiguous: [bool; N_OPERANDS],
 }
 
-impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
+impl<I: Idx, const N_OPERANDS: usize> NdIterUnordered<I, N_OPERANDS> {
     /// Order and coalesce the dims and compute the innermost-run flags. An empty region (any dim of
     /// length 0) yields an iterator whose [`foreach_inner_1d`](Self::foreach_inner_1d) visits nothing.
     #[inline]
     pub(crate) fn new(
-        shape: &[usize],
-        strides: [&[usize]; N_OPERANDS],
+        shape: &[I],
+        strides: [&[I]; N_OPERANDS],
         layouts: [(Itemsize, Alignment); N_OPERANDS], // (size, alignment) per operand, in its stride unit
     ) -> Self {
         Self::new_with(shape, strides, layouts, [true; N_OPERANDS])
@@ -60,8 +63,8 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     /// the memory-access order.
     #[inline(never)]
     pub(crate) fn new_with(
-        shape: &[usize],
-        strides: [&[usize]; N_OPERANDS],
+        shape: &[I],
+        strides: [&[I]; N_OPERANDS],
         layouts: [(Itemsize, Alignment); N_OPERANDS], // (size, alignment) per operand, in its stride unit
         affects_dim_order: [bool; N_OPERANDS],
     ) -> Self {
@@ -71,22 +74,22 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
 
         // (1) Order the dims (per-operand strides non-increasing, size-1 dims dropped). The sort key
         // is the array of a dim's per-operand strides, compared lexicographically (operand 0
-        // first), so `[usize; N_OPERANDS]`'s derived `Ord` gives exactly the ranking we want.
+        // first), so `[I; N_OPERANDS]`'s derived `Ord` gives exactly the ranking we want.
         let mut dim_perm = DimArray::new();
         for (d, &len) in shape.iter().enumerate() {
-            if len == 0 {
+            if len == I::ZERO {
                 return Self::empty(layouts); // nothing to iterate
             }
-            if len > 1 {
+            if len > I::ONE {
                 dim_perm.push(d as DimIdx);
             }
         }
         if dim_perm.is_empty() {
             // The whole region is a single element. Treat as 1-d with length 1.
             return Self {
-                shape: DimArray::from_slice(&[1]).unwrap(),
+                shape: DimArray::from_slice(&[I::ONE]).unwrap(),
                 strides: array_from_fn_inline(|i| {
-                    DimArray::from_slice(&[layouts[i].0 as usize]).unwrap()
+                    DimArray::from_slice(&[I::from_u64(layouts[i].0 as u64)]).unwrap()
                 }),
                 is_strides_aligned: [true; N_OPERANDS],
                 is_contiguous: [true; N_OPERANDS],
@@ -108,7 +111,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
                     }
                     // A zero stride means this operand does not move along the dim at all, so it
                     // has no opinion on where the dim belongs.
-                    if strides[d1] == 0 || strides[d2] == 0 {
+                    if strides[d1] == I::ZERO || strides[d2] == I::ZERO {
                         continue;
                     }
                     compared = true;
@@ -152,11 +155,11 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
 
         // (3) Compute the innermost-run flags (length, and per-operand alignment / contiguity).
         debug_assert!(!shape.is_empty());
-        let sizes = array_from_fn_inline::<_, N_OPERANDS>(|i| layouts[i].0 as usize);
+        let sizes = array_from_fn_inline::<_, N_OPERANDS>(|i| I::from_u64(layouts[i].0 as u64));
         let ndim = shape.len();
         let is_strides_aligned = array_from_fn_inline::<_, N_OPERANDS>(|i| {
-            let alignment = layouts[i].1.as_usize();
-            strides[i].iter().all(|s| s.is_multiple_of(alignment))
+            let alignment = layouts[i].1.as_usize() as u64;
+            strides[i].iter().all(|s| s.u64().is_multiple_of(alignment))
         });
         let is_contiguous =
             array_from_fn_inline::<_, N_OPERANDS>(|i| strides[i][ndim - 1] == sizes[i]);
@@ -171,10 +174,10 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
 
     fn empty(layouts: [(Itemsize, Alignment); N_OPERANDS]) -> Self {
         let mut shape = DimArray::new();
-        shape.push(0);
+        shape.push(I::ZERO);
         let strides = array_from_fn_inline(|op_i| {
             let mut s = DimArray::new();
-            s.push(layouts[op_i].0 as usize);
+            s.push(I::from_u64(layouts[op_i].0 as u64));
             s
         });
         Self {
@@ -186,7 +189,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     }
 
     #[inline(always)]
-    pub(crate) fn inner_len(&self) -> usize {
+    pub(crate) fn inner_len(&self) -> I {
         self.shape[self.shape.len() - 1]
     }
 
@@ -201,7 +204,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     }
 
     #[inline(always)]
-    pub(crate) fn inner_strides(&self) -> [usize; N_OPERANDS] {
+    pub(crate) fn inner_strides(&self) -> [I; N_OPERANDS] {
         let inner = self.shape.len() - 1;
         array_from_fn_inline(|i| self.strides[i][inner])
     }
@@ -210,7 +213,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     #[inline]
     pub(crate) fn foreach_inner_1d(
         &self,
-        inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
+        inner_loop: impl FnMut([I; N_OPERANDS], I, [I; N_OPERANDS]),
     ) {
         self.foreach_inner_1d_impl::<false>(inner_loop);
     }
@@ -218,21 +221,25 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     #[inline]
     pub(super) fn foreach_inner_1d_impl<const STATIC_DISPATCH: bool>(
         &self,
-        mut inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
+        mut inner_loop: impl FnMut([I; N_OPERANDS], I, [I; N_OPERANDS]),
     ) {
         let ndim = self.shape.len();
         let inner_len = self.shape[ndim - 1];
         let inner_strides = array_from_fn_inline::<_, N_OPERANDS>(|i| self.strides[i][ndim - 1]);
         if crate::hint::likely(ndim == 1) {
             // always static dispatch for 1D
-            inner_loop([0; N_OPERANDS], inner_len, inner_strides);
+            inner_loop([I::ZERO; N_OPERANDS], inner_len, inner_strides);
             return;
         }
 
         let strides = self.strides.each_ref().map(|s| s.as_slice());
         if ndim == 2 {
             // always static dispatch for 2D
-            nd_iter_unordered_nd_walk_impl::<N_OPERANDS, Dim<1>>(&self.shape, strides, inner_loop);
+            nd_iter_unordered_nd_walk_impl::<I, N_OPERANDS, Dim<1>>(
+                &self.shape,
+                strides,
+                inner_loop,
+            );
             return;
         }
 
@@ -245,23 +252,23 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     }
 }
 #[inline(always)]
-fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize>(
-    shape: &[usize],
-    strides: [&[usize]; N_OPERANDS],
-    inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
+fn nd_iter_unordered_nd_walk<I: Idx, const N_OPERANDS: usize>(
+    shape: &[I],
+    strides: [&[I]; N_OPERANDS],
+    inner_loop: impl FnMut([I; N_OPERANDS], I, [I; N_OPERANDS]),
 ) {
     let nd_walk_fn = match shape.len() {
-        3 => nd_iter_unordered_nd_walk_impl::<N_OPERANDS, Dim<2>>,
-        4 => nd_iter_unordered_nd_walk_impl::<N_OPERANDS, Dim<3>>,
-        _ => nd_iter_unordered_nd_walk_impl::<N_OPERANDS, DimDyn>,
+        3 => nd_iter_unordered_nd_walk_impl::<I, N_OPERANDS, Dim<2>>,
+        4 => nd_iter_unordered_nd_walk_impl::<I, N_OPERANDS, Dim<3>>,
+        _ => nd_iter_unordered_nd_walk_impl::<I, N_OPERANDS, DimDyn>,
     };
     nd_walk_fn(shape, strides, inner_loop);
 }
 #[inline(never)]
-fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
-    shape: &[usize],
-    strides: [&[usize]; N_OPERANDS],
-    mut inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
+fn nd_iter_unordered_nd_walk_impl<I: Idx, const N_OPERANDS: usize, OuterD: Dimension>(
+    shape: &[I],
+    strides: [&[I]; N_OPERANDS],
+    mut inner_loop: impl FnMut([I; N_OPERANDS], I, [I; N_OPERANDS]),
 ) {
     let ndim = shape.len();
     let inner_len = shape[ndim - 1];
@@ -271,9 +278,9 @@ fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
         // Special case for 2D: the outer `NdIter` is just a single loop over the outer dim, and
         // and inner loop is a flat 1-d run.
 
-        let outer_len = shape[0];
+        let outer_len = shape[0].u64();
         let outer_strides: [_; N_OPERANDS] = std::array::from_fn(|i| [strides[i][0]]);
-        let mut offsets = [0usize; N_OPERANDS];
+        let mut offsets = [I::ZERO; N_OPERANDS];
         for i in 0..outer_len {
             if i > 0 {
                 for op_i in 0..N_OPERANDS {
@@ -286,11 +293,11 @@ fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
         // Flat inner 1-d run over the innermost dim [ndim-1]; the outer `NdIter` walks the outer
         // dims and yields all `N_OPERANDS` running byte offsets at once.
 
-        let outer_shape = OuterD::vec(ndim - 1, |k| shape[k] as u64);
+        let outer_shape = OuterD::vec(ndim - 1, |k| shape[k].u64());
         let outer_strides: [_; N_OPERANDS] =
             std::array::from_fn(|i| OuterD::vec(ndim - 1, |k| strides[i][k]));
         let iter = NdIter::builder(outer_shape)
-            .with_strides_offset_multi_ext(outer_strides, [0usize; N_OPERANDS])
+            .with_strides_offset_multi_ext(outer_strides, [I::ZERO; N_OPERANDS])
             .build();
         for (_, offsets) in iter {
             inner_loop(offsets, inner_len, inner_strides);
@@ -824,7 +831,8 @@ mod tests {
         // Dim 0 is outermost (operand 0's stride is larger), so dim 1 forms the inner run and
         // each operand's inner stride is its own stride on dim 1. Operand 1's strides block the
         // coalesce, so the inner run really is dim 1 and not the whole region.
-        let iter = NdIterUnordered::new(&[2, 3], [&[3, 1], &[1, 2]], layouts([(1, 1); 2]));
+        let iter =
+            NdIterUnordered::<usize, _>::new(&[2, 3], [&[3, 1], &[1, 2]], layouts([(1, 1); 2]));
         assert_eq!(iter.inner_strides(), [1, 2]);
         assert_eq!(iter.inner_len(), 3);
     }
@@ -862,7 +870,7 @@ mod tests {
         // Operand 0 alone is fully contiguous and would coalesce both dims into one run of 6.
         // Operand 1 is excluded from the *ordering* but must still constrain the *coalesce*: its
         // stride 5 on dim 0 does not equal 1 * 3, so the dims stay separate.
-        let iter = NdIterUnordered::new_with(
+        let iter = NdIterUnordered::<usize, _>::new_with(
             &[2, 3],
             [&[3, 1], &[5, 1]],
             layouts([(1, 1); 2]),

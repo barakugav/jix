@@ -5,9 +5,11 @@ use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight};
-use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt};
+use crate::{
+    dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt, BLOCK_SIZE_BYTES_MAX,
+};
 
-const MAX_BLOCK_SIZE_BYTES: u64 = 1 << 30;
+const ELEMENT_COST_MAX: f32 = u64::MAX as f32; // 2^64
 
 /// Target byte range for a single read region.
 ///
@@ -284,8 +286,21 @@ impl ArrayParams {
             .get_or_insert_with(|| spec.decoder_params().clone());
 
         if self.block_shape.is_none() {
-            self.block_shape = Some(spec.block_shape().clone());
-            self.block_shape_fixed_dims = Some(spec.block_shape_fixed_dims());
+            let block_shape = spec.block_shape();
+            let mut block_shape_fixed_dims = spec.block_shape_fixed_dims();
+
+            let block_bytes = block_shape
+                .iter()
+                .map(|&b| b as u64)
+                .chain([storage.dtype().itemsize() as u64])
+                .try_shape_product();
+            // If the block size exceeds the maximum allowed, enabled block shape scaling
+            if block_bytes.is_none_or(|n| n > BLOCK_SIZE_BYTES_MAX) {
+                block_shape_fixed_dims = DimBitmap::filled(block_shape.len(), false);
+            }
+
+            self.block_shape = Some(block_shape.clone());
+            self.block_shape_fixed_dims = Some(block_shape_fixed_dims);
         }
         self.block_size.get_or_insert(spec.block_size());
         self.read_size.get_or_insert(spec.read_size());
@@ -329,6 +344,7 @@ impl ArrayParams {
         check_ndim(ndim)?;
         let itemsize = dtype.itemsize() as u64;
         check_dtype_size_nonzero(dtype)?;
+        check_shape_overflow(shape, itemsize)?;
 
         let cache_sizes = crate::util::cpu_cache::cache_sizes();
 
@@ -351,7 +367,7 @@ impl ArrayParams {
         if block_size.is_none() && (block_shape.is_none() || !fixed_block_shape) {
             block_size = Some(cache_sizes.l1_data as u64);
         }
-        let block_size = block_size.map(|n| n.min(MAX_BLOCK_SIZE_BYTES));
+        let block_size = block_size.map(|n| n.min(BLOCK_SIZE_BYTES_MAX));
         // Compute block shape
         let mut block_shape = block_shape.unwrap_or_else(|| {
             Self::scale_block_shape(
@@ -407,10 +423,20 @@ impl ArrayParams {
             .chain([itemsize])
             .try_shape_product();
         ensure!(
-            block_bytes.is_some_and(|n| n <= MAX_BLOCK_SIZE_BYTES),
+            block_bytes.is_some_and(|n| n <= BLOCK_SIZE_BYTES_MAX),
             InvalidArgument,
             "block_shape {block_shape:?} with itemsize {itemsize} is larger than the maximum of \
-             {MAX_BLOCK_SIZE_BYTES} bytes per block"
+             {BLOCK_SIZE_BYTES_MAX} bytes per block"
+        );
+        // The archive reader checks this, so a written array can always be read back
+        let padded_shape = shape
+            .iter()
+            .zip(&block_shape)
+            .map(|(&s, &b)| s.next_multiple_of(b as u64));
+        ensure!(
+            padded_shape.try_shape_product().is_some(),
+            InvalidShapeOperation,
+            "shape {shape:?} padded to block_shape {block_shape:?} has too many items"
         );
         // Update block_size to block_shape.product() if it is not specified
         let block_size = block_size
@@ -509,7 +535,6 @@ impl ArrayParams {
         dtype: &Dtype,
         flags: ArraySpecFlags,
     ) -> Result<ArraySpecOwned> {
-        check_shape_overflow(shape, dtype.itemsize() as _)?;
         let mut params = self;
         params.tune(shape, dtype)?;
         let spec = ArraySpecOwned::new(
@@ -814,7 +839,7 @@ impl ArraySpecDynamic {
         Self {
             block_shape,
             block_shape_fixed_dims,
-            element_cost,
+            element_cost: element_cost.clamp(0.0, ELEMENT_COST_MAX),
             read_shape_scale_weight,
             read_shape_scale_order,
             read_layout_order,
@@ -823,7 +848,7 @@ impl ArraySpecDynamic {
 
     pub(crate) fn add_elementwise_cost(&mut self, extra: f32) {
         let old_cost = self.element_cost;
-        let new_cost = old_cost + extra;
+        let new_cost = (old_cost + extra).min(ELEMENT_COST_MAX);
         self.element_cost = new_cost;
 
         let dilution = if new_cost > 0.0 {
@@ -985,13 +1010,13 @@ pub(crate) mod flags {
 mod tests {
     use crate::storage::params::{
         combine_block_layout, combine_elementwise_hints, combine_select_hints, ArraySpecFlags,
-        DimBitmap, ReadSize,
+        DimBitmap, ReadSize, ELEMENT_COST_MAX,
     };
     use ndarray::ShapeBuilder;
 
     use super::scale_order_from_weights;
     use crate::util::ScaleWeight;
-    use crate::{Array, ArrayParams, ArrayStorage};
+    use crate::{Array, ArrayParams, ArrayStorage, BLOCK_SIZE_BYTES_MAX};
 
     #[test]
     fn block_larger_than_max_block_bytes_is_rejected() {
@@ -1085,6 +1110,39 @@ mod tests {
         }
         // Ordering the u16 directly orders the fractions, which is what the scale order relies on.
         assert!(ScaleWeight::new(0.1) < ScaleWeight::new(0.2));
+    }
+
+    #[test]
+    fn widening_view_rescales_an_oversized_inherited_block_shape() {
+        // One fixed block of 2^20 + 8 items, over 1 GiB as 1 KiB items.
+        let n = (1 << 20) + 8;
+        let mut p = ArrayParams::new();
+        p.block_shape(&[n as u32]);
+        let a = Array::compact_ndarray_with(&ndarray::Array1::<u8>::zeros(n), p).unwrap();
+        let a = a.map(|x: u8| [x as f64; 128]);
+        let mut params = ArrayParams::new();
+        params.override_from_storage(a.storage());
+        params.tune(a.shape(), a.dtype()).unwrap();
+        let block_shape = params.block_shape.unwrap();
+        assert!(block_shape[0] as u64 * 1024 <= BLOCK_SIZE_BYTES_MAX);
+    }
+
+    #[test]
+    fn element_cost_is_bounded() {
+        // Each add doubles the cost, past f32::MAX if unbounded.
+        let x = Array::compact_ndarray(&ndarray::Array1::<f32>::zeros(0)).unwrap();
+        let mut x = x.into_any();
+        for _ in 0..130 {
+            let a = x.clone().into_typed::<f32>().unwrap();
+            x = (a + x.into_typed::<f32>().unwrap()).into_any();
+        }
+        assert_eq!(x.storage().spec().element_cost(), ELEMENT_COST_MAX);
+        // A zero-length concatenate member weighs its cost by 0.
+        let one = Array::compact_ndarray(&ndarray::array![5.0f32])
+            .unwrap()
+            .into_any();
+        let c = crate::ops::Concatenate::new_array(vec![x, one.clone()], 0).unwrap();
+        crate::ops::Concatenate::new_array(vec![c.into_any(), one], 0).unwrap();
     }
 
     #[test]
@@ -2000,6 +2058,23 @@ mod tests {
             result.unwrap_err().kind(),
             crate::error::ErrorKind::InvalidShapeOperation
         );
+    }
+
+    #[test]
+    fn compact_rejects_overflowing_padded_shape() {
+        // 3 * 0x5555_5555_5555_5555 == u64::MAX, and the block dim 2 pads the 3 to 4.
+        let shape = [0, 3, 0x5555_5555_5555_5555];
+        let mut params = ArrayParams::new();
+        params.block_shape(&[1, 2, 1]);
+        let result = Array::compact_fn_with(shape, params, |_| 0u8);
+        assert_eq!(
+            result.unwrap_err().kind(),
+            crate::error::ErrorKind::InvalidShapeOperation
+        );
+        let a = Array::compact_ndarray(&ndarray::Array3::<u8>::zeros((0, 1, 1))).unwrap();
+        let a = a.broadcast(&[0, 3, 0x5555_5555_5555_5555]);
+        assert!(a.compact().is_err());
+        assert!(a.write_to(std::io::Cursor::new(vec![])).is_err());
     }
 
     #[test]

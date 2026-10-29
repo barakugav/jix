@@ -365,7 +365,7 @@
 //! # Limits
 //!
 //! - Maximum array dimensions: [`NDIM_MAX`] (8).
-//! - Maximum dtype inner-shape dimensions: [`dtype::DTYPE_MAX_NDIM`] (4).
+//! - Maximum dtype inner-shape dimensions: [`dtype::DTYPE_NDIM_MAX`] (4).
 //! - Little-endian targets only - enforced by a compile-time assertion.
 //! - Element types must implement [`Dtyped`](dtype::Dtyped); they must be `Copy + Send + Sync +
 //!   'static` and must not implement `Drop`.
@@ -418,6 +418,8 @@ pub use error::Error;
 ///
 /// Create one with [`Array::into_any`].
 pub type ArrayAny = Array<storage::ArrayStorageAny>;
+
+const BLOCK_SIZE_BYTES_MAX: u64 = 1 << 30;
 
 #[doc(hidden)]
 pub mod __private {

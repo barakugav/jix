@@ -134,6 +134,18 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         )?;
         let ndim = self.is_broadcast.as_ref().len();
 
+        // empty read
+        if index.iter().any(|r| r.is_empty()) {
+            let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+            return Ok(materialize_out_buf(
+                out,
+                context,
+                out_shape.as_ref(),
+                self.dtype(),
+                self.spec().read_layout_order(),
+            ));
+        }
+
         let inner_index = dim_arr(ndim, |dim| {
             if self.is_broadcast[dim] {
                 0..1
@@ -336,6 +348,23 @@ mod tests {
             .to_ndarray_sub(&[0..2, 2..5], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![[0, 0, 0], [1, 1, 1]]);
+    }
+
+    #[test]
+    fn empty_read_does_not_read_inner() {
+        // Element [0, 1] divides by zero, but an empty read evaluates no element.
+        let q = make(vec![6, 7, 8], [1, 3]) / make(vec![2, 0, 4], [1, 3]);
+        let got = q
+            .view()
+            .broadcast(&[0, 3])
+            .to_ndarray::<ndarray::Ix2>()
+            .unwrap();
+        assert_eq!(got.shape(), [0, 3]);
+        let got = q
+            .broadcast(&[5, 3])
+            .to_ndarray_sub::<ndarray::Ix2>(&[2..2, 0..3], &ReadContext::default())
+            .unwrap();
+        assert_eq!(got.shape(), [0, 3]);
     }
 
     // -----------------------------------------------------------------------

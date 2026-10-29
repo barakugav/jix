@@ -463,22 +463,28 @@ where
         check_ndim(ndim)?;
         let shape = DimDyn::from_slice(header.shape.as_slice());
         ensure!(
+            shape.as_slice().iter().all(|&s| s <= i64::MAX as u64),
+            InvalidArchive,
+            "array shape {shape:?} has a dim larger than i64::MAX"
+        );
+        ensure!(
             header.block_shape.len() == ndim,
             InvalidArchive,
             "array block_shape has different ndim {} than shape {ndim}",
             header.block_shape.len(),
         );
-        let block_shape = dim_arr(ndim, |dim| header.block_shape[dim] as BlockSize);
         ensure!(
-            block_shape
+            header
+                .block_shape
                 .iter()
                 .zip(shape.as_slice())
-                .all(|(&b, &s)| b > 0 && b as u64 <= s.max(1)),
+                .all(|(&b, &s)| b > 0 && b <= s.max(1) && b <= BlockSize::MAX as u64),
             InvalidArchive,
             "invalid block shape {:?} for array shape {:?}",
-            block_shape,
+            header.block_shape,
             shape
         );
+        let block_shape = dim_arr(ndim, |dim| header.block_shape[dim] as BlockSize);
         // Compute padded shape in usize for nitems validation.
         let expected_nitems = (0..ndim)
             .map(|dim| {
@@ -563,10 +569,72 @@ mod tests {
 
     use ndarray::ArrayD;
 
+    use crate::archive::schema;
     use crate::dtype::Dtyped;
     use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
     use crate::{ArchiveValidation, Array, ArrayParams, Dimension, IntoDimension, Ty};
+    use crate::{ArrayStorage, TypeDyn};
+
+    /// Writes `a`, edits its array and block table headers, and reads the result back.
+    fn read_edited<S: ArrayStorage>(
+        a: &Array<S>,
+        edit: impl FnOnce(&mut schema::ArrayHeader, &mut schema::BlockTableHeader),
+    ) -> crate::error::Result<Array<Compact<TypeDyn>>> {
+        use prost::Message;
+        let mut bytes = Cursor::new(Vec::new());
+        a.write_to(&mut bytes).unwrap();
+        let bytes = bytes.into_inner();
+        // The magic, the file metadata, the two headers, then the [blocks_loc, block_data] TOC.
+        let mut pos = 4;
+        let mut msgs = [&bytes[..0]; 3];
+        for msg in &mut msgs {
+            let len = prost::decode_length_delimiter(&bytes[pos..]).unwrap();
+            pos += prost::length_delimiter_len(len);
+            *msg = &bytes[pos..pos + len];
+            pos += len;
+        }
+        let mut header = schema::ArrayHeader::decode(msgs[1]).unwrap();
+        let mut blocks = schema::BlockTableHeader::decode(msgs[2]).unwrap();
+        edit(&mut header, &mut blocks);
+        let mut out = bytes[..4].to_vec();
+        prost::encode_length_delimiter(msgs[0].len(), &mut out).unwrap();
+        out.extend_from_slice(msgs[0]);
+        header.encode_length_delimited(&mut out).unwrap();
+        blocks.encode_length_delimited(&mut out).unwrap();
+        // Section offsets are from the archive start.
+        let delta = out.len() as i64 - pos as i64;
+        for section in bytes[pos..pos + 32].chunks(16) {
+            let offset = i64::from_le_bytes(section[..8].try_into().unwrap());
+            out.extend_from_slice(&(offset + delta).to_le_bytes());
+            out.extend_from_slice(&section[8..]);
+        }
+        out.extend_from_slice(&bytes[pos + 32..]);
+        let len = out.len() as u64;
+        let params = ArrayParams::default();
+        Array::read_from_reader(
+            Cursor::new(out),
+            Some(len),
+            params,
+            ArchiveValidation::Strict,
+        )
+    }
+
+    #[test]
+    fn header_block_sizes_over_u32_are_rejected() {
+        let a = Array::compact_ndarray_with(&ndarray::array![0u8, 1, 2, 3], arr_params(&[2]));
+        let a = a.unwrap();
+        assert!(read_edited(&a, |_, _| {}).is_ok());
+        assert!(read_edited(&a, |h, _| h.block_shape[0] = (1 << 32) + 2).is_err());
+        assert!(read_edited(&a, |_, b| b.block_size = (1 << 32) + 2).is_err());
+    }
+
+    #[test]
+    fn header_dims_over_i64_are_rejected() {
+        let a = Array::compact_ndarray_with(&ndarray::array![0u8, 1, 2, 3], arr_params(&[2]));
+        let a = a.unwrap();
+        assert!(read_edited(&a, |h, _| h.shape[0] = u64::MAX).is_err());
+    }
 
     #[test]
     fn read_keeps_the_file_block_shape() {

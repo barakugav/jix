@@ -346,21 +346,32 @@ define_op1!(
 #[pyo3::pyfunction(signature = (array, base=None))]
 pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<crate::Array> {
     struct LogArgs {
-        multiplier: Option<f64>,
+        base: f64,
     }
     fn log_op_descriptor<T>() -> OpFnDescriptor<1, LogArgs>
     where
-        T: Dtyped + jix_core::scalar::Ln<Output = T> + core::ops::Mul<Output = T> + Copy,
+        T: Dtyped + jix_core::scalar::Cast<f64>,
+        T: jix_core::scalar::Ln<Output = T>
+            + jix_core::scalar::Log2<Output = T>
+            + jix_core::scalar::Log10<Output = T>,
         f64: jix_core::scalar::Cast<T>,
     {
+        use jix_core::ops::{Cast, Ln, Log10, Log2};
         OpFnDescriptor::new1_args::<T>(CastKind::Safe, |a, args: LogArgs| {
-            let res = jix_core::ops::Ln::new_array(a).into_py_result()?;
-            let Some(multiplier) = args.multiplier else {
-                return Ok(res.into_any());
-            };
-            let multiplier = <f64 as jix_core::scalar::Cast<T>>::cast(multiplier);
-            let res = res.map(move |x| x * multiplier);
-            Ok(res.into_any())
+            Ok(match args.base {
+                core::f64::consts::E => Ln::new_array(a).into_py_result()?.into_any(),
+                2.0 => Log2::new_array(a).into_py_result()?.into_any(),
+                10.0 => Log10::new_array(a).into_py_result()?.into_any(),
+                base => {
+                    let ln_base_inv = 1.0 / base.ln();
+                    let a = Cast::<_, f64>::new_array(a).into_py_result()?;
+                    let res = Ln::new_array(a).into_py_result()?;
+                    let res = res.map(move |x: f64| {
+                        <f64 as jix_core::scalar::Cast<T>>::cast(x * ln_base_inv)
+                    });
+                    res.into_any()
+                }
+            })
         })
     }
     static DISPATCH_TABLE: LazyLock<OpDescriptor<1, LogArgs>> = LazyLock::new(|| {
@@ -373,10 +384,14 @@ pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<
             ],
         )
     });
+    let base = base.unwrap_or(core::f64::consts::E);
+    if base <= 0.0 || base == 1.0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "log base must be a positive number other than 1, got {base}"
+        )));
+    }
     let array = Operand::from_any(array)?;
-    let args = LogArgs {
-        multiplier: base.map(|b| 1.0 / b.ln()),
-    };
+    let args = LogArgs { base };
     let res = DISPATCH_TABLE.dispatch_args([array], args)?;
     Ok(crate::Array::from_core(res))
 }

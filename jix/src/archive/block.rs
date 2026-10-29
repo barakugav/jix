@@ -362,8 +362,10 @@ where
             ),
         };
 
-        let block_size = header.block_size as BlockSize;
-        ensure!(block_size > 0, InvalidArchive, "block_size must be > 0");
+        let block_size = BlockSize::try_from(header.block_size)
+            .ok()
+            .filter(|&b| b > 0)
+            .ok_or_else(|| error!(InvalidArchive, "invalid block_size {}", header.block_size))?;
         ensure!(
             header.nitems.is_multiple_of(block_size as u64),
             InvalidArchive,

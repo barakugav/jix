@@ -484,15 +484,15 @@ where
     // stream is the dot product of its coordinates with these. Zero on the non-reduced dims, which
     // drops them from that dot product
     let reduced_shape_logical_strides = {
-        let mut reduced_shape_logical_strides = InnerD::vec(inner_ndim, |_| 0usize);
+        let mut reduced_shape_logical_strides = InnerD::vec(inner_ndim, |_| 0u64);
         let mut logical_stride = 1;
         for d in (0..inner_ndim).rev() {
             if is_reduced[d] {
                 reduced_shape_logical_strides[d] = logical_stride;
-                logical_stride *= (inner_range_full[d].end - inner_range_full[d].start) as usize;
+                logical_stride *= inner_range_full[d].end - inner_range_full[d].start;
             }
         }
-        debug_assert_eq!(logical_stride as u64, full_reduction_size);
+        debug_assert_eq!(logical_stride, full_reduction_size);
         reduced_shape_logical_strides
     };
 
@@ -513,6 +513,7 @@ where
         let state_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_buf_len) };
         (state_buf, DimArray::from_slice(out_strides).unwrap())
     } else {
+        check_region_size(index, kernel_state_sizeof)?; // states may be bigger than the output
         let state_buf_len = out_nitems * kernel_state_sizeof;
         tmp_state_buf = context.allocate_buf(state_buf_len, kernel_state_alignof);
         (
@@ -587,10 +588,9 @@ where
                 .sum::<usize>();
             let tile_base_reduced_idx = (0..inner_ndim)
                 .map(|d| {
-                    ((tile[d].start - inner_range_full[d].start) as usize)
-                        * reduced_shape_logical_strides[d]
+                    (tile[d].start - inner_range_full[d].start) * reduced_shape_logical_strides[d]
                 })
-                .sum::<usize>() as u64;
+                .sum::<u64>();
 
             let tile_shape = InnerD::vec(inner_ndim, |d| tile_size[d] as usize);
             let tile_state_base =
@@ -636,7 +636,7 @@ struct ReduceTileArgs<'a> {
     state_strides: &'a [usize],
 
     tile_base_reduced_idx: u64,
-    reduced_shape_logical_strides: &'a [usize],
+    reduced_shape_logical_strides: &'a [u64],
 }
 
 fn reduce_tile<T, K>(kernel: &K, args: ReduceTileArgs<'_>)
@@ -691,9 +691,17 @@ fn reduce_tile_impl(
     } = args;
 
     let (items_buf, items_strides) = items.data();
-    let iter = NdIterUnordered::<3>::new_with(
-        tile_shape,
-        [items_strides, state_strides, reduced_shape_logical_strides],
+
+    let [tile_shape_u64, items_strides_u64, state_strides_u64] =
+        [tile_shape, items_strides, state_strides]
+            .map(|a| a.iter().map(|s| *s as u64).collect::<DimArray<_>>());
+    let iter = NdIterUnordered::new_with(
+        &tile_shape_u64,
+        [
+            &items_strides_u64,
+            &state_strides_u64,
+            reduced_shape_logical_strides,
+        ],
         [
             item_layout,
             state_layout,
@@ -744,18 +752,18 @@ fn reduce_tile_impl(
         let [item_offset, state_offset, base_item_idx] = offsets;
         let [items_stride, state_stride, idx_stride] = strides;
 
-        let items_buf = unsafe { items_buf.bytes_offset(item_offset) };
-        let states_buf = unsafe { states_buf.bytes_offset(state_offset) };
+        let items_buf = unsafe { items_buf.bytes_offset(item_offset as usize) };
+        let states_buf = unsafe { states_buf.bytes_offset(state_offset as usize) };
 
-        let base_item_idx = tile_base_reduced_idx + base_item_idx as u64;
+        let base_item_idx = tile_base_reduced_idx + base_item_idx;
 
         inner_loop(
             FoldInnerLoopArgs {
-                inner_len,
+                inner_len: inner_len as usize,
                 items: items_buf,
                 states_buf,
-                items_stride,
-                state_stride,
+                items_stride: items_stride as usize,
+                state_stride: state_stride as usize,
                 idx_stride,
                 base_item_idx,
             },
@@ -776,7 +784,7 @@ struct FoldInnerLoopArgs<'a> {
     states_buf: PtrMutNoalias<'a, u8>,
     items_stride: usize,
     state_stride: usize,
-    idx_stride: usize,
+    idx_stride: u64,
     base_item_idx: u64,
 }
 fn fold_one_cell<T, K, const CONTIGUOUS: bool>(kernel: &K, args: FoldInnerLoopArgs<'_>)
@@ -955,7 +963,7 @@ where
             )
         },
     );
-    let idx_step = (LANES * ctx.idx_stride) as u64;
+    let idx_step = LANES as u64 * ctx.idx_stride;
 
     let mut states = kernel.init_state_bulk(
         ctx.read_items_bulk::<LANES, CONTIGUOUS>(begin),
@@ -982,13 +990,13 @@ struct FoldOneCellCtx<'a, T, K> {
     kernel: &'a K,
     items: PtrNoalias<'a, T>,
     items_stride: usize,
-    idx_stride: usize,
+    idx_stride: u64,
     base_item_idx: u64,
 }
 impl<T: Dtyped, K> FoldOneCellCtx<'_, T, K> {
     #[inline(always)]
     fn item_idx(&self, i: usize) -> u64 {
-        self.base_item_idx + (i * self.idx_stride) as u64
+        self.base_item_idx + (i as u64 * self.idx_stride)
     }
 
     #[inline(always)]
@@ -1171,7 +1179,7 @@ fn finalize_states(
         }
 
         // CAREFUL: state_buf and out_buf may alias
-        let iter = NdIterUnordered::<2>::new(
+        let iter = NdIterUnordered::new(
             out_shape,
             [out_buf_strides, state_buf_strides],
             [output_layout, state_layout],
@@ -1190,7 +1198,7 @@ fn finalize_states(
         });
     } else {
         // Empty reduction: write the empty-stream result to every output.
-        let iter = NdIterUnordered::<1>::new(out_shape, [out_buf_strides], [output_layout]);
+        let iter = NdIterUnordered::new(out_shape, [out_buf_strides], [output_layout]);
         iter.foreach_inner_1d(|[offset], len, [inner_stride]| {
             empty_run(unsafe { out_buf.add(offset) }, len, inner_stride);
         });
@@ -1844,11 +1852,12 @@ pub(crate) mod _traits {
         /// Combine two Welford accumulators computed over disjoint subsets (Chan's parallel
         /// algorithm). Associative + commutative up to float error.
         fn merge_states(a: Self::State, b: Self::State) -> Self::State;
-        /// Finalize `state` into the variance using `ddof` degrees-of-freedom correction.
-        /// `nitems` is the total number of elements folded in.
+        /// Finalize `state` into the variance using `ddof` degrees-of-freedom correction, or into
+        /// its square root, the standard deviation, if `sqrt`. `nitems` is the total number of
+        /// elements folded in.
         ///
         /// Returns `NaN` if the effective denominator (`nitems - ddof`) is non-positive.
-        fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output;
+        fn finalize(state: Self::State, ddof: f64, nitems: u64, sqrt: bool) -> Self::Output;
     }
     macro_rules! impl_variance {
         (
@@ -1929,14 +1938,11 @@ pub(crate) mod _traits {
                     }
                 }
                 #[inline(always)]
-                fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output {
-                    let m2 = if state.m2 >= 0.0 {
-                        state.m2
-                    } else {
-                        f64::INFINITY // m2 negative is caused by overflow
-                    };
+                fn finalize(state: Self::State, ddof: f64, nitems: u64, sqrt: bool) -> Self::Output {
+                    let m2 = if state.m2 < 0.0 { f64::INFINITY } else { state.m2 };
                     let denom = nitems as f64 - ddof;
                     let res = if denom > 0.0 { m2 / denom } else { f64::NAN };
+                    let res = if sqrt { res.sqrt() } else { res };
                     <_ as crate::scalar::Cast<Self::Output>>::cast(res)
                 }
             }
@@ -2750,7 +2756,7 @@ where
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
-        <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems)
+        <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems, false)
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;
@@ -2795,15 +2801,13 @@ define_reduction_op!(
     StandardDeviationKernel { ddof: f64 },
     where {
         S: ArrayStorageTyped,
-        S::Item: crate::scalar::Variance<Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped>,
+        S::Item: crate::scalar::Variance<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Variance>::Output,
 );
 impl<T> ReductionOpKernel<T> for StandardDeviationKernel
 where
-    T: crate::scalar::Variance<
-        Output: crate::scalar::Sqrt<Output = <T as crate::scalar::Variance>::Output>,
-    >,
+    T: crate::scalar::Variance,
 {
     type Output = <T as crate::scalar::Variance>::Output;
     type State = <T as crate::scalar::Variance>::State;
@@ -2850,12 +2854,7 @@ where
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
-        let var = <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems);
-
-        let mut status = Default::default();
-        let result = crate::scalar::Sqrt::sqrt(var, &mut status);
-        debug_assert!(status.is_ok()); // variance is never negative
-        result
+        <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems, true)
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;
@@ -3396,7 +3395,7 @@ where
         std: StandardDeviation,
         where {
             S: ArrayStorageTyped,
-            S::Item: crate::scalar::Variance<Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped>,
+            S::Item: crate::scalar::Variance<Output: Dtyped>,
         },
         extra_args = (ddof: f64)
     );
@@ -4231,6 +4230,23 @@ pub(crate) mod tests {
         assert!((std_row[[0]] - 0.8164).abs() < 0.001);
     }
 
+    #[test]
+    fn std_of_narrow_floats_where_only_the_variance_overflows_or_underflows() {
+        let std = |a: [f32; 2]| {
+            let a = Array::compact_ndarray(&ndarray::arr1(&a)).unwrap();
+            a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]]
+        };
+        assert_eq!(std([-2e19, 2e19]), 2e19);
+        assert_eq!(std([1e-25, 2e-25]), 5e-26);
+        #[cfg(feature = "half")]
+        {
+            let a = array![f16::from_f32(-300.0), f16::from_f32(300.0)];
+            let a = Array::compact_ndarray(&a).unwrap();
+            let std = a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]];
+            assert_eq!(std, f16::from_f32(300.0));
+        }
+    }
+
     /// Drives a `sum` reduction through the two-level bulk/tile chunking, with `block_shape`
     /// and a small `read_size` chosen so the tile lands at a genuine sub-block (smaller than
     /// the array along both a reduced and a non-reduced dim). That exercises both non-trivial
@@ -4439,6 +4455,20 @@ pub(crate) mod tests {
         let a = Array::compact_ndarray(&array![-0.0f64, -0.0]).unwrap();
         let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
         assert_eq!(s.to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
+    fn var_std_of_nan_or_inf_is_nan() {
+        let var = |a: ndarray::Array1<f64>| {
+            let a = Array::compact_ndarray(&a).unwrap();
+            a.var(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]]
+        };
+        assert!(var(array![f64::NAN, 1.0]).is_nan());
+        assert!(var(array![1.0, f64::NAN, 2.0]).is_nan());
+        assert!(var(array![f64::INFINITY, 1.0]).is_nan());
+        assert!(var(array![1.0, f64::NEG_INFINITY]).is_nan());
+        let a = Array::compact_ndarray(&array![1.0f64, f64::NAN, 2.0]).unwrap();
+        assert!(a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]].is_nan());
     }
 
     #[test]
@@ -5119,5 +5149,42 @@ pub(crate) mod tests {
         .map(|_| ())
         .unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
+    }
+
+    #[test]
+    #[cfg(all(target_pointer_width = "32", not(debug_assertions)))] // slow in debug builds
+    fn reduce_more_than_2pow32_items_on_32_bit() {
+        let n = (1u64 << 32) + 16;
+        let ones = Array::compact_ndarray(&array![[1u8, 1]]).unwrap();
+        let sum = ones.view().broadcast(&[n, 2]).sum(0usize);
+        assert_eq!(sum.to_ndarray::<Ix1>().unwrap(), array![n, n]);
+        let sum = ones.view().broadcast(&[n, 2]).sum((0, 1));
+        assert_eq!(sum.to_ndarray::<Ix0>().unwrap()[[]], 2 * n);
+        let mean = ones
+            .view()
+            .map(|x: u8| x as f32)
+            .broadcast(&[n, 2])
+            .mean(0usize);
+        assert_eq!(mean.to_ndarray::<Ix1>().unwrap(), array![1.0, 1.0]);
+        let zeros = Array::compact_ndarray(&array![0u8])
+            .unwrap()
+            .broadcast(&[n]);
+        let one = Array::compact_ndarray(&array![1u8])
+            .unwrap()
+            .broadcast(&[1]);
+        let argmax = crate::ops::concatenate((zeros, one), 0).argmax(0);
+        assert_eq!(argmax.to_ndarray::<Ix0>().unwrap()[[]], n);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn var_state_buffer_must_fit_in_memory_on_32_bit() {
+        use crate::ArrayStorage;
+        // The 4-byte output fits, the 24-byte states do not.
+        let n = (1u64 << 32) / 24 + 1;
+        let a = Array::compact_ndarray(&array![[1.0f32]]).unwrap();
+        let v = a.broadcast(&[n, 1]).var(1, 0.0);
+        let ctx = crate::codec::ReadContext::default();
+        assert!(v.storage().read_data(&[0..n], &ctx, None).is_err());
     }
 }

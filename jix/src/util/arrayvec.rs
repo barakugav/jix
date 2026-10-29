@@ -178,6 +178,11 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
         self.data = new_data;
     }
 
+    // #[inline]
+    // pub fn map<U>(self, f: impl FnMut(T) -> U) -> ArrayVec<U, CAP> {
+    //     self.into_iter().map(f).collect()
+    // }
+
     /// Set the vector's length without dropping or moving out elements
     #[inline]
     pub unsafe fn set_len(&mut self, length: usize) {
