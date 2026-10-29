@@ -1845,11 +1845,12 @@ pub(crate) mod _traits {
         /// Combine two Welford accumulators computed over disjoint subsets (Chan's parallel
         /// algorithm). Associative + commutative up to float error.
         fn merge_states(a: Self::State, b: Self::State) -> Self::State;
-        /// Finalize `state` into the variance using `ddof` degrees-of-freedom correction.
-        /// `nitems` is the total number of elements folded in.
+        /// Finalize `state` into the variance using `ddof` degrees-of-freedom correction, or into
+        /// its square root, the standard deviation, if `sqrt`. `nitems` is the total number of
+        /// elements folded in.
         ///
         /// Returns `NaN` if the effective denominator (`nitems - ddof`) is non-positive.
-        fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output;
+        fn finalize(state: Self::State, ddof: f64, nitems: u64, sqrt: bool) -> Self::Output;
     }
     macro_rules! impl_variance {
         (
@@ -1930,7 +1931,7 @@ pub(crate) mod _traits {
                     }
                 }
                 #[inline(always)]
-                fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output {
+                fn finalize(state: Self::State, ddof: f64, nitems: u64, sqrt: bool) -> Self::Output {
                     let m2 = if state.m2 >= 0.0 {
                         state.m2
                     } else {
@@ -1938,6 +1939,7 @@ pub(crate) mod _traits {
                     };
                     let denom = nitems as f64 - ddof;
                     let res = if denom > 0.0 { m2 / denom } else { f64::NAN };
+                    let res = if sqrt { res.sqrt() } else { res };
                     <_ as crate::scalar::Cast<Self::Output>>::cast(res)
                 }
             }
@@ -2751,7 +2753,7 @@ where
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
-        <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems)
+        <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems, false)
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;
@@ -2796,15 +2798,13 @@ define_reduction_op!(
     StandardDeviationKernel { ddof: f64 },
     where {
         S: ArrayStorageTyped,
-        S::Item: crate::scalar::Variance<Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped>,
+        S::Item: crate::scalar::Variance<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Variance>::Output,
 );
 impl<T> ReductionOpKernel<T> for StandardDeviationKernel
 where
-    T: crate::scalar::Variance<
-        Output: crate::scalar::Sqrt<Output = <T as crate::scalar::Variance>::Output>,
-    >,
+    T: crate::scalar::Variance,
 {
     type Output = <T as crate::scalar::Variance>::Output;
     type State = <T as crate::scalar::Variance>::State;
@@ -2851,12 +2851,7 @@ where
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
-        let var = <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems);
-
-        let mut status = Default::default();
-        let result = crate::scalar::Sqrt::sqrt(var, &mut status);
-        debug_assert!(status.is_ok()); // variance is never negative
-        result
+        <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems, true)
     }
     const SUPPORTS_EMPTY: bool = false;
     const PREFER_TREE_MERGE: bool = true;
@@ -3397,7 +3392,7 @@ where
         std: StandardDeviation,
         where {
             S: ArrayStorageTyped,
-            S::Item: crate::scalar::Variance<Output: crate::scalar::Sqrt<Output = <S::Item as crate::scalar::Variance>::Output> + Dtyped>,
+            S::Item: crate::scalar::Variance<Output: Dtyped>,
         },
         extra_args = (ddof: f64)
     );
@@ -4230,6 +4225,23 @@ pub(crate) mod tests {
         assert!((std_col[[0]] - 1.5).abs() < 0.001);
         let std_row = a.view().std(1, 0.0).to_ndarray::<Ix1>().unwrap();
         assert!((std_row[[0]] - 0.8164).abs() < 0.001);
+    }
+
+    #[test]
+    fn std_of_narrow_floats_where_only_the_variance_overflows_or_underflows() {
+        let std = |a: [f32; 2]| {
+            let a = Array::compact_ndarray(&ndarray::arr1(&a)).unwrap();
+            a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]]
+        };
+        assert_eq!(std([-2e19, 2e19]), 2e19);
+        assert_eq!(std([1e-25, 2e-25]), 5e-26);
+        #[cfg(feature = "half")]
+        {
+            let a = array![f16::from_f32(-300.0), f16::from_f32(300.0)];
+            let a = Array::compact_ndarray(&a).unwrap();
+            let std = a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]];
+            assert_eq!(std, f16::from_f32(300.0));
+        }
     }
 
     /// Drives a `sum` reduction through the two-level bulk/tile chunking, with `block_shape`
