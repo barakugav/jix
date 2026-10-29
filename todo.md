@@ -20,3 +20,4 @@
 - bitwise_rotate_left/right type promotion is wrong, (int,int) raise
 - bump to fearless_simd 1.2.0
 - add more base benchmarks
+- make Python Array support un/pickle
