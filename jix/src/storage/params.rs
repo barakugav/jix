@@ -9,6 +9,8 @@ use crate::{
     dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt, BLOCK_SIZE_BYTES_MAX,
 };
 
+const ELEMENT_COST_MAX: f32 = u64::MAX as f32; // 2^64
+
 /// Target byte range for a single read region.
 ///
 /// Stores a `(min, max)` range in bytes.
@@ -824,7 +826,7 @@ impl ArraySpecDynamic {
         Self {
             block_shape,
             block_shape_fixed_dims,
-            element_cost,
+            element_cost: element_cost.clamp(0.0, ELEMENT_COST_MAX),
             read_shape_scale_weight,
             read_shape_scale_order,
             read_layout_order,
@@ -833,7 +835,7 @@ impl ArraySpecDynamic {
 
     pub(crate) fn add_elementwise_cost(&mut self, extra: f32) {
         let old_cost = self.element_cost;
-        let new_cost = old_cost + extra;
+        let new_cost = (old_cost + extra).min(ELEMENT_COST_MAX);
         self.element_cost = new_cost;
 
         let dilution = if new_cost > 0.0 {
@@ -995,7 +997,7 @@ pub(crate) mod flags {
 mod tests {
     use crate::storage::params::{
         combine_block_layout, combine_elementwise_hints, combine_select_hints, ArraySpecFlags,
-        DimBitmap, ReadSize,
+        DimBitmap, ReadSize, ELEMENT_COST_MAX,
     };
     use ndarray::ShapeBuilder;
 
@@ -1095,6 +1097,24 @@ mod tests {
         }
         // Ordering the u16 directly orders the fractions, which is what the scale order relies on.
         assert!(ScaleWeight::new(0.1) < ScaleWeight::new(0.2));
+    }
+
+    #[test]
+    fn element_cost_is_bounded() {
+        // Each add doubles the cost, past f32::MAX if unbounded.
+        let x = Array::compact_ndarray(&ndarray::Array1::<f32>::zeros(0)).unwrap();
+        let mut x = x.into_any();
+        for _ in 0..130 {
+            let a = x.clone().into_typed::<f32>().unwrap();
+            x = (a + x.into_typed::<f32>().unwrap()).into_any();
+        }
+        assert_eq!(x.storage().spec().element_cost(), ELEMENT_COST_MAX);
+        // A zero-length concatenate member weighs its cost by 0.
+        let one = Array::compact_ndarray(&ndarray::array![5.0f32])
+            .unwrap()
+            .into_any();
+        let c = crate::ops::Concatenate::new_array(vec![x, one.clone()], 0).unwrap();
+        crate::ops::Concatenate::new_array(vec![c.into_any(), one], 0).unwrap();
     }
 
     #[test]
