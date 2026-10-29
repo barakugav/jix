@@ -25,3 +25,4 @@
 - implement stack using insert_dim+concatenate
 - review docs, correctness and style
 - review inlines
+- make Python Array support un/pickle
