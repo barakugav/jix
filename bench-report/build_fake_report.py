@@ -72,7 +72,7 @@ FAKE = {
         "blosc2": [561, 540],
         "zarr": [59.2, 58.0],
     },
-    # sum f32 axis0/axis1/all, sum i32 axis0/all, std f32 axis0/all - all measured
+    # sum f32 dim0/dim1/all, sum i32 dim0/all, std f32 dim0/all - all measured
     "reduction": {
         "numpy": [2.33, 3.97, 3.21, 11.70, 4.39, 11.06, 10.74],
         "jix-plain": [2.03, 1.55, 1.31, 3.12, 1.36, 14.44, 34.81],
@@ -112,7 +112,7 @@ FAKE = {
         "jix-plain": [503.0, 73.2],
         "jix": [1007.0, 125.3],
     },
-    "rust_axis_order": {
+    "rust_dim_order": {
         "ndarray": [88.0, 86.0, 13.0, 12.5],
         "jix-plain": [14.0, 13.8, 13.5, 13.0],
     },

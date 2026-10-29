@@ -94,7 +94,7 @@ class AbstractArray:
     def add(self, other):
         raise NotImplementedError()
 
-    def reduce(self, op, axis):
+    def reduce(self, op, dim):
         raise NotImplementedError()
 
     def _operand(self):
@@ -161,8 +161,8 @@ class NumpyArray(AbstractArray):
     def add(self, other):
         return self.raw + other.raw
 
-    def reduce(self, op, axis):
-        return np.asarray(getattr(self.raw, op)(axis=axis))
+    def reduce(self, op, dim):
+        return np.asarray(getattr(self.raw, op)(axis=dim))
 
     def _materialize(self, value):
         return value
@@ -218,8 +218,8 @@ class JixArray(AbstractArray):
     def add(self, other):
         return np.asarray((self.raw + other.raw).numpy())
 
-    def reduce(self, op, axis):
-        return np.asarray(getattr(self.raw, op)(dim=axis).numpy())
+    def reduce(self, op, dim):
+        return np.asarray(getattr(self.raw, op)(dim=dim).numpy())
 
     def _materialize(self, value):
         return np.asarray(value.numpy())
@@ -294,8 +294,8 @@ class Blosc2Array(AbstractArray):
     def add(self, other):
         return np.asarray((self.raw + other.raw)[:])
 
-    def reduce(self, op, axis):
-        return np.asarray(getattr(blosc2, op)(self.raw, axis=axis))
+    def reduce(self, op, dim):
+        return np.asarray(getattr(blosc2, op)(self.raw, axis=dim))
 
     def _materialize(self, value):
         return np.asarray(value[:])
@@ -356,8 +356,8 @@ class ZarrArray(AbstractArray):
     def add(self, other):
         return self._dense() + other._dense()
 
-    def reduce(self, op, axis):
-        return np.asarray(getattr(self._dense(), op)(axis=axis))
+    def reduce(self, op, dim):
+        return np.asarray(getattr(self._dense(), op)(axis=dim))
 
     def _operand(self):
         return self._dense()

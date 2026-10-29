@@ -64,7 +64,7 @@ PNG per operation.
 
 Two investigations landed in `FINDINGS.md` and changed the plan:
 
-- **ndarray has no axis sorting**, just a four-way layout classifier. The existing 2-D transpose
+- **ndarray has no dim sorting**, just a four-way layout classifier. The existing 2-D transpose
   benchmark measures nothing, because a transpose is exactly F-layout. The case that actually
   separates the two libraries is a 3-D *rotation*, which lands on `Layout::none()`.
 - **blosc2 auto-selects 8.7 MiB chunks** against a 4 KiB block, and silently rewrites a requested
@@ -163,7 +163,7 @@ Two fixes it forced:
 
 And two findings about jix itself, in `FINDINGS.md`: the Rust chain fuses perfectly (flat 2.6 ms to
 4.0 ms across 1 to 8 steps, against ndarray's linear 2.6 to 20.9) while the Python scalar-operand
-path is linear at ~5 ms per step; and `normalize` over axis 0 is 17x slower than ndarray while axis
+path is linear at ~5 ms per step; and `normalize` over dim 0 is 17x slower than ndarray while dim
 1 is 1.7x faster.
 
 ### Iteration 8 - first CI run, and a benchmark that measured nothing
@@ -179,7 +179,7 @@ machines have far less bandwidth per core.
 Three corrections the real data forced, all of them cases where the earlier draft was wrong rather
 than merely incomplete:
 
-- **The axis-order benchmark measured nothing.** All four cases agreed to within 1.08-1.39x,
+- **The dim-order benchmark measured nothing.** All four cases agreed to within 1.08-1.39x,
   controls included, which is the signature. `ndarray`'s contiguity check sorts strides before
   testing, so a permutation of a contiguous array is still contiguous in memory order and takes a
   flat fast path. The view has to be sliced first. Fixed, but unverified - it has not run.
@@ -205,7 +205,7 @@ flattering numpy.
 
 Two judgement calls worth recording:
 
-- **The axis-order section is withheld.** This run predates the fix, so its numbers come from the
+- **The dim-order section is withheld.** This run predates the fix, so its numbers come from the
   version that measured nothing. `build_report.py` now warns when a section's cases are only
   partly present - stale benchmark ids get drawn under new labels, which is worse than an empty
   plot. The section returns when a run includes the fixed benchmark.
@@ -213,3 +213,17 @@ Two judgement calls worth recording:
   46x faster; against `chunks == blocks` it is 2.4x. The 46x is real and is in the report, but a
   headline that beats a competitor's default when a better configuration exists is not a claim
   worth making.
+
+### Iteration 10 - rebase on main, peak RSS on macOS, axis -> dim
+
+Rebased onto main, which renamed `axis` to `dim` across the API and dropped the `Dimension` generic
+from storage. The report follows: case ids are `sum_f32_dim0`, `normalize_dim1`, the Rust section
+is `rust_dim_order`, and the labels read "dim 0". Plot axes and the NumPy/blosc2/ndarray APIs keep
+their own word. No published run has the new ids yet, so the committed report is still the fake one.
+
+**Peak RSS now works on macOS.** The iteration 7 fallback to `ru_maxrss` was a high-water mark, and
+building the inputs set it above anything a chain allocates, so every overhead came out 0. The
+worker now samples the current RSS through `psutil` on every platform. `test_peak_rss` asserted
+the overhead was positive, which a one-step NumPy chain correctly is not; it now checks the sampler
+saw the process instead.
+

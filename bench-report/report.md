@@ -228,12 +228,12 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| sum f32 axis 0 | 2.75 ms | 2.40 ms | 58.53 ms | 40.95 ms | 36.46 ms |
-| sum f32 axis 1 | 4.68 ms | 1.83 ms | 57.82 ms | 42.83 ms | 38.82 ms |
+| sum f32 dim 0 | 2.75 ms | 2.40 ms | 58.53 ms | 40.95 ms | 36.46 ms |
+| sum f32 dim 1 | 4.68 ms | 1.83 ms | 57.82 ms | 42.83 ms | 38.82 ms |
 | sum f32 all | 3.79 ms | 1.55 ms | 57.35 ms | 46.73 ms | 37.17 ms |
-| sum i32 axis 0 | 13.81 ms | 9.57 ms | 67.50 ms | 24.07 ms | 43.78 ms |
+| sum i32 dim 0 | 13.81 ms | 9.57 ms | 67.50 ms | 24.07 ms | 43.78 ms |
 | sum i32 all | 5.18 ms | 4.65 ms | 63.65 ms | 16.76 ms | 34.93 ms |
-| std f32 axis 0 | 13.05 ms | 17.04 ms | 72.81 ms | 86.02 ms | 49.44 ms |
+| std f32 dim 0 | 13.05 ms | 17.04 ms | 72.81 ms | 86.02 ms | 49.44 ms |
 | std f32 all | 12.67 ms | 41.08 ms | 97.23 ms | 87.32 ms | 46.14 ms |
 
 </details>
@@ -251,8 +251,8 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 | negate i32 | 12.86 ms | 13.10 ms | 53.10 ms |
 | add f32 | 19.00 ms | 19.35 ms | 116.82 ms |
 | add i32 | 18.88 ms | 19.23 ms | 112.10 ms |
-| sum f32 axis 0 | 8.38 ms | 6.37 ms | 57.82 ms |
-| sum f32 axis 1 | 6.14 ms | 5.78 ms | 56.64 ms |
+| sum f32 dim 0 | 8.38 ms | 6.37 ms | 57.82 ms |
+| sum f32 dim 1 | 6.14 ms | 5.78 ms | 56.64 ms |
 | sum i32 all | 8.02 ms | 3.30 ms | 22.42 ms |
 
 </details>
@@ -364,18 +364,18 @@ per step.
 
 ## A reduction inside a broadcast
 
-`a / a.std(axis)`, with the reduction broadcast back over the array, is a different shape from an
+`a / a.std(dim)`, with the reduction broadcast back over the array, is a different shape from an
 elementwise chain, and it is the case where laziness costs rather than pays.
 
 ![Rust: normalize, a reduction inside a broadcast](plots/rust_normalize.png)
 
 The reduction sits inside the lazy pipeline, so producing an output element re-runs it over that
-element's whole column: O(N*M) instead of O(N+M). Over axis 0 the reduced axis is 130000 elements
-long and the result is what the plot shows. Over axis 1 it is 200 elements and jix comes out ahead.
+element's whole column: O(N*M) instead of O(N+M). Over dim 0 the reduced dim is 130000 elements
+long and the result is what the plot shows. Over dim 1 it is 200 elements and jix comes out ahead.
 
 This is not a kernel deficiency, it is what fusing a broadcast reduction means, and the remedy is
 the one the `ops` module already gives for reshape: materialize the reduction before broadcasting
-it when the reduced axis is long. It is on the page because a caller who writes this expression
+it when the reduced dim is long. It is on the page because a caller who writes this expression
 without knowing that will pay for it.
 
 <details>
@@ -383,15 +383,15 @@ without knowing that will pay for it.
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| normalize axis 0 | 7.32 ms | 593.54 ms | 1.19 s |
-| normalize axis 1 | 99.24 ms | 86.38 ms | 147.85 ms |
+| normalize dim 0 | 7.32 ms | 593.54 ms | 1.19 s |
+| normalize dim 1 | 99.24 ms | 86.38 ms | 147.85 ms |
 
 </details>
 
 <!--
-The axis-order section is withheld. The benchmark it relied on measured nothing - see
+The dim-order section is withheld. The benchmark it relied on measured nothing - see
 FINDINGS.md - and the fixed version has not been run yet. Restore this section, with
-<!- - plot:rust_axis_order - -> and <!- - table:rust_axis_order - ->, once a run includes it.
+<!- - plot:rust_dim_order - -> and <!- - table:rust_dim_order - ->, once a run includes it.
 -->
 
 ## Reproducing

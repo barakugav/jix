@@ -55,7 +55,7 @@ def test_uncompressed_stored_size_is_raw_size(name):
 # worse than no benchmark.
 UNARY_OPERATIONS = [
     ("negate", ()),
-    *[("reduce", (op, axis)) for op in ("sum", "std") for axis in (0, 1, None)],
+    *[("reduce", (op, dim)) for op in ("sum", "std") for dim in (0, 1, None)],
 ]
 BINARY_OPERATIONS = [
     ("add", ()),

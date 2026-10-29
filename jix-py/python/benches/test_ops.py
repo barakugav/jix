@@ -35,9 +35,9 @@ def test_negate_by_distribution(benchmark, library, distribution):
 
 
 @pytest.mark.parametrize("library", report_spec.CORE)
-@pytest.mark.parametrize("case", report_spec.REDUCTION_CASES, ids=lambda c: f"{c[0]}_{c[1]}_axis{c[2]}")
+@pytest.mark.parametrize("case", report_spec.REDUCTION_CASES, ids=lambda c: f"{c[0]}_{c[1]}_dim{c[2]}")
 def test_reduction(benchmark, library, case):
-    op, dtype, axis = case
+    op, dtype, dim = case
     arr = build(library, "smooth", dtype, SHAPE)
     record(benchmark, section="reduction", case=report_spec.reduction_label(*case), library=library)
-    assert benchmark(lambda: arr.reduce(op, axis)) is not None
+    assert benchmark(lambda: arr.reduce(op, dim)) is not None

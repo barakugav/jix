@@ -22,14 +22,14 @@ always drawn as a 1x bar.
 |---|---|
 | math dtypes | **`f32` and `i32`, both, almost always** |
 | read dtype | **`i32` only** |
-| ndim | 2, except the axis-order section which needs 3 |
+| ndim | 2, except the dim-order section which needs 3 |
 | codec | zstd level 3 |
 | filters | byte-shuffle. `jix` and `blosc2` always mean the shuffled build; `-noshuffle` arms appear only in the compression section |
 | data distribution | `smooth`, except where distribution is a case |
 | array shape | **`[130_000, 200]` in both Rust and Python** (104 MB as f32), stated on every plot |
 
 Two dtypes is not a sweep - it is the minimum honest sample. The suite already shows the two
-diverging sharply (`sum` all-axis: jix beats numpy 3.2x on `i32` and 2.4x on `f32`), and showing
+diverging sharply (`sum` all-dims: jix beats numpy 3.2x on `i32` and 2.4x on `f32`), and showing
 only the flattering one would be a choice.
 
 **Do not get attached to the integer-reduction win.** jix's kernels are tuned on macOS arm64;
@@ -123,7 +123,7 @@ choosing which result to show.
 
 | | |
 |---|---|
-| cases | `sum axis=0`, `sum axis=1`, `sum all`, `std axis=0`, `std all` - each for `f32` and `i32` |
+| cases | `sum dim=0`, `sum dim=1`, `sum all`, `std dim=0`, `std all` - each for `f32` and `i32` |
 | libraries | numpy, jix-plain, jix-shuffle, blosc2-shuffle, zarr |
 | status | ADAPT |
 
@@ -131,7 +131,7 @@ Expect `sum` above the line and `std` well below it (currently 3.2x slower than 
 the same chart, same axis. The `std` result is a real deficiency in the kernel and the plot says so
 without a paragraph apologizing for it.
 
-Note that blosc2 beats jix on compressed reductions (`std` all-axis 74 ms against 82 ms) while
+Note that blosc2 beats jix on compressed reductions (`std` all-dims 74 ms against 82 ms) while
 losing badly on compressed elementwise. Same plot, both facts visible.
 
 ### 6. Operation chains
@@ -156,7 +156,7 @@ labelled `exp/log`, next to the cheap-op cases, where the contrast is the point.
 **Peak memory** is a second plot in this section, same cases. It works the way `test_compress`
 works: a normal pytest-benchmark test that records the extra metric into `extra_info`, so it lands
 in `python.json` next to everything else and needs no separate file or merge step. The measurement
-itself runs the chain in a fresh subprocess and reads its `ru_maxrss`, because `tracemalloc` cannot
+itself runs the chain in a fresh subprocess and samples its RSS, because `tracemalloc` cannot
 see numpy's C-level allocations and an in-process high-water mark is contaminated by every test
 that ran before it. Python only. Memory has no noise floor, which makes it the cleanest evidence on
 the page.
@@ -166,10 +166,10 @@ the page.
 Rust iterators already fuse for free, so the honest Rust claim is about chains that mix elementwise
 work with reductions and broadcasts.
 
-### 7. Axis order (Rust only)
+### 7. Dim order (Rust only)
 
-jix sorts all axes by descending stride; ndarray classifies into C, F, first-axis-contiguous,
-last-axis-contiguous, or nothing (`FINDINGS.md`). The benchmark has to hit the "nothing" case.
+jix sorts all dims by descending stride; ndarray classifies into C, F, first-dim-contiguous,
+last-dim-contiguous, or nothing (`FINDINGS.md`). The benchmark has to hit the "nothing" case.
 
 | | |
 |---|---|
@@ -178,7 +178,7 @@ last-axis-contiguous, or nothing (`FINDINGS.md`). The benchmark has to hit the "
 | dtypes | `f32`, `i32` |
 | status | NEW - the existing `bench_op1_plain_transposed` uses a 2-D transpose, which ndarray handles perfectly, so it measures nothing |
 
-No Python counterpart: numpy sorts axes too, so there is no comparison to make.
+No Python counterpart: numpy sorts dims too, so there is no comparison to make.
 
 ---
 
@@ -205,7 +205,7 @@ out.
 The Rust benches are development tools for optimizing the library, so they stay as they are. The
 report benchmarks go in new files alongside them:
 
-- `benches/vs_ndarray.rs` - reads, negate, add, sum, std, chains, axis order. Everything the report
+- `benches/vs_ndarray.rs` - reads, negate, add, sum, std, chains, dim order. Everything the report
   needs, in one bench target with an `ndarray` arm throughout.
 
 `jix/benches/run.py` grows a `--report` flag that runs only that target
@@ -234,4 +234,4 @@ about what a case is. `bench-report/README.md` is the runbook.
 
 The numbers in `report.md` are real, from run 34788352028 at full fidelity on both runners.
 
-Outstanding: the axis-order section is withheld pending a run that includes its fixed benchmark.
+Outstanding: the dim-order section is withheld pending a run that includes its fixed benchmark.

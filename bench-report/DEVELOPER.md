@@ -70,7 +70,7 @@ The rest of `jix/benches/` is for optimizing the library and is deliberately not
 Each of these produced a plausible-looking wrong number. They are the reasons for several
 otherwise-odd choices in the code.
 
-- **A benchmark that measured nothing.** The axis-order cases negated permuted views and reported
+- **A benchmark that measured nothing.** The dim-order cases negated permuted views and reported
   the treatment and both controls as identical. `ndarray`'s contiguity check sorts strides first,
   so a permutation of a contiguous array still takes the fast path. **If a treatment agrees with
   its controls, believe the controls.**

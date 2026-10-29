@@ -233,26 +233,26 @@ per step.
 
 ## A reduction inside a broadcast
 
-`a / a.std(axis)`, with the reduction broadcast back over the array, is a different shape from an
+`a / a.std(dim)`, with the reduction broadcast back over the array, is a different shape from an
 elementwise chain, and it is the case where laziness costs rather than pays.
 
 <!-- plot:rust_normalize -->
 
 The reduction sits inside the lazy pipeline, so producing an output element re-runs it over that
-element's whole column: O(N*M) instead of O(N+M). Over axis 0 the reduced axis is 130000 elements
-long and the result is what the plot shows. Over axis 1 it is 200 elements and jix comes out ahead.
+element's whole column: O(N*M) instead of O(N+M). Over dim 0 the reduced dim is 130000 elements
+long and the result is what the plot shows. Over dim 1 it is 200 elements and jix comes out ahead.
 
 This is not a kernel deficiency, it is what fusing a broadcast reduction means, and the remedy is
 the one the `ops` module already gives for reshape: materialize the reduction before broadcasting
-it when the reduced axis is long. It is on the page because a caller who writes this expression
+it when the reduced dim is long. It is on the page because a caller who writes this expression
 without knowing that will pay for it.
 
 <!-- table:rust_normalize -->
 
 <!--
-The axis-order section is withheld. The benchmark it relied on measured nothing - see
+The dim-order section is withheld. The benchmark it relied on measured nothing - see
 FINDINGS.md - and the fixed version has not been run yet. Restore this section, with
-<!- - plot:rust_axis_order - -> and <!- - table:rust_axis_order - ->, once a run includes it.
+<!- - plot:rust_dim_order - -> and <!- - table:rust_dim_order - ->, once a run includes it.
 -->
 
 ## Reproducing
