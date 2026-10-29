@@ -2,9 +2,10 @@ use std::ops::Range;
 
 use crate::buf_pool::PoolBuf;
 use crate::dtype::Dtype;
-use crate::error::{check_get_range, check_region_size, ensure, Result};
+use crate::error::{bail, check_get_range, check_region_size, ensure, Result};
 use crate::util::{
-    default_strides_slice, strided_span_bytes, strides_for_layout_order, DimArray, SliceExt,
+    default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
+    SliceExt,
 };
 use crate::{ArrayStorage, DimDyn, DimIdx, NdCopier, PtrMutNoalias, PtrNoalias, ReadContext};
 
@@ -325,19 +326,43 @@ pub(crate) fn check_out_buf(
         InvalidArgument,
         "out buffer must be a writable destination, not a read-only view"
     );
-    // The furthest byte the region touches must lie inside `out`.
     if index.iter().all(|r| r.end > r.start) {
-        let span = index
-            .iter()
-            .zip(out.strides())
-            .try_fold(itemsize as u64, |acc, (r, &s)| {
-                (s as u64)
-                    .checked_mul(r.end - r.start - 1)?
-                    .checked_add(acc)
-            });
+        let strides = out.strides();
+        let d_len_stride = |d: usize| (index[d].end - index[d].start, strides[d] as u64);
+
+        /// The span in bytes of a region with `(len, stride)` dims.
+        ///
+        /// If every dim steps past the span of the previous dims, meaning no two elements overlap,
+        /// returns Some(span), otherwise None.
+        fn disjoint_span(dims: impl Iterator<Item = (u64, u64)>, itemsize: usize) -> Option<u64> {
+            dims.filter(|&(len, _)| len > 1)
+                .try_fold(itemsize as u64, |span, (len, stride)| {
+                    (stride >= span).then(|| stride.saturating_mul(len - 1).saturating_add(span))
+                })
+        }
+
+        let mut span = None;
+        if span.is_none() {
+            // common fast path, strides decrease with the dim
+            span = disjoint_span((0..index.len()).rev().map(d_len_stride), itemsize);
+        }
+        if span.is_none() {
+            // general path, sort dims by stride
+            let mut dims = dim_arr(index.len(), d_len_stride);
+            dims.sort_unstable_by_key(|&(_len, stride)| stride);
+            span = disjoint_span(dims.into_iter(), itemsize);
+        }
+
+        let Some(span) = span else {
+            bail!(
+                InvalidArgument,
+                "out buffer strides {:?} overlap over the region {index:?}",
+                out.strides()
+            );
+        };
         let len = out.data().0.len();
         ensure!(
-            span.is_some_and(|span| span <= len as u64),
+            span <= len as u64,
             InvalidArgument,
             "out buffer of {len} bytes is too small for the region {index:?}"
         );
@@ -440,6 +465,23 @@ mod tests {
             .to_ndarray_buf(&[0..4], &ctx2, Some(&mut out))
             .is_err());
         assert!(big().to_ndarray_buf(&[1..2], &ctx2, Some(&mut out)).is_ok());
+    }
+
+    #[test]
+    fn out_overlapping_over_the_region_is_rejected() {
+        let ctx = ReadContext::default();
+        // A writable pull result with strides [0, 4], reused as `out` of a 3-row read.
+        let a = Array::plain_ndarray(array![1i32, 2, 3, 4]).unwrap();
+        let a = a.flip(0).insert_dim(0);
+        let mut out = a.to_ndarray_buf(&[0..1, 0..4], &ctx, None).unwrap();
+        let big = Array::plain_ndarray(array![[10i32, 11, 12, 13], [20, 21, 22, 23]]).unwrap();
+        let ctx2 = ReadContext::default();
+        assert!(big
+            .to_ndarray_buf(&[0..2, 0..4], &ctx2, Some(&mut out))
+            .is_err());
+        assert!(big
+            .to_ndarray_buf(&[1..2, 0..4], &ctx2, Some(&mut out))
+            .is_ok());
     }
 
     #[test]
