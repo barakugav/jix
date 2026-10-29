@@ -27,16 +27,18 @@ def test_peak_rss(benchmark, library, steps):
         out = subprocess.check_output(
             [sys.executable, str(WORKER), "--library", library, "--steps", str(steps)], text=True
         )
-        return json.loads(out.splitlines()[-1])["peak_rss_bytes"]
+        return json.loads(out.splitlines()[-1])
 
     # One round: each is a fresh interpreter, and the number does not get better for repeating it.
-    peak = benchmark.pedantic(run, rounds=1, iterations=1)
+    result = benchmark.pedantic(run, rounds=1, iterations=1)
     record(
         benchmark,
         section="chain_memory",
         case=report_spec.chain_label(steps),
         library=library,
-        peak_rss_bytes=peak,
+        peak_rss_bytes=result["peak_rss_bytes"],
         value_field="peak_rss_bytes",
     )
-    assert peak > 0
+    # The overhead itself may legitimately be zero (a one-step NumPy chain writes straight into
+    # `out`), so check the sampler saw the process at all.
+    assert result["absolute_peak_bytes"] > 0
