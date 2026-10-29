@@ -329,6 +329,7 @@ impl ArrayParams {
         check_ndim(ndim)?;
         let itemsize = dtype.itemsize() as u64;
         check_dtype_size_nonzero(dtype)?;
+        check_shape_overflow(shape, itemsize)?;
 
         let cache_sizes = crate::util::cpu_cache::cache_sizes();
 
@@ -411,6 +412,16 @@ impl ArrayParams {
             InvalidArgument,
             "block_shape {block_shape:?} with itemsize {itemsize} is larger than the maximum of \
              {BLOCK_SIZE_BYTES_MAX} bytes per block"
+        );
+        // The archive reader checks this, so a written array can always be read back
+        let padded_shape = shape
+            .iter()
+            .zip(&block_shape)
+            .map(|(&s, &b)| s.next_multiple_of(b as u64));
+        ensure!(
+            padded_shape.try_shape_product().is_some(),
+            InvalidShapeOperation,
+            "shape {shape:?} padded to block_shape {block_shape:?} has too many items"
         );
         // Update block_size to block_shape.product() if it is not specified
         let block_size = block_size
@@ -509,7 +520,6 @@ impl ArrayParams {
         dtype: &Dtype,
         flags: ArraySpecFlags,
     ) -> Result<ArraySpecOwned> {
-        check_shape_overflow(shape, dtype.itemsize() as _)?;
         let mut params = self;
         params.tune(shape, dtype)?;
         let spec = ArraySpecOwned::new(
@@ -2000,6 +2010,23 @@ mod tests {
             result.unwrap_err().kind(),
             crate::error::ErrorKind::InvalidShapeOperation
         );
+    }
+
+    #[test]
+    fn compact_rejects_overflowing_padded_shape() {
+        // 3 * 0x5555_5555_5555_5555 == u64::MAX, and the block dim 2 pads the 3 to 4.
+        let shape = [0, 3, 0x5555_5555_5555_5555];
+        let mut params = ArrayParams::new();
+        params.block_shape(&[1, 2, 1]);
+        let result = Array::compact_fn_with(shape, params, |_| 0u8);
+        assert_eq!(
+            result.unwrap_err().kind(),
+            crate::error::ErrorKind::InvalidShapeOperation
+        );
+        let a = Array::compact_ndarray(&ndarray::Array3::<u8>::zeros((0, 1, 1))).unwrap();
+        let a = a.broadcast(&[0, 3, 0x5555_5555_5555_5555]);
+        assert!(a.compact().is_err());
+        assert!(a.write_to(std::io::Cursor::new(vec![])).is_err());
     }
 
     #[test]
