@@ -18,7 +18,7 @@ use pyo3::exceptions::{
 use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
-use crate::ops::asarray_simple;
+use crate::ops::plain_from_numpy;
 use crate::util::{
     dim_arr, maybe_detach, numpy_empty_ordered, strided_span_bytes, DimArray, IntoPyResult,
     ItemOrTuple,
@@ -712,7 +712,9 @@ impl Array {
     ///
     /// Identical to `numpy()`, except the decoded elements are wrapped as a plain
     /// [`jix.Array`][jix.Array] - a view over a freshly-allocated buffer, with no block compression -
-    /// rather than returned as a NumPy array. Equivalent to `jix.asarray(self.numpy(index))`.
+    /// rather than returned as a NumPy array. Equivalent to `jix.asarray(self.numpy(index))`,
+    /// except that a dtype with an inner shape stays the dtype, while NumPy expands it into
+    /// trailing dims.
     ///
     /// Like [`compact()`][jix.Array.compact], `plain()` materializes an intermediate array: it
     /// breaks the lazy operation chain - or a shape view such as the output of
@@ -753,8 +755,13 @@ impl Array {
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, Array>> {
-        let np_arr = self.numpy(py, index, None)?;
-        asarray_simple(&np_arr)
+        let np_arr = self.numpy(py, index, None)?.0;
+        let params = resolve_array_params(py, None)?;
+        let array = plain_from_numpy(np_arr, self.arr.dtype().clone(), params)?;
+        Bound::new(
+            py,
+            Array::from_core_with_np_dtype(array, self.numpy_dtype(py)?.unbind()),
+        )
     }
 
     /// Read elements from the array (or a sub-region of it) and return them as a NumPy array.
