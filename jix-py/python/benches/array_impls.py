@@ -219,7 +219,7 @@ class JixArray(AbstractArray):
         return np.asarray((self.raw + other.raw).numpy())
 
     def reduce(self, op, axis):
-        return np.asarray(getattr(self.raw, op)(axis=axis).numpy())
+        return np.asarray(getattr(self.raw, op)(dim=axis).numpy())
 
     def _materialize(self, value):
         return np.asarray(value.numpy())
