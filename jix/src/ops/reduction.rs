@@ -1932,11 +1932,7 @@ pub(crate) mod _traits {
                 }
                 #[inline(always)]
                 fn finalize(state: Self::State, ddof: f64, nitems: u64, sqrt: bool) -> Self::Output {
-                    let m2 = if state.m2 >= 0.0 {
-                        state.m2
-                    } else {
-                        f64::INFINITY // m2 negative is caused by overflow
-                    };
+                    let m2 = if state.m2 < 0.0 { f64::INFINITY } else { state.m2 };
                     let denom = nitems as f64 - ddof;
                     let res = if denom > 0.0 { m2 / denom } else { f64::NAN };
                     let res = if sqrt { res.sqrt() } else { res };
@@ -4452,6 +4448,20 @@ pub(crate) mod tests {
         let a = Array::compact_ndarray(&array![-0.0f64, -0.0]).unwrap();
         let s = a.sum(0usize).to_ndarray::<Ix0>().unwrap()[[]];
         assert_eq!(s.to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
+    fn var_std_of_nan_or_inf_is_nan() {
+        let var = |a: ndarray::Array1<f64>| {
+            let a = Array::compact_ndarray(&a).unwrap();
+            a.var(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]]
+        };
+        assert!(var(array![f64::NAN, 1.0]).is_nan());
+        assert!(var(array![1.0, f64::NAN, 2.0]).is_nan());
+        assert!(var(array![f64::INFINITY, 1.0]).is_nan());
+        assert!(var(array![1.0, f64::NEG_INFINITY]).is_nan());
+        let a = Array::compact_ndarray(&array![1.0f64, f64::NAN, 2.0]).unwrap();
+        assert!(a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]].is_nan());
     }
 
     #[test]
