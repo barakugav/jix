@@ -692,7 +692,7 @@ fn reduce_tile_impl(
     } = args;
 
     let (items_buf, items_strides) = items.data();
-    let iter = NdIterUnordered::<3>::new_with(
+    let iter = NdIterUnordered::new_with(
         tile_shape,
         [items_strides, state_strides, reduced_shape_logical_strides],
         [
@@ -1172,7 +1172,7 @@ fn finalize_states(
         }
 
         // CAREFUL: state_buf and out_buf may alias
-        let iter = NdIterUnordered::<2>::new(
+        let iter = NdIterUnordered::new(
             out_shape,
             [out_buf_strides, state_buf_strides],
             [output_layout, state_layout],
@@ -1191,7 +1191,7 @@ fn finalize_states(
         });
     } else {
         // Empty reduction: write the empty-stream result to every output.
-        let iter = NdIterUnordered::<1>::new(out_shape, [out_buf_strides], [output_layout]);
+        let iter = NdIterUnordered::new(out_shape, [out_buf_strides], [output_layout]);
         iter.foreach_inner_1d(|[offset], len, [inner_stride]| {
             empty_run(unsafe { out_buf.add(offset) }, len, inner_stride);
         });

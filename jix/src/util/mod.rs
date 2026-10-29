@@ -46,11 +46,13 @@ pub(crate) trait Idx:
     + PartialOrd
     + Ord
     + core::ops::Add<Output = Self>
-    + core::ops::Sub<Output = Self>
     + core::ops::AddAssign
+    + core::ops::Sub<Output = Self>
     + core::ops::SubAssign
     + core::ops::Mul<Output = Self>
+    + core::ops::MulAssign
     + core::ops::Div<Output = Self>
+    + core::ops::DivAssign
     + core::ops::Rem<Output = Self>
     + core::fmt::Display
     + core::fmt::Debug
