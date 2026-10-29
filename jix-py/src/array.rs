@@ -295,6 +295,21 @@ impl Array {
             }
             inner_stride *= out.shape()[dim] as isize;
         }
+        // In stride order, each stepped dim must step past the span of the smaller ones.
+        let mut dims = (out.strides().iter().zip(out.shape()))
+            .filter(|&(_, &len)| len > 1)
+            .map(|(&stride, &len)| (stride as usize, len))
+            .collect::<Vec<_>>();
+        dims.sort_unstable();
+        let mut span = expected_dtype.itemsize();
+        for (stride, len) in dims {
+            if stride < span {
+                return Err(PyValueError::new_err(
+                    "out array elements overlap, two of them share memory",
+                ));
+            }
+            span += stride * (len - 1);
+        }
         Ok(())
     }
 
@@ -478,9 +493,10 @@ impl Array {
     ///         be writeable.
     ///
     ///         The destination does not have to be C-contiguous - almost any strided view works.
-    ///         Two kinds of view are rejected: reversed ones (a negative stride, e.g. `big[::-1]`)
-    ///         and broadcast ones (a zero stride over a dim longer than 1). The destination must
-    ///         also be aligned to the dtype.
+    ///         Three kinds of view are rejected: reversed ones (a negative stride, e.g. `big[::-1]`),
+    ///         broadcast ones (a zero stride over a dim longer than 1) and ones whose elements
+    ///         overlap (e.g. a `sliding_window_view`). The destination must also be aligned to the
+    ///         dtype.
     ///
     ///         When `out` is given it is returned as-is, so `arr.numpy(out=dst) is dst`.
     ///
