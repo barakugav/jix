@@ -299,15 +299,22 @@ impl Array {
     }
 
     pub(crate) fn numpy_dtype<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
-        let mut cache = self
-            .cache
-            .lock()
-            .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))?;
-
-        if cache.numpy_dtype.is_none() {
-            cache.numpy_dtype = Some(dtype_to_numpy(py, self.arr.dtype())?.unbind());
+        let get_cache = || {
+            self.cache
+                .lock()
+                .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))
+        };
+        if let Some(dtype) = &get_cache()?.numpy_dtype {
+            return Ok(dtype.bind(py).clone());
         }
-        Ok(cache.numpy_dtype.as_ref().unwrap().bind(py).clone())
+
+        // call dtype_to_numpy while NOT holding the lock
+        let dtype = dtype_to_numpy(py, self.arr.dtype())?;
+
+        get_cache()?
+            .numpy_dtype
+            .get_or_insert_with(|| dtype.clone().unbind());
+        Ok(dtype)
     }
 }
 #[pymethods]
