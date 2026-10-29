@@ -128,6 +128,17 @@ def test_log_base10_concrete():
             check_op1_concrete(jix.log10, np.log10, [(dtype, values)], rtol=rtol)
 
 
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+def test_log2_log10_exact_on_powers(dtype):
+    # Exact, as numpy for float64 (numpy's float32 log10 is not).
+    k = np.arange(-14, 16)
+    np.testing.assert_array_equal(jix.log2(np.exp2(k).astype(dtype)).numpy(), k)
+    k = np.arange(5)
+    np.testing.assert_array_equal(jix.log10((10.0**k).astype(dtype)).numpy(), k)
+    x = np.array([0.5, 3.0, 81.0], dtype=dtype)
+    np.testing.assert_allclose(jix.log(x, base=3).numpy(), np.log(x) / np.log(3), rtol=1e-3)
+
+
 @pytest.mark.parametrize("base", [1.0, 0.0, -0.0, -2.0])
 def test_log_invalid_base(base):
     with pytest.raises(ValueError, match="base"):
