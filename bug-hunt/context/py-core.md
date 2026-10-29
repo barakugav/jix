@@ -182,6 +182,16 @@ Line numbers in this doc refer to bb1ee2c.
 - Operand inputs accept any stride, negative included, on a dim of length <= 1 (operand.rs:171-178)
   (K80). This supersedes the "negative strides rejected even on extent<=1 dims" statements above.
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- `numpy()` returns an empty result before rebuilding strides (K98), and `numpy(out=)` rejects an
+  `out` whose elements overlap, with the same stride-order criterion as `check_out_buf` (K97).
+- `numpy_dtype` calls `dtype_to_numpy` without holding the cache lock (K90).
+- `numpy_empty` / `numpy_empty_ordered` take up to 32 dims (`NumpyDimArray`), so ndim + inner
+  ndim > 8 works (K89).
+- `plain()` builds the Plain storage with `plain_from_numpy` and the array's own dtype, keeping an
+  inner-shape dtype (K99). `plain_from_numpy` (operand.rs:419-490) requires the trailing numpy dims
+  to equal the inner shape and be C-contiguous.
+
 ## Hot spots
 
 - Stride rebuild in `numpy()` (`array.rs:563-592`): it pops `np_arr.strides()` from the end

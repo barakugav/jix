@@ -184,6 +184,11 @@ All strides are `usize` (bytes, or elements for `(1,1)` layouts) and never negat
 ### Changed in 4d11918 (#90) - supersedes conflicting statements above
 - `NdCopier::copy` documents that its dtype must match the one given to `new` (K54).
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- `NdIterUnordered` / `NdIterUnorderedDyn` are generic over the shape / stride index type
+  (usize or u64); the reduction uses u64.
+- The `NdIterExtBlockOffsetSize` doc now gives `block_end = calc_block_end(begin, end, b)` (K93).
+
 ## Hot spots
 
 - Coalescing (nd_iter_unordered.rs:129-150, _dyn.rs:91-107): can any combination of 0 strides,

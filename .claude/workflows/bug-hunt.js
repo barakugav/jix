@@ -104,7 +104,7 @@ const MODULE_UNITS = [
     "files": [
       "jix/src/dimension.rs:1-546",
       "jix/src/error.rs:1-441",
-      "jix/src/lib.rs:1-429"
+      "jix/src/lib.rs:1-431"
     ],
     "consult": [
       "jix/src/util/arrayvec.rs",
@@ -168,8 +168,8 @@ const MODULE_UNITS = [
     ],
     "title": "ArrayParams::tune, block-shape auto selection, ArraySpec read hints and scale_read_shape",
     "files": [
-      "jix/src/storage/params.rs:1-983",
-      "jix/src/util/mod.rs:405-526"
+      "jix/src/storage/params.rs:1-1008",
+      "jix/src/util/mod.rs:407-528"
     ],
     "consult": [
       "jix/src/array.rs",
@@ -203,8 +203,8 @@ const MODULE_UNITS = [
     "title": "NdCopier strided n-d copy kernels, fill_contiguous, PtrNoalias and span helpers",
     "files": [
       "jix/src/util/nd_copy.rs:1-447",
-      "jix/src/util/mod.rs:101-184",
-      "jix/src/util/mod.rs:652-809"
+      "jix/src/util/mod.rs:103-186",
+      "jix/src/util/mod.rs:654-811"
     ],
     "consult": [
       "jix/src/util/nd_iter_unordered.rs",
@@ -234,8 +234,8 @@ const MODULE_UNITS = [
     ],
     "title": "NdIterUnordered / NdIterUnorderedDyn: dim drop, sort, coalesce, flags and walk",
     "files": [
-      "jix/src/util/nd_iter_unordered.rs:1-326",
-      "jix/src/util/nd_iter_unordered_dyn.rs:1-241"
+      "jix/src/util/nd_iter_unordered.rs:1-333",
+      "jix/src/util/nd_iter_unordered_dyn.rs:1-247"
     ],
     "consult": [
       "jix/src/util/iter/nd.rs",
@@ -266,7 +266,7 @@ const MODULE_UNITS = [
       "jix/src/util/iter/nd.rs:1-520",
       "jix/src/util/iter/block.rs:1-142",
       "jix/src/util/iter/strides.rs:1-174",
-      "jix/src/util/mod.rs:624-633"
+      "jix/src/util/mod.rs:626-635"
     ],
     "consult": [
       "jix/src/storage/compact.rs",
@@ -320,7 +320,7 @@ const MODULE_UNITS = [
     "title": "ReductionOp construction, bulk/tile streaming loop, state-buffer choice and finalize pass",
     "files": [
       "jix/src/ops/reduction.rs:1-630",
-      "jix/src/ops/reduction.rs:1137-1279"
+      "jix/src/ops/reduction.rs:1145-1287"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -349,7 +349,7 @@ const MODULE_UNITS = [
     "title": "Kernel trait contract and the fold inner loops (one-cell, pairwise tree, multi-cell, SIMD vs strided)",
     "files": [
       "jix/src/ops/reduction.rs:18-118",
-      "jix/src/ops/reduction.rs:632-1135"
+      "jix/src/ops/reduction.rs:632-1143"
     ],
     "consult": [
       "jix/src/util/nd_iter_unordered.rs",
@@ -374,7 +374,7 @@ const MODULE_UNITS = [
     ],
     "title": "Scalar kernel traits: Sum, Product, ArgMax/ArgMin, Mean, Variance (Welford/Chan)",
     "files": [
-      "jix/src/ops/reduction.rs:1398-2069"
+      "jix/src/ops/reduction.rs:1406-2075"
     ],
     "consult": [
       "jix/src/ops/cast.rs",
@@ -400,8 +400,8 @@ const MODULE_UNITS = [
     ],
     "title": "Per-op kernel impls and flags, define_reduction_op macros, Reduce, Array methods",
     "files": [
-      "jix/src/ops/reduction.rs:1281-1396",
-      "jix/src/ops/reduction.rs:2071-3448"
+      "jix/src/ops/reduction.rs:1289-1404",
+      "jix/src/ops/reduction.rs:2077-3447"
     ],
     "consult": [
       "jix/src/ops/cmp.rs",
@@ -459,7 +459,7 @@ const MODULE_UNITS = [
     ],
     "title": "ArrayVec/DimArray, DimBitmap, branch hints and CPU cache detection",
     "files": [
-      "jix/src/util/arrayvec.rs:1-616",
+      "jix/src/util/arrayvec.rs:1-621",
       "jix/src/util/bitmap.rs:1-132",
       "jix/src/util/hint.rs:1-23",
       "jix/src/util/cpu_cache.rs:1-327"
@@ -491,7 +491,7 @@ const MODULE_UNITS = [
     ],
     "title": "util/mod.rs helpers: strides/spans, cast_slice, AlternatingBuffers, scale_read_shape, SendSyncPtr, PtrNoalias/PtrMutNoalias, POD I/O, aligned access",
     "files": [
-      "jix/src/util/mod.rs:1-837"
+      "jix/src/util/mod.rs:1-839"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -558,7 +558,7 @@ const MODULE_UNITS = [
     "title": "Pipeline operands, output layout, and generic op plumbing (Map/MapMultiple/IntoType/MaybeCompact)",
     "files": [
       "jix/src/storage/elementwise_pipeline.rs:734-993",
-      "jix/src/ops/map.rs:1-440",
+      "jix/src/ops/map.rs:1-439",
       "jix/src/ops/into_type.rs:1-154",
       "jix/src/ops/maybe_compact.rs:1-119",
       "jix/src/ops/common.rs:1-185",
@@ -627,7 +627,7 @@ const MODULE_UNITS = [
       "jix-py/src/ops/common/dispatch.rs:1-399",
       "jix-py/src/ops/common/dtype_promote.rs:1-143",
       "jix-py/src/ops/common/mod.rs:1-154",
-      "jix-py/src/ops/mod.rs:43-182"
+      "jix-py/src/ops/mod.rs:44-174"
     ],
     "consult": [
       "jix-py/src/ops/common/operand.rs",
@@ -653,10 +653,10 @@ const MODULE_UNITS = [
     ],
     "title": "Operand conversion (Python/numpy -> Scalar/Plain), scalar casts, broadcasting, asarray",
     "files": [
-      "jix-py/src/ops/common/operand.rs:1-462",
+      "jix-py/src/ops/common/operand.rs:1-490",
       "jix-py/src/ops/common/broadcast.rs:1-106",
-      "jix-py/src/ops/as_array.rs:1-84",
-      "jix-py/src/util.rs:346-469"
+      "jix-py/src/ops/as_array.rs:1-98",
+      "jix-py/src/util.rs:371-494"
     ],
     "consult": [
       "jix/src/storage/plain.rs",
@@ -683,7 +683,7 @@ const MODULE_UNITS = [
     ],
     "title": "Unary and binary arithmetic wrappers incl. absolute, log, multiply fast path, power shortcuts",
     "files": [
-      "jix-py/src/ops/op1.rs:1-707",
+      "jix-py/src/ops/op1.rs:1-722",
       "jix-py/src/ops/op2.rs:1-697"
     ],
     "consult": [
@@ -747,8 +747,8 @@ const MODULE_UNITS = [
     "title": "Shape op wrappers and index parsing (also used by Array.__getitem__/numpy())",
     "files": [
       "jix-py/src/ops/shape_ops.rs:1-1262",
-      "jix-py/src/util.rs:18-44",
-      "jix-py/src/util.rs:172-329"
+      "jix-py/src/util.rs:20-46",
+      "jix-py/src/util.rs:197-354"
     ],
     "consult": [
       "jix/src/ops/shape_ops/",
@@ -774,11 +774,11 @@ const MODULE_UNITS = [
     ],
     "title": "Array.numpy / __getitem__ / out= / compact / read context and basic-index parsing",
     "files": [
-      "jix-py/src/array.rs:1-313",
-      "jix-py/src/array.rs:411-760",
-      "jix-py/src/array.rs:1623-1770",
-      "jix-py/src/util.rs:1-170",
-      "jix-py/src/util.rs:368-379"
+      "jix-py/src/array.rs:1-335",
+      "jix-py/src/array.rs:433-790",
+      "jix-py/src/array.rs:1653-1800",
+      "jix-py/src/util.rs:1-195",
+      "jix-py/src/util.rs:393-404"
     ],
     "consult": [
       "jix-py/src/ops/shape_ops.rs",
@@ -810,9 +810,10 @@ const MODULE_UNITS = [
     "title": "numpy <-> jix dtype mapping, zero-copy Plain wrapping, numpy-dtype caching, type-hint extractors",
     "files": [
       "jix-py/src/dtype.rs:1-219",
-      "jix-py/src/ops/common/operand.rs:18-200",
-      "jix-py/src/ops/as_array.rs:1-84",
-      "jix-py/src/ops/mod.rs:37-103",
+      "jix-py/src/ops/common/operand.rs:17-155",
+      "jix-py/src/ops/common/operand.rs:419-490",
+      "jix-py/src/ops/as_array.rs:1-98",
+      "jix-py/src/ops/mod.rs:38-94",
       "jix-py/src/type_hint.rs:1-125"
     ],
     "consult": [
@@ -869,10 +870,10 @@ const MODULE_UNITS = [
     ],
     "title": "Array getters/dunder forwarding, __str__, and util helpers (dims normalization, ItemOrTuple, array_try_map, UnsafeSend)",
     "files": [
-      "jix-py/src/array.rs:313-411",
-      "jix-py/src/array.rs:761-1489",
-      "jix-py/src/util.rs:172-366",
-      "jix-py/src/util.rs:380-469"
+      "jix-py/src/array.rs:335-433",
+      "jix-py/src/array.rs:791-1519",
+      "jix-py/src/util.rs:197-391",
+      "jix-py/src/util.rs:405-494"
     ],
     "consult": [
       "jix-py/src/ops/common/broadcast.rs",
@@ -929,7 +930,7 @@ const MODULE_UNITS = [
     "title": "Archive reader/writer core: sections, TOC, block-table (de)serialization for Owned and Mmap storage, version word",
     "files": [
       "jix/src/archive/common.rs:1-276",
-      "jix/src/archive/block.rs:1-503",
+      "jix/src/archive/block.rs:1-505",
       "jix/src/archive/version.rs:1-129",
       "jix/src/archive/mod.rs:1-48"
     ],
@@ -960,7 +961,7 @@ const MODULE_UNITS = [
     ],
     "title": "Array-level archive API and header validation, protobuf dtype conversions",
     "files": [
-      "jix/src/archive/array.rs:1-559",
+      "jix/src/archive/array.rs:1-565",
       "jix/src/archive/schema/conversions.rs:1-174",
       "jix/src/archive/schema/mod.rs:1-8"
     ],
@@ -995,8 +996,8 @@ const MODULE_UNITS = [
       "jix/src/ops/shape_ops/permute_dims.rs:1-176",
       "jix/src/ops/shape_ops/insert_dim.rs:1-236",
       "jix/src/ops/shape_ops/remove_dim.rs:1-221",
-      "jix/src/ops/shape_ops/broadcast.rs:1-209",
-      "jix/src/storage/buf.rs:370-418"
+      "jix/src/ops/shape_ops/broadcast.rs:1-221",
+      "jix/src/storage/buf.rs:395-443"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -1111,7 +1112,7 @@ const MODULE_UNITS = [
     "title": "ArrayStorage trait, StridedBuf and out-buffer helpers, forwarders (View/Box/Rc/Arc/&dyn), ArrayStorageAny, info",
     "files": [
       "jix/src/storage/core_trait.rs:1-179",
-      "jix/src/storage/buf.rs:1-418",
+      "jix/src/storage/buf.rs:1-443",
       "jix/src/storage/mod.rs:1-302",
       "jix/src/storage/any.rs:1-114",
       "jix/src/storage/info.rs:1-74"
@@ -1262,7 +1263,7 @@ const MODULE_UNITS = [
     ],
     "title": "Unary math kernels (sign/abs/square/neg/floor/ceil/round/sqrt/exp/ln/trig), float classification, complex real/imag",
     "files": [
-      "jix/src/ops/op1.rs:269-1261",
+      "jix/src/ops/op1.rs:269-1334",
       "jix/src/ops/logical1.rs:1-179",
       "jix/src/ops/complex.rs:1-158"
     ],
@@ -1350,7 +1351,7 @@ const MODULE_UNITS = [
       "jix/src/storage/elementwise_pipeline.rs:735-869",
       "jix/src/storage/core_trait.rs:63-141",
       "jix/src/dtype.rs:461-707",
-      "jix/src/util/mod.rs:616-676"
+      "jix/src/util/mod.rs:618-678"
     ],
     "focus": [
       "Where::read_data unsafe loops (where_op.rs:153-342): offsets and strides from NdIterUnordered over three buffers with different layouts (0-stride cond/y), the (itemsize, alignment) to typed-loop table, the `aligned` logic when REQUIRE_ALIGNED, contiguous chunking and tail",

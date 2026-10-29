@@ -204,6 +204,11 @@ Pub(crate) unsafe fns and who establishes their preconditions:
 ### Changed in 4d11918 (#90) - supersedes conflicting statements above
 - `ArrayStorage` is sealed (`ArrayStorageImpl`), so the pipeline may trust read_data's buffers.
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- `MapMultiple::new` returns InvalidShapeOperation for zero arrays (K87).
+- The element cost is clamped to [0, 2^64] (`ELEMENT_COST_MAX`, params.rs), so it never becomes
+  inf or NaN (K104).
+
 ## Hot spots
 
 - N_OPERANDS / operands() agreement for every node (Op1, Op2, Where `ops/where_op.rs:371-387`,

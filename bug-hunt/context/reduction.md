@@ -200,6 +200,15 @@ finalize pass (1117-1259) turns states into outputs. Scalar-level traits (`jix::
   `var([1e308, -1e308])` and its `std` are +inf (K67). The test is `>= 0.0`, so a NaN `m2`
   (NaN or inf input) also becomes +inf - a regression, recorded as K84.
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- The driver keeps reduced-stream positions and logical strides in u64 (`reduced_shape_logical_strides`,
+  `tile_base_reduced_idx`, `idx_stride`), so 32-bit targets no longer wrap them (K86).
+  `NdIterUnordered` is generic over its index type and the reduction iterates in u64.
+- The temporary state buffer is bounded with `check_region_size(index, size_of State)` (K85).
+- Variance finalize: `m2 < 0.0` (overflow) becomes +inf, a NaN m2 stays NaN (K84), which makes some
+  overflowing finite inputs NaN again (K108). `finalize` takes
+  a `sqrt` flag, so `std` takes the sqrt in f64 before casting to the output dtype (K94).
+
 ## Hot spots
 
 1. Init vs merge is keyed ONLY on the stream position: `init = base_item_idx == 0` (640) for
