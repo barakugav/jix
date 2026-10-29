@@ -484,15 +484,15 @@ where
     // stream is the dot product of its coordinates with these. Zero on the non-reduced dims, which
     // drops them from that dot product
     let reduced_shape_logical_strides = {
-        let mut reduced_shape_logical_strides = InnerD::vec(inner_ndim, |_| 0usize);
+        let mut reduced_shape_logical_strides = InnerD::vec(inner_ndim, |_| 0u64);
         let mut logical_stride = 1;
         for d in (0..inner_ndim).rev() {
             if is_reduced[d] {
                 reduced_shape_logical_strides[d] = logical_stride;
-                logical_stride *= (inner_range_full[d].end - inner_range_full[d].start) as usize;
+                logical_stride *= inner_range_full[d].end - inner_range_full[d].start;
             }
         }
-        debug_assert_eq!(logical_stride as u64, full_reduction_size);
+        debug_assert_eq!(logical_stride, full_reduction_size);
         reduced_shape_logical_strides
     };
 
@@ -588,10 +588,9 @@ where
                 .sum::<usize>();
             let tile_base_reduced_idx = (0..inner_ndim)
                 .map(|d| {
-                    ((tile[d].start - inner_range_full[d].start) as usize)
-                        * reduced_shape_logical_strides[d]
+                    (tile[d].start - inner_range_full[d].start) * reduced_shape_logical_strides[d]
                 })
-                .sum::<usize>() as u64;
+                .sum::<u64>();
 
             let tile_shape = InnerD::vec(inner_ndim, |d| tile_size[d] as usize);
             let tile_state_base =
@@ -637,7 +636,7 @@ struct ReduceTileArgs<'a> {
     state_strides: &'a [usize],
 
     tile_base_reduced_idx: u64,
-    reduced_shape_logical_strides: &'a [usize],
+    reduced_shape_logical_strides: &'a [u64],
 }
 
 fn reduce_tile<T, K>(kernel: &K, args: ReduceTileArgs<'_>)
@@ -692,9 +691,17 @@ fn reduce_tile_impl(
     } = args;
 
     let (items_buf, items_strides) = items.data();
+
+    let [tile_shape_u64, items_strides_u64, state_strides_u64] =
+        [tile_shape, items_strides, state_strides]
+            .map(|a| a.iter().map(|s| *s as u64).collect::<DimArray<_>>());
     let iter = NdIterUnordered::new_with(
-        tile_shape,
-        [items_strides, state_strides, reduced_shape_logical_strides],
+        &tile_shape_u64,
+        [
+            &items_strides_u64,
+            &state_strides_u64,
+            reduced_shape_logical_strides,
+        ],
         [
             item_layout,
             state_layout,
@@ -745,18 +752,18 @@ fn reduce_tile_impl(
         let [item_offset, state_offset, base_item_idx] = offsets;
         let [items_stride, state_stride, idx_stride] = strides;
 
-        let items_buf = unsafe { items_buf.bytes_offset(item_offset) };
-        let states_buf = unsafe { states_buf.bytes_offset(state_offset) };
+        let items_buf = unsafe { items_buf.bytes_offset(item_offset as usize) };
+        let states_buf = unsafe { states_buf.bytes_offset(state_offset as usize) };
 
         let base_item_idx = tile_base_reduced_idx + base_item_idx as u64;
 
         inner_loop(
             FoldInnerLoopArgs {
-                inner_len,
+                inner_len: inner_len as usize,
                 items: items_buf,
                 states_buf,
-                items_stride,
-                state_stride,
+                items_stride: items_stride as usize,
+                state_stride: state_stride as usize,
                 idx_stride,
                 base_item_idx,
             },
@@ -777,7 +784,7 @@ struct FoldInnerLoopArgs<'a> {
     states_buf: PtrMutNoalias<'a, u8>,
     items_stride: usize,
     state_stride: usize,
-    idx_stride: usize,
+    idx_stride: u64,
     base_item_idx: u64,
 }
 fn fold_one_cell<T, K, const CONTIGUOUS: bool>(kernel: &K, args: FoldInnerLoopArgs<'_>)
@@ -956,7 +963,7 @@ where
             )
         },
     );
-    let idx_step = (LANES * ctx.idx_stride) as u64;
+    let idx_step = LANES as u64 * ctx.idx_stride;
 
     let mut states = kernel.init_state_bulk(
         ctx.read_items_bulk::<LANES, CONTIGUOUS>(begin),
@@ -983,13 +990,13 @@ struct FoldOneCellCtx<'a, T, K> {
     kernel: &'a K,
     items: PtrNoalias<'a, T>,
     items_stride: usize,
-    idx_stride: usize,
+    idx_stride: u64,
     base_item_idx: u64,
 }
 impl<T: Dtyped, K> FoldOneCellCtx<'_, T, K> {
     #[inline(always)]
     fn item_idx(&self, i: usize) -> u64 {
-        self.base_item_idx + (i * self.idx_stride) as u64
+        self.base_item_idx + (i as u64 * self.idx_stride)
     }
 
     #[inline(always)]
@@ -5142,6 +5149,31 @@ pub(crate) mod tests {
         .map(|_| ())
         .unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
+    }
+
+    #[test]
+    #[cfg(all(target_pointer_width = "32", not(debug_assertions)))] // slow in debug builds
+    fn reduce_more_than_2pow32_items_on_32_bit() {
+        let n = (1u64 << 32) + 16;
+        let ones = Array::compact_ndarray(&array![[1u8, 1]]).unwrap();
+        let sum = ones.view().broadcast(&[n, 2]).sum(0usize);
+        assert_eq!(sum.to_ndarray::<Ix1>().unwrap(), array![n, n]);
+        let sum = ones.view().broadcast(&[n, 2]).sum((0, 1));
+        assert_eq!(sum.to_ndarray::<Ix0>().unwrap()[[]], 2 * n);
+        let mean = ones
+            .view()
+            .map(|x: u8| x as f32)
+            .broadcast(&[n, 2])
+            .mean(0usize);
+        assert_eq!(mean.to_ndarray::<Ix1>().unwrap(), array![1.0, 1.0]);
+        let zeros = Array::compact_ndarray(&array![0u8])
+            .unwrap()
+            .broadcast(&[n]);
+        let one = Array::compact_ndarray(&array![1u8])
+            .unwrap()
+            .broadcast(&[1]);
+        let argmax = crate::ops::concatenate((zeros, one), 0).argmax(0);
+        assert_eq!(argmax.to_ndarray::<Ix0>().unwrap()[[]], n);
     }
 
     #[test]
