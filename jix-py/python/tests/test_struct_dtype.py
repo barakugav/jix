@@ -161,6 +161,36 @@ def test_sub_array_field_reads_as_trailing_dims():
         pos.numpy(out=np.zeros((2, 4, 3), np.float32, order="F"))
 
 
+def test_sub_array_field_plain_keeps_the_dtype():
+    dt = np.dtype([("a", "<i4", (3,)), ("b", "<i4")])
+    a = np.zeros((2, 2), dt)
+    a["a"] = np.arange(12, dtype=np.int32).reshape(2, 2, 3)
+    f = jix.dtype_sub_field(jix.compact(a), "a")
+    p = f.plain()
+    assert (p.shape, p.dtype) == (f.shape, f.dtype)
+    np.testing.assert_array_equal(p.numpy(), a["a"])
+    p = f.plain(1)
+    assert (p.shape, p.dtype) == ((2,), f.dtype)
+    np.testing.assert_array_equal(p.numpy(), a["a"][1])
+    # 8 array dims, the most jix supports, plus the inner dim.
+    f = jix.dtype_sub_field(jix.compact(np.zeros((1,) * 7 + (2,), dt)), "a")
+    assert f.plain().shape == f.shape
+
+
+def test_sub_array_field_plain_of_non_c_order_read():
+    # numpy() allocates in the storage's read order, so the read of a permuted view is not
+    # C-contiguous, while each inner sub-array still is.
+    dt = np.dtype([("a", "<i4", (2, 3)), ("b", "<i4")])
+    a = np.zeros((3, 4), dt)
+    a["a"] = np.arange(72, dtype=np.int32).reshape(3, 4, 2, 3)
+    f = jix.permute_dims(jix.dtype_sub_field(jix.compact(a), "a"), (1, 0))
+    assert not f.numpy().flags.c_contiguous
+    p = f.plain()
+    assert (p.shape, p.dtype) == (f.shape, f.dtype)
+    np.testing.assert_array_equal(p.numpy(), a["a"].transpose(1, 0, 2, 3))
+    np.testing.assert_array_equal(f.plain((slice(1, 3), 2)).numpy(), a["a"][2, 1:3])
+
+
 def test_numpy_dtype_import_hook_can_use_the_array():
     # The numpy dtype of an aligned struct imports numpy, running any Python __import__ hook. A
     # subprocess, so that a deadlock fails on the timeout.

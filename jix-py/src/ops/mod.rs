@@ -1,4 +1,5 @@
 mod common;
+pub(crate) use common::plain_from_numpy;
 
 mod as_array;
 pub use as_array::*;
