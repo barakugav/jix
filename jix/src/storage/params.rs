@@ -286,8 +286,21 @@ impl ArrayParams {
             .get_or_insert_with(|| spec.decoder_params().clone());
 
         if self.block_shape.is_none() {
-            self.block_shape = Some(spec.block_shape().clone());
-            self.block_shape_fixed_dims = Some(spec.block_shape_fixed_dims());
+            let block_shape = spec.block_shape();
+            let mut block_shape_fixed_dims = spec.block_shape_fixed_dims();
+
+            let block_bytes = block_shape
+                .iter()
+                .map(|&b| b as u64)
+                .chain([storage.dtype().itemsize() as u64])
+                .try_shape_product();
+            // If the block size exceeds the maximum allowed, enabled block shape scaling
+            if block_bytes.is_none_or(|n| n > BLOCK_SIZE_BYTES_MAX) {
+                block_shape_fixed_dims = DimBitmap::filled(block_shape.len(), false);
+            }
+
+            self.block_shape = Some(block_shape.clone());
+            self.block_shape_fixed_dims = Some(block_shape_fixed_dims);
         }
         self.block_size.get_or_insert(spec.block_size());
         self.read_size.get_or_insert(spec.read_size());
@@ -1003,7 +1016,7 @@ mod tests {
 
     use super::scale_order_from_weights;
     use crate::util::ScaleWeight;
-    use crate::{Array, ArrayParams, ArrayStorage};
+    use crate::{Array, ArrayParams, ArrayStorage, BLOCK_SIZE_BYTES_MAX};
 
     #[test]
     fn block_larger_than_max_block_bytes_is_rejected() {
@@ -1097,6 +1110,21 @@ mod tests {
         }
         // Ordering the u16 directly orders the fractions, which is what the scale order relies on.
         assert!(ScaleWeight::new(0.1) < ScaleWeight::new(0.2));
+    }
+
+    #[test]
+    fn widening_view_rescales_an_oversized_inherited_block_shape() {
+        // One fixed block of 2^20 + 8 items, over 1 GiB as 1 KiB items.
+        let n = (1 << 20) + 8;
+        let mut p = ArrayParams::new();
+        p.block_shape(&[n as u32]);
+        let a = Array::compact_ndarray_with(&ndarray::Array1::<u8>::zeros(n), p).unwrap();
+        let a = a.map(|x: u8| [x as f64; 128]);
+        let mut params = ArrayParams::new();
+        params.override_from_storage(a.storage());
+        params.tune(a.shape(), a.dtype()).unwrap();
+        let block_shape = params.block_shape.unwrap();
+        assert!(block_shape[0] as u64 * 1024 <= BLOCK_SIZE_BYTES_MAX);
     }
 
     #[test]
