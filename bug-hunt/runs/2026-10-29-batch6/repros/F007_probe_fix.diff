@@ -1,0 +1,14 @@
+--- jix/src/ops/op2.rs	2026-10-24 19:29:55.268505487 +0000
++++ jix/src/ops/op2.rs	2026-10-29 21:50:02.583272274 +0000
+@@ -183,8 +183,9 @@
+     }
+     #[inline(always)]
+     fn shape(&self) -> &[u64] {
+-        debug_assert_eq!(self.a.shape(), self.b.shape());
+-        self.a.shape()
++        let a = self.a.shape();
++        debug_assert_eq!(a, self.b.shape());
++        a
+     }
+ 
+     #[inline(always)]
