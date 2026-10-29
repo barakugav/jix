@@ -1,6 +1,7 @@
 use crate::dtype::{Alignment, Itemsize};
 use crate::util::dims_sort_by;
 use crate::util::iter::NdIter;
+use crate::util::Idx;
 use crate::{dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
 /// [`NdIterUnordered`](crate::NdIterUnordered) with the operand count known only at runtime.
@@ -8,22 +9,24 @@ use crate::{dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 /// Same walk, same flags, same caller contract - see [`NdIterUnordered`](crate::NdIterUnordered) for
 /// all of it. Two differences: the per-operand tables are heap-allocated rather than inline, and
 /// [`foreach_inner_1d`](Self::foreach_inner_1d) lends the offsets and inner strides out as slices
-/// instead of yielding `[usize; N_OPERANDS]`. In exchange any number of operands is allowed, and the
+/// instead of yielding `[I; N_OPERANDS]`. In exchange any number of operands is allowed, and the
 /// sort and coalesce are compiled once for the whole crate rather than once per count.
-pub(crate) struct NdIterUnorderedDyn {
+///
+/// `I` is the integer type of the shape, the strides and the yielded offsets (`usize` or `u64`).
+pub(crate) struct NdIterUnorderedDyn<I: Idx> {
     /// Post-permutation, post-coalescing shape; always rank >= 1.
-    shape: DimArray<usize>,
+    shape: DimArray<I>,
     /// Per-operand strides aligned with `shape`, each in its operand's own stride unit.
-    strides: Vec<DimArray<usize>>,
+    strides: Vec<DimArray<I>>,
     is_strides_aligned: Vec<bool>,
     is_contiguous: Vec<bool>,
 }
 
-impl NdIterUnorderedDyn {
+impl<I: Idx> NdIterUnorderedDyn<I> {
     #[inline(never)]
     pub(crate) fn new(
-        shape: &[usize],
-        strides: &[&[usize]],
+        shape: &[I],
+        strides: &[&[I]],
         layouts: &[(Itemsize, Alignment)], // (size, alignment) per operand, in its stride unit
     ) -> Self {
         assert_eq!(strides.len(), layouts.len());
@@ -36,20 +39,20 @@ impl NdIterUnorderedDyn {
         // first), so ranking by it gives exactly the order we want.
         let mut dim_perm = DimArray::new();
         for (d, &len) in shape.iter().enumerate() {
-            if len == 0 {
+            if len == I::ZERO {
                 return Self::empty(layouts); // nothing to iterate
             }
-            if len > 1 {
+            if len > I::ONE {
                 dim_perm.push(d as DimIdx);
             }
         }
         if dim_perm.is_empty() {
             // The whole region is a single element. Treat as 1-d with length 1.
             return Self {
-                shape: DimArray::from_slice(&[1]).unwrap(),
+                shape: DimArray::from_slice(&[I::ONE]).unwrap(),
                 strides: layouts
                     .iter()
-                    .map(|&(size, _)| DimArray::from_slice(&[size as usize]).unwrap())
+                    .map(|&(size, _)| DimArray::from_slice(&[I::from_u64(size as u64)]).unwrap())
                     .collect(),
                 is_strides_aligned: vec![true; strides.len()],
                 is_contiguous: vec![true; strides.len()],
@@ -70,7 +73,7 @@ impl NdIterUnorderedDyn {
                 for strides in strides.iter() {
                     // A zero stride means this operand does not move along the dim at all, so it
                     // has no opinion on where the dim belongs.
-                    if strides[d1] == 0 || strides[d2] == 0 {
+                    if strides[d1] == I::ZERO || strides[d2] == I::ZERO {
                         continue;
                     }
                     compared = true;
@@ -119,12 +122,15 @@ impl NdIterUnorderedDyn {
         let is_strides_aligned = strides
             .iter()
             .zip(layouts)
-            .map(|(s, &(_, alignment))| s.iter().all(|s| s.is_multiple_of(alignment.as_usize())))
+            .map(|(s, &(_, alignment))| {
+                let alignment = alignment.as_usize() as u64;
+                s.iter().all(|s| s.u64().is_multiple_of(alignment))
+            })
             .collect();
         let is_contiguous = strides
             .iter()
             .zip(layouts)
-            .map(|(s, &(size, _))| s[ndim - 1] == size as usize)
+            .map(|(s, &(size, _))| s[ndim - 1] == I::from_u64(size as u64))
             .collect();
 
         Self {
@@ -137,12 +143,12 @@ impl NdIterUnorderedDyn {
 
     fn empty(layouts: &[(Itemsize, Alignment)]) -> Self {
         let mut shape = DimArray::new();
-        shape.push(0);
+        shape.push(I::ZERO);
         let strides = layouts
             .iter()
             .map(|&(size, _)| {
                 let mut s = DimArray::new();
-                s.push(size as usize);
+                s.push(I::from_u64(size as u64));
                 s
             })
             .collect::<Vec<_>>();
@@ -155,7 +161,7 @@ impl NdIterUnorderedDyn {
     }
 
     #[inline(always)]
-    pub(crate) fn inner_len(&self) -> usize {
+    pub(crate) fn inner_len(&self) -> I {
         self.shape[self.shape.len() - 1]
     }
 
@@ -170,24 +176,24 @@ impl NdIterUnorderedDyn {
     }
 
     #[inline]
-    pub(crate) fn inner_strides(&self) -> Vec<usize> {
+    pub(crate) fn inner_strides(&self) -> Vec<I> {
         let inner = self.shape.len() - 1;
         self.strides.iter().map(|s| s[inner]).collect()
     }
 
     #[inline]
-    pub(crate) fn foreach_inner_1d(&self, mut inner_loop: impl FnMut(&[usize], usize, &[usize])) {
+    pub(crate) fn foreach_inner_1d(&self, mut inner_loop: impl FnMut(&[I], I, &[I])) {
         let ndim = self.shape.len();
         if crate::hint::likely(ndim == 1) {
-            let offsets = vec![0usize; self.strides.len()];
+            let offsets = vec![I::ZERO; self.strides.len()];
             let inner_strides = self.strides.iter().map(|s| s[0]).collect::<Vec<_>>();
             inner_loop(&offsets, self.shape[0], &inner_strides);
         } else {
             let nd_walk_fn = match ndim {
-                2 => nd_iter_unordered_nd_walk::<Dim<1>>,
-                3 => nd_iter_unordered_nd_walk::<Dim<2>>,
-                4 => nd_iter_unordered_nd_walk::<Dim<3>>,
-                _ => nd_iter_unordered_nd_walk::<DimDyn>,
+                2 => nd_iter_unordered_nd_walk::<I, Dim<1>>,
+                3 => nd_iter_unordered_nd_walk::<I, Dim<2>>,
+                4 => nd_iter_unordered_nd_walk::<I, Dim<3>>,
+                _ => nd_iter_unordered_nd_walk::<I, DimDyn>,
             };
             nd_walk_fn(&self.shape, &self.strides, &mut inner_loop);
         }
@@ -199,26 +205,26 @@ impl NdIterUnorderedDyn {
 /// outer `NdIter` here is the lending kind.
 #[allow(clippy::type_complexity)]
 #[inline(never)]
-fn nd_iter_unordered_nd_walk<OuterD: Dimension>(
-    shape: &[usize],
-    strides: &[DimArray<usize>],
-    inner_loop: &mut dyn FnMut(&[usize], usize, &[usize]),
+fn nd_iter_unordered_nd_walk<I: Idx, OuterD: Dimension>(
+    shape: &[I],
+    strides: &[DimArray<I>],
+    inner_loop: &mut dyn FnMut(&[I], I, &[I]),
 ) {
     let ndim = shape.len();
     let inner_len = shape[ndim - 1];
     let inner_strides = strides.iter().map(|s| s[ndim - 1]).collect::<Vec<_>>();
-    let mut offsets = vec![0usize; strides.len()];
+    let mut offsets = vec![I::ZERO; strides.len()];
 
     if OuterD::NDIM == Some(1) {
         // Special case for 2D: the outer `NdIter` is just a single loop over the outer dim, and
         // and inner loop is a flat 1-d run.
 
-        let outer_len = shape[0];
+        let outer_len = shape[0].u64();
         let outer_strides = strides.iter().map(|s| s[0]).collect::<Vec<_>>();
         for i in 0..outer_len {
             if i > 0 {
                 for (offset, outer_stride) in offsets.iter_mut().zip(&outer_strides) {
-                    *offset += outer_stride;
+                    *offset += *outer_stride;
                 }
             }
             inner_loop(&offsets, inner_len, &inner_strides);
@@ -227,7 +233,7 @@ fn nd_iter_unordered_nd_walk<OuterD: Dimension>(
         // Flat inner 1-d run over the innermost dim [ndim-1]; the outer `NdIter` walks the outer
         // dims and yields every operand's running byte offset at once.
 
-        let outer_shape = OuterD::vec(ndim - 1, |k| shape[k] as u64);
+        let outer_shape = OuterD::vec(ndim - 1, |k| shape[k].u64());
         let outer_strides = strides
             .iter()
             .map(|s| OuterD::vec(ndim - 1, |k| s[k]))
