@@ -18,7 +18,7 @@ on three axes:
 
 | kind | count | what it does |
 |------|-------|--------------|
-| module  | 44 | reads one slice (600-1500 lines) line by line, with the contracts it depends on, and settles the mapping-stage suspicions in it |
+| module  | 46 | reads one slice (600-1500 lines) line by line, with the contracts it depends on, and settles the mapping-stage suspicions in it |
 | concept | 12  | traces ONE invariant (push / pull contract, aliasing, alignment, integer width, degenerate shapes, untrusted archives, the Python boundary, ...) across every module, to catch bugs at the seams |
 | dynamic | 2   | writes differential tests (Rust vs an ndarray reference, Python vs NumPy) and explains each failure from the code |
 
@@ -93,6 +93,14 @@ bug-hunt/
    Subagents may not write report files, so the workflow returns the report as `reportMarkdown`
    and the session that ran it saves it to `bug-hunt/runs/<runId>/REPORT.md`.
 
+   After editing `bug-hunt.js` (e.g. remapping unit ranges after a rebase), launch it with
+   `scriptPath: ".claude/workflows/bug-hunt.js"` rather than by name: a launch by name can run an
+   older copy of the file (batch6 started with the #91 ranges this way).
+
+   To add units to a running batch, stop it and re-invoke with `resumeFromRunId`, the same `runId`
+   and the longer `units` list. Finished hunters replay from the cache only if their prompts are
+   byte-identical, so do not change the definitions of units that already ran.
+
    After editing a workflow script, check its control flow for free with fake agents:
    `node bug-hunt/templates/dry_run_workflow.mjs .claude/workflows/bug-hunt.js '{"runId":"x"}'`
    (`PRINT_PROMPT=hunt:<unit-id>` prints a rendered prompt).
@@ -136,7 +144,8 @@ recorded here before batch4 summed every copy and were ~1.8x too high).
 - Builds leave GBs behind (incremental caches, per-repro test binaries): batch3 ended with 3 GB of
   disk free. setup.sh and the report stage now delete them.
 
-Remaining after batch5: 9 module + 9 concept = 18 units. At ~3M and ~3.5 agents per unit, that
+Remaining after batch5: 9 module + 9 concept = 18 units, plus the 2 units added for code no
+unit covered (py-ops-reduction-wrappers, util-test-infra), all in batch6. At ~3M and ~3.5 agents per unit, that
 is ~55M input-equivalent tokens and ~65 agents, i.e. ~3.5 hours on a 4-core container (2 agents
 at a time). The workflow runs at most `min(16, CPUs - 2)` agents at once. To go faster on a small
 machine, split the run into batches with `units` and different `runId`s and launch them
