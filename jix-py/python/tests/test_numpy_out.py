@@ -272,6 +272,19 @@ def test_out_rejects_broadcast_views():
         a.numpy(out=dst)
 
 
+def test_out_rejects_overlapping_views():
+    a = jix.compact(np.arange(1, 25, dtype=np.int64).reshape(2, 4, 3))
+    windows = np.lib.stride_tricks.sliding_window_view(np.zeros(6, np.int64), 3, writeable=True)
+    with pytest.raises(ValueError, match="overlap"):
+        a.sum(dim=0).numpy(out=windows)
+    as_strided = np.lib.stride_tricks.as_strided
+    with pytest.raises(ValueError, match="overlap"):
+        a.numpy(0, out=as_strided(np.zeros(16, np.int64), shape=(4, 3), strides=(16, 8)))
+    # Interleaved but disjoint.
+    dst = as_strided(np.zeros(12, np.int64), shape=(4, 3), strides=(8, 32))
+    np.testing.assert_array_equal(a.numpy(0, out=dst), a.numpy(0))
+
+
 def test_out_rejects_non_arrays():
     a = jix.compact(np.arange(1, 13, dtype=np.int32).reshape(3, 4))
     with pytest.raises(TypeError):
