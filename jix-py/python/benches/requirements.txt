@@ -2,4 +2,5 @@ pytest-benchmark~=5.2
 matplotlib~=3.11
 blosc2~=4.9
 numexpr~=2.14
+psutil~=7.0
 zarr~=3.2

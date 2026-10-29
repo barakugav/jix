@@ -8,19 +8,15 @@ The inputs and the output are allocated before the baseline is taken, so the num
 the engine's own overhead rather than the cost of the data. A one-step NumPy chain writes straight
 into the output and should therefore come out at roughly zero.
 
-Sampling RSS in a thread rather than reading `ru_maxrss` is deliberate. `ru_maxrss` only ever
-increases, so it would report the transient of building the array - identical for every library and
-large enough to bury the thing being measured. Sampling bounds the window to the chain itself.
-
-Sampling needs `/proc/self/statm`, so it works on the Linux runners the report is published from.
-Elsewhere - a macOS dev machine, say - it falls back to `ru_maxrss`, which still produces a number
-but one that includes the construction transient. Local numbers are for checking the plumbing.
+Sampling the current RSS in a thread rather than reading `ru_maxrss` is deliberate. `ru_maxrss`
+only ever increases, so it would report the transient of building the array - identical for every
+library and large enough to bury the thing being measured (on a 2-step chain it hides the chain
+entirely and the overhead comes out as zero). Sampling bounds the window to the chain itself.
 """
 
 import argparse
 import gc
 import json
-import resource
 import sys
 import threading
 import time
@@ -29,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # put python/ on the path
 
 import numpy as np
+import psutil
 
 from benches import report_spec
 from benches.array_impls import ARRAY_IMPLS
@@ -38,18 +35,12 @@ from benches.data import make_data
 SAMPLE_SECONDS = 0.001
 
 
-STATM = Path("/proc/self/statm")
-SAMPLED = STATM.exists()
+PROCESS = psutil.Process()
 
 
 def rss_bytes():
-    """Resident set size of this process, in bytes."""
-    if SAMPLED:
-        # statm fields are in pages; the second is resident.
-        return int(STATM.read_text().split()[1]) * resource.getpagesize()
-    # No /proc: fall back to the high-water mark. Linux reports KiB, macOS and BSD report bytes.
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return peak if sys.platform == "darwin" else peak * 1024
+    """Current resident set size of this process, in bytes."""
+    return PROCESS.memory_info().rss
 
 
 class PeakSampler:
@@ -67,15 +58,13 @@ class PeakSampler:
 
     def __enter__(self):
         self.peak = rss_bytes()
-        if SAMPLED:
-            self._thread = threading.Thread(target=self._sample, daemon=True)
-            self._thread.start()
+        self._thread = threading.Thread(target=self._sample, daemon=True)
+        self._thread.start()
         return self
 
     def __exit__(self, *exc):
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
+        self._thread.join(timeout=1.0)
         self.peak = max(self.peak, rss_bytes())
 
 
@@ -110,7 +99,6 @@ def main(argv=None):
                 "peak_rss_bytes": overhead,
                 "baseline_rss_bytes": baseline,
                 "absolute_peak_bytes": sampler.peak,
-                "sampled": SAMPLED,
             }
         )
     )
