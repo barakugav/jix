@@ -1,0 +1,33 @@
+--- jix/src/ops/op1.rs	2026-10-29 18:04:01.380319792 +0000
++++ bug-hunt/runs/2026-10-29-batch6/scratch/crate-f027/src/ops/op1.rs	2026-10-29 22:22:07.184840517 +0000
+@@ -448,9 +448,17 @@
+         bulk_fn: neg_bulk,
+     );
+     impl_scalar_op1!(
+-        impl Neg for [f32, f64] {
++        impl Neg for [f32] {
+             fn neg = |x| -x,
+-            fn neg_bulk = |x| -x,
++            // F027 MUTATION (scratch only): -(+0.0) == +0.0 in the SIMD body.
++            fn neg_bulk = |x| (x * -1.0f32) + 0.0f32,
++        }
++    );
++    impl_scalar_op1!(
++        impl Neg for [f64] {
++            fn neg = |x| -x,
++            // F027 MUTATION (scratch only): -(+0.0) == +0.0 in the SIMD body.
++            fn neg_bulk = |x| (x * -1.0f64) + 0.0f64,
+         }
+     );
+     impl_scalar_op1!(
+--- jix/src/ops/reduction.rs	2026-10-29 18:04:01.380319792 +0000
++++ bug-hunt/runs/2026-10-29-batch6/scratch/crate-f027/src/ops/reduction.rs	2026-10-29 22:22:07.184239175 +0000
+@@ -3449,6 +3449,8 @@
+ #[allow(clippy::single_range_in_vec_init)]
+ pub(crate) mod tests {
+     use std::rc::Rc;
++    #[path = "/home/user/jix/bug-hunt/runs/2026-10-29-batch6/repros/F027_internal.rs"]
++    mod f027;
+ 
+     use crate::scalar::bool8;
+ 
