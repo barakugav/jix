@@ -3,10 +3,10 @@
 Investigation results that shape the benchmark design. Facts about other libraries, established
 by reading their source or by direct introspection - not by benchmarking.
 
-## ndarray has no axis sorting - but reaching that fact is harder than it looks
+## ndarray has no dim sorting - but reaching that fact is harder than it looks
 
 `ndarray-0.17.2/src/zip/mod.rs::array_layout` is a four-way classifier - C, F,
-first-axis-contiguous, last-axis-contiguous, or nothing - with no general axis sort anywhere. jix
+first-dim-contiguous, last-dim-contiguous, or nothing - with no general dim sort anywhere. jix
 sorts every axis by descending stride (`jix/src/storage/plain.rs:160`). So jix should win whenever
 the stride-sorted order differs from logical order.
 
@@ -26,13 +26,13 @@ Two reasons, and the second is the one that matters:
    for every permutation, rotation and reversal alike. There is nothing to measure.
 
 To reach the logical-order iterator the view has to be genuinely non-contiguous, so the benchmark
-now slices the last axis before permuting. With `[1,2,0]` on a sliced view the largest stride ends
-up on the innermost logical axis and `ndarray` jumps a full plane per element, while jix sorts and
+now slices the last dim before permuting. With `[1,2,0]` on a sliced view the largest stride ends
+up on the innermost logical dim and `ndarray` jumps a full plane per element, while jix sorts and
 walks memory in order. Controls: a permutation that keeps logical order near memory order, and a
 contiguous rotation that still reaches the fast path.
 
 **This is not yet confirmed**, and the section is withheld from the published report. The first
-full run (94f72a73) predates the fix, so its axis-order numbers come from the version that measured
+full run (94f72a73) predates the fix, so its dim-order numbers come from the version that measured
 nothing. `build_report.py` now warns when a section's cases are only partly present, which is what
 that looks like: surviving benchmark ids get drawn under the new labels, which is worse than an
 empty plot. Restore the section once a run includes the fixed benchmark.
@@ -344,20 +344,20 @@ Two consequences:
   17 decompressions to 2 and make the compact chain track the plain one. That is the single largest
   lever on these numbers.
 
-## `normalize` over a long axis re-runs the reduction per output element
+## `normalize` over a long dim re-runs the reduction per output element
 
-`a / a.std(axis).insert_axis(axis).broadcast(shape)` on `[130000, 200] f32`:
+`a / a.std(dim).insert_dim(dim).broadcast(shape)` on `[130000, 200] f32`:
 
-| axis | ndarray | jix-plain | jix (compact) |
+| dim | ndarray | jix-plain | jix (compact) |
 |---|---|---|---|
 | 0 | 6.2 ms | 109.0 ms (17.6x) | 397.0 ms (64x) |
 | 1 | 84.1 ms | **48.4 ms** (0.58x) | 121.2 ms (1.44x) |
 
 Not a kernel deficiency - it is what fusing a broadcast reduction costs. The `std` is inside the
-lazy pipeline, so reading an output element re-runs the reduction over its whole column. Over axis
-0 each column is 130000 long, so the work is O(N*M) instead of O(N+M). Over axis 1 the reduced axis
+lazy pipeline, so reading an output element re-runs the reduction over its whole column. Over dim
+0 each column is 130000 long, so the work is O(N*M) instead of O(N+M). Over dim 1 the reduced dim
 is 200 long and jix comes out ahead.
 
 The lesson is the one `ops/mod.rs` already gives for reshape: materialize the reduction before
-broadcasting it when the reduced axis is long. Worth saying in the report next to this plot, since
-a reader will otherwise take the axis-0 bar as a general result.
+broadcasting it when the reduced dim is long. Worth saying in the report next to this plot, since
+a reader will otherwise take the dim-0 bar as a general result.

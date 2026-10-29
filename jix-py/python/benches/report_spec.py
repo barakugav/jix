@@ -60,7 +60,7 @@ def read_label(block, read):
     return f"block {block[0]}x{block[1]}\nread {name}\n{_size(region[0] * region[1] * ITEMSIZE)}"
 
 
-# (reduction, dtype, axis)
+# (reduction, dtype, dim)
 REDUCTION_CASES = [
     ("sum", "f32", 0),
     ("sum", "f32", 1),
@@ -72,8 +72,8 @@ REDUCTION_CASES = [
 ]
 
 
-def reduction_label(op, dtype, axis):
-    return f"{op} {dtype}\n{'all' if axis is None else f'axis {axis}'}"
+def reduction_label(op, dtype, dim):
+    return f"{op} {dtype}\n{'all' if dim is None else f'dim {dim}'}"
 
 
 # Number of elementwise steps, then the transcendental chain that behaves differently. Every step
@@ -195,8 +195,8 @@ SECTIONS = [
             "negate\ni32",
             "add\nf32",
             "add\ni32",
-            "sum f32\naxis 0",
-            "sum f32\naxis 1",
+            "sum f32\ndim 0",
+            "sum f32\ndim 1",
             "sum i32\nall",
         ],
         "case_ids": [
@@ -204,8 +204,8 @@ SECTIONS = [
             "negate_i32",
             "add_f32",
             "add_i32",
-            "sum_f32_axis0",
-            "sum_f32_axis1",
+            "sum_f32_dim0",
+            "sum_f32_dim1",
             "sum_i32_all",
         ],
         "libraries": ["ndarray", "jix-plain", "jix"],
@@ -227,16 +227,16 @@ SECTIONS = [
         "key": "rust_normalize",
         "source": "rust_chain",
         "title": "Rust: normalize, a reduction inside a broadcast",
-        "subtitle": f"f32 {ARRAY}; a / a.std(axis) broadcast back over the array",
+        "subtitle": f"f32 {ARRAY}; a / a.std(dim) broadcast back over the array",
         "baseline": "ndarray",
         "metric": "time",
-        "cases": ["normalize\naxis 0", "normalize\naxis 1"],
-        "case_ids": ["normalize_axis0", "normalize_axis1"],
+        "cases": ["normalize\ndim 0", "normalize\ndim 1"],
+        "case_ids": ["normalize_dim0", "normalize_dim1"],
         "libraries": ["ndarray", "jix-plain", "jix"],
     },
     {
-        "key": "rust_axis_order",
-        "title": "Rust: axis order",
+        "key": "rust_dim_order",
+        "title": "Rust: dim order",
         "subtitle": "negate on a sliced, permuted view of [300, 400, 500] = 240 MB as f32",
         "baseline": "ndarray",
         "metric": "time",

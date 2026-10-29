@@ -178,21 +178,21 @@ macro_rules! bench_add {
     }};
 }
 
-/// `sum` over one axis. The all-axes variant is separate because jix spells it differently.
-macro_rules! bench_sum_axis {
-    ($group:expr, $case:expr, $data:expr, $axis:expr) => {{
+/// `sum` over one dim. The all-dims variant is separate because jix spells it differently.
+macro_rules! bench_sum_dim {
+    ($group:expr, $case:expr, $data:expr, $dim:expr) => {{
         let data = $data;
-        let axis = $axis;
+        let dim = $dim;
         let plain = Array::plain_ndarray_ref(&data).unwrap();
         let array = compact(&data, None);
         $group.bench_function(BenchmarkId::new("ndarray", $case), |b| {
-            b.iter(|| data.sum_axis(Axis(axis)));
+            b.iter(|| data.sum_axis(Axis(dim)));
         });
         $group.bench_function(BenchmarkId::new("jix-plain", $case), |b| {
-            b.iter(|| plain.view().sum(axis).to_ndarray::<IxDyn>().unwrap());
+            b.iter(|| plain.view().sum(dim).to_ndarray::<IxDyn>().unwrap());
         });
         $group.bench_function(BenchmarkId::new("jix", $case), |b| {
-            b.iter(|| array.view().sum(axis).to_ndarray::<IxDyn>().unwrap());
+            b.iter(|| array.view().sum(dim).to_ndarray::<IxDyn>().unwrap());
         });
     }};
 }
@@ -240,15 +240,15 @@ fn bench_op(c: &mut Criterion) {
         create_data::<i32>(Profile::Smooth, &SHAPE, SEED),
         create_data::<i32>(Profile::Smooth, &SHAPE, SEED ^ 1)
     );
-    bench_sum_axis!(
+    bench_sum_dim!(
         group,
-        "sum_f32_axis0",
+        "sum_f32_dim0",
         create_data::<f32>(Profile::Smooth, &SHAPE, SEED),
         0
     );
-    bench_sum_axis!(
+    bench_sum_dim!(
         group,
-        "sum_f32_axis1",
+        "sum_f32_dim1",
         create_data::<f32>(Profile::Smooth, &SHAPE, SEED),
         1
     );
@@ -427,12 +427,12 @@ fn bench_chain(c: &mut Criterion) {
     // awkward to hand-write as an iterator chain, which is jix's actual pitch in Rust.
     let shape = SHAPE.to_vec();
     let shape_usize = [SHAPE[0] as usize, SHAPE[1] as usize];
-    for axis in [0usize, 1] {
-        let case = format!("normalize_axis{axis}");
+    for dim in [0usize, 1] {
+        let case = format!("normalize_dim{dim}");
         group.bench_function(BenchmarkId::new("ndarray", &case), |b| {
             let view = data.view().into_dimensionality::<ndarray::Ix2>().unwrap();
             b.iter(|| {
-                let std = view.std_axis(Axis(axis), 0.0).insert_axis(Axis(axis));
+                let std = view.std_axis(Axis(dim), 0.0).insert_axis(Axis(dim));
                 let std = std.broadcast(shape_usize).unwrap();
                 ndarray::Zip::from(&view)
                     .and(&std)
@@ -441,21 +441,13 @@ fn bench_chain(c: &mut Criterion) {
         });
         group.bench_function(BenchmarkId::new("jix-plain", &case), |b| {
             b.iter(|| {
-                let std = plain
-                    .view()
-                    .std(axis, 0.0)
-                    .insert_dim(axis)
-                    .broadcast(&shape);
+                let std = plain.view().std(dim, 0.0).insert_dim(dim).broadcast(&shape);
                 (plain.view() / std).to_ndarray::<IxDyn>().unwrap()
             });
         });
         group.bench_function(BenchmarkId::new("jix", &case), |b| {
             b.iter(|| {
-                let std = array
-                    .view()
-                    .std(axis, 0.0)
-                    .insert_dim(axis)
-                    .broadcast(&shape);
+                let std = array.view().std(dim, 0.0).insert_dim(dim).broadcast(&shape);
                 (array.view() / std).to_ndarray::<IxDyn>().unwrap()
             });
         });
@@ -464,10 +456,10 @@ fn bench_chain(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// report_rust_axis_order - jix sorts axes by stride; ndarray classifies layout four ways.
+// report_rust_dim_order - jix sorts dims by stride; ndarray classifies layout four ways.
 // ---------------------------------------------------------------------------------------------
 
-/// jix sorts every axis by descending stride before iterating. `ndarray` does not: `map` takes a
+/// jix sorts every dim by descending stride before iterating. `ndarray` does not: `map` takes a
 /// flat fast path when the view is contiguous *in memory order*, and otherwise falls back to
 /// `iter()`, which walks logical index order however the strides actually run.
 ///
@@ -476,14 +468,14 @@ fn bench_chain(c: &mut Criterion) {
 /// the strides before checking - so the fast path is taken and no permutation shows a difference.
 /// The view has to be genuinely non-contiguous first, which is what the slice is for.
 ///
-/// With the slice, `[1,2,0]` leaves the largest stride on the innermost logical axis, so `ndarray`
+/// With the slice, `[1,2,0]` leaves the largest stride on the innermost logical dim, so `ndarray`
 /// jumps a full plane per element. The controls are a permutation that keeps logical order close
 /// to memory order, and a contiguous rotation that still reaches the fast path.
-macro_rules! bench_axis_order {
-    ($group:expr, $case:expr, $data:expr, $keep:expr, $axes:expr) => {{
+macro_rules! bench_dim_order {
+    ($group:expr, $case:expr, $data:expr, $keep:expr, $dims:expr) => {{
         let data = $data;
         let keep: usize = $keep;
-        let axes: &[usize] = $axes;
+        let dims: &[usize] = $dims;
         let sliced = data.slice_each_axis(|ax| {
             if ax.axis.index() == 2 {
                 Slice::from(0..keep)
@@ -491,7 +483,7 @@ macro_rules! bench_axis_order {
                 Slice::from(0..ax.len)
             }
         });
-        let permuted = sliced.permuted_axes(axes);
+        let permuted = sliced.permuted_axes(dims);
         $group.bench_function(BenchmarkId::new("ndarray", $case), |b| {
             b.iter(|| permuted.map(|&x| x.neg()));
         });
@@ -503,7 +495,7 @@ macro_rules! bench_axis_order {
                 plain
                     .view()
                     .slice((0..shape[0] as i64, 0..shape[1] as i64, 0..keep as i64))
-                    .permute_dims(axes)
+                    .permute_dims(dims)
                     .neg()
                     .to_ndarray::<IxDyn>()
                     .unwrap()
@@ -512,21 +504,21 @@ macro_rules! bench_axis_order {
     }};
 }
 
-fn bench_axis_order(c: &mut Criterion) {
-    let mut group = c.benchmark_group("report_rust_axis_order");
+fn bench_dim_order(c: &mut Criterion) {
+    let mut group = c.benchmark_group("report_rust_dim_order");
     group.sample_size(SAMPLES);
 
     let shape3 = [300u64, 400, 500];
-    const KEEP: usize = 250; // slice the last axis so the view is not contiguous in memory order
+    const KEEP: usize = 250; // slice the last dim so the view is not contiguous in memory order
 
-    bench_axis_order!(
+    bench_dim_order!(
         group,
         "rotate_f32",
         create_data::<f32>(Profile::Smooth, &shape3, SEED),
         KEEP,
         &[1, 2, 0]
     );
-    bench_axis_order!(
+    bench_dim_order!(
         group,
         "rotate_i32",
         create_data::<i32>(Profile::Smooth, &shape3, SEED),
@@ -534,7 +526,7 @@ fn bench_axis_order(c: &mut Criterion) {
         &[1, 2, 0]
     );
     // Control: logical order already close to memory order, so nothing to sort.
-    bench_axis_order!(
+    bench_dim_order!(
         group,
         "identity_f32",
         create_data::<f32>(Profile::Smooth, &shape3, SEED),
@@ -542,7 +534,7 @@ fn bench_axis_order(c: &mut Criterion) {
         &[0, 1, 2]
     );
     // Control: no slice, so the view stays contiguous and ndarray reaches its flat fast path.
-    bench_axis_order!(
+    bench_dim_order!(
         group,
         "contig_rotate_f32",
         create_data::<f32>(Profile::Smooth, &shape3, SEED),
@@ -553,5 +545,5 @@ fn bench_axis_order(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_read, bench_op, bench_chain, bench_axis_order);
+criterion_group!(benches, bench_read, bench_op, bench_chain, bench_dim_order);
 criterion_main!(benches);

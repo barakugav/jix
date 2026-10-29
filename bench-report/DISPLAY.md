@@ -8,7 +8,7 @@ alone. Tables are the ground truth and sit under every plot, but folded away.
 Every comparison in the report is the same chart, so the reader learns to read it once:
 
 - **x axis: discrete cases.** Not array size. Each tick is a configuration we deliberately chose -
-  a dtype, a data distribution, a block/read shape, a reduction axis.
+  a dtype, a data distribution, a block/read shape, a reduction dim.
 - **bars within a case: one per library.** Same color for the same library everywhere in the
   report, so the legend stops being needed after the first plot.
 - **y axis: cost relative to the baseline**, log scale. Bars rise from a common floor and a black
