@@ -164,6 +164,12 @@ fixed dims, scale weights, layout order) for the read-tiling heuristics.
   bounds convert with `i64::try_from`, saturating at i64::MAX instead of wrapping, and the `+ 1`
   of an inclusive end saturates (K68).
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- Broadcast returns the materialized empty `out` without reading the inner array when any
+  requested range is empty (K91).
+- `RemoveDim::new` validates the dims while iterating, so more than NDIM_MAX entries return Err
+  (K95).
+
 ## Hot spots
 - Push-mode offsets: for each split op, does every inner read land at `out + sum(offset_d * out_stride_d)` with the
   correct per-dim stride, and do the pieces tile the region exactly once? Check with permuted / padded `out`

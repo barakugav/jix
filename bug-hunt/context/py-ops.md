@@ -197,6 +197,14 @@ Line numbers in this doc refer to bb1ee2c; jix-py/src/ops/op1.rs and shape_ops.r
   unwraps (dispatch.rs:186-192).
 - Open and tracked in todo.md: `bitwise_rotate_left/right` promotion of Python ints (K76).
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- `jix.log(x, base)` raises ValueError for base <= 0 or == 1 (K107); base e / 2 / 10 dispatch to
+  Ln / Log2 / Log10, any other base is computed in f64 and cast once (K92).
+- `cast_impl` uses the fallible `Cast::new_array` (K88). `jix.cast` is `asarray(array, dtype)`.
+- `asarray(value, dtype=)` for a value that is not a jix or numpy array goes through
+  `numpy.asarray(value, dtype=)` first, so numpy's range checks apply to Python ints (K96).
+- Operand's numpy -> Plain conversion moved to `plain_from_numpy` (operand.rs:419-490).
+
 ## Hot spots
 
 1. Dispatch tables (op1/op2/cmp/bitwise/reduction): is the order right for every input pair, and

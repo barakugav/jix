@@ -207,6 +207,12 @@ Provided by this subsystem / required of every `read_data` impl (core_trait.rs:7
 - `Array::to_ndarray` no longer promises C order; the layout is documented as an implementation
   detail (K82).
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- `check_out_buf` rejects an `out` whose strides overlap over the requested region (K103): in
+  stride order, every dim of length > 1 must step past the span of the smaller dims
+  (`disjoint_span`, buf.rs). This is conservative: interleaved layouts that do not overlap (e.g.
+  lengths (3, 2), strides (2, 3) with itemsize 1) are rejected too.
+
 ## Hot spots
 
 - Push-mode buffer size: is there ANY path from safe code that makes a push write past `out`'s

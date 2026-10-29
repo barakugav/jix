@@ -216,6 +216,12 @@ Unsafe fns with preconditions:
 ### Changed in 691e11b (#91) - supersedes conflicting statements above
 - archive/array.rs uses std `next_multiple_of` instead of the removed `Idx::ceil_to_multiple`.
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- The array reader rejects header dims > i64::MAX (K100) and block_shape entries > BlockSize::MAX
+  before casting; the block-table reader converts block_size with `BlockSize::try_from` (K102).
+- Writing (via `ArrayParams::tune`) rejects a shape whose block-padded product overflows u64, so
+  the writer no longer produces files the reader rejects (K101).
+
 ## Hot spots
 
 - Short decompression: what does a release build return when a block decodes to fewer bytes

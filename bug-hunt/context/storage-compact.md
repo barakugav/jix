@@ -201,6 +201,13 @@ Unsafe fns / preconditions:
 - params.rs uses std `next_multiple_of` instead of the removed `Idx::ceil_to_multiple` (same
   overflow behavior: panics with overflow checks, wraps without).
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- `ArrayParams::tune` now runs `check_shape_overflow` itself and checks that the shape padded to
+  the block shape has a u64 product (InvalidShapeOperation), for compact() and writes alike (K101).
+- When `override_from_storage` inherits a block shape larger than `BLOCK_SIZE_BYTES_MAX` (1 GiB,
+  now in lib.rs) at the storage's itemsize, it clears the fixed dims so tune rescales it (K105).
+- The element cost is clamped to [0, 2^64] (K104).
+
 ## Hot spots
 
 - Direct decode into `out` (compact.rs:429-437, 464-471): `lead_dim` = first dim with block > 1;

@@ -215,6 +215,12 @@ SIMD/scalar split - the same element can go through either path:
 - Float `pow` with an integer exponent uses `powf`, not `powi` (K51). power(x, 2) -> Square still
   drops the overflow flag (K60, acknowledged in todo.md).
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- The f16 `float_op1!` kernels report Overflow when a finite f32 result rounds to an infinite f16
+  (Tan included, K106).
+- New `Log2` / `Log10` ops (scalar traits, SIMD bulk, `Array::log2` / `Array::log10`), with Ln's
+  error set (K92).
+
 ## Hot spots
 
 - SIMD vs scalar equality. Most SIMD tests compare with `==` via `same_value` (util/test_util.rs:1357-

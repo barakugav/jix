@@ -172,6 +172,9 @@ types the macro is):
 - `Idx::ceil_to_multiple` / `Idx::div_ceil` are gone; the derive macro and the crate use std
   `next_multiple_of` (in the derive it runs in const eval, so an overflow is a compile error).
 
+### Changed in df2f918 (#92) - supersedes conflicting statements above
+- `DTYPE_MAX_NDIM` is renamed `DTYPE_NDIM_MAX`.
+
 ## Hot spots
 
 - Layout arithmetic in dtype.rs:476-506 and 653-717: every `expected_offset += itemsize` and
