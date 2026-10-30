@@ -54,6 +54,7 @@ impl<T> Scalar<T> {
         T: Dtyped,
     {
         let shape = DimDyn::from_slice(shape.into_dimension()?.as_slice());
+        let ndim = shape.ndim();
 
         params.block_shape = None;
         params.block_shape_fixed_dims = None;
@@ -62,6 +63,7 @@ impl<T> Scalar<T> {
             &T::DTYPE,
             ArraySpecFlags::new().set_plain_read(),
         )?;
+        spec.dynamic_mut().block_shape = dim_arr(ndim, |_| 1);
         // Reading a scalar element is free, and it broadcasts over every dimension.
         spec.dynamic_mut().element_cost = 0.0;
 

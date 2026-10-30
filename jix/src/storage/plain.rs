@@ -145,6 +145,8 @@ impl<A> Plain<A, TypeDyn> {
             &dtype,
             ArraySpecFlags::new().set_plain_read(),
         )?;
+        spec.dynamic_mut().block_shape = dim_arr(ndim, |_| 1);
+
         // Layout order by contiguity: the outermost (largest stride) real dim comes first.
         {
             let shape = shape.as_slice();
