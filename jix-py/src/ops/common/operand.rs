@@ -393,6 +393,7 @@ impl Scalar {
             ScalarKind::F32 | ScalarKind::ComplexF32 => x as f32 as f64,
             _ => x,
         };
+        #[allow(clippy::nonminimal_bool)]
         let fits = |x: f64| {
             let y = narrow(x);
             !(x.is_finite() && y.is_infinite()) && !(x != 0.0 && y == 0.0)
