@@ -183,8 +183,9 @@ where
     }
     #[inline(always)]
     fn shape(&self) -> &[u64] {
-        debug_assert_eq!(self.a.shape(), self.b.shape());
-        self.a.shape()
+        let shape = self.a.shape();
+        debug_assert_eq!(shape, self.b.shape());
+        shape
     }
 
     #[inline(always)]
