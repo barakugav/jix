@@ -4,7 +4,7 @@ use jix_core::NDIM_MAX;
 use numpy::npyffi::{npy_intp, PyArray_Dims};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{
-    PyFloatingPointError, PyIndexError, PyRuntimeError, PyTypeError, PyValueError,
+    PyFloatingPointError, PyIndexError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
 };
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::marker::Ungil;
@@ -64,16 +64,37 @@ pub(crate) trait IntoPyResult<T> {
     fn into_py_result(self) -> PyResult<T>;
 }
 impl<T> IntoPyResult<T> for Result<T, jix_core::Error> {
-    #[inline(always)]
     fn into_py_result(self) -> PyResult<T> {
-        self.map_err(|e| {
+        fn py_err_clone(err: &PyErr) -> PyErr {
+            Python::attach(|py| err.clone_ref(py))
+        }
+
+        fn map_err(e: jix_core::Error) -> PyErr {
+            // A Python exception wrapped inside the source chain
+            if let Some(source) = std::error::Error::source(&e) {
+                let py_err = None;
+                let py_err = py_err.or_else(|| source.downcast_ref::<PyErr>());
+                let py_err = py_err.or_else(|| {
+                    source
+                        .downcast_ref::<std::io::Error>()?
+                        .get_ref()?
+                        .downcast_ref::<PyErr>()
+                });
+                if let Some(py_err) = py_err {
+                    return py_err_clone(py_err);
+                }
+            }
+
             let err_str = format!("{e}");
             match e.kind() {
                 jix_core::error::ErrorKind::Arithmetic => PyFloatingPointError::new_err(err_str),
                 jix_core::error::ErrorKind::UnsupportedDtype => PyTypeError::new_err(err_str),
+                jix_core::error::ErrorKind::Io => PyOSError::new_err(err_str),
                 _ => PyRuntimeError::new_err(err_str),
             }
-        })
+        }
+
+        self.map_err(map_err)
     }
 }
 

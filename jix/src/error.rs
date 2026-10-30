@@ -20,12 +20,17 @@ pub struct Error(Box<ErrorRepr>);
 struct ErrorRepr {
     kind: ErrorKind,
     msg: Cow<'static, str>,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 impl Error {
     /// Create a new [`Error`] with the given [`ErrorKind`] and a human-readable `message`.
     pub fn new(kind: ErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
         let msg = message.into();
-        Self(Box::new(ErrorRepr { kind, msg }))
+        Self(Box::new(ErrorRepr {
+            kind,
+            msg,
+            source: None,
+        }))
     }
 }
 impl Error {
@@ -40,7 +45,9 @@ impl Error {
     }
 
     pub(crate) fn io(err: std::io::Error) -> Self {
-        Self::new(ErrorKind::Io, format!("IO error: {err}"))
+        let mut e = Self::new(ErrorKind::Io, format!("IO error: {err}"));
+        e.0.source = Some(Box::new(err));
+        e
     }
 }
 
@@ -89,7 +96,11 @@ impl fmt::Display for Error {
         self.message().fmt(fmt)
     }
 }
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source.as_deref().map(|e| e as _)
+    }
+}
 pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
 
 macro_rules! error {

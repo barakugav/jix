@@ -1,7 +1,7 @@
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
@@ -258,8 +258,11 @@ pub fn write_array(
         }
         PathOrWriter::PyWriter(writer) => {
             // cant detach the GIL here since the writer is a Python object
-            let writer = BufWriter::new(writer);
-            write_array_impl(array, writer, params, modes)
+            let mut writer = BufWriter::new(writer);
+            let written = write_array_impl(array, &mut writer, params, modes);
+            // Drop the buffer of a failed write instead of writing it again on drop
+            let _ = writer.into_parts();
+            written
         }
     }?;
     // Emit the warnings of the read even if it raised
@@ -268,15 +271,12 @@ pub fn write_array(
 }
 /// Returns the result of the write and the warnings of the read, see
 /// [`crate::error::emit_warnings`].
-fn write_array_impl<W>(
+fn write_array_impl(
     array: &Array,
-    mut writer: W,
+    mut writer: impl Write + Seek,
     params: jix_core::ArrayParams,
     modes: ArithmeticErrorModes,
-) -> PyResult<(PyResult<()>, Vec<jix_core::Error>)>
-where
-    W: Write + Seek,
-{
+) -> PyResult<(PyResult<()>, Vec<jix_core::Error>)> {
     let context = array.read_ctx(modes)?;
     let result = array
         .arr
@@ -463,7 +463,9 @@ impl Write for PyWriter<'_> {
             .bind(py)
             .call1((&py_buf,))
             .map_err(|_| {
-                io::Error::other("write() kept a reference to its buffer after returning")
+                py_to_io_err(PyRuntimeError::new_err(
+                    "write() kept a reference to its buffer after returning",
+                ))
             })?;
 
         let result = result.map_err(py_to_io_err)?;
@@ -525,7 +527,7 @@ impl Seek for PyWriter<'_> {
 
 /// Convert a PyErr into std::io::Error.
 fn py_to_io_err(e: PyErr) -> io::Error {
-    io::Error::other(e.to_string())
+    io::Error::other(e)
 }
 
 #[cfg(test)]
