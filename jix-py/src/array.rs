@@ -659,7 +659,7 @@ impl Array {
 
         let should_detach =
             !self.arr.storage().spec().flags().plain_read() || nitems * itemsize > 4096;
-        let warnings = maybe_detach(py, should_detach, || {
+        let (result, warnings) = maybe_detach(py, should_detach, || {
             let context_guard = self.read_ctx()?;
             let context = context_guard.as_ref();
 
@@ -671,12 +671,15 @@ impl Array {
                     itemsize,
                 )
             };
-            self.arr
+            let result = self
+                .arr
                 .to_ndarray_buf(&index, context, Some(&mut out))
-                .into_py_result()?;
-            Ok::<_, PyErr>(context_guard.take_warnings())
+                .map(drop);
+            Ok::<_, PyErr>((result.into_py_result(), context_guard.take_warnings()))
         })?;
+        // Emit the warnings of the read even if it raised
         crate::error::emit_warnings(py, warnings)?;
+        result?;
 
         Ok(NdArray(np_arr))
     }
@@ -1666,13 +1669,11 @@ pub fn compact<'py>(
     let array = array.get();
     let (compacted, warnings) = py.detach(|| {
         let context = array.read_ctx()?;
-        let compacted = array
-            .arr
-            .compact_with(params, context.as_ref())
-            .into_py_result()?;
-        Ok::<_, PyErr>((compacted, context.take_warnings()))
+        let compacted = array.arr.compact_with(params, context.as_ref());
+        Ok::<_, PyErr>((compacted.into_py_result(), context.take_warnings()))
     })?;
     crate::error::emit_warnings(py, warnings)?;
+    let compacted = compacted?;
 
     Bound::new(py, Array::from_core(compacted.into_any()))
 }

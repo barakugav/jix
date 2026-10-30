@@ -210,7 +210,7 @@ pub fn write_array(
     let path_or_writer = PathOrWriter::from_pyany(path_or_writer)?;
     let params = resolve_array_params(py, params)?;
 
-    let warnings = match path_or_writer {
+    let (result, warnings) = match path_or_writer {
         PathOrWriter::Path(path) => {
             // detach the GIL
             py.detach(|| {
@@ -238,25 +238,27 @@ pub fn write_array(
             write_array_impl(array, writer, params)
         }
     }?;
-    crate::error::emit_warnings(py, warnings)
+    // Emit the warnings of the read even if it raised
+    crate::error::emit_warnings(py, warnings)?;
+    result
 }
-/// Returns the warnings of the read, see [`crate::error::emit_warnings`].
+/// Returns the result of the write and the warnings of the read, see
+/// [`crate::error::emit_warnings`].
 fn write_array_impl<W>(
     array: &Array,
     mut writer: W,
     params: jix_core::ArrayParams,
-) -> PyResult<Vec<jix_core::Error>>
+) -> PyResult<(PyResult<()>, Vec<jix_core::Error>)>
 where
     W: Write + Seek,
 {
     let context = array.read_ctx()?;
-    array
+    let result = array
         .arr
         .write_to_with(&mut writer, params, context.as_ref())
-        .into_py_result()?;
-
-    writer.flush()?;
-    Ok(context.take_warnings())
+        .into_py_result()
+        .and_then(|()| Ok(writer.flush()?));
+    Ok((result, context.take_warnings()))
 }
 
 enum PathOrReader<'a> {

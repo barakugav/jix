@@ -4,6 +4,7 @@ integer power and wrapping integer arithmetic. Mirrors the tests in jix/src/ops/
 jix/src/ops/op2.rs.
 """
 
+import io
 import sys
 import threading
 import warnings
@@ -413,3 +414,18 @@ def test_arithmetic_wraps_like_numpy(dtype):
         np.testing.assert_array_equal(jix.absolute(za).numpy(), np.absolute(a))
         if np.issubdtype(dtype, np.signedinteger):
             np.testing.assert_array_equal(jix.negative(za).numpy(), np.negative(a))
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        lambda x: x.numpy(),
+        jix.compact,
+        lambda x: jix.write_array(x, io.BytesIO()),
+    ],
+)
+def test_warnings_are_emitted_when_the_read_raises(read):
+    a, b = jix.compact(np.array([1e308, 0.0])), jix.compact(np.array([0.5, 0.0]))
+    modes = jix.errstate(over="warn", invalid="raise", divide="ignore")
+    with modes, pytest.warns(RuntimeWarning), pytest.raises(FloatingPointError):
+        read(a / b)
