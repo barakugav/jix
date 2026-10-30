@@ -280,11 +280,10 @@ def carrays2_mixed_strategy(draw, dtype_a: np.dtype, dtype_b: np.dtype, element_
 def sub_range_strategy(draw, shape: tuple):
     """
     Random sub-range (tuple of slices) for an array of the given shape.
-    jix requires 0 <= start < size, so only call this when all dims are non-zero.
     """
     slices = []
     for size in shape:
-        start = draw(st.integers(0, size - 1), label="sub_range_start")
+        start = draw(st.integers(0, size), label="sub_range_start")
         stop = draw(st.integers(start, size), label="sub_range_stop")
         slices.append(slice(start, stop))
     return tuple(slices)
@@ -299,20 +298,20 @@ def assert_array_matches(
     atol: float = 0.0,
 ):
     """
-    Assert actual matches expected for the full array. When data is provided
-    (from @given(st.data())), also checks one random sub-range.
+    Assert actual matches expected, shape and dtype included, for the full array. When data is
+    provided (from @given(st.data())), also checks a few random sub-ranges.
     Mirrors Rust's assert_array_matches().
     """
 
     def assert_arr_equal(a, b):
-        np.testing.assert_allclose(a, b, rtol=rtol, atol=atol)
+        np.testing.assert_allclose(a, b, rtol=rtol, atol=atol, strict=True)
 
     assert_arr_equal(actual.numpy(), expected)
 
-    # jix rejects slice(0, 0) on zero-length dimensions; skip sub-range for those.
-    if data is not None and actual.shape and all(s > 0 for s in actual.shape):
-        sub_idx = data.draw(sub_range_strategy(actual.shape), label="sub_range")
-        assert_arr_equal(actual[sub_idx], expected[sub_idx])
+    if data is not None and actual.shape:
+        for _ in range(4):
+            sub_idx = data.draw(sub_range_strategy(actual.shape), label="sub_range")
+            assert_arr_equal(actual[sub_idx], expected[sub_idx])
 
 
 def check_op1_concrete(jix_fn, ref_fn, cases, *, rtol=0.0, atol=0.0):
