@@ -75,6 +75,41 @@ fn raw_ident_field() {
     assert_eq!(RawIdent::DTYPE.fields().unwrap()[0].0, "type");
 }
 
+// Names in the user's scope that the generated code used to pick up.
+mod shadowed {
+    #![allow(unused_macros)]
+    use jix_core::dtype::Dtyped;
+
+    const fn size_of<T>() -> usize {
+        1
+    }
+    const fn align_of<T>() -> usize {
+        1
+    }
+    macro_rules! assert {
+        ($($t:tt)*) => {};
+    }
+    const BASE_OFFSET: usize = 3;
+
+    #[derive(Copy, Clone, Dtyped)]
+    #[dtyped(crate = "::jix_core")]
+    #[repr(C)]
+    pub struct Shadowed {
+        a: u8,
+        b: [u8; BASE_OFFSET],
+        c: u32,
+    }
+}
+
+#[test]
+fn derive_is_hygienic() {
+    let d = shadowed::Shadowed::DTYPE;
+    assert_eq!(d.itemsize(), 8);
+    assert_eq!(d.alignment().as_usize(), 4);
+    let offsets = d.fields().unwrap().iter().map(|f| f.1).collect::<Vec<_>>();
+    assert_eq!(offsets, [0, 1, 4]);
+}
+
 // ---- packed structs ----
 
 #[derive(Copy, Clone, Dtyped)]
