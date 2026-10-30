@@ -450,18 +450,16 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
                 let tmp_buf = unsafe { &mut *self.tmp_buf.get() };
                 tmp_buf.clear();
                 tmp_buf.reserve(narrays * M);
-                #[allow(clippy::uninit_vec)]
-                unsafe {
-                    tmp_buf.set_len(narrays * M)
-                };
-
+                let tmp_buf_mut = &mut tmp_buf.spare_capacity_mut()[..narrays * M];
                 for (arr, inner) in self.inners.iter().enumerate() {
                     let items =
                         unsafe { inner.read_bulk::<M, CONTIGUOUS, _>(offset, status, simd) };
                     for (item_idx, item) in items.into_iter().enumerate() {
-                        tmp_buf[item_idx * narrays + arr] = item;
+                        tmp_buf_mut[item_idx * narrays + arr].write(item);
                     }
                 }
+                // SAFETY: every slot was written above.
+                unsafe { tmp_buf.set_len(narrays * M) };
 
                 let tmp_buf: &'s [S::Item] = tmp_buf;
                 array_from_fn_inline::<_, M>(|item_idx| &tmp_buf[item_idx * narrays..][..narrays])
@@ -574,18 +572,16 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
                 let tmp_buf = unsafe { &mut *self.tmp_buf.get() };
                 tmp_buf.clear();
                 tmp_buf.reserve(narrays * M);
-                #[allow(clippy::uninit_vec)]
-                unsafe {
-                    tmp_buf.set_len(narrays * M)
-                };
-
+                let tmp_buf_mut = &mut tmp_buf.spare_capacity_mut()[..narrays * M];
                 for (arr, inner) in self.inners.iter().enumerate() {
                     let items =
                         unsafe { inner.read_bulk::<M, CONTIGUOUS, _>(offset, status, simd) };
                     for (item_idx, item) in items.into_iter().enumerate() {
-                        tmp_buf[item_idx * narrays + arr] = item;
+                        tmp_buf_mut[item_idx * narrays + arr].write(item);
                     }
                 }
+                // SAFETY: every slot was written above.
+                unsafe { tmp_buf.set_len(narrays * M) };
 
                 let tmp_buf: &'s [S::Item] = tmp_buf;
                 array_from_fn_inline::<_, M>(|item_idx| &tmp_buf[item_idx * narrays..][..narrays])
