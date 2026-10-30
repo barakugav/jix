@@ -287,7 +287,9 @@ impl ArrayParams {
 
         if self.block_shape.is_none() {
             let block_shape = spec.block_shape();
-            let mut block_shape_fixed_dims = spec.block_shape_fixed_dims();
+            let mut block_shape_fixed_dims = self
+                .block_shape_fixed_dims
+                .unwrap_or(spec.block_shape_fixed_dims());
 
             let block_bytes = block_shape
                 .iter()
@@ -1017,6 +1019,20 @@ mod tests {
     use super::scale_order_from_weights;
     use crate::util::ScaleWeight;
     use crate::{Array, ArrayParams, ArrayStorage, BLOCK_SIZE_BYTES_MAX};
+
+    #[test]
+    fn compact_with_keeps_caller_fixed_dims() {
+        let data = ndarray::Array2::<i32>::zeros((64, 64));
+        let mut params = ArrayParams::new();
+        params.block_shape(&[8, 32]);
+        let a = Array::compact_ndarray_with(&data, params).unwrap();
+
+        let mut params = ArrayParams::new();
+        params.block_shape_fixed_dims(&[true, false]);
+        params.block_size(8 * 64 * 4);
+        let c = a.compact_with(params, &a.read_ctx()).unwrap();
+        assert_eq!(c.storage().spec().block_shape()[..], [8, 64]);
+    }
 
     #[test]
     fn block_larger_than_max_block_bytes_is_rejected() {
