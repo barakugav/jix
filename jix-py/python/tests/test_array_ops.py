@@ -86,6 +86,11 @@ def test_python_ints_are_range_checked_at_the_dtype(fn):
     np.testing.assert_array_equal(fn([0, 255], np.uint8).numpy(), [0, 255])
     # Typed values are cast, wrapping like numpy's astype.
     assert fn(np.int64(300), np.uint8).numpy() == 44
+    # Typed scalars are cast like 0-d arrays of the same type.
+    for value, dtype in [(np.float64(-1.5), np.uint8), (np.float32(1e10), np.int32)]:
+        assert fn(value, dtype).numpy() == fn(np.array(value), dtype).numpy()
+    with pytest.raises(TypeError):
+        fn(np.complex128(1 + 2j), np.float64)
 
 
 # ---------------------------------------------------------------------------

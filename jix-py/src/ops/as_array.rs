@@ -62,8 +62,9 @@ pub fn asarray<'py>(
         .map(|dtype| numpy_descr_from_any(py, dtype))
         .transpose()?;
 
-    let value_is_array =
-        value.is_instance_of::<Array>() || value.is_instance_of::<numpy::PyUntypedArray>();
+    let value_is_array = value.is_instance_of::<Array>()
+        || value.is_instance_of::<numpy::PyUntypedArray>()
+        || value.is_instance(numpy_items(py)?.generic.bind(py))?;
     let value = match &np_dtype {
         Some(np_dtype) if !value_is_array => {
             let kwargs = [("dtype", np_dtype)].into_py_dict(py)?;
