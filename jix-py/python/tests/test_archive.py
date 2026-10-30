@@ -1,6 +1,7 @@
 """Tests for read_array and write_array with both file paths and file-like objects."""
 
 import io
+import pickle
 import tempfile
 from pathlib import Path
 
@@ -97,6 +98,16 @@ def test_write_array_bytesio_roundtrip():
     buf.seek(0)
     a2 = jix.read_array(buf)
     np.testing.assert_array_equal(a2.numpy(), a.numpy())
+
+
+def test_write_array_writer_keeps_buffer_raises():
+    class Writer(io.BytesIO):
+        def write(self, b):
+            self.kept = pickle.PickleBuffer(b)
+            return super().write(b)
+
+    with pytest.raises(RuntimeError, match="kept a reference"):
+        jix.write_array(make_array([1.0, 2.0]), Writer())
 
 
 def test_write_array_bad_object():

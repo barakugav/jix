@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
 
 use crate::array::resolve_array_params;
@@ -160,7 +161,9 @@ pub fn read_array(
 ///     path_or_writer: A file path or any seekable binary file-like object with `.write()`,
 ///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle). The writer
 ///         must support seeking backwards. For the same reason a file object opened in append
-///         mode (`"ab"`) raises; use `append=True` with a path instead.
+///         mode (`"ab"`) raises; use `append=True` with a path instead. As with `io.RawIOBase`,
+///         `.write(b)` must only access `b` during the call, and must not keep `b` or any view of
+///         it (a slice, `np.frombuffer(b)`, ...) after it returns.
 ///     append: When `False` (default), the file is created anew and must not already exist.
 ///         When `True`, the array is appended to an existing file (or a new one is created).
 ///         Ignored when `path_or_writer` is a file-like object.
@@ -384,21 +387,17 @@ struct PyWriter<'py> {
 
 impl<'py> PyWriter<'py> {
     fn new(inner: Bound<'py, PyAny>) -> PyResult<Self> {
-        let write_fn = inner
-            .getattr("write")
-            .map_err(|_| PyTypeError::new_err("Object must have a 'write' method"))?;
-        let seek_fn = inner
-            .getattr("seek")
-            .map_err(|_| PyTypeError::new_err("Object must have a 'seek' method"))?;
-        let tell_fn = inner
-            .getattr("tell")
-            .map_err(|_| PyTypeError::new_err("Object must have a 'tell' method"))?;
-        let flush_fn = inner.getattr("flush").ok();
         Ok(Self {
-            write_fn,
-            seek_fn,
-            tell_fn,
-            flush_fn,
+            write_fn: inner
+                .getattr("write")
+                .map_err(|_| PyTypeError::new_err("Object must have a 'write' method"))?,
+            seek_fn: inner
+                .getattr("seek")
+                .map_err(|_| PyTypeError::new_err("Object must have a 'seek' method"))?,
+            tell_fn: inner
+                .getattr("tell")
+                .map_err(|_| PyTypeError::new_err("Object must have a 'tell' method"))?,
+            flush_fn: inner.getattr("flush").ok(),
         })
     }
 }
@@ -408,14 +407,10 @@ impl Write for PyWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let py = self.write_fn.py();
 
-        // SAFETY: We create a read-only memoryview pointing directly into
-        // `buf`. This is sound as long as the memoryview does not outlive
-        // this call - i.e. Python's .write() must not stash a reference to
-        // the memoryview (or a slice of it) beyond returning.
-        //
-        // All standard library IO implementations (FileIO, BufferedWriter,
-        // BytesIO, GzipFile, etc.) consume the buffer immediately. This is
-        // the same contract CPython's own C-level IO code relies on.
+        // SAFETY: A read-only memoryview pointing directly into `buf`. Python's write() must not
+        // keep the memoryview or any view derived from it after returning, the same contract
+        // CPython's BufferedWriter puts on raw.write() (documented in write_array). A view that
+        // holds a buffer export makes release() fail, which is reported as an error below.
         let py_buf: Bound<'_, PyAny> = unsafe {
             Bound::from_owned_ptr_or_err(
                 py,
@@ -428,16 +423,23 @@ impl Write for PyWriter<'_> {
             .map_err(py_to_io_err)?
         };
 
-        let result = self.write_fn.call1((&py_buf,)).map_err(py_to_io_err)?;
+        let result = self.write_fn.call1((&py_buf,));
 
-        // Explicitly release the memoryview before we return, ensuring
-        // Python can't hold a reference into `buf` after this point.
-        // (The refcount drop on `mv` would do this anyway, but
-        // calling .release() makes the invalidation immediate and
-        // deterministic - any stashed reference becomes a dead
-        // memoryview that raises ValueError on access.)
-        let _ = py_buf.call_method0("release");
+        static MEMORY_VIEW_RELEASE_FN: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+        let memory_view_release_fn = MEMORY_VIEW_RELEASE_FN.get_or_init(py, || {
+            py.get_type::<pyo3::types::PyMemoryView>()
+                .getattr("release")
+                .expect("Failed to get memoryview release function")
+                .into()
+        });
+        memory_view_release_fn
+            .bind(py)
+            .call1((&py_buf,))
+            .map_err(|_| {
+                io::Error::other("write() kept a reference to its buffer after returning")
+            })?;
 
+        let result = result.map_err(py_to_io_err)?;
         if result.is_none() {
             return Ok(buf.len());
         }
