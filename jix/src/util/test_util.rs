@@ -906,8 +906,9 @@ pub(crate) fn sub_range_strategy(shape: &[u64]) -> BoxedStrategy<Vec<Range<u64>>
 }
 
 /// Asserts that `actual` contains the same values as `expected`, comparing each
-/// element bit-for-bit. Checks the full array first, then 16 random sub-ranges
-/// via `to_ndarray_sub`.
+/// element with `==`: +0.0 equals -0.0, a NaN never matches, and a `bool8` compares
+/// by truth value. Checks the full array first, then 16 random sub-ranges via
+/// `to_ndarray_sub`.
 ///
 /// Use [`assert_array_matches_approx`] for results of order-dependent
 /// floating-point arithmetic (e.g. reductions), where exact equality is too
@@ -1374,7 +1375,7 @@ macro_rules! impl_simd_test_values_int {
 }
 impl_simd_test_values_int!(i8, i16, i32, i64, u8, u16, u32, u64);
 
-/// Whether `a` and `b` are equal, NaNs included.
+/// Whether `a` and `b` are equal (`==`, so +0.0 equals -0.0), NaNs included.
 #[allow(clippy::eq_op)]
 pub(crate) fn same_value<T: PartialEq>(a: &T, b: &T) -> bool {
     a == b || (a != a && b != b)
