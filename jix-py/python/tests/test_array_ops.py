@@ -2,6 +2,7 @@
 flatten, reshape, broadcast, permute_dims, squeeze/unsqueeze, insert_dim/remove_dim,
 read_array/write_array."""
 
+import operator
 import tempfile
 from pathlib import Path
 
@@ -1137,3 +1138,22 @@ def test_tile_large_reps():
     a = jix.compact(arr)
     r = jix.tile(a, 7)
     np.testing.assert_array_equal(r.numpy(), np.tile(arr, 7))
+
+
+def test_binary_ops_return_not_implemented_for_operands_that_opt_out():
+    a = jix.compact(np.array([1, 2]))
+    names = ["add", "sub", "mul", "truediv", "floordiv", "mod", "pow", "and", "or", "xor", "lshift", "rshift"]
+    # Each reflected op returns its own name, so the result shows Python fell back to it
+    reflected = {f"__r{name}__": lambda self, other, name=name: f"r{name}" for name in names}
+    OptsOut = type("OptsOut", (), {"__array_ufunc__": None, "__gt__": lambda self, other: "gt", **reflected})
+
+    for name in names:
+        op = getattr(operator, f"{name}_" if name in ("and", "or") else name)
+        assert op(a, OptsOut()) == f"r{name}"
+    assert (a < OptsOut()) == "gt"
+    assert (a == OptsOut()) is False
+    # The reflected ops of jix opt out too, OptsOut has no __sub__
+    with pytest.raises(TypeError):
+        OptsOut() - a
+    np.testing.assert_array_equal((a + [1, 1]).numpy(), [2, 3])
+    np.testing.assert_array_equal((a + np.array([1, 1])).numpy(), [2, 3])

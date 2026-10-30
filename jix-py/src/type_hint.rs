@@ -142,3 +142,31 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ErrMode {
         }
     }
 }
+
+/// The result of a binary dunder. `NotImplemented` makes Python try the other operand's reflected
+/// op. Typed as an `Array`, like numpy's dunders.
+pub enum ValueOrUnimplemented<T>
+where
+    T: pyo3::PyClass + Into<pyo3::PyClassInitializer<T>> + pyo3::PyTypeInfo,
+{
+    Value(T),
+    NotImplemented,
+}
+
+impl<'py, T> IntoPyObject<'py> for ValueOrUnimplemented<T>
+where
+    T: pyo3::PyClass + Into<pyo3::PyClassInitializer<T>> + pyo3::PyTypeInfo,
+{
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    const OUTPUT_TYPE: PyStaticExpr = <T as pyo3::PyTypeInfo>::TYPE_HINT;
+
+    fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
+        match self {
+            Self::Value(value) => Ok(Bound::new(py, value)?.into_any()),
+            Self::NotImplemented => Ok(py.NotImplemented().into_bound(py)),
+        }
+    }
+}
