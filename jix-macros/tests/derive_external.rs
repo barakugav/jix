@@ -85,32 +85,16 @@ struct PackedC {
     b: u32,
 }
 
-// A bare `packed` repr is its own branch in the derive (the ABI-qualified `#[repr(Rust, packed)]`
-// spelling is not one of the strings the macro accepts), so the lint has to be allowed here.
-#[allow(clippy::repr_packed_without_abi)]
-#[derive(Copy, Clone, Dtyped)]
-#[dtyped(crate = "::jix_core")]
-#[repr(packed)]
-struct PackedBare {
-    a: u8,
-    b: u32,
-}
-
 #[test]
 fn repr_packed_has_no_padding() {
-    for d in [PackedC::DTYPE, PackedBare::DTYPE] {
-        assert_eq!(d.itemsize(), 5);
-        assert_eq!(d.alignment().as_usize(), 1);
-        assert!(!d.is_aligned());
-        let fields = d.fields().unwrap();
-        assert_eq!(fields[0].1, 0);
-        assert_eq!(fields[1].1, 1);
-    }
-    assert_eq!(PackedC::DTYPE.itemsize() as usize, size_of::<PackedC>());
-    assert_eq!(
-        PackedBare::DTYPE.itemsize() as usize,
-        size_of::<PackedBare>()
-    );
+    let d = PackedC::DTYPE;
+    assert_eq!(d.itemsize(), 5);
+    assert_eq!(d.itemsize() as usize, size_of::<PackedC>());
+    assert_eq!(d.alignment().as_usize(), 1);
+    assert!(!d.is_aligned());
+    let fields = d.fields().unwrap();
+    assert_eq!(fields[0].1, 0);
+    assert_eq!(fields[1].1, 1);
 }
 
 // ---- #[repr(transparent)] newtypes ----

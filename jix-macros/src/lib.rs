@@ -10,7 +10,7 @@
 //!
 //! `Dtyped` maps the struct's layout to a `jix::dtype::Dtype` at compile time: it walks the
 //! fields, computes byte offsets respecting C alignment rules (or packed layout when
-//! `#[repr(packed)]` is used), and records field names so that individual fields can be accessed
+//! `#[repr(C, packed)]` is used), and records field names so that individual fields can be accessed
 //! as array views at runtime.
 //!
 //! ```rust,ignore
@@ -26,7 +26,7 @@
 //!
 //! ### Requirements
 //!
-//! - The struct must be `#[repr(C)]` or `#[repr(C, packed)]` / `#[repr(packed)]`.
+//! - The struct must be `#[repr(C)]` or `#[repr(C, packed)]`.
 //! - Every field must itself implement `Dtyped`.
 //! - The struct must not have padding bytes (checked at compile time). If the C layout needs
 //!   padding, add it as an explicit field, for example `_pad: [u8; 3]`, or use
@@ -125,7 +125,7 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         Fields::Named(fields) => {
             let is_packed = match repr_attribute.as_str() {
                 "C" => false,
-                "C,packed" | "packed" => true,
+                "C,packed" => true,
                 unknown => {
                     return Err(syn::Error::new_spanned(
                         input,
