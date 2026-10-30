@@ -20,3 +20,4 @@
 - bitwise_rotate_left/right type promotion is wrong, (int,int) raise
 - bump to fearless_simd 1.2.0
 - add more base benchmarks
+- fast path for read/write to python bytes object, releasing the GIL

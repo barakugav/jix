@@ -215,6 +215,16 @@ def test_read_array_reader_at_offset():
     np.testing.assert_array_equal(b2.numpy(), b.numpy())
 
 
+def test_read_array_reader_back_to_back():
+    buf = io.BytesIO()
+    jix.write_array(make_array([1, 2, 3], dtype=np.int32), buf)
+    jix.write_array(make_array([4.0, 5.0]), buf)
+    buf.seek(0)
+    np.testing.assert_array_equal(jix.read_array(buf).numpy(), [1, 2, 3])
+    np.testing.assert_array_equal(jix.read_array(buf).numpy(), [4.0, 5.0])
+    assert buf.tell() == len(buf.getvalue())
+
+
 def test_read_array_reader_mmap_raises():
     buf = io.BytesIO()
     a = make_array([1.0])

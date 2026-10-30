@@ -577,6 +577,26 @@ mod tests {
     use crate::{ArrayStorage, TypeDyn};
 
     #[test]
+    fn read_back_to_back_archives() {
+        let a = Array::compact_ndarray(&ndarray::array![1i32, 2, 3]).unwrap();
+        let b = Array::compact_ndarray(&ndarray::array![4i64, 5]).unwrap();
+        let mut buf = Cursor::new(Vec::new());
+        a.write_to(&mut buf).unwrap();
+        b.write_to(&mut buf).unwrap();
+        buf.rewind().unwrap();
+        let read = |buf: &mut Cursor<Vec<u8>>| {
+            Array::read_from_reader(buf, None, ArrayParams::new(), ArchiveValidation::Strict)
+        };
+        let a2 = read(&mut buf).unwrap().into_typed::<i32>().unwrap();
+        let b2 = read(&mut buf).unwrap().into_typed::<i64>().unwrap();
+        assert_eq!(
+            a2.to_ndarray().unwrap(),
+            ndarray::array![1, 2, 3].into_dyn()
+        );
+        assert_eq!(b2.to_ndarray().unwrap(), ndarray::array![4, 5].into_dyn());
+    }
+
+    #[test]
     fn deepest_struct_dtype_round_trips() {
         use crate::dtype::{Dtype, DTYPE_NESTING_MAX};
         let mut dtype = u8::DTYPE;

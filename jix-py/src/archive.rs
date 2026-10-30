@@ -143,9 +143,14 @@ pub fn read_array(
                 ));
             }
             // Can't detach the GIL since the reader is a Python object.
-            let reader = BufReader::new(reader);
-            let array = jix_core::Array::read_from_reader(reader, len, params, validation)
+            let mut reader = BufReader::new(reader);
+            let array = jix_core::Array::read_from_reader(&mut reader, len, params, validation)
                 .into_py_result()?;
+
+            // Leave the reader at the current position after reading the array, BufReader may have read ahead
+            let pos = reader.stream_position()?;
+            reader.into_inner().seek(SeekFrom::Start(pos))?;
+
             Ok(Array::from_core(array.into_any()))
         }
     }

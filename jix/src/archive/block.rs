@@ -355,6 +355,17 @@ where
                 let block_data = storage.read_section(reader, block_data_section)?;
                 let blocks_loc =
                     storage.read_section::<BlockLocation, _>(reader, blocks_loc_section)?;
+
+                // Leave the reader at the end of the archive
+                let end_offset = [blocks_loc_section, block_data_section]
+                    .map(|s| s.offset.saturating_add_unsigned(s.size))
+                    .into_iter()
+                    .max()
+                    .unwrap();
+                reader
+                    .seek_relative_to_base(end_offset)
+                    .map_err(Error::io)?;
+
                 (block_data, blocks_loc)
             }
             None => bail!(
