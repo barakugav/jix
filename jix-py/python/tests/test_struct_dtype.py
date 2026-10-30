@@ -133,6 +133,15 @@ def test_padded_struct_error_suggests_explicit_padding():
         jix.asarray(a)
 
 
+def test_fields_out_of_offset_order():
+    x = np.zeros(3, np.dtype([("a", "<i4"), ("b", "<f4")]))
+    x["a"], x["b"] = [1, 2, 3], [0.5, 1.5, 2.5]
+    view = x[["b", "a"]]
+    out = jix.asarray(view).numpy()
+    np.testing.assert_array_equal(out["a"], x["a"])
+    np.testing.assert_array_equal(out["b"], x["b"])
+
+
 def test_deeply_nested_struct():
     def nested(depth):
         d = np.dtype("u1")

@@ -679,7 +679,8 @@ impl Dtype {
                 *offset == expected_offset,
                 InvalidArgument,
                 "struct dtype field `{name}` is at offset {offset}, expected {expected_offset}: \
-                 padding between fields is not supported, add an explicit padding field instead"
+                 fields must be given in offset order, \
+                 and padding between fields is not supported, add an explicit padding field instead"
             );
             expected_offset = expected_offset
                 .checked_add(dtype.itemsize())

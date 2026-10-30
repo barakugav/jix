@@ -201,7 +201,7 @@ fn dtype_from_numpy_nested(numpy_dtype: &Bound<PyArrayDescr>, depth: usize) -> P
         let names = numpy_base.names().ok_or_else(|| {
             PyValueError::new_err(format!("Unsupported struct dtype: {numpy_base:?}"))
         })?;
-        let fields = names
+        let mut fields = names
             .into_iter()
             .map::<PyResult<_>, _>(|field_name| {
                 let (field_dtype, field_offset) = numpy_base.get_field(&field_name)?;
@@ -215,6 +215,7 @@ fn dtype_from_numpy_nested(numpy_dtype: &Bound<PyArrayDescr>, depth: usize) -> P
                 Ok((field_name, field_offset, field_dtype))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        fields.sort_by_key(|(_, offset, _)| *offset);
 
         Dtype::new_struct(fields, &shape, itemsize, alignment)
             .map_err(|e| PyValueError::new_err(format!("Unsupported struct dtype: {e}")))?
