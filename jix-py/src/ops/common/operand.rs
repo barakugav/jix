@@ -466,12 +466,13 @@ pub(crate) fn plain_from_numpy(
         .iter()
         .map(|&d| d as u64)
         .collect::<DimArray<_>>();
+    let empty = shape.contains(&0);
     let strides = shape
         .iter()
         .zip(array.strides())
         .map(|(&d_len, &stride)| {
-            if d_len <= 1 {
-                return Ok(dtype.itemsize() as usize); // allow any stride on 0 or 1 len dim
+            if d_len <= 1 || empty {
+                return Ok(dtype.itemsize() as usize); // no element is addressed through this stride
             }
             usize::try_from(stride)
                 .map_err(|_| PyValueError::new_err("Negative strides are not supported"))

@@ -112,6 +112,9 @@ def test_negative_strides_raise_value_error(fn):
     x = np.arange(3).reshape(1, 3)[::-1]
     np.testing.assert_array_equal(fn(x).numpy(), x)
     np.testing.assert_array_equal((jix.asarray(np.ones((1, 3))) + x).numpy(), x + 1)
+    # A zero-element array addresses no element, any stride is fine.
+    x = np.arange(6).reshape(2, 3)[:0, ::-1]
+    assert fn(x).numpy().shape == (0, 3)
 
 
 # ---------------------------------------------------------------------------

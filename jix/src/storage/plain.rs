@@ -514,10 +514,11 @@ fn shape_from_ndarray(shape: &[usize]) -> Result<DimDyn> {
 }
 
 fn strides_from_ndarray<T>(shape: &[usize], strides: &[isize]) -> Result<DimArray<usize>> {
+    let empty = shape.contains(&0);
     std::iter::zip(shape, strides)
         .map(|(&len, &s)| {
-            if len <= 1 {
-                return Ok(size_of::<T>()); // allow any stride on 0 or 1 len dim
+            if len <= 1 || empty {
+                return Ok(size_of::<T>()); // no element is addressed through this stride
             }
             let s = usize::try_from(s)
                 .map_err(|_| error!(InvalidArgument, "Negative strides are not supported"))?;
@@ -580,6 +581,11 @@ mod tests {
         owned.invert_axis(ndarray::Axis(0));
         let a = Array::plain_ndarray(owned).unwrap();
         assert_eq!(a.to_ndarray().unwrap(), array![[1, 2, 3]]);
+
+        // A zero-element array addresses no element, any stride is fine.
+        let empty = base.slice(s![..0, ..;-1]);
+        let a = Array::plain_ndarray_view(empty).unwrap();
+        assert_eq!(a.shape(), &[0, 3]);
     }
 
     // plain_ndarray (owned)
