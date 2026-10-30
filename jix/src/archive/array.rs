@@ -280,7 +280,15 @@ where
     /// ```
     pub fn write_to_file(&self, path: &Path) -> Result<()> {
         let writer = BufWriter::new(std::fs::File::create_new(path).map_err(Error::io)?);
-        self.write_to(writer)
+        let result = self.write_to(writer);
+        if result.is_err() {
+            // Don't leave a partial archive behind
+            let revert_result = std::fs::remove_file(path);
+            if let Err(err) = revert_result {
+                eprintln!("Error cleaning up partial archive: {err}");
+            }
+        }
+        result
     }
 
     /// Write the array to a generic writer.

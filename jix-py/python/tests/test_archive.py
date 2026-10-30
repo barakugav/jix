@@ -65,6 +65,20 @@ def test_write_array_path_append():
         np.testing.assert_array_equal(b2.numpy(), b.numpy())
 
 
+def test_write_array_path_failure_leaves_no_partial_file(tmp_path):
+    a = make_array([1.0, 2.0])
+    bad = jix.compact(np.zeros(2)) / jix.compact(np.zeros(2))
+    p = tmp_path / "out.jix"
+    with jix.errstate(invalid="raise"), pytest.raises(FloatingPointError):
+        jix.write_array(bad, p)
+    assert not p.exists()
+    jix.write_array(a, p)
+    size = p.stat().st_size
+    with jix.errstate(invalid="raise"), pytest.raises(FloatingPointError):
+        jix.write_array(bad, p, append=True)
+    assert p.stat().st_size == size
+
+
 # ---------------------------------------------------------------------------
 # write_array - file-like object
 # ---------------------------------------------------------------------------

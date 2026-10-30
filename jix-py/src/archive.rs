@@ -220,11 +220,11 @@ pub fn write_array(
 
     let (result, warnings) = match path_or_writer {
         PathOrWriter::Path(path) => {
-            // detach the GIL
             py.detach(|| {
-                let file = if !append {
-                    std::fs::File::create_new(path)?
+                let (file, original_file_size) = if !append {
+                    (std::fs::File::create_new(&path)?, None)
                 } else {
+                    let file_exists = path.exists();
                     // O_APPEND would force every write to EOF, breaking the
                     // seek-then-write used to patch the block TOC placeholder.
                     // Instead, open for writing and seek to the end manually.
@@ -232,12 +232,26 @@ pub fn write_array(
                         .write(true)
                         .create(true)
                         .truncate(false)
-                        .open(path)?;
-                    file.seek(std::io::SeekFrom::End(0))?;
-                    file
+                        .open(&path)?;
+                    let original_size = file.seek(std::io::SeekFrom::End(0))?;
+                    let original_size = (file_exists || original_size > 0).then_some(original_size);
+                    (file, original_size)
                 };
-                let writer = BufWriter::new(file);
-                write_array_impl(array, writer, params)
+                let written = write_array_impl(array, BufWriter::new(&file), params);
+                if !matches!(written, Ok((Ok(()), _))) {
+                    // Don't leave a partial archive behind
+                    let revert_result = match original_file_size {
+                        Some(original_size) => file.set_len(original_size),
+                        None => {
+                            drop(file);
+                            std::fs::remove_file(&path)
+                        }
+                    };
+                    if let Err(err) = revert_result {
+                        eprintln!("Error cleaning up partial archive: {err}");
+                    }
+                }
+                written
             })
         }
         PathOrWriter::PyWriter(writer) => {
