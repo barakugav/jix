@@ -103,11 +103,11 @@ impl_idx_for_primitive!(u64);
 /// Compute the byte span of a region accessed by `shape` and `strides`.
 #[inline]
 pub(crate) fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: usize) -> usize {
+    if shape.contains(&0) {
+        return 0;
+    }
     let mut biggest_offset = 0;
     for (&len, &stride) in shape.iter().zip(strides) {
-        if len == 0 {
-            return 0;
-        }
         biggest_offset += stride * (len - 1);
     }
     biggest_offset + itemsize
@@ -1152,6 +1152,10 @@ mod tests {
         // A zero-length dim makes the region empty.
         assert_eq!(super::strided_span_bytes(&[0], &[4], 4), 0);
         assert_eq!(super::strided_span_bytes(&[2, 0, 3], &[24, 8, 4], 4), 0);
+        assert_eq!(
+            super::strided_span_bytes(&[30, 0], &[usize::MAX / 2, 4], 4),
+            0
+        );
     }
 
     #[test]
