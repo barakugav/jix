@@ -13,7 +13,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
 use pyo3::exceptions::{
-    PyIndexError, PyNotImplementedError, PyRuntimeError, PyTypeError, PyValueError,
+    PyIndexError, PyNotImplementedError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
 };
 use pyo3::types::PyAnyMethods;
 
@@ -409,12 +409,14 @@ impl Array {
     /// ```
     #[inline]
     pub fn __len__(&self) -> PyResult<usize> {
-        let len = self
+        let len = *self
             .arr
             .shape()
             .first()
             .ok_or_else(|| PyValueError::new_err("zero-dimensional array has no length"))?;
-        Ok(*len as usize)
+        usize::try_from(len).map_err(|_| {
+            PyOverflowError::new_err(format!("array length too large for usize: {len}"))
+        })
     }
 
     /// Always raises: an array has no single truth value.
