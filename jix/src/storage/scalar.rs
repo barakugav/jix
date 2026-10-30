@@ -10,8 +10,7 @@ use crate::storage::{
 };
 use crate::util::dim_arr;
 use crate::{
-    cast_slice, cast_slice_mut, ArrayParams, DimBitmap, DimDyn, Dimension, ElementType,
-    IntoDimension,
+    cast_slice, cast_slice_mut, ArrayParams, DimDyn, Dimension, ElementType, IntoDimension,
 };
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
@@ -55,15 +54,9 @@ impl<T> Scalar<T> {
         T: Dtyped,
     {
         let shape = DimDyn::from_slice(shape.into_dimension()?.as_slice());
-        let ndim = shape.ndim();
 
-        if params.block_shape_fixed_dims.is_none() {
-            // A scalar broadcasts over every dimension, so none of them are fixed.
-            params.block_shape_fixed_dims = Some(DimBitmap::filled(ndim, false));
-            if params.block_shape.is_none() {
-                params.block_shape(dim_arr(ndim, |_| 1).as_ref());
-            }
-        }
+        params.block_shape = None;
+        params.block_shape_fixed_dims = None;
         let mut spec = params.into_spec(
             shape.as_slice(),
             &T::DTYPE,

@@ -28,6 +28,7 @@ use crate::util::numpy_items;
 ///     params: Block layout and codec configuration. See [`jix.compact()`][jix.compact] for
 ///         details. The returned array is never compressed, so these mostly affect only arrays
 ///         later created from it (e.g. via `compact()` or `write_array()`), which inherit them.
+///         The block shape is ignored, pass it to `compact()` or `write_array()` instead.
 ///         Only relevant when `value` is not already a jix array; an existing jix array is
 ///         returned as-is.
 ///
