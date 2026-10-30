@@ -128,6 +128,8 @@ pub type Itemsize = u16;
 ///
 /// Note this is not the shape of the array, but rather the inner shape of a dtype.
 pub const DTYPE_NDIM_MAX: usize = 4;
+
+pub(crate) const DTYPE_NESTING_MAX: usize = 32;
 type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 
 /// Runtime descriptor of an element type: captures all layout information needed to interpret
@@ -655,6 +657,16 @@ impl Dtype {
         fields: &[(Cow<'static, str>, Itemsize, Dtype)],
         itemsize: Itemsize,
     ) -> Result<()> {
+        let depth = 1 + fields
+            .iter()
+            .map(|(_, _, d)| d.nesting_depth())
+            .max()
+            .unwrap_or(0);
+        ensure!(
+            depth <= DTYPE_NESTING_MAX,
+            InvalidArgument,
+            "struct dtype is nested {depth} levels, more than the maximum {DTYPE_NESTING_MAX}"
+        );
         let mut seen_names = HashSet::new();
         let mut expected_offset: Itemsize = 0;
         for (name, offset, dtype) in fields {
@@ -723,6 +735,17 @@ impl Dtype {
             DtypeInner::StructOwned { fields, .. } => Some(fields),
             DtypeInner::StructBorrowed { fields, .. } => Some(fields),
         }
+    }
+
+    /// The struct nesting depth: 0 for a scalar, 1 + the deepest field for a struct.
+    pub(crate) fn nesting_depth(&self) -> usize {
+        self.fields().map_or(0, |fields| {
+            1 + fields
+                .iter()
+                .map(|(_, _, d)| d.nesting_depth())
+                .max()
+                .unwrap_or(0)
+        })
     }
 
     /// Get the shape of the dtype.

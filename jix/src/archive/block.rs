@@ -5,7 +5,7 @@ use std::mem::MaybeUninit;
 use crate::archive::common::{ArchiveReader, ArchiveWriter, Section};
 use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter, MAX_FILTERS};
-use crate::dtype::Dtype;
+use crate::dtype::{Dtype, DTYPE_NESTING_MAX};
 use crate::error::{bail, ensure, error, Error, Result};
 use crate::storage::block::{
     BlockLocation, BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage, Mmap, MmapData,
@@ -131,6 +131,11 @@ where
         decoder_config: &DecoderCodecConfig,
     ) -> Result<Self> {
         let nitems = nblocks * block_size as u64;
+        ensure!(
+            decoder_config.dtype.nesting_depth() <= DTYPE_NESTING_MAX,
+            InvalidArgument,
+            "struct dtype is nested more than the maximum {DTYPE_NESTING_MAX} levels"
+        );
 
         // Write header
         let header = schema::BlockTableHeader {

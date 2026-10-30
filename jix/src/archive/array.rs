@@ -576,6 +576,33 @@ mod tests {
     use crate::{ArchiveValidation, Array, ArrayParams, Dimension, IntoDimension, Ty};
     use crate::{ArrayStorage, TypeDyn};
 
+    #[test]
+    fn deepest_struct_dtype_round_trips() {
+        use crate::dtype::{Dtype, DTYPE_NESTING_MAX};
+        let mut dtype = u8::DTYPE;
+        for _ in 0..DTYPE_NESTING_MAX {
+            dtype = Dtype::from_fields(vec![("f".to_string(), 0, dtype)]).unwrap();
+        }
+        assert!(Dtype::from_fields(vec![("f".to_string(), 0, dtype.clone())]).is_err());
+
+        let data = [7u8; 4];
+        let a: Array<crate::storage::Plain<&(), TypeDyn>> = unsafe {
+            Array::plain_ndarray_ptr(data.as_ptr(), [4], &[1], dtype.clone(), ArrayParams::new())
+                .unwrap()
+        };
+        let mut buf = Cursor::new(Vec::new());
+        a.write_to(&mut buf).unwrap();
+        let len = buf.get_ref().len() as u64;
+        buf.rewind().unwrap();
+        let b = Array::read_from_reader(
+            buf,
+            Some(len),
+            ArrayParams::new(),
+            ArchiveValidation::Strict,
+        );
+        assert_eq!(b.unwrap().dtype(), &dtype);
+    }
+
     /// Writes `a`, edits its array and block table headers, and reads the result back.
     fn read_edited<S: ArrayStorage>(
         a: &Array<S>,
