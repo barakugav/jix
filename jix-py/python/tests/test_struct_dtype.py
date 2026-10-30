@@ -133,6 +133,20 @@ def test_padded_struct_error_suggests_explicit_padding():
         jix.asarray(a)
 
 
+def test_deeply_nested_struct():
+    def nested(depth):
+        d = np.dtype("u1")
+        for _ in range(depth):
+            d = np.dtype([("a", d)])
+        return np.zeros(2, d)
+
+    a = nested(32)
+    np.testing.assert_array_equal(jix.asarray(a).numpy(), a)
+    for depth in [33, 10000]:
+        with pytest.raises(ValueError, match="nested more than 32"):
+            jix.asarray(nested(depth))
+
+
 def test_sub_field_of_struct_with_explicit_padding():
     dt = np.dtype([("id", "<u1"), ("_pad", "(3,)u1"), ("grade", "<f4")], align=True)
     a = np.zeros(4, dt)

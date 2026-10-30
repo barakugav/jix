@@ -99,6 +99,12 @@ pub(crate) fn numpy_descr_from_any<'py>(
 }
 
 pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dtype> {
+    dtype_from_numpy_nested(numpy_dtype, 0)
+}
+
+const DTYPE_NESTING_MAX: usize = 32;
+
+fn dtype_from_numpy_nested(numpy_dtype: &Bound<PyArrayDescr>, depth: usize) -> PyResult<Dtype> {
     let shape = numpy_dtype.shape();
     if shape.len() > DTYPE_NDIM_MAX {
         return Err(PyValueError::new_err(format!(
@@ -187,6 +193,11 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dt
         dtype
     } else {
         // struct
+        if depth >= DTYPE_NESTING_MAX {
+            return Err(PyValueError::new_err(format!(
+                "Unsupported struct dtype: nested more than {DTYPE_NESTING_MAX} levels"
+            )));
+        }
         let names = numpy_base.names().ok_or_else(|| {
             PyValueError::new_err(format!("Unsupported struct dtype: {numpy_base:?}"))
         })?;
@@ -200,7 +211,7 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dt
                         Itemsize::MAX
                     ))
                 })?;
-                let field_dtype = dtype_from_numpy(&field_dtype)?;
+                let field_dtype = dtype_from_numpy_nested(&field_dtype, depth + 1)?;
                 Ok((field_name, field_offset, field_dtype))
             })
             .collect::<Result<Vec<_>, _>>()?;
