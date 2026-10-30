@@ -275,7 +275,7 @@ pub(crate) fn check_region_size(index: &[Range<u64>], itemsize: usize) -> Result
     if cfg!(target_pointer_width = "32") {
         let bytes = index
             .iter()
-            .map(|r| r.end - r.start)
+            .map(|r| (r.end - r.start).max(1))
             .chain([itemsize as u64])
             .try_shape_product();
         ensure!(
