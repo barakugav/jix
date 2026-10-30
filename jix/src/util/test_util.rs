@@ -1375,8 +1375,10 @@ pub(crate) fn assert_same_elements<T: PartialEq + Debug, const N: usize>(
 }
 
 /// Assert `storage.read_data` rejects an index with the wrong number of dims, a range past the end
-/// of a dim, and a reversed range with [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex), in
-/// both pull and push mode, rather than panicking or reading.
+/// of a dim, a reversed range and huge range bounds with
+/// [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex), in both pull and push mode, rather
+/// than panicking or reading. Each bad range is also tried next to a valid empty range in another
+/// dim, which must not skip the validation.
 #[track_caller]
 #[allow(clippy::reversed_empty_ranges, clippy::single_range_in_vec_init)]
 pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
@@ -1387,14 +1389,33 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
     let shape = storage.shape().to_vec();
     let ndim = shape.len();
     let full = shape.iter().map(|&len| 0..len).collect::<Vec<_>>();
-    let mut invalid = vec![full.iter().cloned().chain([0..1]).collect::<Vec<_>>()];
+    let mut invalid = vec![
+        full.iter().cloned().chain([0..1]).collect::<Vec<_>>(),
+        vec![0..1; crate::NDIM_MAX + 1],
+    ];
+    if ndim > 0 {
+        invalid.push(full[..ndim - 1].to_vec());
+    }
     for d in 0..ndim {
-        let mut past_end = full.clone();
-        past_end[d] = 0..shape[d] + 1;
-        invalid.push(past_end);
-        let mut reversed = full.clone();
-        reversed[d] = 1..0;
-        invalid.push(reversed);
+        let len = shape[d];
+        let bad_ranges = [
+            0..len + 1,
+            len + 1..len + 1,
+            1..0,
+            u64::MAX..u64::MAX,
+            u64::MAX..0,
+            0..u64::MAX,
+            len..u64::MAX,
+        ];
+        for range in bad_ranges {
+            let mut index = full.clone();
+            index[d] = range;
+            invalid.push(index.clone());
+            if ndim > 1 {
+                index[(d + 1) % ndim] = 0..0;
+                invalid.push(index);
+            }
+        }
     }
 
     // A destination large enough for one extra element in every dim, in case a read writes before
@@ -1428,5 +1449,38 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
             ErrorKind::InvalidIndex,
             "push {index:?} for {shape:?}: {err}"
         );
+    }
+}
+
+#[test]
+fn every_storage_rejects_invalid_indices() {
+    use crate::__private::Scalar;
+
+    for shape in [vec![2usize, 3, 4], vec![2, 0, 3], vec![]] {
+        let n = shape.iter().product::<usize>() as i32;
+        let data = ndarray::ArrayD::from_shape_vec(IxDyn(&shape), (0..n).collect()).unwrap();
+        let a = Array::compact_ndarray(&data).unwrap();
+        let plain = Array::plain_ndarray_view(data.view()).unwrap();
+        let shape = shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
+        let scalar =
+            Array::from_storage(Scalar::new(1i32, shape.as_slice(), ArrayParams::new()).unwrap());
+
+        assert_read_rejects_invalid_index(a.storage());
+        assert_read_rejects_invalid_index(plain.storage());
+        assert_read_rejects_invalid_index(scalar.storage());
+        assert_read_rejects_invalid_index((-a.view()).storage());
+        assert_read_rejects_invalid_index((a.view() + plain.view()).storage());
+        assert_read_rejects_invalid_index(a.view().cast::<f64>().storage());
+        assert_read_rejects_invalid_index(a.view().equal(scalar.view()).storage());
+        assert_read_rejects_invalid_index(a.view().map(|x: i32| x + 1).storage());
+        let broadcast_shape = [[2].as_slice(), &shape].concat();
+        assert_read_rejects_invalid_index(
+            a.view().insert_dim(0).broadcast(&broadcast_shape).storage(),
+        );
+        assert_read_rejects_invalid_index(a.view().insert_dim(0).storage());
+        if !shape.is_empty() {
+            assert_read_rejects_invalid_index(a.view().sum(0).storage());
+            assert_read_rejects_invalid_index(a.view().flip(0).storage());
+        }
     }
 }
