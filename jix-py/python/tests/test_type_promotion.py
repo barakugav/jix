@@ -380,6 +380,21 @@ def test_python_float_default_keeps_f32_precision():
     np.testing.assert_array_equal(jix.add(a, 1e10).numpy(), np.array([1e10, 1e10], dtype=np.float32))
 
 
+def test_python_float_out_of_f32_range_raises():
+    a = jix.compact(np.array([1, 3], dtype=np.uint8))
+    for fn in [lambda: a + 1e300, lambda: a * 1e-46, lambda: a / 1e39, lambda: a + 1e300j]:
+        with pytest.raises(OverflowError):
+            fn()
+    with pytest.raises(OverflowError):
+        jix.where(a > 1, a, 1e300)
+    # Also next to a typed f32 operand, where numpy rounds the value to inf or zero
+    f = jix.compact(np.array([1.0], dtype=np.float32))
+    h = jix.compact(np.array([1.0], dtype=np.float16))
+    for fn in [lambda: f + 1e300, lambda: f > 1e-50, lambda: h + 1e5]:
+        with pytest.raises(OverflowError):
+            fn()
+
+
 # ---------------------------------------------------------------------------
 # An untyped Python int adopts the integer dtype dispatch picked for it, so its
 # value must fit that dtype. Otherwise an OverflowError is raised rather than
