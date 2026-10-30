@@ -115,6 +115,10 @@ impl<A> Plain<A, TypeDyn> {
     /// * The memory region reachable via `data` and `strides` is valid to
     ///   read for all index combinations in `0..shape[d]` on each dimension
     ///   `d`.
+    /// * Every byte from the first to the last element (the strided span, gaps between elements
+    ///   included) lies in one allocation, and none of it is written, or borrowed through a
+    ///   `&mut`, while the array is read or while a buffer returned by a pull read of it (or of a
+    ///   lazy view over it) is alive.
     pub unsafe fn new(
         allocation: A,
         data: *const u8,
@@ -416,6 +420,10 @@ impl<ET> Array<Plain<&(), ET>> {
     /// * The memory region reachable via `data_ptr` and `strides` is valid to read for all index combinations in
     ///   `0..shape[d]` on each dimension `d`.
     /// * Elements accessed by the data pointer must be valid for the specified `dtype`.
+    /// * Every byte from the first to the last element (the strided span, gaps between elements
+    ///   included) lies in one allocation, and none of it is written, or borrowed through a
+    ///   `&mut`, while the array is read or while a buffer returned by a pull read of it (or of a
+    ///   lazy view over it) is alive.
     pub unsafe fn plain_ndarray_ptr(
         data_ptr: *const u8,
         shape: impl IntoDimension,

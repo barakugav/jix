@@ -302,7 +302,9 @@ impl Array<Compact<TypeDyn>> {
     /// `strides` (in bytes, one per dimension).
     /// The buffer should contain elements of the given `dtype`.
     /// Accessing the buffer according to the shape, strides and dtype must be memory-safe and yield
-    /// valid elements.
+    /// valid elements. Every byte from the first to the last element (the strided span, gaps
+    /// between elements included) lies in one allocation, and none of it is written, or borrowed
+    /// through a `&mut`, during the call.
     pub unsafe fn compact_nd_ptr(
         ptr: *const u8,
         shape: impl IntoDimension,
