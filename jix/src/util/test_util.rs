@@ -39,7 +39,7 @@ use proptest::strategy::BoxedStrategy;
 
 /// Proptest strategies for scalar types used across test modules.
 ///
-/// - `any_strategy()`: full domain (used for codec roundtrip tests).
+/// - `any_strategy()`: full domain, finite only for floats (used for codec roundtrip tests).
 /// - `op_safe_strategy()`: bounded range that avoids overflow when values are
 ///   combined arithmetically (used for op2, cast tests). For integer types,
 ///   values are small and positive so that e.g. `a = a_extra + b` still fits
@@ -242,7 +242,10 @@ impl ScalarStrategy for i64 {
 #[cfg(feature = "half")]
 impl ScalarStrategy for crate::scalar::f16 {
     fn any_strategy() -> BoxedStrategy<Self> {
-        any::<f32>().prop_map(crate::scalar::f16::from_f32).boxed()
+        any::<u16>()
+            .prop_map(crate::scalar::f16::from_bits)
+            .prop_filter("finite", |x| x.is_finite())
+            .boxed()
     }
 
     fn maybe_non_finite_strategy() -> BoxedStrategy<Self> {
@@ -305,7 +308,15 @@ impl ScalarStrategy for f32 {
         (1..=(100 * 100)).prop_map(|x| (x as f32) / 100.0).boxed()
     }
     fn comparable_strategy() -> BoxedStrategy<Self> {
-        prop_oneof![Just(0.0f32), Just(1.0f32), Just(2.4f32), Just(f32::NAN)].boxed()
+        prop_oneof![
+            Just(0.0f32),
+            Just(-0.0f32),
+            Just(1.0f32),
+            Just(2.4f32),
+            Just(f32::INFINITY),
+            Just(f32::NAN)
+        ]
+        .boxed()
     }
 }
 impl ScalarStrategy for f64 {
@@ -342,7 +353,15 @@ impl ScalarStrategy for f64 {
     }
 
     fn comparable_strategy() -> BoxedStrategy<Self> {
-        prop_oneof![Just(0.0f64), Just(1.0f64), Just(2.4f64), Just(f64::NAN)].boxed()
+        prop_oneof![
+            Just(0.0f64),
+            Just(-0.0f64),
+            Just(1.0f64),
+            Just(2.4f64),
+            Just(f64::INFINITY),
+            Just(f64::NAN)
+        ]
+        .boxed()
     }
 }
 impl ScalarStrategy for crate::scalar::bool8 {
