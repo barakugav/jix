@@ -38,7 +38,10 @@ use crate::Array;
 ///         the heap; blocks are paged in on demand. Defaults to `False`. **Caution:** modifying
 ///         the file while the returned array is live has undefined behavior. Not supported for
 ///         file-like objects.
-///     params: Controls how the array is read and decoded. See [`jix.compact()`][jix.compact] for details.
+///     params: Controls how the array is read and decoded and how future arrays created from the
+///         result are configured. See [`jix.compact()`][jix.compact] for details.
+///         Arrays derived from the result inherit only the block shape from the archive, while
+///         codec settings come from the `params` argument.
 ///     validation: Controls how strictly the archive is validated. Can be one of:
 ///
 ///         - `None` (default): Currently the same as the `strict` mode, may change in the future.
