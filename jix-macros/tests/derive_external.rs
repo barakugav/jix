@@ -63,6 +63,18 @@ fn repr_c_explicit_padding_field() {
     assert_eq!(fields[2].1, 8);
 }
 
+#[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
+#[repr(C)]
+struct RawIdent {
+    r#type: u8,
+}
+
+#[test]
+fn raw_ident_field() {
+    assert_eq!(RawIdent::DTYPE.fields().unwrap()[0].0, "type");
+}
+
 // ---- packed structs ----
 
 #[derive(Copy, Clone, Dtyped)]

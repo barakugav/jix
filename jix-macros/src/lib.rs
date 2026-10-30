@@ -55,6 +55,7 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
+use syn::ext::IdentExt;
 use syn::spanned::Spanned;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, Meta};
 
@@ -137,34 +138,16 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
             let field_names = fields
                 .named
                 .iter()
-                .map(|f| f.ident.clone())
+                .map(|f| f.ident.as_ref().unwrap().unraw().to_string())
                 .collect::<Vec<_>>();
-            let var_field_dtype = field_names
-                .iter()
-                .enumerate()
-                .map(|(i, f_name)| {
-                    let f_name = f_name.as_ref().unwrap();
-                    let var_name = format!("field_{i}_{}_dtype", f_name);
-                    syn::Ident::new(&var_name.to_uppercase(), input.span())
-                })
+            let var_field_dtype = (0..field_names.len())
+                .map(|i| syn::Ident::new(&format!("FIELD_{i}_DTYPE"), input.span()))
                 .collect::<Vec<_>>();
-            let var_field_offset = field_names
-                .iter()
-                .enumerate()
-                .map(|(i, f_name)| {
-                    let f_name = f_name.as_ref().unwrap();
-                    let var_name = format!("field_{i}_{}_offset", f_name);
-                    syn::Ident::new(&var_name.to_uppercase(), input.span())
-                })
+            let var_field_offset = (0..field_names.len())
+                .map(|i| syn::Ident::new(&format!("FIELD_{i}_OFFSET"), input.span()))
                 .collect::<Vec<_>>();
-            let var_field_end_offset = field_names
-                .iter()
-                .enumerate()
-                .map(|(i, f_name)| {
-                    let f_name = f_name.as_ref().unwrap();
-                    let var_name = format!("field_{i}_{}_end_offset", f_name);
-                    syn::Ident::new(&var_name.to_uppercase(), input.span())
-                })
+            let var_field_end_offset = (0..field_names.len())
+                .map(|i| syn::Ident::new(&format!("FIELD_{i}_END_OFFSET"), input.span()))
                 .collect::<Vec<_>>();
             let var_prev_field_offset = [syn::Ident::new("BASE_OFFSET", input.span())]
                 .into_iter()
@@ -199,7 +182,7 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
 
                 const FIELDS: &'static [(std::borrow::Cow<'static, str>, #jix_crate::dtype::Itemsize, #jix_crate::dtype::Dtype)] = &[
                     #(
-                        (std::borrow::Cow::Borrowed(stringify!(#field_names)), #var_field_offset, #var_field_dtype)
+                        (std::borrow::Cow::Borrowed(#field_names), #var_field_offset, #var_field_dtype)
                     ),*
                 ];
 
