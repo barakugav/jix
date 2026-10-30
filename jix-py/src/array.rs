@@ -9,7 +9,7 @@ use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
 use crate::error::{current_modes, ArithmeticErrorModes};
-use crate::type_hint::{NdArray, NpDtype};
+use crate::type_hint::{Dim, NdArray, NpDtype};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
@@ -1195,7 +1195,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn all(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::all(slf, dim, keepdim)
@@ -1205,7 +1205,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn any(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::any(slf, dim, keepdim)
@@ -1215,7 +1215,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn max(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::max(slf, dim, keepdim)
@@ -1225,7 +1225,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn min(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::min(slf, dim, keepdim)
@@ -1233,13 +1233,13 @@ impl Array {
 
     /// Returns the index of the maximum element along a single dim. See [`jix.argmax()`][jix.argmax].
     #[pyo3(signature = (dim=None, *, keepdim=false))]
-    pub fn argmax(slf: &Bound<'_, Self>, dim: Option<i32>, keepdim: bool) -> PyResult<Self> {
+    pub fn argmax(slf: &Bound<'_, Self>, dim: Option<Dim>, keepdim: bool) -> PyResult<Self> {
         crate::ops::argmax(slf, dim, keepdim)
     }
 
     /// Returns the index of the minimum element along a single dim. See [`jix.argmin()`][jix.argmin].
     #[pyo3(signature = (dim=None, *, keepdim=false))]
-    pub fn argmin(slf: &Bound<'_, Self>, dim: Option<i32>, keepdim: bool) -> PyResult<Self> {
+    pub fn argmin(slf: &Bound<'_, Self>, dim: Option<Dim>, keepdim: bool) -> PyResult<Self> {
         crate::ops::argmin(slf, dim, keepdim)
     }
 
@@ -1247,7 +1247,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn sum(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::sum(slf, dim, keepdim)
@@ -1257,7 +1257,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn mean(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::mean(slf, dim, keepdim)
@@ -1267,7 +1267,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn prod(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::product(slf, dim, keepdim)
@@ -1277,7 +1277,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn std(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
@@ -1288,7 +1288,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn var(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
@@ -1322,7 +1322,7 @@ impl Array {
     #[pyo3(signature = (dims=None))]
     pub fn permute_dims<'py>(
         slf: &Bound<'py, Self>,
-        dims: Option<Vec<i32>>,
+        dims: Option<Vec<Dim>>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::permute_dims(slf, dims)
     }
@@ -1331,8 +1331,8 @@ impl Array {
     #[pyo3(signature = (dim0, dim1))]
     pub fn swapdims<'py>(
         slf: &Bound<'py, Self>,
-        dim0: i32,
-        dim1: i32,
+        dim0: Dim,
+        dim1: Dim,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::swapdims(slf, dim0, dim1)
     }
@@ -1365,7 +1365,7 @@ impl Array {
     #[pyo3(signature = (dim=None))]
     pub fn squeeze<'py>(
         slf: &Bound<'py, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::squeeze(slf, dim)
     }
@@ -1373,7 +1373,7 @@ impl Array {
     /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Self>,
-        dim: ItemOrTuple<i32>,
+        dim: ItemOrTuple<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::unsqueeze(slf, dim)
     }
@@ -1383,7 +1383,7 @@ impl Array {
     pub fn repeat<'py>(
         slf: &Bound<'py, Self>,
         repeats: u64,
-        dim: Option<i32>,
+        dim: Option<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::repeat(slf, repeats, dim)
     }
@@ -1392,7 +1392,7 @@ impl Array {
     #[pyo3(signature = (dim=None))]
     pub fn flip<'py>(
         slf: &Bound<'py, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::flip(slf, dim)
     }
@@ -1402,7 +1402,7 @@ impl Array {
     pub fn roll<'py>(
         slf: &Bound<'py, Self>,
         shift: i64,
-        dim: Option<i32>,
+        dim: Option<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::roll(slf, shift, dim)
     }
@@ -1412,7 +1412,7 @@ impl Array {
     pub fn tile<'py>(
         slf: &Bound<'py, Self>,
         repeats: u64,
-        dim: Option<i32>,
+        dim: Option<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::tile(slf, repeats, dim)
     }
@@ -1506,7 +1506,7 @@ impl Array {
     /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_dim()`][jix.insert_dim].
     pub fn insert_dim<'py>(
         slf: &Bound<'py, Self>,
-        dim: ItemOrTuple<i32>,
+        dim: ItemOrTuple<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::insert_dim(slf, dim)
     }
@@ -1514,7 +1514,7 @@ impl Array {
     /// Removes length-1 dimensions from the array's shape. See [`jix.remove_dim()`][jix.remove_dim].
     pub fn remove_dim<'py>(
         slf: &Bound<'py, Self>,
-        dim: ItemOrTuple<i32>,
+        dim: ItemOrTuple<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::remove_dim(slf, dim)
     }

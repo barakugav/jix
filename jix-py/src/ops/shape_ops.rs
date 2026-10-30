@@ -6,6 +6,7 @@ use pyo3::types::{PyBool, PyEllipsis, PySlice, PyTuple};
 
 use crate::ops::asarray_simple;
 use crate::ops::common::{operands_dtype_promotion_vec, Operand};
+use crate::type_hint::Dim;
 use crate::util::{
     normalize_dim, normalize_dim_optional, normalize_dims, normalize_dims_optional, slice_unpack,
     DimArray, IntoPyResult, ItemOrTuple,
@@ -437,7 +438,7 @@ pub(crate) struct ParsedBasicIndex {
 #[pyfunction]
 pub fn insert_dim<'py>(
     array: &Bound<'py, PyAny>,
-    dim: ItemOrTuple<i32>,
+    dim: ItemOrTuple<Dim>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
@@ -476,7 +477,7 @@ pub fn insert_dim<'py>(
 #[pyfunction]
 pub fn unsqueeze<'py>(
     array: &Bound<'py, PyAny>,
-    dim: ItemOrTuple<i32>,
+    dim: ItemOrTuple<Dim>,
 ) -> PyResult<Bound<'py, Array>> {
     insert_dim(array, dim)
 }
@@ -518,7 +519,7 @@ pub fn unsqueeze<'py>(
 #[pyfunction]
 pub fn remove_dim<'py>(
     array: &Bound<'py, PyAny>,
-    dim: ItemOrTuple<i32>,
+    dim: ItemOrTuple<Dim>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
@@ -566,7 +567,7 @@ pub fn remove_dim<'py>(
 #[pyo3(signature = (array, dim=None))]
 pub fn squeeze<'py>(
     array: &Bound<'py, PyAny>,
-    dim: Option<ItemOrTuple<i32>>,
+    dim: Option<ItemOrTuple<Dim>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let dim = dim.unwrap_or_else(|| {
@@ -577,7 +578,7 @@ pub fn squeeze<'py>(
                 .shape()
                 .iter()
                 .enumerate()
-                .filter_map(|(d, len)| (*len == 1).then_some(d as i32))
+                .filter_map(|(d, len)| (*len == 1).then_some(Dim(d as i32)))
                 .collect(),
         )
     });
@@ -629,7 +630,7 @@ pub fn squeeze<'py>(
 ))]
 pub fn permute_dims<'py>(
     array: &Bound<'py, PyAny>,
-    dims: Option<Vec<i32>>,
+    dims: Option<Vec<Dim>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
@@ -684,14 +685,14 @@ pub fn permute_dims<'py>(
 #[pyfunction]
 pub fn swapdims<'py>(
     array: &Bound<'py, PyAny>,
-    dim0: i32,
-    dim1: i32,
+    dim0: Dim,
+    dim1: Dim,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let ndim = py_arr.get().ndim();
     let dim0 = normalize_dim(dim0, ndim)?;
     let dim1 = normalize_dim(dim1, ndim)?;
-    let mut dims = (0..ndim as i32).collect::<Vec<_>>();
+    let mut dims = (0..ndim as i32).map(Dim).collect::<Vec<_>>();
     dims.swap(dim0, dim1);
     permute_dims(py_arr.as_any(), Some(dims))
 }
@@ -868,8 +869,8 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///     assert jix.concatenate([u, i]).dtype == np.int16
 ///     ```
 #[pyfunction]
-#[pyo3(signature = (arrays, dim=0))]
-pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bound<'py, Array>> {
+#[pyo3(signature = (arrays, dim=Dim(0)))]
+pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Bound<'py, Array>> {
     if arrays.is_empty() {
         return Err(PyValueError::new_err(
             "arrays must contain at least one array",
@@ -950,9 +951,9 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Bo
 #[pyfunction]
 #[pyo3(signature = (
     arrays,
-    dim=0,
+    dim=Dim(0),
 ))]
-pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Array> {
+pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Array> {
     if arrays.is_empty() {
         return Err(PyValueError::new_err(
             "arrays must contain at least one array",
@@ -1048,7 +1049,7 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: i32) -> PyResult<Array> {
 pub fn repeat<'py>(
     array: &Bound<'py, PyAny>,
     repeats: u64,
-    dim: Option<i32>,
+    dim: Option<Dim>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
@@ -1111,7 +1112,7 @@ pub fn repeat<'py>(
 #[pyo3(signature = (array, dim=None))]
 pub fn flip<'py>(
     array: &Bound<'py, PyAny>,
-    dim: Option<ItemOrTuple<i32>>,
+    dim: Option<ItemOrTuple<Dim>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
@@ -1174,7 +1175,7 @@ pub fn flip<'py>(
 pub fn roll<'py>(
     array: &Bound<'py, PyAny>,
     shift: i64,
-    dim: Option<i32>,
+    dim: Option<Dim>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
@@ -1244,7 +1245,7 @@ pub fn roll<'py>(
 pub fn tile<'py>(
     array: &Bound<'py, PyAny>,
     repeats: u64,
-    dim: Option<i32>,
+    dim: Option<Dim>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();

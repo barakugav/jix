@@ -14,6 +14,8 @@ use pyo3::types::slice::PySliceIndices;
 use pyo3::types::{PySlice, PyTuple};
 use pyo3::{type_hint_subscript, type_hint_union};
 
+use crate::type_hint::Dim;
+
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 pub(crate) type NumpyDimArray<T> = arrayvec::ArrayVec<T, 32>;
 
@@ -216,7 +218,8 @@ pub(crate) fn numpy_items(py: Python) -> PyResult<&'static NumpyItems> {
 }
 
 #[inline]
-pub(crate) fn normalize_dim(dim: i32, ndim: usize) -> pyo3::PyResult<usize> {
+pub(crate) fn normalize_dim(dim: Dim, ndim: usize) -> pyo3::PyResult<usize> {
+    let dim = dim.0;
     let ndim = ndim as i32;
     if dim < -ndim || dim >= ndim {
         return Err(PyValueError::new_err(format!(
@@ -230,7 +233,7 @@ pub(crate) fn normalize_dim(dim: i32, ndim: usize) -> pyo3::PyResult<usize> {
     })
 }
 #[inline]
-pub(crate) fn normalize_dim_optional(dim: Option<i32>, ndim: usize) -> pyo3::PyResult<usize> {
+pub(crate) fn normalize_dim_optional(dim: Option<Dim>, ndim: usize) -> pyo3::PyResult<usize> {
     match dim {
         Some(dim) => normalize_dim(dim, ndim),
         None => {
@@ -245,7 +248,7 @@ pub(crate) fn normalize_dim_optional(dim: Option<i32>, ndim: usize) -> pyo3::PyR
 }
 
 #[inline]
-pub(crate) fn normalize_dims(dims: &[i32], ndim: usize) -> pyo3::PyResult<DimArray<usize>> {
+pub(crate) fn normalize_dims(dims: &[Dim], ndim: usize) -> pyo3::PyResult<DimArray<usize>> {
     if ndim > NDIM_MAX {
         return Err(PyValueError::new_err(format!(
             "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
@@ -261,7 +264,7 @@ pub(crate) fn normalize_dims(dims: &[i32], ndim: usize) -> pyo3::PyResult<DimArr
 }
 #[inline]
 pub(crate) fn normalize_dims_optional(
-    dims: Option<&[i32]>,
+    dims: Option<&[Dim]>,
     ndim: usize,
 ) -> pyo3::PyResult<DimArray<usize>> {
     if ndim > NDIM_MAX {
