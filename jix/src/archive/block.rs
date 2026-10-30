@@ -78,14 +78,10 @@ where
         assert!(self.nitems.is_multiple_of(self.block_size as u64));
         let nblocks = self.nitems / self.block_size as u64;
 
-        let block_data = self.block_data.as_ref();
-
         let mut block_writer =
             BlockArchiveWriter::start(writer, nblocks, self.block_size, self.decoder_config())?;
         for block_index in 0..nblocks {
-            let (offset, len) = self.block_location(block_index);
-            let data = &block_data[offset as usize..][..len as usize];
-            block_writer.write_compressed_block(block_index, data)?;
+            block_writer.write_compressed_block(block_index, self.block_bytes(block_index)?)?;
         }
         block_writer.finalize()
     }

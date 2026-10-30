@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
-use crate::error::{ensure, Result};
+use crate::error::{ensure, error, Result};
 use crate::util::{assert_unchecked_eq, SendSyncPtr, Unaligned};
 use crate::ElementType;
 
@@ -102,8 +102,8 @@ where
     ///
     /// - `block_data` - concatenated compressed bytes for all blocks.
     /// - `blocks_loc` - one [`BlockLocation`] per block; block `i`'s compressed bytes are the `len`
-    ///   bytes of `block_data` starting at `offset` of entry `i`. Every block must satisfy `offset + len <= block_data.len()`; blocks need not be contiguous
-    ///   or in order.
+    ///   bytes of `block_data` starting at `offset` of entry `i`. Every block must satisfy
+    ///   `offset + len <= block_data.len()`; blocks need not be contiguous or in order.
     /// - `nblocks` - number of blocks; must equal `blocks_loc.len()`.
     /// - `block_size` - number of items per block (must be `> 0`).
     /// - `decoder_config` - codec and dtype configuration used when decoding blocks.
@@ -124,12 +124,7 @@ where
     {
         ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
         let nitems = nblocks * block_size as u64;
-        let data_len = block_data.as_ref().len() as u64;
         debug_assert_eq!(blocks_loc.as_ref().len() as u64, nblocks);
-        debug_assert!(blocks_loc.as_ref().iter().all(|loc| {
-            let (offset, len) = (loc.offset(), loc.len() as u64);
-            offset <= data_len && len <= data_len - offset
-        }));
         let element_type = ET::from_dtype(decoder_config.dtype.clone())?;
         Ok(Self {
             block_data,
@@ -163,6 +158,21 @@ where
         (loc.offset(), loc.len())
     }
 
+    /// Compressed bytes of block `block_idx`
+    #[inline]
+    pub(crate) fn block_bytes(&self, block_idx: u64) -> Result<&[u8]> {
+        let (offset, len) = self.block_location(block_idx);
+        let offset = usize::try_from(offset).ok();
+        let bytes =
+            offset.and_then(|offset| self.block_data.as_ref().get(offset..)?.get(..len as usize));
+        bytes.ok_or_else(|| {
+            error!(
+                InvalidArchive,
+                "Block {block_idx} is out of the data bounds"
+            )
+        })
+    }
+
     /// Decompress one block into `buf`.
     ///
     /// # Arguments
@@ -194,9 +204,7 @@ where
             buf.len()
         );
 
-        let (offset, len) = self.block_location(block_idx);
-        let block_data = &self.block_data.as_ref()[offset as usize..][..len as usize];
-
+        let block_data = self.block_bytes(block_idx)?;
         let decoder = context.decoder(&self.decoder_config);
         decoder.decode(block_data, buf)
     }
@@ -580,6 +588,26 @@ mod tests {
             .flat_map(|i| decode_block(&table, i, &mut context))
             .collect();
         assert_eq!(recovered, items);
+    }
+
+    #[test]
+    fn out_of_bounds_block_location_is_an_error() {
+        let table = build_from_items(&[0u8; 4], 4, &EncoderParams::default()).unwrap();
+        let locs = [super::BlockLocation::new(0, u32::MAX)];
+        let config = table.decoder_config.clone();
+        let bad = BlockTable::<super::Borrowed<'_>, Ty<u8>>::new(
+            table.block_data.as_ref(),
+            &locs,
+            1,
+            4,
+            config,
+        );
+        let bad = bad.unwrap();
+        assert!(bad.block_bytes(0).is_err());
+        let mut buf = [0u8; 4];
+        assert!(bad
+            .read_block(0, &mut buf, &ReadContext::default())
+            .is_err());
     }
 
     #[test]
