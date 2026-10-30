@@ -347,11 +347,14 @@ impl ScalarStrategy for f64 {
 }
 impl ScalarStrategy for crate::scalar::bool8 {
     fn any_strategy() -> BoxedStrategy<Self> {
-        any::<bool>().prop_map(crate::scalar::bool8::from).boxed()
+        // Any non-zero byte is true, as read from a file or a NumPy buffer
+        prop_oneof![Just(0u8), Just(1u8), Just(2u8), Just(0x80u8), Just(0xFFu8)]
+            .prop_map(crate::scalar::bool8)
+            .boxed()
     }
 
     fn op_safe_non_zero_strategy() -> BoxedStrategy<Self> {
-        Just(crate::scalar::bool8::TRUE).boxed()
+        (1u8..=255).prop_map(crate::scalar::bool8).boxed()
     }
 }
 

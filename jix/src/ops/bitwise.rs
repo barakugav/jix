@@ -790,6 +790,7 @@ mod tests {
 
     use crate::ops::op1::tests::test_op1;
     use crate::ops::op2::tests::test_op2;
+    use crate::scalar::bool8;
 
     /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
     /// their scalar semantics, on every SIMD level of the CPU, over edge cases.
@@ -878,7 +879,7 @@ mod tests {
     }
 
     test_op1!(count_ones, |a| a.count_ones(), [u8, u32], any_strategy);
-    test_op2!(bitand, |a, b| a & b, [u8, u32], any_strategy);
+    test_op2!(bitand, |a, b| a & b, [u8, u32, bool8], any_strategy);
     test_op2!(
         bitwise_shift_left,
         |a, b| a.unbounded_shl(b as u32),
