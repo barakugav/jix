@@ -7,6 +7,7 @@ use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
 
 use crate::array::resolve_array_params;
+use crate::error::{current_modes, ArithmeticErrorModes};
 use crate::ops::asarray;
 use crate::type_hint::ArchiveValidation;
 use crate::util::IntoPyResult;
@@ -217,6 +218,7 @@ pub fn write_array(
     let array = array.get();
     let path_or_writer = PathOrWriter::from_pyany(path_or_writer)?;
     let params = resolve_array_params(py, params)?;
+    let modes = current_modes(py)?;
 
     let (result, warnings) = match path_or_writer {
         PathOrWriter::Path(path) => {
@@ -237,7 +239,7 @@ pub fn write_array(
                     let original_size = (file_exists || original_size > 0).then_some(original_size);
                     (file, original_size)
                 };
-                let written = write_array_impl(array, BufWriter::new(&file), params);
+                let written = write_array_impl(array, BufWriter::new(&file), params, modes);
                 if !matches!(written, Ok((Ok(()), _))) {
                     // Don't leave a partial archive behind
                     let revert_result = match original_file_size {
@@ -257,7 +259,7 @@ pub fn write_array(
         PathOrWriter::PyWriter(writer) => {
             // cant detach the GIL here since the writer is a Python object
             let writer = BufWriter::new(writer);
-            write_array_impl(array, writer, params)
+            write_array_impl(array, writer, params, modes)
         }
     }?;
     // Emit the warnings of the read even if it raised
@@ -270,11 +272,12 @@ fn write_array_impl<W>(
     array: &Array,
     mut writer: W,
     params: jix_core::ArrayParams,
+    modes: ArithmeticErrorModes,
 ) -> PyResult<(PyResult<()>, Vec<jix_core::Error>)>
 where
     W: Write + Seek,
 {
-    let context = array.read_ctx()?;
+    let context = array.read_ctx(modes)?;
     let result = array
         .arr
         .write_to_with(&mut writer, params, context.as_ref())

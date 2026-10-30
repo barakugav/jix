@@ -8,6 +8,7 @@ use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
+use crate::error::{current_modes, ArithmeticErrorModes};
 use crate::type_hint::{NdArray, NpDtype};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
@@ -160,9 +161,9 @@ impl Array {
     /// The context is taken out of the cache for the lifetime of the returned guard and
     /// returned to it on drop, so successive reads of the same array reuse the same
     /// decompressor state instead of re-initializing it on every call. It is configured with the
-    /// calling thread's arithmetic error modes (see `jix.errstate`); the warnings of the read are
-    /// collected with [`ContextGuard::take_warnings`].
-    pub(crate) fn read_ctx(&self) -> PyResult<ContextGuard<'_>> {
+    /// arithmetic error `modes` (see `jix.errstate`); the warnings of the read are collected with
+    /// [`ContextGuard::take_warnings`].
+    pub(crate) fn read_ctx(&self, modes: ArithmeticErrorModes) -> PyResult<ContextGuard<'_>> {
         let mut cache = self
             .cache
             .lock()
@@ -171,7 +172,7 @@ impl Array {
             .context
             .take()
             .unwrap_or_else(|| Box::new(self.arr.read_ctx()));
-        crate::error::configure_context_error_modes(&mut context);
+        crate::error::configure_context_error_modes(&mut context, modes);
         Ok(ContextGuard {
             array: self,
             context: Some(context),
@@ -659,8 +660,9 @@ impl Array {
 
         let should_detach =
             !self.arr.storage().spec().flags().plain_read() || nitems * itemsize > 4096;
+        let modes = current_modes(py)?;
         let (result, warnings) = maybe_detach(py, should_detach, || {
-            let context_guard = self.read_ctx()?;
+            let context_guard = self.read_ctx(modes)?;
             let context = context_guard.as_ref();
 
             let mut out = unsafe {
@@ -1667,8 +1669,9 @@ pub fn compact<'py>(
     let params = resolve_array_params(py, params)?;
 
     let array = array.get();
+    let modes = current_modes(py)?;
     let (compacted, warnings) = py.detach(|| {
-        let context = array.read_ctx()?;
+        let context = array.read_ctx(modes)?;
         let compacted = array.arr.compact_with(params, context.as_ref());
         Ok::<_, PyErr>((compacted.into_py_result(), context.take_warnings()))
     })?;
