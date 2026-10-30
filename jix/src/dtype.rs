@@ -1207,7 +1207,7 @@ unsafe impl<T: Dtyped, const N: usize> Dtyped for [T; N] {
             "Dtyped is not supported for arrays of zero-sized types"
         );
         assert!(
-            N < Itemsize::MAX as usize,
+            N <= Itemsize::MAX as usize,
             "Array size exceeds maximum supported dtype shape size of Itemsize::MAX"
         );
         let n = N as Itemsize;
@@ -1947,6 +1947,13 @@ mod tests {
     fn set_shape_overflow_errors() {
         let mut d = u8::DTYPE;
         assert!(d.set_shape(&[Itemsize::MAX, Itemsize::MAX]).is_err());
+    }
+
+    #[test]
+    fn dtyped_array_of_max_len() {
+        let mut d = u8::DTYPE;
+        d.set_shape(&[Itemsize::MAX]).unwrap();
+        assert_eq!(<[u8; Itemsize::MAX as usize]>::DTYPE, d);
     }
 
     // ---- Zero-itemsize dtypes ----
