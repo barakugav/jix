@@ -1207,6 +1207,8 @@ pub(crate) mod _traits {
                     0 => 1.0,
                     1 => a,
                     2 => a * a,
+                    // compute a**i32 in f64
+                    _ if size_of_val(&b) >= 4 => (a as f64).powf(b as f64) as Self,
                     _ => a.powf(b as Self),
                 };
                 float_power(p, a, b as Self, status)
@@ -1232,6 +1234,8 @@ pub(crate) mod _traits {
                     0 => 1.0,
                     1 => a,
                     2 => a * a,
+                    // compute a**i32 in f64
+                    _ if size_of_val(&b) >= 4 => (a as f64).powf(b as f64) as f32,
                     _ => a.powf(b as f32),
                 };
                 let p = f16::from_f32(p);
@@ -3142,6 +3146,23 @@ pub(crate) mod tests {
         let mut status = ArithmeticOpStatus::default();
         assert_eq!(Pow::pow(1u8, i64::MIN, &mut status), 0);
         assert!(status.contains(ArithmeticErrorKind::InvalidOperation));
+    }
+
+    #[test]
+    fn float_pow_odd_i32_exponent_keeps_sign() {
+        use crate::error::ArithmeticOpStatus;
+        use crate::scalar::Pow;
+
+        let mut status = ArithmeticOpStatus::default();
+        let odd = (1i32 << 24) + 1;
+        assert_eq!(Pow::pow(-1.0f32, odd, &mut status), -1.0);
+        assert_eq!(Pow::pow(-1.0f32, -odd, &mut status), -1.0);
+        assert_eq!(Pow::pow(-2.0f32, odd, &mut status), f32::NEG_INFINITY);
+        #[cfg(feature = "half")]
+        assert_eq!(
+            Pow::pow(f16::from_f32(-1.0), odd, &mut status),
+            f16::from_f32(-1.0)
+        );
     }
 
     #[test]
