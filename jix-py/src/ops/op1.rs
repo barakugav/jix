@@ -363,12 +363,11 @@ pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<
                 2.0 => Log2::new_array(a).into_py_result()?.into_any(),
                 10.0 => Log10::new_array(a).into_py_result()?.into_any(),
                 base => {
-                    let ln_base_inv = 1.0 / base.ln();
+                    let ln_base = base.ln();
                     let a = Cast::<_, f64>::new_array(a).into_py_result()?;
                     let res = Ln::new_array(a).into_py_result()?;
-                    let res = res.map(move |x: f64| {
-                        <f64 as jix_core::scalar::Cast<T>>::cast(x * ln_base_inv)
-                    });
+                    let res = res
+                        .map(move |x: f64| <f64 as jix_core::scalar::Cast<T>>::cast(x / ln_base));
                     res.into_any()
                 }
             })

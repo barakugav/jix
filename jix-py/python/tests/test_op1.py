@@ -139,6 +139,11 @@ def test_log2_log10_exact_on_powers(dtype):
     np.testing.assert_allclose(jix.log(x, base=3).numpy(), np.log(x) / np.log(3), rtol=1e-3)
 
 
+def test_log_base_divides():
+    # Divides by ln(base) like math.log(x, base), multiplying by its reciprocal gives 2.9999999999999996
+    np.testing.assert_array_equal(jix.log(np.array([16.0, 64.0]), base=4).numpy(), [2.0, 3.0])
+
+
 @pytest.mark.parametrize("base", [1.0, 0.0, -0.0, -2.0])
 def test_log_invalid_base(base):
     with pytest.raises(ValueError, match="base"):
