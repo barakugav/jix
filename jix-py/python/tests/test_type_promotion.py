@@ -380,6 +380,30 @@ def test_python_float_default_keeps_f32_precision():
     np.testing.assert_array_equal(jix.add(a, 1e10).numpy(), np.array([1e10, 1e10], dtype=np.float32))
 
 
+def test_comparisons_python_float_run_in_f64():
+    """Comparisons do not show the precision in their output, so a Python float next to a small int
+    compares exactly in f64. A typed float operand keeps its own precision, as in numpy."""
+    a = jix.compact(np.array([0, 1, 3], dtype=np.int16))
+    x = 1.00000001  # 1.0 in f32
+    for fn, expected in [
+        (jix.equal, [False, False, False]),
+        (jix.not_equal, [True, True, True]),
+        (jix.less, [True, True, False]),
+        (jix.less_equal, [True, True, False]),
+        (jix.greater, [False, False, True]),
+        (jix.greater_equal, [False, False, True]),
+    ]:
+        np.testing.assert_array_equal(fn(a, x).numpy(), expected)
+    np.testing.assert_array_equal((a == x).numpy(), [False, False, False])
+    np.testing.assert_array_equal((a < x).numpy(), [True, True, False])
+    np.testing.assert_array_equal(jix.isclose(a, x, rtol=0.0, atol=0.0).numpy(), [False, False, False])
+    np.testing.assert_array_equal(jix.equal(a, complex(x, 0)).numpy(), [False, False, False])
+    assert not jix.equal(True, x).numpy()
+    # 1e-50 is zero in f32, but fits in f64
+    np.testing.assert_array_equal((a < 1e-50).numpy(), [True, False, False])
+    assert jix.equal(np.array([1.0], dtype=np.float32), x).numpy().all()
+
+
 def test_python_float_out_of_f32_range_raises():
     a = jix.compact(np.array([1, 3], dtype=np.uint8))
     for fn in [lambda: a + 1e300, lambda: a * 1e-46, lambda: a / 1e39, lambda: a + 1e300j]:

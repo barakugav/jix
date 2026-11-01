@@ -22,6 +22,8 @@ type TypedOperand<T> = CoreArray<IntoType<ArrayStorageAny, Ty<T>>>;
 pub(crate) struct OpDescriptor<const IN_N: usize, ExtraArgs> {
     name: &'static str,
     fns: Vec<OpFnDescriptor<IN_N, ExtraArgs>>,
+
+    cast_untyped_float_to_f64: bool,
 }
 pub(crate) struct OpFnDescriptor<const IN_N: usize, ExtraArgs> {
     f: Box<dyn Fn([ArrayAny; IN_N], ExtraArgs) -> PyResult<ArrayAny> + Send + Sync>,
@@ -34,7 +36,16 @@ pub(crate) struct OpFnInputDescriptor {
 
 impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
     pub(crate) fn new(name: &'static str, fns: Vec<OpFnDescriptor<IN_N, ExtraArgs>>) -> Self {
-        Self { name, fns }
+        Self {
+            name,
+            fns,
+            cast_untyped_float_to_f64: false,
+        }
+    }
+
+    pub(crate) fn cast_untyped_float_to_f64(mut self, flag: bool) -> Self {
+        self.cast_untyped_float_to_f64 = flag;
+        self
     }
 }
 
@@ -193,6 +204,16 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
 
         if let Some(mut in_dtypes) = in_dtypes {
             cast_python_scalars_to_default_precision(&mut in_dtypes);
+            let typed_float = in_dtypes.iter().any(|(rank, precision)| {
+                matches!(rank, Rank::Float | Rank::Complex) && precision.is_some()
+            });
+            if self.cast_untyped_float_to_f64 && !typed_float {
+                for (rank, precision) in &mut in_dtypes {
+                    if matches!(rank, Rank::Float | Rank::Complex) && precision.is_none() {
+                        *precision = Some(Precision::P8);
+                    }
+                }
+            }
             let has_float16_input = has_float16_input(&in_dtypes);
 
             for op_fn in &self.fns {
