@@ -221,6 +221,9 @@ SIMD/scalar split - the same element can go through either path:
 - New `Log2` / `Log10` ops (scalar traits, SIMD bulk, `Array::log2` / `Array::log10`), with Ln's
   error set (K92).
 
+### Changed in 6dbeb15 (#93) - supersedes conflicting statements above
+- f32 / f16 `** i32` is computed in f64 (K144). `Op2::shape` calls the child's `shape()` once (K115).
+
 ## Hot spots
 
 - SIMD vs scalar equality. Most SIMD tests compare with `==` via `same_value` (util/test_util.rs:1357-

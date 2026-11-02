@@ -192,6 +192,19 @@ Line numbers in this doc refer to bb1ee2c.
   inner-shape dtype (K99). `plain_from_numpy` (operand.rs:419-490) requires the trailing numpy dims
   to equal the inner shape and be C-contiguous.
 
+### Changed in 6dbeb15 (#93) - supersedes conflicting statements above
+- `__len__` raises OverflowError when dim 0 does not fit usize (K112).
+- `write_array(a, file_like)`: the memoryview is released after `write()` and the call raises if
+  release fails. Slices and `np.frombuffer` views do not block release, so the use-after-free is
+  still open (K109). A failed write to a path removes the new file or truncates an appended one
+  (K146); Python exceptions from file-likes keep their type, IO errors map to OSError (K130).
+- `read_array(file_like)` leaves the stream right after the archive (K131).
+- errstate modes live in a `ContextVar`, per thread and asyncio task (K132); a read that raises
+  still emits its warnings (K147).
+- numpy struct dtypes nested deeper than 32 raise (K114); their fields are sorted by offset (K143).
+- Binary dunders return NotImplemented for operands with `__array_ufunc__ = None`
+  (`binary_op_builtin`); other unsupported operands still raise ValueError (K133).
+
 ## Hot spots
 
 - Stride rebuild in `numpy()` (`array.rs:563-592`): it pops `np_arr.strides()` from the end

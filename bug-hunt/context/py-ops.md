@@ -205,6 +205,12 @@ Line numbers in this doc refer to bb1ee2c; jix-py/src/ops/op1.rs and shape_ops.r
   `numpy.asarray(value, dtype=)` first, so numpy's range checks apply to Python ints (K96).
 - Operand's numpy -> Plain conversion moved to `plain_from_numpy` (operand.rs:419-490).
 
+### Changed in 6dbeb15 (#93) - supersedes conflicting statements above
+- A Python float next to an int / bool operand is compared in f64 (K113), and an untyped Python
+  float is range-checked when converted to a smaller dtype (K125).
+- A bool is not accepted as a `dim` (K134). numpy scalars go through jix's Cast in
+  asarray / compact / cast (K129). `log(x, base)` divides by ln(base) (K127).
+
 ## Hot spots
 
 1. Dispatch tables (op1/op2/cmp/bitwise/reduction): is the order right for every input pair, and

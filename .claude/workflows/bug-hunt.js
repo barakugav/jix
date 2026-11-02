@@ -47,7 +47,7 @@ const MODULE_UNITS = [
     ],
     "title": "Dtype representation, struct layout validation, set_shape, equality",
     "files": [
-      "jix/src/dtype.rs:1-918"
+      "jix/src/dtype.rs:1-942"
     ],
     "consult": [
       "jix/src/util/mod.rs",
@@ -73,8 +73,8 @@ const MODULE_UNITS = [
     ],
     "title": "Dtyped trait contract, scalar and array impls, derive macro, ElementType",
     "files": [
-      "jix/src/dtype.rs:919-1219",
-      "jix-macros/src/lib.rs:1-310",
+      "jix/src/dtype.rs:943-1243",
+      "jix-macros/src/lib.rs:1-246",
       "jix/src/element_type.rs:1-94"
     ],
     "consult": [
@@ -103,8 +103,8 @@ const MODULE_UNITS = [
     "title": "Dimension types, IntoDimension conversions, validation helpers and arithmetic error modes",
     "files": [
       "jix/src/dimension.rs:1-546",
-      "jix/src/error.rs:1-441",
-      "jix/src/lib.rs:1-431"
+      "jix/src/error.rs:1-452",
+      "jix/src/lib.rs:1-430"
     ],
     "consult": [
       "jix/src/util/arrayvec.rs",
@@ -133,7 +133,7 @@ const MODULE_UNITS = [
     "title": "Compact nd read path (read_data / read_data_slow) and BlockTable decode/build/mmap backends",
     "files": [
       "jix/src/storage/compact.rs:1-508",
-      "jix/src/storage/block.rs:1-453"
+      "jix/src/storage/block.rs:1-461"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -168,7 +168,7 @@ const MODULE_UNITS = [
     ],
     "title": "ArrayParams::tune, block-shape auto selection, ArraySpec read hints and scale_read_shape",
     "files": [
-      "jix/src/storage/params.rs:1-1008",
+      "jix/src/storage/params.rs:1-1009",
       "jix/src/util/mod.rs:407-528"
     ],
     "consult": [
@@ -292,7 +292,7 @@ const MODULE_UNITS = [
     ],
     "title": "ArraySequence adapters (arrays, Vec, slices, tuples) and fixed-array map helpers",
     "files": [
-      "jix/src/util/arr_sequence.rs:1-737",
+      "jix/src/util/arr_sequence.rs:1-733",
       "jix/src/util/arr_ext.rs:1-258"
     ],
     "consult": [
@@ -624,9 +624,9 @@ const MODULE_UNITS = [
     ],
     "title": "Runtime dtype dispatch, cast rules, promotion target, op macros, cast()",
     "files": [
-      "jix-py/src/ops/common/dispatch.rs:1-399",
+      "jix-py/src/ops/common/dispatch.rs:1-420",
       "jix-py/src/ops/common/dtype_promote.rs:1-143",
-      "jix-py/src/ops/common/mod.rs:1-154",
+      "jix-py/src/ops/common/mod.rs:1-156",
       "jix-py/src/ops/mod.rs:44-174"
     ],
     "consult": [
@@ -653,10 +653,10 @@ const MODULE_UNITS = [
     ],
     "title": "Operand conversion (Python/numpy -> Scalar/Plain), scalar casts, broadcasting, asarray",
     "files": [
-      "jix-py/src/ops/common/operand.rs:1-490",
+      "jix-py/src/ops/common/operand.rs:1-521",
       "jix-py/src/ops/common/broadcast.rs:1-106",
-      "jix-py/src/ops/as_array.rs:1-98",
-      "jix-py/src/util.rs:371-494"
+      "jix-py/src/ops/as_array.rs:1-100",
+      "jix-py/src/util.rs:395-518"
     ],
     "consult": [
       "jix/src/storage/plain.rs",
@@ -683,7 +683,7 @@ const MODULE_UNITS = [
     ],
     "title": "Unary and binary arithmetic wrappers incl. absolute, log, multiply fast path, power shortcuts",
     "files": [
-      "jix-py/src/ops/op1.rs:1-722",
+      "jix-py/src/ops/op1.rs:1-721",
       "jix-py/src/ops/op2.rs:1-697"
     ],
     "consult": [
@@ -712,7 +712,7 @@ const MODULE_UNITS = [
     ],
     "title": "Comparison, clamp, isclose, bitwise/logical, where, is_nan/real/imag, dtype_sub_field",
     "files": [
-      "jix-py/src/ops/cmp.rs:1-625",
+      "jix-py/src/ops/cmp.rs:1-632",
       "jix-py/src/ops/bitwise.rs:1-705",
       "jix-py/src/ops/where_op.rs:1-83",
       "jix-py/src/ops/logical1.rs:1-88",
@@ -746,9 +746,9 @@ const MODULE_UNITS = [
     ],
     "title": "Shape op wrappers and index parsing (also used by Array.__getitem__/numpy())",
     "files": [
-      "jix-py/src/ops/shape_ops.rs:1-1262",
-      "jix-py/src/util.rs:20-46",
-      "jix-py/src/util.rs:197-354"
+      "jix-py/src/ops/shape_ops.rs:1-1263",
+      "jix-py/src/util.rs:22-48",
+      "jix-py/src/util.rs:220-378"
     ],
     "consult": [
       "jix/src/ops/shape_ops/",
@@ -774,11 +774,11 @@ const MODULE_UNITS = [
     ],
     "title": "Array.numpy / __getitem__ / out= / compact / read context and basic-index parsing",
     "files": [
-      "jix-py/src/array.rs:1-335",
-      "jix-py/src/array.rs:433-790",
-      "jix-py/src/array.rs:1653-1800",
-      "jix-py/src/util.rs:1-195",
-      "jix-py/src/util.rs:393-404"
+      "jix-py/src/array.rs:1-336",
+      "jix-py/src/array.rs:436-797",
+      "jix-py/src/array.rs:1744-1914",
+      "jix-py/src/util.rs:1-218",
+      "jix-py/src/util.rs:417-428"
     ],
     "consult": [
       "jix-py/src/ops/shape_ops.rs",
@@ -809,12 +809,12 @@ const MODULE_UNITS = [
     ],
     "title": "numpy <-> jix dtype mapping, zero-copy Plain wrapping, numpy-dtype caching, type-hint extractors",
     "files": [
-      "jix-py/src/dtype.rs:1-219",
+      "jix-py/src/dtype.rs:1-231",
       "jix-py/src/ops/common/operand.rs:17-155",
-      "jix-py/src/ops/common/operand.rs:419-490",
-      "jix-py/src/ops/as_array.rs:1-98",
+      "jix-py/src/ops/common/operand.rs:449-521",
+      "jix-py/src/ops/as_array.rs:1-100",
       "jix-py/src/ops/mod.rs:38-94",
-      "jix-py/src/type_hint.rs:1-125"
+      "jix-py/src/type_hint.rs:1-172"
     ],
     "consult": [
       "jix/src/storage/plain.rs",
@@ -840,8 +840,8 @@ const MODULE_UNITS = [
     ],
     "title": "read_array/write_array, PyReader/PyWriter adapters, mmap, errstate/warnings, module/package shim",
     "files": [
-      "jix-py/src/archive.rs:1-501",
-      "jix-py/src/error.rs:1-196",
+      "jix-py/src/archive.rs:1-532",
+      "jix-py/src/error.rs:1-216",
       "jix-py/src/lib.rs:1-98",
       "jix-py/python/jix/__init__.py:1-46"
     ],
@@ -870,10 +870,10 @@ const MODULE_UNITS = [
     ],
     "title": "Array getters/dunder forwarding, __str__, and util helpers (dims normalization, ItemOrTuple, array_try_map, UnsafeSend)",
     "files": [
-      "jix-py/src/array.rs:335-433",
-      "jix-py/src/array.rs:791-1519",
-      "jix-py/src/util.rs:197-391",
-      "jix-py/src/util.rs:405-494"
+      "jix-py/src/array.rs:336-436",
+      "jix-py/src/array.rs:798-1610",
+      "jix-py/src/util.rs:220-415",
+      "jix-py/src/util.rs:429-518"
     ],
     "consult": [
       "jix-py/src/ops/common/broadcast.rs",
@@ -930,7 +930,7 @@ const MODULE_UNITS = [
     "title": "Archive reader/writer core: sections, TOC, block-table (de)serialization for Owned and Mmap storage, version word",
     "files": [
       "jix/src/archive/common.rs:1-276",
-      "jix/src/archive/block.rs:1-505",
+      "jix/src/archive/block.rs:1-517",
       "jix/src/archive/version.rs:1-129",
       "jix/src/archive/mod.rs:1-48"
     ],
@@ -961,7 +961,7 @@ const MODULE_UNITS = [
     ],
     "title": "Array-level archive API and header validation, protobuf dtype conversions",
     "files": [
-      "jix/src/archive/array.rs:1-565",
+      "jix/src/archive/array.rs:1-573",
       "jix/src/archive/schema/conversions.rs:1-174",
       "jix/src/archive/schema/mod.rs:1-8"
     ],
@@ -1085,7 +1085,7 @@ const MODULE_UNITS = [
       "jix/src/ops/shape_ops/concatenate.rs:1-321",
       "jix/src/ops/shape_ops/stack.rs:1-269",
       "jix/src/util/arr_sequence.rs:1-93",
-      "jix/src/util/arr_sequence.rs:600-664"
+      "jix/src/util/arr_sequence.rs:596-660"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -1147,9 +1147,9 @@ const MODULE_UNITS = [
     ],
     "title": "Plain and Scalar backends, ndarray constructors, compact_ndarray / compact_nd_ptr / compact_fn (FnStorage)",
     "files": [
-      "jix/src/storage/plain.rs:1-528",
-      "jix/src/storage/scalar.rs:1-199",
-      "jix/src/array.rs:177-517"
+      "jix/src/storage/plain.rs:1-544",
+      "jix/src/storage/scalar.rs:1-194",
+      "jix/src/array.rs:177-519"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -1179,7 +1179,7 @@ const MODULE_UNITS = [
     ],
     "title": "Array front-end: to_ndarray / to_ndarray_sub / to_ndarray_slice / to_ndarray_buf + request splitting, compact_with / compact_into_builder, misc Array methods",
     "files": [
-      "jix/src/array.rs:519-1748"
+      "jix/src/array.rs:521-1751"
     ],
     "consult": [
       "jix/src/storage/buf.rs",
@@ -1212,7 +1212,7 @@ const MODULE_UNITS = [
     "title": "Op1/Op2 storage wrappers and define_op1/define_op2 plumbing",
     "files": [
       "jix/src/ops/op1.rs:1-268",
-      "jix/src/ops/op2.rs:1-327"
+      "jix/src/ops/op2.rs:1-328"
     ],
     "consult": [
       "jix/src/scalar/traits_util.rs",
@@ -1237,7 +1237,7 @@ const MODULE_UNITS = [
     ],
     "title": "Binary arithmetic kernels: add/sub/mul, int and float divide/remainder (trunc/floor/euclid), f16/complex div, pow and error classification",
     "files": [
-      "jix/src/ops/op2.rs:328-1613"
+      "jix/src/ops/op2.rs:329-1618"
     ],
     "consult": [
       "jix/src/scalar/traits_util.rs",
@@ -1294,7 +1294,7 @@ const MODULE_UNITS = [
       "jix/src/ops/cmp.rs:1-1128"
     ],
     "consult": [
-      "jix/src/ops/op2.rs:1-327",
+      "jix/src/ops/op2.rs:1-328",
       "jix/src/scalar/simd.rs:300-385",
       "jix/src/scalar/traits_util.rs:200-329"
     ],
@@ -1350,7 +1350,7 @@ const MODULE_UNITS = [
       "jix/src/util/nd_iter_unordered.rs",
       "jix/src/storage/elementwise_pipeline.rs:735-869",
       "jix/src/storage/core_trait.rs:63-141",
-      "jix/src/dtype.rs:461-707",
+      "jix/src/dtype.rs:463-720",
       "jix/src/util/mod.rs:618-678"
     ],
     "focus": [
@@ -1370,7 +1370,7 @@ const MODULE_UNITS = [
     ],
     "title": "Python reduction API: sum/prod/max/min/argmax/argmin/mean/var/std/all/any wrappers, dims and keepdim handling",
     "files": [
-      "jix-py/src/ops/reduction.rs:1-534"
+      "jix-py/src/ops/reduction.rs:1-535"
     ],
     "consult": [
       "jix/src/ops/reduction.rs",
@@ -1398,7 +1398,7 @@ const MODULE_UNITS = [
     ],
     "title": "Shared Rust test strategies and assertions (test_util), the public bench nd_copy helper",
     "files": [
-      "jix/src/util/test_util.rs:1-1429",
+      "jix/src/util/test_util.rs:1-1506",
       "jix/src/util/bench_util.rs:1-29"
     ],
     "consult": [

@@ -209,6 +209,11 @@ Pub(crate) unsafe fns and who establishes their preconditions:
 - The element cost is clamped to [0, 2^64] (`ELEMENT_COST_MAX`, params.rs), so it never becomes
   inf or NaN (K104).
 
+### Changed in 6dbeb15 (#93) - supersedes conflicting statements above
+- `Op2::shape` calls the child's `shape()` once, so debug builds no longer inline 2^k copies (K115).
+- The Vec / slice `MapMultiple` scratch is written through `spare_capacity_mut` before `set_len`
+  (K124).
+
 ## Hot spots
 
 - N_OPERANDS / operands() agreement for every node (Op1, Op2, Where `ops/where_op.rs:371-387`,

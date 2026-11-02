@@ -213,6 +213,9 @@ wrappers used by every hot inner loop, raw POD I/O).
   `Idx::div_ceil` / `Idx::ceil_to_multiple`; callers use std `next_multiple_of`. Line numbers in
   util/mod.rs after line 30 moved by -6.
 
+### Changed in 6dbeb15 (#93) - supersedes conflicting statements above
+- `strided_span_bytes` returns 0 for an empty shape before any multiply (K142).
+
 ## Hot spots
 - PoolBuf full-capacity slices: does any consumer of `PoolBuf::as_*slice` or `StridedBuf::data()/data_mut()` on a
   pool-backed buffer use `.len()` as the logical size (copy_from_slice, compress, fill, length asserts)?

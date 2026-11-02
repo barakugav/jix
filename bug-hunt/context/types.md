@@ -175,6 +175,14 @@ types the macro is):
 ### Changed in df2f918 (#92) - supersedes conflicting statements above
 - `DTYPE_MAX_NDIM` is renamed `DTYPE_NDIM_MAX`.
 
+### Changed in 6dbeb15 (#93) - supersedes conflicting statements above
+- `#[derive(Dtyped)]` is rewritten around `offset_of!`: it accepts `repr(C)` and `repr(C, packed)`
+  only (bare `repr(packed)` is rejected, K117), padded structs fail to compile, raw identifiers
+  work (K118), and it no longer emits call-site-sensitive helper names (K110).
+- `[T; N]` is Dtyped up to N == Itemsize::MAX (K119).
+- Struct nesting is limited to `DTYPE_NESTING_MAX` (32): `from_fields` errors deeper, and the
+  block-table writer checks it, so every writable dtype can be read back (K128).
+
 ## Hot spots
 
 - Layout arithmetic in dtype.rs:476-506 and 653-717: every `expected_offset += itemsize` and

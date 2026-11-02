@@ -213,6 +213,16 @@ Provided by this subsystem / required of every `read_data` impl (core_trait.rs:7
   (`disjoint_span`, buf.rs). This is conservative: interleaved layouts that do not overlap (e.g.
   lengths (3, 2), strides (2, 3) with itemsize 1) are rejected too.
 
+### Changed in 6dbeb15 (#93) - supersedes conflicting statements above
+- Plain and Scalar ignore `block_shape` / `block_shape_fixed_dims` params; their spec block shape
+  is all 1s, unfixed (K122 documents it, K121).
+- The Safety sections of `Plain::new`, `plain_ndarray_ptr` and `compact_nd_ptr` require the whole
+  strided span in one allocation, not written or `&mut`-borrowed while read (K140). The span
+  aliasing itself is still open (K111, todo.md).
+- `strided_span_bytes` returns 0 for an empty shape before multiplying (K142); 32-bit
+  `check_region_size` counts empty extents as 1, and `to_ndarray_slice` calls it (K120).
+- Plain accepts any stride for zero-element inputs (K141). `Error` carries a source (IO errors).
+
 ## Hot spots
 
 - Push-mode buffer size: is there ANY path from safe code that makes a push write past `out`'s

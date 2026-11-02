@@ -208,6 +208,13 @@ Unsafe fns / preconditions:
   now in lib.rs) at the storage's itemsize, it clears the fixed dims so tune rescales it (K105).
 - The element cost is clamped to [0, 2^64] (K104).
 
+### Changed in 6dbeb15 (#93) - supersedes conflicting statements above
+- `combine_block_layout`: a dim stays fixed when some input fixes it and every fixing input has
+  the combined (max) block length; shorter unfixed inputs no longer unfix it (K121).
+- `override_from_storage` keeps the caller's `block_shape_fixed_dims` (K123).
+- `BlockTable` checks block locations on access (`block_bytes`, InvalidArchive) instead of a
+  debug_assert at load (K149).
+
 ## Hot spots
 
 - Direct decode into `out` (compact.rs:429-437, 464-471): `lead_dim` = first dim with block > 1;

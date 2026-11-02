@@ -222,6 +222,12 @@ Unsafe fns with preconditions:
 - Writing (via `ArrayParams::tune`) rejects a shape whose block-padded product overflows u64, so
   the writer no longer produces files the reader rejects (K101).
 
+### Changed in 6dbeb15 (#93) - supersedes conflicting statements above
+- Block locations are checked on access (K149). After a read, the reader is left at the end of
+  the archive, so back-to-back archives read in sequence (K131).
+- `write_to_file` removes the partial file when the write fails (K146). The block-table writer
+  rejects struct dtypes nested deeper than 32 (K128).
+
 ## Hot spots
 
 - Short decompression: what does a release build return when a block decodes to fewer bytes
