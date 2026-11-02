@@ -287,7 +287,9 @@ impl ArrayParams {
 
         if self.block_shape.is_none() {
             let block_shape = spec.block_shape();
-            let mut block_shape_fixed_dims = spec.block_shape_fixed_dims();
+            let mut block_shape_fixed_dims = self
+                .block_shape_fixed_dims
+                .unwrap_or(spec.block_shape_fixed_dims());
 
             let block_bytes = block_shape
                 .iter()
@@ -951,9 +953,8 @@ pub(crate) fn combine_block_layout(
     });
     let block_shape_fixed_dims = (0..ndim)
         .map(|d| {
-            let all_equal = inputs.iter().all(|&(bs, _)| bs[d] == block_shape[d]);
-            let any_fixed = inputs.iter().any(|&(_, fixed)| fixed.get(d));
-            all_equal && any_fixed
+            let mut fixed_inputs = inputs.iter().filter(|(_, fixed)| fixed.get(d)).peekable();
+            fixed_inputs.peek().is_some() && fixed_inputs.all(|&(bs, _)| bs[d] == block_shape[d])
         })
         .collect::<DimBitmap>();
     (block_shape, block_shape_fixed_dims)
@@ -1017,6 +1018,20 @@ mod tests {
     use super::scale_order_from_weights;
     use crate::util::ScaleWeight;
     use crate::{Array, ArrayParams, ArrayStorage, BLOCK_SIZE_BYTES_MAX};
+
+    #[test]
+    fn compact_with_keeps_caller_fixed_dims() {
+        let data = ndarray::Array2::<i32>::zeros((64, 64));
+        let mut params = ArrayParams::new();
+        params.block_shape(&[8, 32]);
+        let a = Array::compact_ndarray_with(&data, params).unwrap();
+
+        let mut params = ArrayParams::new();
+        params.block_shape_fixed_dims(&[true, false]);
+        params.block_size(8 * 64 * 4);
+        let c = a.compact_with(params, &a.read_ctx()).unwrap();
+        assert_eq!(c.storage().spec().block_shape()[..], [8, 64]);
+    }
 
     #[test]
     fn block_larger_than_max_block_bytes_is_rejected() {
@@ -1487,14 +1502,40 @@ mod tests {
 
     #[test]
     fn combine_block_layout_takes_max_and_fixes_on_agreement() {
-        let a_fixed: DimBitmap = [true, false, false].iter().copied().collect();
-        let b_fixed: DimBitmap = [false, true, false].iter().copied().collect();
-        // dim 0: equal len (4) and `a` fixed -> fixed. dim 1: differing len (2 vs 8) -> not fixed
-        // even though `b` is fixed. dim 2: equal len (5) but neither fixed -> not fixed.
-        let (bs, fx) =
-            combine_block_layout(&[(&[4u32, 2, 5][..], a_fixed), (&[4u32, 8, 5][..], b_fixed)]);
-        assert_eq!(bs.as_slice(), &[4, 8, 5]);
-        assert_eq!(bits(fx), [true, false, false]);
+        let a_fixed: DimBitmap = [true, false, true, false].iter().copied().collect();
+        let b_fixed: DimBitmap = [false, true, false, false].iter().copied().collect();
+        // dim 0: `a` fixes it at the max len (4) -> fixed. dim 1: `b` fixes it at the max len (8),
+        // the shorter `a` does not fix it -> fixed. dim 2: `a` fixes it at 2, below `b`'s 5 -> not
+        // fixed. dim 3: equal len (5) but neither fixed -> not fixed.
+        let (bs, fx) = combine_block_layout(&[
+            (&[4u32, 2, 2, 5][..], a_fixed),
+            (&[4u32, 8, 5, 5][..], b_fixed),
+        ]);
+        assert_eq!(bs.as_slice(), &[4, 8, 5, 5]);
+        assert_eq!(bits(fx), [true, true, false, false]);
+    }
+
+    #[test]
+    fn scalar_and_plain_keep_the_compact_block_shape() {
+        let mut params = ArrayParams::new();
+        params.block_shape(&[1024, 1]);
+        let data = ndarray::Array2::<f32>::zeros((1024, 1024));
+        let a = Array::compact_ndarray_with(&data, params).unwrap();
+        let scalar = crate::__private::Scalar::new(2.0f32, [1024, 1024], ArrayParams::new());
+        let c = (a.view() * Array::from_storage(scalar.unwrap()))
+            .compact()
+            .unwrap();
+        assert_eq!(c.storage().spec().block_shape()[..], [1024, 1]);
+        let plain = Array::plain_ndarray_view(data.view()).unwrap();
+        let c = (a + plain).compact().unwrap();
+        assert_eq!(c.storage().spec().block_shape()[..], [1024, 1]);
+
+        let mut params = ArrayParams::new();
+        params.block_shape(&[64, 64]);
+        let a = Array::compact_ndarray_with(&data, params).unwrap();
+        let plain = Array::plain_ndarray_view(data.view()).unwrap();
+        let c = (a + plain).compact().unwrap();
+        assert_eq!(c.storage().spec().block_shape()[..], [64, 64]);
     }
 
     #[test]
@@ -1533,8 +1574,8 @@ mod tests {
         let out = a.maximum(bc);
         let sp = out.storage().spec();
         assert_eq!(sp.block_shape().as_slice(), &[3, 2]);
-        // dim 0: equal block (3) and `a` fixed -> fixed. dim 1: differing block (2 vs 1) -> not fixed.
-        assert_eq!(bits(sp.block_shape_fixed_dims()), [true, false]);
+        // `a` fixes both dims, and the shorter unfixed dim 1 (1) of the broadcast does not unfix it.
+        assert_eq!(bits(sp.block_shape_fixed_dims()), [true, true]);
         // The broadcasted operand is much the costlier (64 vs 8), so it dominates the combined
         // gain: 64 * 1.0 / (8 + 64 + 1).
         assert_eq!(sp.element_cost(), 8.0 + 64.0 + 1.0);

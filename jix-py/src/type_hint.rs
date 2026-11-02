@@ -93,6 +93,25 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
     }
 }
 
+/// A dim argument. Unlike a plain `i32` it rejects a `bool`.
+#[derive(Clone, Copy)]
+pub struct Dim(pub i32);
+
+impl<'a, 'py> FromPyObject<'a, 'py> for Dim {
+    type Error = PyErr;
+
+    const INPUT_TYPE: PyStaticExpr = <pyo3::types::PyInt as pyo3::PyTypeInfo>::TYPE_HINT;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        if obj.is_instance_of::<pyo3::types::PyBool>() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "a dim must be an int, not a bool",
+            ));
+        }
+        Ok(Self(obj.extract()?))
+    }
+}
+
 /// An arithmetic error mode of [`crate::error::errstate`].
 pub struct ErrMode(pub jix_core::error::ArithmeticErrorMode);
 
@@ -120,6 +139,34 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ErrMode {
             other => Err(PyValueError::new_err(format!(
                 "invalid error mode '{other}', expected one of 'ignore', 'warn', 'raise'"
             ))),
+        }
+    }
+}
+
+/// The result of a binary dunder. `NotImplemented` makes Python try the other operand's reflected
+/// op. Typed as an `Array`, like numpy's dunders.
+pub enum ValueOrUnimplemented<T>
+where
+    T: pyo3::PyClass + Into<pyo3::PyClassInitializer<T>> + pyo3::PyTypeInfo,
+{
+    Value(T),
+    NotImplemented,
+}
+
+impl<'py, T> IntoPyObject<'py> for ValueOrUnimplemented<T>
+where
+    T: pyo3::PyClass + Into<pyo3::PyClassInitializer<T>> + pyo3::PyTypeInfo,
+{
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    const OUTPUT_TYPE: PyStaticExpr = <T as pyo3::PyTypeInfo>::TYPE_HINT;
+
+    fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
+        match self {
+            Self::Value(value) => Ok(Bound::new(py, value)?.into_any()),
+            Self::NotImplemented => Ok(py.NotImplemented().into_bound(py)),
         }
     }
 }

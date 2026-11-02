@@ -3488,7 +3488,7 @@ pub(crate) mod tests {
         fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>);
     }
 
-    /// Implements [`ReductionCompare`] with exact, bit-for-bit comparison.
+    /// Implements [`ReductionCompare`] with exact comparison, see [`crate::util::assert_array_matches`].
     macro_rules! reduction_compare_exact {
         ($($t:ty),* $(,)?) => {$(
             impl ReductionCompare for $t {

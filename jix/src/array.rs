@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{check_get_buffer_size, check_get_range, check_region_size, ensure, Result};
 use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
@@ -302,7 +302,9 @@ impl Array<Compact<TypeDyn>> {
     /// `strides` (in bytes, one per dimension).
     /// The buffer should contain elements of the given `dtype`.
     /// Accessing the buffer according to the shape, strides and dtype must be memory-safe and yield
-    /// valid elements.
+    /// valid elements. Every byte from the first to the last element (the strided span, gaps
+    /// between elements included) lies in one allocation, and none of it is written, or borrowed
+    /// through a `&mut`, during the call.
     pub unsafe fn compact_nd_ptr(
         ptr: *const u8,
         shape: impl IntoDimension,
@@ -869,6 +871,7 @@ impl<S: ArrayStorage> Array<S> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
         check_get_buffer_size(index, dtype, buf)?;
+        check_region_size(index, dtype.itemsize() as usize)?;
         let read_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
         let strides = default_strides(&read_shape, dtype.itemsize() as usize);
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides.as_ref()) };

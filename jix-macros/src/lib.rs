@@ -9,9 +9,8 @@
 //! struct, making it usable as an element type in a `jix::Array`.
 //!
 //! `Dtyped` maps the struct's layout to a `jix::dtype::Dtype` at compile time: it walks the
-//! fields, computes byte offsets respecting C alignment rules (or packed layout when
-//! `#[repr(packed)]` is used), and records field names so that individual fields can be accessed
-//! as array views at runtime.
+//! fields, takes their byte offsets from the compiler (`offset_of!`), and records field names so
+//! that individual fields can be accessed as array views at runtime.
 //!
 //! ```rust,ignore
 //! use jix::dtype::Dtyped;
@@ -26,7 +25,7 @@
 //!
 //! ### Requirements
 //!
-//! - The struct must be `#[repr(C)]` or `#[repr(C, packed)]` / `#[repr(packed)]`.
+//! - The struct must be `#[repr(C)]` or `#[repr(C, packed)]`.
 //! - Every field must itself implement `Dtyped`.
 //! - The struct must not have padding bytes (checked at compile time). If the C layout needs
 //!   padding, add it as an explicit field, for example `_pad: [u8; 3]`, or use
@@ -55,7 +54,7 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
-use syn::spanned::Spanned;
+use syn::ext::IdentExt;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, Meta};
 
 /// Derive macro generating an impl of the trait `Dtyped`.
@@ -124,7 +123,7 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         Fields::Named(fields) => {
             let is_packed = match repr_attribute.as_str() {
                 "C" => false,
-                "C,packed" | "packed" => true,
+                "C,packed" => true,
                 unknown => {
                     return Err(syn::Error::new_spanned(
                         input,
@@ -134,110 +133,47 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
             };
 
             field_types = fields.named.iter().map(|f| &f.ty).collect::<Vec<_>>();
-            let field_names = fields
+            let field_idents = fields
                 .named
                 .iter()
-                .map(|f| f.ident.clone())
+                .map(|f| f.ident.as_ref().unwrap())
                 .collect::<Vec<_>>();
-            let var_field_dtype = field_names
+            let field_names = field_idents
                 .iter()
-                .enumerate()
-                .map(|(i, f_name)| {
-                    let f_name = f_name.as_ref().unwrap();
-                    let var_name = format!("field_{i}_{}_dtype", f_name);
-                    syn::Ident::new(&var_name.to_uppercase(), input.span())
-                })
+                .map(|ident| ident.unraw().to_string())
                 .collect::<Vec<_>>();
-            let var_field_offset = field_names
-                .iter()
-                .enumerate()
-                .map(|(i, f_name)| {
-                    let f_name = f_name.as_ref().unwrap();
-                    let var_name = format!("field_{i}_{}_offset", f_name);
-                    syn::Ident::new(&var_name.to_uppercase(), input.span())
-                })
-                .collect::<Vec<_>>();
-            let var_field_end_offset = field_names
-                .iter()
-                .enumerate()
-                .map(|(i, f_name)| {
-                    let f_name = f_name.as_ref().unwrap();
-                    let var_name = format!("field_{i}_{}_end_offset", f_name);
-                    syn::Ident::new(&var_name.to_uppercase(), input.span())
-                })
-                .collect::<Vec<_>>();
-            let var_prev_field_offset = [syn::Ident::new("BASE_OFFSET", input.span())]
-                .into_iter()
-                .chain(
-                    var_field_end_offset
-                        .iter()
-                        .take(var_field_end_offset.len().saturating_sub(1))
-                        .cloned(),
-                )
-                .collect::<Vec<_>>();
-            let last_field_end_offset = var_field_end_offset
-                .last()
-                .cloned()
-                .unwrap_or_else(|| syn::Ident::new("BASE_OFFSET", input.span()));
 
             quote::quote! {
-                const BASE_OFFSET: #jix_crate::dtype::Itemsize = 0;
-
-                #(
-                    const #var_field_dtype: #jix_crate::dtype::Dtype = <#field_types as #jix_crate::dtype::Dtyped>::DTYPE;
-
-                    const #var_field_offset: #jix_crate::dtype::Itemsize = {
-                        let mut offset = #var_prev_field_offset;
-                        if ! #is_packed {
-                            offset = offset.next_multiple_of(align_of::<#field_types>() as #jix_crate::dtype::Itemsize);
-                        }
-                        offset
-                    };
-
-                    const #var_field_end_offset: #jix_crate::dtype::Itemsize = #var_field_offset + size_of::<#field_types>() as #jix_crate::dtype::Itemsize;
-                )*
-
-                const FIELDS: &'static [(std::borrow::Cow<'static, str>, #jix_crate::dtype::Itemsize, #jix_crate::dtype::Dtype)] = &[
+                const __JIX_DTYPED_FIELDS: &'static [(::std::borrow::Cow<'static, str>, #jix_crate::dtype::Itemsize, #jix_crate::dtype::Dtype)] = &[
                     #(
-                        (std::borrow::Cow::Borrowed(stringify!(#field_names)), #var_field_offset, #var_field_dtype)
+                        (
+                            ::std::borrow::Cow::Borrowed(#field_names),
+                            ::core::mem::offset_of!(#struct_name, #field_idents) as #jix_crate::dtype::Itemsize,
+                            <#field_types as #jix_crate::dtype::Dtyped>::DTYPE,
+                        )
                     ),*
                 ];
 
-                let mut alignment = 1;
-                let mut total_size = #last_field_end_offset;
-                if !#is_packed {
-                    #( {
-                        let field_alignment = align_of::<#field_types>() as #jix_crate::dtype::Itemsize;
-                        if field_alignment > alignment {
-                            alignment = field_alignment;
-                        }
-                    } )*
-
-                    total_size = total_size.next_multiple_of(alignment as #jix_crate::dtype::Itemsize);
-                }
-                let alignment = #jix_crate::dtype::Alignment::new(alignment as usize).unwrap();
-
-                let dtype = unsafe { #jix_crate::dtype::Dtype::new_struct_borrowed_unchecked(
-                    FIELDS,
-                    total_size,
-                    alignment,
-                    /* is_aligned */ ! #is_packed,
-                ) };
-
-                assert!(dtype.itemsize() as usize == size_of::<Self>());
-                assert!(dtype.alignment().as_usize() == align_of::<Self>());
-
-                let fields_size = 0 #( + size_of::<#field_types>() )*;
-                assert!(
-                    fields_size == size_of::<Self>(),
-                    concat!(
+                ::core::assert!(::core::mem::size_of::<Self>() <= #jix_crate::dtype::Itemsize::MAX as usize);
+                let fields_size = 0 #( + ::core::mem::size_of::<#field_types>() )*;
+                ::core::assert!(
+                    fields_size == ::core::mem::size_of::<Self>(),
+                    ::core::concat!(
                         "Dtyped can not be derived for `",
-                        stringify!(#struct_name),
+                        ::core::stringify!(#struct_name),
                         "` because it has padding bytes. Add explicit padding fields \
                         (e.g. `_pad: [u8; N]`) or use #[repr(C, packed)]."
                     )
                 );
-                dtype
+
+                unsafe {
+                    #jix_crate::dtype::Dtype::new_struct_borrowed_unchecked(
+                        __JIX_DTYPED_FIELDS,
+                        ::core::mem::size_of::<Self>() as #jix_crate::dtype::Itemsize,
+                        #jix_crate::dtype::Alignment::new(::core::mem::align_of::<Self>()).unwrap(),
+                        /* is_aligned */ !#is_packed,
+                    )
+                }
             }
         }
         Fields::Unnamed(fields) => {
@@ -259,8 +195,8 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
             field_types = vec![field_type];
 
             quote::quote! {
-                assert!(size_of::<#field_type>() == size_of::<Self>());
-                assert!(align_of::<#field_type>() == align_of::<Self>());
+                ::core::assert!(::core::mem::size_of::<#field_type>() == ::core::mem::size_of::<Self>());
+                ::core::assert!(::core::mem::align_of::<#field_type>() == ::core::mem::align_of::<Self>());
                 <#field_type as #jix_crate::dtype::Dtyped>::DTYPE
             }
         }

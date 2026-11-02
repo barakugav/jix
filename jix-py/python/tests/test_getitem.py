@@ -172,3 +172,20 @@ def test_bool_index_raises(index):
         a.numpy(index)
     with pytest.raises(TypeError):
         jix.slice(a, index)
+
+
+@pytest.mark.parametrize(
+    "fn",
+    [
+        lambda a: jix.sum(a, True),
+        lambda a: a.mean(False),
+        lambda a: jix.argmax(a, dim=True),
+        lambda a: jix.sum(a, (0, True)),
+        lambda a: jix.concatenate([a, a], True),
+        lambda a: jix.swapdims(a, 0, True),
+        lambda a: jix.permute_dims(a, (True, 0)),
+    ],
+)
+def test_bool_dim_raises(fn):
+    with pytest.raises(TypeError, match="bool"):
+        fn(jix.compact(arange((3, 4))))

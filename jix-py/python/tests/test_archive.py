@@ -1,6 +1,7 @@
 """Tests for read_array and write_array with both file paths and file-like objects."""
 
 import io
+import pickle
 import tempfile
 from pathlib import Path
 
@@ -64,6 +65,20 @@ def test_write_array_path_append():
         np.testing.assert_array_equal(b2.numpy(), b.numpy())
 
 
+def test_write_array_path_failure_leaves_no_partial_file(tmp_path):
+    a = make_array([1.0, 2.0])
+    bad = jix.compact(np.zeros(2)) / jix.compact(np.zeros(2))
+    p = tmp_path / "out.jix"
+    with jix.errstate(invalid="raise"), pytest.raises(FloatingPointError):
+        jix.write_array(bad, p)
+    assert not p.exists()
+    jix.write_array(a, p)
+    size = p.stat().st_size
+    with jix.errstate(invalid="raise"), pytest.raises(FloatingPointError):
+        jix.write_array(bad, p, append=True)
+    assert p.stat().st_size == size
+
+
 # ---------------------------------------------------------------------------
 # write_array - file-like object
 # ---------------------------------------------------------------------------
@@ -97,6 +112,16 @@ def test_write_array_bytesio_roundtrip():
     buf.seek(0)
     a2 = jix.read_array(buf)
     np.testing.assert_array_equal(a2.numpy(), a.numpy())
+
+
+def test_write_array_writer_keeps_buffer_raises():
+    class Writer(io.BytesIO):
+        def write(self, b):
+            self.kept = pickle.PickleBuffer(b)
+            return super().write(b)
+
+    with pytest.raises(RuntimeError, match="kept a reference"):
+        jix.write_array(make_array([1.0, 2.0]), Writer())
 
 
 def test_write_array_bad_object():
@@ -202,6 +227,16 @@ def test_read_array_reader_at_offset():
     buf.seek(offset)
     b2 = jix.read_array(buf)
     np.testing.assert_array_equal(b2.numpy(), b.numpy())
+
+
+def test_read_array_reader_back_to_back():
+    buf = io.BytesIO()
+    jix.write_array(make_array([1, 2, 3], dtype=np.int32), buf)
+    jix.write_array(make_array([4.0, 5.0]), buf)
+    buf.seek(0)
+    np.testing.assert_array_equal(jix.read_array(buf).numpy(), [1, 2, 3])
+    np.testing.assert_array_equal(jix.read_array(buf).numpy(), [4.0, 5.0])
+    assert buf.tell() == len(buf.getvalue())
 
 
 def test_read_array_reader_mmap_raises():

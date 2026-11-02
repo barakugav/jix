@@ -5,7 +5,7 @@ use std::mem::MaybeUninit;
 use crate::archive::common::{ArchiveReader, ArchiveWriter, Section};
 use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter, MAX_FILTERS};
-use crate::dtype::Dtype;
+use crate::dtype::{Dtype, DTYPE_NESTING_MAX};
 use crate::error::{bail, ensure, error, Error, Result};
 use crate::storage::block::{
     BlockLocation, BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage, Mmap, MmapData,
@@ -78,14 +78,10 @@ where
         assert!(self.nitems.is_multiple_of(self.block_size as u64));
         let nblocks = self.nitems / self.block_size as u64;
 
-        let block_data = self.block_data.as_ref();
-
         let mut block_writer =
             BlockArchiveWriter::start(writer, nblocks, self.block_size, self.decoder_config())?;
         for block_index in 0..nblocks {
-            let (offset, len) = self.block_location(block_index);
-            let data = &block_data[offset as usize..][..len as usize];
-            block_writer.write_compressed_block(block_index, data)?;
+            block_writer.write_compressed_block(block_index, self.block_bytes(block_index)?)?;
         }
         block_writer.finalize()
     }
@@ -135,6 +131,11 @@ where
         decoder_config: &DecoderCodecConfig,
     ) -> Result<Self> {
         let nitems = nblocks * block_size as u64;
+        ensure!(
+            decoder_config.dtype.nesting_depth() <= DTYPE_NESTING_MAX,
+            InvalidArgument,
+            "struct dtype is nested more than the maximum {DTYPE_NESTING_MAX} levels"
+        );
 
         // Write header
         let header = schema::BlockTableHeader {
@@ -354,6 +355,17 @@ where
                 let block_data = storage.read_section(reader, block_data_section)?;
                 let blocks_loc =
                     storage.read_section::<BlockLocation, _>(reader, blocks_loc_section)?;
+
+                // Leave the reader at the end of the archive
+                let end_offset = [blocks_loc_section, block_data_section]
+                    .map(|s| s.offset.saturating_add_unsigned(s.size))
+                    .into_iter()
+                    .max()
+                    .unwrap();
+                reader
+                    .seek_relative_to_base(end_offset)
+                    .map_err(Error::io)?;
+
                 (block_data, blocks_loc)
             }
             None => bail!(

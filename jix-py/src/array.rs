@@ -8,20 +8,21 @@ use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
-use crate::type_hint::{NdArray, NpDtype};
+use crate::error::{current_modes, ArithmeticErrorModes};
+use crate::type_hint::{Dim, NdArray, NpDtype, ValueOrUnimplemented};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyTuple};
+use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyTuple};
 
 use pyo3::exceptions::{
-    PyIndexError, PyNotImplementedError, PyRuntimeError, PyTypeError, PyValueError,
+    PyIndexError, PyNotImplementedError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
 };
 use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
 use crate::ops::plain_from_numpy;
 use crate::util::{
-    dim_arr, maybe_detach, numpy_empty_ordered, strided_span_bytes, DimArray, IntoPyResult,
-    ItemOrTuple,
+    dim_arr, maybe_detach, numpy_empty_ordered, numpy_items, strided_span_bytes, DimArray,
+    IntoPyResult, ItemOrTuple,
 };
 
 /// A multi-dimensional compressed array.
@@ -160,9 +161,9 @@ impl Array {
     /// The context is taken out of the cache for the lifetime of the returned guard and
     /// returned to it on drop, so successive reads of the same array reuse the same
     /// decompressor state instead of re-initializing it on every call. It is configured with the
-    /// calling thread's arithmetic error modes (see `jix.errstate`); the warnings of the read are
-    /// collected with [`ContextGuard::take_warnings`].
-    pub(crate) fn read_ctx(&self) -> PyResult<ContextGuard<'_>> {
+    /// arithmetic error `modes` (see `jix.errstate`); the warnings of the read are collected with
+    /// [`ContextGuard::take_warnings`].
+    pub(crate) fn read_ctx(&self, modes: ArithmeticErrorModes) -> PyResult<ContextGuard<'_>> {
         let mut cache = self
             .cache
             .lock()
@@ -171,7 +172,7 @@ impl Array {
             .context
             .take()
             .unwrap_or_else(|| Box::new(self.arr.read_ctx()));
-        crate::error::configure_context_error_modes(&mut context);
+        crate::error::configure_context_error_modes(&mut context, modes);
         Ok(ContextGuard {
             array: self,
             context: Some(context),
@@ -409,12 +410,14 @@ impl Array {
     /// ```
     #[inline]
     pub fn __len__(&self) -> PyResult<usize> {
-        let len = self
+        let len = *self
             .arr
             .shape()
             .first()
             .ok_or_else(|| PyValueError::new_err("zero-dimensional array has no length"))?;
-        Ok(*len as usize)
+        usize::try_from(len).map_err(|_| {
+            PyOverflowError::new_err(format!("array length too large for usize: {len}"))
+        })
     }
 
     /// Always raises: an array has no single truth value.
@@ -657,8 +660,9 @@ impl Array {
 
         let should_detach =
             !self.arr.storage().spec().flags().plain_read() || nitems * itemsize > 4096;
-        let warnings = maybe_detach(py, should_detach, || {
-            let context_guard = self.read_ctx()?;
+        let modes = current_modes(py)?;
+        let (result, warnings) = maybe_detach(py, should_detach, || {
+            let context_guard = self.read_ctx(modes)?;
             let context = context_guard.as_ref();
 
             let mut out = unsafe {
@@ -669,12 +673,15 @@ impl Array {
                     itemsize,
                 )
             };
-            self.arr
+            let result = self
+                .arr
                 .to_ndarray_buf(&index, context, Some(&mut out))
-                .into_py_result()?;
-            Ok::<_, PyErr>(context_guard.take_warnings())
+                .map(drop);
+            Ok::<_, PyErr>((result.into_py_result(), context_guard.take_warnings()))
         })?;
+        // Emit the warnings of the read even if it raised
         crate::error::emit_warnings(py, warnings)?;
+        result?;
 
         Ok(NdArray(np_arr))
     }
@@ -877,13 +884,19 @@ impl Array {
     }
 
     /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
-    pub fn __add__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::add(slf, other)
+    pub fn __add__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::add(slf, other))
     }
 
     /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
-    pub fn __radd__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::add(other, slf)
+    pub fn __radd__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::add(other, slf))
     }
 
     /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
@@ -892,13 +905,19 @@ impl Array {
     }
 
     /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
-    pub fn __sub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::subtract(slf, other)
+    pub fn __sub__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::subtract(slf, other))
     }
 
     /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
-    pub fn __rsub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::subtract(other, slf)
+    pub fn __rsub__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::subtract(other, slf))
     }
 
     /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
@@ -907,13 +926,19 @@ impl Array {
     }
 
     /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
-    pub fn __mul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::multiply(slf, other)
+    pub fn __mul__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::multiply(slf, other))
     }
 
     /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
-    pub fn __rmul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::multiply(other, slf)
+    pub fn __rmul__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::multiply(other, slf))
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
@@ -922,13 +947,19 @@ impl Array {
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
-    pub fn __truediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::divide(slf, other)
+    pub fn __truediv__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::divide(slf, other))
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
-    pub fn __rtruediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::divide(other, slf)
+    pub fn __rtruediv__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::divide(other, slf))
     }
 
     /// Element-wise floored division of two arrays. See
@@ -939,14 +970,20 @@ impl Array {
 
     /// Element-wise floored division of two arrays (`a // b`), as Python's and numpy's `//`. See
     /// [`jix.divide_floor()`][jix.divide_floor].
-    pub fn __floordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::divide_floor(slf, other)
+    pub fn __floordiv__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::divide_floor(slf, other))
     }
 
     /// Element-wise floored division of two arrays (`a // b`), as Python's and numpy's `//`. See
     /// [`jix.divide_floor()`][jix.divide_floor].
-    pub fn __rfloordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::divide_floor(other, slf)
+    pub fn __rfloordiv__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::divide_floor(other, slf))
     }
 
     /// Element-wise truncated division of two arrays. See
@@ -969,14 +1006,20 @@ impl Array {
 
     /// Element-wise floored remainder of two arrays (`a % b`), as Python's and numpy's `%`. See
     /// [`jix.remainder_floor()`][jix.remainder_floor].
-    pub fn __mod__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::remainder_floor(slf, other)
+    pub fn __mod__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::remainder_floor(slf, other))
     }
 
     /// Element-wise floored remainder of two arrays (`a % b`), as Python's and numpy's `%`. See
     /// [`jix.remainder_floor()`][jix.remainder_floor].
-    pub fn __rmod__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::remainder_floor(other, slf)
+    pub fn __rmod__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::remainder_floor(other, slf))
     }
 
     /// Element-wise truncated remainder of two arrays. See
@@ -1001,13 +1044,13 @@ impl Array {
         slf: &Bound<'py, Self>,
         exponent: &Bound<'py, PyAny>,
         modulo: Option<&Bound<'py, PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
         if modulo.is_some() {
             return Err(PyNotImplementedError::new_err(
                 "modulo argument to pow() is not supported",
             ));
         }
-        crate::ops::power(slf, exponent)
+        binary_op_builtin(exponent, || crate::ops::power(slf, exponent))
     }
 
     /// Element-wise exponentiation (`b ** a`). See [`jix.power()`][jix.power].
@@ -1015,13 +1058,13 @@ impl Array {
         slf: &Bound<'py, Self>,
         base: &Bound<'py, PyAny>,
         modulo: Option<&Bound<'py, PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
         if modulo.is_some() {
             return Err(PyNotImplementedError::new_err(
                 "modulo argument to pow() is not supported",
             ));
         }
-        crate::ops::power(base, slf)
+        binary_op_builtin(base, || crate::ops::power(base, slf))
     }
 
     /// Arithmetic negation applied element-wise. See [`jix.negative()`][jix.negative].
@@ -1096,33 +1139,51 @@ impl Array {
     // == bitwise ops ==
 
     /// Element-wise bitwise AND of two arrays. See [`jix.bitwise_and()`][jix.bitwise_and].
-    pub fn __and__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_and(slf, other)
+    pub fn __and__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::bitwise_and(slf, other))
     }
 
     /// Element-wise bitwise AND of two arrays. See [`jix.bitwise_and()`][jix.bitwise_and].
-    pub fn __rand__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_and(other, slf)
+    pub fn __rand__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::bitwise_and(other, slf))
     }
 
     /// Element-wise bitwise OR of two arrays. See [`jix.bitwise_or()`][jix.bitwise_or].
-    pub fn __or__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_or(slf, other)
+    pub fn __or__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::bitwise_or(slf, other))
     }
 
     /// Element-wise bitwise OR of two arrays. See [`jix.bitwise_or()`][jix.bitwise_or].
-    pub fn __ror__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_or(other, slf)
+    pub fn __ror__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::bitwise_or(other, slf))
     }
 
     /// Element-wise bitwise XOR of two arrays. See [`jix.bitwise_xor()`][jix.bitwise_xor].
-    pub fn __xor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_xor(slf, other)
+    pub fn __xor__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::bitwise_xor(slf, other))
     }
 
     /// Element-wise bitwise XOR of two arrays. See [`jix.bitwise_xor()`][jix.bitwise_xor].
-    pub fn __rxor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_xor(other, slf)
+    pub fn __rxor__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::bitwise_xor(other, slf))
     }
 
     /// Element-wise bitwise NOT (one's complement). See [`jix.bitwise_not()`][jix.bitwise_not].
@@ -1131,55 +1192,85 @@ impl Array {
     }
 
     /// Element-wise left shift (`a << b`). See [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
-    pub fn __lshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_left_shift(slf, other)
+    pub fn __lshift__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::bitwise_left_shift(slf, other))
     }
 
     /// Element-wise left shift (`a << b`). See [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
-    pub fn __rlshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_left_shift(other, slf)
+    pub fn __rlshift__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::bitwise_left_shift(other, slf))
     }
 
     /// Element-wise right shift (`a >> b`). See [`jix.bitwise_right_shift()`][jix.bitwise_right_shift].
-    pub fn __rshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_right_shift(slf, other)
+    pub fn __rshift__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::bitwise_right_shift(slf, other))
     }
 
     /// Element-wise right shift (`a >> b`). See [`jix.bitwise_right_shift()`][jix.bitwise_right_shift].
-    pub fn __rrshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_right_shift(other, slf)
+    pub fn __rrshift__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::bitwise_right_shift(other, slf))
     }
 
     // == comparison ops ==
 
     /// Element-wise less-than test (`a < b`). See [`jix.less()`][jix.less].
-    pub fn __lt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::less(slf, other)
+    pub fn __lt__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::less(slf, other))
     }
 
     /// Element-wise less-than-or-equal test (`a <= b`). See [`jix.less_equal()`][jix.less_equal].
-    pub fn __le__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::less_equal(slf, other)
+    pub fn __le__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::less_equal(slf, other))
     }
 
     /// Element-wise greater-than test (`a > b`). See [`jix.greater()`][jix.greater].
-    pub fn __gt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::greater(slf, other)
+    pub fn __gt__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::greater(slf, other))
     }
 
     /// Element-wise greater-than-or-equal test (`a >= b`). See [`jix.greater_equal()`][jix.greater_equal].
-    pub fn __ge__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::greater_equal(slf, other)
+    pub fn __ge__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::greater_equal(slf, other))
     }
 
     /// Element-wise equality test (`a == b`). See [`jix.equal()`][jix.equal].
-    pub fn __eq__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::equal(slf, other)
+    pub fn __eq__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::equal(slf, other))
     }
 
     /// Element-wise inequality test (`a != b`). See [`jix.not_equal()`][jix.not_equal].
-    pub fn __ne__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::not_equal(slf, other)
+    pub fn __ne__<'py>(
+        slf: &Bound<'py, Self>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<ValueOrUnimplemented<Self>> {
+        binary_op_builtin(other, || crate::ops::not_equal(slf, other))
     }
 
     // == reduction ops ==
@@ -1188,7 +1279,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn all(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::all(slf, dim, keepdim)
@@ -1198,7 +1289,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn any(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::any(slf, dim, keepdim)
@@ -1208,7 +1299,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn max(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::max(slf, dim, keepdim)
@@ -1218,7 +1309,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn min(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::min(slf, dim, keepdim)
@@ -1226,13 +1317,13 @@ impl Array {
 
     /// Returns the index of the maximum element along a single dim. See [`jix.argmax()`][jix.argmax].
     #[pyo3(signature = (dim=None, *, keepdim=false))]
-    pub fn argmax(slf: &Bound<'_, Self>, dim: Option<i32>, keepdim: bool) -> PyResult<Self> {
+    pub fn argmax(slf: &Bound<'_, Self>, dim: Option<Dim>, keepdim: bool) -> PyResult<Self> {
         crate::ops::argmax(slf, dim, keepdim)
     }
 
     /// Returns the index of the minimum element along a single dim. See [`jix.argmin()`][jix.argmin].
     #[pyo3(signature = (dim=None, *, keepdim=false))]
-    pub fn argmin(slf: &Bound<'_, Self>, dim: Option<i32>, keepdim: bool) -> PyResult<Self> {
+    pub fn argmin(slf: &Bound<'_, Self>, dim: Option<Dim>, keepdim: bool) -> PyResult<Self> {
         crate::ops::argmin(slf, dim, keepdim)
     }
 
@@ -1240,7 +1331,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn sum(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::sum(slf, dim, keepdim)
@@ -1250,7 +1341,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn mean(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::mean(slf, dim, keepdim)
@@ -1260,7 +1351,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn prod(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
     ) -> PyResult<Self> {
         crate::ops::product(slf, dim, keepdim)
@@ -1270,7 +1361,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn std(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
@@ -1281,7 +1372,7 @@ impl Array {
     #[pyo3(signature = (dim=None, *, keepdim=false, ddof=0.0))]
     pub fn var(
         slf: &Bound<'_, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
         keepdim: bool,
         ddof: f64,
     ) -> PyResult<Self> {
@@ -1315,7 +1406,7 @@ impl Array {
     #[pyo3(signature = (dims=None))]
     pub fn permute_dims<'py>(
         slf: &Bound<'py, Self>,
-        dims: Option<Vec<i32>>,
+        dims: Option<Vec<Dim>>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::permute_dims(slf, dims)
     }
@@ -1324,8 +1415,8 @@ impl Array {
     #[pyo3(signature = (dim0, dim1))]
     pub fn swapdims<'py>(
         slf: &Bound<'py, Self>,
-        dim0: i32,
-        dim1: i32,
+        dim0: Dim,
+        dim1: Dim,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::swapdims(slf, dim0, dim1)
     }
@@ -1358,7 +1449,7 @@ impl Array {
     #[pyo3(signature = (dim=None))]
     pub fn squeeze<'py>(
         slf: &Bound<'py, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::squeeze(slf, dim)
     }
@@ -1366,7 +1457,7 @@ impl Array {
     /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Self>,
-        dim: ItemOrTuple<i32>,
+        dim: ItemOrTuple<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::unsqueeze(slf, dim)
     }
@@ -1376,7 +1467,7 @@ impl Array {
     pub fn repeat<'py>(
         slf: &Bound<'py, Self>,
         repeats: u64,
-        dim: Option<i32>,
+        dim: Option<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::repeat(slf, repeats, dim)
     }
@@ -1385,7 +1476,7 @@ impl Array {
     #[pyo3(signature = (dim=None))]
     pub fn flip<'py>(
         slf: &Bound<'py, Self>,
-        dim: Option<ItemOrTuple<i32>>,
+        dim: Option<ItemOrTuple<Dim>>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::flip(slf, dim)
     }
@@ -1395,7 +1486,7 @@ impl Array {
     pub fn roll<'py>(
         slf: &Bound<'py, Self>,
         shift: i64,
-        dim: Option<i32>,
+        dim: Option<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::roll(slf, shift, dim)
     }
@@ -1405,7 +1496,7 @@ impl Array {
     pub fn tile<'py>(
         slf: &Bound<'py, Self>,
         repeats: u64,
-        dim: Option<i32>,
+        dim: Option<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::tile(slf, repeats, dim)
     }
@@ -1499,7 +1590,7 @@ impl Array {
     /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_dim()`][jix.insert_dim].
     pub fn insert_dim<'py>(
         slf: &Bound<'py, Self>,
-        dim: ItemOrTuple<i32>,
+        dim: ItemOrTuple<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::insert_dim(slf, dim)
     }
@@ -1507,7 +1598,7 @@ impl Array {
     /// Removes length-1 dimensions from the array's shape. See [`jix.remove_dim()`][jix.remove_dim].
     pub fn remove_dim<'py>(
         slf: &Bound<'py, Self>,
-        dim: ItemOrTuple<i32>,
+        dim: ItemOrTuple<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::remove_dim(slf, dim)
     }
@@ -1662,15 +1753,14 @@ pub fn compact<'py>(
     let params = resolve_array_params(py, params)?;
 
     let array = array.get();
+    let modes = current_modes(py)?;
     let (compacted, warnings) = py.detach(|| {
-        let context = array.read_ctx()?;
-        let compacted = array
-            .arr
-            .compact_with(params, context.as_ref())
-            .into_py_result()?;
-        Ok::<_, PyErr>((compacted, context.take_warnings()))
+        let context = array.read_ctx(modes)?;
+        let compacted = array.arr.compact_with(params, context.as_ref());
+        Ok::<_, PyErr>((compacted.into_py_result(), context.take_warnings()))
     })?;
     crate::error::emit_warnings(py, warnings)?;
+    let compacted = compacted?;
 
     Bound::new(py, Array::from_core(compacted.into_any()))
 }
@@ -1773,6 +1863,30 @@ pub(crate) fn resolve_array_params(
     }
 
     Ok(params)
+}
+
+fn binary_op_builtin(
+    other: &Bound<'_, PyAny>,
+    op: impl FnOnce() -> PyResult<Array>,
+) -> PyResult<ValueOrUnimplemented<Array>> {
+    let py = other.py();
+    let is_known_type = other.is_instance_of::<Array>()
+        || other.is_instance_of::<PyUntypedArray>()
+        || other.is_instance_of::<PyInt>()
+        || other.is_instance_of::<PyFloat>()
+        || other.is_instance_of::<PyComplex>()
+        || other.is_instance(numpy_items(py)?.generic.bind(py))?;
+    if !is_known_type {
+        let opts_out = other
+            .get_type()
+            .getattr("__array_ufunc__")
+            .is_ok_and(|f| f.is_none());
+        if opts_out {
+            return Ok(ValueOrUnimplemented::NotImplemented);
+        }
+    }
+
+    op().map(ValueOrUnimplemented::Value)
 }
 
 pub(crate) struct ContextGuard<'a> {
@@ -1985,7 +2099,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f32>(Array::__add__(&a, &b).unwrap())
+            eval::<f32>(Array::add(&a, &b).unwrap())
         });
         assert_eq!(result, (a + b).into_dyn());
     }
@@ -1997,7 +2111,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f32>(Array::__sub__(&a, &b).unwrap())
+            eval::<f32>(Array::subtract(&a, &b).unwrap())
         });
         assert_eq!(result, (a - b).into_dyn());
     }
@@ -2009,7 +2123,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f32>(Array::__mul__(&a, &b).unwrap())
+            eval::<f32>(Array::multiply(&a, &b).unwrap())
         });
         assert_eq!(result, (a * b).into_dyn());
     }
@@ -2021,7 +2135,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f32>(Array::__truediv__(&a, &b).unwrap())
+            eval::<f32>(Array::divide(&a, &b).unwrap())
         });
         assert_eq!(result, (a / b).into_dyn());
     }
@@ -2033,7 +2147,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f64>(Array::__add__(&a, &b).unwrap())
+            eval::<f64>(Array::add(&a, &b).unwrap())
         });
         assert_eq!(result, (a + b).into_dyn());
     }
@@ -2045,7 +2159,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<i32>(Array::__add__(&a, &b).unwrap())
+            eval::<i32>(Array::add(&a, &b).unwrap())
         });
         assert_eq!(result, (a + b).into_dyn());
     }
@@ -2057,7 +2171,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<i32>(Array::__sub__(&a, &b).unwrap())
+            eval::<i32>(Array::subtract(&a, &b).unwrap())
         });
         assert_eq!(result, (a - b).into_dyn());
     }
@@ -2069,7 +2183,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<i32>(Array::__mul__(&a, &b).unwrap())
+            eval::<i32>(Array::multiply(&a, &b).unwrap())
         });
         assert_eq!(result, (a * b).into_dyn());
     }
@@ -2399,11 +2513,7 @@ mod tests {
             let b = make_py_array(py, &b);
             let c = make_py_array(py, &c);
             eval::<f32>(
-                Array::__mul__(
-                    &Bound::new(py, Array::__add__(&a, &b).unwrap()).unwrap(),
-                    &c,
-                )
-                .unwrap(),
+                Array::multiply(&Bound::new(py, Array::add(&a, &b).unwrap()).unwrap(), &c).unwrap(),
             )
         });
         assert_eq!(jix_result, ((a + b) * c).into_dyn());

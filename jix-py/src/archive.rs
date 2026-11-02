@@ -1,11 +1,13 @@
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
 
 use crate::array::resolve_array_params;
+use crate::error::{current_modes, ArithmeticErrorModes};
 use crate::ops::asarray;
 use crate::type_hint::ArchiveValidation;
 use crate::util::IntoPyResult;
@@ -37,7 +39,10 @@ use crate::Array;
 ///         the heap; blocks are paged in on demand. Defaults to `False`. **Caution:** modifying
 ///         the file while the returned array is live has undefined behavior. Not supported for
 ///         file-like objects.
-///     params: Controls how the array is read and decoded. See [`jix.compact()`][jix.compact] for details.
+///     params: Controls how the array is read and decoded and how future arrays created from the
+///         result are configured. See [`jix.compact()`][jix.compact] for details.
+///         Arrays derived from the result inherit only the block shape from the archive, while
+///         codec settings come from the `params` argument.
 ///     validation: Controls how strictly the archive is validated. Can be one of:
 ///
 ///         - `None` (default): Currently the same as the `strict` mode, may change in the future.
@@ -139,9 +144,14 @@ pub fn read_array(
                 ));
             }
             // Can't detach the GIL since the reader is a Python object.
-            let reader = BufReader::new(reader);
-            let array = jix_core::Array::read_from_reader(reader, len, params, validation)
+            let mut reader = BufReader::new(reader);
+            let array = jix_core::Array::read_from_reader(&mut reader, len, params, validation)
                 .into_py_result()?;
+
+            // Leave the reader at the current position after reading the array, BufReader may have read ahead
+            let pos = reader.stream_position()?;
+            reader.into_inner().seek(SeekFrom::Start(pos))?;
+
             Ok(Array::from_core(array.into_any()))
         }
     }
@@ -160,7 +170,9 @@ pub fn read_array(
 ///     path_or_writer: A file path or any seekable binary file-like object with `.write()`,
 ///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle). The writer
 ///         must support seeking backwards. For the same reason a file object opened in append
-///         mode (`"ab"`) raises; use `append=True` with a path instead.
+///         mode (`"ab"`) raises; use `append=True` with a path instead. As with `io.RawIOBase`,
+///         `.write(b)` must only access `b` during the call, and must not keep `b` or any view of
+///         it (a slice, `np.frombuffer(b)`, ...) after it returns.
 ///     append: When `False` (default), the file is created anew and must not already exist.
 ///         When `True`, the array is appended to an existing file (or a new one is created).
 ///         Ignored when `path_or_writer` is a file-like object.
@@ -206,14 +218,15 @@ pub fn write_array(
     let array = array.get();
     let path_or_writer = PathOrWriter::from_pyany(path_or_writer)?;
     let params = resolve_array_params(py, params)?;
+    let modes = current_modes(py)?;
 
-    let warnings = match path_or_writer {
+    let (result, warnings) = match path_or_writer {
         PathOrWriter::Path(path) => {
-            // detach the GIL
             py.detach(|| {
-                let file = if !append {
-                    std::fs::File::create_new(path)?
+                let (file, original_file_size) = if !append {
+                    (std::fs::File::create_new(&path)?, None)
                 } else {
+                    let file_exists = path.exists();
                     // O_APPEND would force every write to EOF, breaking the
                     // seek-then-write used to patch the block TOC placeholder.
                     // Instead, open for writing and seek to the end manually.
@@ -221,39 +234,56 @@ pub fn write_array(
                         .write(true)
                         .create(true)
                         .truncate(false)
-                        .open(path)?;
-                    file.seek(std::io::SeekFrom::End(0))?;
-                    file
+                        .open(&path)?;
+                    let original_size = file.seek(std::io::SeekFrom::End(0))?;
+                    let original_size = (file_exists || original_size > 0).then_some(original_size);
+                    (file, original_size)
                 };
-                let writer = BufWriter::new(file);
-                write_array_impl(array, writer, params)
+                let written = write_array_impl(array, BufWriter::new(&file), params, modes);
+                if !matches!(written, Ok((Ok(()), _))) {
+                    // Don't leave a partial archive behind
+                    let revert_result = match original_file_size {
+                        Some(original_size) => file.set_len(original_size),
+                        None => {
+                            drop(file);
+                            std::fs::remove_file(&path)
+                        }
+                    };
+                    if let Err(err) = revert_result {
+                        eprintln!("Error cleaning up partial archive: {err}");
+                    }
+                }
+                written
             })
         }
         PathOrWriter::PyWriter(writer) => {
             // cant detach the GIL here since the writer is a Python object
-            let writer = BufWriter::new(writer);
-            write_array_impl(array, writer, params)
+            let mut writer = BufWriter::new(writer);
+            let written = write_array_impl(array, &mut writer, params, modes);
+            // Drop the buffer of a failed write instead of writing it again on drop
+            let _ = writer.into_parts();
+            written
         }
     }?;
-    crate::error::emit_warnings(py, warnings)
+    // Emit the warnings of the read even if it raised
+    crate::error::emit_warnings(py, warnings)?;
+    result
 }
-/// Returns the warnings of the read, see [`crate::error::emit_warnings`].
-fn write_array_impl<W>(
+/// Returns the result of the write and the warnings of the read, see
+/// [`crate::error::emit_warnings`].
+fn write_array_impl(
     array: &Array,
-    mut writer: W,
+    mut writer: impl Write + Seek,
     params: jix_core::ArrayParams,
-) -> PyResult<Vec<jix_core::Error>>
-where
-    W: Write + Seek,
-{
-    let context = array.read_ctx()?;
-    array
+    modes: ArithmeticErrorModes,
+) -> PyResult<(PyResult<()>, Vec<jix_core::Error>)> {
+    let context = array.read_ctx(modes)?;
+    let result = array
         .arr
         .write_to_with(&mut writer, params, context.as_ref())
-        .into_py_result()?;
-
-    writer.flush()?;
-    Ok(context.take_warnings())
+        .into_py_result()
+        .and_then(|()| Ok(writer.flush()?));
+    Ok((result, context.take_warnings()))
 }
 
 enum PathOrReader<'a> {
@@ -384,21 +414,17 @@ struct PyWriter<'py> {
 
 impl<'py> PyWriter<'py> {
     fn new(inner: Bound<'py, PyAny>) -> PyResult<Self> {
-        let write_fn = inner
-            .getattr("write")
-            .map_err(|_| PyTypeError::new_err("Object must have a 'write' method"))?;
-        let seek_fn = inner
-            .getattr("seek")
-            .map_err(|_| PyTypeError::new_err("Object must have a 'seek' method"))?;
-        let tell_fn = inner
-            .getattr("tell")
-            .map_err(|_| PyTypeError::new_err("Object must have a 'tell' method"))?;
-        let flush_fn = inner.getattr("flush").ok();
         Ok(Self {
-            write_fn,
-            seek_fn,
-            tell_fn,
-            flush_fn,
+            write_fn: inner
+                .getattr("write")
+                .map_err(|_| PyTypeError::new_err("Object must have a 'write' method"))?,
+            seek_fn: inner
+                .getattr("seek")
+                .map_err(|_| PyTypeError::new_err("Object must have a 'seek' method"))?,
+            tell_fn: inner
+                .getattr("tell")
+                .map_err(|_| PyTypeError::new_err("Object must have a 'tell' method"))?,
+            flush_fn: inner.getattr("flush").ok(),
         })
     }
 }
@@ -408,14 +434,10 @@ impl Write for PyWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let py = self.write_fn.py();
 
-        // SAFETY: We create a read-only memoryview pointing directly into
-        // `buf`. This is sound as long as the memoryview does not outlive
-        // this call - i.e. Python's .write() must not stash a reference to
-        // the memoryview (or a slice of it) beyond returning.
-        //
-        // All standard library IO implementations (FileIO, BufferedWriter,
-        // BytesIO, GzipFile, etc.) consume the buffer immediately. This is
-        // the same contract CPython's own C-level IO code relies on.
+        // SAFETY: A read-only memoryview pointing directly into `buf`. Python's write() must not
+        // keep the memoryview or any view derived from it after returning, the same contract
+        // CPython's BufferedWriter puts on raw.write() (documented in write_array). A view that
+        // holds a buffer export makes release() fail, which is reported as an error below.
         let py_buf: Bound<'_, PyAny> = unsafe {
             Bound::from_owned_ptr_or_err(
                 py,
@@ -428,16 +450,25 @@ impl Write for PyWriter<'_> {
             .map_err(py_to_io_err)?
         };
 
-        let result = self.write_fn.call1((&py_buf,)).map_err(py_to_io_err)?;
+        let result = self.write_fn.call1((&py_buf,));
 
-        // Explicitly release the memoryview before we return, ensuring
-        // Python can't hold a reference into `buf` after this point.
-        // (The refcount drop on `mv` would do this anyway, but
-        // calling .release() makes the invalidation immediate and
-        // deterministic - any stashed reference becomes a dead
-        // memoryview that raises ValueError on access.)
-        let _ = py_buf.call_method0("release");
+        static MEMORY_VIEW_RELEASE_FN: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+        let memory_view_release_fn = MEMORY_VIEW_RELEASE_FN.get_or_init(py, || {
+            py.get_type::<pyo3::types::PyMemoryView>()
+                .getattr("release")
+                .expect("Failed to get memoryview release function")
+                .into()
+        });
+        memory_view_release_fn
+            .bind(py)
+            .call1((&py_buf,))
+            .map_err(|_| {
+                py_to_io_err(PyRuntimeError::new_err(
+                    "write() kept a reference to its buffer after returning",
+                ))
+            })?;
 
+        let result = result.map_err(py_to_io_err)?;
         if result.is_none() {
             return Ok(buf.len());
         }
@@ -496,7 +527,7 @@ impl Seek for PyWriter<'_> {
 
 /// Convert a PyErr into std::io::Error.
 fn py_to_io_err(e: PyErr) -> io::Error {
-    io::Error::other(e.to_string())
+    io::Error::other(e)
 }
 
 #[cfg(test)]

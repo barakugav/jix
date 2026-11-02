@@ -10,7 +10,7 @@ use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
 };
 use crate::util::{dim_arr, strided_span_bytes, DimArray, DimIdx, SendSyncPtr};
-use crate::{Array, ArrayParams, ArrayStorage, DimBitmap, DimDyn, Dimension, IntoDimension};
+use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, IntoDimension};
 
 /// Plain (not-compressed) owned array (type alias).
 pub type PlainArray<T> = Array<Plain<Vec<T>, Ty<T>>>;
@@ -89,10 +89,12 @@ impl<A> Plain<A, TypeDyn> {
     /// * `dtype` - element type descriptor; used for itemsize.
     /// * `params` - this arg never changes how the plain buffer is stored - a `Plain` array is always an
     ///   uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
-    ///   storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
-    ///   codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    ///   storage spec, where they (a) seed arrays derived from this one (e.g. the codec used by
+    ///   [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
     ///   [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
     ///   though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
+    ///   The block shape is ignored, as a plain view has no blocks: pass it to
+    ///   [`Array::compact_with`] instead.
     ///
     /// `data` and `strides` need not be aligned to `dtype.alignment()`: a `Plain` read lends a view
     /// of the caller's own bytes, and per the [`read_data`](ArrayStorage::read_data) contract a lent
@@ -113,6 +115,10 @@ impl<A> Plain<A, TypeDyn> {
     /// * The memory region reachable via `data` and `strides` is valid to
     ///   read for all index combinations in `0..shape[d]` on each dimension
     ///   `d`.
+    /// * Every byte from the first to the last element (the strided span, gaps between elements
+    ///   included) lies in one allocation, and none of it is written, or borrowed through a
+    ///   `&mut`, while the array is read or while a buffer returned by a pull read of it (or of a
+    ///   lazy view over it) is alive.
     pub unsafe fn new(
         allocation: A,
         data: *const u8,
@@ -132,18 +138,15 @@ impl<A> Plain<A, TypeDyn> {
         );
         let strides = dim_arr(ndim, |d| strides[d]);
 
-        if params.block_shape_fixed_dims.is_none() {
-            // A plain view is a strided copy, so no dimension is a fixed block boundary.
-            params.block_shape_fixed_dims = Some(DimBitmap::filled(ndim, false));
-            if params.block_shape.is_none() {
-                params.block_shape(dim_arr(ndim, |_| 1).as_ref());
-            }
-        }
+        params.block_shape = None;
+        params.block_shape_fixed_dims = None;
         let mut spec = params.into_spec(
             shape.as_slice(),
             &dtype,
             ArraySpecFlags::new().set_plain_read(),
         )?;
+        spec.dynamic_mut().block_shape = dim_arr(ndim, |_| 1);
+
         // Layout order by contiguity: the outermost (largest stride) real dim comes first.
         {
             let shape = shape.as_slice();
@@ -226,10 +229,12 @@ impl<T> Array<Plain<Vec<T>, Ty<T>>> {
     ///
     /// The `params` never change how the plain buffer is stored - a `Plain` array is always an
     /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
-    /// storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
-    /// codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    /// storage spec, where they (a) seed arrays derived from this one (e.g. the codec used by
+    /// [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
     /// [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
     /// though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
+    /// The block shape is ignored, as a plain view has no blocks: pass it to
+    /// [`Array::compact_with`] instead.
     ///
     /// # Errors
     ///
@@ -319,10 +324,12 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     ///
     /// The `params` never change how the plain buffer is stored - a `Plain` array is always an
     /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
-    /// storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
-    /// codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    /// storage spec, where they (a) seed arrays derived from this one (e.g. the codec used by
+    /// [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
     /// [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
     /// though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
+    /// The block shape is ignored, as a plain view has no blocks: pass it to
+    /// [`Array::compact_with`] instead.
     ///
     /// # Errors
     ///
@@ -364,10 +371,12 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     ///
     /// The `params` never change how the plain buffer is stored - a `Plain` array is always an
     /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
-    /// storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
-    /// codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    /// storage spec, where they (a) seed arrays derived from this one (e.g. the codec used by
+    /// [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
     /// [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
     /// though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
+    /// The block shape is ignored, as a plain view has no blocks: pass it to
+    /// [`Array::compact_with`] instead.
     pub fn plain_ndarray_view_with<D2>(
         arr: ndarray::ArrayView<'a, T, D2>,
         params: ArrayParams,
@@ -399,10 +408,12 @@ impl<ET> Array<Plain<&(), ET>> {
     /// * `dtype` - element type descriptor; used for itemsize.
     /// * `params` - this arg never changes how the plain buffer is stored - a `Plain` array is always an
     ///   uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
-    ///   storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
-    ///   codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    ///   storage spec, where they (a) seed arrays derived from this one (e.g. the codec used by
+    ///   [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
     ///   [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
     ///   though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
+    ///   The block shape is ignored, as a plain view has no blocks: pass it to
+    ///   [`Array::compact_with`] instead.
     ///
     /// # Safety
     ///
@@ -411,6 +422,10 @@ impl<ET> Array<Plain<&(), ET>> {
     /// * The memory region reachable via `data_ptr` and `strides` is valid to read for all index combinations in
     ///   `0..shape[d]` on each dimension `d`.
     /// * Elements accessed by the data pointer must be valid for the specified `dtype`.
+    /// * Every byte from the first to the last element (the strided span, gaps between elements
+    ///   included) lies in one allocation, and none of it is written, or borrowed through a
+    ///   `&mut`, while the array is read or while a buffer returned by a pull read of it (or of a
+    ///   lazy view over it) is alive.
     pub unsafe fn plain_ndarray_ptr(
         data_ptr: *const u8,
         shape: impl IntoDimension,
@@ -514,10 +529,11 @@ fn shape_from_ndarray(shape: &[usize]) -> Result<DimDyn> {
 }
 
 fn strides_from_ndarray<T>(shape: &[usize], strides: &[isize]) -> Result<DimArray<usize>> {
+    let empty = shape.contains(&0);
     std::iter::zip(shape, strides)
         .map(|(&len, &s)| {
-            if len <= 1 {
-                return Ok(size_of::<T>()); // allow any stride on 0 or 1 len dim
+            if len <= 1 || empty {
+                return Ok(size_of::<T>()); // no element is addressed through this stride
             }
             let s = usize::try_from(s)
                 .map_err(|_| error!(InvalidArgument, "Negative strides are not supported"))?;
@@ -580,6 +596,24 @@ mod tests {
         owned.invert_axis(ndarray::Axis(0));
         let a = Array::plain_ndarray(owned).unwrap();
         assert_eq!(a.to_ndarray().unwrap(), array![[1, 2, 3]]);
+
+        // A zero-element array addresses no element, any stride is fine.
+        let empty = base.slice(s![..0, ..;-1]);
+        let a = Array::plain_ndarray_view(empty).unwrap();
+        assert_eq!(a.shape(), &[0, 3]);
+    }
+
+    #[test]
+    fn explicit_block_shape_is_ignored() {
+        let data = ndarray::Array2::<f32>::zeros((256, 256));
+        let mut params = crate::ArrayParams::new();
+        params.block_shape(&[64, 64]);
+        let a = Array::plain_ndarray_view_with(data.view(), params).unwrap();
+        let b = Array::plain_ndarray_view(data.view()).unwrap();
+        assert_eq!(
+            crate::ArrayStorage::spec(a.storage()).block_shape()[..],
+            crate::ArrayStorage::spec(b.storage()).block_shape()[..]
+        );
     }
 
     // plain_ndarray (owned)

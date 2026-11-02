@@ -125,6 +125,7 @@ macro_rules! define_op2 {
         $(#[$meta:meta])* $name:ident,
         $core_op:ident,
         dispatch = { $($dispatch:tt)* }
+        $(, $option:ident = $option_val:expr)*
     ) => {
         $(#[$meta])*
         #[pyo3::pyfunction]
@@ -140,6 +141,7 @@ macro_rules! define_op2 {
                         $($dispatch)*
                     ),
                 )
+                $(.$option($option_val))*
             });
 
             let a = crate::ops::common::Operand::from_any(a)?;

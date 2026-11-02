@@ -112,6 +112,9 @@ def test_negative_strides_raise_value_error(fn):
     x = np.arange(3).reshape(1, 3)[::-1]
     np.testing.assert_array_equal(fn(x).numpy(), x)
     np.testing.assert_array_equal((jix.asarray(np.ones((1, 3))) + x).numpy(), x + 1)
+    # A zero-element array addresses no element, any stride is fine.
+    x = np.arange(6).reshape(2, 3)[:0, ::-1]
+    assert fn(x).numpy().shape == (0, 3)
 
 
 # ---------------------------------------------------------------------------
@@ -158,13 +161,42 @@ def _serialized():
 
 
 def test_reader_returning_too_many_bytes():
-    with pytest.raises(RuntimeError, match="read"):
+    with pytest.raises(OSError, match="read"):
         jix.read_array(_OverReader(_serialized()))
 
 
 def test_writer_reporting_too_many_bytes():
-    with pytest.raises(RuntimeError, match="write"):
+    with pytest.raises(OSError, match="write"):
         jix.write_array(_array(), _OverWriter())
+
+
+class _Interrupted(Exception):
+    pass
+
+
+def test_file_like_exceptions_keep_their_type():
+    class Reader(io.BytesIO):
+        def read(self, size=-1):
+            raise _Interrupted
+
+    class Writer(io.BytesIO):
+        calls = 0
+
+        def write(self, data):
+            Writer.calls += 1
+            raise _Interrupted
+
+    with pytest.raises(_Interrupted):
+        jix.read_array(Reader(_serialized()))
+    with pytest.raises(_Interrupted):
+        jix.write_array(_array(), Writer())
+    assert Writer.calls == 1
+
+
+def test_missing_file_raises_os_error(tmp_path):
+    for kwargs in [{}, {"len": 10}]:
+        with pytest.raises(FileNotFoundError if not kwargs else OSError):
+            jix.read_array(tmp_path / "missing.jix", **kwargs)
 
 
 @pytest.mark.parametrize(

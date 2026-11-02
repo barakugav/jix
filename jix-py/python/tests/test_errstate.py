@@ -4,6 +4,8 @@ integer power and wrapping integer arithmetic. Mirrors the tests in jix/src/ops/
 jix/src/ops/op2.rs.
 """
 
+import asyncio
+import io
 import sys
 import threading
 import warnings
@@ -176,6 +178,31 @@ def test_modes_are_per_thread():
         thread.start()
         thread.join()
     assert seen == [DEFAULT_MODES]
+
+
+def test_modes_are_per_asyncio_task():
+    async def worker(mode, entered, leave, seen):
+        with jix.errstate(divide=mode):
+            entered.set()
+            await leave.wait()
+            seen.append(jix.geterr()["divide"])
+
+    async def main():
+        e1, l1, e2, l2 = (asyncio.Event() for _ in range(4))
+        seen = []
+        t1 = asyncio.create_task(worker("ignore", e1, l1, seen))
+        await e1.wait()
+        t2 = asyncio.create_task(worker("warn", e2, l2, seen))
+        await e2.wait()
+        # the block entered first exits first
+        l1.set()
+        await t1
+        l2.set()
+        await t2
+        return seen
+
+    assert asyncio.run(main()) == ["ignore", "warn"]
+    assert jix.geterr() == DEFAULT_MODES
 
 
 @pytest.mark.parametrize("jix_fn", _INT_DIVISIONS, ids=lambda f: f.__name__)
@@ -413,3 +440,18 @@ def test_arithmetic_wraps_like_numpy(dtype):
         np.testing.assert_array_equal(jix.absolute(za).numpy(), np.absolute(a))
         if np.issubdtype(dtype, np.signedinteger):
             np.testing.assert_array_equal(jix.negative(za).numpy(), np.negative(a))
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        lambda x: x.numpy(),
+        jix.compact,
+        lambda x: jix.write_array(x, io.BytesIO()),
+    ],
+)
+def test_warnings_are_emitted_when_the_read_raises(read):
+    a, b = jix.compact(np.array([1e308, 0.0])), jix.compact(np.array([0.5, 0.0]))
+    modes = jix.errstate(over="warn", invalid="raise", divide="ignore")
+    with modes, pytest.warns(RuntimeWarning), pytest.raises(FloatingPointError):
+        read(a / b)

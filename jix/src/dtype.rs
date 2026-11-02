@@ -128,6 +128,8 @@ pub type Itemsize = u16;
 ///
 /// Note this is not the shape of the array, but rather the inner shape of a dtype.
 pub const DTYPE_NDIM_MAX: usize = 4;
+
+pub(crate) const DTYPE_NESTING_MAX: usize = 32;
 type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 
 /// Runtime descriptor of an element type: captures all layout information needed to interpret
@@ -655,6 +657,16 @@ impl Dtype {
         fields: &[(Cow<'static, str>, Itemsize, Dtype)],
         itemsize: Itemsize,
     ) -> Result<()> {
+        let depth = 1 + fields
+            .iter()
+            .map(|(_, _, d)| d.nesting_depth())
+            .max()
+            .unwrap_or(0);
+        ensure!(
+            depth <= DTYPE_NESTING_MAX,
+            InvalidArgument,
+            "struct dtype is nested {depth} levels, more than the maximum {DTYPE_NESTING_MAX}"
+        );
         let mut seen_names = HashSet::new();
         let mut expected_offset: Itemsize = 0;
         for (name, offset, dtype) in fields {
@@ -667,7 +679,8 @@ impl Dtype {
                 *offset == expected_offset,
                 InvalidArgument,
                 "struct dtype field `{name}` is at offset {offset}, expected {expected_offset}: \
-                 padding between fields is not supported, add an explicit padding field instead"
+                 fields must be given in offset order, \
+                 and padding between fields is not supported, add an explicit padding field instead"
             );
             expected_offset = expected_offset
                 .checked_add(dtype.itemsize())
@@ -723,6 +736,17 @@ impl Dtype {
             DtypeInner::StructOwned { fields, .. } => Some(fields),
             DtypeInner::StructBorrowed { fields, .. } => Some(fields),
         }
+    }
+
+    /// The struct nesting depth: 0 for a scalar, 1 + the deepest field for a struct.
+    pub(crate) fn nesting_depth(&self) -> usize {
+        self.fields().map_or(0, |fields| {
+            1 + fields
+                .iter()
+                .map(|(_, _, d)| d.nesting_depth())
+                .max()
+                .unwrap_or(0)
+        })
     }
 
     /// Get the shape of the dtype.
@@ -1207,7 +1231,7 @@ unsafe impl<T: Dtyped, const N: usize> Dtyped for [T; N] {
             "Dtyped is not supported for arrays of zero-sized types"
         );
         assert!(
-            N < Itemsize::MAX as usize,
+            N <= Itemsize::MAX as usize,
             "Array size exceeds maximum supported dtype shape size of Itemsize::MAX"
         );
         let n = N as Itemsize;
@@ -1947,6 +1971,13 @@ mod tests {
     fn set_shape_overflow_errors() {
         let mut d = u8::DTYPE;
         assert!(d.set_shape(&[Itemsize::MAX, Itemsize::MAX]).is_err());
+    }
+
+    #[test]
+    fn dtyped_array_of_max_len() {
+        let mut d = u8::DTYPE;
+        d.set_shape(&[Itemsize::MAX]).unwrap();
+        assert_eq!(<[u8; Itemsize::MAX as usize]>::DTYPE, d);
     }
 
     // ---- Zero-itemsize dtypes ----

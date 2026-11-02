@@ -3,6 +3,7 @@ use jix_core::scalar::{f16, Complex};
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
 
+use crate::type_hint::Dim;
 use crate::util::DimArray;
 
 fn keepdim_after_multi_reduction(
@@ -41,7 +42,7 @@ macro_rules! define_reduction_op {
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-            dim: Option<crate::util::ItemOrTuple<i32>>,
+            dim: Option<crate::util::ItemOrTuple<Dim>>,
             keepdim: bool,
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
@@ -91,7 +92,7 @@ macro_rules! define_reduction_op {
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-            dim: Option<i32>,
+            dim: Option<Dim>,
             keepdim: bool,
         ) -> pyo3::PyResult<crate::Array> {
             struct DispatchArgs {

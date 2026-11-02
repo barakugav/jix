@@ -280,7 +280,15 @@ where
     /// ```
     pub fn write_to_file(&self, path: &Path) -> Result<()> {
         let writer = BufWriter::new(std::fs::File::create_new(path).map_err(Error::io)?);
-        self.write_to(writer)
+        let result = self.write_to(writer);
+        if result.is_err() {
+            // Don't leave a partial archive behind
+            let revert_result = std::fs::remove_file(path);
+            if let Err(err) = revert_result {
+                eprintln!("Error cleaning up partial archive: {err}");
+            }
+        }
+        result
     }
 
     /// Write the array to a generic writer.
@@ -575,6 +583,53 @@ mod tests {
     use crate::util::{arr_params, carray_strategy_any};
     use crate::{ArchiveValidation, Array, ArrayParams, Dimension, IntoDimension, Ty};
     use crate::{ArrayStorage, TypeDyn};
+
+    #[test]
+    fn read_back_to_back_archives() {
+        let a = Array::compact_ndarray(&ndarray::array![1i32, 2, 3]).unwrap();
+        let b = Array::compact_ndarray(&ndarray::array![4i64, 5]).unwrap();
+        let mut buf = Cursor::new(Vec::new());
+        a.write_to(&mut buf).unwrap();
+        b.write_to(&mut buf).unwrap();
+        buf.rewind().unwrap();
+        let read = |buf: &mut Cursor<Vec<u8>>| {
+            Array::read_from_reader(buf, None, ArrayParams::new(), ArchiveValidation::Strict)
+        };
+        let a2 = read(&mut buf).unwrap().into_typed::<i32>().unwrap();
+        let b2 = read(&mut buf).unwrap().into_typed::<i64>().unwrap();
+        assert_eq!(
+            a2.to_ndarray().unwrap(),
+            ndarray::array![1, 2, 3].into_dyn()
+        );
+        assert_eq!(b2.to_ndarray().unwrap(), ndarray::array![4, 5].into_dyn());
+    }
+
+    #[test]
+    fn deepest_struct_dtype_round_trips() {
+        use crate::dtype::{Dtype, DTYPE_NESTING_MAX};
+        let mut dtype = u8::DTYPE;
+        for _ in 0..DTYPE_NESTING_MAX {
+            dtype = Dtype::from_fields(vec![("f".to_string(), 0, dtype)]).unwrap();
+        }
+        assert!(Dtype::from_fields(vec![("f".to_string(), 0, dtype.clone())]).is_err());
+
+        let data = [7u8; 4];
+        let a: Array<crate::storage::Plain<&(), TypeDyn>> = unsafe {
+            Array::plain_ndarray_ptr(data.as_ptr(), [4], &[1], dtype.clone(), ArrayParams::new())
+                .unwrap()
+        };
+        let mut buf = Cursor::new(Vec::new());
+        a.write_to(&mut buf).unwrap();
+        let len = buf.get_ref().len() as u64;
+        buf.rewind().unwrap();
+        let b = Array::read_from_reader(
+            buf,
+            Some(len),
+            ArrayParams::new(),
+            ArchiveValidation::Strict,
+        );
+        assert_eq!(b.unwrap().dtype(), &dtype);
+    }
 
     /// Writes `a`, edits its array and block table headers, and reads the result back.
     fn read_edited<S: ArrayStorage>(

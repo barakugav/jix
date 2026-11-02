@@ -2,6 +2,7 @@
 flatten, reshape, broadcast, permute_dims, squeeze/unsqueeze, insert_dim/remove_dim,
 read_array/write_array."""
 
+import operator
 import tempfile
 from pathlib import Path
 
@@ -86,6 +87,11 @@ def test_python_ints_are_range_checked_at_the_dtype(fn):
     np.testing.assert_array_equal(fn([0, 255], np.uint8).numpy(), [0, 255])
     # Typed values are cast, wrapping like numpy's astype.
     assert fn(np.int64(300), np.uint8).numpy() == 44
+    # Typed scalars are cast like 0-d arrays of the same type.
+    for value, dtype in [(np.float64(-1.5), np.uint8), (np.float32(1e10), np.int32)]:
+        assert fn(value, dtype).numpy() == fn(np.array(value), dtype).numpy()
+    with pytest.raises(TypeError):
+        fn(np.complex128(1 + 2j), np.float64)
 
 
 # ---------------------------------------------------------------------------
@@ -1132,3 +1138,22 @@ def test_tile_large_reps():
     a = jix.compact(arr)
     r = jix.tile(a, 7)
     np.testing.assert_array_equal(r.numpy(), np.tile(arr, 7))
+
+
+def test_binary_ops_return_not_implemented_for_operands_that_opt_out():
+    a = jix.compact(np.array([1, 2]))
+    names = ["add", "sub", "mul", "truediv", "floordiv", "mod", "pow", "and", "or", "xor", "lshift", "rshift"]
+    # Each reflected op returns its own name, so the result shows Python fell back to it
+    reflected = {f"__r{name}__": lambda self, other, name=name: f"r{name}" for name in names}
+    OptsOut = type("OptsOut", (), {"__array_ufunc__": None, "__gt__": lambda self, other: "gt", **reflected})
+
+    for name in names:
+        op = getattr(operator, f"{name}_" if name in ("and", "or") else name)
+        assert op(a, OptsOut()) == f"r{name}"
+    assert (a < OptsOut()) == "gt"
+    assert (a == OptsOut()) is False
+    # The reflected ops of jix opt out too, OptsOut has no __sub__
+    with pytest.raises(TypeError):
+        OptsOut() - a
+    np.testing.assert_array_equal((a + [1, 1]).numpy(), [2, 3])
+    np.testing.assert_array_equal((a + np.array([1, 1])).numpy(), [2, 3])

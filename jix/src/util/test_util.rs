@@ -39,7 +39,7 @@ use proptest::strategy::BoxedStrategy;
 
 /// Proptest strategies for scalar types used across test modules.
 ///
-/// - `any_strategy()`: full domain (used for codec roundtrip tests).
+/// - `any_strategy()`: full domain, finite only for floats (used for codec roundtrip tests).
 /// - `op_safe_strategy()`: bounded range that avoids overflow when values are
 ///   combined arithmetically (used for op2, cast tests). For integer types,
 ///   values are small and positive so that e.g. `a = a_extra + b` still fits
@@ -242,7 +242,10 @@ impl ScalarStrategy for i64 {
 #[cfg(feature = "half")]
 impl ScalarStrategy for crate::scalar::f16 {
     fn any_strategy() -> BoxedStrategy<Self> {
-        any::<f32>().prop_map(crate::scalar::f16::from_f32).boxed()
+        any::<u16>()
+            .prop_map(crate::scalar::f16::from_bits)
+            .prop_filter("finite", |x| x.is_finite())
+            .boxed()
     }
 
     fn maybe_non_finite_strategy() -> BoxedStrategy<Self> {
@@ -305,7 +308,15 @@ impl ScalarStrategy for f32 {
         (1..=(100 * 100)).prop_map(|x| (x as f32) / 100.0).boxed()
     }
     fn comparable_strategy() -> BoxedStrategy<Self> {
-        prop_oneof![Just(0.0f32), Just(1.0f32), Just(2.4f32), Just(f32::NAN)].boxed()
+        prop_oneof![
+            Just(0.0f32),
+            Just(-0.0f32),
+            Just(1.0f32),
+            Just(2.4f32),
+            Just(f32::INFINITY),
+            Just(f32::NAN)
+        ]
+        .boxed()
     }
 }
 impl ScalarStrategy for f64 {
@@ -342,16 +353,27 @@ impl ScalarStrategy for f64 {
     }
 
     fn comparable_strategy() -> BoxedStrategy<Self> {
-        prop_oneof![Just(0.0f64), Just(1.0f64), Just(2.4f64), Just(f64::NAN)].boxed()
+        prop_oneof![
+            Just(0.0f64),
+            Just(-0.0f64),
+            Just(1.0f64),
+            Just(2.4f64),
+            Just(f64::INFINITY),
+            Just(f64::NAN)
+        ]
+        .boxed()
     }
 }
 impl ScalarStrategy for crate::scalar::bool8 {
     fn any_strategy() -> BoxedStrategy<Self> {
-        any::<bool>().prop_map(crate::scalar::bool8::from).boxed()
+        // Any non-zero byte is true, as read from a file or a NumPy buffer
+        prop_oneof![Just(0u8), Just(1u8), Just(2u8), Just(0x80u8), Just(0xFFu8)]
+            .prop_map(crate::scalar::bool8)
+            .boxed()
     }
 
     fn op_safe_non_zero_strategy() -> BoxedStrategy<Self> {
-        Just(crate::scalar::bool8::TRUE).boxed()
+        (1u8..=255).prop_map(crate::scalar::bool8).boxed()
     }
 }
 
@@ -884,8 +906,9 @@ pub(crate) fn sub_range_strategy(shape: &[u64]) -> BoxedStrategy<Vec<Range<u64>>
 }
 
 /// Asserts that `actual` contains the same values as `expected`, comparing each
-/// element bit-for-bit. Checks the full array first, then 16 random sub-ranges
-/// via `to_ndarray_sub`.
+/// element with `==`: +0.0 equals -0.0, a NaN never matches, and a `bool8` compares
+/// by truth value. Checks the full array first, then 16 random sub-ranges via
+/// `to_ndarray_sub`.
 ///
 /// Use [`assert_array_matches_approx`] for results of order-dependent
 /// floating-point arithmetic (e.g. reductions), where exact equality is too
@@ -1352,7 +1375,7 @@ macro_rules! impl_simd_test_values_int {
 }
 impl_simd_test_values_int!(i8, i16, i32, i64, u8, u16, u32, u64);
 
-/// Whether `a` and `b` are equal, NaNs included.
+/// Whether `a` and `b` are equal (`==`, so +0.0 equals -0.0), NaNs included.
 #[allow(clippy::eq_op)]
 pub(crate) fn same_value<T: PartialEq>(a: &T, b: &T) -> bool {
     a == b || (a != a && b != b)
@@ -1372,8 +1395,10 @@ pub(crate) fn assert_same_elements<T: PartialEq + Debug, const N: usize>(
 }
 
 /// Assert `storage.read_data` rejects an index with the wrong number of dims, a range past the end
-/// of a dim, and a reversed range with [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex), in
-/// both pull and push mode, rather than panicking or reading.
+/// of a dim, a reversed range and huge range bounds with
+/// [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex), in both pull and push mode, rather
+/// than panicking or reading. Each bad range is also tried next to a valid empty range in another
+/// dim, which must not skip the validation.
 #[track_caller]
 #[allow(clippy::reversed_empty_ranges, clippy::single_range_in_vec_init)]
 pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
@@ -1384,14 +1409,33 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
     let shape = storage.shape().to_vec();
     let ndim = shape.len();
     let full = shape.iter().map(|&len| 0..len).collect::<Vec<_>>();
-    let mut invalid = vec![full.iter().cloned().chain([0..1]).collect::<Vec<_>>()];
+    let mut invalid = vec![
+        full.iter().cloned().chain([0..1]).collect::<Vec<_>>(),
+        vec![0..1; crate::NDIM_MAX + 1],
+    ];
+    if ndim > 0 {
+        invalid.push(full[..ndim - 1].to_vec());
+    }
     for d in 0..ndim {
-        let mut past_end = full.clone();
-        past_end[d] = 0..shape[d] + 1;
-        invalid.push(past_end);
-        let mut reversed = full.clone();
-        reversed[d] = 1..0;
-        invalid.push(reversed);
+        let len = shape[d];
+        let bad_ranges = [
+            0..len + 1,
+            len + 1..len + 1,
+            1..0,
+            u64::MAX..u64::MAX,
+            u64::MAX..0,
+            0..u64::MAX,
+            len..u64::MAX,
+        ];
+        for range in bad_ranges {
+            let mut index = full.clone();
+            index[d] = range;
+            invalid.push(index.clone());
+            if ndim > 1 {
+                index[(d + 1) % ndim] = 0..0;
+                invalid.push(index);
+            }
+        }
     }
 
     // A destination large enough for one extra element in every dim, in case a read writes before
@@ -1425,5 +1469,38 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
             ErrorKind::InvalidIndex,
             "push {index:?} for {shape:?}: {err}"
         );
+    }
+}
+
+#[test]
+fn every_storage_rejects_invalid_indices() {
+    use crate::__private::Scalar;
+
+    for shape in [vec![2usize, 3, 4], vec![2, 0, 3], vec![]] {
+        let n = shape.iter().product::<usize>() as i32;
+        let data = ndarray::ArrayD::from_shape_vec(IxDyn(&shape), (0..n).collect()).unwrap();
+        let a = Array::compact_ndarray(&data).unwrap();
+        let plain = Array::plain_ndarray_view(data.view()).unwrap();
+        let shape = shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
+        let scalar =
+            Array::from_storage(Scalar::new(1i32, shape.as_slice(), ArrayParams::new()).unwrap());
+
+        assert_read_rejects_invalid_index(a.storage());
+        assert_read_rejects_invalid_index(plain.storage());
+        assert_read_rejects_invalid_index(scalar.storage());
+        assert_read_rejects_invalid_index((-a.view()).storage());
+        assert_read_rejects_invalid_index((a.view() + plain.view()).storage());
+        assert_read_rejects_invalid_index(a.view().cast::<f64>().storage());
+        assert_read_rejects_invalid_index(a.view().equal(scalar.view()).storage());
+        assert_read_rejects_invalid_index(a.view().map(|x: i32| x + 1).storage());
+        let broadcast_shape = [[2].as_slice(), &shape].concat();
+        assert_read_rejects_invalid_index(
+            a.view().insert_dim(0).broadcast(&broadcast_shape).storage(),
+        );
+        assert_read_rejects_invalid_index(a.view().insert_dim(0).storage());
+        if !shape.is_empty() {
+            assert_read_rejects_invalid_index(a.view().sum(0).storage());
+            assert_read_rejects_invalid_index(a.view().flip(0).storage());
+        }
     }
 }

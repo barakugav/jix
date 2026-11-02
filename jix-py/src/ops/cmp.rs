@@ -58,7 +58,8 @@ define_op2!(
             Complex<f32>, Complex<f64>, bool8
         ],
         Safe
-    }
+    },
+    cast_untyped_float_to_f64 = true
 );
 
 define_op2!(
@@ -101,7 +102,8 @@ define_op2!(
             Complex<f32>, Complex<f64>, bool8
         ],
         Safe
-    }
+    },
+    cast_untyped_float_to_f64 = true
 );
 
 define_op2!(
@@ -141,7 +143,8 @@ define_op2!(
     dispatch = {
         [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool8],
         Safe
-    }
+    },
+    cast_untyped_float_to_f64 = true
 );
 
 define_op2!(
@@ -181,7 +184,8 @@ define_op2!(
     dispatch = {
         [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool8],
         Safe
-    }
+    },
+    cast_untyped_float_to_f64 = true
 );
 
 define_op2!(
@@ -221,7 +225,8 @@ define_op2!(
     dispatch = {
         [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool8],
         Safe
-    }
+    },
+    cast_untyped_float_to_f64 = true
 );
 
 define_op2!(
@@ -261,7 +266,8 @@ define_op2!(
     dispatch = {
         [u8, i8, u16, i16, u32, i32, u64, i64, (u64, i64), (i64, u64), f16, f32, f64, bool8],
         Safe
-    }
+    },
+    cast_untyped_float_to_f64 = true
 );
 
 define_op2!(
@@ -607,6 +613,7 @@ pub fn isclose<'py>(
                 complex_descriptor::<f64>(),
             ],
         )
+        .cast_untyped_float_to_f64(true)
     });
 
     let rtol_scalar = Scalar::from_any(rtol)?;

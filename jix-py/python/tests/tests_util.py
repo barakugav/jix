@@ -163,6 +163,15 @@ def op_safe_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     }[dtype]
 
 
+def _compact(draw, np_a: np.ndarray, block_shape) -> jix.Array:
+    """jix.compact of np_a. A bool array is stored with random non-zero bytes for True, which jix must
+    read as True like any other non-zero byte."""
+    if np_a.dtype == np.bool_:
+        true_bytes = draw(np_arrays(np.uint8, np_a.shape, elements=st.sampled_from([1, 2, 0x80, 0xFF])))
+        np_a = np.where(np_a, true_bytes, 0).astype(np.uint8).view(np.bool_)
+    return jix.compact(np_a, params={"block_shape": block_shape})
+
+
 @st.composite
 def carray_strategy(draw, dtype: np.dtype, element_st=None):
     """
@@ -178,7 +187,7 @@ def carray_strategy(draw, dtype: np.dtype, element_st=None):
     block_shape = draw(st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape")
     # A block dim may not exceed its array dim (validation requires 1 <= block <= max(shape, 1)).
     block_shape = [min(b, max(s, 1)) for b, s in zip(block_shape, shape)]
-    za = jix.compact(np_a, params={"block_shape": block_shape})
+    za = _compact(draw, np_a, block_shape)
     return np_a, za
 
 
@@ -261,8 +270,8 @@ def carrays2_mixed_strategy(draw, dtype_a: np.dtype, dtype_b: np.dtype, element_
     block_shape_a = [min(b, max(s, 1)) for b, s in zip(block_shape_a, shape)]
     block_shape_b = [min(b, max(s, 1)) for b, s in zip(block_shape_b, shape)]
 
-    za = jix.compact(np_a, params={"block_shape": block_shape_a})
-    zb = jix.compact(np_b, params={"block_shape": block_shape_b})
+    za = _compact(draw, np_a, block_shape_a)
+    zb = _compact(draw, np_b, block_shape_b)
 
     return (np_a, za), (np_b, zb)
 
@@ -271,11 +280,10 @@ def carrays2_mixed_strategy(draw, dtype_a: np.dtype, dtype_b: np.dtype, element_
 def sub_range_strategy(draw, shape: tuple):
     """
     Random sub-range (tuple of slices) for an array of the given shape.
-    jix requires 0 <= start < size, so only call this when all dims are non-zero.
     """
     slices = []
     for size in shape:
-        start = draw(st.integers(0, size - 1), label="sub_range_start")
+        start = draw(st.integers(0, size), label="sub_range_start")
         stop = draw(st.integers(start, size), label="sub_range_stop")
         slices.append(slice(start, stop))
     return tuple(slices)
@@ -290,20 +298,20 @@ def assert_array_matches(
     atol: float = 0.0,
 ):
     """
-    Assert actual matches expected for the full array. When data is provided
-    (from @given(st.data())), also checks one random sub-range.
+    Assert actual matches expected, shape and dtype included, for the full array. When data is
+    provided (from @given(st.data())), also checks a few random sub-ranges.
     Mirrors Rust's assert_array_matches().
     """
 
     def assert_arr_equal(a, b):
-        np.testing.assert_allclose(a, b, rtol=rtol, atol=atol)
+        np.testing.assert_allclose(a, b, rtol=rtol, atol=atol, strict=True)
 
     assert_arr_equal(actual.numpy(), expected)
 
-    # jix rejects slice(0, 0) on zero-length dimensions; skip sub-range for those.
-    if data is not None and actual.shape and all(s > 0 for s in actual.shape):
-        sub_idx = data.draw(sub_range_strategy(actual.shape), label="sub_range")
-        assert_arr_equal(actual[sub_idx], expected[sub_idx])
+    if data is not None and actual.shape:
+        for _ in range(4):
+            sub_idx = data.draw(sub_range_strategy(actual.shape), label="sub_range")
+            assert_arr_equal(actual[sub_idx], expected[sub_idx])
 
 
 def check_op1_concrete(jix_fn, ref_fn, cases, *, rtol=0.0, atol=0.0):

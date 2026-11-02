@@ -113,12 +113,23 @@ def _out_dtype(dtype):
     return np.float64
 
 
+def _result_dtype(dtype):
+    """Dtype of jix's sum and product: 64-bit for ints and bool, the input dtype for floats."""
+    if np.issubdtype(dtype, np.signedinteger):
+        return np.int64
+    if np.issubdtype(dtype, np.unsignedinteger) or dtype == np.bool_:
+        return np.uint64
+    return dtype
+
+
 def _sum_ref(np_a, dim, keepdim, dtype):
-    return np.sum(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdim)
+    out = np.sum(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdim)
+    return out.astype(_result_dtype(dtype))
 
 
 def _prod_ref(np_a, dim, keepdim, dtype):
-    return np.prod(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdim)
+    out = np.prod(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdim)
+    return out.astype(_result_dtype(dtype))
 
 
 def _element_st(dtype):
@@ -352,9 +363,10 @@ def test_product_concrete():
 @given(st.data())
 def test_mean(dtype: np.dtype, data: DataObject):
     np_a, za, dim, keepdim = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
+    out_dtype = np.float64 if np.issubdtype(dtype, np.integer) or dtype == np.bool_ else dtype
     assert_array_matches(
         jix.mean(za, dim=dim, keepdim=keepdim),
-        np.mean(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdim),
+        np.mean(np_a.astype(_out_dtype(dtype)), axis=_np_dim(dim), keepdims=keepdim).astype(out_dtype),
         data=data,
         rtol=1e-3,
     )
@@ -384,7 +396,7 @@ def test_var_concrete():
         for dim in (0, 1, None):
             assert_array_matches(
                 jix.var(za, dim=dim, ddof=0.0),
-                np.var(np_a.astype(np.float64), axis=_np_dim(dim), ddof=0),
+                np.var(np_a.astype(np.float64), axis=_np_dim(dim), ddof=0).astype(np.var(np_a).dtype),
                 rtol=1e-3,
                 # atol covers near-zero cases where the true variance is 0 but numpy
                 # accumulates a tiny FP error (e.g. all-equal elements like
@@ -399,7 +411,7 @@ def test_std_concrete():
         for dim in (0, 1, None):
             assert_array_matches(
                 jix.std(za, dim=dim, ddof=0.0),
-                np.std(np_a.astype(np.float64), axis=_np_dim(dim), ddof=0),
+                np.std(np_a.astype(np.float64), axis=_np_dim(dim), ddof=0).astype(np.std(np_a).dtype),
                 rtol=1e-3,
                 atol=1e-10,
             )

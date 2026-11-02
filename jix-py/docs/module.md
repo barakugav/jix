@@ -185,5 +185,4 @@ disk.
 # Limits
 
 - Maximum array dimensions: 8.
-- Maximum inner-shape dimensions for dtypes: 4.
 - Little-endian platforms only.
