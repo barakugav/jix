@@ -785,6 +785,45 @@ impl Array {
         self.numpy(index.py(), Some(index), None)
     }
 
+    /// Converts the array to a NumPy array; the hook behind `np.asarray(a)` and `np.array(a)`.
+    ///
+    /// Reads the whole array via `numpy()`, so the result is always a new allocation.
+    ///
+    /// Args:
+    ///     dtype: If given, the result is cast to this dtype.
+    ///     copy: `None` or `True` are accepted. `False` raises, since the data is always copied.
+    ///
+    /// Returns:
+    ///     A NumPy array with the same shape as `self`.
+    ///
+    /// Raises:
+    ///     ValueError: `copy=False`.
+    #[pyo3(signature = (dtype=None, copy=None))]
+    pub fn __array__<'py>(
+        &self,
+        py: Python<'py>,
+        dtype: Option<&Bound<'py, PyAny>>,
+        copy: Option<bool>,
+    ) -> PyResult<NdArray<'py>> {
+        if copy == Some(false) {
+            return Err(PyValueError::new_err(
+                "a jix Array cannot be converted to a NumPy array without a copy",
+            ));
+        }
+
+        let mut arr = self.numpy(py, None, None)?;
+
+        if let Some(dtype) = dtype {
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("copy", false)?;
+            arr.0 = arr
+                .call_method("astype", (dtype,), Some(&kwargs))?
+                .cast_into()?;
+        }
+
+        return Ok(arr);
+    }
+
     /// Copies the data of an array into a new compact array by compressing it into new blocks. See [`jix.compact()`][jix.compact].
     #[pyo3(signature = (*, params=None))]
     pub fn compact<'py>(
