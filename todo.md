@@ -1,6 +1,5 @@
 - compress offsets array
 - use multiple threads for reads
-- ArrayParams stream syntax
 - resolve TODOs across the repo
 - add read benchmark of the whole array, also for low entropy data
 - optimize reshape and its flags propagation

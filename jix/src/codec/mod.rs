@@ -520,9 +520,9 @@ mod tests {
         use crate::{Array, ArrayParams};
 
         let nd = ndarray::Array2::from_shape_fn((16, 16), |(i, j)| (i * 16 + j) as i32);
-        let mut params = ArrayParams::new();
-        params.block_shape(&[4, 4]);
-        params
+        let params = ArrayParams::new()
+            .block_shape(&[4, 4])
+            .unwrap()
             .filters(&[Filter::ByteShuffle, Filter::BitShuffle])
             .unwrap();
 

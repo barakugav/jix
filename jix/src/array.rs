@@ -248,9 +248,7 @@ impl<T> Array<Compact<Ty<T>>> {
     /// let data = ndarray::Array2::<f32>::zeros((512, 512));
     ///
     /// // Store with 64*64 blocks - good for tile-at-a-time access patterns.
-    /// let mut params = ArrayParams::new();
-    /// params.block_shape(&[64, 64]);
-    /// let array = Array::compact_ndarray_with(&data, params)?;
+    /// let array = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[64, 64])?)?;
     ///
     /// // Read tiles of 128*128 by decompressing 2*2 blocks at a time.
     /// let context = array.read_ctx();
@@ -400,8 +398,7 @@ impl<T> Array<Compact<Ty<T>>> {
     ///
     /// ```
     /// # use jix::{Array, ArrayParams};
-    /// let mut params = ArrayParams::new();
-    /// params.block_shape(&[64, 64]);
+    /// let params = ArrayParams::new().block_shape(&[64, 64])?;
     ///
     /// let a = Array::compact_fn_with((256, 256), params, |(x, y)| (x as f32) * 0.5 + (y as f32))?;
     /// assert_eq!(a.shape(), &[256, 256]);
@@ -715,9 +712,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// // 256x256 f32 array stored as 32x32 blocks.
     /// let data = ndarray::Array2::<f32>::from_shape_fn((256, 256), |(i, j)| (i + j) as f32);
-    /// let mut params = ArrayParams::new();
-    /// params.block_shape(&[32, 32]);
-    /// let a = Array::compact_ndarray_with(&data, params)?;
+    /// let a = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[32, 32])?)?;
     ///
     /// // Walk the array as 64x64 tiles. 32 divides 64, so each call decompresses exactly
     /// // 2*2 = 4 blocks - no boundary waste. The same ReadContext is reused across all
@@ -1209,15 +1204,12 @@ impl<S: ArrayStorage> Array<S> {
     /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
-    /// let mut a_params = ArrayParams::default();
-    /// a_params.block_shape(&[1, 2]);
+    /// let a_params = ArrayParams::default().block_shape(&[1, 2])?;
     /// let a = Array::compact_ndarray_with(&array![[1.5f32, 2.0], [3.14, 6.17]], a_params)?;
     ///
     /// // Let's say a is given to us, and we prepare to access it many times with a specific access
     /// // pattern. We re-compress it with a matching block shape.
-    /// let mut b_params = ArrayParams::default();
-    /// b_params.block_shape(&[2, 1]);
-    /// let b = a.compact_with(b_params, &a.read_ctx())?;
+    /// let b = a.compact_with(ArrayParams::default().block_shape(&[2, 1])?, &a.read_ctx())?;
     ///
     /// assert_eq!(
     ///     b.to_ndarray_sub(&[0..2, 0..1], &b.read_ctx())?,
@@ -1810,7 +1802,7 @@ mod tests {
             .iter()
             .map(|&x| x as BlockSize)
             .collect::<DimArray<_>>();
-        let params = ArrayParams::default().block_shape(&block_shape).clone();
+        let params = ArrayParams::default().block_shape(&block_shape).unwrap();
         Array {
             storage: Compact(
                 ArrayBlockTableStorageBase::new(
@@ -2117,9 +2109,10 @@ mod tests {
     /// Params whose small read size makes compaction read the array in many chunks, so `f` is
     /// called for regions that do not start at the origin.
     fn multi_chunk_params(block_shape: &[BlockSize]) -> ArrayParams {
-        let mut params = ArrayParams::new();
-        params.block_shape(block_shape).read_size((8, 64));
-        params
+        ArrayParams::new()
+            .block_shape(block_shape)
+            .unwrap()
+            .read_size((8, 64))
     }
 
     #[test]
@@ -2440,11 +2433,12 @@ mod tests {
     #[test]
     fn to_buf_strided_pull_and_push_over_a_split_read() {
         let src = ndarray::Array2::from_shape_fn((12, 10), |(r, c)| (r * 100 + c) as i32);
-        let mut params = ArrayParams::new();
-        params.block_shape(&[4, 5]);
         // A tiny read-size budget forces the read to be cut into several pieces, so the test
         // exercises the block-splitting path rather than a single forwarded read.
-        params.read_size((16, 64));
+        let params = ArrayParams::new()
+            .block_shape(&[4, 5])
+            .unwrap()
+            .read_size((16, 64));
         let a = Array::compact_ndarray_with(&src, params).unwrap();
         let ctx = a.read_ctx();
 

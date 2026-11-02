@@ -3451,6 +3451,7 @@ pub(crate) mod tests {
     use std::rc::Rc;
 
     use crate::scalar::bool8;
+    use crate::{ArrayParams, ArrayStorage};
 
     use ndarray::{array, ArrayD, Ix0, Ix1, IxDyn};
 
@@ -3907,7 +3908,7 @@ pub(crate) mod tests {
             for &window in windows {
                 let mut params = ArrayParams::new();
                 if let Some(w) = window {
-                    params.read_size(w);
+                    params = params.read_size(w);
                 }
                 let arr: Array<crate::storage::Plain<_, Ty<i32>>> = unsafe {
                     // SAFETY: `backing` outlives `arr`, and every index combination stays in bounds.
@@ -4277,9 +4278,10 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let mut params = crate::ArrayParams::new();
-        params.block_shape(block_shape);
-        params.read_size(read_size);
+        let params = ArrayParams::new()
+            .block_shape(block_shape)
+            .unwrap()
+            .read_size(read_size);
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
 
         let reduced = za.view().sum(dims);
@@ -4419,11 +4421,12 @@ pub(crate) mod tests {
         let exact = f64::from(1u32 << 24) + (N - 1) as f64;
 
         let nd = ndarray::ArrayD::from_shape_vec(vec![N], data).unwrap();
-        let mut params = crate::ArrayParams::new();
         // One block and one tile over the whole array, so the run reaches a single
         // `fold_pairwise` call rather than being split across tiles and merged sequentially.
-        params.block_shape(&[N as u32]);
-        params.read_size((1 << 19, 1 << 20));
+        let params = ArrayParams::new()
+            .block_shape(&[N as u32])
+            .unwrap()
+            .read_size((1 << 19, 1 << 20));
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
 
         let got = f64::from(za.view().sum(0usize).to_ndarray::<Ix0>().unwrap()[[]]);
@@ -4525,10 +4528,11 @@ pub(crate) mod tests {
             let data: Vec<f32> = (0..n).map(|i| (i % 7) as f32).collect();
             let exact = (0..n).map(|i| i % 7).sum::<usize>() as f32;
             let nd = ndarray::ArrayD::from_shape_vec(vec![n], data).unwrap();
-            let mut params = crate::ArrayParams::new();
             // One block and one tile: the whole run is one `fold_pairwise` call.
-            params.block_shape(&[n as u32]);
-            params.read_size((1 << 19, 1 << 20));
+            let params = ArrayParams::new()
+                .block_shape(&[n as u32])
+                .unwrap()
+                .read_size((1 << 19, 1 << 20));
             let za = Array::compact_ndarray_with(&nd, params).unwrap();
             assert_eq!(
                 za.view().sum(0usize).to_ndarray::<Ix0>().unwrap()[[]],
@@ -4555,9 +4559,10 @@ pub(crate) mod tests {
             (0..64i32).map(|x| (x % 97) as i8).collect(),
         )
         .unwrap();
-        let mut params = crate::ArrayParams::new();
-        params.block_shape(&[2, 2, 2]);
-        params.read_size((32, 64));
+        let params = ArrayParams::new()
+            .block_shape(&[2, 2, 2])
+            .unwrap()
+            .read_size((32, 64));
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let reduced = za.view().sum(1usize); // [4, 4] i64
         let index = [0..4u64, 0..4];
@@ -4866,8 +4871,6 @@ pub(crate) mod tests {
     ) {
         use std::cell::Cell;
 
-        use crate::ArrayStorage;
-
         let n: usize = shape.iter().product();
         let nd = ndarray::ArrayD::from_shape_vec(
             shape.to_vec(),
@@ -4875,9 +4878,10 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let mut params = crate::ArrayParams::new();
-        params.block_shape(block_shape);
-        params.read_size(read_size);
+        let params = ArrayParams::new()
+            .block_shape(block_shape)
+            .unwrap()
+            .read_size(read_size);
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
 
         let calls = Cell::new(0u64);

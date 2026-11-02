@@ -596,13 +596,12 @@ where
         (Just(arr), block_shape, block_size, read_size, kind, layout)
     })
     .prop_map(|(arr, block_shape, block_size, read_size, kind, layout)| {
-        let mut params = ArrayParams::default();
-        params.block_shape(&block_shape);
+        let mut params = ArrayParams::default().block_shape(&block_shape).unwrap();
         if let Some(block_size) = block_size {
-            params.block_size(block_size);
+            params = params.block_size(block_size);
         }
         if let Some(read_size) = read_size {
-            params.read_size(read_size);
+            params = params.read_size(read_size);
         }
         let arr = collapse_zero_stride_dims(arr, &layout.zero_stride_dims);
         let array = build_test_array(&arr, &layout, kind, params);
@@ -672,13 +671,12 @@ where
         (Just(arr), block_shape, block_size, read_size)
     })
     .prop_map(|(arr, block_shape, block_size, read_size)| {
-        let mut params = ArrayParams::default();
-        params.block_shape(&block_shape);
+        let mut params = ArrayParams::default().block_shape(&block_shape).unwrap();
         if let Some(block_size) = block_size {
-            params.block_size(block_size);
+            params = params.block_size(block_size);
         }
         if let Some(read_size) = read_size {
-            params.read_size(read_size);
+            params = params.read_size(read_size);
         }
         let compact = Array::compact_ndarray_with(&arr, params).unwrap();
         (arr, compact)

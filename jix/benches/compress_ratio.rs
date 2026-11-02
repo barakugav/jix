@@ -33,9 +33,11 @@ fn main() {
             let raw_bytes = data.len() * std::mem::size_of::<i32>();
             for block_shape in block_shapes {
                 for level in levels {
-                    let mut params = ArrayParams::new();
-                    params.block_shape(block_shape);
-                    params.level(level).unwrap();
+                    let params = ArrayParams::new()
+                        .block_shape(block_shape)
+                        .unwrap()
+                        .level(level)
+                        .unwrap();
                     let array = Array::compact_ndarray_with(&data, params).unwrap();
 
                     if path.exists() {

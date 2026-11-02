@@ -368,9 +368,7 @@ where
     /// let mut buf = Cursor::new(Vec::new());
     /// // A lazy view is compressed on the fly, here into blocks of 1x2 items.
     /// let scaled = a.map(|x| x * 10);
-    /// let mut params = ArrayParams::new();
-    /// params.block_shape(&[1, 2]);
-    /// scaled.write_to(&mut buf, params, &scaled.read_ctx())?;
+    /// scaled.write_to(&mut buf, ArrayParams::new().block_shape(&[1, 2])?, &scaled.read_ctx())?;
     /// let offset = buf.position();
     /// // A compact array copies its compressed blocks as-is, so `params` is ignored.
     /// b.write_to(&mut buf, ArrayParams::default(), &b.read_ctx())?;
@@ -698,15 +696,16 @@ mod tests {
     #[test]
     fn read_keeps_the_file_block_shape() {
         let src = ndarray::Array2::from_shape_fn((64, 64), |(i, j)| (i * 64 + j) as i32);
-        let mut p = ArrayParams::new();
-        p.block_shape(&[8, 32]);
-        let a = Array::compact_ndarray_with(&src, p).unwrap();
+        let params = ArrayParams::new().block_shape(&[8, 32]).unwrap();
+        let a = Array::compact_ndarray_with(&src, params).unwrap();
         let mut bytes = Cursor::new(Vec::new());
         a.write_to(&mut bytes, ArrayParams::default(), &a.read_ctx())
             .unwrap();
 
-        let mut p = ArrayParams::new();
-        p.block_shape_fixed_dims(&[false, false]).block_size(1024);
+        let p = ArrayParams::new()
+            .block_shape_fixed_dims(&[false, false])
+            .unwrap()
+            .block_size(1024);
         let a = Array::read_from(
             Cursor::new(bytes.into_inner()),
             None,

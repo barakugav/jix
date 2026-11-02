@@ -266,9 +266,7 @@
 //! let data = ndarray::Array2::<f32>::zeros((512, 512));
 //!
 //! // Store with 64*64 blocks - one decompression per tile.
-//! let mut params = ArrayParams::new();
-//! params.block_shape(&[64, 64]);
-//! let array = Array::compact_ndarray_with(&data, params)?;
+//! let array = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[64, 64])?)?;
 //!
 //! let context = array.read_ctx();
 //! for tile_row in 0..7 {
@@ -294,13 +292,11 @@
 //! use jix::{Array, ArrayParams};
 //!
 //! // Compress with column-friendly blocks.
-//! let mut params = ArrayParams::new();
-//! params.block_shape(&[64, 64]);
+//! let params = ArrayParams::new().block_shape(&[64, 64])?;
 //! let a = Array::compact_ndarray_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
 //!
 //! // Transpose and re-encode with row-friendly blocks.
-//! let mut out_params = ArrayParams::new();
-//! out_params.block_shape(&[128, 128]);
+//! let out_params = ArrayParams::new().block_shape(&[128, 128])?;
 //! let ctx = a.read_ctx();
 //! let transposed = a.permute_dims(&[1, 0]).compact_with(out_params, &ctx)?;
 //! # Ok::<(), jix::Error>(())

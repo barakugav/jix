@@ -26,10 +26,10 @@ pub fn create_compact<'a>(
     let data = create_ndarray(shape, rng);
     let mut params = ArrayParams::new();
     if let Some(block_shape) = block_shape.into() {
-        params.block_shape(block_shape);
+        params = params.block_shape(block_shape).unwrap();
     }
     if let Some(read_size) = read_size.into() {
-        params.read_size(read_size);
+        params = params.read_size(read_size);
     }
     Array::compact_ndarray_with(&data, params).unwrap()
 }

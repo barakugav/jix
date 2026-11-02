@@ -47,9 +47,11 @@ fn bench_compact_array(c: &mut Criterion) {
         group.sample_size(20);
         for (block_shape, level, profile) in block_shapes {
             let data = create_data::<i32>(*profile, &shape, 0x52cd98c6eb78ed4b);
-            let mut params = ArrayParams::new();
-            params.block_shape(block_shape.as_slice());
-            params.level(*level).unwrap();
+            let params = ArrayParams::new()
+                .block_shape(block_shape.as_slice())
+                .unwrap()
+                .level(*level)
+                .unwrap();
             group.bench_function(
                 BenchmarkId::from_parameter(format!(
                     "profile={}, block={block_shape:?}, level={level}",

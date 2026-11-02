@@ -530,8 +530,7 @@ mod tests {
             (0..n as i32).map(|x| x * 7 - 11).collect(),
         )
         .unwrap();
-        let mut params = ArrayParams::new();
-        params.block_shape(block_shape);
+        let params = ArrayParams::new().block_shape(block_shape).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -635,8 +634,7 @@ mod tests {
             (0..n as i32).map(|x| x * 13 - 7).collect(),
         )
         .unwrap();
-        let mut params = ArrayParams::new();
-        params.block_shape(block_shape);
+        let params = ArrayParams::new().block_shape(block_shape).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -737,8 +735,7 @@ mod tests {
             (0..32i32).map(|x| x * 3 - 5).collect(),
         )
         .unwrap();
-        let mut params = ArrayParams::new();
-        params.block_shape(&[1, 2, 4]);
+        let params = ArrayParams::new().block_shape(&[1, 2, 4]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -769,8 +766,8 @@ mod tests {
         let nd =
             ndarray::ArrayD::from_shape_vec(vec![2usize, 3], (0..6i32).map(|x| x + 1).collect())
                 .unwrap();
-        let mut params = ArrayParams::new();
-        params.block_shape(&[2, 3]); // single block covering the whole array
+        // Single block covering the whole array.
+        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -808,8 +805,8 @@ mod tests {
         let nd =
             ndarray::ArrayD::from_shape_vec(vec![2usize, 3], (0..6i32).map(|x| x + 1).collect())
                 .unwrap();
-        let mut params = ArrayParams::new();
-        params.block_shape(&[2, 3]); // single block covering the whole array
+        // Single block covering the whole array.
+        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();

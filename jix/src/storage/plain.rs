@@ -553,7 +553,7 @@ mod tests {
 
     use crate::codec::ReadContext;
     use crate::scalar::bool8;
-    use crate::Array;
+    use crate::{Array, ArrayParams};
 
     // -----------------------------------------------------------------------
     /// Reading an empty region whose start sits at the end of a dim must not compute an
@@ -611,8 +611,7 @@ mod tests {
     #[test]
     fn explicit_block_shape_is_ignored() {
         let data = ndarray::Array2::<f32>::zeros((256, 256));
-        let mut params = crate::ArrayParams::new();
-        params.block_shape(&[64, 64]);
+        let params = ArrayParams::new().block_shape(&[64, 64]).unwrap();
         let a = Array::plain_ndarray_view_with(data.view(), params).unwrap();
         let b = Array::plain_ndarray_view(data.view()).unwrap();
         assert_eq!(
@@ -798,12 +797,10 @@ mod tests {
     fn strided_scatter_path_negation() {
         use std::ops::Neg;
 
-        use crate::ArrayParams;
-
         let vals = (0..4 * 10).collect::<Vec<i32>>();
         let nd = ArrayD::from_shape_vec(vec![4, 10], vals).unwrap();
-        let mut params = ArrayParams::new();
-        params.read_size((16, 32)); // for i32: a 4..8 item window, narrower than the 10-wide inner dim
+        // for i32: a 4..8 item window, narrower than the 10-wide inner dim
+        let params = ArrayParams::new().read_size((16, 32));
         let a = Array::plain_ndarray_with(nd.clone(), params).unwrap();
 
         let got = a.view().neg().to_ndarray().unwrap();
@@ -842,7 +839,7 @@ mod tests {
                 [rows as u64, cols as u64],
                 &strides,
                 <i32 as crate::dtype::Dtyped>::DTYPE,
-                crate::ArrayParams::default(),
+                ArrayParams::default(),
             )
             .unwrap()
         };

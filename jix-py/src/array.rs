@@ -1848,15 +1848,15 @@ pub(crate) fn resolve_array_params(
 
     let mut params = jix_core::ArrayParams::default();
     if let Some(block_shape) = block_shape {
-        params.try_block_shape(&block_shape).into_py_result()?;
+        params = params.block_shape(&block_shape).into_py_result()?;
     }
     if let Some(block_shape_fixed_dims) = block_shape_fixed_dims {
-        params
-            .try_block_shape_fixed_dims(&block_shape_fixed_dims)
+        params = params
+            .block_shape_fixed_dims(&block_shape_fixed_dims)
             .into_py_result()?;
     }
     if let Some(block_size) = block_size {
-        params.block_size(block_size);
+        params = params.block_size(block_size);
     }
     if let Some(read_size) = read_size {
         if read_size.len() != 1 && read_size.len() != 2 {
@@ -1871,21 +1871,19 @@ pub(crate) fn resolve_array_params(
             [min, max] => (min, max),
             _ => unreachable!(),
         };
-        params.read_size(pair);
+        params = params.read_size(pair);
     }
 
     if let Some(codec) = codec {
         match codec.as_str() {
-            "zstd" => {
-                params.codec(Codec::Zstd);
-            }
+            "zstd" => params = params.codec(Codec::Zstd),
             _ => {
                 return Err(PyValueError::new_err(format!("Unsupported codec: {codec}")));
             }
         }
     }
     if let Some(compression_level) = compression_level {
-        params.level(compression_level).into_py_result()?;
+        params = params.level(compression_level).into_py_result()?;
     }
     if let Some(filters) = filters {
         let filters = filters
@@ -1898,7 +1896,7 @@ pub(crate) fn resolve_array_params(
                 ))),
             })
             .collect::<Result<Vec<_>, _>>()?;
-        params.filters(&filters).into_py_result()?;
+        params = params.filters(&filters).into_py_result()?;
     }
 
     Ok(params)
