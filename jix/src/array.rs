@@ -26,7 +26,7 @@ use crate::{
 /// `Array<S>` is the central type in jix. It behaves like a regular n-dimensional array, but
 /// its data is stored in a compressed format and decoded on demand. Its core functionality is
 /// provided by [`shape()`](Array::shape), [`dtype()`](Array::dtype),
-/// and [`to_ndarray_buf()`](Array::to_ndarray_buf), all other functions are built on top of those.
+/// and [`to_buf_strided()`](Array::to_buf_strided), all other functions are built on top of those.
 ///
 /// An array is generic over `S: ArrayStorage`, which provides the implementation of the three core
 /// methods. The main concrete storage backend is the block-compressed [`Compact`] type, which
@@ -595,7 +595,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The returned array is not necessarily C-contiguous. The implementation is free to
     /// choose any memory layout it prefers, mostly for performance reasons.
-    /// If you need a specific memory layout, use [`to_ndarray_buf`](Array::to_ndarray_buf) and
+    /// If you need a specific memory layout, use [`to_buf_strided`](Array::to_buf_strided) and
     /// pass a pre-allocated buffer with your specified strides.
     ///
     /// # Errors
@@ -654,7 +654,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The returned array is not necessarily C-contiguous. The implementation is free to
     /// choose any memory layout it prefers, mostly for performance reasons.
-    /// If you need a specific memory layout, use [`to_ndarray_buf`](Array::to_ndarray_buf) and
+    /// If you need a specific memory layout, use [`to_buf_strided`](Array::to_buf_strided) and
     /// pass a pre-allocated buffer with your specified strides.
     ///
     /// # When to use this over [`to_ndarray`](Array::to_ndarray)
@@ -820,7 +820,7 @@ impl<S: ArrayStorage> Array<S> {
                 ))
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides.as_ref()) };
-            self.to_ndarray_buf_checked(index, context, Some(&mut out))?;
+            self.to_buf_strided_checked(index, context, Some(&mut out))?;
         }
         Ok(unsafe { array.assume_init() })
     }
@@ -829,11 +829,11 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
     /// [`to_ndarray_sub`](Array::to_ndarray_sub), and the contiguous-destination shorthand for
-    /// [`to_ndarray_buf`](Array::to_ndarray_buf). `buf` must be exactly
+    /// [`to_buf_strided`](Array::to_buf_strided). `buf` must be exactly
     /// `index.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes; it needs no
     /// particular alignment. Elements are written in row-major (C-contiguous) order.
     ///
-    /// Use [`to_ndarray_buf`](Array::to_ndarray_buf) instead when the destination is strided rather
+    /// Use [`to_buf_strided`](Array::to_buf_strided) instead when the destination is strided rather
     /// than packed, or when you would rather let the array hand back a buffer of its own than
     /// allocate one up front.
     ///
@@ -875,7 +875,7 @@ impl<S: ArrayStorage> Array<S> {
         let read_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
         let strides = default_strides(&read_shape, dtype.itemsize() as usize);
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides.as_ref()) };
-        self.to_ndarray_buf_checked(index, context, Some(&mut out))?;
+        self.to_buf_strided_checked(index, context, Some(&mut out))?;
         Ok(())
     }
 
@@ -926,7 +926,7 @@ impl<S: ArrayStorage> Array<S> {
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
     /// let context = a.read_ctx();
     ///
-    /// let buf = a.to_ndarray_buf(&[1..3, 1..3], &context, None)?;
+    /// let buf = a.to_buf_strided(&[1..3, 1..3], &context, None)?;
     /// let (base, strides) = (buf.data_ptr(), buf.strides());
     /// let mut values = Vec::new();
     /// for i in 0..2 {
@@ -955,25 +955,25 @@ impl<S: ArrayStorage> Array<S> {
     ///     let mut out = unsafe {
     ///         StridedBuf::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), &[2, 2], &[4, 8], 4)
     ///     };
-    ///     a.to_ndarray_buf(&[1..3, 1..3], &context, Some(&mut out))?;
+    ///     a.to_buf_strided(&[1..3, 1..3], &context, Some(&mut out))?;
     /// }
     /// assert_eq!(dst, [5, 8, 6, 9]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     #[inline]
-    pub fn to_ndarray_buf<'a>(
+    pub fn to_buf_strided<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-        self.to_ndarray_buf_checked(index, context, out)
+        self.to_buf_strided_checked(index, context, out)
     }
 
-    // like `to_ndarray_buf` for an `index` the caller already validated against
+    // like `to_buf_strided` for an `index` the caller already validated against
     #[inline]
-    fn to_ndarray_buf_checked<'a>(
+    fn to_buf_strided_checked<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
@@ -996,13 +996,13 @@ impl<S: ArrayStorage> Array<S> {
             // Fast path for small reads
             self.storage.read_data(index, context, out)
         } else {
-            to_ndarray_buf_slow(&self.storage, index, context, out)
+            to_buf_strided_slow(&self.storage, index, context, out)
         }
     }
 }
 
 #[inline(never)]
-fn to_ndarray_buf_slow<'a, S: ArrayStorage>(
+fn to_buf_strided_slow<'a, S: ArrayStorage>(
     storage: &'a S,
     index: &[Range<u64>],
     context: &'a ReadContext,
@@ -1010,34 +1010,34 @@ fn to_ndarray_buf_slow<'a, S: ArrayStorage>(
 ) -> Result<StridedBuf<'a>> {
     // Erase the storage so the body is monomorphized once
     let storage: &dyn ArrayStorage = storage;
-    to_ndarray_buf_slow_dyn_dispatch(storage, index, context, out)
+    to_buf_strided_slow_dyn_dispatch(storage, index, context, out)
 }
 
 #[inline(never)]
-fn to_ndarray_buf_slow_dyn_dispatch<'a>(
+fn to_buf_strided_slow_dyn_dispatch<'a>(
     storage: &'a dyn ArrayStorage,
     index: &[Range<u64>],
     context: &'a ReadContext,
     out: Option<&'a mut StridedBuf<'_>>,
 ) -> Result<StridedBuf<'a>> {
     let to_ndarray_fn = match storage.shape().len() {
-        0 => to_ndarray_buf_slow_dyn::<Dim<0>>,
-        1 => to_ndarray_buf_slow_dyn::<Dim<1>>,
-        2 => to_ndarray_buf_slow_dyn::<Dim<2>>,
-        3 => to_ndarray_buf_slow_dyn::<Dim<3>>,
-        4 => to_ndarray_buf_slow_dyn::<Dim<4>>,
-        5 => to_ndarray_buf_slow_dyn::<Dim<5>>,
-        6 => to_ndarray_buf_slow_dyn::<Dim<6>>,
-        7 => to_ndarray_buf_slow_dyn::<Dim<7>>,
-        8 => to_ndarray_buf_slow_dyn::<Dim<8>>,
-        _ => to_ndarray_buf_slow_dyn::<DimDyn>,
+        0 => to_buf_strided_slow_dyn::<Dim<0>>,
+        1 => to_buf_strided_slow_dyn::<Dim<1>>,
+        2 => to_buf_strided_slow_dyn::<Dim<2>>,
+        3 => to_buf_strided_slow_dyn::<Dim<3>>,
+        4 => to_buf_strided_slow_dyn::<Dim<4>>,
+        5 => to_buf_strided_slow_dyn::<Dim<5>>,
+        6 => to_buf_strided_slow_dyn::<Dim<6>>,
+        7 => to_buf_strided_slow_dyn::<Dim<7>>,
+        8 => to_buf_strided_slow_dyn::<Dim<8>>,
+        _ => to_buf_strided_slow_dyn::<DimDyn>,
     };
     to_ndarray_fn(storage, index, context, out)
 }
 
 // index range and buffer size are not checked
 #[inline(never)]
-fn to_ndarray_buf_slow_dyn<'a, D: Dimension>(
+fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     storage: &'a dyn ArrayStorage,
     index: &[Range<u64>],
     context: &'a ReadContext,
@@ -2356,7 +2356,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // to_ndarray_buf - pull and push modes, over the block-splitting slow path
+    // to_buf_strided - pull and push modes, over the block-splitting slow path
     // -----------------------------------------------------------------------
 
     #[test]
@@ -2433,12 +2433,12 @@ mod tests {
         // pull-mode buffer, which must follow it: dim 1 outermost, dim 0 contiguous.
         let f = a.view().permute_dims(&[1, 0]).flip(0);
         let ctx = f.read_ctx();
-        let buf = f.to_ndarray_buf(&[0..5, 0..4], &ctx, None).unwrap();
+        let buf = f.to_buf_strided(&[0..5, 0..4], &ctx, None).unwrap();
         assert_eq!(buf.strides(), &[4, 20]);
     }
 
     #[test]
-    fn to_ndarray_buf_pull_and_push_over_a_split_read() {
+    fn to_buf_strided_pull_and_push_over_a_split_read() {
         let src = ndarray::Array2::from_shape_fn((12, 10), |(r, c)| (r * 100 + c) as i32);
         let mut params = ArrayParams::new();
         params.block_shape(&[4, 5]);
@@ -2454,7 +2454,7 @@ mod tests {
 
         // Pull mode: the array hands back a buffer, and its strides say where each element sits.
         {
-            let buf = a.to_ndarray_buf(&index, &ctx, None).unwrap();
+            let buf = a.to_buf_strided(&index, &ctx, None).unwrap();
             let (base, strides) = (buf.data_ptr(), buf.strides());
             for r in 0..rows {
                 for c in 0..cols {
@@ -2481,7 +2481,7 @@ mod tests {
                     itemsize,
                 )
             };
-            a.to_ndarray_buf(&index, &ctx, Some(&mut out)).unwrap();
+            a.to_buf_strided(&index, &ctx, Some(&mut out)).unwrap();
         }
         for r in 0..rows {
             for c in 0..cols {
@@ -2504,15 +2504,15 @@ mod tests {
     }
 
     #[test]
-    fn to_ndarray_buf_empty_range() {
+    fn to_buf_strided_empty_range() {
         let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
         let ctx = a.read_ctx();
-        let buf = a.to_ndarray_buf(&[1..1, 0..3], &ctx, None).unwrap();
+        let buf = a.to_buf_strided(&[1..1, 0..3], &ctx, None).unwrap();
         assert_eq!(buf.strides().len(), 2);
     }
 
     #[test]
-    fn to_ndarray_buf_rejects_a_bad_destination() {
+    fn to_buf_strided_rejects_a_bad_destination() {
         let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]]).unwrap();
         let ctx = a.read_ctx();
         let itemsize = size_of::<i32>();
@@ -2528,7 +2528,7 @@ mod tests {
             )
         };
         let err = a
-            .to_ndarray_buf(&[0..2, 0..2], &ctx, Some(&mut out))
+            .to_buf_strided(&[0..2, 0..2], &ctx, Some(&mut out))
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
@@ -2543,7 +2543,7 @@ mod tests {
             )
         };
         let err = a
-            .to_ndarray_buf(&[0..2, 0..2], &ctx, Some(&mut out))
+            .to_buf_strided(&[0..2, 0..2], &ctx, Some(&mut out))
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);

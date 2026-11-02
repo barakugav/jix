@@ -101,7 +101,7 @@ Impls start with `check_out_buf(...)` and then `materialize_out_buf(out, ctx, ou
 which resolves the two modes into a single writable buffer - the caller's in push mode, a pooled
 allocation in pull mode.
 
-`Array::to_ndarray_buf(index, ctx, out)` is the array-level entry point: same two modes, plus a
+`Array::to_buf_strided(index, ctx, out)` is the array-level entry point: same two modes, plus a
 heuristic that cuts an oversized request into cache-sized pieces read one at a time.
 `Array::to_buf_slice(index, buf, ctx)` is the shorthand for a packed row-major destination.
 

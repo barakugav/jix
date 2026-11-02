@@ -13,7 +13,7 @@
 - work on Dimension public API
 - avoid calling check_get_range many times
 - jix.power(x, 2) on floats is routed to Square and dont have the overflow check
-- pull mode to_ndarray_buf splits large reads of O(1) lazy views and copies the whole region
+- pull mode to_buf_strided splits large reads of O(1) lazy views and copies the whole region
 - i686: alignment of f64/i64/u64/c128 is hard-coded to 8, the ABI says 4
 - stepped slice over a non-plain inner reads one position at a time, decompressing whole blocks
 - reshape reads split/merge reshapes one element at a time, decompressing whole blocks

@@ -612,7 +612,7 @@ impl Array {
             return Ok(NdArray(np_arr));
         }
 
-        // `to_ndarray_buf` wants one stride per *array* dimension, but an integer index item drops
+        // `to_buf_strided` wants one stride per *array* dimension, but an integer index item drops
         // its dim from `np_arr`. Put a stride back for each dropped dim. Reading them back off
         // `np_arr` keeps one source of truth, whether it is the caller's `out=` or our own
         // allocation above.
@@ -675,7 +675,7 @@ impl Array {
             };
             let result = self
                 .arr
-                .to_ndarray_buf(&index, context, Some(&mut out))
+                .to_buf_strided(&index, context, Some(&mut out))
                 .map(drop);
             Ok::<_, PyErr>((result.into_py_result(), context_guard.take_warnings()))
         })?;
