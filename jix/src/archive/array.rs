@@ -102,7 +102,7 @@ impl Array<Compact<TypeDyn>> {
         let file = File::open(path).map_err(Error::io)?;
         let mut reader = BufReader::new(file);
         reader.seek(SeekFrom::Start(offset)).map_err(Error::io)?;
-        Self::read_from_reader(reader, Some(len), params, validation)
+        Self::read_from(reader, Some(len), params, validation)
     }
 
     /// Load a compressed array from a generic reader.
@@ -132,7 +132,7 @@ impl Array<Compact<TypeDyn>> {
     /// original.write_to(&mut buf)?;
     ///
     /// let bytes = buf.into_inner();
-    /// let loaded = Array::read_from_reader(
+    /// let loaded = Array::read_from(
     ///     Cursor::new(bytes),
     ///     None,
     ///     ArrayParams::default(),
@@ -142,7 +142,7 @@ impl Array<Compact<TypeDyn>> {
     /// assert_eq!(loaded.to_ndarray()?, array![1i32, 2, 3, 4].into_dyn());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn read_from_reader(
+    pub fn read_from(
         reader: impl Read + Seek,
         len: Option<u64>,
         params: ArrayParams,
@@ -323,7 +323,7 @@ where
     ///
     /// // Read back the second array by seeking to its offset.
     /// let bytes = buf.into_inner();
-    /// let b2 = Array::read_from_reader(
+    /// let b2 = Array::read_from(
     ///     Cursor::new(&bytes[offset as usize..]),
     ///     None,
     ///     ArrayParams::default(),
@@ -593,7 +593,7 @@ mod tests {
         b.write_to(&mut buf).unwrap();
         buf.rewind().unwrap();
         let read = |buf: &mut Cursor<Vec<u8>>| {
-            Array::read_from_reader(buf, None, ArrayParams::new(), ArchiveValidation::Strict)
+            Array::read_from(buf, None, ArrayParams::new(), ArchiveValidation::Strict)
         };
         let a2 = read(&mut buf).unwrap().into_typed::<i32>().unwrap();
         let b2 = read(&mut buf).unwrap().into_typed::<i64>().unwrap();
@@ -622,7 +622,7 @@ mod tests {
         a.write_to(&mut buf).unwrap();
         let len = buf.get_ref().len() as u64;
         buf.rewind().unwrap();
-        let b = Array::read_from_reader(
+        let b = Array::read_from(
             buf,
             Some(len),
             ArrayParams::new(),
@@ -667,7 +667,7 @@ mod tests {
         out.extend_from_slice(&bytes[pos + 32..]);
         let len = out.len() as u64;
         let params = ArrayParams::default();
-        Array::read_from_reader(
+        Array::read_from(
             Cursor::new(out),
             Some(len),
             params,
@@ -702,7 +702,7 @@ mod tests {
 
         let mut p = ArrayParams::new();
         p.block_shape_fixed_dims(&[false, false]).block_size(1024);
-        let a = Array::read_from_reader(
+        let a = Array::read_from(
             Cursor::new(bytes.into_inner()),
             None,
             p,
@@ -739,7 +739,7 @@ mod tests {
         for bad_size in [1u64 << 44, (1 << 32) + size] {
             let mut bytes = bytes.clone();
             bytes[toc + 24..toc + 32].copy_from_slice(&bad_size.to_le_bytes());
-            let result = Array::read_from_reader(
+            let result = Array::read_from(
                 Cursor::new(bytes),
                 None,
                 ArrayParams::default(),
@@ -781,8 +781,7 @@ mod tests {
         a.write_to(&mut bytes).unwrap();
         drop(vec![0xA5u8; 4096]); // leave stale bytes in the allocator
         let mut snoop = Snoop(Cursor::new(bytes.into_inner()), false);
-        Array::read_from_reader(&mut snoop, None, ArrayParams::default(), Default::default())
-            .unwrap();
+        Array::read_from(&mut snoop, None, ArrayParams::default(), Default::default()).unwrap();
         assert!(!snoop.1);
     }
 
@@ -814,7 +813,7 @@ mod tests {
         let mut buf = Cursor::new(Vec::new());
         a.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
-        let array = Array::read_from_reader(
+        let array = Array::read_from(
             Cursor::new(bytes),
             None,
             ArrayParams::default(),
@@ -827,7 +826,7 @@ mod tests {
     // -----------------------------------------------------------------------
     // Proptest: roundtrip for many dtypes
     //
-    // Tests that write_to + read_from_reader recovers the original values for
+    // Tests that write_to + read_from recovers the original values for
     // arbitrary inputs, covering:
     //   - 1D single block (no padding)
     //   - 1D multi-block with a padded last block
@@ -955,7 +954,7 @@ mod tests {
     // Three arrays of different dtypes and shapes are written back-to-back into
     // a single buffer with 177-byte gaps between them. Each is read back
     // independently by passing the correct (offset, len) pair to
-    // read_from_reader.
+    // read_from.
     // -----------------------------------------------------------------------
 
     #[test]
@@ -992,7 +991,7 @@ mod tests {
 
         let bytes = buf.into_inner();
 
-        let r0 = Array::read_from_reader(
+        let r0 = Array::read_from(
             Cursor::new(&bytes),
             Some(end0),
             ArrayParams::default(),
@@ -1005,7 +1004,7 @@ mod tests {
             src0.into_dyn()
         );
 
-        let r1 = Array::read_from_reader(
+        let r1 = Array::read_from(
             Cursor::new(&bytes[start1 as usize..]),
             Some(len1),
             ArrayParams::default(),
@@ -1018,7 +1017,7 @@ mod tests {
             src1.into_dyn()
         );
 
-        let r2 = Array::read_from_reader(
+        let r2 = Array::read_from(
             Cursor::new(&bytes[start2 as usize..]),
             Some(len2),
             ArrayParams::default(),
@@ -1051,7 +1050,7 @@ mod tests {
         view.write_to_with(&mut buf, arr_params(&[2, 2]), &ctx)
             .unwrap();
 
-        let got = Array::read_from_reader(
+        let got = Array::read_from(
             Cursor::new(buf.into_inner()),
             None,
             ArrayParams::default(),
@@ -1075,7 +1074,7 @@ mod tests {
         view.write_to_with(&mut buf, arr_params(&[2, 2, 3]), &ctx)
             .unwrap();
 
-        let got = Array::read_from_reader(
+        let got = Array::read_from(
             Cursor::new(buf.into_inner()),
             None,
             ArrayParams::default(),
@@ -1101,7 +1100,7 @@ mod tests {
         view.write_to_with(&mut buf, arr_params(&[2, 3]), &ctx)
             .unwrap();
 
-        let got = Array::read_from_reader(
+        let got = Array::read_from(
             Cursor::new(buf.into_inner()),
             None,
             ArrayParams::default(),
@@ -1379,7 +1378,7 @@ mod tests {
         view.write_to_with(&mut out_buf, arr_params(&[2, 2, 3]), &ctx)
             .unwrap();
 
-        let got = Array::read_from_reader(
+        let got = Array::read_from(
             Cursor::new(out_buf.into_inner()),
             None,
             ArrayParams::default(),
