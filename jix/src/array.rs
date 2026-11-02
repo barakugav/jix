@@ -856,13 +856,13 @@ impl<S: ArrayStorage> Array<S> {
     /// {
     ///     let buf =
     ///         unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 4) };
-    ///     a.to_ndarray_slice(&[1..3, 1..3], buf, &context)?;
+    ///     a.to_buf_slice(&[1..3, 1..3], buf, &context)?;
     /// }
     /// assert_eq!(buf, vec![5, 6, 8, 9]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     #[inline]
-    pub fn to_ndarray_slice(
+    pub fn to_buf_slice(
         &self,
         index: &[Range<u64>],
         buf: &mut [u8],
@@ -882,7 +882,7 @@ impl<S: ArrayStorage> Array<S> {
     /// Read a rectangular sub-region and return it as a [`StridedBuf`].
     ///
     /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub), and [`to_ndarray_slice`](Array::to_ndarray_slice).
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub), and [`to_buf_slice`](Array::to_buf_slice).
     ///
     /// The two modes mirror NumPy's `out=`:
     /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
@@ -893,7 +893,7 @@ impl<S: ArrayStorage> Array<S> {
     ///   per array dimension.
     ///
     /// For the common case of pushing into a packed row-major buffer, use
-    /// [`to_ndarray_slice`](Array::to_ndarray_slice), which builds the `StridedBuf` for you.
+    /// [`to_buf_slice`](Array::to_buf_slice), which builds the `StridedBuf` for you.
     ///
     /// # Arguments
     ///
@@ -1483,7 +1483,7 @@ impl<S: ArrayStorage> Array<S> {
     /// repeated reads, sharing the allocation and initialization overhead.
     ///
     /// [`to_ndarray`](Array::to_ndarray) builds a context internally. Call this when using
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub) or [`to_ndarray_slice`](Array::to_ndarray_slice)
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub) or [`to_buf_slice`](Array::to_buf_slice)
     /// directly.
     ///
     /// Using a context created in other ways (e.g. `ReadContext::default()`) is also valid, and will
@@ -2331,7 +2331,7 @@ mod tests {
     }
 
     #[test]
-    fn to_ndarray_slice_into_a_misaligned_buf() {
+    fn to_buf_slice_into_a_misaligned_buf() {
         // A packed destination needs no particular alignment. Run under Miri to check the accesses.
         let src = ndarray::Array2::from_shape_fn((3, 4), |(r, c)| (r * 4 + c) as i32);
         let a = Array::compact_ndarray(&src).unwrap();
@@ -2340,7 +2340,7 @@ mod tests {
         // A byte window starting one byte past a 4-aligned address.
         let mut backing = [0u8; 12 * 4 + 4];
         let off = backing.as_ptr().align_offset(4) + 1;
-        a.to_ndarray_slice(&[0..3, 0..4], &mut backing[off..off + 12 * 4], &ctx)
+        a.to_buf_slice(&[0..3, 0..4], &mut backing[off..off + 12 * 4], &ctx)
             .unwrap();
 
         let got = (0..12)
@@ -2495,7 +2495,7 @@ mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), dst.len() * itemsize)
             };
-            a.to_ndarray_slice(&index, bytes, &ctx).unwrap();
+            a.to_buf_slice(&index, bytes, &ctx).unwrap();
         }
         let expected = (0..rows)
             .flat_map(|r| (0..cols).map(move |c| at(r, c)))

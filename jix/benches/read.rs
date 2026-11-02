@@ -195,7 +195,7 @@ fn bench_compact_read_transposed(c: &mut Criterion) {
                         nitems * size_of::<i32>(),
                     )
                 };
-                t.to_ndarray_slice(&full, buf, &ctx).unwrap();
+                t.to_buf_slice(&full, buf, &ctx).unwrap();
                 unsafe { arr.assume_init() }
             });
         });

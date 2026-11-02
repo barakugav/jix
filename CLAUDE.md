@@ -103,7 +103,7 @@ allocation in pull mode.
 
 `Array::to_ndarray_buf(index, ctx, out)` is the array-level entry point: same two modes, plus a
 heuristic that cuts an oversized request into cache-sized pieces read one at a time.
-`Array::to_ndarray_slice(index, buf, ctx)` is the shorthand for a packed row-major destination.
+`Array::to_buf_slice(index, buf, ctx)` is the shorthand for a packed row-major destination.
 
 Storage carries one piece of compile-time info as an associated type, **`ElementType`** - either
 `Ty<T>` (scalar type `T` known at compile time) or `TypeDyn` (runtime-only; arrays loaded from disk
