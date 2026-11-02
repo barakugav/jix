@@ -121,7 +121,7 @@ pub fn read_array(
 
             Ok(if !mmap {
                 let array =
-                    jix_core::Array::read_from_file_section(&path, offset, len, params, validation)
+                    jix_core::Array::read_from_file_with(&path, offset, len, params, validation)
                         .into_py_result()?;
                 Array::from_core(array.into_any())
             } else {

@@ -20,36 +20,40 @@ impl Array<Compact<TypeDyn>> {
     /// This is the most common way to read an array that was previously saved with
     /// [`write_to_file`](Array::write_to_file) or [`write_to`](Array::write_to).
     ///
-    /// Use [`read_from_file_section`](Array::read_from_file_section) if the array occupies only
+    /// Use [`read_from_file_with`](Array::read_from_file_with) if the array occupies only
     /// part of a larger file, or [`read_from_file_mmap`](Array::read_from_file_mmap) for
     /// memory-mapped (zero-copy) loading.
     ///
     /// # Arguments
     ///
     /// - `path`: path to the `.jix` file containing the array.
-    /// - `params`: parameters controlling how the array is read and decoded. See
-    ///   [`ArrayParams`] for details.
     ///
     /// # Examples
     ///
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
     /// let path = tmp_dir.path().join("data.jix");
     ///
     /// Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?.write_to_file(&path)?;
-    /// let array = Array::read_from_file(&path, ArrayParams::default())?;
+    /// let array = Array::read_from_file(&path)?;
     /// assert_eq!(array.shape(), &[2, 2]);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn read_from_file(path: &Path, params: ArrayParams) -> Result<Self> {
+    pub fn read_from_file(path: &Path) -> Result<Self> {
         let len = path.metadata().map_err(Error::io)?.len();
-        Self::read_from_file_section(path, 0, len, params, ArchiveValidation::default())
+        Self::read_from_file_with(
+            path,
+            0,
+            len,
+            ArrayParams::default(),
+            ArchiveValidation::default(),
+        )
     }
 
-    /// Load a compressed array from a byte range within a file.
+    /// Load a compressed array from a byte range within a file with specified parameters.
     ///
     /// Use this when multiple arrays are packed into a single file and you know the byte `offset`
     /// and `len` of the array you want to read. This avoids opening separate files per array and
@@ -82,7 +86,7 @@ impl Array<Compact<TypeDyn>> {
     /// let total = f.metadata()?.len();
     ///
     /// // Read the second array back using its offset.
-    /// let b2 = Array::read_from_file_section(
+    /// let b2 = Array::read_from_file_with(
     ///     &path,
     ///     offset,
     ///     total - offset,
@@ -92,7 +96,7 @@ impl Array<Compact<TypeDyn>> {
     /// assert_eq!(b2.shape(), &[6]);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn read_from_file_section(
+    pub fn read_from_file_with(
         path: &Path,
         offset: u64,
         len: u64,
@@ -261,7 +265,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let array = Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
@@ -270,7 +274,7 @@ where
     /// let path = tmp_dir.path().join("output.jix");
     /// array.write_to_file(&path)?;
     ///
-    /// let loaded = Array::read_from_file(&path, ArrayParams::default())?;
+    /// let loaded = Array::read_from_file(&path)?;
     /// let loaded = loaded.into_typed::<f32>()?;
     /// assert_eq!(
     ///     loaded.to_ndarray()?,
@@ -1146,7 +1150,7 @@ mod tests {
         let path = tmp_dir.path().join("array.jix");
         a.write_to_file(&path).unwrap();
 
-        let got = Array::read_from_file(&path, ArrayParams::default())
+        let got = Array::read_from_file(&path)
             .unwrap()
             .into_typed::<u8>()
             .unwrap()
@@ -1170,7 +1174,7 @@ mod tests {
     #[test]
     fn read_from_file_section_two_dtypes_packed() {
         // Two arrays of different dtypes written consecutively; each is read back
-        // via read_from_file_section using the recorded (offset, len).
+        // via read_from_file_with using the recorded (offset, len).
         let src0 = ArrayD::<u8>::from_shape_vec(vec![6], (0..6u8).collect()).unwrap();
         let src1 = ndarray::Array::from_shape_vec([4, 5], (0..20).map(|x: i32| x as f32).collect())
             .unwrap();
@@ -1189,7 +1193,7 @@ mod tests {
         let total = f.metadata().unwrap().len();
         drop(f);
 
-        let r0 = Array::read_from_file_section(
+        let r0 = Array::read_from_file_with(
             &path,
             0,
             off1,
@@ -1199,7 +1203,7 @@ mod tests {
         .unwrap();
         assert_eq!(r0.into_typed::<u8>().unwrap().to_ndarray().unwrap(), src0);
 
-        let r1 = Array::read_from_file_section(
+        let r1 = Array::read_from_file_with(
             &path,
             off1,
             total - off1,

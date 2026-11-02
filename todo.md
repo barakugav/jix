@@ -24,7 +24,6 @@
 - Plain::read_data and numpy(out=) build &[u8]/&mut [u8] over the whole strided span, element-disjoint views alias (UB)
 - support writes to Compact and Plain
 - rename write_to_with->write_to
-- read_from_file and read_from_file_with
 - avoid reading in blocks when there is no benefit in it, instead of just when plain
 - dont convert prost errors to io
 - implement stack using insert_dim+concatenate

@@ -76,7 +76,7 @@ use crate::{
 ///
 /// Create arrays from various sources:
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// // Compress an ndarray into a block-compressed Array<Compact>.
@@ -89,7 +89,7 @@ use crate::{
 /// let tmp_dir = tempfile::tempdir()?;
 /// let path = tmp_dir.path().join("array.jix");
 /// compact.write_to_file(&path)?;
-/// let from_file = Array::read_from_file(&path, ArrayParams::default())?;
+/// let from_file = Array::read_from_file(&path)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///

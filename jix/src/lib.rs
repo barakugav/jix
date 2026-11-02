@@ -201,9 +201,9 @@
 //! ```no_run
 //! use std::path::Path;
 //!
-//! use jix::{Array, ArrayParams};
+//! use jix::Array;
 //!
-//! let src = Array::read_from_file(Path::new("data.jix"), ArrayParams::default())?;
+//! let src = Array::read_from_file(Path::new("data.jix"))?;
 //! // src: Array<Compact<TypeDyn>> - element type unknown at compile time
 //! // src: Array<S::ElementType = TypeDyn>
 //!
