@@ -2027,7 +2027,7 @@ mod tests {
     fn compact_nd_ptr_rejects_zero_itemsize() {
         let buf = [0u8; 8];
         let result = unsafe {
-            Array::<crate::storage::Compact<crate::TypeDyn>>::compact_nd_ptr(
+            Array::<crate::storage::Compact<crate::TypeDyn>>::compact_ndarray_ptr(
                 buf.as_ptr(),
                 [4u64],
                 &[0usize],

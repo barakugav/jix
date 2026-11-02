@@ -305,7 +305,7 @@ impl Array<Compact<TypeDyn>> {
     /// valid elements. Every byte from the first to the last element (the strided span, gaps
     /// between elements included) lies in one allocation, and none of it is written, or borrowed
     /// through a `&mut`, during the call.
-    pub unsafe fn compact_nd_ptr(
+    pub unsafe fn compact_ndarray_ptr(
         ptr: *const u8,
         shape: impl IntoDimension,
         strides: &[usize],

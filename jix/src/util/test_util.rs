@@ -866,7 +866,7 @@ fn build_test_array<T: Dtyped>(
         // `Compact` re-blocks and compresses, so the layout shapes only the one read that copies
         // the data in - which is the ingest path worth exercising. `buf` outlives the call.
         TestArrayKind::Compact => unsafe {
-            Array::<Compact<TypeDyn>>::compact_nd_ptr(data, &shape, &strides, T::DTYPE, params)
+            Array::<Compact<TypeDyn>>::compact_ndarray_ptr(data, &shape, &strides, T::DTYPE, params)
         }
         .unwrap()
         .into_any(),
