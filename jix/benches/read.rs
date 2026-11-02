@@ -6,7 +6,9 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use fastrand::Rng;
 use ndarray::Ix2;
 
-use crate::common::create_compact;
+use jix::Array;
+
+use crate::common::{create_compact, create_ndarray};
 
 fn bench_compact_read_region(c: &mut Criterion) {
     let mut rng = Rng::with_seed(0xfacc5ed5f7466613);
@@ -200,10 +202,58 @@ fn bench_compact_read_transposed(c: &mut Criterion) {
     }
 }
 
+fn bench_plain_read(c: &mut Criterion) {
+    let mut rng = Rng::with_seed(0x6b559f7709d96c43);
+    let configs: &[([u64; 2], usize)] = &[([600, 32], 1024), ([8_192, 4_096], 1 << 20)];
+    let read_shapes: &[[u64; 2]] = &[[1, 1], [32, 32]];
+
+    let mut run_buf_nocopy = true;
+    for &(shape, nregions) in configs {
+        let array = Array::plain_ndarray(create_ndarray(&shape, &mut rng)).unwrap();
+        let ctx = array.read_ctx();
+
+        let mut group = c.benchmark_group(format!("plain_read_tiny {shape:?}"));
+        for read_shape in read_shapes {
+            let regions: Vec<[Range<u64>; 2]> = (0..nregions)
+                .map(|_| {
+                    std::array::from_fn(|dim| {
+                        let start = rng.u64(0..=shape[dim] - read_shape[dim]);
+                        start..start + read_shape[dim]
+                    })
+                })
+                .collect();
+            let param = format!("read={read_shape:?}");
+
+            group.bench_function(BenchmarkId::new("ndarray", &param), |b| {
+                let mut i = 0;
+                b.iter(|| {
+                    let region = &regions[i % regions.len()];
+                    i += 1;
+                    array.to_ndarray_sub::<Ix2>(region, &ctx).unwrap()
+                });
+            });
+
+            if !run_buf_nocopy {
+                continue;
+            }
+            run_buf_nocopy = false;
+            group.bench_function(BenchmarkId::new("buf_nocopy", &param), |b| {
+                let mut i = 0;
+                b.iter(|| {
+                    let region = &regions[i % regions.len()];
+                    i += 1;
+                    array.to_ndarray_buf(region, &ctx, None).unwrap()
+                });
+            });
+        }
+    }
+}
+
 criterion_group!(
     benches,
     bench_compact_read_region,
     bench_compact_read_full,
-    bench_compact_read_transposed
+    bench_compact_read_transposed,
+    bench_plain_read
 );
 criterion_main!(benches);
