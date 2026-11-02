@@ -131,7 +131,7 @@ use crate::{
 /// assert_eq!(result.shape(), &[2]);
 /// assert_eq!(result.dtype(), &i16::DTYPE);
 /// let tmp_dir = tempfile::tempdir()?;
-/// result.write_to_file(tmp_dir.path().join("result.jix").as_ref())?;
+/// result.write_to_file(&tmp_dir.path().join("result.jix"))?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
@@ -898,7 +898,7 @@ impl<S: ArrayStorage> Array<S> {
     /// # Arguments
     ///
     /// - `index` - one half-open range (`start..end`) per dimension, within the array bounds.
-    /// - `context` - read context carrying the decoder state.
+    /// - `context` - read context carrying reusable buffers and decoder state.
     /// - `out` - optional destination, as described above.
     ///
     /// # Alignment

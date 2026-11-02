@@ -328,9 +328,6 @@
 //! from the source lazily:
 //!
 //! ```
-//! use std::fs::File;
-//! use std::io::BufWriter;
-//!
 //! use jix::{ArchiveValidation, Array, ArrayParams};
 //! use ndarray::array;
 //!
@@ -355,9 +352,7 @@
 //! let processed = src.into_typed::<f32>()?.exp().map(|x| x + 1.0f32);
 //!
 //! // Streaming write: blocks are decompressed, transformed, and re-compressed one at a time.
-//! processed.write_to(BufWriter::new(File::create(
-//!     tmp_dir.path().join("modified.jix"),
-//! )?))?;
+//! processed.write_to_file(&tmp_dir.path().join("modified.jix"))?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!

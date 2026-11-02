@@ -2115,7 +2115,13 @@ mod tests {
         let a = Array::compact_ndarray(&ndarray::Array3::<u8>::zeros((0, 1, 1))).unwrap();
         let a = a.broadcast(&[0, 3, 0x5555_5555_5555_5555]);
         assert!(a.compact().is_err());
-        assert!(a.write_to(std::io::Cursor::new(vec![])).is_err());
+        assert!(a
+            .write_to(
+                std::io::Cursor::new(vec![]),
+                ArrayParams::default(),
+                &a.read_ctx()
+            )
+            .is_err());
     }
 
     #[test]

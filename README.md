@@ -17,6 +17,8 @@ input(s) and records the transformation, nothing is computed until data is expli
 A chain of such operations builds a pipeline that runs in a single decompression pass the moment you ask for output.
 
 ```rust
+use std::path::Path;
+
 use jix::Array;
 use ndarray::array;
 
@@ -30,7 +32,7 @@ let result = a.exp().sum(0).map(|x| x - 1.0);
 
 // Materialize and persist. Blocks are decompressed, transformed,
 // and re-compressed one at a time - no full copy in memory.
-result.write_to_file("result.jix")?;
+result.write_to_file(Path::new("result.jix"))?;
 ```
 
 Python bindings are also available:

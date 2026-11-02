@@ -23,8 +23,8 @@
 - deep type-erased op chains (x = x + 1 in a Python loop) recurse once per op on read and drop, and overflow the stack
 - Plain::read_data and numpy(out=) build &[u8]/&mut [u8] over the whole strided span, element-disjoint views alias (UB)
 - support writes to Compact and Plain
-- rename write_to_with->write_to
 - avoid reading in blocks when there is no benefit in it, instead of just when plain
 - dont convert prost errors to io
 - implement stack using insert_dim+concatenate
 - rework kernels errors and warnings reporting
+- review docs, correctness and style

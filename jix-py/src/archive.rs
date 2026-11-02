@@ -280,7 +280,7 @@ fn write_array_impl(
     let context = array.read_ctx(modes)?;
     let result = array
         .arr
-        .write_to_with(&mut writer, params, context.as_ref())
+        .write_to(&mut writer, params, context.as_ref())
         .into_py_result()
         .and_then(|()| Ok(writer.flush()?));
     Ok((result, context.take_warnings()))

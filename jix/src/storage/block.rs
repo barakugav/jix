@@ -180,7 +180,7 @@ where
     /// - `block_idx` - zero-based block index in `0..(nitems / block_size)`.
     ///   **Panics** if out of range.
     /// - `buf` - destination buffer. Must be exactly `block_size * dtype.itemsize()` bytes.
-    /// - `context` - read context used for decoding.
+    /// - `context` - read context carrying reusable buffers and decoder state.
     ///
     /// # Errors
     ///
