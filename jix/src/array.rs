@@ -1315,7 +1315,7 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
     let ndim = shape.len();
     let dtype = storage.dtype();
 
-    params.override_from_storage(&storage);
+    params.inherit_unset_from_storage(&storage);
     params.tune(shape, dtype)?;
 
     let block_shape = params.block_shape.as_ref().unwrap();

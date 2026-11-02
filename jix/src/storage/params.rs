@@ -257,7 +257,7 @@ impl ArrayParams {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```ignore
     /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
@@ -266,19 +266,20 @@ impl ArrayParams {
     /// // Override just the block shape; inherit codec params from `source`.
     /// let mut params = ArrayParams::new();
     /// params.block_shape(&[4]);
-    /// params.override_from_array(&source);
+    /// params.inherit_unset_from_array(&source);
     ///
     /// let copy = source.compact_with(params, &source.read_ctx())?;
     /// # Ok::<(), jix::Error>(())
     /// ```
-    pub fn override_from_array<S>(&mut self, array: &Array<S>)
+    #[allow(unused)]
+    pub(crate) fn inherit_unset_from_array<S>(&mut self, array: &Array<S>)
     where
         S: ArrayStorage,
     {
-        self.override_from_storage(array.storage());
+        self.inherit_unset_from_storage(array.storage());
     }
 
-    pub(crate) fn override_from_storage(&mut self, storage: &impl ArrayStorage) {
+    pub(crate) fn inherit_unset_from_storage(&mut self, storage: &impl ArrayStorage) {
         let spec = storage.spec();
         self.encoder_params
             .get_or_insert_with(|| spec.encoder_params().clone());
@@ -1136,7 +1137,7 @@ mod tests {
         let a = Array::compact_ndarray_with(&ndarray::Array1::<u8>::zeros(n), p).unwrap();
         let a = a.map(|x: u8| [x as f64; 128]);
         let mut params = ArrayParams::new();
-        params.override_from_storage(a.storage());
+        params.inherit_unset_from_storage(a.storage());
         params.tune(a.shape(), a.dtype()).unwrap();
         let block_shape = params.block_shape.unwrap();
         assert!(block_shape[0] as u64 * 1024 <= BLOCK_SIZE_BYTES_MAX);
