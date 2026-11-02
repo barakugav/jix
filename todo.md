@@ -23,7 +23,6 @@
 - fast path for read/write to python bytes object, releasing the GIL
 - deep type-erased op chains (x = x + 1 in a Python loop) recurse once per op on read and drop, and overflow the stack
 - Plain::read_data and numpy(out=) build &[u8]/&mut [u8] over the whole strided span, element-disjoint views alias (UB)
-- remove call to strided_span_bytes in Plain::read_data
 - support writes to Compact and Plain
 - rename read_from_reader->read_from, write_to_with->write_to
 - read_from_file and read_from_file_with

@@ -9,8 +9,11 @@ use crate::storage::params::{
 use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
 };
-use crate::util::{dim_arr, strided_span_bytes, DimArray, DimIdx, SendSyncPtr};
-use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, IntoDimension};
+use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
+use crate::{
+    strided_span_bytes_from_iter, Array, ArrayParams, ArrayStorage, DimDyn, Dimension,
+    IntoDimension,
+};
 
 /// Plain (not-compressed) owned array (type alias).
 pub type PlainArray<T> = Array<Plain<Vec<T>, Ty<T>>>;
@@ -467,10 +470,11 @@ where
         )?;
 
         let ndim = self.shape.ndim();
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let out_shape = (0..ndim).map(|dim| (index[dim].end - index[dim].start) as usize);
 
         let itemsize = dtype.itemsize() as usize;
-        let src_span = strided_span_bytes(out_shape.as_ref(), self.strides.as_ref(), itemsize);
+        let src_span =
+            strided_span_bytes_from_iter(out_shape.clone(), self.strides.as_ref(), itemsize);
 
         let src_ptr = if src_span == 0 {
             self.data.as_ptr()
@@ -485,6 +489,7 @@ where
         match out {
             None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.as_ref()) }),
             Some(out) => {
+                let out_shape = out_shape.collect::<DimArray<_>>();
                 unsafe { out.copy_from(src, self.strides.as_ref(), out_shape.as_ref(), dtype) };
                 Ok(out.view_mut())
             }

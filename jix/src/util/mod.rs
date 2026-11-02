@@ -103,11 +103,20 @@ impl_idx_for_primitive!(u64);
 /// Compute the byte span of a region accessed by `shape` and `strides`.
 #[inline]
 pub(crate) fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: usize) -> usize {
-    if shape.contains(&0) {
+    strided_span_bytes_from_iter(shape.iter().copied(), strides, itemsize)
+}
+
+#[inline]
+pub(crate) fn strided_span_bytes_from_iter(
+    shape: impl IntoIterator<Item = usize> + Clone,
+    strides: &[usize],
+    itemsize: usize,
+) -> usize {
+    if shape.clone().into_iter().any(|d| d == 0) {
         return 0;
     }
     let mut biggest_offset = 0;
-    for (&len, &stride) in shape.iter().zip(strides) {
+    for (len, &stride) in shape.into_iter().zip(strides) {
         biggest_offset += stride * (len - 1);
     }
     biggest_offset + itemsize
