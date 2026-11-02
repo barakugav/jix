@@ -1570,19 +1570,19 @@ impl Array {
 
     // == float predicates ==
 
-    /// Tests whether each element is finite. See [`jix.is_finite()`][jix.is_finite].
-    pub fn is_finite(slf: &Bound<'_, Self>) -> PyResult<Self> {
-        crate::ops::is_finite(slf)
+    /// Tests whether each element is finite. See [`jix.isfinite()`][jix.isfinite].
+    pub fn isfinite(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::isfinite(slf)
     }
 
-    /// Tests whether each element is infinite. See [`jix.is_infinite()`][jix.is_infinite].
-    pub fn is_infinite(slf: &Bound<'_, Self>) -> PyResult<Self> {
-        crate::ops::is_infinite(slf)
+    /// Tests whether each element is infinite. See [`jix.isinf()`][jix.isinf].
+    pub fn isinf(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::isinf(slf)
     }
 
-    /// Tests whether each element is `NaN`. See [`jix.is_nan()`][jix.is_nan].
-    pub fn is_nan(slf: &Bound<'_, Self>) -> PyResult<Self> {
-        crate::ops::is_nan(slf)
+    /// Tests whether each element is `NaN`. See [`jix.isnan()`][jix.isnan].
+    pub fn isnan(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::isnan(slf)
     }
 
     // == dim ops ==

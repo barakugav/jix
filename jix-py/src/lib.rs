@@ -84,7 +84,7 @@ mod jix {
     };
 
     #[pymodule_export]
-    pub use crate::ops::{is_finite, is_infinite, is_nan};
+    pub use crate::ops::{isfinite, isinf, isnan};
 
     #[pymodule_export]
     pub use crate::ops::{all, any, argmax, argmin, clamp, max, mean, min, product, std, sum, var};
