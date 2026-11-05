@@ -1,4 +1,6 @@
-use crate::ops::common::{broadcast_operands, operands_dtype_promotion, Operand};
+use pyo3::types::PyAnyMethods;
+
+use crate::ops::common::{broadcast_operands, operands_dtype_promotion, Operand, Scalar};
 use crate::util::IntoPyResult;
 use crate::Array;
 
@@ -12,6 +14,9 @@ use crate::Array;
 ///
 /// **Broadcasting**: the shapes of `condition`, `x`, and `y` are broadcast to a common shape
 /// following numpy rules, which is the output shape.
+///
+/// If `condition` is a scalar, or `x` and `y` are the same object, the selected operand is returned
+/// as is (after broadcasting and type promotion).
 ///
 /// This function deviates from numpy: `condition` must already have `bool` dtype; use
 /// [`jix.cast(condition, 'bool')`][jix.cast] if needed (numpy implicitly casts the condition to bool).
@@ -57,8 +62,9 @@ pub fn r#where<'py>(
     condition: &pyo3::Bound<'py, pyo3::PyAny>,
     x: &pyo3::Bound<'py, pyo3::PyAny>,
     y: &pyo3::Bound<'py, pyo3::PyAny>,
-) -> pyo3::PyResult<Array> {
+) -> pyo3::PyResult<pyo3::Bound<'py, Array>> {
     let py = condition.py();
+    let same_values = x.is(y);
 
     let condition = Operand::from_any(condition)?;
     let x = Operand::from_any(x)?;
@@ -66,18 +72,30 @@ pub fn r#where<'py>(
     let [condition, x, y] = broadcast_operands([condition, x, y])?;
     let [x, y] = operands_dtype_promotion("where", [x, y])?;
 
+    if let Operand::Scalar {
+        value: Scalar::Bool(value),
+        ..
+    } = condition
+    {
+        let selected = if value { x } else { y };
+        return selected.into_py_array(py);
+    }
+
     let condition = condition
         .into_array()?
         .into_typed::<jix_core::scalar::bool8>()
         .into_py_result()?;
+    if same_values {
+        return x.into_py_array(py);
+    }
     let x_py = x.into_py_array(py)?;
     let np_dtype = x_py.get().numpy_dtype(py)?;
     let x = x_py.get().to_core();
     let y = y.into_array()?;
 
     let ret = jix_core::ops::Where::new_array(condition, x, y).into_py_result()?;
-    Ok(Array::from_core_with_np_dtype(
-        ret.into_any(),
-        np_dtype.unbind(),
-    ))
+    pyo3::Bound::new(
+        py,
+        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+    )
 }

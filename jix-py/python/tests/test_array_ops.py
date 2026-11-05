@@ -722,6 +722,27 @@ def test_where_2d():
     np.testing.assert_array_equal(r.numpy(), np.where(cond, x, y))
 
 
+def test_where_scalar_condition_returns_operand():
+    x = jix.compact([1, 2, 3], dtype=np.int32)
+    y = jix.compact([10, 20, 30], dtype=np.int32)
+    assert jix.where(True, x, y) is x
+    assert jix.where(np.False_, x, y) is y
+    # broadcasting and type promotion still apply
+    y = jix.compact([[10], [20]], dtype=np.int64)
+    r = jix.where(True, x, y)
+    assert r.dtype == np.int64
+    np.testing.assert_array_equal(r.numpy(), [[1, 2, 3], [1, 2, 3]])
+    with pytest.raises(TypeError):
+        jix.where(1, x, y)
+
+
+def test_where_same_operands_returns_operand():
+    x = jix.compact([1, 2, 3], dtype=np.int32)
+    assert jix.where(jix.compact([True, False, True]), x, x) is x
+    with pytest.raises(TypeError):
+        jix.where(jix.compact([1, 0, 1]), x, x)
+
+
 # ---------------------------------------------------------------------------
 # read_array / write_array
 # ---------------------------------------------------------------------------
