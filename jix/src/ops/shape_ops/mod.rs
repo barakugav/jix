@@ -36,7 +36,7 @@ pub use tile::*;
 
 use crate::ops::DimsArg;
 use crate::util::dim_arr;
-use crate::{Array, ArrayStorage, IntoDimension};
+use crate::{Array, ArrayStorage};
 
 impl<S> Array<S>
 where
@@ -56,7 +56,7 @@ where
     ///
     /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
     #[track_caller]
-    pub fn reshape(self, shape: impl IntoDimension) -> Array<Reshape<S>> {
+    pub fn reshape(self, shape: &[u64]) -> Array<Reshape<S>> {
         Reshape::new_array(self, shape).unwrap()
     }
 

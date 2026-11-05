@@ -1748,7 +1748,7 @@ mod tests {
     /// An `Array` broadcasting one `f32` across a 4x5 region.
     fn scalar_4x5(value: f32) -> crate::Array<crate::storage::scalar::Scalar<f32>> {
         crate::Array::from_storage(
-            crate::storage::scalar::Scalar::new(value, [4u64, 5], crate::ArrayParams::default())
+            crate::storage::scalar::Scalar::new(value, &[4, 5], crate::ArrayParams::default())
                 .unwrap(),
         )
     }

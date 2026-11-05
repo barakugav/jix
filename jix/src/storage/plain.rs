@@ -10,10 +10,7 @@ use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
-use crate::{
-    strided_span_bytes_from_iter, Array, ArrayParams, ArrayStorage, DimDyn, Dimension,
-    IntoDimension,
-};
+use crate::{strided_span_bytes_from_iter, Array, ArrayParams, ArrayStorage, DimDyn, Dimension};
 
 /// Plain (not-compressed) owned array (type alias).
 pub type PlainArray<T> = Array<Plain<Vec<T>, Ty<T>>>;
@@ -125,12 +122,13 @@ impl<A> Plain<A, TypeDyn> {
     pub unsafe fn new(
         allocation: A,
         data: *const u8,
-        shape: impl IntoDimension,
+        shape: &[u64],
         strides: &[usize], // in bytes
         dtype: Dtype,
         mut params: ArrayParams,
     ) -> Result<Self> {
-        let shape = DimDyn::from_slice(shape.into_dimension()?.as_slice());
+        check_ndim(shape.len())?;
+        let shape = DimDyn::from_slice(shape);
         let ndim = shape.ndim();
 
         ensure!(
@@ -259,8 +257,16 @@ impl<T> Array<Plain<Vec<T>, Ty<T>>> {
         }
         let data_ptr = data_ptr.cast::<u8>();
 
-        let storage =
-            unsafe { Plain::new(allocation, data_ptr, shape, &strides, T::DTYPE, params) }?;
+        let storage = unsafe {
+            Plain::new(
+                allocation,
+                data_ptr,
+                shape.as_slice(),
+                &strides,
+                T::DTYPE,
+                params,
+            )
+        }?;
         let array = Array::from_storage(storage);
         let array = array.into_type().unwrap();
         Ok(array)
@@ -291,7 +297,7 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
 
         let data_ptr = arr.as_ptr().cast::<u8>();
 
-        unsafe { Self::plain_ndarray_ptr(data_ptr, shape, &strides, T::DTYPE, params) }
+        unsafe { Self::plain_ndarray_ptr(data_ptr, shape.as_slice(), &strides, T::DTYPE, params) }
     }
 
     /// Create a [`Plain`] array that borrows from an ndarray.
@@ -431,7 +437,7 @@ impl<ET> Array<Plain<&(), ET>> {
     ///   lazy view over it) is alive.
     pub unsafe fn plain_ndarray_ptr(
         data_ptr: *const u8,
-        shape: impl IntoDimension,
+        shape: &[u64],
         strides: &[usize],
         dtype: Dtype,
         params: ArrayParams,
@@ -836,7 +842,7 @@ mod tests {
         let make = || unsafe {
             Array::plain_ndarray_ptr(
                 base.cast_const(),
-                [rows as u64, cols as u64],
+                &[rows as u64, cols as u64],
                 &strides,
                 <i32 as crate::dtype::Dtyped>::DTYPE,
                 ArrayParams::default(),

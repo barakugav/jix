@@ -615,7 +615,7 @@ mod tests {
 
         let data = [7u8; 4];
         let a: Array<crate::storage::Plain<&(), TypeDyn>> = unsafe {
-            Array::plain_ndarray_ptr(data.as_ptr(), [4], &[1], dtype.clone(), ArrayParams::new())
+            Array::plain_ndarray_ptr(data.as_ptr(), &[4], &[1], dtype.clone(), ArrayParams::new())
                 .unwrap()
         };
         let mut buf = Cursor::new(Vec::new());

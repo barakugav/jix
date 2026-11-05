@@ -3,7 +3,9 @@ use std::ops::Range;
 
 use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, check_region_size, ensure, Result};
+use crate::error::{
+    check_get_buffer_size, check_get_range, check_ndim, check_region_size, ensure, Result,
+};
 use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
@@ -305,13 +307,13 @@ impl Array<Compact<TypeDyn>> {
     /// through a `&mut`, during the call.
     pub unsafe fn compact_ndarray_ptr(
         ptr: *const u8,
-        shape: impl IntoDimension,
+        shape: &[u64],
         strides: &[usize],
         dtype: Dtype,
         mut params: ArrayParams,
     ) -> Result<Self> {
-        let shape = shape.into_dimension()?;
-        params.tune(shape.as_slice(), &dtype)?;
+        check_ndim(shape.len())?;
+        params.tune(shape, &dtype)?;
         let array =
             unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype, params.clone())? };
         array.compact_with(params, &array.try_read_ctx()?)
@@ -2583,7 +2585,7 @@ mod tests {
         // Lazy ops are not compact, also when type-erased.
         let a = make();
         assert!(!(-a.view()).is_compact());
-        assert!(!a.view().reshape([4]).is_compact());
+        assert!(!a.view().reshape(&[4]).is_compact());
         assert!(!(-make()).into_any().is_compact());
     }
 }

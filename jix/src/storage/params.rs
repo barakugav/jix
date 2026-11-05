@@ -1378,11 +1378,11 @@ mod tests {
     fn read_layout_order_survives_a_one_to_one_reshape_only() {
         let a = compact_i32([3, 4, 5]);
         // Every output dim maps 1:1 to a source dim, so the layout carries through.
-        let r = a.view().permute_dims(&[2, 1, 0]).reshape([5, 4, 3]);
+        let r = a.view().permute_dims(&[2, 1, 0]).reshape(&[5, 4, 3]);
         assert_eq!(r.storage().spec().read_layout_order(), &[2, 1, 0]);
         // Merging dims 0 and 1 has no honest layout - a reshape is defined on C-order flattening -
         // so the output falls back to C-order.
-        let r = a.view().permute_dims(&[2, 1, 0]).reshape([20, 3]);
+        let r = a.view().permute_dims(&[2, 1, 0]).reshape(&[20, 3]);
         assert_eq!(r.storage().spec().read_layout_order(), &[0, 1]);
     }
 
@@ -1500,7 +1500,7 @@ mod tests {
         let params = ArrayParams::new().block_shape(&[1024, 1]).unwrap();
         let data = ndarray::Array2::<f32>::zeros((1024, 1024));
         let a = Array::compact_ndarray_with(&data, params).unwrap();
-        let scalar = crate::__private::Scalar::new(2.0f32, [1024, 1024], ArrayParams::new());
+        let scalar = crate::__private::Scalar::new(2.0f32, &[1024, 1024], ArrayParams::new());
         let c = (a.view() * Array::from_storage(scalar.unwrap()))
             .compact()
             .unwrap();
@@ -2005,7 +2005,7 @@ mod tests {
         let result = unsafe {
             Array::<crate::storage::Compact<crate::TypeDyn>>::compact_ndarray_ptr(
                 buf.as_ptr(),
-                [4u64],
+                &[4],
                 &[0usize],
                 zero_itemsize_dtype(),
                 ArrayParams::new(),
@@ -2023,7 +2023,7 @@ mod tests {
         let result = unsafe {
             Array::<crate::storage::Plain<&(), crate::TypeDyn>>::plain_ndarray_ptr(
                 buf.as_ptr(),
-                [4u64],
+                &[4],
                 &[0usize],
                 zero_itemsize_dtype(),
                 ArrayParams::new(),
@@ -2106,7 +2106,7 @@ mod tests {
         let result = unsafe {
             Array::<crate::storage::Plain<&(), crate::TypeDyn>>::plain_ndarray_ptr(
                 buf.as_ptr(),
-                OVERFLOWING_EMPTY_SHAPE,
+                &OVERFLOWING_EMPTY_SHAPE,
                 &[0usize; 3],
                 <i32 as crate::dtype::Dtyped>::DTYPE,
                 ArrayParams::new(),
@@ -2121,7 +2121,7 @@ mod tests {
     #[test]
     fn scalar_rejects_overflowing_shape() {
         let result =
-            crate::__private::Scalar::new(0i32, OVERFLOWING_EMPTY_SHAPE, ArrayParams::new())
+            crate::__private::Scalar::new(0i32, &OVERFLOWING_EMPTY_SHAPE, ArrayParams::new())
                 .map(|_| ());
         assert_eq!(
             result.unwrap_err().kind(),
