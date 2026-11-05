@@ -12,11 +12,11 @@
 //!   into memory.
 //!
 //! - **Lazy operation chains** - every operation (arithmetic, shape manipulation, type cast,
-//!   reduction, ...) returns a new [`Array<OpStorage<...>>`](Array), rather than a materialized result.
+//!   reduction, ...) returns a new [`Array<Op<...>>`](Array), rather than a materialized result.
 //!   Computation only runs when data is explicitly requested (e.g. via
 //!   [`.to_ndarray()`](Array::to_ndarray) or [`.compact()`](Array::compact)). Because the full
 //!   operation chain is encoded in the static type, the compiler can inline the entire pipeline
-//!   into a single read loop with no virtual dispatch very efficiently.
+//!   into a single efficient read loop with no virtual dispatch.
 //!
 //! # Quick start
 //!
@@ -30,7 +30,7 @@
 //! assert_eq!(a.shape(), &[2, 3]);
 //! assert_eq!(a.dtype(), &f32::DTYPE);
 //!
-//! // Decompress into a regular `ndarray::Array<f32>` array.
+//! // Decompress into a regular `ndarray::Array2<f32>` array.
 //! let decompressed = a.to_ndarray::<Ix2>()?;
 //! assert_eq!(decompressed[[0, 0]], 1.5);
 //!
@@ -94,8 +94,8 @@
 //!
 //! # Core type: `Array<S>`
 //!
-//! [`Array<S>`](Array) is generic over its storage backend [`S: ArrayStorage`]. The storage
-//! trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else - slicing,
+//! [`Array<S>`](Array) is generic over its storage backend [`S: ArrayStorage`](ArrayStorage). The
+//! storage trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else - slicing,
 //! arithmetic, reductions, serialization - is implemented on top of those three.
 //!
 //! The type parameter `S` carries the full operation chain at compile time:
@@ -106,7 +106,7 @@
 //!   .reshape(...)          -> Array<Reshape<Neg<Compact>>>
 //!   .permute_dims(&[1, 0]) -> Array<PermuteDims<Reshape<...>>>
 //!   .add(other)            -> Array<Add<PermuteDims<...>, Compact>>
-//!   .sum(0).               -> Array<Sum<Add<...>>>
+//!   .sum(0)                -> Array<Sum<Add<...>>>
 //!   .compact()?            -> Array<Compact>  - materialize
 //! ```
 //!
@@ -117,13 +117,15 @@
 //! | Type | Description |
 //! |------|-------------|
 //! | [`Array<Compact<...>>`](storage::Compact) | Heap-allocated block-compressed array. The main backend of the library. |
+//! | [`Array<CompactMmap<...>>`](storage::CompactMmap) | Block-compressed array served from a memory-mapped file. Created by [`Array::read_from_file_mmap`]. |
 //! | [`Array<Op<...>>`](ops) | Lazy operation views defined in [`ops`]. Wrap one or more arrays; apply their transformation on each read. |
-//! | [`Array<Plain<...>>`](storage::Plain) | Zero-copy view of a contiguous or strided in-memory buffer. Created by [`Array::plain_ndarray_ref`]. |
+//! | [`Array<Plain<...>>`](storage::Plain) | Zero-copy view of a contiguous or strided in-memory buffer. Created by [`Array::plain_ndarray`] (owned) or [`Array::plain_ndarray_ref`] (borrowed). |
 //!
 //! # Operations
 //!
-//! All operations live in [`ops`] and are also available as methods on [`Array<S>`](Array).
-//! The supported list of operations is still growing, but includes:
+//! All operations live in [`ops`], and most are also available as methods on [`Array<S>`](Array);
+//! the multi-array ones such as [`concatenate`](ops::concatenate) and [`stack`](ops::stack) are
+//! free functions. The supported list of operations is still growing, but includes:
 //!
 //! **Element-wise unary** - `neg`, `abs`, `exp`, `ln`, `sqrt`, `floor`, `ceil`,
 //! `round`, `sign`, `sin`, `cos`, `tan`, ...
@@ -137,14 +139,16 @@
 //!
 //! **Comparisons** - `equal`, `not_equal`, `greater`, `greater_equal`, `less`, ...
 //!
-//! **Logical** - `not`, `logical_and`, `logical_or`, `logical_xor`
+//! **Logical** (the bitwise ops below, applied to `bool8` arrays) - `not`, `bitand`, `bitor`,
+//! `bitxor`; plus `is_nan`, `is_finite`, `is_infinite`
 //!
-//! **Bitwise** - `bitwise_and`, `bitwise_or`, `bitwise_xor`, `bitwise_not`
+//! **Bitwise** (via `&`, `|`, `^`, `!` operator overloads and named methods) - `bitand`, `bitor`,
+//! `bitxor`, `not`, `bitwise_shift_left`, `bitwise_shift_right`, `count_ones`, ...
 //!
 //! **Reductions** - `sum`, `mean`, `min`, `max`, `argmin`, `argmax`, `any`, `all`, ...
 //!
 //! **Shape operations** - `reshape`, `slice`, `permute_dims`, `broadcast`,
-//! `insert_dim`, `remove_dim`, `concatenate`, `stack`
+//! `insert_dim`, `remove_dim`, `flip`, `roll`, `tile`, `repeat`, `concatenate`, `stack`
 //!
 //! **Type cast** - `cast::<T>()` converts each element to T.
 //!
@@ -160,7 +164,8 @@
 //!
 //! - *Scalar dtypes* cover all primitive numeric and boolean types:
 //!   `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`, `f64`,
-//!   `Complex<f32>`, `Complex<f64>`, `bool8`.
+//!   `Complex<f32>`, `Complex<f64>`, `bool8` (using `f16` and `Complex` as Rust element types
+//!   needs the `half` and `num-complex` features).
 //! - *Struct dtypes* group named fields with explicit byte offsets (C aligned or packed layout),
 //!   enabling NumPy-style structured dtypes.
 //!
@@ -191,7 +196,8 @@
 //! - [`Ty<T>`](Ty) - the scalar element type `T` is known at compile time.
 //!   Arrays constructed from typed sources carry this automatically (e.g.
 //!   `Array::compact_ndarray(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>>>`).
-//!   Most of the element-wise operations require `Ty<T>`, as they are bounded by scalar trait of `T`.
+//!   Most of the element-wise operations require `Ty<T>`, as they are bounded by a scalar trait of
+//!   `T`.
 //!
 //! - [`TypeDyn`] - the element type is only known at runtime. Arrays loaded
 //!   from disk start with this (`Array<Compact<TypeDyn>>`). Call
@@ -217,8 +223,8 @@
 //! # Number of dims
 //!
 //! The number of dims of an array is a runtime property, read from [`Array::shape`] and limited to
-//! [`NDIM_MAX`]. Shape arguments accept any [`IntoDimension`] value - a `u64`, an array or tuple of
-//! `u64`, or a slice - and [`Array::to_ndarray`] returns an ndarray of whichever dimension type
+//! [`NDIM_MAX`]. Shape arguments are plain `&[u64]` slices (e.g. `reshape(&[2, 3])`), and
+//! [`Array::to_ndarray`] returns an ndarray of whichever dimension type
 //! the caller asks for (checked at runtime), e.g. `to_ndarray::<ndarray::Ix2>()` or
 //! `to_ndarray::<ndarray::IxDyn>()`.
 //!
@@ -269,10 +275,10 @@
 //! let array = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[64, 64])?)?;
 //!
 //! let context = array.read_ctx();
-//! for tile_row in 0..7 {
-//!     for tile_col in 0..7 {
-//!         let row_range = (tile_row * 64)..((tile_row + 2) * 64);
-//!         let col_range = (tile_col * 64)..((tile_col + 2) * 64);
+//! for tile_row in 0..8 {
+//!     for tile_col in 0..8 {
+//!         let row_range = (tile_row * 64)..((tile_row + 1) * 64);
+//!         let col_range = (tile_col * 64)..((tile_col + 1) * 64);
 //!         let tile = array.to_ndarray_sub::<Ix2>(&[row_range, col_range], &context)?;
 //!         println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
 //!     }
@@ -286,16 +292,17 @@
 //! needed.
 //!
 //! To avoid this, call [`.compact()`](Array::compact)
-//! after a shape change to re-encode with a freshly derived block shape:
+//! after a shape change to re-encode with a freshly derived block shape, or
+//! [`.compact_with()`](Array::compact_with) to choose the new block shape yourself:
 //!
 //! ```
 //! use jix::{Array, ArrayParams};
 //!
-//! // Compress with column-friendly blocks.
+//! // Compress with 64*64 blocks.
 //! let params = ArrayParams::new().block_shape(&[64, 64])?;
 //! let a = Array::compact_ndarray_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
 //!
-//! // Transpose and re-encode with row-friendly blocks.
+//! // Transpose and re-encode with explicit 128*128 blocks.
 //! let out_params = ArrayParams::new().block_shape(&[128, 128])?;
 //! let ctx = a.read_ctx();
 //! let transposed = a.permute_dims(&[1, 0]).compact_with(out_params, &ctx)?;
@@ -358,7 +365,9 @@
 //! - Maximum array dimensions: [`NDIM_MAX`] (8).
 //! - Little-endian targets only - enforced by a compile-time assertion.
 //! - Element types must implement [`Dtyped`](dtype::Dtyped); they must be `Copy + Send + Sync +
-//!   'static` and must not implement `Drop`.
+//!   'static` and must not implement `Drop`. They must have no padding bytes, and every bit
+//!   pattern must be a valid value, since arrays are read from files without validation - which
+//!   is why the boolean element type is [`bool8`](scalar::bool8) and not `bool`.
 //!
 //!
 //! # Acknowledgements

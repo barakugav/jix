@@ -821,7 +821,7 @@ impl Array {
                 .cast_into()?;
         }
 
-        return Ok(arr);
+        Ok(arr)
     }
 
     /// Copies the data of an array into a new compact array by compressing it into new blocks. See [`jix.compact()`][jix.compact].
