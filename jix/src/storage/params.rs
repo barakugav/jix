@@ -2045,7 +2045,7 @@ mod tests {
         struct Empty {}
 
         let result =
-            Array::<crate::storage::Compact<crate::Ty<Empty>>>::compact_fn([4u64], |_| Empty {});
+            Array::<crate::storage::Compact<crate::Ty<Empty>>>::compact_fn(&[4], |_| Empty {});
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::UnsupportedDtype
@@ -2071,7 +2071,7 @@ mod tests {
 
     #[test]
     fn compact_fn_rejects_overflowing_shape() {
-        let result = Array::compact_fn(OVERFLOWING_EMPTY_SHAPE, |_| 0i32);
+        let result = Array::compact_fn(&OVERFLOWING_EMPTY_SHAPE, |_| 0i32);
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::InvalidShapeOperation
@@ -2083,7 +2083,7 @@ mod tests {
         // 3 * 0x5555_5555_5555_5555 == u64::MAX, and the block dim 2 pads the 3 to 4.
         let shape = [0, 3, 0x5555_5555_5555_5555];
         let params = ArrayParams::new().block_shape(&[1, 2, 1]).unwrap();
-        let result = Array::compact_fn_with(shape, params, |_| 0u8);
+        let result = Array::compact_fn_with(&shape, params, |_| 0u8);
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::InvalidShapeOperation

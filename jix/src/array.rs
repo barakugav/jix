@@ -19,8 +19,8 @@ use crate::util::{
     PtrMutNoalias, PtrNoalias,
 };
 use crate::{
-    default_logical_strides, default_strides, ArrayAny, ArrayParams, ArrayStorage, Dim, DimDyn,
-    DimVec, Dimension, ElementType, IntoDimension, SliceExt, Ty, TypeDyn,
+    default_logical_strides, default_strides, ArrayAny, ArrayParams, ArrayStorage, Dim, DimArray,
+    DimDyn, DimVec, Dimension, ElementType, SliceExt, Ty, TypeDyn,
 };
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
@@ -336,44 +336,24 @@ impl<T> Array<Compact<Ty<T>>> {
     ///
     /// # Examples
     ///
-    /// 1D - the index is a `u64`:
+    /// The index is passed as a `&[u64]` with one entry per dim:
     ///
     /// ```
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_fn(5, |i: u64| i * 2)?;
+    /// let a = Array::compact_fn(&[5], |i| i[0] * 2)?;
     /// assert_eq!(a.to_ndarray()?, array![0, 2, 4, 6, 8]);
-    /// # Ok::<(), jix::Error>(())
-    /// ```
     ///
-    /// 2D - the index is a `(u64, u64)` tuple:
-    ///
-    /// ```
-    /// use jix::Array;
-    /// use ndarray::array;
-    ///
-    /// let a = Array::compact_fn((3, 3), |(x, y)| x * 10 + y)?;
+    /// let a = Array::compact_fn(&[3, 3], |i| i[0] * 10 + i[1])?;
     /// assert_eq!(
     ///     a.to_ndarray()?,
     ///     array![[0, 1, 2], [10, 11, 12], [20, 21, 22]]
     /// );
     /// # Ok::<(), jix::Error>(())
     /// ```
-    ///
-    /// Passing a slice as the shape makes the callback receive `&[u64]`:
-    ///
-    /// ```
-    /// use jix::Array;
-    ///
-    /// let a = Array::compact_fn([2, 3].as_slice(), |i: &[u64]| i[0] + i[1])?;
-    /// assert_eq!(a.shape(), &[2, 3]);
-    /// # Ok::<(), jix::Error>(())
-    /// ```
-    pub fn compact_fn<Sh, F>(shape: Sh, f: F) -> Result<Self>
+    pub fn compact_fn(shape: &[u64], f: impl Fn(&[u64]) -> T) -> Result<Self>
     where
-        Sh: IntoDimension,
-        F: Fn(<Sh::Dimension as Dimension>::Index<'_>) -> T,
         T: Dtyped,
     {
         Self::compact_fn_with(shape, ArrayParams::default(), f)
@@ -402,28 +382,29 @@ impl<T> Array<Compact<Ty<T>>> {
     /// # use jix::{Array, ArrayParams};
     /// let params = ArrayParams::new().block_shape(&[64, 64])?;
     ///
-    /// let a = Array::compact_fn_with((256, 256), params, |(x, y)| (x as f32) * 0.5 + (y as f32))?;
+    /// let a = Array::compact_fn_with(&[256, 256], params, |i| (i[0] as f32) * 0.5 + (i[1] as f32))?;
     /// assert_eq!(a.shape(), &[256, 256]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    pub fn compact_fn_with<Sh, F>(shape: Sh, mut params: ArrayParams, f: F) -> Result<Self>
+    pub fn compact_fn_with(
+        shape: &[u64],
+        mut params: ArrayParams,
+        f: impl Fn(&[u64]) -> T,
+    ) -> Result<Self>
     where
-        Sh: IntoDimension,
-        F: Fn(<Sh::Dimension as Dimension>::Index<'_>) -> T,
         T: Dtyped,
     {
-        struct FnStorage<T, D, F> {
+        struct FnStorage<T, F> {
             dtype: Ty<T>,
-            shape: D,
+            shape: DimArray<u64>,
             f: F,
             spec: ArraySpecOwned,
         }
-        impl<T, D, F> crate::storage::ArrayStorageImpl for FnStorage<T, D, F> {}
-        impl<T, D, F> ArrayStorage for FnStorage<T, D, F>
+        impl<T, F> crate::storage::ArrayStorageImpl for FnStorage<T, F> {}
+        impl<T, F> ArrayStorage for FnStorage<T, F>
         where
             T: Dtyped,
-            D: Dimension,
-            F: Fn(D::Index<'_>) -> T,
+            F: Fn(&[u64]) -> T,
         {
             type ElementType = Ty<T>;
 
@@ -441,8 +422,8 @@ impl<T> Array<Compact<Ty<T>>> {
                     self.dtype().itemsize() as usize,
                 )?;
                 let ndim = self.shape().len();
-                let read_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
-                let read_shape_usize = D::vec(ndim, |dim| read_shape[dim] as usize);
+                let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+                let read_shape_usize = dim_arr(ndim, |dim| read_shape[dim] as usize);
                 let mut out = materialize_out_buf(
                     out,
                     context,
@@ -456,20 +437,20 @@ impl<T> Array<Compact<Ty<T>>> {
                 let dst_aligned = (out_buf.as_ptr() as usize).is_multiple_of(alignment)
                     && (out_strides.iter().all(|s| s.is_multiple_of(alignment)));
 
-                let begin = D::vec(ndim, |dim| index[dim].start);
-                let end = D::vec(ndim, |dim| index[dim].end);
+                let begin = dim_arr(ndim, |dim| index[dim].start);
+                let end = dim_arr(ndim, |dim| index[dim].end);
                 let base = out_buf.as_mut_ptr();
                 let iter = NdIter::builder_with_begin(begin, end)
-                    .with_strides_offset_ext(out_strides.to_dim_vec::<D>(), 0)
+                    .with_strides_offset_ext(out_strides.to_dim_vec::<DimDyn>(), 0)
                     .build();
                 if dst_aligned {
                     iter.for_each(|idx, dst_offset| {
-                        let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
+                        let value = (self.f)(idx.as_ref());
                         unsafe { base.add(dst_offset).cast::<T>().write(value) };
                     });
                 } else {
                     iter.for_each(|idx, dst_offset| {
-                        let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
+                        let value = (self.f)(idx.as_ref());
                         unsafe { base.add(dst_offset).cast::<T>().write_unaligned(value) };
                     });
                 }
@@ -498,9 +479,10 @@ impl<T> Array<Compact<Ty<T>>> {
             crate::ops::impl_element_type_change_default!();
         }
 
-        let shape = shape.into_dimension()?;
         let dtype = Ty::<T>::new();
 
+        check_ndim(shape.len())?;
+        let shape = DimArray::from_slice(shape).unwrap();
         params.tune(shape.as_slice(), dtype.dtype())?;
         let spec =
             params
@@ -2083,7 +2065,7 @@ mod tests {
 
     #[test]
     fn compact_fn_1d() {
-        let a = Array::compact_fn(47, |i| i * 4 + 6).unwrap();
+        let a = Array::compact_fn(&[47], |i| i[0] * 4 + 6).unwrap();
         assert_eq!(a.shape(), &[47]);
         assert_eq!(
             a.to_ndarray().unwrap(),
@@ -2093,18 +2075,11 @@ mod tests {
 
     #[test]
     fn compact_fn_2d() {
-        let a = Array::compact_fn((3, 3), |(x, y)| x * 10 + y).unwrap();
+        let a = Array::compact_fn(&[3, 3], |i| i[0] * 10 + i[1]).unwrap();
         assert_eq!(a.shape(), &[3, 3]);
         assert_eq!(
             a.to_ndarray().unwrap(),
             array![[0, 1, 2], [10, 11, 12], [20, 21, 22]]
-        );
-
-        let a = Array::compact_fn([3, 3].as_slice(), |i| i[0] * 7 + i[1]).unwrap();
-        assert_eq!(a.shape(), &[3, 3]);
-        assert_eq!(
-            a.to_ndarray().unwrap(),
-            array![[0, 1, 2], [7, 8, 9], [14, 15, 16]].into_dyn()
         );
     }
 
@@ -2120,40 +2095,25 @@ mod tests {
     #[test]
     fn compact_fn_multi_chunk_static() {
         let params = multi_chunk_params(&[4, 4]);
-        let a = Array::compact_fn_with((32, 24), params, |(x, y)| x * 100 + y).unwrap();
+        let a = Array::compact_fn_with(&[32, 24], params, |i| i[0] * 100 + i[1]).unwrap();
         let expected = ndarray::Array2::from_shape_fn((32, 24), |(x, y)| (x * 100 + y) as u64);
         assert_eq!(a.to_ndarray().unwrap(), expected);
     }
 
     #[test]
-    fn compact_fn_multi_chunk_dyn() {
-        // ndim 2, given as a slice: a `DimDyn` walk handing `f` a `&[u64]` index.
-        let params = multi_chunk_params(&[4, 4]);
-        let a = Array::compact_fn_with([32, 24].as_slice(), params, |i| i[0] * 100 + i[1]).unwrap();
-        let expected = ndarray::Array2::from_shape_fn((32, 24), |(x, y)| (x * 100 + y) as u64);
-        assert_eq!(a.to_ndarray().unwrap(), expected.into_dyn());
-    }
-
-    #[test]
-    fn compact_fn_multi_chunk_dyn_high_ndim() {
-        // ndim 5, given as a slice.
+    fn compact_fn_multi_chunk_high_ndim() {
         let params = multi_chunk_params(&[2, 2, 2, 2, 2]);
-        let shape = [6u64, 4, 6, 4, 2];
         let f = |i: &[u64]| i.iter().fold(0, |acc, &x| acc * 10 + x);
-        let a = Array::compact_fn_with(shape.as_slice(), params, f).unwrap();
-        let shape_usize = shape.map(|s| s as usize);
-        let expected = ndarray::ArrayD::from_shape_fn(shape_usize.as_slice(), |i| {
-            f(&ndarray::Dimension::slice(&i)
-                .iter()
-                .map(|&x| x as u64)
-                .collect::<Vec<_>>())
+        let a = Array::compact_fn_with(&[6, 4, 6, 4, 2], params, f).unwrap();
+        let expected = ndarray::Array5::from_shape_fn((6, 4, 6, 4, 2), |(a, b, c, d, e)| {
+            f(&[a, b, c, d, e].map(|x| x as u64))
         });
         assert_eq!(a.to_ndarray().unwrap(), expected);
     }
 
     #[test]
     fn compact_fn_0d() {
-        let a = Array::compact_fn((), |()| 42).unwrap();
+        let a = Array::compact_fn(&[], |_| 42).unwrap();
         assert_eq!(a.shape(), &[]);
         assert_eq!(a.to_ndarray().unwrap(), ndarray::arr0(42));
     }
