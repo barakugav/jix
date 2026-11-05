@@ -6,7 +6,20 @@ from .jix import absolute, clamp, concatenate, divide, log, multiply, negative, 
 
 __doc__ = jix.__doc__  # noqa: F405
 if hasattr(jix, "__all__"):  # noqa: F405
-    __all__ = jix.__all__  # noqa: F405
+    __all__ = jix.__all__ + [  # noqa: F405
+        "pow",
+        "abs",
+        "concat",
+        "clip",
+        "prod",
+        "sub",
+        "mul",
+        "div",
+        "neg",
+        "log2",
+        "log10",
+    ]
+
 
 pow = power
 """Alias for [`jix.power`][jix.power]"""
