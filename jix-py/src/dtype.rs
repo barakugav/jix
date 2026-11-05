@@ -46,33 +46,30 @@ pub(crate) fn dtype_to_numpy<'py>(
         }
 
         let dtype_dict = PyDict::new(py);
-        dtype_dict.set_item("names", names).unwrap();
-        dtype_dict.set_item("offsets", offsets).unwrap();
-        dtype_dict.set_item("formats", dtypes).unwrap();
-        dtype_dict
-            .set_item(
-                "itemsize",
-                itemsize as u64 / shape.iter().map(|&s| s as u64).product::<u64>(),
-            )
-            .unwrap();
+        dtype_dict.set_item("names", names)?;
+        dtype_dict.set_item("offsets", offsets)?;
+        dtype_dict.set_item("formats", dtypes)?;
+        dtype_dict.set_item(
+            "itemsize",
+            itemsize as u64 / shape.iter().map(|&s| s as u64).product::<u64>(),
+        )?;
         let align = dtype.is_aligned();
         if !align {
             // No need to pass 'align=False', its the default
             PyArrayDescr::new(py, dtype_dict)?
         } else {
             let dtype_kwargs = PyDict::new(py);
-            dtype_kwargs.set_item("align", align).unwrap();
+            dtype_kwargs.set_item("align", align)?;
 
             // Can't pass kwargs to PyArrayDescr::new, so we use the Python API instead of numpy C API.
             py.import("numpy")?
                 .getattr("dtype")?
                 .call((dtype_dict,), Some(&dtype_kwargs))?
-                .cast_into::<PyArrayDescr>()
-                .unwrap()
+                .cast_into::<PyArrayDescr>()?
         }
     };
 
-    let shape = PyTuple::new(py, shape).unwrap();
+    let shape = PyTuple::new(py, shape)?;
     let numpy_dtype = PyArrayDescr::new(py, (numpy_dtype, shape))?;
 
     let dtype_layout = (itemsize as usize, dtype.alignment().as_usize());

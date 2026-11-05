@@ -93,7 +93,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// - `index` - one half-open range per dimension (`start..end`).
     ///   The number of ranges must equal `self.shape().len()`.
     ///   Ranges must be within the array shape bounds; empty ranges are allowed.
-    /// - `context` - read context carrying the decoder state.
+    /// - `context` - read context carrying reusable buffers and decoder state.
     /// - `out` - optional destination, as described above.
     ///
     /// # Returns

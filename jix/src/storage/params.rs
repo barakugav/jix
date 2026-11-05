@@ -83,13 +83,10 @@ impl ReadSize {
 ///
 /// // Construct an array with a specific block shape.
 /// let data = ndarray::Array2::<f32>::zeros((1024, 1024));
-/// let mut params = ArrayParams::new();
-/// params.block_shape(&[64, 64]);
-/// let za = Array::compact_ndarray_with(&data, params)?;
+/// let za = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[64, 64])?)?;
 ///
 /// // After a shape-changing op, pin the block shape explicitly.
-/// let mut out_params = ArrayParams::new();
-/// out_params.block_shape(&[128, 128]);
+/// let out_params = ArrayParams::new().block_shape(&[128, 128])?;
 /// let ctx = za.read_ctx();
 /// let transposed = za.permute_dims(&[1, 0]).compact_with(out_params, &ctx)?;
 /// # Ok::<(), jix::Error>(())
@@ -122,16 +119,8 @@ impl ArrayParams {
     /// [`block_shape_fixed_dims`](Self::block_shape_fixed_dims) is also used, meaning the shape will
     /// be preserved as-is if this `ArrayParams` is later used as a propagation source.
     ///
-    /// Panics if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries; see
-    /// [`try_block_shape`](Self::try_block_shape) for a non-panicking variant.
-    #[track_caller]
-    pub fn block_shape(&mut self, block_shape: &[BlockSize]) -> &mut Self {
-        self.try_block_shape(block_shape).unwrap()
-    }
-
-    /// Like [`block_shape`](Self::block_shape), but fails with `TooManyDimensions` instead of
-    /// panicking if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries.
-    pub fn try_block_shape(&mut self, block_shape: &[BlockSize]) -> Result<&mut Self> {
+    /// Fails with `TooManyDimensions` if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries.
+    pub fn block_shape(mut self, block_shape: &[BlockSize]) -> Result<Self> {
         check_ndim(block_shape.len())?;
         self.block_shape = Some(DimArray::from_slice(block_shape).unwrap());
         Ok(self)
@@ -151,18 +140,8 @@ impl ArrayParams {
     /// on the block shape: an explicitly-set [`block_shape`](Self::block_shape) is all-fixed
     /// (preserved exactly), while an auto-computed block shape is all-non-fixed.
     ///
-    /// Panics if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries; see
-    /// [`try_block_shape_fixed_dims`](Self::try_block_shape_fixed_dims) for a non-panicking
-    /// variant.
-    #[track_caller]
-    pub fn block_shape_fixed_dims(&mut self, fixed: &[bool]) -> &mut Self {
-        self.try_block_shape_fixed_dims(fixed).unwrap()
-    }
-
-    /// Like [`block_shape_fixed_dims`](Self::block_shape_fixed_dims), but fails with
-    /// `TooManyDimensions` instead of panicking if given more than [`NDIM_MAX`](crate::NDIM_MAX)
-    /// entries.
-    pub fn try_block_shape_fixed_dims(&mut self, fixed: &[bool]) -> Result<&mut Self> {
+    /// Fails with `TooManyDimensions` if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries.
+    pub fn block_shape_fixed_dims(mut self, fixed: &[bool]) -> Result<Self> {
         check_ndim(fixed.len())?;
         self.block_shape_fixed_dims = Some(fixed.iter().copied().collect());
         Ok(self)
@@ -177,7 +156,8 @@ impl ArrayParams {
     /// When not provided, defaults to `block_shape.product() * itemsize` (the block size in
     /// bytes), or a size chosen automatically according to the CPU cache sizes if no block shape
     /// is given.
-    pub fn block_size(&mut self, size_hint: u64) -> &mut Self {
+    #[must_use]
+    pub fn block_size(mut self, size_hint: u64) -> Self {
         self.block_size = Some(size_hint);
         self
     }
@@ -202,7 +182,8 @@ impl ArrayParams {
     /// residency, which the `max` ceiling bounds.
     ///
     /// When unset, the range is chosen automatically according to the CPU cache sizes.
-    pub fn read_size(&mut self, size_hint: (u64, u64)) -> &mut Self {
+    #[must_use]
+    pub fn read_size(mut self, size_hint: (u64, u64)) -> Self {
         self.read_size = Some(ReadSize::new(size_hint.0, size_hint.1));
         self
     }
@@ -211,7 +192,8 @@ impl ArrayParams {
     ///
     /// Defaults to [`Codec::Zstd`] when not set. Setting any codec field materializes the codec
     /// configuration to its defaults, then applies this override.
-    pub fn codec(&mut self, codec: Codec) -> &mut Self {
+    #[must_use]
+    pub fn codec(mut self, codec: Codec) -> Self {
         self.encoder_params
             .get_or_insert_with(EncoderParams::default)
             .codec(codec);
@@ -225,7 +207,7 @@ impl ArrayParams {
     /// # Errors
     ///
     /// Returns `InvalidArgument` if `level` is not in the valid range.
-    pub fn level(&mut self, level: i32) -> Result<&mut Self> {
+    pub fn level(mut self, level: i32) -> Result<Self> {
         self.encoder_params
             .get_or_insert_with(EncoderParams::default)
             .level(level)?;
@@ -242,7 +224,7 @@ impl ArrayParams {
     /// # Errors
     ///
     /// Returns `InvalidArgument` if `filters` contains more than 4 elements.
-    pub fn filters(&mut self, filters: &[Filter]) -> Result<&mut Self> {
+    pub fn filters(mut self, filters: &[Filter]) -> Result<Self> {
         self.encoder_params
             .get_or_insert_with(EncoderParams::default)
             .filters(filters)?;
@@ -257,28 +239,28 @@ impl ArrayParams {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```ignore
     /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
     /// let source = Array::compact_ndarray(&array![1i32, 2, 3, 4, 5, 6, 7, 8])?;
     ///
     /// // Override just the block shape; inherit codec params from `source`.
-    /// let mut params = ArrayParams::new();
-    /// params.block_shape(&[4]);
-    /// params.override_from_array(&source);
+    /// let mut params = ArrayParams::new().block_shape(&[4])?;
+    /// params.inherit_unset_from_array(&source);
     ///
     /// let copy = source.compact_with(params, &source.read_ctx())?;
     /// # Ok::<(), jix::Error>(())
     /// ```
-    pub fn override_from_array<S>(&mut self, array: &Array<S>)
+    #[allow(unused)]
+    pub(crate) fn inherit_unset_from_array<S>(&mut self, array: &Array<S>)
     where
         S: ArrayStorage,
     {
-        self.override_from_storage(array.storage());
+        self.inherit_unset_from_storage(array.storage());
     }
 
-    pub(crate) fn override_from_storage(&mut self, storage: &impl ArrayStorage) {
+    pub(crate) fn inherit_unset_from_storage(&mut self, storage: &impl ArrayStorage) {
         let spec = storage.spec();
         self.encoder_params
             .get_or_insert_with(|| spec.encoder_params().clone());
@@ -1022,13 +1004,13 @@ mod tests {
     #[test]
     fn compact_with_keeps_caller_fixed_dims() {
         let data = ndarray::Array2::<i32>::zeros((64, 64));
-        let mut params = ArrayParams::new();
-        params.block_shape(&[8, 32]);
+        let params = ArrayParams::new().block_shape(&[8, 32]).unwrap();
         let a = Array::compact_ndarray_with(&data, params).unwrap();
 
-        let mut params = ArrayParams::new();
-        params.block_shape_fixed_dims(&[true, false]);
-        params.block_size(8 * 64 * 4);
+        let params = ArrayParams::new()
+            .block_shape_fixed_dims(&[true, false])
+            .unwrap()
+            .block_size(8 * 64 * 4);
         let c = a.compact_with(params, &a.read_ctx()).unwrap();
         assert_eq!(c.storage().spec().block_shape()[..], [8, 64]);
     }
@@ -1041,8 +1023,7 @@ mod tests {
                 .unwrap()
                 .broadcast(&[1 << 31])
         };
-        let mut params = ArrayParams::new();
-        params.block_shape(&[1 << 31]);
+        let params = ArrayParams::new().block_shape(&[1 << 31]).unwrap();
         assert!(a().compact_with(params, &Default::default()).is_err());
     }
 
@@ -1131,12 +1112,11 @@ mod tests {
     fn widening_view_rescales_an_oversized_inherited_block_shape() {
         // One fixed block of 2^20 + 8 items, over 1 GiB as 1 KiB items.
         let n = (1 << 20) + 8;
-        let mut p = ArrayParams::new();
-        p.block_shape(&[n as u32]);
-        let a = Array::compact_ndarray_with(&ndarray::Array1::<u8>::zeros(n), p).unwrap();
+        let params = ArrayParams::new().block_shape(&[n as u32]).unwrap();
+        let a = Array::compact_ndarray_with(&ndarray::Array1::<u8>::zeros(n), params).unwrap();
         let a = a.map(|x: u8| [x as f64; 128]);
         let mut params = ArrayParams::new();
-        params.override_from_storage(a.storage());
+        params.inherit_unset_from_storage(a.storage());
         params.tune(a.shape(), a.dtype()).unwrap();
         let block_shape = params.block_shape.unwrap();
         assert!(block_shape[0] as u64 * 1024 <= BLOCK_SIZE_BYTES_MAX);
@@ -1398,11 +1378,11 @@ mod tests {
     fn read_layout_order_survives_a_one_to_one_reshape_only() {
         let a = compact_i32([3, 4, 5]);
         // Every output dim maps 1:1 to a source dim, so the layout carries through.
-        let r = a.view().permute_dims(&[2, 1, 0]).reshape([5, 4, 3]);
+        let r = a.view().permute_dims(&[2, 1, 0]).reshape(&[5, 4, 3]);
         assert_eq!(r.storage().spec().read_layout_order(), &[2, 1, 0]);
         // Merging dims 0 and 1 has no honest layout - a reshape is defined on C-order flattening -
         // so the output falls back to C-order.
-        let r = a.view().permute_dims(&[2, 1, 0]).reshape([20, 3]);
+        let r = a.view().permute_dims(&[2, 1, 0]).reshape(&[20, 3]);
         assert_eq!(r.storage().spec().read_layout_order(), &[0, 1]);
     }
 
@@ -1517,11 +1497,10 @@ mod tests {
 
     #[test]
     fn scalar_and_plain_keep_the_compact_block_shape() {
-        let mut params = ArrayParams::new();
-        params.block_shape(&[1024, 1]);
+        let params = ArrayParams::new().block_shape(&[1024, 1]).unwrap();
         let data = ndarray::Array2::<f32>::zeros((1024, 1024));
         let a = Array::compact_ndarray_with(&data, params).unwrap();
-        let scalar = crate::__private::Scalar::new(2.0f32, [1024, 1024], ArrayParams::new());
+        let scalar = crate::__private::Scalar::new(2.0f32, &[1024, 1024], ArrayParams::new());
         let c = (a.view() * Array::from_storage(scalar.unwrap()))
             .compact()
             .unwrap();
@@ -1530,8 +1509,7 @@ mod tests {
         let c = (a + plain).compact().unwrap();
         assert_eq!(c.storage().spec().block_shape()[..], [1024, 1]);
 
-        let mut params = ArrayParams::new();
-        params.block_shape(&[64, 64]);
+        let params = ArrayParams::new().block_shape(&[64, 64]).unwrap();
         let a = Array::compact_ndarray_with(&data, params).unwrap();
         let plain = Array::plain_ndarray_view(data.view()).unwrap();
         let c = (a + plain).compact().unwrap();
@@ -1545,8 +1523,7 @@ mod tests {
         // "cover this dim" wish lives in `read_shape_scale_weight` instead.
         // The ops consume their receiver, so build two identical arrays.
         let mk = || {
-            let mut params = ArrayParams::new();
-            params.block_shape(&[3, 2]);
+            let params = ArrayParams::new().block_shape(&[3, 2]).unwrap();
             Array::compact_ndarray_with(
                 &ndarray::Array::from_shape_vec([3, 4], (0..12i64).collect()).unwrap(),
                 params,
@@ -1703,20 +1680,21 @@ mod tests {
         use crate::dtype::Dtyped;
 
         // All dims fixed by default: the explicit block shape is preserved exactly.
-        let mut params = ArrayParams::new();
-        params.block_shape(&[4, 4]);
-        let spec = params
+        let spec = ArrayParams::new()
+            .block_shape(&[4, 4])
+            .unwrap()
             .into_spec(&[1024, 1024], &i32::DTYPE, ArraySpecFlags::default())
             .unwrap();
         assert_eq!(spec.as_ref().block_shape().as_slice(), &[4, 4]);
         assert!(spec.as_ref().block_shape_fixed_dims().all());
 
         // Release dim 1: it may grow to fill the block-size budget, while dim 0 stays pinned.
-        let mut params = ArrayParams::new();
-        params.block_shape(&[4, 4]);
-        params.block_shape_fixed_dims(&[true, false]);
-        params.block_size(4 * 1024 * i32::DTYPE.itemsize() as u64);
-        let spec = params
+        let spec = ArrayParams::new()
+            .block_shape(&[4, 4])
+            .unwrap()
+            .block_shape_fixed_dims(&[true, false])
+            .unwrap()
+            .block_size(4 * 1024 * i32::DTYPE.itemsize() as u64)
             .into_spec(&[1024, 1024], &i32::DTYPE, ArraySpecFlags::default())
             .unwrap();
         let bs = spec.as_ref().block_shape();
@@ -1729,8 +1707,7 @@ mod tests {
     #[test]
     fn block_shape_fixed_dims_without_block_shape_errors() {
         use crate::dtype::Dtyped;
-        let mut params = ArrayParams::new();
-        params.block_shape_fixed_dims(&[false]);
+        let params = ArrayParams::new().block_shape_fixed_dims(&[false]).unwrap();
         let result = params.into_spec(&[8], &i32::DTYPE, ArraySpecFlags::default());
         match result {
             Err(e) => assert!(matches!(e.kind(), crate::error::ErrorKind::InvalidArgument)),
@@ -1742,9 +1719,11 @@ mod tests {
     fn block_shape_fixed_dims_length_mismatch_errors() {
         use crate::dtype::Dtyped;
         // A 3-element fixed-dims mask on a 2-D array is a length mismatch.
-        let mut params = ArrayParams::new();
-        params.block_shape(&[4, 4]);
-        params.block_shape_fixed_dims(&[true, false, true]);
+        let params = ArrayParams::new()
+            .block_shape(&[4, 4])
+            .unwrap()
+            .block_shape_fixed_dims(&[true, false, true])
+            .unwrap();
         let result = params.into_spec(&[1024, 1024], &i32::DTYPE, ArraySpecFlags::default());
         match result {
             Err(e) => assert!(matches!(e.kind(), crate::error::ErrorKind::InvalidArgument)),
@@ -1755,13 +1734,11 @@ mod tests {
     #[test]
     fn example() {
         let data = ndarray::Array2::<f32>::zeros((1024, 1024));
-        let mut params = ArrayParams::new();
-        params.block_shape(&[64, 64]);
+        let params = ArrayParams::new().block_shape(&[64, 64]).unwrap();
         let za = Array::compact_ndarray_with(&data, params).unwrap();
 
         // After a shape-changing op, pin the block shape explicitly.
-        let mut out_params = ArrayParams::new();
-        out_params.block_shape(&[128, 128]);
+        let out_params = ArrayParams::new().block_shape(&[128, 128]).unwrap();
         let ctx = za.read_ctx();
         let transposed = za
             .permute_dims(&[1, 0])
@@ -1774,13 +1751,13 @@ mod tests {
     fn flattened_codec_methods_roundtrip() {
         use crate::codec::{Codec, Filter};
 
-        let mut params = ArrayParams::new();
         // Unset by default -> getters return None.
-        assert!(params.encoder_params.is_none());
+        assert!(ArrayParams::new().encoder_params.is_none());
 
-        params.codec(Codec::Zstd);
-        params.level(7).unwrap();
-        params
+        let params = ArrayParams::new()
+            .codec(Codec::Zstd)
+            .level(7)
+            .unwrap()
             .filters(&[Filter::ByteShuffle, Filter::BitShuffle])
             .unwrap();
 
@@ -1795,9 +1772,9 @@ mod tests {
     fn read_size_defaults_to_cache_window() {
         use crate::dtype::Dtyped;
         use crate::util::cpu_cache::cache_sizes;
-        let mut params = ArrayParams::new();
-        params.block_shape(&[8]);
-        let spec = params
+        let spec = ArrayParams::new()
+            .block_shape(&[8])
+            .unwrap()
             .into_spec(&[8], &i32::DTYPE, ArraySpecFlags::default())
             .unwrap();
         let rs = spec.as_ref().read_size();
@@ -1817,10 +1794,10 @@ mod tests {
     #[test]
     fn read_size_setter_roundtrips_tuple() {
         use crate::dtype::Dtyped;
-        let mut params = ArrayParams::new();
-        params.block_shape(&[8]);
-        params.read_size((4096, 65536));
-        let spec = params
+        let spec = ArrayParams::new()
+            .block_shape(&[8])
+            .unwrap()
+            .read_size((4096, 65536))
             .into_spec(&[8], &i32::DTYPE, ArraySpecFlags::default())
             .unwrap();
         let rs = spec.as_ref().read_size();
@@ -2026,9 +2003,9 @@ mod tests {
     fn compact_nd_ptr_rejects_zero_itemsize() {
         let buf = [0u8; 8];
         let result = unsafe {
-            Array::<crate::storage::Compact<crate::TypeDyn>>::compact_nd_ptr(
+            Array::<crate::storage::Compact<crate::TypeDyn>>::compact_ndarray_ptr(
                 buf.as_ptr(),
-                [4u64],
+                &[4],
                 &[0usize],
                 zero_itemsize_dtype(),
                 ArrayParams::new(),
@@ -2046,7 +2023,7 @@ mod tests {
         let result = unsafe {
             Array::<crate::storage::Plain<&(), crate::TypeDyn>>::plain_ndarray_ptr(
                 buf.as_ptr(),
-                [4u64],
+                &[4],
                 &[0usize],
                 zero_itemsize_dtype(),
                 ArrayParams::new(),
@@ -2068,7 +2045,7 @@ mod tests {
         struct Empty {}
 
         let result =
-            Array::<crate::storage::Compact<crate::Ty<Empty>>>::compact_fn([4u64], |_| Empty {});
+            Array::<crate::storage::Compact<crate::Ty<Empty>>>::compact_fn(&[4], |_| Empty {});
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::UnsupportedDtype
@@ -2094,7 +2071,7 @@ mod tests {
 
     #[test]
     fn compact_fn_rejects_overflowing_shape() {
-        let result = Array::compact_fn(OVERFLOWING_EMPTY_SHAPE, |_| 0i32);
+        let result = Array::compact_fn(&OVERFLOWING_EMPTY_SHAPE, |_| 0i32);
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::InvalidShapeOperation
@@ -2105,9 +2082,8 @@ mod tests {
     fn compact_rejects_overflowing_padded_shape() {
         // 3 * 0x5555_5555_5555_5555 == u64::MAX, and the block dim 2 pads the 3 to 4.
         let shape = [0, 3, 0x5555_5555_5555_5555];
-        let mut params = ArrayParams::new();
-        params.block_shape(&[1, 2, 1]);
-        let result = Array::compact_fn_with(shape, params, |_| 0u8);
+        let params = ArrayParams::new().block_shape(&[1, 2, 1]).unwrap();
+        let result = Array::compact_fn_with(&shape, params, |_| 0u8);
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::InvalidShapeOperation
@@ -2115,7 +2091,13 @@ mod tests {
         let a = Array::compact_ndarray(&ndarray::Array3::<u8>::zeros((0, 1, 1))).unwrap();
         let a = a.broadcast(&[0, 3, 0x5555_5555_5555_5555]);
         assert!(a.compact().is_err());
-        assert!(a.write_to(std::io::Cursor::new(vec![])).is_err());
+        assert!(a
+            .write_to(
+                std::io::Cursor::new(vec![]),
+                ArrayParams::default(),
+                &a.read_ctx()
+            )
+            .is_err());
     }
 
     #[test]
@@ -2124,7 +2106,7 @@ mod tests {
         let result = unsafe {
             Array::<crate::storage::Plain<&(), crate::TypeDyn>>::plain_ndarray_ptr(
                 buf.as_ptr(),
-                OVERFLOWING_EMPTY_SHAPE,
+                &OVERFLOWING_EMPTY_SHAPE,
                 &[0usize; 3],
                 <i32 as crate::dtype::Dtyped>::DTYPE,
                 ArrayParams::new(),
@@ -2139,7 +2121,7 @@ mod tests {
     #[test]
     fn scalar_rejects_overflowing_shape() {
         let result =
-            crate::__private::Scalar::new(0i32, OVERFLOWING_EMPTY_SHAPE, ArrayParams::new())
+            crate::__private::Scalar::new(0i32, &OVERFLOWING_EMPTY_SHAPE, ArrayParams::new())
                 .map(|_| ());
         assert_eq!(
             result.unwrap_err().kind(),

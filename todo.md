@@ -1,6 +1,5 @@
 - compress offsets array
 - use multiple threads for reads
-- ArrayParams stream syntax
 - resolve TODOs across the repo
 - add read benchmark of the whole array, also for low entropy data
 - optimize reshape and its flags propagation
@@ -10,24 +9,20 @@
 - rearrange ops module
 - move ReadContext
 - optimize nd copy of structs
-- work on Dimension public API
 - avoid calling check_get_range many times
 - jix.power(x, 2) on floats is routed to Square and dont have the overflow check
-- pull mode to_ndarray_buf splits large reads of O(1) lazy views and copies the whole region
+- pull mode to_buf_strided splits large reads of O(1) lazy views and copies the whole region
 - i686: alignment of f64/i64/u64/c128 is hard-coded to 8, the ABI says 4
 - stepped slice over a non-plain inner reads one position at a time, decompressing whole blocks
 - reshape reads split/merge reshapes one element at a time, decompressing whole blocks
 - bitwise_rotate_left/right type promotion is wrong, (int,int) raise
-- bump to fearless_simd 1.2.0
 - add more base benchmarks
 - fast path for read/write to python bytes object, releasing the GIL
 - deep type-erased op chains (x = x + 1 in a Python loop) recurse once per op on read and drop, and overflow the stack
 - Plain::read_data and numpy(out=) build &[u8]/&mut [u8] over the whole strided span, element-disjoint views alias (UB)
-- remove call to strided_span_bytes in Plain::read_data
 - support writes to Compact and Plain
-- rename read_from_reader->read_from, write_to_with->write_to
-- read_from_file and read_from_file_with
 - avoid reading in blocks when there is no benefit in it, instead of just when plain
 - dont convert prost errors to io
 - implement stack using insert_dim+concatenate
 - rework kernels errors and warnings reporting
+- review docs, correctness and style

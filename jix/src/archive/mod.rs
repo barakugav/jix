@@ -19,9 +19,8 @@ mod version;
 ///   can become non-trivial - on the order of memory-touch cost over the whole offset table.
 ///   These checks are only performed in [`ArchiveValidation::Strict`] mode.
 ///
-/// As a concrete example, [`ArchiveValidation::Strict`] currently verifies that the block
-/// offset table is monotonically non-decreasing and that its final entry lies within the
-/// block-data section - an O(nblocks) scan. This is illustrative only: future versions of
+/// As a concrete example, [`ArchiveValidation::Strict`] currently verifies that every block's
+/// `(offset, len)` location lies within the block-data section - an O(nblocks) scan. This is illustrative only: future versions of
 /// the library may add new checks, remove existing ones, or move checks between the two
 /// categories. Do not rely on any specific check being present or absent in either mode -
 /// treat this enum as a coarse "be paranoid" vs "trust the source" knob, not as a contract

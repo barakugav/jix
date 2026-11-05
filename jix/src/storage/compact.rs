@@ -168,12 +168,12 @@ impl_array_storage!(CompactMmap<ET>);
 /// grid position `(b0, b1, ..., bn)` has 1D index
 /// `b0 * block_grid_shape[1] * ... * block_grid_shape[n-1] * block_grid_shape[n] + ... + bn`.
 ///
-/// The block shape is stored in `blocks_layout.block_shape_hint` (items per dimension, not
-/// bytes). The number of blocks per dimension is `block_grid_shape[d] = ceil(shape[d] / block_shape[d])`.
-/// All blocks in the `BlockTable` are full, so `shape[d]` must be a multiple of `block_shape[d]`
-/// for all `d`.
+/// The block shape is stored in `spec` (items per dimension, not bytes). The number of blocks per
+/// dimension is `block_grid_shape[d] = ceil(shape[d] / block_shape[d])`. All blocks in the
+/// `BlockTable` are full-size: blocks at the array edge are padded, so `shape[d]` need not be a
+/// multiple of `block_shape[d]`.
 ///
-/// `encoder_params` and `decoder_params` are kept here - not in `BlockTable` - so that
+/// The block shape and codec params are kept in `spec` - not in `BlockTable` - so that
 /// [`ArrayStorage::spec`] can propagate them through lazy view operations and
 /// [`compact_with`](crate::Array::compact_with).
 pub(crate) struct ArrayBlockTableStorageBase<S, ET>
@@ -191,7 +191,7 @@ where
 {
     /// Construct the nd-array layer from a pre-built `BlockTable`.
     ///
-    /// `blocks_layout.block_shape_hint` must match the block geometry already encoded in
+    /// The block shape resolved from `params` must match the block geometry already encoded in
     /// `blocks`. `block_grid_shape` is derived from `shape` and the block shape.
     pub(crate) fn new(blocks: BlockTable<S, ET>, shape: DimDyn, params: ArrayParams) -> Result<Self>
     where
@@ -530,8 +530,7 @@ mod tests {
             (0..n as i32).map(|x| x * 7 - 11).collect(),
         )
         .unwrap();
-        let mut params = ArrayParams::new();
-        params.block_shape(block_shape);
+        let params = ArrayParams::new().block_shape(block_shape).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -635,8 +634,7 @@ mod tests {
             (0..n as i32).map(|x| x * 13 - 7).collect(),
         )
         .unwrap();
-        let mut params = ArrayParams::new();
-        params.block_shape(block_shape);
+        let params = ArrayParams::new().block_shape(block_shape).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -737,8 +735,7 @@ mod tests {
             (0..32i32).map(|x| x * 3 - 5).collect(),
         )
         .unwrap();
-        let mut params = ArrayParams::new();
-        params.block_shape(&[1, 2, 4]);
+        let params = ArrayParams::new().block_shape(&[1, 2, 4]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -769,8 +766,8 @@ mod tests {
         let nd =
             ndarray::ArrayD::from_shape_vec(vec![2usize, 3], (0..6i32).map(|x| x + 1).collect())
                 .unwrap();
-        let mut params = ArrayParams::new();
-        params.block_shape(&[2, 3]); // single block covering the whole array
+        // Single block covering the whole array.
+        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -808,8 +805,8 @@ mod tests {
         let nd =
             ndarray::ArrayD::from_shape_vec(vec![2usize, 3], (0..6i32).map(|x| x + 1).collect())
                 .unwrap();
-        let mut params = ArrayParams::new();
-        params.block_shape(&[2, 3]); // single block covering the whole array
+        // Single block covering the whole array.
+        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();

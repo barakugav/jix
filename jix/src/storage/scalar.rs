@@ -2,16 +2,14 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, check_get_range, Result};
+use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, ElementwisePipeline,
     ElementwisePipelineImpl, Operand, StridedBuf, Ty,
 };
 use crate::util::dim_arr;
-use crate::{
-    cast_slice, cast_slice_mut, ArrayParams, DimDyn, Dimension, ElementType, IntoDimension,
-};
+use crate::{cast_slice, cast_slice_mut, ArrayParams, DimDyn, Dimension, ElementType};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -49,11 +47,12 @@ impl<T> Scalar<T> {
     ///
     /// Returns an error if `shape.len()` exceeds the maximum supported number
     /// of dimensions.
-    pub fn new(data: T, shape: impl IntoDimension, mut params: ArrayParams) -> Result<Self>
+    pub fn new(data: T, shape: &[u64], mut params: ArrayParams) -> Result<Self>
     where
         T: Dtyped,
     {
-        let shape = DimDyn::from_slice(shape.into_dimension()?.as_slice());
+        check_ndim(shape.len())?;
+        let shape = DimDyn::from_slice(shape);
         let ndim = shape.ndim();
 
         params.block_shape = None;
@@ -200,9 +199,9 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::dtype::Dtyped;
     use crate::error::Result;
-    use crate::{Array, ArrayParams, IntoDimension};
+    use crate::{Array, ArrayParams};
 
-    pub fn plain_scalar<T>(value: T, shape: impl IntoDimension) -> Result<Array<Scalar<T>>>
+    pub fn plain_scalar<T>(value: T, shape: &[u64]) -> Result<Array<Scalar<T>>>
     where
         T: Dtyped,
     {
@@ -220,7 +219,7 @@ mod tests {
         use crate::storage::StridedBuf;
         use crate::ArrayStorage;
 
-        let a = plain_scalar(5i32, [3, 4]).unwrap();
+        let a = plain_scalar(5i32, &[3, 4]).unwrap();
         let mut dst = [-1i32; 12];
         {
             let bytes = unsafe { crate::cast_slice_mut::<i32, u8>(&mut dst) };
@@ -250,31 +249,31 @@ mod tests {
 
     #[test]
     fn broadcast_1d_shape() {
-        let a = plain_scalar(5i32, [4]).unwrap();
+        let a = plain_scalar(5i32, &[4]).unwrap();
         assert_eq!(a.shape(), &[4u64]);
     }
 
     #[test]
     fn broadcast_1d_read_i32() {
-        let got = plain_scalar(5i32, [4]).unwrap().to_ndarray().unwrap();
+        let got = plain_scalar(5i32, &[4]).unwrap().to_ndarray().unwrap();
         assert_eq!(got, array![5i32, 5, 5, 5]);
     }
 
     #[test]
     fn broadcast_2d_shape() {
-        let a = plain_scalar(1u8, [3, 4]).unwrap();
+        let a = plain_scalar(1u8, &[3, 4]).unwrap();
         assert_eq!(a.shape(), &[3u64, 4]);
     }
 
     #[test]
     fn broadcast_2d_read_u8() {
-        let got = plain_scalar(9u8, [2, 3]).unwrap().to_ndarray().unwrap();
+        let got = plain_scalar(9u8, &[2, 3]).unwrap().to_ndarray().unwrap();
         assert_eq!(got, array![[9u8, 9, 9], [9, 9, 9]]);
     }
 
     #[test]
     fn broadcast_2d_subregion_read() {
-        let got = plain_scalar(42i32, [5, 5])
+        let got = plain_scalar(42i32, &[5, 5])
             .unwrap()
             .to_ndarray_sub(&[1..3, 2..4], &ReadContext::default())
             .unwrap();
@@ -283,7 +282,7 @@ mod tests {
 
     #[test]
     fn broadcast_3d_read_f32() {
-        let got = plain_scalar(1.5f32, [2, 3, 4])
+        let got = plain_scalar(1.5f32, &[2, 3, 4])
             .unwrap()
             .to_ndarray()
             .unwrap();
@@ -300,7 +299,7 @@ mod tests {
     #[test]
     fn max_of_broadcast_scalar() {
         // max of a constant array is the constant itself
-        let got = plain_scalar(7.0f64, [3, 4])
+        let got = plain_scalar(7.0f64, &[3, 4])
             .unwrap()
             .max(0)
             .to_ndarray()
@@ -311,7 +310,7 @@ mod tests {
     #[test]
     fn sum_of_broadcast_scalar_i32() {
         // sum of [2,2,2] (3 rows, broadcast) over dim 0 = [6,6,6,6] as i64
-        let got = plain_scalar(2i32, [3, 4])
+        let got = plain_scalar(2i32, &[3, 4])
             .unwrap()
             .sum(0)
             .to_ndarray()

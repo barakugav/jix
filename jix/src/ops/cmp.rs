@@ -1129,6 +1129,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::scalar::bool8;
+    use crate::ArrayParams;
     use ndarray::Ix1;
 
     #[cfg(feature = "half")]
@@ -1373,8 +1374,7 @@ mod tests {
 
         let c_order = ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap();
         let f_order = ndarray::Array::from_shape_vec([3, 4].f(), (0..12i32).collect()).unwrap();
-        let mut params = ArrayParams::default();
-        params.block_size(1 << 12);
+        let params = ArrayParams::default().block_size(1 << 12);
         let a = Array::plain_ndarray_with(c_order, params).unwrap();
         let b = Array::plain_ndarray(f_order).unwrap();
         assert_ne!(
@@ -1487,10 +1487,8 @@ mod tests {
         // block-boundary bug in the ordering kernel would still show up.
         let ba = ndarray::array![[bool8::FALSE, bool8::TRUE], [bool8::TRUE, bool8::FALSE]];
         let bb = ndarray::array![[bool8::TRUE, bool8::FALSE], [bool8::TRUE, bool8::TRUE]];
-        let mut params_a = crate::ArrayParams::new();
-        params_a.block_shape(&[1u32, 1]);
-        let mut params_b = crate::ArrayParams::new();
-        params_b.block_shape(&[1u32, 1]);
+        let params_a = ArrayParams::new().block_shape(&[1u32, 1]).unwrap();
+        let params_b = ArrayParams::new().block_shape(&[1u32, 1]).unwrap();
         let zba = Array::compact_ndarray_with(&ba, params_a).unwrap();
         let zbb = Array::compact_ndarray_with(&bb, params_b).unwrap();
         let bexp = ndarray::Zip::from(&ba)

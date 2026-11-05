@@ -20,10 +20,10 @@ define_op1!(
     ///     import numpy as np
     ///
     ///     a = jix.compact([float('nan'), 1.0, float('inf'), -1.0], dtype=np.float32)
-    ///     result = jix.is_nan(a)
+    ///     result = jix.isnan(a)
     ///     assert np.array_equal(result.numpy(), [True, False, False, False])
     ///     ```
-    is_nan,
+    isnan,
     IsNan,
     dispatch = {
         [f16, f32, f64],
@@ -48,10 +48,10 @@ define_op1!(
     ///     import numpy as np
     ///
     ///     a = jix.compact([1.0, float('nan'), float('inf'), float('-inf')], dtype=np.float32)
-    ///     result = jix.is_finite(a)
+    ///     result = jix.isfinite(a)
     ///     assert np.array_equal(result.numpy(), [True, False, False, False])
     ///     ```
-    is_finite,
+    isfinite,
     IsFinite,
     dispatch = {
         [f16, f32, f64],
@@ -76,10 +76,10 @@ define_op1!(
     ///     import numpy as np
     ///
     ///     a = jix.compact([float('inf'), float('-inf'), float('nan'), 1.0], dtype=np.float32)
-    ///     result = jix.is_infinite(a)
+    ///     result = jix.isinf(a)
     ///     assert np.array_equal(result.numpy(), [True, True, False, False])
     ///     ```
-    is_infinite,
+    isinf,
     IsInfinite,
     dispatch = {
         [f16, f32, f64],

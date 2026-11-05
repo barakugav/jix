@@ -10,37 +10,19 @@ pub const NDIM_MAX: usize = 8;
 /// A shape or index value whose number of dims may be known at compile time.
 ///
 /// Arrays always track their number of dims at runtime (see [`Array::shape`](crate::Array::shape)).
-/// `Dimension` only appears in arguments: shapes passed to constructors and shape operations go
-/// through [`IntoDimension`], so they can be given as a `u64`, an array or tuple of `u64`, or a
-/// slice. [`Array::compact_fn`](crate::Array::compact_fn) also uses it to pick the index pattern
-/// its callback receives: a tuple for a tuple shape, `&[u64]` for a slice shape.
+/// `Dimension` is a crate-internal argument helper (public APIs take shapes as `&[u64]`): internal
+/// functions that accept [`IntoDimension`] can be given a `u64`, an array or tuple of `u64`, or a
+/// slice.
 ///
 /// # Two implementors
 ///
 /// - **[`Dim<N>`]** - the ndim is known at compile time. Implemented for `N = 0..=8`.
 /// - **[`DimDyn`]** - the ndim is only known at runtime, stored in a stack-allocated array.
 ///
-/// # Example
-///
-/// ```
-/// use jix::Array;
-/// use ndarray::array;
-///
-/// // A tuple shape: the callback receives a `(u64, u64)` index.
-/// let a = Array::compact_fn((2, 3), |(i, j)| i * 10 + j)?;
-///
-/// // A slice shape: the callback receives a `&[u64]` index.
-/// let b = Array::compact_fn([2u64, 3].as_slice(), |i: &[u64]| i[0] * 10 + i[1])?;
-///
-/// let expected = array![[0, 1, 2], [10, 11, 12]];
-/// assert_eq!(a.to_ndarray()?, expected);
-/// assert_eq!(b.to_ndarray()?, expected);
-/// # Ok::<(), jix::Error>(())
-/// ```
-///
 /// Every `Dimension` value also implements [`IntoDimension`] (with `Dimension = Self`), so a
 /// `Dim<N>` or `DimDyn` can be passed directly to any function that accepts `IntoDimension`.
-pub trait Dimension:
+#[allow(unused)]
+pub(crate) trait Dimension:
     Index<usize, Output = u64>
     + IndexMut<usize, Output = u64>
     + IntoDimension<Dimension = Self>
@@ -155,7 +137,7 @@ pub(crate) trait DimVec<T>:
 /// `DimDyn` stores the shape in a stack-allocated array with capacity [`NDIM_MAX`]. It is what a
 /// slice shape argument (`&[u64]`, `&Vec<u64>`) converts to.
 #[derive(Clone)]
-pub struct DimDyn(DimArray<u64>);
+pub(crate) struct DimDyn(DimArray<u64>);
 impl Dimension for DimDyn {
     const NDIM: Option<usize> = None;
     type Index<'a> = &'a [u64];
@@ -238,9 +220,10 @@ impl<T> DimVec<T> for DimArray<T> {
 /// It is what fixed-size shape arguments (`u64`, `[u64; N]`, tuples of `u64`) convert to, so
 /// callers rarely need to name this type explicitly.
 #[derive(Clone)]
-pub struct Dim<const NDIM: usize>([u64; NDIM]);
+pub(crate) struct Dim<const NDIM: usize>([u64; NDIM]);
 impl<const NDIM: usize> Dim<NDIM> {
     /// Construct a `Dim<NDIM>` from a fixed-size array of dim sizes.
+    #[allow(unused)]
     #[inline(always)]
     pub fn from_array(arr: [u64; NDIM]) -> Self {
         Self(arr)
@@ -362,7 +345,7 @@ impl_dim!(8, nd_dim = ndarray::IxDyn, index = { (u64, u64, u64, u64, u64, u64, u
 /// `into_dimension` returns `Option<Self::Dimension>`. It returns `None` only when the input
 /// cannot fit (e.g. a slice longer than [`NDIM_MAX`]). For all fixed-size types (arrays, tuples,
 /// `u64`) the conversion is infallible.
-pub trait IntoDimension {
+pub(crate) trait IntoDimension {
     /// The [`Dimension`] type produced by this conversion.
     type Dimension: Dimension;
 
@@ -370,6 +353,7 @@ pub trait IntoDimension {
     ///
     /// Returns an error if the input cannot be converted (e.g. a slice whose length exceeds
     /// [`NDIM_MAX`]). For statically-sized types the conversion is infallible.
+    #[allow(unused)]
     fn into_dimension(self) -> Result<Self::Dimension>;
 }
 impl<D> IntoDimension for D

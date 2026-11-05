@@ -107,7 +107,7 @@ impl AnyMeta {
     fn new(storage: &dyn ArrayStorage) -> Self {
         Self {
             shape: DimDyn::from_slice(storage.shape()),
-            element_type: TypeDyn::from_dtype(storage.dtype().clone()).unwrap(),
+            element_type: TypeDyn::new(storage.dtype().clone()),
             spec: storage.spec().to_owned(),
         }
     }

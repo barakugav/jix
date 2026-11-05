@@ -309,7 +309,7 @@ mod tests {
                 1,
             )
         };
-        r.to_ndarray_buf(&[5..6, 0..4], &ctx, Some(&mut out))
+        r.to_buf_strided(&[5..6, 0..4], &ctx, Some(&mut out))
             .unwrap();
         assert_eq!(&backing[..4], &[1, 2, 3, 4]);
     }

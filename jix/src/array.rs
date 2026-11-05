@@ -3,7 +3,9 @@ use std::ops::Range;
 
 use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, check_region_size, ensure, Result};
+use crate::error::{
+    check_get_buffer_size, check_get_range, check_ndim, check_region_size, ensure, Result,
+};
 use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
@@ -17,8 +19,8 @@ use crate::util::{
     PtrMutNoalias, PtrNoalias,
 };
 use crate::{
-    default_logical_strides, default_strides, ArrayAny, ArrayParams, ArrayStorage, Dim, DimDyn,
-    DimVec, Dimension, ElementType, IntoDimension, SliceExt, Ty, TypeDyn,
+    default_logical_strides, default_strides, ArrayAny, ArrayParams, ArrayStorage, Dim, DimArray,
+    DimDyn, DimVec, Dimension, ElementType, SliceExt, Ty, TypeDyn,
 };
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
@@ -26,7 +28,7 @@ use crate::{
 /// `Array<S>` is the central type in jix. It behaves like a regular n-dimensional array, but
 /// its data is stored in a compressed format and decoded on demand. Its core functionality is
 /// provided by [`shape()`](Array::shape), [`dtype()`](Array::dtype),
-/// and [`to_ndarray_buf()`](Array::to_ndarray_buf), all other functions are built on top of those.
+/// and [`to_buf_strided()`](Array::to_buf_strided), all other functions are built on top of those.
 ///
 /// An array is generic over `S: ArrayStorage`, which provides the implementation of the three core
 /// methods. The main concrete storage backend is the block-compressed [`Compact`] type, which
@@ -56,7 +58,7 @@ use crate::{
 ///   .permute_dims(dims)    -> Array<PermuteDims<Reshape<...>>>
 ///   .add(other_array)      -> Array<Add<PermuteDims<...>, Compact>>
 ///   .sum(dim)             -> Array<Sum<Add<...>>>
-///   .compact();            -> Array<Compact> - materialize the pipeline
+///   .compact()?            -> Array<Compact> - materialize the pipeline
 /// ```
 ///
 /// Data is never copied or computed at construction time. An operation only runs when the result
@@ -76,7 +78,7 @@ use crate::{
 ///
 /// Create arrays from various sources:
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// // Compress an ndarray into a block-compressed Array<Compact>.
@@ -89,7 +91,7 @@ use crate::{
 /// let tmp_dir = tempfile::tempdir()?;
 /// let path = tmp_dir.path().join("array.jix");
 /// compact.write_to_file(&path)?;
-/// let from_file = Array::read_from_file(&path, ArrayParams::default())?;
+/// let from_file = Array::read_from_file(&path)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
@@ -124,14 +126,14 @@ use crate::{
 ///
 /// // Materialize the result and write to a file.
 /// let result = scaled
-///     .argmax(/* dim */ 1)                        // Array<ArgMax<Add<Mul<...>, Compact>>>
+///     .argmax(/* dim */ 1)                        // Array<ArgMax<Add<Map<...>, Compact>>>
 ///     .cast::<i16>()                               // Array<Cast<ArgMax<Add<...>>>>
 ///     // materialize the pipeline bt recompressing
 ///     .compact()?;                                 // Array<Compact>
 /// assert_eq!(result.shape(), &[2]);
 /// assert_eq!(result.dtype(), &i16::DTYPE);
 /// let tmp_dir = tempfile::tempdir()?;
-/// result.write_to_file(tmp_dir.path().join("result.jix").as_ref())?;
+/// result.write_to_file(&tmp_dir.path().join("result.jix"))?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
@@ -248,9 +250,7 @@ impl<T> Array<Compact<Ty<T>>> {
     /// let data = ndarray::Array2::<f32>::zeros((512, 512));
     ///
     /// // Store with 64*64 blocks - good for tile-at-a-time access patterns.
-    /// let mut params = ArrayParams::new();
-    /// params.block_shape(&[64, 64]);
-    /// let array = Array::compact_ndarray_with(&data, params)?;
+    /// let array = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[64, 64])?)?;
     ///
     /// // Read tiles of 128*128 by decompressing 2*2 blocks at a time.
     /// let context = array.read_ctx();
@@ -305,15 +305,15 @@ impl Array<Compact<TypeDyn>> {
     /// valid elements. Every byte from the first to the last element (the strided span, gaps
     /// between elements included) lies in one allocation, and none of it is written, or borrowed
     /// through a `&mut`, during the call.
-    pub unsafe fn compact_nd_ptr(
+    pub unsafe fn compact_ndarray_ptr(
         ptr: *const u8,
-        shape: impl IntoDimension,
+        shape: &[u64],
         strides: &[usize],
         dtype: Dtype,
         mut params: ArrayParams,
     ) -> Result<Self> {
-        let shape = shape.into_dimension()?;
-        params.tune(shape.as_slice(), &dtype)?;
+        check_ndim(shape.len())?;
+        params.tune(shape, &dtype)?;
         let array =
             unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype, params.clone())? };
         array.compact_with(params, &array.try_read_ctx()?)
@@ -336,44 +336,24 @@ impl<T> Array<Compact<Ty<T>>> {
     ///
     /// # Examples
     ///
-    /// 1D - the index is a `u64`:
+    /// The index is passed as a `&[u64]` with one entry per dim:
     ///
     /// ```
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_fn(5, |i: u64| i * 2)?;
+    /// let a = Array::compact_fn(&[5], |i| i[0] * 2)?;
     /// assert_eq!(a.to_ndarray()?, array![0, 2, 4, 6, 8]);
-    /// # Ok::<(), jix::Error>(())
-    /// ```
     ///
-    /// 2D - the index is a `(u64, u64)` tuple:
-    ///
-    /// ```
-    /// use jix::Array;
-    /// use ndarray::array;
-    ///
-    /// let a = Array::compact_fn((3, 3), |(x, y)| x * 10 + y)?;
+    /// let a = Array::compact_fn(&[3, 3], |i| i[0] * 10 + i[1])?;
     /// assert_eq!(
     ///     a.to_ndarray()?,
     ///     array![[0, 1, 2], [10, 11, 12], [20, 21, 22]]
     /// );
     /// # Ok::<(), jix::Error>(())
     /// ```
-    ///
-    /// Passing a slice as the shape makes the callback receive `&[u64]`:
-    ///
-    /// ```
-    /// use jix::Array;
-    ///
-    /// let a = Array::compact_fn([2, 3].as_slice(), |i: &[u64]| i[0] + i[1])?;
-    /// assert_eq!(a.shape(), &[2, 3]);
-    /// # Ok::<(), jix::Error>(())
-    /// ```
-    pub fn compact_fn<Sh, F>(shape: Sh, f: F) -> Result<Self>
+    pub fn compact_fn(shape: &[u64], f: impl Fn(&[u64]) -> T) -> Result<Self>
     where
-        Sh: IntoDimension,
-        F: Fn(<Sh::Dimension as Dimension>::Index<'_>) -> T,
         T: Dtyped,
     {
         Self::compact_fn_with(shape, ArrayParams::default(), f)
@@ -400,31 +380,31 @@ impl<T> Array<Compact<Ty<T>>> {
     ///
     /// ```
     /// # use jix::{Array, ArrayParams};
-    /// let mut params = ArrayParams::new();
-    /// params.block_shape(&[64, 64]);
+    /// let params = ArrayParams::new().block_shape(&[64, 64])?;
     ///
-    /// let a = Array::compact_fn_with((256, 256), params, |(x, y)| (x as f32) * 0.5 + (y as f32))?;
+    /// let a = Array::compact_fn_with(&[256, 256], params, |i| (i[0] as f32) * 0.5 + (i[1] as f32))?;
     /// assert_eq!(a.shape(), &[256, 256]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    pub fn compact_fn_with<Sh, F>(shape: Sh, mut params: ArrayParams, f: F) -> Result<Self>
+    pub fn compact_fn_with(
+        shape: &[u64],
+        mut params: ArrayParams,
+        f: impl Fn(&[u64]) -> T,
+    ) -> Result<Self>
     where
-        Sh: IntoDimension,
-        F: Fn(<Sh::Dimension as Dimension>::Index<'_>) -> T,
         T: Dtyped,
     {
-        struct FnStorage<T, D, F> {
+        struct FnStorage<T, F> {
             dtype: Ty<T>,
-            shape: D,
+            shape: DimArray<u64>,
             f: F,
             spec: ArraySpecOwned,
         }
-        impl<T, D, F> crate::storage::ArrayStorageImpl for FnStorage<T, D, F> {}
-        impl<T, D, F> ArrayStorage for FnStorage<T, D, F>
+        impl<T, F> crate::storage::ArrayStorageImpl for FnStorage<T, F> {}
+        impl<T, F> ArrayStorage for FnStorage<T, F>
         where
             T: Dtyped,
-            D: Dimension,
-            F: Fn(D::Index<'_>) -> T,
+            F: Fn(&[u64]) -> T,
         {
             type ElementType = Ty<T>;
 
@@ -442,8 +422,8 @@ impl<T> Array<Compact<Ty<T>>> {
                     self.dtype().itemsize() as usize,
                 )?;
                 let ndim = self.shape().len();
-                let read_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
-                let read_shape_usize = D::vec(ndim, |dim| read_shape[dim] as usize);
+                let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+                let read_shape_usize = dim_arr(ndim, |dim| read_shape[dim] as usize);
                 let mut out = materialize_out_buf(
                     out,
                     context,
@@ -457,20 +437,20 @@ impl<T> Array<Compact<Ty<T>>> {
                 let dst_aligned = (out_buf.as_ptr() as usize).is_multiple_of(alignment)
                     && (out_strides.iter().all(|s| s.is_multiple_of(alignment)));
 
-                let begin = D::vec(ndim, |dim| index[dim].start);
-                let end = D::vec(ndim, |dim| index[dim].end);
+                let begin = dim_arr(ndim, |dim| index[dim].start);
+                let end = dim_arr(ndim, |dim| index[dim].end);
                 let base = out_buf.as_mut_ptr();
                 let iter = NdIter::builder_with_begin(begin, end)
-                    .with_strides_offset_ext(out_strides.to_dim_vec::<D>(), 0)
+                    .with_strides_offset_ext(out_strides.to_dim_vec::<DimDyn>(), 0)
                     .build();
                 if dst_aligned {
                     iter.for_each(|idx, dst_offset| {
-                        let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
+                        let value = (self.f)(idx.as_ref());
                         unsafe { base.add(dst_offset).cast::<T>().write(value) };
                     });
                 } else {
                     iter.for_each(|idx, dst_offset| {
-                        let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
+                        let value = (self.f)(idx.as_ref());
                         unsafe { base.add(dst_offset).cast::<T>().write_unaligned(value) };
                     });
                 }
@@ -499,9 +479,10 @@ impl<T> Array<Compact<Ty<T>>> {
             crate::ops::impl_element_type_change_default!();
         }
 
-        let shape = shape.into_dimension()?;
         let dtype = Ty::<T>::new();
 
+        check_ndim(shape.len())?;
+        let shape = DimArray::from_slice(shape).unwrap();
         params.tune(shape.as_slice(), dtype.dtype())?;
         let spec =
             params
@@ -595,7 +576,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The returned array is not necessarily C-contiguous. The implementation is free to
     /// choose any memory layout it prefers, mostly for performance reasons.
-    /// If you need a specific memory layout, use [`to_ndarray_buf`](Array::to_ndarray_buf) and
+    /// If you need a specific memory layout, use [`to_buf_strided`](Array::to_buf_strided) and
     /// pass a pre-allocated buffer with your specified strides.
     ///
     /// # Errors
@@ -654,7 +635,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The returned array is not necessarily C-contiguous. The implementation is free to
     /// choose any memory layout it prefers, mostly for performance reasons.
-    /// If you need a specific memory layout, use [`to_ndarray_buf`](Array::to_ndarray_buf) and
+    /// If you need a specific memory layout, use [`to_buf_strided`](Array::to_buf_strided) and
     /// pass a pre-allocated buffer with your specified strides.
     ///
     /// # When to use this over [`to_ndarray`](Array::to_ndarray)
@@ -715,9 +696,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// // 256x256 f32 array stored as 32x32 blocks.
     /// let data = ndarray::Array2::<f32>::from_shape_fn((256, 256), |(i, j)| (i + j) as f32);
-    /// let mut params = ArrayParams::new();
-    /// params.block_shape(&[32, 32]);
-    /// let a = Array::compact_ndarray_with(&data, params)?;
+    /// let a = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[32, 32])?)?;
     ///
     /// // Walk the array as 64x64 tiles. 32 divides 64, so each call decompresses exactly
     /// // 2*2 = 4 blocks - no boundary waste. The same ReadContext is reused across all
@@ -820,7 +799,7 @@ impl<S: ArrayStorage> Array<S> {
                 ))
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides.as_ref()) };
-            self.to_ndarray_buf_checked(index, context, Some(&mut out))?;
+            self.to_buf_strided_checked(index, context, Some(&mut out))?;
         }
         Ok(unsafe { array.assume_init() })
     }
@@ -829,11 +808,11 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
     /// [`to_ndarray_sub`](Array::to_ndarray_sub), and the contiguous-destination shorthand for
-    /// [`to_ndarray_buf`](Array::to_ndarray_buf). `buf` must be exactly
+    /// [`to_buf_strided`](Array::to_buf_strided). `buf` must be exactly
     /// `index.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes; it needs no
     /// particular alignment. Elements are written in row-major (C-contiguous) order.
     ///
-    /// Use [`to_ndarray_buf`](Array::to_ndarray_buf) instead when the destination is strided rather
+    /// Use [`to_buf_strided`](Array::to_buf_strided) instead when the destination is strided rather
     /// than packed, or when you would rather let the array hand back a buffer of its own than
     /// allocate one up front.
     ///
@@ -856,13 +835,13 @@ impl<S: ArrayStorage> Array<S> {
     /// {
     ///     let buf =
     ///         unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 4) };
-    ///     a.to_ndarray_slice(&[1..3, 1..3], buf, &context)?;
+    ///     a.to_buf_slice(&[1..3, 1..3], buf, &context)?;
     /// }
     /// assert_eq!(buf, vec![5, 6, 8, 9]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     #[inline]
-    pub fn to_ndarray_slice(
+    pub fn to_buf_slice(
         &self,
         index: &[Range<u64>],
         buf: &mut [u8],
@@ -875,14 +854,14 @@ impl<S: ArrayStorage> Array<S> {
         let read_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
         let strides = default_strides(&read_shape, dtype.itemsize() as usize);
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides.as_ref()) };
-        self.to_ndarray_buf_checked(index, context, Some(&mut out))?;
+        self.to_buf_strided_checked(index, context, Some(&mut out))?;
         Ok(())
     }
 
     /// Read a rectangular sub-region and return it as a [`StridedBuf`].
     ///
     /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub), and [`to_ndarray_slice`](Array::to_ndarray_slice).
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub), and [`to_buf_slice`](Array::to_buf_slice).
     ///
     /// The two modes mirror NumPy's `out=`:
     /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
@@ -893,12 +872,12 @@ impl<S: ArrayStorage> Array<S> {
     ///   per array dimension.
     ///
     /// For the common case of pushing into a packed row-major buffer, use
-    /// [`to_ndarray_slice`](Array::to_ndarray_slice), which builds the `StridedBuf` for you.
+    /// [`to_buf_slice`](Array::to_buf_slice), which builds the `StridedBuf` for you.
     ///
     /// # Arguments
     ///
     /// - `index` - one half-open range (`start..end`) per dimension, within the array bounds.
-    /// - `context` - read context carrying the decoder state.
+    /// - `context` - read context carrying reusable buffers and decoder state.
     /// - `out` - optional destination, as described above.
     ///
     /// # Alignment
@@ -926,7 +905,7 @@ impl<S: ArrayStorage> Array<S> {
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
     /// let context = a.read_ctx();
     ///
-    /// let buf = a.to_ndarray_buf(&[1..3, 1..3], &context, None)?;
+    /// let buf = a.to_buf_strided(&[1..3, 1..3], &context, None)?;
     /// let (base, strides) = (buf.data_ptr(), buf.strides());
     /// let mut values = Vec::new();
     /// for i in 0..2 {
@@ -955,25 +934,25 @@ impl<S: ArrayStorage> Array<S> {
     ///     let mut out = unsafe {
     ///         StridedBuf::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), &[2, 2], &[4, 8], 4)
     ///     };
-    ///     a.to_ndarray_buf(&[1..3, 1..3], &context, Some(&mut out))?;
+    ///     a.to_buf_strided(&[1..3, 1..3], &context, Some(&mut out))?;
     /// }
     /// assert_eq!(dst, [5, 8, 6, 9]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     #[inline]
-    pub fn to_ndarray_buf<'a>(
+    pub fn to_buf_strided<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-        self.to_ndarray_buf_checked(index, context, out)
+        self.to_buf_strided_checked(index, context, out)
     }
 
-    // like `to_ndarray_buf` for an `index` the caller already validated against
+    // like `to_buf_strided` for an `index` the caller already validated against
     #[inline]
-    fn to_ndarray_buf_checked<'a>(
+    fn to_buf_strided_checked<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
@@ -996,13 +975,13 @@ impl<S: ArrayStorage> Array<S> {
             // Fast path for small reads
             self.storage.read_data(index, context, out)
         } else {
-            to_ndarray_buf_slow(&self.storage, index, context, out)
+            to_buf_strided_slow(&self.storage, index, context, out)
         }
     }
 }
 
 #[inline(never)]
-fn to_ndarray_buf_slow<'a, S: ArrayStorage>(
+fn to_buf_strided_slow<'a, S: ArrayStorage>(
     storage: &'a S,
     index: &[Range<u64>],
     context: &'a ReadContext,
@@ -1010,34 +989,34 @@ fn to_ndarray_buf_slow<'a, S: ArrayStorage>(
 ) -> Result<StridedBuf<'a>> {
     // Erase the storage so the body is monomorphized once
     let storage: &dyn ArrayStorage = storage;
-    to_ndarray_buf_slow_dyn_dispatch(storage, index, context, out)
+    to_buf_strided_slow_dyn_dispatch(storage, index, context, out)
 }
 
 #[inline(never)]
-fn to_ndarray_buf_slow_dyn_dispatch<'a>(
+fn to_buf_strided_slow_dyn_dispatch<'a>(
     storage: &'a dyn ArrayStorage,
     index: &[Range<u64>],
     context: &'a ReadContext,
     out: Option<&'a mut StridedBuf<'_>>,
 ) -> Result<StridedBuf<'a>> {
     let to_ndarray_fn = match storage.shape().len() {
-        0 => to_ndarray_buf_slow_dyn::<Dim<0>>,
-        1 => to_ndarray_buf_slow_dyn::<Dim<1>>,
-        2 => to_ndarray_buf_slow_dyn::<Dim<2>>,
-        3 => to_ndarray_buf_slow_dyn::<Dim<3>>,
-        4 => to_ndarray_buf_slow_dyn::<Dim<4>>,
-        5 => to_ndarray_buf_slow_dyn::<Dim<5>>,
-        6 => to_ndarray_buf_slow_dyn::<Dim<6>>,
-        7 => to_ndarray_buf_slow_dyn::<Dim<7>>,
-        8 => to_ndarray_buf_slow_dyn::<Dim<8>>,
-        _ => to_ndarray_buf_slow_dyn::<DimDyn>,
+        0 => to_buf_strided_slow_dyn::<Dim<0>>,
+        1 => to_buf_strided_slow_dyn::<Dim<1>>,
+        2 => to_buf_strided_slow_dyn::<Dim<2>>,
+        3 => to_buf_strided_slow_dyn::<Dim<3>>,
+        4 => to_buf_strided_slow_dyn::<Dim<4>>,
+        5 => to_buf_strided_slow_dyn::<Dim<5>>,
+        6 => to_buf_strided_slow_dyn::<Dim<6>>,
+        7 => to_buf_strided_slow_dyn::<Dim<7>>,
+        8 => to_buf_strided_slow_dyn::<Dim<8>>,
+        _ => to_buf_strided_slow_dyn::<DimDyn>,
     };
     to_ndarray_fn(storage, index, context, out)
 }
 
 // index range and buffer size are not checked
 #[inline(never)]
-fn to_ndarray_buf_slow_dyn<'a, D: Dimension>(
+fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     storage: &'a dyn ArrayStorage,
     index: &[Range<u64>],
     context: &'a ReadContext,
@@ -1209,15 +1188,12 @@ impl<S: ArrayStorage> Array<S> {
     /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
-    /// let mut a_params = ArrayParams::default();
-    /// a_params.block_shape(&[1, 2]);
+    /// let a_params = ArrayParams::default().block_shape(&[1, 2])?;
     /// let a = Array::compact_ndarray_with(&array![[1.5f32, 2.0], [3.14, 6.17]], a_params)?;
     ///
     /// // Let's say a is given to us, and we prepare to access it many times with a specific access
     /// // pattern. We re-compress it with a matching block shape.
-    /// let mut b_params = ArrayParams::default();
-    /// b_params.block_shape(&[2, 1]);
-    /// let b = a.compact_with(b_params, &a.read_ctx())?;
+    /// let b = a.compact_with(ArrayParams::default().block_shape(&[2, 1])?, &a.read_ctx())?;
     ///
     /// assert_eq!(
     ///     b.to_ndarray_sub(&[0..2, 0..1], &b.read_ctx())?,
@@ -1315,7 +1291,7 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
     let ndim = shape.len();
     let dtype = storage.dtype();
 
-    params.override_from_storage(&storage);
+    params.inherit_unset_from_storage(&storage);
     params.tune(shape, dtype)?;
 
     let block_shape = params.block_shape.as_ref().unwrap();
@@ -1483,7 +1459,7 @@ impl<S: ArrayStorage> Array<S> {
     /// repeated reads, sharing the allocation and initialization overhead.
     ///
     /// [`to_ndarray`](Array::to_ndarray) builds a context internally. Call this when using
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub) or [`to_ndarray_slice`](Array::to_ndarray_slice)
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub) or [`to_buf_slice`](Array::to_buf_slice)
     /// directly.
     ///
     /// Using a context created in other ways (e.g. `ReadContext::default()`) is also valid, and will
@@ -1516,7 +1492,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// Almost all ops on arrays accept ownership of an `Array<S>` rather than a reference, for
     /// example `a + b` for two arrays consumes `a` and `b`. To reuse an array without cloning its
-    /// storage, call `view` to get an `Array<View<'_, S>>`, which doesn't own the storage but can
+    /// storage, call `view` to get an `Array<View<S>>`, which doesn't own the storage but can
     /// be used in any API that accepts an owned `Array<S>`.
     ///
     /// # Examples
@@ -1810,7 +1786,7 @@ mod tests {
             .iter()
             .map(|&x| x as BlockSize)
             .collect::<DimArray<_>>();
-        let params = ArrayParams::default().block_shape(&block_shape).clone();
+        let params = ArrayParams::default().block_shape(&block_shape).unwrap();
         Array {
             storage: Compact(
                 ArrayBlockTableStorageBase::new(
@@ -2089,7 +2065,7 @@ mod tests {
 
     #[test]
     fn compact_fn_1d() {
-        let a = Array::compact_fn(47, |i| i * 4 + 6).unwrap();
+        let a = Array::compact_fn(&[47], |i| i[0] * 4 + 6).unwrap();
         assert_eq!(a.shape(), &[47]);
         assert_eq!(
             a.to_ndarray().unwrap(),
@@ -2099,66 +2075,45 @@ mod tests {
 
     #[test]
     fn compact_fn_2d() {
-        let a = Array::compact_fn((3, 3), |(x, y)| x * 10 + y).unwrap();
+        let a = Array::compact_fn(&[3, 3], |i| i[0] * 10 + i[1]).unwrap();
         assert_eq!(a.shape(), &[3, 3]);
         assert_eq!(
             a.to_ndarray().unwrap(),
             array![[0, 1, 2], [10, 11, 12], [20, 21, 22]]
-        );
-
-        let a = Array::compact_fn([3, 3].as_slice(), |i| i[0] * 7 + i[1]).unwrap();
-        assert_eq!(a.shape(), &[3, 3]);
-        assert_eq!(
-            a.to_ndarray().unwrap(),
-            array![[0, 1, 2], [7, 8, 9], [14, 15, 16]].into_dyn()
         );
     }
 
     /// Params whose small read size makes compaction read the array in many chunks, so `f` is
     /// called for regions that do not start at the origin.
     fn multi_chunk_params(block_shape: &[BlockSize]) -> ArrayParams {
-        let mut params = ArrayParams::new();
-        params.block_shape(block_shape).read_size((8, 64));
-        params
+        ArrayParams::new()
+            .block_shape(block_shape)
+            .unwrap()
+            .read_size((8, 64))
     }
 
     #[test]
     fn compact_fn_multi_chunk_static() {
         let params = multi_chunk_params(&[4, 4]);
-        let a = Array::compact_fn_with((32, 24), params, |(x, y)| x * 100 + y).unwrap();
+        let a = Array::compact_fn_with(&[32, 24], params, |i| i[0] * 100 + i[1]).unwrap();
         let expected = ndarray::Array2::from_shape_fn((32, 24), |(x, y)| (x * 100 + y) as u64);
         assert_eq!(a.to_ndarray().unwrap(), expected);
     }
 
     #[test]
-    fn compact_fn_multi_chunk_dyn() {
-        // ndim 2, given as a slice: a `DimDyn` walk handing `f` a `&[u64]` index.
-        let params = multi_chunk_params(&[4, 4]);
-        let a = Array::compact_fn_with([32, 24].as_slice(), params, |i| i[0] * 100 + i[1]).unwrap();
-        let expected = ndarray::Array2::from_shape_fn((32, 24), |(x, y)| (x * 100 + y) as u64);
-        assert_eq!(a.to_ndarray().unwrap(), expected.into_dyn());
-    }
-
-    #[test]
-    fn compact_fn_multi_chunk_dyn_high_ndim() {
-        // ndim 5, given as a slice.
+    fn compact_fn_multi_chunk_high_ndim() {
         let params = multi_chunk_params(&[2, 2, 2, 2, 2]);
-        let shape = [6u64, 4, 6, 4, 2];
         let f = |i: &[u64]| i.iter().fold(0, |acc, &x| acc * 10 + x);
-        let a = Array::compact_fn_with(shape.as_slice(), params, f).unwrap();
-        let shape_usize = shape.map(|s| s as usize);
-        let expected = ndarray::ArrayD::from_shape_fn(shape_usize.as_slice(), |i| {
-            f(&ndarray::Dimension::slice(&i)
-                .iter()
-                .map(|&x| x as u64)
-                .collect::<Vec<_>>())
+        let a = Array::compact_fn_with(&[6, 4, 6, 4, 2], params, f).unwrap();
+        let expected = ndarray::Array5::from_shape_fn((6, 4, 6, 4, 2), |(a, b, c, d, e)| {
+            f(&[a, b, c, d, e].map(|x| x as u64))
         });
         assert_eq!(a.to_ndarray().unwrap(), expected);
     }
 
     #[test]
     fn compact_fn_0d() {
-        let a = Array::compact_fn((), |()| 42).unwrap();
+        let a = Array::compact_fn(&[], |_| 42).unwrap();
         assert_eq!(a.shape(), &[]);
         assert_eq!(a.to_ndarray().unwrap(), ndarray::arr0(42));
     }
@@ -2331,7 +2286,7 @@ mod tests {
     }
 
     #[test]
-    fn to_ndarray_slice_into_a_misaligned_buf() {
+    fn to_buf_slice_into_a_misaligned_buf() {
         // A packed destination needs no particular alignment. Run under Miri to check the accesses.
         let src = ndarray::Array2::from_shape_fn((3, 4), |(r, c)| (r * 4 + c) as i32);
         let a = Array::compact_ndarray(&src).unwrap();
@@ -2340,7 +2295,7 @@ mod tests {
         // A byte window starting one byte past a 4-aligned address.
         let mut backing = [0u8; 12 * 4 + 4];
         let off = backing.as_ptr().align_offset(4) + 1;
-        a.to_ndarray_slice(&[0..3, 0..4], &mut backing[off..off + 12 * 4], &ctx)
+        a.to_buf_slice(&[0..3, 0..4], &mut backing[off..off + 12 * 4], &ctx)
             .unwrap();
 
         let got = (0..12)
@@ -2356,7 +2311,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // to_ndarray_buf - pull and push modes, over the block-splitting slow path
+    // to_buf_strided - pull and push modes, over the block-splitting slow path
     // -----------------------------------------------------------------------
 
     #[test]
@@ -2433,18 +2388,19 @@ mod tests {
         // pull-mode buffer, which must follow it: dim 1 outermost, dim 0 contiguous.
         let f = a.view().permute_dims(&[1, 0]).flip(0);
         let ctx = f.read_ctx();
-        let buf = f.to_ndarray_buf(&[0..5, 0..4], &ctx, None).unwrap();
+        let buf = f.to_buf_strided(&[0..5, 0..4], &ctx, None).unwrap();
         assert_eq!(buf.strides(), &[4, 20]);
     }
 
     #[test]
-    fn to_ndarray_buf_pull_and_push_over_a_split_read() {
+    fn to_buf_strided_pull_and_push_over_a_split_read() {
         let src = ndarray::Array2::from_shape_fn((12, 10), |(r, c)| (r * 100 + c) as i32);
-        let mut params = ArrayParams::new();
-        params.block_shape(&[4, 5]);
         // A tiny read-size budget forces the read to be cut into several pieces, so the test
         // exercises the block-splitting path rather than a single forwarded read.
-        params.read_size((16, 64));
+        let params = ArrayParams::new()
+            .block_shape(&[4, 5])
+            .unwrap()
+            .read_size((16, 64));
         let a = Array::compact_ndarray_with(&src, params).unwrap();
         let ctx = a.read_ctx();
 
@@ -2454,7 +2410,7 @@ mod tests {
 
         // Pull mode: the array hands back a buffer, and its strides say where each element sits.
         {
-            let buf = a.to_ndarray_buf(&index, &ctx, None).unwrap();
+            let buf = a.to_buf_strided(&index, &ctx, None).unwrap();
             let (base, strides) = (buf.data_ptr(), buf.strides());
             for r in 0..rows {
                 for c in 0..cols {
@@ -2481,7 +2437,7 @@ mod tests {
                     itemsize,
                 )
             };
-            a.to_ndarray_buf(&index, &ctx, Some(&mut out)).unwrap();
+            a.to_buf_strided(&index, &ctx, Some(&mut out)).unwrap();
         }
         for r in 0..rows {
             for c in 0..cols {
@@ -2495,7 +2451,7 @@ mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), dst.len() * itemsize)
             };
-            a.to_ndarray_slice(&index, bytes, &ctx).unwrap();
+            a.to_buf_slice(&index, bytes, &ctx).unwrap();
         }
         let expected = (0..rows)
             .flat_map(|r| (0..cols).map(move |c| at(r, c)))
@@ -2504,15 +2460,15 @@ mod tests {
     }
 
     #[test]
-    fn to_ndarray_buf_empty_range() {
+    fn to_buf_strided_empty_range() {
         let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
         let ctx = a.read_ctx();
-        let buf = a.to_ndarray_buf(&[1..1, 0..3], &ctx, None).unwrap();
+        let buf = a.to_buf_strided(&[1..1, 0..3], &ctx, None).unwrap();
         assert_eq!(buf.strides().len(), 2);
     }
 
     #[test]
-    fn to_ndarray_buf_rejects_a_bad_destination() {
+    fn to_buf_strided_rejects_a_bad_destination() {
         let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]]).unwrap();
         let ctx = a.read_ctx();
         let itemsize = size_of::<i32>();
@@ -2528,7 +2484,7 @@ mod tests {
             )
         };
         let err = a
-            .to_ndarray_buf(&[0..2, 0..2], &ctx, Some(&mut out))
+            .to_buf_strided(&[0..2, 0..2], &ctx, Some(&mut out))
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
@@ -2543,7 +2499,7 @@ mod tests {
             )
         };
         let err = a
-            .to_ndarray_buf(&[0..2, 0..2], &ctx, Some(&mut out))
+            .to_buf_strided(&[0..2, 0..2], &ctx, Some(&mut out))
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
@@ -2589,7 +2545,7 @@ mod tests {
         // Lazy ops are not compact, also when type-erased.
         let a = make();
         assert!(!(-a.view()).is_compact());
-        assert!(!a.view().reshape([4]).is_compact());
+        assert!(!a.view().reshape(&[4]).is_compact());
         assert!(!(-make()).into_any().is_compact());
     }
 }

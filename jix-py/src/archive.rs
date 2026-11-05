@@ -70,7 +70,7 @@ use crate::Array;
 ///     with open("packed.jix", "wb") as f:
 ///         jix.write_array(a, f)
 ///         offset = f.tell()
-///         jix.write_array(b, f)
+///         jix.write_array(a, f)
 ///         total = f.tell()
 ///     b2 = jix.read_array("packed.jix", offset=offset, len=total - offset)
 ///
@@ -121,7 +121,7 @@ pub fn read_array(
 
             Ok(if !mmap {
                 let array =
-                    jix_core::Array::read_from_file_section(&path, offset, len, params, validation)
+                    jix_core::Array::read_from_file_with(&path, offset, len, params, validation)
                         .into_py_result()?;
                 Array::from_core(array.into_any())
             } else {
@@ -145,7 +145,7 @@ pub fn read_array(
             }
             // Can't detach the GIL since the reader is a Python object.
             let mut reader = BufReader::new(reader);
-            let array = jix_core::Array::read_from_reader(&mut reader, len, params, validation)
+            let array = jix_core::Array::read_from(&mut reader, len, params, validation)
                 .into_py_result()?;
 
             // Leave the reader at the current position after reading the array, BufReader may have read ahead
@@ -280,7 +280,7 @@ fn write_array_impl(
     let context = array.read_ctx(modes)?;
     let result = array
         .arr
-        .write_to_with(&mut writer, params, context.as_ref())
+        .write_to(&mut writer, params, context.as_ref())
         .into_py_result()
         .and_then(|()| Ok(writer.flush()?));
     Ok((result, context.take_warnings()))

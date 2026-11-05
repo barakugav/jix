@@ -9,8 +9,8 @@ use crate::storage::params::{
 use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
 };
-use crate::util::{dim_arr, strided_span_bytes, DimArray, DimIdx, SendSyncPtr};
-use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, IntoDimension};
+use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
+use crate::{strided_span_bytes_from_iter, Array, ArrayParams, ArrayStorage, DimDyn, Dimension};
 
 /// Plain (not-compressed) owned array (type alias).
 pub type PlainArray<T> = Array<Plain<Vec<T>, Ty<T>>>;
@@ -122,12 +122,13 @@ impl<A> Plain<A, TypeDyn> {
     pub unsafe fn new(
         allocation: A,
         data: *const u8,
-        shape: impl IntoDimension,
+        shape: &[u64],
         strides: &[usize], // in bytes
         dtype: Dtype,
         mut params: ArrayParams,
     ) -> Result<Self> {
-        let shape = DimDyn::from_slice(shape.into_dimension()?.as_slice());
+        check_ndim(shape.len())?;
+        let shape = DimDyn::from_slice(shape);
         let ndim = shape.ndim();
 
         ensure!(
@@ -183,7 +184,7 @@ impl<A> Plain<A, TypeDyn> {
             dynamic.read_layout_order = order;
         }
 
-        let element_type = TypeDyn::from_dtype(dtype).unwrap();
+        let element_type = TypeDyn::new(dtype);
 
         Ok(Self {
             allocation,
@@ -256,8 +257,16 @@ impl<T> Array<Plain<Vec<T>, Ty<T>>> {
         }
         let data_ptr = data_ptr.cast::<u8>();
 
-        let storage =
-            unsafe { Plain::new(allocation, data_ptr, shape, &strides, T::DTYPE, params) }?;
+        let storage = unsafe {
+            Plain::new(
+                allocation,
+                data_ptr,
+                shape.as_slice(),
+                &strides,
+                T::DTYPE,
+                params,
+            )
+        }?;
         let array = Array::from_storage(storage);
         let array = array.into_type().unwrap();
         Ok(array)
@@ -283,12 +292,9 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
         T: Dtyped,
     {
         let shape = shape_from_ndarray(arr.shape())?;
-
         let strides = strides_from_ndarray::<T>(arr.shape(), arr.strides())?;
-
         let data_ptr = arr.as_ptr().cast::<u8>();
-
-        unsafe { Self::plain_ndarray_ptr(data_ptr, shape, &strides, T::DTYPE, params) }
+        unsafe { Self::plain_ndarray_ptr(data_ptr, shape.as_slice(), &strides, T::DTYPE, params) }
     }
 
     /// Create a [`Plain`] array that borrows from an ndarray.
@@ -428,7 +434,7 @@ impl<ET> Array<Plain<&(), ET>> {
     ///   lazy view over it) is alive.
     pub unsafe fn plain_ndarray_ptr(
         data_ptr: *const u8,
-        shape: impl IntoDimension,
+        shape: &[u64],
         strides: &[usize],
         dtype: Dtype,
         params: ArrayParams,
@@ -467,10 +473,11 @@ where
         )?;
 
         let ndim = self.shape.ndim();
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let out_shape = (0..ndim).map(|dim| (index[dim].end - index[dim].start) as usize);
 
         let itemsize = dtype.itemsize() as usize;
-        let src_span = strided_span_bytes(out_shape.as_ref(), self.strides.as_ref(), itemsize);
+        let src_span =
+            strided_span_bytes_from_iter(out_shape.clone(), self.strides.as_ref(), itemsize);
 
         let src_ptr = if src_span == 0 {
             self.data.as_ptr()
@@ -485,6 +492,7 @@ where
         match out {
             None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.as_ref()) }),
             Some(out) => {
+                let out_shape = out_shape.collect::<DimArray<_>>();
                 unsafe { out.copy_from(src, self.strides.as_ref(), out_shape.as_ref(), dtype) };
                 Ok(out.view_mut())
             }
@@ -548,7 +556,7 @@ mod tests {
 
     use crate::codec::ReadContext;
     use crate::scalar::bool8;
-    use crate::Array;
+    use crate::{Array, ArrayParams};
 
     // -----------------------------------------------------------------------
     /// Reading an empty region whose start sits at the end of a dim must not compute an
@@ -606,8 +614,7 @@ mod tests {
     #[test]
     fn explicit_block_shape_is_ignored() {
         let data = ndarray::Array2::<f32>::zeros((256, 256));
-        let mut params = crate::ArrayParams::new();
-        params.block_shape(&[64, 64]);
+        let params = ArrayParams::new().block_shape(&[64, 64]).unwrap();
         let a = Array::plain_ndarray_view_with(data.view(), params).unwrap();
         let b = Array::plain_ndarray_view(data.view()).unwrap();
         assert_eq!(
@@ -793,12 +800,10 @@ mod tests {
     fn strided_scatter_path_negation() {
         use std::ops::Neg;
 
-        use crate::ArrayParams;
-
         let vals = (0..4 * 10).collect::<Vec<i32>>();
         let nd = ArrayD::from_shape_vec(vec![4, 10], vals).unwrap();
-        let mut params = ArrayParams::new();
-        params.read_size((16, 32)); // for i32: a 4..8 item window, narrower than the 10-wide inner dim
+        // for i32: a 4..8 item window, narrower than the 10-wide inner dim
+        let params = ArrayParams::new().read_size((16, 32));
         let a = Array::plain_ndarray_with(nd.clone(), params).unwrap();
 
         let got = a.view().neg().to_ndarray().unwrap();
@@ -834,10 +839,10 @@ mod tests {
         let make = || unsafe {
             Array::plain_ndarray_ptr(
                 base.cast_const(),
-                [rows as u64, cols as u64],
+                &[rows as u64, cols as u64],
                 &strides,
                 <i32 as crate::dtype::Dtyped>::DTYPE,
-                crate::ArrayParams::default(),
+                ArrayParams::default(),
             )
             .unwrap()
         };

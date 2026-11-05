@@ -31,7 +31,7 @@ use crate::ops::prelude::*;
 ///
 /// // Erase the static element type - always succeeds.
 /// let dyn_a = a.view().into_type_dyn();
-/// // dyn_a: Array<IntoType<AsRef<Compact<Ty<f32>>>, TypeDyn>>
+/// // dyn_a: Array<IntoType<View<Compact<Ty<f32>>>, TypeDyn>>
 /// // dyn_a: Array<Storage::ElementType = TypeDyn>
 /// assert_eq!(dyn_a.dtype(), &f32::DTYPE);
 ///

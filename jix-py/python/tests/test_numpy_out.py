@@ -3,7 +3,7 @@ Tests for the `out=` argument of `jix.Array.numpy()`.
 
 `numpy(out=...)` decodes straight into a caller-owned NumPy array instead of
 allocating a fresh one. Internally it always takes the *push* mode of the core
-`to_ndarray_buf`, describing the destination as a `StridedBuf` over the NumPy
+`to_buf_strided`, describing the destination as a `StridedBuf` over the NumPy
 array's own memory and strides - so the destination does not have to be
 C-contiguous. These tests cover the layouts that must work (C, Fortran, gapped
 and transposed views), that nothing outside the destination is written, and the

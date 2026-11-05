@@ -144,7 +144,8 @@ mod tests {
 
     fn to_bytes<ET: ElementType>(a: &Array<Compact<ET>>) -> Vec<u8> {
         let mut buf = Cursor::new(Vec::new());
-        a.write_to(&mut buf).unwrap();
+        a.write_to(&mut buf, ArrayParams::default(), &a.read_ctx())
+            .unwrap();
         buf.into_inner()
     }
 
@@ -174,7 +175,7 @@ mod tests {
                         );
                         // No re-compression: serialized bytes must be identical.
                         let mut result_bytes = Cursor::new(Vec::new());
-                        result.write_to(&mut result_bytes).unwrap();
+                        result.write_to(&mut result_bytes, ArrayParams::default(), &result.read_ctx()).unwrap();
                         proptest::prop_assert_eq!(result_bytes.into_inner(), original_bytes);
                     }
                 }
@@ -267,7 +268,13 @@ mod tests {
         // Pass a different block shape - it must be ignored.
         let result = a.maybe_compact_with(arr_params(&[8]), &ctx).unwrap();
         let mut result_bytes = Cursor::new(Vec::new());
-        result.write_to(&mut result_bytes).unwrap();
+        result
+            .write_to(
+                &mut result_bytes,
+                ArrayParams::default(),
+                &result.read_ctx(),
+            )
+            .unwrap();
 
         assert_eq!(result_bytes.into_inner(), original_bytes);
     }
@@ -289,7 +296,13 @@ mod tests {
         assert!(result.storage().as_compact().is_some());
         // No re-compression: serialized bytes must be identical.
         let mut result_bytes = Cursor::new(Vec::new());
-        result.write_to(&mut result_bytes).unwrap();
+        result
+            .write_to(
+                &mut result_bytes,
+                ArrayParams::default(),
+                &result.read_ctx(),
+            )
+            .unwrap();
         assert_eq!(result_bytes.into_inner(), original_bytes);
 
         let got = result.into_typed::<i32>().unwrap().to_ndarray().unwrap();

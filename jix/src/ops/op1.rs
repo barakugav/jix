@@ -748,10 +748,10 @@ define_op1!(
     /// let result = (-a).to_ndarray()?;
     /// assert_eq!(result, array![-1.0, 2.5, -3.0]);
     ///
-    /// // Negating i8::MIN wraps in release builds (two's complement overflow).
-    /// let b = Array::compact_ndarray(&array![0i8, 1, -1])?;
+    /// // Integer negation wraps (two's complement overflow): -i8::MIN is i8::MIN.
+    /// let b = Array::compact_ndarray(&array![0i8, 1, -1, i8::MIN])?;
     /// let result = (-b).to_ndarray()?;
-    /// assert_eq!(result, array![0, -1, 1]);
+    /// assert_eq!(result, array![0, -1, 1, i8::MIN]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Neg,

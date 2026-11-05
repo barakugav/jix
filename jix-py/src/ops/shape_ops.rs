@@ -406,8 +406,7 @@ pub(crate) struct ParsedBasicIndex {
 /// supported and are resolved against the output ndim (`ndim + n`).
 ///
 /// Repeated output dims are rejected, exactly as in `numpy.expand_dims`. The inverse operation
-/// is [`jix.remove_dim()`][jix.remove_dim] (which is also exposed as
-/// [`jix.squeeze()`][jix.squeeze]).
+/// is [`jix.remove_dim()`][jix.remove_dim] (see also [`jix.squeeze()`][jix.squeeze]).
 ///
 /// Output dtype and total number of elements equal the input.
 ///
@@ -433,7 +432,7 @@ pub(crate) struct ParsedBasicIndex {
 ///
 ///     b = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
 ///     # dims index the output shape: positions 0 and 2 become new length-1 dims
-///     assert jix.insert_dim(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
+///     assert jix.insert_dim(b, (0, 2)).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
 ///     ```
 #[pyfunction]
 pub fn insert_dim<'py>(
@@ -513,8 +512,8 @@ pub fn unsqueeze<'py>(
 ///     assert jix.remove_dim(a, 0).numpy().shape == (3,)     # -> [3]
 ///
 ///     b = jix.compact([[[10], [20]]], dtype=np.int32)  # shape [1, 2, 1]
-///     assert jix.remove_dim(b, [0, 2]).numpy().shape == (2,)    # -> [2]
-///     assert jix.remove_dim(b, [0, -1]).numpy().shape == (2,)   # negative dim
+///     assert jix.remove_dim(b, (0, 2)).numpy().shape == (2,)    # -> [2]
+///     assert jix.remove_dim(b, (0, -1)).numpy().shape == (2,)   # negative dim
 ///     ```
 #[pyfunction]
 pub fn remove_dim<'py>(

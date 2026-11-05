@@ -510,7 +510,7 @@ impl Array {
     ///     **`out` must not overlap memory the array itself reads from.** jix does not check for
     ///     this, and the result is undefined behavior - corrupted values, or a crash.
     ///
-    ///     The overlap arises when the array, or anything in its lazy chain, was built by
+    ///     The overlap arises when the array, or anything in its lazy chain, was built
     ///     with the very NumPy array being passed as `out`. [`jix.asarray()`][jix.asarray]
     ///     wraps that buffer instead of copying it, so the read would be scattering
     ///     decoded elements into the same bytes it is still reading from. Using numpy
@@ -522,7 +522,7 @@ impl Array {
     ///     a = jix.asarray(x)      # a is a view of x's buffer - no copy
     ///
     ///     (a + 1).numpy(out=x)    # UNDEFINED - do not do this
-    ///     (c + x).numpy(out=x)    # UNDEFINED too: x is wrapped without a copy
+    ///     (a + x).numpy(out=x)    # UNDEFINED too: x is wrapped without a copy
     ///     x[...] = (a + 1).numpy()  # do this instead
     ///     ```
     ///
@@ -612,7 +612,7 @@ impl Array {
             return Ok(NdArray(np_arr));
         }
 
-        // `to_ndarray_buf` wants one stride per *array* dimension, but an integer index item drops
+        // `to_buf_strided` wants one stride per *array* dimension, but an integer index item drops
         // its dim from `np_arr`. Put a stride back for each dropped dim. Reading them back off
         // `np_arr` keeps one source of truth, whether it is the caller's `out=` or our own
         // allocation above.
@@ -675,7 +675,7 @@ impl Array {
             };
             let result = self
                 .arr
-                .to_ndarray_buf(&index, context, Some(&mut out))
+                .to_buf_strided(&index, context, Some(&mut out))
                 .map(drop);
             Ok::<_, PyErr>((result.into_py_result(), context_guard.take_warnings()))
         })?;
@@ -783,6 +783,45 @@ impl Array {
     #[inline]
     pub fn __getitem__<'py>(&self, index: &Bound<'py, PyAny>) -> PyResult<NdArray<'py>> {
         self.numpy(index.py(), Some(index), None)
+    }
+
+    /// Converts the array to a NumPy array; the hook behind `np.asarray(a)` and `np.array(a)`.
+    ///
+    /// Reads the whole array via `numpy()`, so the result is always a new allocation.
+    ///
+    /// Args:
+    ///     dtype: If given, the result is cast to this dtype.
+    ///     copy: `None` or `True` are accepted. `False` raises, since the data is always copied.
+    ///
+    /// Returns:
+    ///     A NumPy array with the same shape as `self`.
+    ///
+    /// Raises:
+    ///     ValueError: `copy=False`.
+    #[pyo3(signature = (dtype=None, copy=None))]
+    pub fn __array__<'py>(
+        &self,
+        py: Python<'py>,
+        dtype: Option<&Bound<'py, PyAny>>,
+        copy: Option<bool>,
+    ) -> PyResult<NdArray<'py>> {
+        if copy == Some(false) {
+            return Err(PyValueError::new_err(
+                "a jix Array cannot be converted to a NumPy array without a copy",
+            ));
+        }
+
+        let mut arr = self.numpy(py, None, None)?;
+
+        if let Some(dtype) = dtype {
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("copy", false)?;
+            arr.0 = arr
+                .call_method("astype", (dtype,), Some(&kwargs))?
+                .cast_into()?;
+        }
+
+        Ok(arr)
     }
 
     /// Copies the data of an array into a new compact array by compressing it into new blocks. See [`jix.compact()`][jix.compact].
@@ -1570,19 +1609,19 @@ impl Array {
 
     // == float predicates ==
 
-    /// Tests whether each element is finite. See [`jix.is_finite()`][jix.is_finite].
-    pub fn is_finite(slf: &Bound<'_, Self>) -> PyResult<Self> {
-        crate::ops::is_finite(slf)
+    /// Tests whether each element is finite. See [`jix.isfinite()`][jix.isfinite].
+    pub fn isfinite(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::isfinite(slf)
     }
 
-    /// Tests whether each element is infinite. See [`jix.is_infinite()`][jix.is_infinite].
-    pub fn is_infinite(slf: &Bound<'_, Self>) -> PyResult<Self> {
-        crate::ops::is_infinite(slf)
+    /// Tests whether each element is infinite. See [`jix.isinf()`][jix.isinf].
+    pub fn isinf(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::isinf(slf)
     }
 
-    /// Tests whether each element is `NaN`. See [`jix.is_nan()`][jix.is_nan].
-    pub fn is_nan(slf: &Bound<'_, Self>) -> PyResult<Self> {
-        crate::ops::is_nan(slf)
+    /// Tests whether each element is `NaN`. See [`jix.isnan()`][jix.isnan].
+    pub fn isnan(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::isnan(slf)
     }
 
     // == dim ops ==
@@ -1809,15 +1848,15 @@ pub(crate) fn resolve_array_params(
 
     let mut params = jix_core::ArrayParams::default();
     if let Some(block_shape) = block_shape {
-        params.try_block_shape(&block_shape).into_py_result()?;
+        params = params.block_shape(&block_shape).into_py_result()?;
     }
     if let Some(block_shape_fixed_dims) = block_shape_fixed_dims {
-        params
-            .try_block_shape_fixed_dims(&block_shape_fixed_dims)
+        params = params
+            .block_shape_fixed_dims(&block_shape_fixed_dims)
             .into_py_result()?;
     }
     if let Some(block_size) = block_size {
-        params.block_size(block_size);
+        params = params.block_size(block_size);
     }
     if let Some(read_size) = read_size {
         if read_size.len() != 1 && read_size.len() != 2 {
@@ -1832,21 +1871,19 @@ pub(crate) fn resolve_array_params(
             [min, max] => (min, max),
             _ => unreachable!(),
         };
-        params.read_size(pair);
+        params = params.read_size(pair);
     }
 
     if let Some(codec) = codec {
         match codec.as_str() {
-            "zstd" => {
-                params.codec(Codec::Zstd);
-            }
+            "zstd" => params = params.codec(Codec::Zstd),
             _ => {
                 return Err(PyValueError::new_err(format!("Unsupported codec: {codec}")));
             }
         }
     }
     if let Some(compression_level) = compression_level {
-        params.level(compression_level).into_py_result()?;
+        params = params.level(compression_level).into_py_result()?;
     }
     if let Some(filters) = filters {
         let filters = filters
@@ -1859,7 +1896,7 @@ pub(crate) fn resolve_array_params(
                 ))),
             })
             .collect::<Result<Vec<_>, _>>()?;
-        params.filters(&filters).into_py_result()?;
+        params = params.filters(&filters).into_py_result()?;
     }
 
     Ok(params)

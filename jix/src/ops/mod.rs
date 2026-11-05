@@ -15,7 +15,7 @@
 //!     .cast::<f32>()           // Array<Cast<Compact>>
 //!     .floor()                 // Array<Floor<Cast<Compact>>>
 //!     .exp()                   // Array<Exp<Floor<Cast<Compact>>>>
-//!     .compact();              // Array<Compact> - materialize the pipeline
+//!     .compact()?;             // Array<Compact> - materialize the pipeline
 //! ```
 //!
 //! The compiler sees through all the wrappers and can inline the entire pipeline into a single
@@ -56,7 +56,7 @@
 //! use jix::Array;
 //! use ndarray::array;
 //!
-//! // compact_ndarray returns Array<Compact<Ty<f32>, ...>>: automatically typed.
+//! // compact_ndarray returns Array<Compact<Ty<f32>>>: automatically typed.
 //! let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
 //! let b = a.exp();        // fine: f32: Exp
 //! let c = b.cast::<i32>(); // fine: f32: Cast<i32>
@@ -70,9 +70,9 @@
 //! ```no_run
 //! use std::path::Path;
 //!
-//! use jix::{Array, ArrayParams};
+//! use jix::Array;
 //!
-//! let src = Array::read_from_file(Path::new("data.jix"), ArrayParams::default())?;
+//! let src = Array::read_from_file(Path::new("data.jix"))?;
 //! // src is Array<Compact<TypeDyn>> - ops not yet available
 //!
 //! // validates the dtype at runtime
