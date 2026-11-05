@@ -17,7 +17,7 @@ use crate::Array;
 ///     sub_field: The name of the field to extract.
 ///
 /// Raises:
-///     ValueError: If the array dtype is not a struct dtype or does not have a field named
+///     TypeError: If the array dtype is not a struct dtype or does not have a field named
 ///         `sub_field`.
 ///
 /// Returns:

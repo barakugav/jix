@@ -226,7 +226,7 @@ define_op1!(
     /// Squares each element (`x * x`).
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`, `f64`,
-    /// `c32`, `c64`. The output dtype always matches the input dtype.
+    /// `Complex<f32>`, `Complex<f64>`. The output dtype always matches the input dtype.
     ///
     /// For **integer** types squaring can overflow, following two's-complement `*` semantics
     /// (the result wraps).

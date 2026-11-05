@@ -135,7 +135,7 @@ define_reduction_op!(
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
-    ///         When `None`, reduces over all dims, returning a scalar.
+    ///         When `None`, reduces over all dims, returning a 0-d array.
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
@@ -174,7 +174,7 @@ define_reduction_op!(
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
-    ///         When `None`, reduces over all dims, returning a scalar.
+    ///         When `None`, reduces over all dims, returning a 0-d array.
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
@@ -216,8 +216,8 @@ define_reduction_op!(
     ///     keepdim: If `True`, the reduced dim is kept as a length-1 dimension. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `dim` is
-    ///         `None`, returns a scalar. When `keepdim=True`, the reduced dim is kept with size 1.
+    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max element. When `dim` is
+    ///         `None`, returns a 0-d array. When `keepdim=True`, the reduced dim is kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -255,8 +255,8 @@ define_reduction_op!(
     ///     keepdim: If `True`, the reduced dim is kept as a length-1 dimension. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `dim` is
-    ///         `None`, returns a scalar. When `keepdim=True`, the reduced dim is kept with size 1.
+    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the min element. When `dim` is
+    ///         `None`, returns a 0-d array. When `keepdim=True`, the reduced dim is kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -290,7 +290,7 @@ define_reduction_op!(
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
-    ///         When `None`, reduces over all dims, returning a scalar.
+    ///         When `None`, reduces over all dims, returning a 0-d array.
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
@@ -328,7 +328,7 @@ define_reduction_op!(
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
-    ///         When `None`, reduces over all dims, returning a scalar.
+    ///         When `None`, reduces over all dims, returning a 0-d array.
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
@@ -363,7 +363,7 @@ define_reduction_op!(
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
-    ///         When `None`, reduces over all dims, returning a scalar.
+    ///         When `None`, reduces over all dims, returning a 0-d array.
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
@@ -399,7 +399,7 @@ define_reduction_op!(
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values. When `None`, reduces over
-    ///         all dims, returning a scalar.
+    ///         all dims, returning a 0-d array.
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///     ddof: Delta degrees of freedom. Default `0.0` (population). Use `1.0` for sample
     ///         (Bessel-corrected).
@@ -438,7 +438,7 @@ define_reduction_op!(
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values. When `None`, reduces over
-    ///         all dims, returning a scalar.
+    ///         all dims, returning a 0-d array.
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///     ddof: Delta degrees of freedom. Default `0.0` (population). Use `1.0` for sample
     ///         (Bessel-corrected).
@@ -475,7 +475,7 @@ define_reduction_op!(
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
-    ///         When `None`, reduces over all dims, returning a scalar.
+    ///         When `None`, reduces over all dims, returning a 0-d array.
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
@@ -510,7 +510,7 @@ define_reduction_op!(
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
-    ///         When `None`, reduces over all dims, returning a scalar.
+    ///         When `None`, reduces over all dims, returning a 0-d array.
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:

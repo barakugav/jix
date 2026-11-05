@@ -11,7 +11,7 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the array's dtype does not match `T::DTYPE`.
+    /// Panics if `R` is zero-sized, or if the output size in bytes overflows.
     #[track_caller]
     pub fn map<R, F>(self, map_fn: F) -> Array<Map<S, F>>
     where

@@ -246,7 +246,7 @@ impl ArrayParams {
     /// let source = Array::compact_ndarray(&array![1i32, 2, 3, 4, 5, 6, 7, 8])?;
     ///
     /// // Override just the block shape; inherit codec params from `source`.
-    /// let params = ArrayParams::new().block_shape(&[4])?;
+    /// let mut params = ArrayParams::new().block_shape(&[4])?;
     /// params.inherit_unset_from_array(&source);
     ///
     /// let copy = source.compact_with(params, &source.read_ctx())?;

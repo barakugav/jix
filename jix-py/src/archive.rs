@@ -70,7 +70,7 @@ use crate::Array;
 ///     with open("packed.jix", "wb") as f:
 ///         jix.write_array(a, f)
 ///         offset = f.tell()
-///         jix.write_array(b, f)
+///         jix.write_array(a, f)
 ///         total = f.tell()
 ///     b2 = jix.read_array("packed.jix", offset=offset, len=total - offset)
 ///

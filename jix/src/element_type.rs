@@ -37,7 +37,7 @@ pub trait ElementType: Clone + Send + Sync + crate::util::Sealed {
 ///
 /// Arrays with `TypeDyn` do not support most element-wise operations directly; call
 /// [`Array::into_typed::<T>()`](crate::Array::into_typed) first to assert the expected
-/// element type and recover [`ArrayStorageTyped`](crate::ArrayStorage).
+/// element type and recover [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped).
 #[derive(Clone)]
 pub struct TypeDyn(Dtype);
 impl TypeDyn {

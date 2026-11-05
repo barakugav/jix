@@ -10,8 +10,8 @@ pub const NDIM_MAX: usize = 8;
 /// A shape or index value whose number of dims may be known at compile time.
 ///
 /// Arrays always track their number of dims at runtime (see [`Array::shape`](crate::Array::shape)).
-/// `Dimension` only appears in arguments: shapes passed to constructors and shape operations go
-/// through [`IntoDimension`], so they can be given as a `u64`, an array or tuple of `u64`, or a
+/// `Dimension` is a crate-internal argument helper (public APIs take shapes as `&[u64]`): internal
+/// functions that accept [`IntoDimension`] can be given a `u64`, an array or tuple of `u64`, or a
 /// slice.
 ///
 /// # Two implementors

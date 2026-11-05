@@ -103,7 +103,7 @@ where
 
 /// A view reference to an [`ArrayStorage`], itself implementing [`ArrayStorage`].
 ///
-/// Created by [`Array::view`](crate::Array::view) to produce an `Array<View<'_, S>>`
+/// Created by [`Array::view`](crate::Array::view) to produce an `Array<View<S>>`
 /// from `&Array<S>` without cloning the underlying storage.
 pub struct View<'a, S>(pub(crate) &'a S);
 impl<'a, S> View<'a, S> {

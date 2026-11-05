@@ -510,7 +510,7 @@ impl Array {
     ///     **`out` must not overlap memory the array itself reads from.** jix does not check for
     ///     this, and the result is undefined behavior - corrupted values, or a crash.
     ///
-    ///     The overlap arises when the array, or anything in its lazy chain, was built by
+    ///     The overlap arises when the array, or anything in its lazy chain, was built
     ///     with the very NumPy array being passed as `out`. [`jix.asarray()`][jix.asarray]
     ///     wraps that buffer instead of copying it, so the read would be scattering
     ///     decoded elements into the same bytes it is still reading from. Using numpy
@@ -522,7 +522,7 @@ impl Array {
     ///     a = jix.asarray(x)      # a is a view of x's buffer - no copy
     ///
     ///     (a + 1).numpy(out=x)    # UNDEFINED - do not do this
-    ///     (c + x).numpy(out=x)    # UNDEFINED too: x is wrapped without a copy
+    ///     (a + x).numpy(out=x)    # UNDEFINED too: x is wrapped without a copy
     ///     x[...] = (a + 1).numpy()  # do this instead
     ///     ```
     ///

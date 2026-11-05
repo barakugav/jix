@@ -371,7 +371,7 @@ impl<'a> Decoder<'a> {
 /// # Reusing a context
 ///
 /// A single `ReadContext` can be passed to multiple successive reads. Reusing it avoids
-/// reinitializing the decompressor and keeps the scratch buffer allocations warm:
+/// reinitializing the decompressor and keeps the scratch buffer allocations warm.
 ///
 /// # Arithmetic errors
 ///

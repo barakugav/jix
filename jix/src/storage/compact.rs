@@ -168,12 +168,12 @@ impl_array_storage!(CompactMmap<ET>);
 /// grid position `(b0, b1, ..., bn)` has 1D index
 /// `b0 * block_grid_shape[1] * ... * block_grid_shape[n-1] * block_grid_shape[n] + ... + bn`.
 ///
-/// The block shape is stored in `blocks_layout.block_shape_hint` (items per dimension, not
-/// bytes). The number of blocks per dimension is `block_grid_shape[d] = ceil(shape[d] / block_shape[d])`.
-/// All blocks in the `BlockTable` are full, so `shape[d]` must be a multiple of `block_shape[d]`
-/// for all `d`.
+/// The block shape is stored in `spec` (items per dimension, not bytes). The number of blocks per
+/// dimension is `block_grid_shape[d] = ceil(shape[d] / block_shape[d])`. All blocks in the
+/// `BlockTable` are full-size: blocks at the array edge are padded, so `shape[d]` need not be a
+/// multiple of `block_shape[d]`.
 ///
-/// `encoder_params` and `decoder_params` are kept here - not in `BlockTable` - so that
+/// The block shape and codec params are kept in `spec` - not in `BlockTable` - so that
 /// [`ArrayStorage::spec`] can propagate them through lazy view operations and
 /// [`compact_with`](crate::Array::compact_with).
 pub(crate) struct ArrayBlockTableStorageBase<S, ET>
@@ -191,7 +191,7 @@ where
 {
     /// Construct the nd-array layer from a pre-built `BlockTable`.
     ///
-    /// `blocks_layout.block_shape_hint` must match the block geometry already encoded in
+    /// The block shape resolved from `params` must match the block geometry already encoded in
     /// `blocks`. `block_grid_shape` is derived from `shape` and the block shape.
     pub(crate) fn new(blocks: BlockTable<S, ET>, shape: DimDyn, params: ArrayParams) -> Result<Self>
     where

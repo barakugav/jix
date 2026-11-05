@@ -58,7 +58,7 @@ use crate::{
 ///   .permute_dims(dims)    -> Array<PermuteDims<Reshape<...>>>
 ///   .add(other_array)      -> Array<Add<PermuteDims<...>, Compact>>
 ///   .sum(dim)             -> Array<Sum<Add<...>>>
-///   .compact();            -> Array<Compact> - materialize the pipeline
+///   .compact()?            -> Array<Compact> - materialize the pipeline
 /// ```
 ///
 /// Data is never copied or computed at construction time. An operation only runs when the result
@@ -126,7 +126,7 @@ use crate::{
 ///
 /// // Materialize the result and write to a file.
 /// let result = scaled
-///     .argmax(/* dim */ 1)                        // Array<ArgMax<Add<Mul<...>, Compact>>>
+///     .argmax(/* dim */ 1)                        // Array<ArgMax<Add<Map<...>, Compact>>>
 ///     .cast::<i16>()                               // Array<Cast<ArgMax<Add<...>>>>
 ///     // materialize the pipeline bt recompressing
 ///     .compact()?;                                 // Array<Compact>
@@ -1492,7 +1492,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// Almost all ops on arrays accept ownership of an `Array<S>` rather than a reference, for
     /// example `a + b` for two arrays consumes `a` and `b`. To reuse an array without cloning its
-    /// storage, call `view` to get an `Array<View<'_, S>>`, which doesn't own the storage but can
+    /// storage, call `view` to get an `Array<View<S>>`, which doesn't own the storage but can
     /// be used in any API that accepts an owned `Array<S>`.
     ///
     /// # Examples
