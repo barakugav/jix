@@ -10,6 +10,11 @@ where
     /// # Safety
     ///
     /// Every element must be a valid bit pattern for `T` (see [`Transmute`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the itemsize of `T` differs from the array's dtype itemsize. Use
+    /// [`Transmute::new_array`] for a fallible version.
     #[track_caller]
     pub unsafe fn transmute_elements<T>(self) -> Array<Transmute<S, Ty<T>>>
     where
@@ -24,9 +29,14 @@ where
     /// # Safety
     ///
     /// Every element must be a valid bit pattern for `dtype` (see [`Transmute`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the itemsize of `dtype` differs from the array's dtype itemsize. Use
+    /// [`Transmute::new_array`] for a fallible version.
     #[track_caller]
     pub unsafe fn transmute_elements_dyn(self, dtype: Dtype) -> Array<Transmute<S, TypeDyn>> {
-        unsafe { Transmute::new_array(self, TypeDyn::from_dtype(dtype).unwrap()).unwrap() }
+        unsafe { Transmute::new_array(self, TypeDyn::new(dtype)).unwrap() }
     }
 }
 

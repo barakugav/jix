@@ -184,7 +184,7 @@ impl<A> Plain<A, TypeDyn> {
             dynamic.read_layout_order = order;
         }
 
-        let element_type = TypeDyn::from_dtype(dtype).unwrap();
+        let element_type = TypeDyn::new(dtype);
 
         Ok(Self {
             allocation,
@@ -292,11 +292,8 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
         T: Dtyped,
     {
         let shape = shape_from_ndarray(arr.shape())?;
-
         let strides = strides_from_ndarray::<T>(arr.shape(), arr.strides())?;
-
         let data_ptr = arr.as_ptr().cast::<u8>();
-
         unsafe { Self::plain_ndarray_ptr(data_ptr, shape.as_slice(), &strides, T::DTYPE, params) }
     }
 
