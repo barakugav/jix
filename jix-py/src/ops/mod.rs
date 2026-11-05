@@ -101,6 +101,12 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
         use jix_core::scalar::bool8;
         use jix_core::scalar::{f16, Complex};
 
+        if src.is_integer() && dst.is_integer() && src.itemsize() == dst.itemsize() {
+            // SAFETY: both are ints of the same size, and every bit pattern is valid for both
+            let array = unsafe { array.transmute_elements_dyn(dtype.clone()) };
+            return Ok(array.into_any());
+        }
+
         macro_rules! cast_typed {
             ($src_type:ty, $dst_type:ty) => {{
                 let array = array.into_typed::<$src_type>().unwrap();

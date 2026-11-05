@@ -121,6 +121,18 @@ def test_cast_scalar_dtypes(src_dtype, dst_dtype):
     np.testing.assert_array_equal(result.numpy(), data.astype(dst_dtype))
 
 
+@pytest.mark.parametrize(
+    "src_dtype, dst_dtype",
+    [(np.int8, np.uint8), (np.uint16, np.int16), (np.int32, np.uint32), (np.uint64, np.int64)],
+)
+def test_cast_same_size_int(src_dtype, dst_dtype):
+    info = np.iinfo(src_dtype)
+    data = np.array([info.min, 0, 1, info.max], dtype=src_dtype)
+    result = jix.cast(jix.compact(data), dst_dtype)
+    assert result.dtype == np.dtype(dst_dtype)
+    np.testing.assert_array_equal(result.numpy(), data.astype(dst_dtype))
+
+
 def test_cast_preserves_shape():
     arr = np.arange(12, dtype=np.int32).reshape(3, 4)
     za = jix.compact(arr)
