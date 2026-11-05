@@ -9,7 +9,7 @@ use pyo3::types::{PyDict, PyTuple};
 use crate::util::DimArray;
 
 pub(crate) fn dtype_to_numpy<'py>(
-    py: pyo3::Python<'py>,
+    py: Python<'py>,
     dtype: &Dtype,
 ) -> PyResult<Bound<'py, PyArrayDescr>> {
     let itemsize = dtype.itemsize();
@@ -84,7 +84,7 @@ pub(crate) fn dtype_to_numpy<'py>(
 }
 
 pub(crate) fn numpy_descr_from_any<'py>(
-    py: pyo3::Python<'py>,
+    py: Python<'py>,
     dtype: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyArrayDescr>> {
     if dtype.is_none() {

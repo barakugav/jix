@@ -1,11 +1,12 @@
 use std::sync::LazyLock;
 
 use jix_core::scalar::{f16, Complex};
-use pyo3::types::PyAnyMethods;
+use pyo3::prelude::*;
 
 use crate::ops::common::{
     broadcast_operands, define_op2, define_op2_desc, OpDescriptor, Operand, Rank, Scalar,
 };
+use crate::Array;
 
 macro_rules! unary_shortcut_desc {
     (|$x:ident| $f:expr, [$(($a_ty:ty, $b_ty:ty)),* $(,)?]) => {
@@ -164,10 +165,7 @@ define_op2!(
 ///     assert np.array_equal(result.numpy(), [4, 10, 18])
 ///     ```
 #[pyo3::pyfunction]
-pub fn multiply<'py>(
-    a: &pyo3::Bound<'py, pyo3::PyAny>,
-    b: &pyo3::Bound<'py, pyo3::PyAny>,
-) -> pyo3::PyResult<crate::Array> {
+pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Array> {
     let a_op = Operand::from_any(a)?;
 
     // fast path for x * x
@@ -195,7 +193,7 @@ pub fn multiply<'py>(
     let b = Operand::from_any(b)?;
     let [a, b] = broadcast_operands([a, b])?;
     let res = DISPATCH_TABLE.dispatch2(a, b)?;
-    Ok(crate::Array::from_core(res))
+    Ok(Array::from_core(res))
 }
 define_op2!(
     /// Element-wise (true) division of two arrays (`a / b`).
@@ -593,10 +591,7 @@ define_op2!(
 ///     assert jix.power(ai, 3).dtype == np.dtype("int32")
 ///     ```
 #[pyo3::pyfunction]
-pub fn power<'py>(
-    a: &pyo3::Bound<'py, pyo3::PyAny>,
-    b: &pyo3::Bound<'py, pyo3::PyAny>,
-) -> pyo3::PyResult<crate::Array> {
+pub fn power<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Array> {
     static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
         OpDescriptor::new(
             "power",
@@ -693,5 +688,5 @@ pub fn power<'py>(
 
     let [a, b] = broadcast_operands([a, b])?;
     let res = table.dispatch2(a, b)?;
-    Ok(crate::Array::from_core(res))
+    Ok(Array::from_core(res))
 }

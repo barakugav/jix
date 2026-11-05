@@ -1,4 +1,4 @@
-use pyo3::types::PyAnyMethods;
+use pyo3::prelude::*;
 
 use crate::ops::common::{broadcast_operands, operands_dtype_promotion, Operand, Scalar};
 use crate::util::IntoPyResult;
@@ -59,10 +59,10 @@ use crate::Array;
 #[pyo3::pyfunction]
 #[pyo3(name = "where")]
 pub fn r#where<'py>(
-    condition: &pyo3::Bound<'py, pyo3::PyAny>,
-    x: &pyo3::Bound<'py, pyo3::PyAny>,
-    y: &pyo3::Bound<'py, pyo3::PyAny>,
-) -> pyo3::PyResult<pyo3::Bound<'py, Array>> {
+    condition: &Bound<'py, PyAny>,
+    x: &Bound<'py, PyAny>,
+    y: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, Array>> {
     let py = condition.py();
     let same_values = x.is(y);
 
@@ -94,7 +94,7 @@ pub fn r#where<'py>(
     let y = y.into_array()?;
 
     let ret = jix_core::ops::Where::new_array(condition, x, y).into_py_result()?;
-    pyo3::Bound::new(
+    Bound::new(
         py,
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )

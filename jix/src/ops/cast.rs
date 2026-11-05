@@ -492,9 +492,11 @@ mod tests {
 
     #[test]
     fn cast_rejects_widened_shape_overflow() {
+        use crate::Array;
+
         // n * 1 byte fits u64, so broadcast accepts it, but n * 8 bytes does not.
         let n = (1u64 << 61) + 1;
-        let a = crate::Array::compact_ndarray(&ndarray::array![7u8])
+        let a = Array::compact_ndarray(&ndarray::array![7u8])
             .unwrap()
             .broadcast(&[n]);
         let err = super::Cast::<_, f64>::new_array(a).map(|_| ()).unwrap_err();

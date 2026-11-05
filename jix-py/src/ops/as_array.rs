@@ -1,4 +1,5 @@
 use jix_core::ArrayAny;
+use numpy::PyUntypedArray;
 use pyo3::prelude::*;
 use pyo3::types::{IntoPyDict, PyDict};
 
@@ -64,7 +65,7 @@ pub fn asarray<'py>(
         .transpose()?;
 
     let value_is_array = value.is_instance_of::<Array>()
-        || value.is_instance_of::<numpy::PyUntypedArray>()
+        || value.is_instance_of::<PyUntypedArray>()
         || value.is_instance(numpy_items(py)?.generic.bind(py))?;
     let value = match &np_dtype {
         Some(np_dtype) if !value_is_array => {
@@ -105,6 +106,7 @@ mod tests {
     use jix_core::scalar::Complex;
     use ndarray::{array, Array0, ArrayD};
     use numpy::PyArray;
+    use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
 
     use super::asarray;
@@ -335,7 +337,7 @@ mod tests {
                 .unwrap();
             assert!(asarray(&val, None, None)
                 .unwrap_err()
-                .is_instance_of::<pyo3::exceptions::PyValueError>(py));
+                .is_instance_of::<PyValueError>(py));
         });
     }
 }

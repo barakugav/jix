@@ -1114,10 +1114,10 @@ where
     #[track_caller]
     pub fn approx_equal<S2>(
         self,
-        other: crate::Array<S2>,
+        other: Array<S2>,
         rtol: <S::Item as crate::scalar::ApproxEq>::RelativeTolerance,
         atol: <S::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
-    ) -> crate::Array<ApproxEq<S, S2>>
+    ) -> Array<ApproxEq<S, S2>>
     where
         S: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
         S2: ArrayStorageTyped<Item = S::Item>,
@@ -1755,8 +1755,9 @@ mod tests {
             ),
             hi_offset in -50i32..50,
         ) {
+            use crate::Array;
             let nd_hi = nd_lo.mapv(|x| x.saturating_add(hi_offset));
-            let zhi = crate::Array::compact_ndarray(&nd_hi).unwrap();
+            let zhi = Array::compact_ndarray(&nd_hi).unwrap();
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_lo)
                 .and(&nd_hi)

@@ -49,12 +49,12 @@ use crate::Array;
 ///     ```
 #[pyfunction]
 pub fn dtype_sub_field<'py>(
-    array: &Bound<'py, pyo3::PyAny>,
+    array: &Bound<'py, PyAny>,
     sub_field: String,
 ) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let array = crate::ops::as_array::any_to_core_array(array)?;
     let res =
         jix_core::ops::SubDtype::<_, TypeDyn>::new_array(array, &sub_field).into_py_result()?;
-    Bound::new(py, crate::Array::from_core(res.into_any()))
+    Bound::new(py, Array::from_core(res.into_any()))
 }
