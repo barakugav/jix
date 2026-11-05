@@ -1962,12 +1962,12 @@ mod tests {
     }
 
     #[test]
-    fn compact_ndarray_block_larger_than_shape_is_rejected() {
-        // block_shape [10] > array shape [4]; must be rejected per the
-        // `b <= s.max(1)` invariant enforced by `ArrayParams::tune`.
+    fn compact_ndarray_block_larger_than_shape_is_clamped() {
+        // block_shape [10] > array shape [4] is clamped to the array boundary.
         let src = array![0u8, 1, 2, 3];
-        let err = Array::compact_ndarray_with(&src, arr_params(&[10])).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidArgument);
+        let a = Array::compact_ndarray_with(&src, arr_params(&[10])).unwrap();
+        assert_eq!(a.storage().spec().block_shape().as_slice(), &[4]);
+        assert_eq!(a.to_ndarray().unwrap(), src);
     }
 
     #[test]

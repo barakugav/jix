@@ -112,8 +112,9 @@ impl ArrayParams {
 
     /// Sets the explicit storage block shape, in items per dimension.
     ///
-    /// When set, the array is stored in nd-blocks of exactly this shape (subject to boundary
-    /// clamping at the array edges). This overrides any auto-computed shape.
+    /// When set, the array is stored in nd-blocks of exactly this shape, except that a block dim
+    /// larger than the array is clamped to the array's length in that dim. This overrides any
+    /// auto-computed shape.
     ///
     /// Setting the block shape also marks every dimension as fixed unless
     /// [`block_shape_fixed_dims`](Self::block_shape_fixed_dims) is also used, meaning the shape will
@@ -368,6 +369,10 @@ impl ArrayParams {
             ndim,
             block_shape.len()
         );
+        // Clamp block dims that exceed the array to the array boundary
+        for (b, &s) in block_shape.iter_mut().zip(shape) {
+            *b = (*b as u64).min(s.max(1)) as BlockSize;
+        }
         // Scale block_shape up to block_size
         if !fixed_block_shape {
             ensure!(
@@ -1702,6 +1707,18 @@ mod tests {
         assert!(bs[1] > 4, "non-fixed dim 1 should scale up: {bs:?}");
         assert!(spec.as_ref().block_shape_fixed_dims().get(0));
         assert!(!spec.as_ref().block_shape_fixed_dims().get(1));
+    }
+
+    #[test]
+    fn block_shape_larger_than_array_is_clamped() {
+        use crate::dtype::Dtyped;
+
+        let spec = ArrayParams::new()
+            .block_shape(&[1024, 1, 8])
+            .unwrap()
+            .into_spec(&[4, 3, 0], &i32::DTYPE, ArraySpecFlags::default())
+            .unwrap();
+        assert_eq!(spec.as_ref().block_shape().as_slice(), &[4, 1, 1]);
     }
 
     #[test]
