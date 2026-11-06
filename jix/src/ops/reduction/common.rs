@@ -1599,7 +1599,7 @@ pub(crate) mod tests {
 
     // pub(crate) fn carray_strategy_for_reduction_single_dim<T: crate::util::ScalarStrategy>(
     //     elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    // ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>>>>, usize)>
+    // ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<CompactArray<T>>, usize)>
     // {
     //     let shape = reduction_shape_strategy();
     //     let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);

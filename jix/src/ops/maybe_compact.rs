@@ -177,17 +177,13 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams, ArrayStorage, ElementType, Ty};
+    use crate::{Array, ArrayParams, ArrayStorage, CompactArray, ElementType};
 
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn compact<T: Dtyped>(
-        vals: Vec<T>,
-        shape: &[usize],
-        block_shape: &[usize],
-    ) -> Array<Compact<Ty<T>>> {
+    fn compact<T: Dtyped>(vals: Vec<T>, shape: &[usize], block_shape: &[usize]) -> CompactArray<T> {
         let src = ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
         Array::compact_ndarray_with(&src, arr_params(block_shape)).unwrap()
     }

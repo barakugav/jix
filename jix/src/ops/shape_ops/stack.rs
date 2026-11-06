@@ -274,9 +274,9 @@ mod tests {
 
     use crate::array::Array;
     use crate::ops::stack;
-    use crate::storage::Compact;
+
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{Ty, NDIM_MAX};
+    use crate::{CompactArray, NDIM_MAX};
 
     #[test]
     fn test_i32_1d_dim0() {
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_empty_panics() {
-        let _ = stack(Vec::<Array<Compact<Ty<i64>>>>::new(), 0);
+        let _ = stack(Vec::<CompactArray<i64>>::new(), 0);
     }
 
     // -----------------------------------------------------------------------

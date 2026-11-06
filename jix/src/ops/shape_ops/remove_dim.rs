@@ -245,9 +245,9 @@ mod tests {
 
     use crate::array::Array;
     use crate::codec::ReadContext;
-    use crate::storage::Compact;
+
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{Ty, NDIM_MAX};
+    use crate::{CompactArray, NDIM_MAX};
 
     #[test]
     fn rejects_invalid_index() {
@@ -258,17 +258,17 @@ mod tests {
         crate::util::assert_read_rejects_invalid_index(plain.remove_dim(1).storage());
     }
 
-    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>>> {
+    fn make1d(vals: Vec<i32>, block_size: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>>> {
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>>> {
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([d0, d1, d2], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }

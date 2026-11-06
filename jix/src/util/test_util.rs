@@ -7,7 +7,7 @@ use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
 use crate::storage::Compact;
 use crate::util::AlignedBytes;
-use crate::{Array, ArrayParams, ArrayStorage, Ty, TypeDyn};
+use crate::{Array, ArrayParams, ArrayStorage, CompactArray, Ty, TypeDyn};
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper
@@ -634,7 +634,7 @@ where
 /// Always [`Compact`] storage, row-major. Only for tests that need real compact storage -
 /// `as_compact()` and the archive's compact write path. Prefer [`array_strategy_any`] otherwise.
 pub(crate) fn carray_strategy_any<T>(
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, CompactArray<T>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -644,7 +644,7 @@ where
 pub(crate) fn carray_strategy_from_shape<T>(
     shape: impl Strategy<Value = Vec<usize>>,
     element: impl Strategy<Value = T> + Clone,
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, CompactArray<T>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -653,7 +653,7 @@ where
 
 pub(crate) fn carray_strategy_from_data<T>(
     data: impl Strategy<Value = ndarray::ArrayD<T>>,
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, CompactArray<T>)>
 where
     T: ScalarStrategy + Debug,
 {

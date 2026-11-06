@@ -364,14 +364,14 @@ mod tests {
     use ndarray::{array, Ix2};
 
     use crate::codec::ReadContext;
-    use crate::storage::Compact;
-    use crate::{Array, ArrayStorage, IntoDimension, Ty, NDIM_MAX};
+
+    use crate::{Array, ArrayStorage, CompactArray, IntoDimension, NDIM_MAX};
 
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn make(vals: Vec<i32>, shape: impl IntoDimension) -> Array<Compact<Ty<i32>>> {
+    fn make(vals: Vec<i32>, shape: impl IntoDimension) -> CompactArray<i32> {
         let shape = shape.into_dimension().unwrap();
         let nd = ndarray::Array::from_shape_vec(shape, vals).unwrap();
         Array::compact_ndarray(&nd).unwrap()
@@ -536,7 +536,7 @@ mod tests {
     //   output = [10, 20, 30, 40, 10, 20, 30, 40, 10, 20, 30, 40]  (length 12)
     //   s_in   = s mod L
 
-    fn make_1d_tile3() -> Array<Compact<Ty<i32>>> {
+    fn make_1d_tile3() -> CompactArray<i32> {
         make(vec![10, 20, 30, 40], [4u64])
     }
 

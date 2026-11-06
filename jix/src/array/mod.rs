@@ -391,7 +391,7 @@ pub(crate) mod tests {
     use crate::storage::block::{BlockSize, BlockTable};
 
     use crate::util::{arr_params, cast_slice, DimArray};
-    use crate::{ArrayParams, Dimension, IntoDimension, Ty};
+    use crate::{ArrayParams, CompactArray, Dimension, IntoDimension, Ty};
 
     // -----------------------------------------------------------------------
     // compact_ndarray roundtrip helper
@@ -429,7 +429,7 @@ pub(crate) mod tests {
         blocks: &[&[T]],
         shape: impl IntoDimension,
         block_shape: &[usize],
-    ) -> Array<Compact<Ty<T>>>
+    ) -> CompactArray<T>
     where
         T: Dtyped,
     {

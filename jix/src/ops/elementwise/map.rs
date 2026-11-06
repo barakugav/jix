@@ -444,6 +444,7 @@ mod tests {
     use crate::array::Array;
     use crate::scalar::bool8;
     use crate::util::arr_params;
+    use crate::CompactArray;
 
     #[test]
     fn map_multiple_widening_shape_overflow_is_an_error() {
@@ -460,7 +461,7 @@ mod tests {
 
     #[test]
     fn map_multiple_no_arrays_is_an_error() {
-        let arrays: Vec<Array<crate::storage::Compact<crate::Ty<f32>>>> = vec![];
+        let arrays: Vec<CompactArray<f32>> = vec![];
         assert!(crate::ops::MapMultiple::new(arrays, |xs: &[f32]| xs.len() as f32).is_err());
     }
 

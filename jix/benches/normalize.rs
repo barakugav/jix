@@ -1,15 +1,14 @@
 mod common;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use jix::storage::Compact;
-use jix::{Array, ArrayParams, Ty};
+use jix::{Array, ArrayParams, CompactArray};
 use ndarray::Ix2;
 
 use crate::common::{create_data, Profile};
 
 const SIZES: [(u64, u64); 4] = [(4_000, 200), (40_000, 200), (200_000, 64), (20_000, 2_000)];
 
-fn compact_f32(shape: &[u64], seed: u64) -> Array<Compact<Ty<f32>>> {
+fn compact_f32(shape: &[u64], seed: u64) -> CompactArray<f32> {
     let data = create_data::<f32>(Profile::Smooth, shape, seed);
     Array::compact_ndarray_with(&data, ArrayParams::new()).unwrap()
 }

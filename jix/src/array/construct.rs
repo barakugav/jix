@@ -7,11 +7,13 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, materialize_out_buf, ArrayStorageInfo, Compact, StridedBuf};
 use crate::util::dim_arr;
 use crate::util::iter::NdIter;
-use crate::{ArrayParams, ArrayStorage, DimArray, DimDyn, ElementType, SliceExt, Ty, TypeDyn};
+use crate::{
+    ArrayParams, ArrayStorage, CompactArray, DimArray, DimDyn, ElementType, SliceExt, Ty, TypeDyn,
+};
 
 use super::Array;
 
-impl<T> Array<Compact<Ty<T>>> {
+impl<T> CompactArray<T> {
     /// Compress an ndarray into a block-compressed `Array<Compact>` with default encoding settings.
     ///
     /// The array is partitioned into n-dimensional blocks, each independently compressed. The
@@ -155,7 +157,7 @@ impl Array<Compact<TypeDyn>> {
     }
 }
 
-impl<T> Array<Compact<Ty<T>>> {
+impl<T> CompactArray<T> {
     /// Create a block-compressed array by evaluating a function `f` at each index.
     ///
     /// The function `f` is called with the index of each element in the output array, and should

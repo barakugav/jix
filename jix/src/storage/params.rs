@@ -1000,7 +1000,7 @@ mod tests {
 
     use super::scale_order_from_weights;
     use crate::util::ScaleWeight;
-    use crate::{Array, ArrayParams, ArrayStorage, BLOCK_SIZE_BYTES_MAX};
+    use crate::{Array, ArrayParams, ArrayStorage, CompactArray, BLOCK_SIZE_BYTES_MAX};
 
     #[test]
     fn compact_with_keeps_caller_fixed_dims() {
@@ -1322,7 +1322,7 @@ mod tests {
         assert_eq!(a.storage().spec().read_layout_order(), &[1, 0, 2]);
     }
 
-    fn compact_i32(shape: [usize; 3]) -> Array<crate::storage::Compact<crate::Ty<i32>>> {
+    fn compact_i32(shape: [usize; 3]) -> CompactArray<i32> {
         let n = shape.iter().product::<usize>() as i32;
         Array::compact_ndarray(
             &ndarray::Array::from_shape_vec(shape, (0..n).collect::<Vec<_>>()).unwrap(),
@@ -1401,7 +1401,7 @@ mod tests {
         assert_eq!(b.storage().spec().read_layout_order(), &[1, 0]);
     }
 
-    fn compact_2d_i32(shape: [usize; 2]) -> Array<crate::storage::Compact<crate::Ty<i32>>> {
+    fn compact_2d_i32(shape: [usize; 2]) -> CompactArray<i32> {
         let n = shape.iter().product::<usize>() as i32;
         Array::compact_ndarray(
             &ndarray::Array::from_shape_vec(shape, (0..n).collect::<Vec<_>>()).unwrap(),
@@ -2057,8 +2057,7 @@ mod tests {
         #[repr(C)]
         struct Empty {}
 
-        let result =
-            Array::<crate::storage::Compact<crate::Ty<Empty>>>::compact_fn(&[4], |_| Empty {});
+        let result = CompactArray::<Empty>::compact_fn(&[4], |_| Empty {});
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::UnsupportedDtype

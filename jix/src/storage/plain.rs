@@ -10,13 +10,9 @@ use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
-use crate::{strided_span_bytes_from_iter, Array, ArrayParams, ArrayStorage, DimDyn, Dimension};
-
-/// Plain (not-compressed) owned array (type alias).
-pub type PlainArray<T> = Array<Plain<Vec<T>, Ty<T>>>;
-
-/// Plain (not-compressed) borrowed array (type alias).
-pub type PlainArrayRef<'a, T> = Array<Plain<&'a (), Ty<T>>>;
+use crate::{
+    strided_span_bytes_from_iter, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, PlainArray,
+};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
