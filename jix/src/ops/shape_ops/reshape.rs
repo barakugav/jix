@@ -407,6 +407,29 @@ where
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a lazy view of the array with a new shape. See [`Reshape`] for details and
+    /// examples.
+    ///
+    /// Like the other shape operations, reshape is lazy: no data is copied at construction time.
+    /// Reshape is uniquely prone to read-amplification, though - when the new shape crosses block
+    /// boundaries of the original layout, a single read may decompress many more blocks than it
+    /// appears to touch. When the result will be read more than once, call
+    /// [`.compact()`](Array::compact) to materialize it with a block layout matched to the new
+    /// shape.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
+    #[track_caller]
+    pub fn reshape(self, shape: &[u64]) -> Array<Reshape<S>> {
+        Reshape::new_array(self, shape).unwrap()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {

@@ -96,35 +96,14 @@
 mod maybe_compact;
 pub use maybe_compact::*;
 
-mod cast;
-pub use cast::Cast;
-
 mod shape_ops;
 pub use shape_ops::*;
 
-mod op1;
-pub use op1::*;
-
-mod op2;
-pub use op2::*;
-
-mod logical1;
-pub use logical1::*;
-
-mod cmp;
-pub use cmp::*;
-
-mod bitwise;
-pub use bitwise::*;
+mod elementwise;
+pub use elementwise::*;
 
 mod reduction;
 pub use reduction::*;
-
-mod map;
-pub use map::*;
-
-mod select;
-pub use select::*;
 
 mod sub_dtype;
 pub use sub_dtype::*;
@@ -132,22 +111,12 @@ pub use sub_dtype::*;
 mod transmute;
 pub use transmute::*;
 
-#[cfg(feature = "num-complex")]
-mod complex;
-#[cfg(feature = "num-complex")]
-pub use complex::*;
+mod dims_arg;
+pub use dims_arg::DimsArg;
 
-mod common;
-pub use common::DimsArg;
-
-pub(crate) mod _traits {
-    pub use super::bitwise::_traits::*;
-    pub use super::cast::_traits::*;
-    pub use super::cmp::_traits::*;
-    pub use super::logical1::_traits::*;
-    pub use super::op1::_traits::*;
-    pub use super::op2::_traits::*;
-    pub use super::reduction::_traits::*;
+pub(crate) mod traits {
+    pub use super::elementwise::traits::*;
+    pub use super::reduction::traits::*;
 }
 
 mod into_type;

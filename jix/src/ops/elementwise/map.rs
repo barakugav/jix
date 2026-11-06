@@ -2,27 +2,6 @@ use crate::ops::prelude::*;
 use crate::ops::{Op1, Op2};
 use crate::{ArraySequence, ArraySequenceTyped, ElementwisePipelineTuple};
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
-    /// Applies `map_fn` to each element, returning an array with dtype `R`. See [`Map`] for
-    /// details and examples.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `R` is zero-sized, or if the output size in bytes overflows.
-    #[track_caller]
-    pub fn map<R, F>(self, map_fn: F) -> Array<Map<S, F>>
-    where
-        S: ArrayStorageTyped,
-        R: Dtyped,
-        F: Fn(S::Item) -> R,
-    {
-        Map::new_array(self, map_fn).unwrap()
-    }
-}
-
 /// Applies a function element-wise to an array.
 ///
 /// The output array has the same shape as the input, and dtype determined by the output of
@@ -435,6 +414,27 @@ where
     F: Fn(ArraysT::ItemSequence<'_>) -> O,
 {
     Array::from_storage(MapMultiple::new(arrays, map_fn).unwrap())
+}
+
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Applies `map_fn` to each element, returning an array with dtype `R`. See [`Map`] for
+    /// details and examples.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `R` is zero-sized, or if the output size in bytes overflows.
+    #[track_caller]
+    pub fn map<R, F>(self, map_fn: F) -> Array<Map<S, F>>
+    where
+        S: ArrayStorageTyped,
+        R: Dtyped,
+        F: Fn(S::Item) -> R,
+    {
+        Map::new_array(self, map_fn).unwrap()
+    }
 }
 
 #[cfg(test)]

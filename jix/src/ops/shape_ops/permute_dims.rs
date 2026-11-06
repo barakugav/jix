@@ -174,6 +174,33 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a lazy view of the array with its dims reordered. See [`PermuteDims`] for details
+    /// and examples.
+    ///
+    /// `dims[i]` names the input dim that maps to output dim `i`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `dims` is not a valid permutation of `0..ndim`.
+    #[track_caller]
+    pub fn permute_dims(self, dims: &[usize]) -> Array<PermuteDims<S>> {
+        PermuteDims::new_array(self, dims).unwrap()
+    }
+
+    /// Returns a lazy view of the array with its dims reversed. See [`PermuteDims`] for details
+    /// and examples.
+    #[track_caller]
+    pub fn transpose(self) -> Array<PermuteDims<S>> {
+        let ndim = self.ndim();
+        let dims = dim_arr(ndim, |i| ndim - 1 - i);
+        PermuteDims::new_array(self, dims.as_ref()).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ndarray::array;

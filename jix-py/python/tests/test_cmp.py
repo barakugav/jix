@@ -1,7 +1,9 @@
 """
 Property tests for element-wise comparison ops.
-Mirrors the test block in jix/src/ops/cmp.rs.
+Mirrors the test block in jix/src/ops/elementwise/cmp.rs.
 """
+
+import cmath
 
 import numpy as np
 import pytest
@@ -11,14 +13,12 @@ from hypothesis.strategies import DataObject
 from tests_util import (
     any_element_strategy,
     assert_array_matches,
-    carray_strategy,
     carrays2_strategy,
     comparable_element_strategy,
     complexes,
     floats,
     ints,
     maybe_non_finite_element_strategy,
-    op_safe_element_strategy,
     uints,
 )
 
@@ -34,24 +34,11 @@ _ordered_dtypes = ints + uints + floats + [np.bool_]
 _GE_LE_FLOAT_A = np.array([float("nan"), 1.0, float("inf"), -1.0], dtype=np.float32)
 _GE_LE_FLOAT_B = np.array([1.0, float("nan"), float("inf"), 1.0], dtype=np.float32)
 
-# clamp_min_only / clamp_max_only share identical input arrays: int32 dtype min/max
-# plus values on both sides of the bound; float32 +/-inf, a value at the bound, and
-# NaN passthrough (comparisons with NaN are always false).
-_CLAMP_INT_VALS = np.array([np.iinfo(np.int32).min, -5, 0, 5, np.iinfo(np.int32).max], dtype=np.int32)
-_CLAMP_FLOAT_VALS = np.array([float("-inf"), -1.0, 0.0, 1.0, float("inf"), float("nan")], dtype=np.float32)
-
 
 def _ordering_st(dtype):
     """any for integers/bool, maybe_non_finite for floats (exercises NaN -> False paths)."""
     if np.issubdtype(dtype, np.floating):
         return maybe_non_finite_element_strategy(dtype)
-    return any_element_strategy(dtype)
-
-
-def _max_min_st(dtype):
-    """any for integers/bool, op_safe for floats (NaN in output breaks assert_allclose)."""
-    if np.issubdtype(dtype, np.floating):
-        return op_safe_element_strategy(dtype)
     return any_element_strategy(dtype)
 
 
@@ -152,150 +139,6 @@ def test_less_equal_concrete():
     assert_array_matches(jix.less_equal(za_b, zb_b), a_b <= b_b)
 
 
-# maximum / minimum: NaN propagates to float output, breaking assert_allclose.
-# Use op_safe_strategy for floats to keep all outputs finite.
-
-
-@pytest.mark.parametrize("dtype", _ordered_dtypes)
-@given(st.data())
-def test_maximum(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=_max_min_st(dtype)), label="arrays")
-    assert_array_matches(jix.maximum(za, zb), np.maximum(np_a, np_b), data=data)
-
-
-# minimum edge cases: signed negatives, equal values,
-# inf ordering (finite outputs), and a NaN-propagation case matching the kernel.
-def test_minimum_concrete():
-    a_i = np.array([1, -5, 3, 3], dtype=np.int32)
-    b_i = np.array([4, -2, 3, -3], dtype=np.int32)
-    za_i, zb_i = jix.compact(a_i), jix.compact(b_i)
-    assert_array_matches(jix.minimum(za_i, zb_i), np.minimum(a_i, b_i))
-
-    # float32: inf/-inf ordering, all finite outputs (no NaN yet).
-    a_f = np.array([float("-inf"), 1.0, float("inf"), -1.0], dtype=np.float32)
-    b_f = np.array([5.0, -1.0, 2.0, -1.0], dtype=np.float32)
-    za_f, zb_f = jix.compact(a_f), jix.compact(b_f)
-    assert_array_matches(jix.minimum(za_f, zb_f), np.minimum(a_f, b_f))
-
-    # NaN-propagation edge: minimum(NaN, x) is NaN for any x, matching np.minimum.
-    a_n = np.array([float("nan"), 1.0], dtype=np.float32)
-    b_n = np.array([2.0, float("nan")], dtype=np.float32)
-    za_n, zb_n = jix.compact(a_n), jix.compact(b_n)
-    assert_array_matches(jix.minimum(za_n, zb_n), np.minimum(a_n, b_n))
-
-
-# clamp: prop tests against numpy.clip, plus explicit edge-case tests.
-
-_clamp_dtypes = ints + uints + floats + [np.bool_]
-
-
-@pytest.mark.parametrize("dtype", _clamp_dtypes)
-@given(st.data())
-def test_clamp_both(dtype: np.dtype, data: DataObject):
-    # Unordered bounds: where lo > hi both numpy and jix return hi.
-    np_a, za = data.draw(carray_strategy(dtype, element_st=_max_min_st(dtype)), label="array")
-    lo = data.draw(_max_min_st(dtype), label="lo")
-    hi = data.draw(_max_min_st(dtype), label="hi")
-    if dtype == np.uint64:  # a Python int above int64 raises
-        lo, hi = np.uint64(lo), np.uint64(hi)
-    assert_array_matches(jix.clamp(za, min=lo, max=hi), np.clip(np_a, lo, hi), data=data)
-
-
-# clamp_min_only / clamp_max_only / clamp_none use np.clip as the reference
-# (with the corresponding bound set to None).
-def test_clamp_min_only_concrete():
-    # int32: dtype min/max, 0, values on both sides of the bound.
-    a_i = _CLAMP_INT_VALS
-    za_i = jix.compact(a_i)
-    assert_array_matches(jix.clamp(za_i, min=0), np.clip(a_i, 0, None))
-
-    # float32: +/-inf, NaN passthrough (comparisons with NaN are always false),
-    # and a value exactly at the bound.
-    a_f = _CLAMP_FLOAT_VALS
-    za_f = jix.compact(a_f)
-    assert_array_matches(jix.clamp(za_f, min=0.0), np.clip(a_f, 0.0, None))
-
-
-def test_clamp_max_only_concrete():
-    # int32: dtype min/max, 0, values on both sides of the bound.
-    a_i = _CLAMP_INT_VALS
-    za_i = jix.compact(a_i)
-    assert_array_matches(jix.clamp(za_i, max=0), np.clip(a_i, None, 0))
-
-    # float32: +/-inf, NaN passthrough, and a value exactly at the bound.
-    a_f = _CLAMP_FLOAT_VALS
-    za_f = jix.compact(a_f)
-    assert_array_matches(jix.clamp(za_f, max=0.0), np.clip(a_f, None, 0.0))
-
-
-def test_clamp_none_concrete():
-    # No bounds set: clamp is a passthrough regardless of dtype or edge values.
-    a_i = np.array([np.iinfo(np.int32).min, 0, np.iinfo(np.int32).max], dtype=np.int32)
-    za_i = jix.compact(a_i)
-    assert_array_matches(jix.clamp(za_i), a_i)
-
-    a_f = np.array([float("-inf"), 0.0, float("inf"), float("nan")], dtype=np.float32)
-    za_f = jix.compact(a_f)
-    assert_array_matches(jix.clamp(za_f), a_f)
-
-
-@pytest.mark.parametrize("lo, hi", [(5, 2), (2, 2), (-1, 10)])
-def test_clamp_min_greater_than_max_gives_max(lo, hi):
-    a = np.array([1, 2, 3], dtype=np.int32)
-    assert_array_matches(jix.clamp(jix.compact(a), min=lo, max=hi), np.clip(a, lo, hi))
-
-
-@pytest.mark.parametrize("lo, hi", [(np.nan, 1.0), (0.0, np.nan), (np.nan, np.nan), (np.nan, None), (None, np.nan)])
-def test_clamp_nan_bound_propagates(lo, hi):
-    a = np.array([1.0, 2.0], dtype=np.float64)
-    assert_array_matches(jix.clamp(jix.compact(a), min=lo, max=hi), np.clip(a, lo, hi))
-
-
-def test_clamp_array_bounds_broadcast():
-    a = np.arange(6, dtype=np.float32).reshape(2, 3)
-    lo = np.array([[1.0], [4.0]], dtype=np.float32)
-    hi = np.array([2.0, 3.0, 5.0], dtype=np.float32)
-    expected = np.clip(a, lo, hi)
-    assert_array_matches(jix.clamp(jix.compact(a), min=jix.compact(lo), max=hi), expected)
-    assert_array_matches(jix.compact(a).clamp(min=lo, max=jix.compact(hi)), expected)
-
-
-def test_clamp_promotes_like_maximum():
-    a = np.array([1, 2, 5, 9], dtype=np.int32)
-    result = jix.clamp(jix.compact(a), min=0.5, max=7.7)
-    assert result.dtype == np.float64
-    assert_array_matches(result, np.clip(a, 0.5, 7.7))
-
-
-def test_clamp_complex_limit_raises():
-    a = jix.compact([1.0, 2.0], dtype=np.float32)
-    with pytest.raises(TypeError):
-        jix.clamp(a, min=complex(1, 0), max=2.0)
-
-
-def test_clamp_equal_bounds():
-    a = jix.compact([-1.0, 0.0, 1.0, 2.0], dtype=np.float32)
-    result = jix.clamp(a, min=0.5, max=0.5).numpy()
-    assert np.all(result == 0.5)
-
-
-def test_clamp_inf_max():
-    a = jix.compact([0.0, 1e10, float("inf")], dtype=np.float64)
-    result = jix.clamp(a, min=0.0, max=float("inf")).numpy()
-    assert np.array_equal(result, [0.0, 1e10, float("inf")])
-
-
-def test_clamp_neg_inf_min():
-    a = jix.compact([float("-inf"), -1.0, 0.0], dtype=np.float64)
-    result = jix.clamp(a, min=float("-inf"), max=0.0).numpy()
-    assert np.array_equal(result, [float("-inf"), -1.0, 0.0])
-
-
-def test_clamp_method():
-    a = jix.compact([0, 5, 10], dtype=np.int32)
-    assert np.array_equal(a.clamp(min=2, max=8).numpy(), [2, 5, 8])
-
-
 @pytest.mark.parametrize("op", ["equal", "not_equal", "less", "less_equal", "greater", "greater_equal"])
 def test_uint64_vs_int64_is_exact(op):
     # A float64 common type would round these values above 2**53.
@@ -303,3 +146,320 @@ def test_uint64_vs_int64_is_exact(op):
     i = np.array([2**53, -1, 2**63 - 1, -(2**63), 5], np.int64)
     np.testing.assert_array_equal(getattr(jix, op)(u, i).numpy(), getattr(np, op)(u, i))
     np.testing.assert_array_equal(getattr(jix, op)(i, u).numpy(), getattr(np, op)(i, u))
+
+
+def _mixed_dtype_operands(dtype_a, dtype_b):
+    """Small fixed (np_a, np_b) pair for a mixed-dtype case, with values kept within each
+    dtype's safe range (no overflow/underflow). Same-category dtypes share a matching
+    value at index 0 (equal), the rest differ, so equal() coverage exercises both
+    True and False branches."""
+
+    def vals(dtype, variant):
+        if dtype == np.bool_:
+            return [True, False, True, False] if variant == 0 else [True, True, False, False]
+        if np.issubdtype(dtype, np.unsignedinteger):
+            return [0, 1, 2, 3] if variant == 0 else [0, 5, 2, 9]
+        if np.issubdtype(dtype, np.signedinteger):
+            return [-3, 0, 2, 3] if variant == 0 else [-3, 5, 2, -9]
+        if np.issubdtype(dtype, np.complexfloating):
+            return [1 + 1j, -2 - 2j, 0 + 0j, 3 - 1j] if variant == 0 else [1 + 1j, 2 + 2j, 0 + 0j, -3 + 1j]
+        return [-2.5, 0.0, 2.0, 3.5] if variant == 0 else [-2.5, 9.0, 2.0, -1.0]  # float
+
+    np_a = np.array(vals(dtype_a, 0), dtype=dtype_a)
+    np_b = np.array(vals(dtype_b, 1), dtype=dtype_b)
+    return np_a, np_b
+
+
+_EQUAL_MIXED_CASES = [
+    (np.uint8, np.uint16, np.uint16),
+    (np.uint8, np.int32, np.int32),
+    (np.uint8, np.float32, np.float32),
+    (np.int8, np.int32, np.int32),
+    (np.int32, np.float64, np.float64),
+    (np.float32, np.float64, np.float64),
+    (np.bool_, np.int32, np.int32),
+]
+
+
+def test_equal_mixed_dtypes_concrete():
+    """equal(a, b) with different dtypes casts both to expected_dtype, output is bool."""
+    for dtype_a, dtype_b, expected_dtype in _EQUAL_MIXED_CASES:
+        np_a, np_b = _mixed_dtype_operands(dtype_a, dtype_b)
+        za, zb = jix.compact(np_a), jix.compact(np_b)
+        result = jix.equal(za, zb)
+        assert result.dtype == np.bool_
+        expected = np_a.astype(expected_dtype) == np_b.astype(expected_dtype)
+        np.testing.assert_array_equal(result.numpy(), expected)
+
+
+# ---------------------------------------------------------------------------
+# Reference implementation (mirrors the Rust algorithm element-wise)
+# ---------------------------------------------------------------------------
+
+
+def _ref_isclose_scalar(a, b, rtol, atol):
+    """Reference for a single pair of same-dtype numpy scalars (any float or complex)."""
+    if a == b:
+        return True
+    if cmath.isinf(a) or cmath.isinf(b):
+        return False
+    diff = abs(a - b)
+    if diff <= atol:
+        return True
+    largest = max(abs(a), abs(b))
+    return bool(diff <= largest * rtol)
+
+
+def _ref_isclose_array(np_a, np_b, rtol, atol, dtype):
+    """Elementwise reference for real float ndarrays, computed in dtype precision."""
+    rtol_t, atol_t = dtype(rtol), dtype(atol)
+    a_t = np_a.astype(dtype)
+    b_t = np_b.astype(dtype)
+    # a and b share a shape (carrays2_strategy), so zip the flattened views.
+    out = [_ref_isclose_scalar(a, b, rtol_t, atol_t) for a, b in zip(a_t.reshape(-1), b_t.reshape(-1))]
+    return np.array(out, dtype=bool).reshape(a_t.shape)
+
+
+# ---------------------------------------------------------------------------
+# Tolerance strategies
+# ---------------------------------------------------------------------------
+
+_tol_st = st.floats(min_value=0.0, max_value=0.5, allow_nan=False, allow_infinity=False)
+
+
+# ---------------------------------------------------------------------------
+# Property tests: float dtypes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("dtype", floats)
+@given(st.data())
+def test_isclose_float(dtype: np.dtype, data: DataObject):
+    element_st = maybe_non_finite_element_strategy(dtype)
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=element_st), label="arrays")
+    rtol = data.draw(_tol_st, label="rtol")
+    atol = data.draw(_tol_st, label="atol")
+    expected = _ref_isclose_array(np_a, np_b, rtol, atol, dtype)
+    assert_array_matches(jix.isclose(za, zb, rtol=rtol, atol=atol), expected, data=data)
+
+
+# ---------------------------------------------------------------------------
+# Concrete: complex dtypes, real atol (same tolerance for re and im)
+# ---------------------------------------------------------------------------
+
+
+def test_isclose_complex_real_atol_concrete():
+    """The same tolerance value applies to both the real and imaginary component.
+    Edge cases: exact match, within atol, outside atol (both plain and
+    magnitude-scaled so rtol behaves differently from atol), NaN component,
+    matching inf, opposite inf; complex64 and complex128 paths.
+    """
+    for dtype in (np.complex64, np.complex128):
+        a = np.array(
+            [
+                1.0 + 2.0j,  # exact match
+                1.0 + 2.0j,  # small diff: within atol AND within rtol
+                1.0 + 2.0j,  # diff of 1: outside atol AND outside rtol
+                100.0 + 100.0j,  # diff of 9: outside atol BUT within rtol
+                complex(float("nan"), 0.0),  # NaN real component
+                complex(float("inf"), 0.0),  # matching inf
+                complex(float("inf"), 0.0),  # opposite inf
+            ],
+            dtype=dtype,
+        )
+        b = np.array(
+            [
+                1.0 + 2.0j,
+                1.005 + 2.005j,
+                2.0 + 3.0j,
+                109.0 + 109.0j,
+                complex(float("nan"), 0.0),
+                complex(float("inf"), 0.0),
+                complex(-float("inf"), 0.0),
+            ],
+            dtype=dtype,
+        )
+        za = jix.compact(a)
+        zb = jix.compact(b)
+
+        expected_atol = np.array([True, True, False, False, False, True, False])
+        assert_array_matches(jix.isclose(za, zb, rtol=0.0, atol=0.01), expected_atol)
+
+        expected_rtol = np.array([True, True, False, True, False, True, False])
+        assert_array_matches(jix.isclose(za, zb, rtol=0.1, atol=0.0), expected_rtol)
+
+
+# ---------------------------------------------------------------------------
+# Concrete: complex dtypes, complex atol (independent re/im tolerances)
+# ---------------------------------------------------------------------------
+
+
+def test_isclose_complex_atol_concrete():
+    """Real and imaginary components each get their own atol. Edge cases: exact match,
+    diff that only clears the real tolerance, diff that only clears the
+    imaginary tolerance, diff that clears both, NaN component, matching inf,
+    opposite inf, and a magnitude-scaled diff that only clears via rtol;
+    complex64 and complex128 paths.
+    """
+    for dtype in (np.complex64, np.complex128):
+        a = np.array(
+            [
+                1.0 + 2.0j,  # exact match
+                1.0 + 2.0j,  # real diff exceeds atol_re; imag diff within atol_im
+                1.0 + 2.0j,  # real diff within atol_re; imag diff exceeds atol_im
+                1.0 + 2.0j,  # both diffs within their own atol
+                complex(float("nan"), 2.0),  # NaN real component, imag matches
+                complex(float("inf"), 2.0),  # matching inf (real)
+                1.0 + complex(0.0, float("inf")),  # opposite inf (imag)
+            ],
+            dtype=dtype,
+        )
+        b = np.array(
+            [
+                1.0 + 2.0j,
+                1.01 + 2.1j,
+                1.001 + 2.5j,
+                1.001 + 2.1j,
+                complex(float("nan"), 2.0),
+                complex(float("inf"), 2.0),
+                1.0 + complex(0.0, -float("inf")),
+            ],
+            dtype=dtype,
+        )
+        za = jix.compact(a)
+        zb = jix.compact(b)
+
+        atol = complex(0.005, 0.2)
+        expected = np.array([True, False, False, True, False, True, False])
+        assert_array_matches(jix.isclose(za, zb, rtol=0.0, atol=atol), expected)
+
+        # Magnitude-scaled diff: too big for atol_re but cleared via rtol; the
+        # imaginary component clears atol_im directly regardless of rtol.
+        c = np.array([100.0 + 100.0j], dtype=dtype)
+        d = np.array([109.0 + 100.1j], dtype=dtype)
+        zc = jix.compact(c)
+        zd = jix.compact(d)
+        expected_rtol = np.array([True])
+        assert_array_matches(jix.isclose(zc, zd, rtol=0.1, atol=atol), expected_rtol)
+
+
+# ---------------------------------------------------------------------------
+# Exact-match edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_isclose_exact_match():
+    a = jix.compact([1.0, -2.5, 0.0], dtype=np.float32)
+    b = jix.compact([1.0, -2.5, 0.0], dtype=np.float32)
+    result = jix.isclose(a, b, rtol=0.0, atol=0.0).numpy()
+    assert np.all(result)
+
+
+def test_isclose_within_atol():
+    a = jix.compact([1.0, 2.0, 3.0], dtype=np.float32)
+    b = jix.compact([1.0, 2.01, 4.0], dtype=np.float32)
+    result = jix.isclose(a, b, rtol=0.0, atol=0.02).numpy()
+    assert np.array_equal(result, [True, True, False])
+
+
+def test_isclose_within_rtol():
+    a = jix.compact([100.0, 1.0], dtype=np.float64)
+    b = jix.compact([109.0, 1.12], dtype=np.float64)
+    result = jix.isclose(a, b, rtol=0.1, atol=0.0).numpy()
+    assert np.array_equal(result, [True, False])
+
+
+def test_isclose_nan_always_false():
+    a = jix.compact([float("nan"), 1.0], dtype=np.float32)
+    b = jix.compact([float("nan"), 1.0], dtype=np.float32)
+    result = jix.isclose(a, b, rtol=0.0, atol=0.0).numpy()
+    assert np.array_equal(result, [False, True])
+
+
+def test_isclose_same_inf():
+    a = jix.compact([float("inf"), float("-inf")], dtype=np.float32)
+    b = jix.compact([float("inf"), float("-inf")], dtype=np.float32)
+    result = jix.isclose(a, b, rtol=0.0, atol=0.0).numpy()
+    assert np.all(result)
+
+
+def test_isclose_opposite_inf():
+    a = jix.compact([float("inf"), float("-inf")], dtype=np.float32)
+    b = jix.compact([float("-inf"), float("inf")], dtype=np.float32)
+    result = jix.isclose(a, b, rtol=0.0, atol=0.0).numpy()
+    assert not np.any(result)
+
+
+def test_isclose_inf_vs_finite():
+    a = jix.compact([float("inf"), 1.0], dtype=np.float32)
+    b = jix.compact([1.0, float("inf")], dtype=np.float32)
+    result = jix.isclose(a, b, rtol=1e10, atol=1e10).numpy()
+    assert np.array_equal(result, [False, False])
+
+
+# ---------------------------------------------------------------------------
+# Complex edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_isclose_complex_scalar_atol():
+    # Different per-component tolerances via complex atol.
+    a = jix.compact([1.0 + 2.0j], dtype=np.complex64)
+    b = jix.compact([1.01 + 2.1j], dtype=np.complex64)
+    # re diff = 0.01, im diff = 0.1
+    tight = jix.isclose(a, b, rtol=0.0, atol=complex(0.005, 0.2)).numpy()
+    loose = jix.isclose(a, b, rtol=0.0, atol=complex(0.02, 0.2)).numpy()
+    assert np.array_equal(tight, [False])  # re diff 0.01 > 0.005
+    assert np.array_equal(loose, [True])  # both within tolerance
+
+
+def test_isclose_complex_real_atol_applies_to_both():
+    a = jix.compact([1.0 + 2.0j], dtype=np.complex64)
+    b = jix.compact([1.01 + 2.01j], dtype=np.complex64)
+    result = jix.isclose(a, b, rtol=0.0, atol=0.02).numpy()
+    assert np.array_equal(result, [True])
+
+
+def test_isclose_complex_nan_component():
+    a = jix.compact([complex(float("nan"), 0.0)], dtype=np.complex64)
+    b = jix.compact([complex(float("nan"), 0.0)], dtype=np.complex64)
+    result = jix.isclose(a, b, rtol=0.0, atol=0.0).numpy()
+    assert np.array_equal(result, [False])
+
+
+# ---------------------------------------------------------------------------
+# Type-error cases
+# ---------------------------------------------------------------------------
+
+
+def test_isclose_complex_rtol_raises():
+    a = jix.compact([1.0, 2.0], dtype=np.float32)
+    b = jix.compact([1.0, 2.0], dtype=np.float32)
+    with pytest.raises(TypeError):
+        jix.isclose(a, b, rtol=complex(1e-5, 0), atol=0.0)
+
+
+def test_isclose_complex_atol_on_real_dtype_raises():
+    a = jix.compact([1.0, 2.0], dtype=np.float32)
+    b = jix.compact([1.0, 2.0], dtype=np.float32)
+    with pytest.raises(TypeError):
+        jix.isclose(a, b, rtol=0.0, atol=complex(1e-8, 0))
+
+
+# ---------------------------------------------------------------------------
+# Broadcasting
+# ---------------------------------------------------------------------------
+
+
+def test_isclose_broadcasting():
+    a = jix.compact([[0.0], [1.0], [2.0]], dtype=np.float32)
+    b = jix.compact([[0.0, 0.01, 0.1]], dtype=np.float32)
+    result = jix.isclose(a, b, rtol=0.0, atol=0.02).numpy()
+    expected = np.array(
+        [
+            [True, True, False],
+            [False, False, False],
+            [False, False, False],
+        ]
+    )
+    assert np.array_equal(result, expected)

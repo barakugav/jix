@@ -1,8 +1,7 @@
-use crate::ops::common::define_array_op1_method;
-use crate::ops::define_op1;
+use crate::ops::elementwise::op1::{define_array_op1_method, define_op1};
 use crate::ops::prelude::*;
 
-pub(crate) mod _traits {
+pub(crate) mod traits {
     #[allow(unused_imports)]
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
@@ -179,7 +178,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::ops::op1::tests::test_op1;
+    use crate::ops::elementwise::op1::tests::test_op1;
     use crate::scalar::bool8;
 
     /// The `apply_bulk` of the kernels of this module against their scalar semantics, on every
@@ -187,7 +186,7 @@ mod tests {
     #[test]
     fn simd_bodies_all_levels() {
         use super::{IsFiniteKernel, IsInfiniteKernel, IsNanKernel};
-        use crate::ops::op1::Op1Kernel;
+        use crate::ops::elementwise::op1::Op1Kernel;
         use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
         use fearless_simd::Simd;
 

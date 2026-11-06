@@ -1,45 +1,5 @@
 use crate::ops::prelude::*;
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
-    /// Reinterprets each element as the type `T` without converting the bytes. See [`Transmute`] for
-    /// details and examples.
-    ///
-    /// # Safety
-    ///
-    /// Every element must be a valid bit pattern for `T` (see [`Transmute`]).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the itemsize of `T` differs from the array's dtype itemsize. Use
-    /// [`Transmute::new_array`] for a fallible version.
-    #[track_caller]
-    pub unsafe fn transmute_elements<T>(self) -> Array<Transmute<S, Ty<T>>>
-    where
-        T: Dtyped,
-    {
-        unsafe { Transmute::new_array(self, Ty::new()).unwrap() }
-    }
-
-    /// Reinterprets each element as the runtime dtype `dtype` without converting the bytes; recover a
-    /// typed array with [`into_typed`](Array::into_typed). See [`Transmute`] for details.
-    ///
-    /// # Safety
-    ///
-    /// Every element must be a valid bit pattern for `dtype` (see [`Transmute`]).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the itemsize of `dtype` differs from the array's dtype itemsize. Use
-    /// [`Transmute::new_array`] for a fallible version.
-    #[track_caller]
-    pub unsafe fn transmute_elements_dyn(self, dtype: Dtype) -> Array<Transmute<S, TypeDyn>> {
-        unsafe { Transmute::new_array(self, TypeDyn::new(dtype)).unwrap() }
-    }
-}
-
 /// Storage that reinterprets each element of the inner array as a different dtype of the same
 /// itemsize, without converting or copying any bytes.
 ///
@@ -157,6 +117,46 @@ where
             array: self.array,
             element_type: NewET::from_dtype(self.element_type.dtype().clone())?,
         })
+    }
+}
+
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Reinterprets each element as the type `T` without converting the bytes. See [`Transmute`] for
+    /// details and examples.
+    ///
+    /// # Safety
+    ///
+    /// Every element must be a valid bit pattern for `T` (see [`Transmute`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the itemsize of `T` differs from the array's dtype itemsize. Use
+    /// [`Transmute::new_array`] for a fallible version.
+    #[track_caller]
+    pub unsafe fn transmute_elements<T>(self) -> Array<Transmute<S, Ty<T>>>
+    where
+        T: Dtyped,
+    {
+        unsafe { Transmute::new_array(self, Ty::new()).unwrap() }
+    }
+
+    /// Reinterprets each element as the runtime dtype `dtype` without converting the bytes; recover a
+    /// typed array with [`into_typed`](Array::into_typed). See [`Transmute`] for details.
+    ///
+    /// # Safety
+    ///
+    /// Every element must be a valid bit pattern for `dtype` (see [`Transmute`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the itemsize of `dtype` differs from the array's dtype itemsize. Use
+    /// [`Transmute::new_array`] for a fallible version.
+    #[track_caller]
+    pub unsafe fn transmute_elements_dyn(self, dtype: Dtype) -> Array<Transmute<S, TypeDyn>> {
+        unsafe { Transmute::new_array(self, TypeDyn::new(dtype)).unwrap() }
     }
 }
 

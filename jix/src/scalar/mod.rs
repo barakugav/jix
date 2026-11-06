@@ -27,4 +27,4 @@ pub use num_complex::Complex;
 
 pub(crate) mod simd;
 pub(crate) mod traits_util;
-pub use crate::ops::_traits::*;
+pub use crate::ops::traits::*;

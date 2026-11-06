@@ -1,10 +1,18 @@
 """
-Property tests for element-wise binary ops. Mirrors the test block in jix/src/ops/op2.rs.
+Tests for element-wise arithmetic ops. Mirrors the test block in
+jix/src/ops/elementwise/arith.rs.
+
+negative is kept as a property test, one per dtype; the other unary ops use fixed-input
+`test_*_concrete` functions.
 
 Mixed-dtype section verifies the automatic casting / dispatch rules:
 - Safe cast: the first impl in the dispatch table that can accept both operands wins.
 - Scalars without explicit precision (Python int, float) are untyped and match any
   same-rank impl; scalars with precision (np.int32, np.float32) match precisely.
+
+Python name differences vs Rust:
+  neg -> negative
+  abs -> absolute
 """
 
 import operator
@@ -16,17 +24,211 @@ from hypothesis import strategies as st
 from hypothesis.strategies import DataObject
 from tests_util import (
     assert_array_matches,
+    carray_strategy,
     carrays2_mixed_strategy,
     carrays2_strategy,
+    check_op1_concrete,
     check_op2_concrete,
     complexes,
     floats,
     ints,
-    op_safe_non_zero_element_strategy,
     uints,
 )
 
 import jix
+
+
+@pytest.mark.parametrize("dtype", ints + floats + complexes)
+@given(st.data())
+def test_negative(dtype: np.dtype, data: DataObject):
+    np_a, za = data.draw(carray_strategy(dtype), label="array")
+    assert_array_matches(jix.negative(za), -np_a, data=data)
+
+
+def test_sign_float_concrete():
+    # jix.sign on floats matches np.sign: +-1.0, 0.0 for both zeros, NaN for NaN.
+    values = [-3.0, -0.0, 0.0, 5.0, np.nan]
+    check_op1_concrete(jix.sign, np.sign, [(np.float16, values), (np.float32, values, [2]), (np.float64, values, [2])])
+
+
+def test_sign_int_concrete():
+    # jix.sign on signed integers: -1, 0, or +1 of the same dtype.
+    check_op1_concrete(jix.sign, np.sign, [(np.int32, [-5, 0, 7])])
+
+
+def test_sign_uint_concrete():
+    # unsigned: sign is 0 when zero, 1 otherwise; output keeps the same uint dtype.
+    check_op1_concrete(
+        jix.sign,
+        lambda a: np.where(a == 0, np.zeros_like(a), np.ones_like(a)),
+        [(np.uint32, [0, 1, 7])],
+    )
+
+
+def test_sign_never_casts():
+    for dtype in (np.int8, np.uint16, np.float16):
+        assert jix.sign(jix.compact(np.array([1, 0], dtype=dtype))).dtype == dtype
+    assert jix.sign(-5).numpy() == -1  # untyped Python int -> int64
+    with pytest.raises(TypeError, match="sign"):
+        jix.sign(jix.compact(np.array([True, False])))
+
+
+def test_absolute_scalar_concrete():
+    # int32: negative, zero, positive, and the op_safe_strategy bound (+/-100).
+    # float32/float64: negative, zero, positive.
+    check_op1_concrete(
+        jix.absolute,
+        np.abs,
+        [
+            (np.int32, [-5, 0, 7, -100, 100]),
+            (np.float32, [-5.0, 0.0, 7.5, -100.0]),
+            (np.float64, [-5.0, 0.0, 7.5, -100.0]),
+        ],
+    )
+
+
+def test_absolute_complex_concrete():
+    # Complex absolute returns the real-component dtype, not the input dtype
+    # (complex64 -> float32, complex128 -> float64). 3+4j / -3-4j exercise an exact
+    # abs()==5 via the 3-4-5 triangle; 0+0j and pure-real/pure-imaginary round out the domain.
+    values = [0 + 0j, 3 + 4j, -3 - 4j, 0 + 5j, 5 + 0j]
+    cases = [(np.complex64, np.float32), (np.complex128, np.float64)]
+    for dtype, expected_dtype in cases:
+        za = jix.compact(np.array(values, dtype=dtype))
+        assert jix.absolute(za).dtype == expected_dtype
+    check_op1_concrete(jix.absolute, np.abs, [(dtype, values) for dtype, _ in cases], rtol=1e-5)
+
+
+@pytest.mark.parametrize("dtype", [np.bool_, np.uint8, np.uint16, np.uint32, np.uint64])
+def test_absolute_uint_bool_returns_self(dtype):
+    # abs is a no-op on unsigned and bool: the same Array object comes back, for the free
+    # function, the method and the builtin.
+    np_a = np.array([0, 1, 1], dtype=dtype) if dtype == np.bool_ else np.array([0, 1, 200], dtype=dtype)
+    za = jix.compact(np_a)
+    assert jix.absolute(za) is za
+    assert za.abs() is za
+    assert abs(za) is za
+    assert jix.absolute(za).dtype == dtype
+    np.testing.assert_array_equal(jix.absolute(za).numpy(), np.abs(np_a))
+
+
+def test_absolute_method_matches_function():
+    za = jix.compact(np.array([-1.5, 0.0, 3.0], dtype=np.float32))
+    np.testing.assert_array_equal(za.abs().numpy(), jix.absolute(za).numpy())
+    np.testing.assert_array_equal(abs(za).numpy(), jix.absolute(za).numpy())
+
+
+@pytest.mark.parametrize(
+    "value, expected, expected_dtype",
+    [
+        # Python scalars take the default (64-bit) precision.
+        (True, True, np.bool_),
+        (False, False, np.bool_),
+        (-5, 5, np.int64),
+        (-(2**63), -(2**63), np.int64),  # i64 min wraps, like numpy
+        (-2.5, 2.5, np.float64),
+        (3 - 4j, 5.0, np.float64),
+        # NumPy scalars keep their precision.
+        (np.uint8(7), 7, np.uint8),
+        (np.int8(-7), 7, np.int8),
+        (np.int8(-128), -128, np.int8),  # i8 min wraps
+        (np.float16(-1.5), 1.5, np.float16),
+        (np.float32(-1.5), 1.5, np.float32),
+        (np.complex64(3 + 4j), 5.0, np.float32),
+    ],
+)
+def test_absolute_scalar_input(value, expected, expected_dtype):
+    result = jix.absolute(value)
+    assert result.dtype == expected_dtype
+    assert result.numpy()[()] == expected
+
+
+def test_absolute_unsupported_dtype_raises():
+    za = jix.compact(np.zeros(3, dtype=[("a", np.int32), ("b", np.float32)]))
+    with pytest.raises(TypeError, match="Op 'absolute' does not support"):
+        jix.absolute(za)
+
+
+def test_square_int_concrete():
+    # int32: negative, zero, positive, and the op_safe_strategy bound (+/-100) so the squared
+    # result (10000) still fits comfortably in int32.
+    # uint32: zero, and positive values up to the op_safe_strategy bound (30).
+    cases = [(np.int32, [-100, -1, 0, 1, 5, 100]), (np.uint32, [0, 1, 5, 30])]
+    for dtype, values in cases:
+        za = jix.compact(np.array(values, dtype=dtype))
+        assert jix.square(za).dtype == dtype  # square preserves the input dtype
+    check_op1_concrete(jix.square, np.square, cases)
+
+
+def test_square_float_complex_concrete():
+    # float32/float64: negative, zero, positive, and the op_safe_strategy bound (+/-100.0).
+    # complex64/complex128: zero, pure-real, pure-imaginary, and a mixed value.
+    float_vals = [[-100.0, -0.5, 0.0], [0.5, 5.0, 100.0]]
+    complex_vals = [0 + 0j, 3 + 0j, 0 + 4j, 3 + 4j]
+    rtol_groups = [
+        (1e-5, [(np.float32, float_vals), (np.complex64, complex_vals)]),
+        (1e-12, [(np.float64, float_vals), (np.complex128, complex_vals)]),
+    ]
+    for rtol, cases in rtol_groups:
+        for dtype, values in cases:
+            za = jix.compact(np.array(values, dtype=dtype))
+            assert jix.square(za).dtype == dtype  # square preserves the input dtype
+        check_op1_concrete(jix.square, np.square, cases, rtol=rtol)
+
+
+def test_square_method_matches_function():
+    """Array.square() matches the jix.square() free function."""
+    np_a = np.array([1.5, -2.0, 3.0], dtype=np.float32)
+    za = jix.compact(np_a)
+    np.testing.assert_array_equal(za.square().numpy(), jix.square(za).numpy())
+
+
+def test_square_unsupported_bool_raises():
+    """square() does not auto-cast bool (CastKind::None); it raises."""
+    za = jix.compact(np.array([True, False], dtype=np.bool_))
+    with pytest.raises(Exception):
+        jix.square(za)
+
+
+# ---------------------------------------------------------------------------
+# Auto-cast (Safe dispatch) for op1
+#
+# When the input dtype is not directly in the dispatch list, the first impl
+# whose CastKind::Safe rule accepts the input dtype is selected.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "dtype, expected_dtype",
+    [(np.uint8, np.int8), (np.uint16, np.int16), (np.uint32, np.int32), (np.uint64, np.int64)],
+)
+def test_negative_uint_is_int_of_same_width(dtype, expected_dtype):
+    """The bits are those of numpy's wrapping unsigned negation."""
+    np_a = np.array([0, 1, 3, np.iinfo(dtype).max], dtype=dtype)
+    result = jix.negative(jix.compact(np_a))
+    assert result.dtype == np.dtype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), (-np_a).view(expected_dtype))
+
+
+@pytest.mark.parametrize("dtype", ints + floats + complexes + [np.uint8, np.uint64])
+def test_positive_returns_self(dtype):
+    za = jix.compact(np.array([1, 2, 3], dtype=dtype))
+    assert +za is za
+
+
+def test_positive_rejects_bool():
+    with pytest.raises(TypeError, match="Op 'positive' does not support"):
+        +jix.compact(np.array([True, False]))
+
+
+def test_negative_on_bool_auto_casts():
+    """negative(bool) auto-casts to the first signed integer impl (i8)."""
+    np_a = np.array([True, False, True], dtype=np.bool_)
+    za = jix.compact(np_a)
+    result = jix.negative(za)
+    # bool is Rank::Bool -> first Int impl: i8
+    assert result.dtype == np.int8
+    np.testing.assert_array_equal(result.numpy(), -(np_a.astype(np.int8)))
 
 
 @pytest.mark.parametrize(
@@ -223,195 +425,6 @@ def test_multiply_custom_inputs():
     zac = jix.compact(dc)
     check(zac * complex(2, 0), dc * complex(2, 0))
     check(zac * [1 + 1j, 2 + 0j], dc * np.array([1 + 1j, 2 + 0j]))
-
-
-@pytest.mark.parametrize("dtype", floats + complexes)
-@given(st.data())
-def test_divide(dtype: np.dtype, data: DataObject):
-    # True division dispatches only on float/complex dtypes; integer quotients come from a
-    # rounding_mode (see test_integer_division). Non-zero strategy avoids inf/NaN from
-    # division-by-zero for the float case.
-    nz = op_safe_non_zero_element_strategy(dtype)
-    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
-    result = za / zb
-    expected = np_a / np_b
-    # Complex division algorithms differ slightly between jix (Rust) and numpy;
-    # allow a few ULP of tolerance. Float32 eps ~1.2e-7, float64 eps ~2.2e-16.
-    rtol = 1e-5 if np.issubdtype(dtype, np.complexfloating) else 0.0
-    assert_array_matches(result, expected, data=data, rtol=rtol)
-
-
-def test_divide_custom_inputs():
-    def check(result, expected):
-        np.testing.assert_array_equal(result.numpy(), expected)
-
-    # float64
-    df = np.array([10.0, 20.0, 30.0])
-    zaf = jix.compact(df)
-    check(zaf / 2.0, df / 2.0)
-    check(60.0 / zaf, 60.0 / df)  # __rtruediv__ (float64 natural)
-    check(zaf / [2.0, 4.0, 5.0], df / [2.0, 4.0, 5.0])
-    check(zaf / (2.0, 4.0, 5.0), df / (2.0, 4.0, 5.0))
-    check(jix.divide(zaf, 2.0), df / 2.0)
-    check(jix.divide(60.0, zaf), 60.0 / df)  # scalar first via free-function
-
-    # float32: use jix.divide() for scalar-first to bypass numpy promotion
-    df32 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
-    zaf32 = jix.compact(df32)
-    check(zaf32 / np.float32(2.0), df32 / np.float32(2.0))
-    check(jix.divide(np.float32(60.0), zaf32), np.float32(60.0) / df32)  # scalar first via free-function
-    check(
-        zaf32 / np.array([2.0, 4.0, 5.0], dtype=np.float32),
-        df32 / np.array([2.0, 4.0, 5.0], dtype=np.float32),
-    )
-
-    # complex128
-    dc = np.array([2 + 4j, 6 + 8j], dtype=np.complex128)
-    zac = jix.compact(dc)
-    check(zac / complex(2, 0), dc / complex(2, 0))
-    check(zac / [1 + 0j, 2 + 0j], dc / np.array([1 + 0j, 2 + 0j]))
-
-
-def _remainder_euclid_ref(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    # Python's `%` is floored, so by `|b|` it is never negative.
-    values = [x % abs(y) for x, y in zip(a.ravel().tolist(), b.ravel().tolist())]
-    return np.array(values, dtype=a.dtype).reshape(a.shape)
-
-
-def _quotient(a: np.ndarray, b: np.ndarray, r: np.ndarray) -> np.ndarray:
-    """The quotient of `a / b` whose remainder is `r`."""
-    if np.issubdtype(a.dtype, np.integer):
-        return (a - r) // b
-    exact = (a.astype(np.float64) - r.astype(np.float64)) / b.astype(np.float64)
-    return exact.round().astype(a.dtype)
-
-
-ROUNDING_MODES = ["trunc", "floor", "euclid"]
-
-# Each rounding mode and a reference remainder.
-CONVENTIONS = [
-    pytest.param("trunc", np.fmod, id="trunc"),
-    pytest.param("floor", np.remainder, id="floor"),
-    pytest.param("euclid", _remainder_euclid_ref, id="euclid"),
-]
-
-
-@pytest.mark.parametrize(("rounding_mode", "remainder_ref"), CONVENTIONS)
-@pytest.mark.parametrize("dtype", ints + uints + floats)
-@given(st.data())
-def test_integer_division(rounding_mode, remainder_ref, dtype: np.dtype, data: DataObject):
-    # The remainder against the reference, and the quotient against the one of that remainder,
-    # which is exact. Non-zero divisors avoid the integer divide-by-zero error.
-    nz = op_safe_non_zero_element_strategy(dtype)
-    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
-    r = remainder_ref(np_a, np_b)
-    assert_array_matches(jix.remainder(za, zb, rounding_mode=rounding_mode), r, data=data)
-    q = jix.divide(za, zb, rounding_mode=rounding_mode)
-    assert_array_matches(q, _quotient(np_a, np_b, r), data=data)
-
-
-@pytest.mark.parametrize("dtype", ints + uints + floats)
-@given(st.data())
-def test_floordiv_and_mod_operators_match_numpy(dtype: np.dtype, data: DataObject):
-    nz = op_safe_non_zero_element_strategy(dtype)
-    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
-    assert_array_matches(za // zb, np_a // np_b, data=data)
-    assert_array_matches(za % zb, np_a % np_b, data=data)
-
-
-def test_integer_division_custom_inputs():
-    def check(result, expected):
-        np.testing.assert_array_equal(result.numpy(), expected)
-
-    # Every sign combination: the conventions differ only when the operands have opposite signs,
-    # or (Euclidean vs floored) when the divisor is negative. Each quotient pairs with its remainder.
-    a = np.array([7, -7, 7, -7, 0], dtype=np.int32)
-    b = np.array([2, 2, -2, -2, 5], dtype=np.int32)
-    za, zb = jix.compact(a), jix.compact(b)
-    for mode, q, r in [
-        ("trunc", [3, -3, -3, 3, 0], [1, -1, 1, -1, 0]),
-        ("floor", [3, -4, -4, 3, 0], [1, 1, -1, -1, 0]),
-        ("euclid", [3, -4, -3, 4, 0], [1, 1, 1, 1, 0]),
-    ]:
-        zq = jix.divide(za, zb, rounding_mode=mode)
-        zr = jix.remainder(za, zb, rounding_mode=mode)
-        check(zq, q)
-        check(zr, r)
-        check(zq * zb + zr, a)
-        check(za.divide(zb, rounding_mode=mode), q)  # the Array methods
-        check(za.remainder(zb, rounding_mode=mode), r)
-    check(za // zb, a // b)
-    check(za % zb, a % b)
-    check(jix.remainder(za, zb), a % b)  # floored by default
-    check(za.remainder(zb), a % b)
-    check(za.divide(zb), a / b)  # true division by default
-
-    # Scalars and lists on either side.
-    d = np.array([[10, 20, 30], [40, 50, 61]], dtype=np.int64)
-    zd = jix.compact(d)
-    check(zd // np.int64(-7), d // -7)
-    check(zd % np.int64(-7), d % -7)
-    check(np.int64(65) // zd, 65 // d)  # __rfloordiv__
-    check(np.int64(-65) % zd, -65 % d)  # __rmod__
-    check(65 % zd, 65 % d)
-    check(zd // [[5, 4, 3], [2, 5, 6]], d // [[5, 4, 3], [2, 5, 6]])
-    check(jix.remainder(zd, [[3, 6, 7], [9, 8, 10]], rounding_mode="trunc"), np.fmod(d, [[3, 6, 7], [9, 8, 10]]))
-
-    # Floats: of the exact quotient, so `0.1` fits in `1.0` 9 times, as in numpy.
-    f = np.array([1.0, -7.5, 7.5, -1e-20], dtype=np.float64)
-    g = np.array([0.1, 2.0, -2.0, 1.0], dtype=np.float64)
-    zf, zg = jix.compact(f), jix.compact(g)
-    check(zf // zg, f // g)
-    check(zf % zg, f % g)
-    check(jix.divide(zf, zg, rounding_mode="trunc"), [9.0, -3.0, -3.0, 0.0])
-    check(jix.divide(zf, zg, rounding_mode="floor"), [9.0, -4.0, -4.0, -1.0])
-    check(jix.divide(zf, zg, rounding_mode="euclid"), [9.0, -4.0, -3.0, -1.0])
-    check(jix.remainder(zf, zg, rounding_mode="trunc"), np.fmod(f, g))
-    check(jix.remainder(zf, zg, rounding_mode="euclid"), _remainder_euclid_ref(f, g))
-
-
-@pytest.mark.parametrize("dtype", floats)
-@pytest.mark.parametrize(
-    ("name", "rounding_mode", "numpy_fn"),
-    [("remainder", "trunc", np.fmod), ("remainder", "floor", np.remainder), ("divide", "floor", np.floor_divide)],
-)
-def test_float_special_values(name, rounding_mode, numpy_fn, dtype: np.dtype):
-    # Every pair of special values, bit for bit (zero signs included) as numpy.
-    values = [0.0, -0.0, 1.0, -1.0, 5.0, -2.5, np.inf, -np.inf, np.nan]
-    a = np.array([x for x in values for _ in values], dtype=dtype)
-    b = np.array([y for _ in values for y in values], dtype=dtype)
-    result = getattr(jix, name)(jix.compact(a), jix.compact(b), rounding_mode=rounding_mode).numpy()
-    with np.errstate(divide="ignore", invalid="ignore"):
-        expected = numpy_fn(a, b)
-    np.testing.assert_array_equal(result, expected)
-    finite = ~np.isnan(expected)
-    np.testing.assert_array_equal(np.signbit(result[finite]), np.signbit(expected[finite]))
-
-
-@pytest.mark.parametrize("rounding_mode", ROUNDING_MODES)
-@pytest.mark.parametrize("name", ["divide", "remainder"])
-def test_integer_division_rejects_complex(name, rounding_mode):
-    a = jix.compact(np.array([1 + 1j, 2 + 2j], dtype=np.complex64))
-    with pytest.raises(TypeError, match=f"Op '{name}' does not support"):
-        _ = getattr(jix, name)(a, a, rounding_mode=rounding_mode).numpy()
-
-
-@pytest.mark.parametrize("name", ["divide", "remainder"])
-def test_invalid_rounding_mode_raises(name):
-    a = jix.compact(np.array([7, -7], dtype=np.int32))
-    with pytest.raises(ValueError, match="invalid rounding_mode value: 'round'"):
-        getattr(jix, name)(a, a, rounding_mode="round")
-    with pytest.raises(ValueError, match="invalid rounding_mode value: 'round'"):
-        getattr(a, name)(a, rounding_mode="round")
-    with pytest.raises(TypeError):
-        getattr(jix, name)(a, a, "floor")  # keyword-only
-
-
-def test_remainder_rejects_none_rounding_mode():
-    # There is no true remainder, as there is a true division.
-    a = jix.compact(np.array([7, -7], dtype=np.int32))
-    with pytest.raises(TypeError):
-        jix.remainder(a, a, rounding_mode=None)
 
 
 # Every (base_dtype, exponent_dtype) pair the power dispatch table accepts directly.
@@ -793,28 +806,6 @@ def test_subtract_mixed_dtypes_concrete():
         result = jix.subtract(za, zb)
         assert result.dtype == np.dtype(expected_dtype)
         expected = np_a.astype(expected_dtype) - np_b.astype(expected_dtype)
-        np.testing.assert_array_equal(result.numpy(), expected)
-
-
-_EQUAL_MIXED_CASES = [
-    (np.uint8, np.uint16, np.uint16),
-    (np.uint8, np.int32, np.int32),
-    (np.uint8, np.float32, np.float32),
-    (np.int8, np.int32, np.int32),
-    (np.int32, np.float64, np.float64),
-    (np.float32, np.float64, np.float64),
-    (np.bool_, np.int32, np.int32),
-]
-
-
-def test_equal_mixed_dtypes_concrete():
-    """equal(a, b) with different dtypes casts both to expected_dtype, output is bool."""
-    for dtype_a, dtype_b, expected_dtype in _EQUAL_MIXED_CASES:
-        np_a, np_b = _mixed_dtype_operands(dtype_a, dtype_b)
-        za, zb = jix.compact(np_a), jix.compact(np_b)
-        result = jix.equal(za, zb)
-        assert result.dtype == np.bool_
-        expected = np_a.astype(expected_dtype) == np_b.astype(expected_dtype)
         np.testing.assert_array_equal(result.numpy(), expected)
 
 

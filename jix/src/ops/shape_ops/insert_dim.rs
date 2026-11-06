@@ -234,6 +234,26 @@ where
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a lazy view of the array with new length-1 dimensions inserted. See [`InsertDim`]
+    /// for details and examples.
+    ///
+    /// Like `numpy.expand_dims`, each value in `dim` is a dim index in the output shape, whose
+    /// ndim is `self.ndim() + dim.len()`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any value in `dim` is out of bounds for the output ndim, is repeated, or the
+    /// resulting ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
+    #[track_caller]
+    pub fn insert_dim(self, dim: impl DimsArg) -> Array<InsertDim<S>> {
+        InsertDim::new_array(self, dim).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ndarray::array;

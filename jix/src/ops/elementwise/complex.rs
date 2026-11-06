@@ -25,9 +25,9 @@ use crate::scalar::Complex;
 /// assert_eq!(result, array![1.0f32, 3.0]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Real<S, T>(crate::ops::op1::Op1<S, RealKernel<T>>);
+pub struct Real<S, T>(crate::ops::elementwise::op1::Op1<S, RealKernel<T>>);
 struct RealKernel<T>(std::marker::PhantomData<T>);
-impl<T> crate::ops::op1::Op1Kernel<Complex<T>> for RealKernel<T> {
+impl<T> crate::ops::elementwise::op1::Op1Kernel<Complex<T>> for RealKernel<T> {
     type Output = T;
 
     #[inline(always)]
@@ -44,7 +44,7 @@ where
     /// Constructs a [`Real`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S) -> crate::error::Result<Self> {
         let kernel = RealKernel(std::marker::PhantomData);
-        Ok(Self(crate::ops::op1::Op1::new(array, kernel)?))
+        Ok(Self(crate::ops::elementwise::op1::Op1::new(array, kernel)?))
     }
 
     /// Constructs an array with [`Real`] storage. See the storage struct docs for semantics and examples.
@@ -93,9 +93,9 @@ where
 /// assert_eq!(result, array![2.0f32, -4.0]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Imaginary<S, T>(crate::ops::op1::Op1<S, ImaginaryKernel<T>>);
+pub struct Imaginary<S, T>(crate::ops::elementwise::op1::Op1<S, ImaginaryKernel<T>>);
 struct ImaginaryKernel<T>(std::marker::PhantomData<T>);
-impl<T> crate::ops::op1::Op1Kernel<Complex<T>> for ImaginaryKernel<T> {
+impl<T> crate::ops::elementwise::op1::Op1Kernel<Complex<T>> for ImaginaryKernel<T> {
     type Output = T;
 
     #[inline(always)]
@@ -112,7 +112,7 @@ where
     /// Constructs a [`Imaginary`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S) -> crate::error::Result<Self> {
         let kernel = ImaginaryKernel(std::marker::PhantomData);
-        Ok(Self(crate::ops::op1::Op1::new(array, kernel)?))
+        Ok(Self(crate::ops::elementwise::op1::Op1::new(array, kernel)?))
     }
 
     /// Constructs an array with [`Imaginary`] storage. See the storage struct docs for semantics and examples.

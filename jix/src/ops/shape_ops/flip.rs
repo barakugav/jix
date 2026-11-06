@@ -207,6 +207,25 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a lazy view of the array with the order of elements reversed along the
+    /// specified dims. See [`Flip`] for details and examples.
+    ///
+    /// `dim` accepts any [`DimsArg`]: a single `usize`, an array `[usize; N]`, a tuple
+    /// `(usize, ...)`, a `Vec<usize>`, or a slice `&[usize]`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any dim is out of bounds or duplicated.
+    #[track_caller]
+    pub fn flip(self, dim: impl DimsArg) -> Array<Flip<S>> {
+        Flip::new_array(self, dim).unwrap()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
