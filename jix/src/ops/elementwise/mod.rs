@@ -1,5 +1,8 @@
 //! Element-wise operations: the `Op1` / `Op2` engines and the op families built on them.
 
+mod pipeline;
+pub use pipeline::*;
+
 mod op1;
 pub(crate) use op1::*;
 

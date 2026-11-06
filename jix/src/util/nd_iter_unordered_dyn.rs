@@ -421,7 +421,7 @@ mod tests {
     #[test]
     fn operand_count_has_no_ceiling() {
         // The per-operand tables are heap-allocated, so the count is not bounded by anything the
-        // callers instantiate - `elementwise_pipeline`'s const-generic dispatch table stops at 16
+        // callers instantiate - `ops::elementwise::pipeline`'s const-generic dispatch table stops at 16
         // and hands everything above it to this type. Twenty operands, each with its own itemsize
         // and its own gap, still walk exactly like `NdIterUnordered<20>`.
         const N: usize = 20;

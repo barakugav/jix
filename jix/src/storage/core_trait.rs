@@ -3,9 +3,8 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
-use crate::storage::{
-    ArraySpec, ArrayStorageInfo, CompactBorrowed, ElementwisePipeline, OperandTyped, StridedBuf,
-};
+use crate::ops::{ElementwisePipeline, OperandTyped};
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, StridedBuf};
 use crate::{ElementType, TypeDyn};
 
 mod sealed {

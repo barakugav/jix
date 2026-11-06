@@ -49,6 +49,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::dtype::Dtyped;
+use crate::ops::ElementwisePipeline;
 use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
 
 pub(crate) mod core_trait;
@@ -73,9 +74,6 @@ pub(crate) mod scalar;
 
 mod buf;
 pub use buf::*;
-
-mod elementwise_pipeline;
-pub use elementwise_pipeline::*;
 
 mod info;
 pub use info::*;
@@ -271,7 +269,7 @@ macro_rules! impl_array_storage_forward {
             &$lifetime self,
             index: &[::core::ops::Range<u64>],
             context: &$lifetime crate::codec::ReadContext,
-        ) -> crate::error::Result<impl crate::storage::ElementwisePipeline<$generic> + use<$lifetime, $generic, $($generics),*>>
+        ) -> crate::error::Result<impl crate::ops::ElementwisePipeline<$generic> + use<$lifetime, $generic, $($generics),*>>
         where
             $generic: crate::dtype::Dtyped,
         {
