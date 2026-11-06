@@ -6,7 +6,6 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{
     check_get_buffer_size, check_get_range, check_ndim, check_region_size, ensure, Result,
 };
-use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
@@ -1549,54 +1548,6 @@ impl<S: ArrayStorage> Array<S> {
         self.storage().spec().flags().is_compact()
     }
 
-    /// Ensure this array is in compact block-compressed form, re-compressing
-    /// if needed.
-    ///
-    /// If the array is already compact, the storage is kept as-is - no data is
-    /// copied or re-compressed. Otherwise the array is materialized block by
-    /// block into a new [`Compact`](crate::storage::Compact) storage using
-    /// default [`ArrayParams`].
-    ///
-    /// Use [`maybe_compact_with`](Self::maybe_compact_with) to control the block
-    /// shape and codec parameters.
-    ///
-    /// # Example
-    /// ```
-    /// use jix::Array;
-    /// use ndarray::array;
-    ///
-    /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
-    /// assert!(a.is_compact());
-    /// let a = a.maybe_compact()?; // a is already compact, so this is a no-op
-    ///
-    /// let b = a.map(|x| x * 2.0f32); // Array<Map<Compact>>
-    /// assert!(!b.is_compact()); // b is a lazy view
-    /// let b = b.maybe_compact()?; // materialize b into compact form
-    /// assert!(b.is_compact());
-    /// # Ok::<(), jix::Error>(())
-    /// ```
-    pub fn maybe_compact(self) -> Result<Array<MaybeCompact<S>>> {
-        let context = self.read_ctx();
-        self.maybe_compact_with(ArrayParams::default(), &context)
-    }
-
-    /// Ensure this array is in compact block-compressed form, re-compressing
-    /// if needed, with explicit control over parameters.
-    ///
-    /// Similar to [`maybe_compact`](Self::maybe_compact) but with explicit [`ArrayParams`].
-    ///
-    /// `params` controls the target block shape and compression settings. It is
-    /// **only used when the source is not already compact** - if `is_compact()`
-    /// returns `true`, the existing storage is wrapped zero-cost and `params` is
-    /// ignored.
-    pub fn maybe_compact_with(
-        self,
-        params: ArrayParams,
-        context: &ReadContext,
-    ) -> Result<Array<MaybeCompact<S>>> {
-        MaybeCompact::new_array(self, params, context)
-    }
-
     /// Return a reference to the underlying storage backend.
     ///
     /// Rarely needed to be used directly by users.
@@ -1650,69 +1601,6 @@ impl<S: ArrayStorage> Array<S> {
     #[inline(always)]
     pub fn into_storage(self) -> S {
         self.storage
-    }
-}
-
-/// Methods for converting an array to a different element type.
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
-    /// Re-tag this array's element type as `NewET`, returning an error if the runtime dtype does
-    /// not match.
-    ///
-    /// This is the bridge between dynamic and static element-type tracking. Arrays loaded from
-    /// files carry [`TypeDyn`] as their element type because the compiler cannot know the dtype
-    /// at that point. After you have confirmed the dtype (e.g. by reading `array.dtype()` or
-    /// knowing the data ahead of time), call `into_type::<Ty<T>>()` (or the
-    /// [`into_typed::<T>`](Self::into_typed) sugar) to recover a statically-typed element type.
-    /// Subsequent operations on the result will propagate the static `Ty<T>` through the type
-    /// system.
-    ///
-    /// Most element-wise operations require a static element type (`ArrayStorageTyped`).
-    ///
-    /// This method replaces the inner storage with `S::ElementTypeChange<NewET>`, which is
-    /// implemented by the simpler [`IntoType<S, NewET>`](crate::ops::IntoType) adaptor for some
-    /// storages, but may be implemented as an in-place replacement for others.
-    ///
-    /// See [`into_type_dyn`](Self::into_type_dyn).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
-    /// `NewET = Ty<T>` and `self.dtype() != T::DTYPE`. Always succeeds for `NewET = TypeDyn`.
-    #[inline]
-    pub fn into_type<NewET>(self) -> Result<Array<S::ElementTypeChange<NewET>>>
-    where
-        NewET: ElementType,
-    {
-        Ok(Array::from_storage(
-            self.into_storage().element_type_change()?,
-        ))
-    }
-
-    /// Re-tag this array's element type as [`Ty<T>`](crate::Ty), asserting a concrete scalar type.
-    ///
-    /// Sugar for [`into_type::<Ty<T>>()`](Self::into_type).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
-    /// `self.dtype() != T::DTYPE`.
-    #[inline]
-    pub fn into_typed<T>(self) -> Result<Array<S::ElementTypeChange<Ty<T>>>>
-    where
-        T: Dtyped,
-    {
-        self.into_type()
-    }
-
-    /// Re-tag this array's element type as [`TypeDyn`], erasing static element-type information.
-    ///
-    /// Infallible sugar for [`into_type::<TypeDyn>()`](Self::into_type).
-    #[inline]
-    pub fn into_type_dyn(self) -> Array<S::ElementTypeChange<TypeDyn>> {
-        self.into_type().unwrap()
     }
 }
 

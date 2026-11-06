@@ -117,6 +117,56 @@ where
     }
 }
 
+impl<S: ArrayStorage> Array<S> {
+    /// Ensure this array is in compact block-compressed form, re-compressing
+    /// if needed.
+    ///
+    /// If the array is already compact, the storage is kept as-is - no data is
+    /// copied or re-compressed. Otherwise the array is materialized block by
+    /// block into a new [`Compact`](crate::storage::Compact) storage using
+    /// default [`ArrayParams`].
+    ///
+    /// Use [`maybe_compact_with`](Self::maybe_compact_with) to control the block
+    /// shape and codec parameters.
+    ///
+    /// # Example
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
+    /// assert!(a.is_compact());
+    /// let a = a.maybe_compact()?; // a is already compact, so this is a no-op
+    ///
+    /// let b = a.map(|x| x * 2.0f32); // Array<Map<Compact>>
+    /// assert!(!b.is_compact()); // b is a lazy view
+    /// let b = b.maybe_compact()?; // materialize b into compact form
+    /// assert!(b.is_compact());
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    pub fn maybe_compact(self) -> Result<Array<MaybeCompact<S>>> {
+        let context = self.read_ctx();
+        self.maybe_compact_with(ArrayParams::default(), &context)
+    }
+
+    /// Ensure this array is in compact block-compressed form, re-compressing
+    /// if needed, with explicit control over parameters.
+    ///
+    /// Similar to [`maybe_compact`](Self::maybe_compact) but with explicit [`ArrayParams`].
+    ///
+    /// `params` controls the target block shape and compression settings. It is
+    /// **only used when the source is not already compact** - if `is_compact()`
+    /// returns `true`, the existing storage is wrapped zero-cost and `params` is
+    /// ignored.
+    pub fn maybe_compact_with(
+        self,
+        params: ArrayParams,
+        context: &ReadContext,
+    ) -> Result<Array<MaybeCompact<S>>> {
+        MaybeCompact::new_array(self, params, context)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
