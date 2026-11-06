@@ -1,10 +1,10 @@
 use std::ops::Range;
 
-use crate::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 use crate::ops::{ElementwisePipeline, OperandTyped};
 use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, StridedBuf};
+use crate::ReadContext;
 use crate::{ElementType, TypeDyn};
 
 mod sealed {

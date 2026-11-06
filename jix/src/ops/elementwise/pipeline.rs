@@ -7,12 +7,12 @@ use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::buf_pool::PoolBuf;
-use crate::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{ArithmeticStatus, Result};
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
+use crate::ReadContext;
 use crate::{
     array_from_fn_inline, const_min, dim_arr, prev_power_of_two, strided_span_bytes, ArrayExt,
     DimArray, DimBitmap, DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn,

@@ -1,6 +1,5 @@
 use std::ops::Range;
 
-use crate::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, ensure, error, Result};
 use crate::storage::params::{
@@ -10,6 +9,7 @@ use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
+use crate::ReadContext;
 use crate::{
     strided_span_bytes_from_iter, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, PlainArray,
 };
@@ -550,8 +550,8 @@ fn strides_from_ndarray<T>(shape: &[usize], strides: &[isize]) -> Result<DimArra
 mod tests {
     use ndarray::{array, s, ArrayD, Ix3};
 
-    use crate::ReadContext;
     use crate::scalar::bool8;
+    use crate::ReadContext;
     use crate::{Array, ArrayParams};
 
     // -----------------------------------------------------------------------

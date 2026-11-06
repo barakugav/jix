@@ -171,11 +171,11 @@ define_op1!(
 ///     import numpy as np
 ///
 ///     a = jix.compact([0x12345678], dtype=np.uint32)
-///     result = jix.swap_bytes(a)
+///     result = jix.byteswap(a)
 ///     assert result.numpy()[0] == 0x78563412
 ///     ```
 #[pyo3::pyfunction]
-pub fn swap_bytes<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+pub fn byteswap<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let array = Operand::from_any(array)?;
 
@@ -188,7 +188,7 @@ pub fn swap_bytes<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>>
     }
 
     let dispatch_table = define_op1_table!(
-        swap_bytes,
+        byteswap,
         SwapBytes,
         dispatch = { [u16, i16, u32, i32, u64, i64], None }
     );

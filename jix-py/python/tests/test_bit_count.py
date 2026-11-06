@@ -122,19 +122,19 @@ def test_trailing_zeros_concrete():
 
 
 # byte/bit permutation: same output type, full range valid.
-def test_swap_bytes_concrete():
+def test_byteswap_concrete():
     cases = _std_cases() + [(np.int8, [0, -1, 1, -128, 127]), (np.bool_, [True, False])]
-    check_op1_concrete(jix.swap_bytes, lambda a: a.byteswap(), cases)
+    check_op1_concrete(jix.byteswap, lambda a: a.byteswap(), cases)
 
 
 @pytest.mark.parametrize("dtype", [np.uint8, np.int8, np.bool_])
-def test_swap_bytes_single_byte_returns_self(dtype):
+def test_byteswap_single_byte_returns_self(dtype):
     np_a = np.array([0, 1], dtype=dtype)
     za = jix.compact(np_a)
-    assert jix.swap_bytes(za) is za
+    assert jix.byteswap(za) is za
     # non-jix inputs still come back as a jix array
     for value in [np_a, np_a[0]]:
-        result = jix.swap_bytes(value)
+        result = jix.byteswap(value)
         assert isinstance(result, jix.Array)
         np.testing.assert_array_equal(result.numpy(), value)
 

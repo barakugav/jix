@@ -1,8 +1,8 @@
-use crate::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::{ArrayStorageAny, View};
 use crate::util::IterExt;
+use crate::ReadContext;
 use crate::{ArrayAny, ArrayStorage, ElementType};
 
 mod compact;

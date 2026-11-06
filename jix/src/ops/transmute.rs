@@ -166,10 +166,10 @@ mod tests {
     use ndarray::Ix1;
 
     use super::Transmute;
-    use crate::ReadContext;
     use crate::dtype::Dtyped;
     use crate::storage::StridedBuf;
     use crate::util::assert_array_matches;
+    use crate::ReadContext;
     use crate::{Array, ArrayStorage, Ty};
 
     /// An 8-byte struct dtype, to check that a transmute handles a composite element type and not

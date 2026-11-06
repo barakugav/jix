@@ -2,11 +2,11 @@ use std::cell::UnsafeCell;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{ArithmeticStatus, Result};
 use crate::ops::{max_itemsize, n_operands_mul, n_operands_sum, ElementwisePipelineImpl, Operand};
 use crate::storage::{ArraySpec, ArrayStorageTyped, StridedBuf};
+use crate::ReadContext;
 use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, ElementType};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)

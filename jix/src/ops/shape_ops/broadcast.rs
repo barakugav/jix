@@ -239,8 +239,8 @@ where
 mod tests {
     use ndarray::array;
 
-    use crate::ReadContext;
     use crate::util::{shape_strategy, ScalarStrategy};
+    use crate::ReadContext;
     use crate::{Array, CompactArray, IntoDimension, NDIM_MAX};
 
     fn make(vals: Vec<i32>, shape: impl IntoDimension) -> CompactArray<i32> {
