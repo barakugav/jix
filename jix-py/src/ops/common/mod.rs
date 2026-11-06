@@ -60,6 +60,25 @@ macro_rules! define_op1_desc {
     };
 }
 
+macro_rules! define_op1_table {
+    (
+        $name:ident,
+        $core_op:ident,
+        dispatch = { $($dispatch:tt)* }
+    ) => {{
+        static DISPATCH_TABLE: ::std::sync::LazyLock<crate::ops::common::OpDescriptor<1, ()>> = ::std::sync::LazyLock::new(|| {
+            crate::ops::common::OpDescriptor::new(
+                stringify!($name),
+                crate::ops::common::define_op1_desc!(
+                    $core_op,
+                    $($dispatch)*
+                ),
+            )
+        });
+        &*DISPATCH_TABLE
+    }};
+}
+
 macro_rules! define_op1 {
     (
         $(#[$meta:meta])* $name:ident,
@@ -71,18 +90,15 @@ macro_rules! define_op1 {
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
         ) -> pyo3::PyResult<crate::Array> {
-            static DISPATCH_TABLE: std::sync::LazyLock<crate::ops::common::OpDescriptor<1, ()>> = std::sync::LazyLock::new(|| {
-                crate::ops::common::OpDescriptor::new(
-                    stringify!($name),
-                    crate::ops::common::define_op1_desc!(
-                        $core_op,
-                        $($dispatch)*
-                    ),
-                )
-            });
-
             let array = crate::ops::common::Operand::from_any(array)?;
-            let res = DISPATCH_TABLE.dispatch1(array)?;
+
+            let dispatch_table = crate::ops::common::define_op1_table!(
+                $name,
+                $core_op,
+                dispatch = { $($dispatch)* }
+            );
+            let res = dispatch_table.dispatch1(array)?;
+
             Ok(crate::Array::from_core(res))
         }
     };
@@ -127,7 +143,7 @@ macro_rules! define_op2_table {
         dispatch = { $($dispatch:tt)* }
         $(, $option:ident = $option_val:expr)*
     ) => {{
-        static DISPATCH_TABLE: std::sync::LazyLock<crate::ops::common::OpDescriptor<2, ()>> = std::sync::LazyLock::new(|| {
+        static DISPATCH_TABLE: ::std::sync::LazyLock<crate::ops::common::OpDescriptor<2, ()>> = ::std::sync::LazyLock::new(|| {
             crate::ops::common::OpDescriptor::new(
                 stringify!($name),
                 crate::ops::common::define_op2_desc!(
@@ -171,4 +187,6 @@ macro_rules! define_op2 {
     };
 }
 
-pub(crate) use {define_op1, define_op1_desc, define_op2, define_op2_desc, define_op2_table};
+pub(crate) use {
+    define_op1, define_op1_desc, define_op1_table, define_op2, define_op2_desc, define_op2_table,
+};

@@ -6,7 +6,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::ops::common::{
-    define_op1, define_op1_desc, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
+    define_op1, define_op1_desc, define_op1_table, CastKind, OpDescriptor, OpFnDescriptor, Operand,
+    Rank, Scalar,
 };
 use crate::util::IntoPyResult;
 use crate::Array;
@@ -98,11 +99,8 @@ pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
         }
     }
 
-    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
-        OpDescriptor::new("floor", define_op1_desc!(Floor, [f16, f32, f64], None))
-    });
-
-    Bound::new(py, Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
+    let dispatch_table = define_op1_table!(floor, Floor, dispatch = { [f16, f32, f64], None });
+    Bound::new(py, Array::from_core(dispatch_table.dispatch1(array)?))
 }
 /// Rounds each element up to the nearest integer (towards +inf).
 ///
@@ -135,9 +133,8 @@ pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
         }
     }
 
-    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> =
-        LazyLock::new(|| OpDescriptor::new("ceil", define_op1_desc!(Ceil, [f16, f32, f64], None)));
-    Bound::new(py, Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
+    let dispatch_table = define_op1_table!(ceil, Ceil, dispatch = { [f16, f32, f64], None });
+    Bound::new(py, Array::from_core(dispatch_table.dispatch1(array)?))
 }
 /// Rounds each element to the nearest integer.
 ///
@@ -174,10 +171,8 @@ pub fn round<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
         }
     }
 
-    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
-        OpDescriptor::new("round", define_op1_desc!(Round, [f16, f32, f64], None))
-    });
-    Bound::new(py, Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
+    let dispatch_table = define_op1_table!(round, Round, dispatch = { [f16, f32, f64], None });
+    Bound::new(py, Array::from_core(dispatch_table.dispatch1(array)?))
 }
 define_op1!(
     /// Computes the square root of each element.
@@ -685,17 +680,11 @@ pub fn absolute<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
         return operand.into_py_array(py);
     }
 
-    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "absolute",
-            define_op1_desc!(
-                Abs,
-                [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
-                None
-            ),
-        )
-    });
-
-    let res = DISPATCH_TABLE.dispatch1(operand)?;
+    let dispatch_table = define_op1_table!(
+        absolute,
+        Abs,
+        dispatch = { [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>], None }
+    );
+    let res = dispatch_table.dispatch1(operand)?;
     Bound::new(py, Array::from_core(res))
 }
