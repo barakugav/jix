@@ -32,8 +32,10 @@ ACCEPTED_DTYPES = [
     # sub-array fields
     np.dtype([("pos", "<f4", (3,)), ("id", "<u4")], align=True),
     np.dtype([("m", "<i2", (2, 3))]),
+    np.dtype([("t", "u1", (2, 3, 4, 5))]),  # the most inner dims jix supports
     # nested structs
     np.dtype([("rgb", [("r", "u1"), ("g", "u1"), ("b", "u1")]), ("w", "<i4")]),
+    np.dtype([("pts", [("x", "<f4"), ("y", "<f4")], (3,))]),
     np.dtype(
         [("p", np.dtype([("x", "<f4"), ("y", "<f4")], align=True)), ("w", "<f4"), ("_pad", "(4,)u1"), ("t", "<f8")],
         align=True,

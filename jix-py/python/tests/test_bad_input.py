@@ -40,6 +40,19 @@ def test_compression_level_in_range(level):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("dtype", ["O", "U10", "S4", "M8[s]", "m8[s]", "V0", "V4"])
+def test_unsupported_dtype(dtype):
+    with pytest.raises(ValueError, match="Unsupported dtype"):
+        jix.asarray(np.zeros(2, dtype=dtype))
+
+
+def test_dtype_inner_shape_too_many_dims():
+    # Five inner dims, one more than jix supports.
+    dtype = np.dtype([("a", "u1", (2, 3, 4, 5, 6))])
+    with pytest.raises(ValueError, match="too many dimensions"):
+        jix.asarray(np.zeros(2, dtype=dtype))
+
+
 def test_dtype_itemsize_too_large():
     # itemsize 80000 does not fit the u16 itemsize field.
     dtype = np.dtype([("a", "i4", (20000,))])
@@ -170,6 +183,16 @@ def test_writer_reporting_too_many_bytes():
         jix.write_array(_array(), _OverWriter())
 
 
+def test_writer_returning_a_non_int():
+    class Writer(io.BytesIO):
+        def write(self, data):
+            super().write(data)
+            return "3"
+
+    with pytest.raises(TypeError):
+        jix.write_array(_array(), Writer())
+
+
 class _Interrupted(Exception):
     pass
 
@@ -191,6 +214,32 @@ def test_file_like_exceptions_keep_their_type():
     with pytest.raises(_Interrupted):
         jix.write_array(_array(), Writer())
     assert Writer.calls == 1
+
+
+def _interrupt(*args, **kwargs):
+    raise _Interrupted
+
+
+@pytest.mark.parametrize("method", ["seek", "tell"])
+def test_reader_exceptions_keep_their_type(method):
+    class Reader(io.BytesIO):
+        pass
+
+    setattr(Reader, method, _interrupt)
+    with pytest.raises(_Interrupted):
+        jix.read_array(Reader(_serialized()))
+
+
+@pytest.mark.parametrize("method", ["seek", "tell", "flush"])
+def test_writer_exceptions_keep_their_type(method):
+    class Writer(io.BytesIO):
+        def seek(self, offset, whence=0):
+            # Returning None makes the writer ask tell() for the position.
+            super().seek(offset, whence)
+
+    setattr(Writer, method, _interrupt)
+    with pytest.raises(_Interrupted):
+        jix.write_array(_array(), Writer())
 
 
 def test_missing_file_raises_os_error(tmp_path):

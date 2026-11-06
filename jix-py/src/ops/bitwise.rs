@@ -1,11 +1,7 @@
-use std::sync::LazyLock;
-
 use jix_core::scalar::bool8;
 use pyo3::prelude::*;
 
-use crate::ops::common::{
-    define_op1, define_op1_desc, define_op2, OpDescriptor, Operand, Precision, Rank,
-};
+use crate::ops::common::{define_op1, define_op1_table, define_op2, Operand, Precision, Rank};
 use crate::Array;
 
 define_op2!(
@@ -671,13 +667,6 @@ define_op1!(
 ///     ```
 #[pyo3::pyfunction]
 pub fn swap_bytes<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
-    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "swap_bytes",
-            define_op1_desc!(SwapBytes, [u16, i16, u32, i32, u64, i64], None),
-        )
-    });
-
     let py = array.py();
     let array = Operand::from_any(array)?;
 
@@ -689,7 +678,12 @@ pub fn swap_bytes<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>>
         return array.into_py_array(py);
     }
 
-    let res = DISPATCH_TABLE.dispatch1(array)?;
+    let dispatch_table = define_op1_table!(
+        swap_bytes,
+        SwapBytes,
+        dispatch = { [u16, i16, u32, i32, u64, i64], None }
+    );
+    let res = dispatch_table.dispatch1(array)?;
     Bound::new(py, Array::from_core(res))
 }
 

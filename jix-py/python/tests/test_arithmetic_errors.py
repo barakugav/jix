@@ -6,6 +6,7 @@ NaN, without raising or warning. Mirrors the tests in jix/src/ops/op1.rs and jix
 
 import io
 import warnings
+from functools import partial
 
 import numpy as np
 import pytest
@@ -18,23 +19,29 @@ import jix
 
 MESSAGE = "integer division or modulo by zero"
 
-# The integer divisions, with their results for a non-zero divisor.
+# The integer divisions as (function name, rounding mode), with their results for a non-zero
+# divisor.
 _INT_DIVISIONS = {
-    jix.divide_trunc: lambda x, y: abs(x) // abs(y) * (1 if (x < 0) == (y < 0) else -1),
-    jix.divide_floor: lambda x, y: x // y,
-    jix.divide_euclid: lambda x, y: (x - x % abs(y)) // y,
-    jix.remainder_trunc: lambda x, y: abs(x) % abs(y) * (1 if x >= 0 else -1),
-    jix.remainder_floor: lambda x, y: x % y,
-    jix.remainder_euclid: lambda x, y: x % abs(y),
+    ("divide", "trunc"): lambda x, y: abs(x) // abs(y) * (1 if (x < 0) == (y < 0) else -1),
+    ("divide", "floor"): lambda x, y: x // y,
+    ("divide", "euclid"): lambda x, y: (x - x % abs(y)) // y,
+    ("remainder", "trunc"): lambda x, y: abs(x) % abs(y) * (1 if x >= 0 else -1),
+    ("remainder", "floor"): lambda x, y: x % y,
+    ("remainder", "euclid"): lambda x, y: x % abs(y),
 }
 
 
-def _int_div_ref(jix_fn, np_a, np_b):
-    """`jix_fn` of each pair of non-zero divisor, wrapping (`MIN // -1` is `MIN`)."""
+def _int_div(op, a, b):
+    name, rounding_mode = op
+    return getattr(jix, name)(a, b, rounding_mode=rounding_mode)
+
+
+def _int_div_ref(op, np_a, np_b):
+    """`op` of each pair of non-zero divisor, wrapping (`MIN // -1` is `MIN`)."""
     out = np.zeros_like(np_a)
     for idx in np.ndindex(np_a.shape):
         x, y = int(np_a[idx]), int(np_b[idx])
-        out[idx] = np.array(_INT_DIVISIONS[jix_fn](x, y)).astype(np_a.dtype)
+        out[idx] = np.array(_INT_DIVISIONS[op](x, y)).astype(np_a.dtype)
     return out
 
 
@@ -46,11 +53,11 @@ def _arrays(dtype):
     return a, b
 
 
-@pytest.mark.parametrize("jix_fn", _INT_DIVISIONS, ids=lambda f: f.__name__)
+@pytest.mark.parametrize("op", _INT_DIVISIONS, ids="-".join)
 @pytest.mark.parametrize("dtype", ints + uints)
-def test_divide_by_zero_raises(jix_fn, dtype):
+def test_divide_by_zero_raises(op, dtype):
     a, b = _arrays(dtype)
-    q = jix_fn(jix.compact(a), jix.compact(b))
+    q = _int_div(op, jix.compact(a), jix.compact(b))
     with pytest.raises(ArithmeticError, match=MESSAGE) as e:
         q.numpy()
     assert type(e.value) is ArithmeticError  # not the ZeroDivisionError subclass
@@ -59,13 +66,13 @@ def test_divide_by_zero_raises(jix_fn, dtype):
         with pytest.raises(ArithmeticError, match=MESSAGE):
             q[part]
     # Only the elements read count.
-    np.testing.assert_array_equal(q[:300], _int_div_ref(jix_fn, a[:300], b[:300]))
+    np.testing.assert_array_equal(q[:300], _int_div_ref(op, a[:300], b[:300]))
 
 
 @pytest.mark.parametrize("dtype", ints + uints)
 def test_divide_by_scalar_zero_raises(dtype):
     za = jix.compact(np.arange(10).astype(dtype))
-    for q in [za // 0, za % 0, jix.divide_trunc(za, 0), jix.remainder_euclid(za, 0)]:
+    for q in [za // 0, za % 0, jix.divide(za, 0, rounding_mode="trunc"), jix.remainder(za, 0, rounding_mode="euclid")]:
         with pytest.raises(ArithmeticError, match=MESSAGE):
             q.numpy()
 
@@ -85,11 +92,11 @@ def test_errors_raise_when_read(tmp_path):
     np.testing.assert_array_equal(q[:1], [3])
 
 
-@pytest.mark.parametrize("jix_fn", _INT_DIVISIONS, ids=lambda f: f.__name__)
+@pytest.mark.parametrize("op", _INT_DIVISIONS, ids="-".join)
 @pytest.mark.parametrize("dtype", ints + uints)
 @settings(deadline=None)  # the reference is a Python loop over up to thousands of elements
 @given(st.data())
-def test_divide_by_zero_random(jix_fn, dtype, data: DataObject):
+def test_divide_by_zero_random(op, dtype, data: DataObject):
     # Zero divisors in about a third of the elements, random shapes and block shapes.
     (np_a, za), (np_b, zb) = data.draw(
         carrays2_mixed_strategy(
@@ -102,22 +109,22 @@ def test_divide_by_zero_random(jix_fn, dtype, data: DataObject):
     )
     if (np_b == 0).any():
         with pytest.raises(ArithmeticError, match=MESSAGE):
-            jix_fn(za, zb).numpy()
+            _int_div(op, za, zb).numpy()
     else:
-        np.testing.assert_array_equal(jix_fn(za, zb).numpy(), _int_div_ref(jix_fn, np_a, np_b))
+        np.testing.assert_array_equal(_int_div(op, za, zb).numpy(), _int_div_ref(op, np_a, np_b))
 
 
-@pytest.mark.parametrize("jix_fn", _INT_DIVISIONS, ids=lambda f: f.__name__)
+@pytest.mark.parametrize("op", _INT_DIVISIONS, ids="-".join)
 @pytest.mark.parametrize("dtype", ints)
-def test_min_by_minus_one_wraps(jix_fn, dtype):
+def test_min_by_minus_one_wraps(op, dtype):
     # As PyTorch: the quotients wrap to `MIN`, and the remainders are `0`, exact.
     info = np.iinfo(dtype)
     a = np.array([info.min, 7, info.max], dtype=dtype)
     b = np.full(3, -1, dtype=dtype)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        result = jix_fn(jix.compact(a), jix.compact(b)).numpy()
-    np.testing.assert_array_equal(result, _int_div_ref(jix_fn, a, b))
+        result = _int_div(op, jix.compact(a), jix.compact(b)).numpy()
+    np.testing.assert_array_equal(result, _int_div_ref(op, a, b))
 
 
 @pytest.mark.parametrize("dtype", ints)
@@ -183,18 +190,17 @@ def _read_quietly(array):
 
 
 _FLOAT_BINARY_OPS = [
-    jix.divide,
-    jix.divide_trunc,
-    jix.divide_floor,
-    jix.divide_euclid,
-    jix.remainder_trunc,
-    jix.remainder_floor,
-    jix.remainder_euclid,
-    jix.power,
+    pytest.param(jix.divide, id="divide"),
+    *[
+        pytest.param(partial(getattr(jix, name), rounding_mode=mode), id=f"{name}-{mode}")
+        for name in ["divide", "remainder"]
+        for mode in ["trunc", "floor", "euclid"]
+    ],
+    pytest.param(jix.power, id="power"),
 ]
 
 
-@pytest.mark.parametrize("jix_fn", _FLOAT_BINARY_OPS, ids=lambda f: f.__name__)
+@pytest.mark.parametrize("jix_fn", _FLOAT_BINARY_OPS)
 @pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
 def test_float_binary_ops_do_not_raise(jix_fn, dtype):
     # Every pair of edge values after ordinary ones: some in the SIMD bulk part of the loop, the

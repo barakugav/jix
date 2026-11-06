@@ -123,8 +123,8 @@ pub use reduction::*;
 mod map;
 pub use map::*;
 
-mod where_op;
-pub use where_op::*;
+mod select;
+pub use select::*;
 
 mod sub_dtype;
 pub use sub_dtype::*;

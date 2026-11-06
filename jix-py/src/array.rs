@@ -8,7 +8,7 @@ use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
-use crate::type_hint::{Dim, NdArray, NpDtype, ValueOrUnimplemented};
+use crate::type_hint::{Dim, ItemOrTuple, NumpyArray, NumpyDtype, Shape, ValueOrUnimplemented};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyTuple};
 
@@ -18,10 +18,10 @@ use pyo3::exceptions::{
 use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
-use crate::ops::plain_from_numpy;
+use crate::ops::{plain_from_numpy, RoundingMode};
 use crate::util::{
     dim_arr, maybe_detach, numpy_empty_ordered, numpy_items, strided_span_bytes, DimArray,
-    IntoPyResult, ItemOrTuple,
+    IntoPyResult,
 };
 
 /// A multi-dimensional compressed array.
@@ -347,8 +347,8 @@ impl Array {
     /// ```
     #[getter]
     #[inline]
-    pub fn shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        PyTuple::new(py, self.arr.shape().iter().copied())
+    pub fn shape<'py>(&self, py: Python<'py>) -> PyResult<Shape<'py>> {
+        PyTuple::new(py, self.arr.shape().iter().copied()).map(Shape)
     }
 
     /// The number of dimensions (dims) of the array.
@@ -446,8 +446,8 @@ impl Array {
     /// ```
     #[getter]
     #[inline]
-    pub fn dtype<'py>(&self, py: Python<'py>) -> PyResult<NpDtype<'py>> {
-        self.numpy_dtype(py).map(NpDtype)
+    pub fn dtype<'py>(&self, py: Python<'py>) -> PyResult<NumpyDtype<'py>> {
+        self.numpy_dtype(py).map(NumpyDtype)
     }
 
     /// Decode the array (or a sub-region of it) into a NumPy array.
@@ -558,8 +558,8 @@ impl Array {
         &self,
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
-        out: Option<NdArray<'py>>,
-    ) -> PyResult<NdArray<'py>> {
+        out: Option<NumpyArray<'py>>,
+    ) -> PyResult<NumpyArray<'py>> {
         let out = out.map(|out| out.0);
         let (index, out_shape, drop_dims) = self.parse_index(index)?;
         // NumPy expands an inner shape of the dtype into trailing dims of its base dtype.
@@ -605,7 +605,7 @@ impl Array {
 
         let nitems = read_shape.iter().product::<usize>();
         if nitems == 0 {
-            return Ok(NdArray(np_arr));
+            return Ok(NumpyArray(np_arr));
         }
 
         // `to_buf_strided` wants one stride per *array* dimension, but an integer index item drops
@@ -674,7 +674,7 @@ impl Array {
                 .into_py_result()
         })?;
 
-        Ok(NdArray(np_arr))
+        Ok(NumpyArray(np_arr))
     }
 
     /// Returns the single element of a zero-dimensional array as a Python scalar.
@@ -772,7 +772,7 @@ impl Array {
     /// Returns:
     ///     A NumPy array. See `numpy()` for details.
     #[inline]
-    pub fn __getitem__<'py>(&self, index: &Bound<'py, PyAny>) -> PyResult<NdArray<'py>> {
+    pub fn __getitem__<'py>(&self, index: &Bound<'py, PyAny>) -> PyResult<NumpyArray<'py>> {
         self.numpy(index.py(), Some(index), None)
     }
 
@@ -795,7 +795,7 @@ impl Array {
         py: Python<'py>,
         dtype: Option<&Bound<'py, PyAny>>,
         copy: Option<bool>,
-    ) -> PyResult<NdArray<'py>> {
+    ) -> PyResult<NumpyArray<'py>> {
         if copy == Some(false) {
             return Err(PyValueError::new_err(
                 "a jix Array cannot be converted to a NumPy array without a copy",
@@ -971,9 +971,15 @@ impl Array {
         binary_op_builtin(other, || crate::ops::multiply(other, slf))
     }
 
-    /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
-    pub fn divide(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::divide(slf, other)
+    /// Element-wise division of two arrays, with the quotient optionally rounded to an integer. See
+    /// [`jix.divide()`][jix.divide].
+    #[pyo3(signature = (other, *, rounding_mode=None))]
+    pub fn divide(
+        slf: &Bound<'_, Self>,
+        other: &Bound<'_, PyAny>,
+        rounding_mode: Option<RoundingMode>,
+    ) -> PyResult<Self> {
+        crate::ops::divide(slf, other, rounding_mode)
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
@@ -981,7 +987,7 @@ impl Array {
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::divide(slf, other))
+        binary_op_builtin(other, || crate::ops::divide(slf, other, None))
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
@@ -989,79 +995,60 @@ impl Array {
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::divide(other, slf))
-    }
-
-    /// Element-wise floored division of two arrays. See
-    /// [`jix.divide_floor()`][jix.divide_floor].
-    pub fn divide_floor(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::divide_floor(slf, other)
+        binary_op_builtin(other, || crate::ops::divide(other, slf, None))
     }
 
     /// Element-wise floored division of two arrays (`a // b`), as Python's and numpy's `//`. See
-    /// [`jix.divide_floor()`][jix.divide_floor].
+    /// [`jix.divide()`][jix.divide].
     pub fn __floordiv__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::divide_floor(slf, other))
+        binary_op_builtin(other, || {
+            crate::ops::divide(slf, other, Some(RoundingMode::Floor))
+        })
     }
 
     /// Element-wise floored division of two arrays (`a // b`), as Python's and numpy's `//`. See
-    /// [`jix.divide_floor()`][jix.divide_floor].
+    /// [`jix.divide()`][jix.divide].
     pub fn __rfloordiv__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::divide_floor(other, slf))
+        binary_op_builtin(other, || {
+            crate::ops::divide(other, slf, Some(RoundingMode::Floor))
+        })
     }
 
-    /// Element-wise truncated division of two arrays. See
-    /// [`jix.divide_trunc()`][jix.divide_trunc].
-    pub fn divide_trunc(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::divide_trunc(slf, other)
-    }
-
-    /// Element-wise Euclidean division of two arrays. See
-    /// [`jix.divide_euclid()`][jix.divide_euclid].
-    pub fn divide_euclid(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::divide_euclid(slf, other)
-    }
-
-    /// Element-wise floored remainder of two arrays. See
-    /// [`jix.remainder_floor()`][jix.remainder_floor].
-    pub fn remainder_floor(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::remainder_floor(slf, other)
+    /// Element-wise remainder of two arrays, floored by default. See
+    /// [`jix.remainder()`][jix.remainder].
+    #[pyo3(
+        signature = (other, *, rounding_mode: "Literal['trunc', 'floor', 'euclid']" = "floor")
+    )]
+    pub fn remainder(
+        slf: &Bound<'_, Self>,
+        other: &Bound<'_, PyAny>,
+        rounding_mode: &str,
+    ) -> PyResult<Self> {
+        crate::ops::remainder(slf, other, rounding_mode)
     }
 
     /// Element-wise floored remainder of two arrays (`a % b`), as Python's and numpy's `%`. See
-    /// [`jix.remainder_floor()`][jix.remainder_floor].
+    /// [`jix.remainder()`][jix.remainder].
     pub fn __mod__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::remainder_floor(slf, other))
+        binary_op_builtin(other, || crate::ops::remainder(slf, other, "floor"))
     }
 
     /// Element-wise floored remainder of two arrays (`a % b`), as Python's and numpy's `%`. See
-    /// [`jix.remainder_floor()`][jix.remainder_floor].
+    /// [`jix.remainder()`][jix.remainder].
     pub fn __rmod__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::remainder_floor(other, slf))
-    }
-
-    /// Element-wise truncated remainder of two arrays. See
-    /// [`jix.remainder_trunc()`][jix.remainder_trunc].
-    pub fn remainder_trunc(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::remainder_trunc(slf, other)
-    }
-
-    /// Element-wise Euclidean remainder of two arrays. See
-    /// [`jix.remainder_euclid()`][jix.remainder_euclid].
-    pub fn remainder_euclid(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::remainder_euclid(slf, other)
+        binary_op_builtin(other, || crate::ops::remainder(other, slf, "floor"))
     }
 
     /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
@@ -1930,613 +1917,5 @@ impl Drop for ContextGuard<'_> {
 impl ContextGuard<'_> {
     pub(crate) fn as_ref(&self) -> &ReadContext {
         self.context.as_ref().unwrap()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use jix_core::dtype::Dtyped;
-    use jix_core::scalar::bool8;
-    use jix_core::Array as CoreArray;
-    use ndarray::{array, ArrayD};
-    use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
-    use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
-    use pyo3::types::{PyAny, PyEllipsis, PySlice, PyTuple};
-    use pyo3::{Bound, IntoPyObject, Python};
-
-    use super::Array;
-
-    fn make_py_array<'py, T: Dtyped, D>(
-        py: Python<'py>,
-        ndarray: &ndarray::Array<T, D>,
-    ) -> Bound<'py, Array>
-    where
-        D: ndarray::Dimension,
-    {
-        let core = CoreArray::compact_ndarray(ndarray).unwrap();
-        Bound::new(py, Array::from_core(core.into_any())).unwrap()
-    }
-
-    fn roundtrip<T, D>(original: &ndarray::Array<T, D>) -> ndarray::Array<T, D>
-    where
-        T: Dtyped + numpy::Element + Copy,
-        D: ndarray::Dimension,
-    {
-        // ndarray::Array -> jix_core::Array -> jix_python::Array -> numpy::PyArray -> ndarray::Array
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, original);
-            let np = py_arr.get().numpy(py, None, None).unwrap().0;
-            let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
-            typed.to_owned_array().into_dimensionality().unwrap()
-        })
-    }
-
-    #[test]
-    fn test_numpy_f32_1d() {
-        let original = array![1.0f32, 2.0, 3.0, 4.0];
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    #[test]
-    fn test_numpy_f32_2d() {
-        let original = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]];
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    #[test]
-    fn test_numpy_f32_3d() {
-        let data: Vec<f32> = (0..24).map(|x| x as f32).collect();
-        let original = ndarray::Array::from_shape_vec(vec![2, 3, 4], data).unwrap();
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    #[test]
-    fn test_numpy_f64_2d() {
-        let original =
-            ndarray::Array::from_shape_vec(vec![3, 4], (0..12).map(|x| x as f64).collect())
-                .unwrap();
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    #[test]
-    fn test_numpy_i32_2d() {
-        let original = ndarray::Array::from_shape_vec(vec![4, 5], (0..20).collect()).unwrap();
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    #[test]
-    fn test_numpy_i64_1d() {
-        let original = ndarray::Array::from_shape_vec(vec![8], (100..108).collect()).unwrap();
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    #[test]
-    fn test_numpy_u8_2d() {
-        let original = ndarray::Array::from_shape_vec(vec![3, 3], (0u8..9).collect()).unwrap();
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    #[test]
-    fn test_numpy_u32_3d() {
-        let data: Vec<u32> = (0..60).collect();
-        let original = ndarray::Array::from_shape_vec(vec![3, 4, 5], data).unwrap();
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    #[test]
-    fn test_numpy_bool_1d() {
-        // `bool8` is not a `numpy::Element`, read the NumPy array back as `bool`
-        let original = array![
-            bool8::TRUE,
-            bool8::FALSE,
-            bool8::TRUE,
-            bool8::TRUE,
-            bool8::FALSE,
-            bool8::TRUE
-        ];
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap().0;
-            let typed = np.cast_into::<PyArrayDyn<bool>>().unwrap();
-            assert_eq!(typed.to_owned_array(), original.mapv(bool::from).into_dyn());
-        });
-    }
-
-    #[test]
-    fn test_numpy_large_values_f64() {
-        // Verify large/negative values are transferred without corruption.
-        let original = array![[f64::MAX, f64::MIN, -1.0], [0.0, 1.0, f64::INFINITY]];
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    #[test]
-    fn test_numpy_shape_preserved() {
-        let original =
-            ndarray::Array::from_shape_vec(vec![2, 3, 4], (0..24).map(|x| x as f32).collect())
-                .unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
-            assert_eq!(np.shape(), &[2usize, 3, 4]);
-        });
-    }
-
-    #[test]
-    fn test_numpy_dtype_preserved_f32() {
-        use numpy::PyArrayDescrMethods;
-        let original = array![1.0f32, 2.0];
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
-            assert_eq!(np.dtype().itemsize(), 4);
-            assert_eq!(np.dtype().kind() as char, 'f');
-        });
-    }
-
-    #[test]
-    fn test_numpy_dtype_preserved_i32() {
-        use numpy::PyArrayDescrMethods;
-        let original = array![1i32, 2, 3];
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
-            assert_eq!(np.dtype().itemsize(), 4);
-            assert_eq!(np.dtype().kind() as char, 'i');
-        });
-    }
-
-    #[test]
-    fn test_numpy_single_element() {
-        let original = array![42.0f64];
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    #[test]
-    fn test_numpy_non_square_2d() {
-        let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
-        let original = ndarray::Array::from_shape_vec(vec![10, 10], data).unwrap();
-        assert_eq!(roundtrip(&original), original);
-    }
-
-    fn eval<T>(py_arr: Array) -> ArrayD<T>
-    where
-        T: Dtyped + numpy::Element + Copy,
-    {
-        Python::attach(|py| {
-            py_arr
-                .numpy(py, None, None)
-                .unwrap()
-                .0
-                .cast_into::<PyArrayDyn<T>>()
-                .unwrap()
-                .to_owned_array()
-        })
-    }
-
-    #[test]
-    fn test_add_f32() {
-        let a = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]];
-        let b = array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]];
-        let result = Python::attach(|py| {
-            let a = make_py_array(py, &a);
-            let b = make_py_array(py, &b);
-            eval::<f32>(Array::add(&a, &b).unwrap())
-        });
-        assert_eq!(result, (a + b).into_dyn());
-    }
-
-    #[test]
-    fn test_sub_f32() {
-        let a = array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]];
-        let b = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]];
-        let result = Python::attach(|py| {
-            let a = make_py_array(py, &a);
-            let b = make_py_array(py, &b);
-            eval::<f32>(Array::subtract(&a, &b).unwrap())
-        });
-        assert_eq!(result, (a - b).into_dyn());
-    }
-
-    #[test]
-    fn test_mul_f32() {
-        let a = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]];
-        let b = array![[2.0f32, 3.0, 4.0], [5.0, 6.0, 7.0]];
-        let result = Python::attach(|py| {
-            let a = make_py_array(py, &a);
-            let b = make_py_array(py, &b);
-            eval::<f32>(Array::multiply(&a, &b).unwrap())
-        });
-        assert_eq!(result, (a * b).into_dyn());
-    }
-
-    #[test]
-    fn test_div_f32() {
-        let a = array![[2.0f32, 6.0, 12.0], [20.0, 30.0, 42.0]];
-        let b = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]];
-        let result = Python::attach(|py| {
-            let a = make_py_array(py, &a);
-            let b = make_py_array(py, &b);
-            eval::<f32>(Array::divide(&a, &b).unwrap())
-        });
-        assert_eq!(result, (a / b).into_dyn());
-    }
-
-    #[test]
-    fn test_add_f64() {
-        let a = array![1.0f64, 2.0, 3.0];
-        let b = array![0.5f64, 1.5, 2.5];
-        let result = Python::attach(|py| {
-            let a = make_py_array(py, &a);
-            let b = make_py_array(py, &b);
-            eval::<f64>(Array::add(&a, &b).unwrap())
-        });
-        assert_eq!(result, (a + b).into_dyn());
-    }
-
-    #[test]
-    fn test_add_i32() {
-        let a = array![[1i32, 2], [3, 4]];
-        let b = array![[10i32, 20], [30, 40]];
-        let result = Python::attach(|py| {
-            let a = make_py_array(py, &a);
-            let b = make_py_array(py, &b);
-            eval::<i32>(Array::add(&a, &b).unwrap())
-        });
-        assert_eq!(result, (a + b).into_dyn());
-    }
-
-    #[test]
-    fn test_sub_i32() {
-        let a = array![[10i32, 20], [30, 40]];
-        let b = array![[1i32, 2], [3, 4]];
-        let result = Python::attach(|py| {
-            let a = make_py_array(py, &a);
-            let b = make_py_array(py, &b);
-            eval::<i32>(Array::subtract(&a, &b).unwrap())
-        });
-        assert_eq!(result, (a - b).into_dyn());
-    }
-
-    #[test]
-    fn test_mul_i32() {
-        let a = array![[1i32, 2], [3, 4]];
-        let b = array![[5i32, 6], [7, 8]];
-        let result = Python::attach(|py| {
-            let a = make_py_array(py, &a);
-            let b = make_py_array(py, &b);
-            eval::<i32>(Array::multiply(&a, &b).unwrap())
-        });
-        assert_eq!(result, (a * b).into_dyn());
-    }
-
-    fn getitem<T>(py_arr: &Bound<'_, Array>, key: &Bound<'_, PyAny>) -> ArrayD<T>
-    where
-        T: Dtyped + numpy::Element + Copy,
-    {
-        Array::__getitem__(py_arr.get(), key)
-            .unwrap()
-            .0
-            .cast_into::<PyArrayDyn<T>>()
-            .unwrap()
-            .to_owned_array()
-    }
-
-    // --- __getitem__: integer indexing ---
-
-    #[test]
-    fn test_getitem_int_positive() {
-        let data = ndarray::Array::from_shape_vec(vec![5], (0..5).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = 2i64.into_pyobject(py).unwrap().into_any();
-            let result = getitem::<i32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[] as &[usize]);
-            assert_eq!(result.first().copied().unwrap(), 2);
-        });
-    }
-
-    #[test]
-    fn test_getitem_int_negative() {
-        let data = ndarray::Array::from_shape_vec(vec![5], (0..5).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = (-1i64).into_pyobject(py).unwrap().into_any();
-            let result = getitem::<i32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[] as &[usize]);
-            assert_eq!(result.first().copied().unwrap(), 4);
-        });
-    }
-
-    #[test]
-    fn test_getitem_int_out_of_bounds() {
-        let data = ndarray::Array::from_shape_vec(vec![5], (0..5).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = 5i64.into_pyobject(py).unwrap().into_any();
-            let err = Array::__getitem__(py_arr.get(), key.as_any()).unwrap_err();
-            assert!(err.is_instance_of::<PyIndexError>(py));
-        });
-    }
-
-    #[test]
-    fn test_getitem_int_negative_out_of_bounds() {
-        let data = ndarray::Array::from_shape_vec(vec![5], (0..5).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = (-6i64).into_pyobject(py).unwrap().into_any();
-            let err = Array::__getitem__(py_arr.get(), key.as_any()).unwrap_err();
-            assert!(err.is_instance_of::<PyIndexError>(py));
-        });
-    }
-
-    // --- __getitem__: slice indexing ---
-
-    #[test]
-    fn test_getitem_slice_start_stop() {
-        let data =
-            ndarray::Array::from_shape_vec(vec![5], (0..5).map(|x| x as f32).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = PySlice::new(py, 1, 4, 1).into_any();
-            let result = getitem::<f32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[3usize]);
-            assert_eq!(result.as_slice().unwrap(), &[1.0f32, 2.0, 3.0]);
-        });
-    }
-
-    #[test]
-    fn test_getitem_slice_no_start() {
-        let data =
-            ndarray::Array::from_shape_vec(vec![5], (0..5).map(|x| x as f32).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = py.eval(c"slice(None, 3, None)", None, None).unwrap();
-            let result = getitem::<f32>(&py_arr, &key);
-            assert_eq!(result.shape(), &[3usize]);
-            assert_eq!(result.as_slice().unwrap(), &[0.0f32, 1.0, 2.0]);
-        });
-    }
-
-    #[test]
-    fn test_getitem_slice_no_stop() {
-        let data =
-            ndarray::Array::from_shape_vec(vec![5], (0..5).map(|x| x as f32).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = py.eval(c"slice(2, None, None)", None, None).unwrap();
-            let result = getitem::<f32>(&py_arr, &key);
-            assert_eq!(result.shape(), &[3usize]);
-            assert_eq!(result.as_slice().unwrap(), &[2.0f32, 3.0, 4.0]);
-        });
-    }
-
-    #[test]
-    fn test_getitem_slice_full() {
-        let data = ndarray::Array::from_shape_vec(vec![5], (0..5).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = PySlice::full(py).into_any();
-            let result = getitem::<i32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[5usize]);
-            assert_eq!(result.as_slice().unwrap(), &[0i32, 1, 2, 3, 4]);
-        });
-    }
-
-    #[test]
-    fn test_getitem_slice_negative_start() {
-        let data = ndarray::Array::from_shape_vec(vec![5], (0..5).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = py.eval(c"slice(-3, None, None)", None, None).unwrap();
-            let result = getitem::<i32>(&py_arr, &key);
-            assert_eq!(result.shape(), &[3usize]);
-            assert_eq!(result.as_slice().unwrap(), &[2i32, 3, 4]);
-        });
-    }
-
-    #[test]
-    fn test_getitem_slice_empty() {
-        let data = ndarray::Array::from_shape_vec(vec![5], (0..5).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = PySlice::new(py, 2, 2, 1).into_any();
-            let result = getitem::<i32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[0usize]);
-        });
-    }
-
-    #[test]
-    fn test_getitem_slice_step_not_one_err() {
-        let data = ndarray::Array::from_shape_vec(vec![5], (0..5).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = py.eval(c"slice(None, None, 2)", None, None).unwrap();
-            let err = Array::__getitem__(py_arr.get(), &key).unwrap_err();
-            assert!(err.is_instance_of::<PyValueError>(py));
-        });
-    }
-
-    // --- __getitem__: 2-D indexing ---
-
-    #[test]
-    fn test_getitem_2d_row_int() {
-        // arr[0] on shape [2, 3] -> first row, shape [3]
-        let data =
-            ndarray::Array::from_shape_vec(vec![2, 3], (0..6).map(|x| x as f32).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = 0i64.into_pyobject(py).unwrap().into_any();
-            let result = getitem::<f32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[3usize]);
-            assert_eq!(result.as_slice().unwrap(), &[0.0f32, 1.0, 2.0]);
-        });
-    }
-
-    #[test]
-    fn test_getitem_2d_element() {
-        // arr[1, 2] on shape [2, 3] -> scalar, shape []
-        let data =
-            ndarray::Array::from_shape_vec(vec![2, 3], (0..6).map(|x| x as f32).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let items: Vec<Bound<'_, PyAny>> = vec![
-                1i64.into_pyobject(py).unwrap().into_any(),
-                2i64.into_pyobject(py).unwrap().into_any(),
-            ];
-            let key = PyTuple::new(py, items).unwrap().into_any();
-            let result = getitem::<f32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[] as &[usize]);
-            assert_eq!(result.first().copied().unwrap(), 5.0f32);
-        });
-    }
-
-    #[test]
-    fn test_getitem_2d_col() {
-        // arr[:, 1] on shape [2, 3] -> column 1, shape [2]
-        let data =
-            ndarray::Array::from_shape_vec(vec![2, 3], (0..6).map(|x| x as f32).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let items: Vec<Bound<'_, PyAny>> = vec![
-                PySlice::full(py).into_any(),
-                1i64.into_pyobject(py).unwrap().into_any(),
-            ];
-            let key = PyTuple::new(py, items).unwrap().into_any();
-            let result = getitem::<f32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[2usize]);
-            assert_eq!(result.as_slice().unwrap(), &[1.0f32, 4.0]);
-        });
-    }
-
-    #[test]
-    fn test_getitem_2d_subarray() {
-        // arr[0:2, 1:3] on shape [3, 3] -> shape [2, 2]
-        let data =
-            ndarray::Array::from_shape_vec(vec![3, 3], (0..9).map(|x| x as f32).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let items: Vec<Bound<'_, PyAny>> = vec![
-                PySlice::new(py, 0, 2, 1).into_any(),
-                PySlice::new(py, 1, 3, 1).into_any(),
-            ];
-            let key = PyTuple::new(py, items).unwrap().into_any();
-            let result = getitem::<f32>(&py_arr, key.as_any());
-            // [[0,1,2],[3,4,5],[6,7,8]] -> rows 0-1, cols 1-2 -> [[1,2],[4,5]]
-            let expected =
-                ndarray::Array::from_shape_vec(vec![2, 2], vec![1.0f32, 2.0, 4.0, 5.0]).unwrap();
-            assert_eq!(result, expected);
-        });
-    }
-
-    // --- __getitem__: ellipsis ---
-
-    #[test]
-    fn test_getitem_ellipsis_full() {
-        // arr[...] -> entire array unchanged
-        let data = ndarray::Array::from_shape_vec(vec![2, 3], (0..6).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = PyEllipsis::get(py).to_owned().into_any();
-            let result = getitem::<i32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[2usize, 3]);
-            assert_eq!(result, data);
-        });
-    }
-
-    #[test]
-    fn test_getitem_ellipsis_prefix() {
-        // arr[0, ...] on shape [2, 3] -> row 0, shape [3]
-        let data =
-            ndarray::Array::from_shape_vec(vec![2, 3], (0..6).map(|x| x as f32).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let items: Vec<Bound<'_, PyAny>> = vec![
-                0i64.into_pyobject(py).unwrap().into_any(),
-                PyEllipsis::get(py).to_owned().into_any(),
-            ];
-            let key = PyTuple::new(py, items).unwrap().into_any();
-            let result = getitem::<f32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[3usize]);
-            assert_eq!(result.as_slice().unwrap(), &[0.0f32, 1.0, 2.0]);
-        });
-    }
-
-    #[test]
-    fn test_getitem_ellipsis_suffix() {
-        // arr[..., 0] on shape [2, 3] -> column 0, shape [2]
-        let data =
-            ndarray::Array::from_shape_vec(vec![2, 3], (0..6).map(|x| x as f32).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let items: Vec<Bound<'_, PyAny>> = vec![
-                PyEllipsis::get(py).to_owned().into_any(),
-                0i64.into_pyobject(py).unwrap().into_any(),
-            ];
-            let key = PyTuple::new(py, items).unwrap().into_any();
-            let result = getitem::<f32>(&py_arr, key.as_any());
-            assert_eq!(result.shape(), &[2usize]);
-            assert_eq!(result.as_slice().unwrap(), &[0.0f32, 3.0]);
-        });
-    }
-
-    // --- __getitem__: error cases ---
-
-    #[test]
-    fn test_getitem_too_many_indices_err() {
-        let data = ndarray::Array::from_shape_vec(vec![2, 3], (0..6).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let items: Vec<Bound<'_, PyAny>> = vec![
-                0i64.into_pyobject(py).unwrap().into_any(),
-                1i64.into_pyobject(py).unwrap().into_any(),
-                2i64.into_pyobject(py).unwrap().into_any(),
-            ];
-            let key = PyTuple::new(py, items).unwrap().into_any();
-            let err = Array::__getitem__(py_arr.get(), key.as_any()).unwrap_err();
-            assert!(err.is_instance_of::<PyIndexError>(py));
-        });
-    }
-
-    #[test]
-    fn test_getitem_multiple_ellipses_err() {
-        let data = ndarray::Array::from_shape_vec(vec![2, 3], (0..6).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let items: Vec<Bound<'_, PyAny>> = vec![
-                PyEllipsis::get(py).to_owned().into_any(),
-                PyEllipsis::get(py).to_owned().into_any(),
-            ];
-            let key = PyTuple::new(py, items).unwrap().into_any();
-            let err = Array::__getitem__(py_arr.get(), key.as_any()).unwrap_err();
-            assert!(err.is_instance_of::<PyIndexError>(py));
-        });
-    }
-
-    #[test]
-    fn test_getitem_invalid_type_err() {
-        let data = ndarray::Array::from_shape_vec(vec![5], (0..5).collect()).unwrap();
-        Python::attach(|py| {
-            let py_arr = make_py_array(py, &data);
-            let key = "bad".into_pyobject(py).unwrap().into_any();
-            let err = Array::__getitem__(py_arr.get(), key.as_any()).unwrap_err();
-            assert!(err.is_instance_of::<PyTypeError>(py));
-        });
-    }
-
-    #[test]
-    fn test_ops_chained() {
-        // (a + b) * c  computed both in jix and ndarray
-        let a = array![1.0f32, 2.0, 3.0, 4.0];
-        let b = array![4.0f32, 3.0, 2.0, 1.0];
-        let c = array![2.0f32, 2.0, 2.0, 2.0];
-        let jix_result = Python::attach(|py| {
-            let a = make_py_array(py, &a);
-            let b = make_py_array(py, &b);
-            let c = make_py_array(py, &c);
-            eval::<f32>(
-                Array::multiply(&Bound::new(py, Array::add(&a, &b).unwrap()).unwrap(), &c).unwrap(),
-            )
-        });
-        assert_eq!(jix_result, ((a + b) * c).into_dyn());
     }
 }

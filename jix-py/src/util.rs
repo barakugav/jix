@@ -7,13 +7,11 @@ use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMet
 use pyo3::exceptions::{
     PyArithmeticError, PyIndexError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
 };
-use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::slice::PySliceIndices;
-use pyo3::types::{PySlice, PyTuple};
-use pyo3::{type_hint_subscript, type_hint_union, PyTypeInfo};
+use pyo3::types::PySlice;
 
 use crate::type_hint::Dim;
 
@@ -279,104 +277,6 @@ pub(crate) fn normalize_dims_optional(
     }
 }
 
-pub enum ItemOrTuple<T> {
-    Item(T),
-    Sequence(Vec<T>),
-}
-impl<'py, T> FromPyObject<'_, 'py> for ItemOrTuple<T>
-where
-    T: FromPyObjectOwned<'py>,
-{
-    type Error = PyErr;
-
-    const INPUT_TYPE: PyStaticExpr = type_hint_union!(
-        T::INPUT_TYPE,
-        type_hint_subscript!(
-            <PyTuple as PyTypeInfo>::TYPE_HINT,
-            T::INPUT_TYPE,
-            PyStaticExpr::Constant {
-                value: PyStaticConstant::Ellipsis
-            }
-        )
-    );
-
-    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
-        // Only tuples count as sequences, unlike pyo3's `Vec<T>`, which
-        // accepts any object with the sequence protocol: an array passed where dims are expected
-        // is rejected instead of having its elements read as dims.
-        if obj.is_instance_of::<PyTuple>() {
-            let items = obj
-                .try_iter()?
-                .map(|item| item?.extract::<T>().map_err(Into::into))
-                .collect::<PyResult<Vec<T>>>()?;
-            return Ok(Self::Sequence(items));
-        }
-        obj.extract::<T>().map(Self::Item).map_err(|err| {
-            let err: PyErr = err.into();
-            if !err.is_instance_of::<PyTypeError>(obj.py()) {
-                return err; // e.g. OverflowError for an out-of-range int
-            }
-            let type_name = obj.get_type().name().map(|n| n.to_string());
-            PyTypeError::new_err(format!(
-                "expected an int, or a tuple of ints, got {}",
-                type_name.as_deref().unwrap_or("?")
-            ))
-        })
-    }
-}
-impl<T> ItemOrTuple<T> {
-    #[inline]
-    pub(crate) fn into_dim_array(self) -> PyResult<DimArray<T>> {
-        match self {
-            ItemOrTuple::Item(item) => {
-                let mut arr = DimArray::new();
-                arr.push(item);
-                Ok(arr)
-            }
-            ItemOrTuple::Sequence(seq) => {
-                if seq.len() > NDIM_MAX {
-                    return Err(PyValueError::new_err(format!(
-                        "Number of dimensions {} exceeds the maximum supported {}",
-                        seq.len(),
-                        NDIM_MAX
-                    )));
-                }
-                Ok(seq.into_iter().collect())
-            }
-        }
-    }
-
-    #[inline]
-    pub(crate) fn len(&self) -> usize {
-        match self {
-            ItemOrTuple::Item(_) => 1,
-            ItemOrTuple::Sequence(seq) => seq.len(),
-        }
-    }
-
-    #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-impl<T> From<T> for ItemOrTuple<T> {
-    #[inline]
-    fn from(item: T) -> Self {
-        ItemOrTuple::Item(item)
-    }
-}
-impl<T> From<Vec<T>> for ItemOrTuple<T> {
-    #[inline]
-    fn from(seq: Vec<T>) -> Self {
-        ItemOrTuple::Sequence(seq)
-    }
-}
-impl<T, const N: usize> From<[T; N]> for ItemOrTuple<T> {
-    #[inline]
-    fn from(arr: [T; N]) -> Self {
-        ItemOrTuple::Sequence(arr.into())
-    }
-}
 #[allow(unused)]
 pub(crate) struct UnsafeSend<T>(T);
 unsafe impl<T> Send for UnsafeSend<T> {}

@@ -228,8 +228,8 @@ def test_multiply_custom_inputs():
 @pytest.mark.parametrize("dtype", floats + complexes)
 @given(st.data())
 def test_divide(dtype: np.dtype, data: DataObject):
-    # divide dispatches only on float/complex dtypes; integer quotients come from
-    # divide_floor (see test_divide_integer_valued). Non-zero strategy avoids inf/NaN from
+    # True division dispatches only on float/complex dtypes; integer quotients come from a
+    # rounding_mode (see test_integer_division). Non-zero strategy avoids inf/NaN from
     # division-by-zero for the float case.
     nz = op_safe_non_zero_element_strategy(dtype)
     (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
@@ -286,25 +286,28 @@ def _quotient(a: np.ndarray, b: np.ndarray, r: np.ndarray) -> np.ndarray:
     return exact.round().astype(a.dtype)
 
 
-# The division and remainder of each convention, and a reference remainder.
+ROUNDING_MODES = ["trunc", "floor", "euclid"]
+
+# Each rounding mode and a reference remainder.
 CONVENTIONS = [
-    pytest.param(jix.divide_trunc, jix.remainder_trunc, np.fmod, id="trunc"),
-    pytest.param(jix.divide_floor, jix.remainder_floor, np.remainder, id="floor"),
-    pytest.param(jix.divide_euclid, jix.remainder_euclid, _remainder_euclid_ref, id="euclid"),
+    pytest.param("trunc", np.fmod, id="trunc"),
+    pytest.param("floor", np.remainder, id="floor"),
+    pytest.param("euclid", _remainder_euclid_ref, id="euclid"),
 ]
 
 
-@pytest.mark.parametrize(("divide", "remainder", "remainder_ref"), CONVENTIONS)
+@pytest.mark.parametrize(("rounding_mode", "remainder_ref"), CONVENTIONS)
 @pytest.mark.parametrize("dtype", ints + uints + floats)
 @given(st.data())
-def test_integer_division(divide, remainder, remainder_ref, dtype: np.dtype, data: DataObject):
+def test_integer_division(rounding_mode, remainder_ref, dtype: np.dtype, data: DataObject):
     # The remainder against the reference, and the quotient against the one of that remainder,
     # which is exact. Non-zero divisors avoid the integer divide-by-zero error.
     nz = op_safe_non_zero_element_strategy(dtype)
     (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
     r = remainder_ref(np_a, np_b)
-    assert_array_matches(remainder(za, zb), r, data=data)
-    assert_array_matches(divide(za, zb), _quotient(np_a, np_b, r), data=data)
+    assert_array_matches(jix.remainder(za, zb, rounding_mode=rounding_mode), r, data=data)
+    q = jix.divide(za, zb, rounding_mode=rounding_mode)
+    assert_array_matches(q, _quotient(np_a, np_b, r), data=data)
 
 
 @pytest.mark.parametrize("dtype", ints + uints + floats)
@@ -325,18 +328,23 @@ def test_integer_division_custom_inputs():
     a = np.array([7, -7, 7, -7, 0], dtype=np.int32)
     b = np.array([2, 2, -2, -2, 5], dtype=np.int32)
     za, zb = jix.compact(a), jix.compact(b)
-    for divide, remainder, q, r in [
-        (jix.divide_trunc, jix.remainder_trunc, [3, -3, -3, 3, 0], [1, -1, 1, -1, 0]),
-        (jix.divide_floor, jix.remainder_floor, [3, -4, -4, 3, 0], [1, 1, -1, -1, 0]),
-        (jix.divide_euclid, jix.remainder_euclid, [3, -4, -3, 4, 0], [1, 1, 1, 1, 0]),
+    for mode, q, r in [
+        ("trunc", [3, -3, -3, 3, 0], [1, -1, 1, -1, 0]),
+        ("floor", [3, -4, -4, 3, 0], [1, 1, -1, -1, 0]),
+        ("euclid", [3, -4, -3, 4, 0], [1, 1, 1, 1, 0]),
     ]:
-        check(divide(za, zb), q)
-        check(remainder(za, zb), r)
-        check(divide(za, zb) * zb + remainder(za, zb), a)
-        check(getattr(za, divide.__name__)(zb), q)  # the Array methods
-        check(getattr(za, remainder.__name__)(zb), r)
+        zq = jix.divide(za, zb, rounding_mode=mode)
+        zr = jix.remainder(za, zb, rounding_mode=mode)
+        check(zq, q)
+        check(zr, r)
+        check(zq * zb + zr, a)
+        check(za.divide(zb, rounding_mode=mode), q)  # the Array methods
+        check(za.remainder(zb, rounding_mode=mode), r)
     check(za // zb, a // b)
     check(za % zb, a % b)
+    check(jix.remainder(za, zb), a % b)  # floored by default
+    check(za.remainder(zb), a % b)
+    check(za.divide(zb), a / b)  # true division by default
 
     # Scalars and lists on either side.
     d = np.array([[10, 20, 30], [40, 50, 61]], dtype=np.int64)
@@ -347,7 +355,7 @@ def test_integer_division_custom_inputs():
     check(np.int64(-65) % zd, -65 % d)  # __rmod__
     check(65 % zd, 65 % d)
     check(zd // [[5, 4, 3], [2, 5, 6]], d // [[5, 4, 3], [2, 5, 6]])
-    check(jix.remainder_trunc(zd, [[3, 6, 7], [9, 8, 10]]), np.fmod(d, [[3, 6, 7], [9, 8, 10]]))
+    check(jix.remainder(zd, [[3, 6, 7], [9, 8, 10]], rounding_mode="trunc"), np.fmod(d, [[3, 6, 7], [9, 8, 10]]))
 
     # Floats: of the exact quotient, so `0.1` fits in `1.0` 9 times, as in numpy.
     f = np.array([1.0, -7.5, 7.5, -1e-20], dtype=np.float64)
@@ -355,24 +363,24 @@ def test_integer_division_custom_inputs():
     zf, zg = jix.compact(f), jix.compact(g)
     check(zf // zg, f // g)
     check(zf % zg, f % g)
-    check(jix.divide_trunc(zf, zg), [9.0, -3.0, -3.0, 0.0])
-    check(jix.divide_floor(zf, zg), [9.0, -4.0, -4.0, -1.0])
-    check(jix.divide_euclid(zf, zg), [9.0, -4.0, -3.0, -1.0])
-    check(jix.remainder_trunc(zf, zg), np.fmod(f, g))
-    check(jix.remainder_euclid(zf, zg), _remainder_euclid_ref(f, g))
+    check(jix.divide(zf, zg, rounding_mode="trunc"), [9.0, -3.0, -3.0, 0.0])
+    check(jix.divide(zf, zg, rounding_mode="floor"), [9.0, -4.0, -4.0, -1.0])
+    check(jix.divide(zf, zg, rounding_mode="euclid"), [9.0, -4.0, -3.0, -1.0])
+    check(jix.remainder(zf, zg, rounding_mode="trunc"), np.fmod(f, g))
+    check(jix.remainder(zf, zg, rounding_mode="euclid"), _remainder_euclid_ref(f, g))
 
 
 @pytest.mark.parametrize("dtype", floats)
 @pytest.mark.parametrize(
-    ("jix_fn", "numpy_fn"),
-    [(jix.remainder_trunc, np.fmod), (jix.remainder_floor, np.remainder), (jix.divide_floor, np.floor_divide)],
+    ("name", "rounding_mode", "numpy_fn"),
+    [("remainder", "trunc", np.fmod), ("remainder", "floor", np.remainder), ("divide", "floor", np.floor_divide)],
 )
-def test_float_special_values(jix_fn, numpy_fn, dtype: np.dtype):
+def test_float_special_values(name, rounding_mode, numpy_fn, dtype: np.dtype):
     # Every pair of special values, bit for bit (zero signs included) as numpy.
     values = [0.0, -0.0, 1.0, -1.0, 5.0, -2.5, np.inf, -np.inf, np.nan]
     a = np.array([x for x in values for _ in values], dtype=dtype)
     b = np.array([y for _ in values for y in values], dtype=dtype)
-    result = jix_fn(jix.compact(a), jix.compact(b)).numpy()
+    result = getattr(jix, name)(jix.compact(a), jix.compact(b), rounding_mode=rounding_mode).numpy()
     with np.errstate(divide="ignore", invalid="ignore"):
         expected = numpy_fn(a, b)
     np.testing.assert_array_equal(result, expected)
@@ -380,21 +388,30 @@ def test_float_special_values(jix_fn, numpy_fn, dtype: np.dtype):
     np.testing.assert_array_equal(np.signbit(result[finite]), np.signbit(expected[finite]))
 
 
-INTEGER_DIVISIONS = [
-    jix.divide_trunc,
-    jix.divide_floor,
-    jix.divide_euclid,
-    jix.remainder_trunc,
-    jix.remainder_floor,
-    jix.remainder_euclid,
-]
-
-
-@pytest.mark.parametrize("jix_fn", INTEGER_DIVISIONS)
-def test_integer_division_rejects_complex(jix_fn):
+@pytest.mark.parametrize("rounding_mode", ROUNDING_MODES)
+@pytest.mark.parametrize("name", ["divide", "remainder"])
+def test_integer_division_rejects_complex(name, rounding_mode):
     a = jix.compact(np.array([1 + 1j, 2 + 2j], dtype=np.complex64))
+    with pytest.raises(TypeError, match=f"Op '{name}' does not support"):
+        _ = getattr(jix, name)(a, a, rounding_mode=rounding_mode).numpy()
+
+
+@pytest.mark.parametrize("name", ["divide", "remainder"])
+def test_invalid_rounding_mode_raises(name):
+    a = jix.compact(np.array([7, -7], dtype=np.int32))
+    with pytest.raises(ValueError, match="invalid rounding_mode value: 'round'"):
+        getattr(jix, name)(a, a, rounding_mode="round")
+    with pytest.raises(ValueError, match="invalid rounding_mode value: 'round'"):
+        getattr(a, name)(a, rounding_mode="round")
     with pytest.raises(TypeError):
-        _ = jix_fn(a, a).numpy()
+        getattr(jix, name)(a, a, "floor")  # keyword-only
+
+
+def test_remainder_rejects_none_rounding_mode():
+    # There is no true remainder, as there is a true division.
+    a = jix.compact(np.array([7, -7], dtype=np.int32))
+    with pytest.raises(TypeError):
+        jix.remainder(a, a, rounding_mode=None)
 
 
 # Every (base_dtype, exponent_dtype) pair the power dispatch table accepts directly.

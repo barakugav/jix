@@ -1,24 +1,23 @@
 use crate::ops::prelude::*;
 
-/// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
-/// examples.
-///
-/// # Panics
-///
-/// Panics if `condition` is not `bool8`, `x` and `y` differ in dtype, or any two arrays differ
-/// in shape.
-#[track_caller]
-pub fn where_condition<SC, SX, SY>(
-    condition: Array<SC>,
-    x: Array<SX>,
-    y: Array<SY>,
-) -> Array<Where<SC, SX, SY>>
+impl<S> Array<S>
 where
-    SC: ArrayStorageTyped<Item = bool8>,
-    SX: ArrayStorage,
-    SY: ArrayStorage<ElementType = SX::ElementType>,
+    S: ArrayStorageTyped<Item = bool8>,
 {
-    Where::new_array(condition, x, y).unwrap()
+    /// Element-wise selection from `x` where `self` is `true`, and from `y` elsewhere. See
+    /// [`Select`] for details and examples.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x` and `y` differ in dtype, or any two arrays differ in shape.
+    #[track_caller]
+    pub fn select<SX, SY>(self, x: Array<SX>, y: Array<SY>) -> Array<Select<S, SX, SY>>
+    where
+        SX: ArrayStorage,
+        SY: ArrayStorage<ElementType = SX::ElementType>,
+    {
+        Select::new_array(self, x, y).unwrap()
+    }
 }
 
 /// Selects elements element-wise from `x` or `y` depending on `condition`.
@@ -33,11 +32,10 @@ where
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
-/// [`where_condition()`].
+/// [`Array::select()`](crate::Array::select).
 ///
 /// # Examples
 /// ```
-/// use jix::ops::where_condition;
 /// use jix::scalar::bool8;
 /// use jix::Array;
 /// use ndarray::{array, Ix2};
@@ -45,38 +43,38 @@ where
 /// let cond = Array::compact_ndarray(&array![bool8::TRUE, bool8::FALSE, bool8::TRUE, bool8::FALSE])?;
 /// let x = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 /// let y = Array::compact_ndarray(&array![10i32, 20, 30, 40])?;
-/// let result = where_condition(cond, x, y).to_ndarray()?;
+/// let result = cond.select(x, y).to_ndarray()?;
 /// assert_eq!(result, array![1, 20, 3, 40]);
 ///
 /// // 2-D arrays
 /// let cond = Array::compact_ndarray(&array![[bool8::TRUE, bool8::FALSE], [bool8::FALSE, bool8::TRUE]])?;
 /// let x = Array::compact_ndarray(&array![[1.0f64, 2.0], [3.0, 4.0]])?;
 /// let y = Array::compact_ndarray(&array![[10.0f64, 20.0], [30.0, 40.0]])?;
-/// let result = where_condition(cond, x, y).to_ndarray::<Ix2>()?;
+/// let result = cond.select(x, y).to_ndarray::<Ix2>()?;
 /// assert_eq!(result[[0, 0]], 1.0);
 /// assert_eq!(result[[0, 1]], 20.0);
 /// assert_eq!(result[[1, 0]], 30.0);
 /// assert_eq!(result[[1, 1]], 4.0);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Where<SC, SX, SY> {
+pub struct Select<SC, SX, SY> {
     condition: SC,
     x: SX,
     y: SY,
     spec: ArraySpecDynamic,
 }
-impl<SC, SX, SY> Where<SC, SX, SY>
+impl<SC, SX, SY> Select<SC, SX, SY>
 where
     SC: ArrayStorageTyped<Item = bool8>,
     SX: ArrayStorage,
     SY: ArrayStorage<ElementType = SX::ElementType>,
 {
-    /// Constructs a [`Where`] storage. See the struct docs for semantics and examples.
+    /// Constructs a [`Select`] storage. See the struct docs for semantics and examples.
     pub fn new(condition: SC, x: SX, y: SY) -> Result<Self> {
         ensure!(
             condition.dtype() == &bool8::DTYPE,
             UnsupportedDtype,
-            "where condition must have boolean dtype, got {}",
+            "select condition must have boolean dtype, got {}",
             condition.dtype()
         );
         ensure!(
@@ -137,14 +135,14 @@ where
         })
     }
 
-    /// Constructs an array with [`Where`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Select`] storage. See the storage struct docs for semantics and examples.
     pub fn new_array(condition: Array<SC>, x: Array<SX>, y: Array<SY>) -> Result<Array<Self>> {
         Self::new(condition.into_storage(), x.into_storage(), y.into_storage())
             .map(Array::from_storage)
     }
 }
-impl<SC, SX, SY> crate::storage::ArrayStorageImpl for Where<SC, SX, SY> {}
-impl<SC, SX, SY> ArrayStorage for Where<SC, SX, SY>
+impl<SC, SX, SY> crate::storage::ArrayStorageImpl for Select<SC, SX, SY> {}
+impl<SC, SX, SY> ArrayStorage for Select<SC, SX, SY>
 where
     SC: ArrayStorageTyped<Item = bool8>,
     SX: ArrayStorage,
@@ -362,12 +360,12 @@ where
         let x = self.x.read_as_elementwise_pipeline::<T>(index, context)?;
         let y = self.y.read_as_elementwise_pipeline::<T>(index, context)?;
 
-        struct WherePipeline<PC, PX, PY> {
+        struct SelectPipeline<PC, PX, PY> {
             condition: PC,
             x: PX,
             y: PY,
         }
-        impl<T, PC, PX, PY> ElementwisePipelineImpl<T> for WherePipeline<PC, PX, PY>
+        impl<T, PC, PX, PY> ElementwisePipelineImpl<T> for SelectPipeline<PC, PX, PY>
         where
             PC: ElementwisePipelineImpl<bool8>,
             PX: ElementwisePipelineImpl<T>,
@@ -409,7 +407,7 @@ where
             }
         }
 
-        Ok(WherePipeline { condition, x, y })
+        Ok(SelectPipeline { condition, x, y })
     }
 
     #[inline(always)]
@@ -428,11 +426,11 @@ where
             .with_cleared_flags()
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
-        ArrayStorageInfo::new_deps("Where", [&self.condition, &self.x, &self.y])
+        ArrayStorageInfo::new_deps("Select", [&self.condition, &self.x, &self.y])
     }
 
     type ElementTypeChange<NewET: crate::ElementType> =
-        Where<SC, SX::ElementTypeChange<NewET>, SY::ElementTypeChange<NewET>>;
+        Select<SC, SX::ElementTypeChange<NewET>, SY::ElementTypeChange<NewET>>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
         self,
@@ -440,7 +438,7 @@ where
     where
         Self: Sized,
     {
-        Ok(Where {
+        Ok(Select {
             condition: self.condition,
             x: self.x.element_type_change()?,
             y: self.y.element_type_change()?,
@@ -456,7 +454,7 @@ mod tests {
     use ndarray::{array, Ix1};
     use proptest::prelude::*;
 
-    use super::{where_condition, Where};
+    use super::Select;
     use crate::array::Array;
     use crate::dtype::Dtyped;
     use crate::scalar::bool8;
@@ -469,8 +467,7 @@ mod tests {
         let cond = ndarray::Array2::from_shape_fn((2, 3), |(i, j)| bool8::from((i + j) % 2 == 0));
         let x = ndarray::Array2::from_shape_fn((2, 3), |(i, j)| (i * 10 + j) as i32);
         let y = x.mapv(|v| -v);
-        let w = where_condition(
-            Array::compact_ndarray(&cond).unwrap(),
+        let w = Array::compact_ndarray(&cond).unwrap().select(
             Array::plain_ndarray_ref(&x).unwrap(),
             Array::compact_ndarray(&y).unwrap(),
         );
@@ -520,10 +517,10 @@ mod tests {
     }
 
     /// Compresses `cond`/`x`/`y` (with `block_shape`, if given, applied to all three), runs
-    /// `where_condition` on them, and asserts the result matches the elementwise `if c { x }
+    /// `select` on them, and asserts the result matches the elementwise `if c { x }
     /// else { y }` reference. Shared by the concrete per-byte-width tests below, which only
     /// differ in the fixed input arrays.
-    fn check_where_concrete<T, InD>(
+    fn check_select_concrete<T, InD>(
         cond: &ndarray::Array<bool8, InD>,
         x: &ndarray::Array<T, InD>,
         y: &ndarray::Array<T, InD>,
@@ -548,18 +545,18 @@ mod tests {
             .and(x)
             .and(y)
             .map_collect(|&c, &x, &y| if c.into() { x } else { y });
-        crate::util::assert_array_matches(&where_condition(za_cond, za_x, za_y), &expected);
+        crate::util::assert_array_matches(&za_cond.select(za_x, za_y), &expected);
     }
 
     // Proptest macro: one test per dtype covering random shapes, random block shapes,
     // full reads, and random sub-range reads via assert_array_matches.
     // The condition, x, and y arrays all share the same random shape.
-    macro_rules! test_where_dtype {
+    macro_rules! test_select_dtype {
         ($dtype:ty) => {
             paste::paste! {
                 proptest::proptest! {
                     #[test]
-                    fn [<where_op_ $dtype>](
+                    fn [<select_ $dtype>](
                         (nd_cond, nd_x, nd_y, za_cond, za_x, za_y) in strategy2::<$dtype>()
                     ) {
                         let expected_vals: Vec<$dtype> = nd_cond
@@ -572,7 +569,7 @@ mod tests {
                             expected_vals,
                         )
                         .unwrap();
-                        let result = where_condition(za_cond, za_x, za_y);
+                        let result = za_cond.select(za_x, za_y);
                         crate::util::assert_array_matches(&result, &expected);
                     }
                 }
@@ -583,16 +580,16 @@ mod tests {
     // `read_data`'s `match (itemsize, alignment)` picks the inner loop by byte width/alignment,
     // not by the specific dtype (see `read_data` above), so one proptest dtype is kept per
     // distinct branch and same-branch dtypes are covered by a concrete test:
-    //   (1,1)  u8-width  -> kept `i8`  proptest; u8/bool     -> where_1byte_concrete
-    //   (2,2)  u16-width -> kept `i16` proptest; u16/f16     -> where_2byte_concrete
-    //   (4,4)  u32-width -> kept `i32` proptest; u32/f32     -> where_4byte_concrete
-    //   (8,8)  u64-width -> kept `i64` proptest; u64/f64     -> where_8byte_concrete
-    //   (8,4)  mixed     -> where_complex_f32_concrete (Complex<f32>: 8 bytes, 4-byte align)
-    //   (16,8) mixed     -> where_complex_f64_concrete (Complex<f64>: 16 bytes, 8-byte align)
-    test_where_dtype!(i8);
-    test_where_dtype!(i16);
-    test_where_dtype!(i32);
-    test_where_dtype!(i64);
+    //   (1,1)  u8-width  -> kept `i8`  proptest; u8/bool     -> select_1byte_concrete
+    //   (2,2)  u16-width -> kept `i16` proptest; u16/f16     -> select_2byte_concrete
+    //   (4,4)  u32-width -> kept `i32` proptest; u32/f32     -> select_4byte_concrete
+    //   (8,8)  u64-width -> kept `i64` proptest; u64/f64     -> select_8byte_concrete
+    //   (8,4)  mixed     -> select_complex_f32_concrete (Complex<f32>: 8 bytes, 4-byte align)
+    //   (16,8) mixed     -> select_complex_f64_concrete (Complex<f64>: 16 bytes, 8-byte align)
+    test_select_dtype!(i8);
+    test_select_dtype!(i16);
+    test_select_dtype!(i32);
+    test_select_dtype!(i64);
 
     // --- concrete tests for the remaining dtypes ---
     //
@@ -603,7 +600,7 @@ mod tests {
     // selection patterns.
 
     #[test]
-    fn where_1byte_concrete() {
+    fn select_1byte_concrete() {
         // (1,1) branch, shared with the kept `i8` proptest: u8 and bool.
         let cond = array![
             bool8::TRUE,
@@ -618,7 +615,7 @@ mod tests {
 
         let x_u8 = array![0u8, 1, 100, u8::MAX, 0xAA, 5, 6, 7];
         let y_u8 = array![u8::MAX, 0, 0xAA, 1, 100, 50, 60, 70];
-        check_where_concrete(&cond, &x_u8, &y_u8, None);
+        check_select_concrete(&cond, &x_u8, &y_u8, None);
 
         let x_bool = array![
             bool8::TRUE,
@@ -640,11 +637,11 @@ mod tests {
             bool8::FALSE,
             bool8::TRUE
         ];
-        check_where_concrete(&cond, &x_bool, &y_bool, None);
+        check_select_concrete(&cond, &x_bool, &y_bool, None);
     }
 
     #[test]
-    fn where_2byte_concrete() {
+    fn select_2byte_concrete() {
         // (2,2) branch, shared with the kept `i16` proptest: u16 and (feature-gated) f16.
         let cond = array![
             bool8::TRUE,
@@ -659,7 +656,7 @@ mod tests {
 
         let x_u16 = array![0u16, 1, 100, u16::MAX, 0xAAAA, 5, 6, 7];
         let y_u16 = array![u16::MAX, 0, 0xAAAA, 1, 100, 50, 60, 70];
-        check_where_concrete(&cond, &x_u16, &y_u16, None);
+        check_select_concrete(&cond, &x_u16, &y_u16, None);
 
         #[cfg(feature = "half")]
         {
@@ -683,12 +680,12 @@ mod tests {
                 f16::from_f32(40.0),
                 f16::from_f32(50.0),
             ];
-            check_where_concrete(&cond, &x_f16, &y_f16, None);
+            check_select_concrete(&cond, &x_f16, &y_f16, None);
         }
     }
 
     #[test]
-    fn where_4byte_concrete() {
+    fn select_4byte_concrete() {
         // (4,4) branch, shared with the kept `i32` proptest: u32 and f32. Also exercises a
         // non-default 2-D block shape to cross block boundaries.
         let cond = ndarray::array![
@@ -698,7 +695,7 @@ mod tests {
 
         let x_u32 = ndarray::array![[0u32, 1, u32::MAX], [0xAAAAAAAAu32, 100, 200]];
         let y_u32 = ndarray::array![[u32::MAX, 0, 1], [100, 0xAAAAAAAAu32, 300]];
-        check_where_concrete(&cond, &x_u32, &y_u32, Some(&[1, 2]));
+        check_select_concrete(&cond, &x_u32, &y_u32, Some(&[1, 2]));
 
         let x_f32 = ndarray::array![
             [0.0f32, -1.5, f32::MAX],
@@ -708,11 +705,11 @@ mod tests {
             [f32::MIN, f32::MAX, 0.0],
             [f32::NEG_INFINITY, 1.5, f32::INFINITY]
         ];
-        check_where_concrete(&cond, &x_f32, &y_f32, None);
+        check_select_concrete(&cond, &x_f32, &y_f32, None);
     }
 
     #[test]
-    fn where_8byte_concrete() {
+    fn select_8byte_concrete() {
         // (8,8) branch, shared with the kept `i64` proptest: u64 and f64.
         let cond = array![
             bool8::TRUE,
@@ -727,7 +724,7 @@ mod tests {
 
         let x_u64 = array![0u64, 1, 100, u64::MAX, 0xAAAAAAAAAAAAAAAA, 5, 6, 7];
         let y_u64 = array![u64::MAX, 0, 0xAAAAAAAAAAAAAAAA, 1, 100, 50, 60, 70];
-        check_where_concrete(&cond, &x_u64, &y_u64, None);
+        check_select_concrete(&cond, &x_u64, &y_u64, None);
 
         let x_f64 = array![
             0.0f64,
@@ -749,12 +746,12 @@ mod tests {
             2.5,
             3.5
         ];
-        check_where_concrete(&cond, &x_f64, &y_f64, None);
+        check_select_concrete(&cond, &x_f64, &y_f64, None);
     }
 
     #[cfg(feature = "num-complex")]
     #[test]
-    fn where_complex_f32_concrete() {
+    fn select_complex_f32_concrete() {
         // (8,4) mixed branch: Complex<f32> is 8 bytes wide but only 4-byte aligned, distinct
         // from the (8,8) branch that i64/u64/f64 hit above.
         let cond = array![
@@ -790,12 +787,12 @@ mod tests {
             complex_f32 { re: 5.0, im: 6.0 },
             complex_f32 { re: 7.0, im: 8.0 },
         ];
-        check_where_concrete(&cond, &x, &y, None);
+        check_select_concrete(&cond, &x, &y, None);
     }
 
     #[cfg(feature = "num-complex")]
     #[test]
-    fn where_complex_f64_concrete() {
+    fn select_complex_f64_concrete() {
         // (16,8) mixed branch: Complex<f64> is 16 bytes wide but only 8-byte aligned.
         let cond = array![
             bool8::TRUE,
@@ -830,12 +827,12 @@ mod tests {
             complex_f64 { re: 5.0, im: 6.0 },
             complex_f64 { re: 7.0, im: 8.0 },
         ];
-        check_where_concrete(&cond, &x, &y, None);
+        check_select_concrete(&cond, &x, &y, None);
     }
 
     // --- strided output buffer ---
 
-    /// Read a `where_condition` view into a *strided* destination and assert every logical output
+    /// Read a `select` view into a *strided* destination and assert every logical output
     /// element lands in its own slot with the bytes between slots left untouched - i.e. `read_data`
     /// selects straight into the caller's byte strides instead of staging through a contiguous
     /// scratch and scattering at the end.
@@ -845,7 +842,7 @@ mod tests {
     /// `base_offset` shifts the destination base that many bytes off an 8-aligned address - so a
     /// non-multiple of the dtype's alignment drives the unaligned inner loop.
     #[track_caller]
-    fn check_where_strided<T, InD>(
+    fn check_select_strided<T, InD>(
         cond: &ndarray::Array<bool8, InD>,
         x: &ndarray::Array<T, InD>,
         y: &ndarray::Array<T, InD>,
@@ -866,8 +863,7 @@ mod tests {
 
         // A block shape of 2 per dim makes every read span several blocks.
         let params = || crate::util::arr_params(&vec![2usize; ndim]);
-        let view = where_condition(
-            Array::compact_ndarray_with(cond, params()).unwrap(),
+        let view = Array::compact_ndarray_with(cond, params()).unwrap().select(
             Array::compact_ndarray_with(x, params()).unwrap(),
             Array::compact_ndarray_with(y, params()).unwrap(),
         );
@@ -945,43 +941,43 @@ mod tests {
     // The inner loop is picked by (element width, alignment) and then specialized on
     // all-operands-contiguous, so each width is checked in all three interesting destination
     // layouts: contiguous+aligned, strided (gap) and contiguous-but-unaligned.
-    macro_rules! test_where_strided_dtype {
+    macro_rules! test_select_strided_dtype {
         ($dtype:ty, $f:expr) => {
             paste::paste! {
                 #[test]
-                fn [<where_strided_output_ $dtype>]() {
+                fn [<select_strided_output_ $dtype>]() {
                     let (cond, x, y) = strided_inputs($f);
-                    check_where_strided(&cond, &x, &y, 1, 0); // contiguous, aligned
-                    check_where_strided(&cond, &x, &y, 2, 0); // gap between slots
-                    check_where_strided(&cond, &x, &y, 3, 0);
+                    check_select_strided(&cond, &x, &y, 1, 0); // contiguous, aligned
+                    check_select_strided(&cond, &x, &y, 2, 0); // gap between slots
+                    check_select_strided(&cond, &x, &y, 3, 0);
                     if size_of::<$dtype>() > 1 {
                         // Base one byte off an 8-aligned address: the strides stay
                         // itemsize-multiples but no `$dtype` access is aligned.
-                        check_where_strided(&cond, &x, &y, 1, 1);
-                        check_where_strided(&cond, &x, &y, 2, 1);
+                        check_select_strided(&cond, &x, &y, 1, 1);
+                        check_select_strided(&cond, &x, &y, 2, 1);
                     }
                 }
             }
         };
     }
 
-    test_where_strided_dtype!(i8, |v| v as i8);
-    test_where_strided_dtype!(i16, |v| v as i16);
-    test_where_strided_dtype!(i32, |v| v as i32);
-    test_where_strided_dtype!(i64, |v| v);
+    test_select_strided_dtype!(i8, |v| v as i8);
+    test_select_strided_dtype!(i16, |v| v as i16);
+    test_select_strided_dtype!(i32, |v| v as i32);
+    test_select_strided_dtype!(i64, |v| v);
     #[cfg(feature = "num-complex")]
-    test_where_strided_dtype!(complex_f32, |v| complex_f32 {
+    test_select_strided_dtype!(complex_f32, |v| complex_f32 {
         re: v as f32,
         im: -(v as f32)
     });
     #[cfg(feature = "num-complex")]
-    test_where_strided_dtype!(complex_f64, |v| complex_f64 {
+    test_select_strided_dtype!(complex_f64, |v| complex_f64 {
         re: v as f64,
         im: -(v as f64)
     });
 
     #[test]
-    fn where_strided_output_4byte_2aligned() {
+    fn select_strided_output_4byte_2aligned() {
         // The (4, 2) width branch: 4 bytes wide but only 2-byte aligned, so it is served by
         // `[u16; 2]` rather than `u32`. No scalar dtype lands here.
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
@@ -997,14 +993,14 @@ mod tests {
             a: v as u16,
             b: (v * 7) as u16,
         });
-        check_where_strided(&cond, &x, &y, 1, 0);
-        check_where_strided(&cond, &x, &y, 2, 0);
-        check_where_strided(&cond, &x, &y, 1, 1);
-        check_where_strided(&cond, &x, &y, 2, 1);
+        check_select_strided(&cond, &x, &y, 1, 0);
+        check_select_strided(&cond, &x, &y, 2, 0);
+        check_select_strided(&cond, &x, &y, 1, 1);
+        check_select_strided(&cond, &x, &y, 2, 1);
     }
 
     #[test]
-    fn where_strided_output_struct_dtype() {
+    fn select_strided_output_struct_dtype() {
         // A 12-byte / 4-aligned dtype matches none of the scalar-width branches, so this drives the
         // byte-wise `inner_loop_generic` fallback into a strided destination.
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
@@ -1022,22 +1018,22 @@ mod tests {
             b: (v * 3) as i32,
             c: (v * 5) as i32,
         });
-        check_where_strided(&cond, &x, &y, 1, 0);
-        check_where_strided(&cond, &x, &y, 2, 0);
-        check_where_strided(&cond, &x, &y, 1, 1);
+        check_select_strided(&cond, &x, &y, 1, 0);
+        check_select_strided(&cond, &x, &y, 2, 0);
+        check_select_strided(&cond, &x, &y, 1, 1);
     }
 
     #[test]
-    fn where_strided_output_3d() {
+    fn select_strided_output_3d() {
         let cond = ndarray::Array3::from_shape_fn((2, 3, 4), |(i, j, k)| {
             bool8::from((i + j + k) % 3 != 0)
         });
         let x = ndarray::Array3::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let y =
             ndarray::Array3::from_shape_fn((2, 3, 4), |(i, j, k)| -1 - (i * 12 + j * 4 + k) as i32);
-        check_where_strided(&cond, &x, &y, 1, 0);
-        check_where_strided(&cond, &x, &y, 2, 0);
-        check_where_strided(&cond, &x, &y, 2, 1);
+        check_select_strided(&cond, &x, &y, 1, 0);
+        check_select_strided(&cond, &x, &y, 2, 0);
+        check_select_strided(&cond, &x, &y, 2, 1);
     }
 
     // --- error cases ---
@@ -1051,7 +1047,7 @@ mod tests {
         let y = Array::compact_ndarray(&array![4.0f64, 5.0, 6.0])
             .unwrap()
             .into_type_dyn();
-        assert!(Where::new_array(cond, x, y).is_err());
+        assert!(Select::new_array(cond, x, y).is_err());
     }
 
     #[test]
@@ -1059,7 +1055,7 @@ mod tests {
         let cond = Array::compact_ndarray(&array![bool8::TRUE, bool8::FALSE]).unwrap();
         let x = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
         let y = Array::compact_ndarray(&array![4i32, 5, 6]).unwrap();
-        assert!(Where::new_array(cond, x, y).is_err());
+        assert!(Select::new_array(cond, x, y).is_err());
     }
 
     #[test]
@@ -1067,7 +1063,7 @@ mod tests {
         let cond = Array::compact_ndarray(&array![bool8::TRUE, bool8::FALSE, bool8::TRUE]).unwrap();
         let x = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
         let y = Array::compact_ndarray(&array![4i32, 5]).unwrap();
-        assert!(Where::new_array(cond, x, y).is_err());
+        assert!(Select::new_array(cond, x, y).is_err());
     }
 
     // --- edge cases ---
@@ -1079,7 +1075,7 @@ mod tests {
                 .unwrap();
         let x = Array::compact_ndarray(&array![1i32, 2, 3, 4]).unwrap();
         let y = Array::compact_ndarray(&array![10i32, 20, 30, 40]).unwrap();
-        let result = where_condition(cond, x, y).to_ndarray().unwrap();
+        let result = cond.select(x, y).to_ndarray().unwrap();
         assert_eq!(result, array![1, 2, 3, 4]);
     }
 
@@ -1094,11 +1090,11 @@ mod tests {
         .unwrap();
         let x = Array::compact_ndarray(&array![1i32, 2, 3, 4]).unwrap();
         let y = Array::compact_ndarray(&array![10i32, 20, 30, 40]).unwrap();
-        let result = where_condition(cond, x, y).to_ndarray().unwrap();
+        let result = cond.select(x, y).to_ndarray().unwrap();
         assert_eq!(result, array![10, 20, 30, 40]);
     }
 
-    // Exercises the fallback byte-copy path in where_impl for struct dtypes.
+    // Exercises the fallback byte-copy path in select's read_data for struct dtypes.
     #[test]
     fn struct_dtype_fallback_path() {
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
@@ -1122,7 +1118,7 @@ mod tests {
             Pair { a: 50, b: 60 }
         ])
         .unwrap();
-        let result = where_condition(cond, x, y).to_ndarray::<Ix1>().unwrap();
+        let result = cond.select(x, y).to_ndarray::<Ix1>().unwrap();
         assert_eq!(result[0], Pair { a: 1, b: 2 }); // cond=true  -> x
         assert_eq!(result[1], Pair { a: 30, b: 40 }); // cond=false -> y
         assert_eq!(result[2], Pair { a: 5, b: 6 }); // cond=true  -> x

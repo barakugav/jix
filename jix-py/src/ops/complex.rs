@@ -1,9 +1,7 @@
-use std::sync::LazyLock;
-
 use jix_core::scalar::Complex;
 use pyo3::prelude::*;
 
-use crate::ops::common::{define_op1, define_op1_desc, OpDescriptor, Operand, Rank};
+use crate::ops::common::{define_op1, define_op1_table, Operand, Rank};
 use crate::Array;
 
 /// Extracts the real part of each complex element.
@@ -42,13 +40,9 @@ pub fn real<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
         }
     }
 
-    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "real",
-            define_op1_desc!(Real, [Complex<f32>, Complex<f64>], None),
-        )
-    });
-    Bound::new(py, Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
+    let dispatch_table =
+        define_op1_table!(real, Real, dispatch = { [Complex<f32>, Complex<f64>], None });
+    Bound::new(py, Array::from_core(dispatch_table.dispatch1(array)?))
 }
 
 define_op1!(
