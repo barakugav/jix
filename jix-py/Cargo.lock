@@ -118,7 +118,7 @@ dependencies = [
 
 [[package]]
 name = "jix"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "fearless_simd",
  "half",
@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "jix-macros"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "quote",
  "syn 3.0.9",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "jix-python"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "arrayvec",
  "ctor",
