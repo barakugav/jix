@@ -6,7 +6,7 @@ use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::{prelude::*, type_hint_identifier, type_hint_subscript};
 
 use crate::ops::common::{
-    broadcast_operands, define_op2, define_op2_desc, OpDescriptor, Operand, Rank, Scalar,
+    broadcast_operands, define_op2, define_op2_table, OpDescriptor, Operand, Rank, Scalar,
 };
 use crate::Array;
 
@@ -180,21 +180,20 @@ pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<A
         }
     }
 
-    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "multiply",
-            define_op2_desc!(
-                Mul,
-                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
-                Safe
-            ),
-        )
-    });
-
     let a = a_op;
     let b = Operand::from_any(b)?;
     let [a, b] = broadcast_operands([a, b])?;
-    let res = DISPATCH_TABLE.dispatch2(a, b)?;
+
+    let dispatch_table = define_op2_table!(
+        multiply,
+        Mul,
+        dispatch = {
+            [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+            Safe
+        }
+    );
+    let res = dispatch_table.dispatch2(a, b)?;
+
     Ok(Array::from_core(res))
 }
 
@@ -272,47 +271,27 @@ pub fn divide<'py>(
     b: &Bound<'py, PyAny>,
     rounding_mode: Option<RoundingMode>,
 ) -> PyResult<Array> {
-    static TRUE_DIVIDE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "divide",
-            define_op2_desc!(Div, [f16, f32, f64, Complex<f32>, Complex<f64>], Safe),
-        )
-    });
-    static DIVIDE_TRUNC: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "divide",
-            define_op2_desc!(
-                DivideTrunc,
-                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
-                Safe
-            ),
-        )
-    });
-    static DIVIDE_FLOOR: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "divide",
-            define_op2_desc!(
-                DivideFloor,
-                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
-                Safe
-            ),
-        )
-    });
-    static DIVIDE_EUCLID: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "divide",
-            define_op2_desc!(
-                DivideEuclid,
-                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
-                Safe
-            ),
-        )
-    });
     let table = match rounding_mode {
-        None => &TRUE_DIVIDE,
-        Some(RoundingMode::Trunc) => &DIVIDE_TRUNC,
-        Some(RoundingMode::Floor) => &DIVIDE_FLOOR,
-        Some(RoundingMode::Euclid) => &DIVIDE_EUCLID,
+        None => define_op2_table!(
+            divide,
+            Div,
+            dispatch = { [f16, f32, f64, Complex<f32>, Complex<f64>], Safe }
+        ),
+        Some(RoundingMode::Trunc) => define_op2_table!(
+            divide,
+            DivideTrunc,
+            dispatch = { [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64], Safe }
+        ),
+        Some(RoundingMode::Floor) => define_op2_table!(
+            divide,
+            DivideFloor,
+            dispatch = { [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64], Safe }
+        ),
+        Some(RoundingMode::Euclid) => define_op2_table!(
+            divide,
+            DivideEuclid,
+            dispatch = { [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64], Safe }
+        ),
     };
     let a = Operand::from_any(a)?;
     let b = Operand::from_any(b)?;
@@ -379,40 +358,22 @@ pub fn remainder<'py>(
     b: &Bound<'py, PyAny>,
     rounding_mode: &str,
 ) -> PyResult<Array> {
-    static REMAINDER_TRUNC: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "remainder",
-            define_op2_desc!(
-                RemainderTrunc,
-                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
-                Safe
-            ),
-        )
-    });
-    static REMAINDER_FLOOR: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "remainder",
-            define_op2_desc!(
-                RemainderFloor,
-                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
-                Safe
-            ),
-        )
-    });
-    static REMAINDER_EUCLID: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "remainder",
-            define_op2_desc!(
-                RemainderEuclid,
-                [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
-                Safe
-            ),
-        )
-    });
     let table = match rounding_mode.parse()? {
-        RoundingMode::Trunc => &REMAINDER_TRUNC,
-        RoundingMode::Floor => &REMAINDER_FLOOR,
-        RoundingMode::Euclid => &REMAINDER_EUCLID,
+        RoundingMode::Trunc => define_op2_table!(
+            remainder,
+            RemainderTrunc,
+            dispatch = { [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64], Safe }
+        ),
+        RoundingMode::Floor => define_op2_table!(
+            remainder,
+            RemainderFloor,
+            dispatch = { [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64], Safe }
+        ),
+        RoundingMode::Euclid => define_op2_table!(
+            remainder,
+            RemainderEuclid,
+            dispatch = { [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64], Safe }
+        ),
     };
     let a = Operand::from_any(a)?;
     let b = Operand::from_any(b)?;
@@ -472,42 +433,7 @@ pub fn remainder<'py>(
 ///     ```
 #[pyo3::pyfunction]
 pub fn power<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Array> {
-    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "power",
-            // TODO complex bases: (Complex<f32>, i32), (Complex<f32>, f32),
-            // (Complex<f64>, i64), (Complex<f64>, f64).
-            define_op2_desc!(
-                Pow,
-                [
-                    // ints, unsigned exponents
-                    (u8, u8),
-                    (i8, u8),
-                    (u16, u16),
-                    (i16, u16),
-                    (u32, u32),
-                    (i32, u32),
-                    (u64, u32),
-                    (i64, u32),
-                    // ints, signed exponents
-                    (i8, i8),
-                    (i16, i16),
-                    (i32, i32),
-                    (i64, i64),
-                    // floats
-                    (f16, i32),
-                    (f16, f16),
-                    (f32, i32),
-                    (f32, f32),
-                    (f64, i32),
-                    (f64, f64)
-                ],
-                Safe
-            ),
-        )
-    });
-
-    // `x ** 2`. Same pairs as `DISPATCH_TABLE`, so the promotion is identical.
+    // `x ** 2`. Same pairs as the `Pow` table, so the promotion is identical.
     static SQUARE_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
         OpDescriptor::new(
             "power",
@@ -557,7 +483,38 @@ pub fn power<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Arra
     let a = Operand::from_any(a)?;
     let b = Operand::from_any(b)?;
 
-    let mut table = &*DISPATCH_TABLE;
+    // TODO complex bases: (Complex<f32>, i32), (Complex<f32>, f32),
+    // (Complex<f64>, i64), (Complex<f64>, f64).
+    let mut table = define_op2_table!(
+        power,
+        Pow,
+        dispatch = {
+            [
+                // ints, unsigned exponents
+                (u8, u8),
+                (i8, u8),
+                (u16, u16),
+                (i16, u16),
+                (u32, u32),
+                (i32, u32),
+                (u64, u32),
+                (i64, u32),
+                // ints, signed exponents
+                (i8, i8),
+                (i16, i16),
+                (i32, i32),
+                (i64, i64),
+                // floats
+                (f16, i32),
+                (f16, f16),
+                (f32, i32),
+                (f32, f32),
+                (f64, i32),
+                (f64, f64)
+            ],
+            Safe
+        }
+    );
     if let Operand::Scalar { value, .. } = &b {
         match value {
             Scalar::UInt(2) | Scalar::Int(2) | Scalar::Float(2.0) => table = &*SQUARE_TABLE,

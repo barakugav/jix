@@ -120,6 +120,27 @@ macro_rules! define_op2_desc {
     };
 }
 
+macro_rules! define_op2_table {
+    (
+        $name:ident,
+        $core_op:ident,
+        dispatch = { $($dispatch:tt)* }
+        $(, $option:ident = $option_val:expr)*
+    ) => {{
+        static DISPATCH_TABLE: std::sync::LazyLock<crate::ops::common::OpDescriptor<2, ()>> = std::sync::LazyLock::new(|| {
+            crate::ops::common::OpDescriptor::new(
+                stringify!($name),
+                crate::ops::common::define_op2_desc!(
+                    $core_op,
+                    $($dispatch)*
+                ),
+            )
+            $(.$option($option_val))*
+        });
+        &*DISPATCH_TABLE
+    }};
+}
+
 macro_rules! define_op2 {
     (
         $(#[$meta:meta])* $name:ident,
@@ -133,24 +154,21 @@ macro_rules! define_op2 {
             a: &pyo3::Bound<'py, pyo3::PyAny>,
             b: &pyo3::Bound<'py, pyo3::PyAny>,
         ) -> pyo3::PyResult<crate::Array> {
-            static DISPATCH_TABLE: std::sync::LazyLock<crate::ops::common::OpDescriptor<2, ()>> = std::sync::LazyLock::new(|| {
-                crate::ops::common::OpDescriptor::new(
-                    stringify!($name),
-                    crate::ops::common::define_op2_desc!(
-                        $core_op,
-                        $($dispatch)*
-                    ),
-                )
-                $(.$option($option_val))*
-            });
-
             let a = crate::ops::common::Operand::from_any(a)?;
             let b = crate::ops::common::Operand::from_any(b)?;
             let [a, b] = crate::ops::common::broadcast_operands([a, b])?;
-            let res = DISPATCH_TABLE.dispatch2(a, b)?;
+
+            let dispatch_table = crate::ops::common::define_op2_table!(
+                $name,
+                $core_op,
+                dispatch = { $($dispatch)* }
+                $(, $option = $option_val)*
+            );
+            let res = dispatch_table.dispatch2(a, b)?;
+
             Ok(crate::Array::from_core(res))
         }
     };
 }
 
-pub(crate) use {define_op1, define_op1_desc, define_op2, define_op2_desc};
+pub(crate) use {define_op1, define_op1_desc, define_op2, define_op2_desc, define_op2_table};
