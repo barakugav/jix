@@ -1,7 +1,6 @@
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::{ArrayStorageAny, View};
-use crate::util::IterExt;
 use crate::ReadContext;
 use crate::{ArrayAny, ArrayStorage, ElementType};
 
@@ -328,7 +327,7 @@ impl<S: ArrayStorage> Array<S> {
     pub fn from_storage(storage: S) -> Self {
         #[cfg(debug_assertions)]
         {
-            use crate::{DimIdx, NDIM_MAX};
+            use crate::{DimIdx, IterExt, NDIM_MAX};
 
             let shape = storage.shape();
             let ndim = shape.len();

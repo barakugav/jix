@@ -87,6 +87,9 @@ jobs:
           - runner: ubuntu-22.04
             target: x86
             interpreter: 3.11 3.12 3.13 3.14 3.15 3.15t
+            # The default manylinux2014_i686 image runs a 32-bit rustc, which runs out of its 4GB
+            # address space compiling jix-py. Cross-compile from a 64-bit rustc instead.
+            container: ghcr.io/rust-cross/manylinux2014-cross:i686
           - runner: ubuntu-22.04
             target: aarch64
             interpreter: 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
@@ -110,6 +113,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --generate-stubs --out dist --interpreter ${{ matrix.platform.interpreter }}
           manylinux: auto
+          container: ${{ matrix.platform.container }}
           working-directory: jix-py
       - name: Upload wheels
         uses: actions/upload-artifact@v7
