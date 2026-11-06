@@ -1,7 +1,8 @@
 """
 Arithmetic errors of element-wise operations: integer division by zero and a negative
 integer power raise an ArithmeticError when the array is read, while float operations give inf and
-NaN, without raising or warning. Mirrors the tests in jix/src/ops/op1.rs and jix/src/ops/op2.rs.
+NaN, without raising or warning. Mirrors the tests in jix/src/ops/elementwise/div_rem.rs and
+arith.rs.
 """
 
 import io

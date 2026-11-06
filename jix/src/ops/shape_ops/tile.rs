@@ -338,6 +338,26 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a lazy view of the array replicated `repeats` times along `dim`.
+    /// See [`Tile`] for details and examples.
+    ///
+    /// Unlike NumPy's `tile`, `dim` must satisfy `dim < self.ndim()`; the array is
+    /// not extended with new leading dimensions.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `dim >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
+    /// internal dim is required), or if `self.shape()[dim] * repeats` overflows `u64`.
+    #[track_caller]
+    pub fn tile(self, repeats: u64, dim: usize) -> Array<Tile<S>> {
+        Tile::new_array(self, repeats, dim).unwrap()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {

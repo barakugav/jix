@@ -434,6 +434,24 @@ impl DimSlice {
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a lazy view of a sub-region of the array. See [`Slice`] for details and examples.
+    ///
+    /// Accepts a tuple of Rust ranges or [`SliceItem`]s, one per dimension. Negative integer
+    /// range bounds are supported (Python-style end-relative indexing).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the number of items != `self.ndim()` or any `step < 1`.
+    #[track_caller]
+    pub fn slice(self, slice: impl Into<SliceSpec>) -> Array<Slice<S>> {
+        Slice::new_array(self, slice.into()).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ndarray::array;

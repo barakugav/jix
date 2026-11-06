@@ -1,123 +1,14 @@
-use crate::ops::common::define_array_op2_method;
-use crate::ops::op2::define_op2;
+use crate::ops::elementwise::op2::{define_array_op2_method, define_op2};
 use crate::ops::prelude::*;
 use crate::ops::{Op2, Op2Kernel};
 
-pub(crate) mod _traits {
+pub(crate) mod traits {
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
-
-    define_scalar_op2_trait!(
-        /// Maximum operation with NaN-propagating semantics for floating-point types.
-        ///
-        /// This trait exists because neither of the standard alternatives covers all supported dtypes:
-        ///
-        /// - [`std::cmp::max`] requires [`Ord`], which floating-point types do not implement due to
-        ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
-        /// - [`f32::max`] / [`f64::max`] use **NaN-ignoring** semantics: when exactly one operand is
-        ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmax` / `numpy.nanmax`, not
-        ///   `numpy.maximum`.
-        ///
-        /// `Maximum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
-        /// the result is `NaN`. This matches `numpy.maximum` and makes NaN visible rather than
-        /// silently discarding it. The result is always the `NaN` of [`f32::NAN`] / [`f64::NAN`],
-        /// not the operand's (`numpy.maximum` keeps the operand's sign and payload).
-        ///
-        /// Of `+0.0` and `-0.0` either may be returned, as with [`f32::max`].
-        ///
-        /// For integer and `bool8` types the implementation delegates to [`std::cmp::max`], which is
-        /// equivalent. The trait therefore provides a single uniform interface usable across all
-        /// supported numeric dtypes.
-        Maximum,
-        /// Compute the maximum with another value.
-        maximum,
-        bulk_fn: maximum_bulk,
-    );
-    impl_scalar_op2!(
-        impl Maximum for [i8, i16, i32, i64, u8, u16, u32, u64] {
-            fn maximum = |a, b| std::cmp::max(a, b),
-            fn maximum_bulk = |a, b| a.max(b),
-        }
-    );
-    impl_scalar_op2!(
-        impl Maximum for [bool8] {
-            fn maximum = |a, b| std::cmp::max(a, b),
-        }
-    );
-    // NaN-propagating, to the one NaN `Self::NAN` (not an operand's, which SIMD and scalar code
-    // would keep differently).
-    impl_scalar_op2!(
-        impl Maximum for [f32, f64] {
-            // Not `f32::max`: past the NaN check, its NaN handling is dead code LLVM still emits.
-            fn maximum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else if a > b { a } else { b },
-            fn maximum_bulk = |a, b| (/* NaN check */ a.simd_ne(a) | b.simd_ne(b))
-                .select(SimdBase::splat(fearless_simd::ExtractToken::token(&a), Self::NAN), a.max(b)),
-        }
-    );
-    #[cfg(feature = "half")]
-    impl_scalar_op2!(
-        impl Maximum for [f16] {
-            fn maximum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.max(b) },
-        }
-    );
-
-    define_scalar_op2_trait!(
-        /// Minimum operation with NaN-propagating semantics for floating-point types.
-        ///
-        /// This trait exists because neither of the standard alternatives covers all supported dtypes:
-        ///
-        /// - [`std::cmp::min`] requires [`Ord`], which floating-point types do not implement due to
-        ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
-        /// - [`f32::min`] / [`f64::min`] use **NaN-ignoring** semantics: when exactly one operand is
-        ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmin` / `numpy.nanmin`, not
-        ///   `numpy.minimum`.
-        ///
-        /// `Minimum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
-        /// the result is `NaN`. This matches `numpy.minimum` and makes NaN visible rather than
-        /// silently discarding it. The result is always the `NaN` of [`f32::NAN`] / [`f64::NAN`],
-        /// not the operand's (`numpy.minimum` keeps the operand's sign and payload).
-        ///
-        /// Of `+0.0` and `-0.0` either may be returned, as with [`f32::min`].
-        ///
-        /// For integer and `bool8` types the implementation delegates to [`std::cmp::min`], which is
-        /// equivalent. The trait therefore provides a single uniform interface usable across all
-        /// supported numeric dtypes.
-        Minimum,
-        /// Compute the minimum with another value.
-        minimum,
-        bulk_fn: minimum_bulk,
-    );
-    impl_scalar_op2!(
-        impl Minimum for [i8, i16, i32, i64, u8, u16, u32, u64] {
-            fn minimum = |a, b| std::cmp::min(a, b),
-            fn minimum_bulk = |a, b| a.min(b),
-        }
-    );
-    impl_scalar_op2!(
-        impl Minimum for [bool8] {
-            fn minimum = |a, b| std::cmp::min(a, b),
-        }
-    );
-    // NaN-propagating, to the one NaN `Self::NAN` (not an operand's, which SIMD and scalar code
-    // would keep differently).
-    impl_scalar_op2!(
-        impl Minimum for [f32, f64] {
-            // Not `f32::min`: past the NaN check, its NaN handling is dead code LLVM still emits.
-            fn minimum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else if a < b { a } else { b },
-            fn minimum_bulk = |a, b| (/* NaN check */ a.simd_ne(a) | b.simd_ne(b))
-                .select(SimdBase::splat(fearless_simd::ExtractToken::token(&a), Self::NAN), a.min(b)),
-        }
-    );
-    #[cfg(feature = "half")]
-    impl_scalar_op2!(
-        impl Minimum for [f16] {
-            fn minimum = |a, b| if a.is_nan() | b.is_nan() { Self::NAN } else { a.min(b) },
-        }
-    );
 
     macro_rules! cmp_op2 {
         (
@@ -657,281 +548,6 @@ define_op2!(
     simd: less_equal_bulk,
 );
 
-define_op2!(
-    /// Element-wise maximum of two arrays.
-    ///
-    /// See [`jix::scalar::Maximum`](crate::scalar::Maximum) scalar trait for the
-    /// per-element semantics.
-    ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
-    /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::maximum()`](crate::Array::maximum).
-    ///
-    /// # Examples
-    /// ```
-    /// use jix::Array;
-    /// use ndarray::{array, Ix1};
-    ///
-    /// let a = Array::compact_ndarray(&array![1i32, 5, 3])?;
-    /// let b = Array::compact_ndarray(&array![4i32, 2, 3])?;
-    /// let result = a.maximum(b).to_ndarray()?;
-    /// assert_eq!(result, array![4, 5, 3]);
-    ///
-    /// // NaN is propagated: if either operand is NaN the result is NaN.
-    /// let c = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
-    /// let d = Array::compact_ndarray(&array![2.0f32, 3.0f32])?;
-    /// let result = c.maximum(d).to_ndarray::<Ix1>()?;
-    /// assert!(result[[0]].is_nan());
-    /// assert_eq!(result[[1]], 3.0);
-    /// # Ok::<(), jix::Error>(())
-    /// ```
-    Maximum,
-    MaximumKernel,
-    crate::scalar::Maximum::maximum,
-    simd: maximum_bulk,
-);
-define_op2!(
-    /// Element-wise minimum of two arrays.
-    ///
-    /// See [`jix::scalar::Minimum`](crate::scalar::Minimum) scalar trait for the
-    /// per-element semantics.
-    ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
-    /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::minimum()`](crate::Array::minimum).
-    ///
-    /// # Examples
-    /// ```
-    /// use jix::Array;
-    /// use ndarray::{array, Ix1};
-    ///
-    /// let a = Array::compact_ndarray(&array![1i32, 5, 3])?;
-    /// let b = Array::compact_ndarray(&array![4i32, 2, 3])?;
-    /// let result = a.minimum(b).to_ndarray()?;
-    /// assert_eq!(result, array![1, 2, 3]);
-    ///
-    /// // NaN is propagated: if either operand is NaN the result is NaN.
-    /// let c = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
-    /// let d = Array::compact_ndarray(&array![2.0f32, 3.0f32])?;
-    /// let result = c.minimum(d).to_ndarray::<Ix1>()?;
-    /// assert!(result[[0]].is_nan());
-    /// assert_eq!(result[[1]], 1.0);
-    /// # Ok::<(), jix::Error>(())
-    /// ```
-    Minimum,
-    MinimumKernel,
-    crate::scalar::Minimum::minimum,
-    simd: minimum_bulk,
-);
-
-/// Element-wise clamp of `a` to the range `[min, max]`, where `min` and `max` are arrays.
-///
-/// Computed as `minimum(maximum(a, min), max)`, the order used by `numpy.clip` and
-/// `torch.clamp`: where `min > max` the result is `max`. For **float** types a `NaN` in any
-/// operand produces `NaN` (see the [`jix::scalar::Maximum`](crate::scalar::Maximum) and
-/// [`jix::scalar::Minimum`](crate::scalar::Minimum) scalar traits). All three arrays must have
-/// the same dtype and shape.
-///
-/// The result is a lazy view; no computation occurs until the array is read.
-///
-/// This struct is the bare storage implementation, the operation is also available as
-/// [`Array::clamp()`](crate::Array::clamp).
-///
-/// # Examples
-/// ```
-/// use jix::Array;
-/// use ndarray::array;
-///
-/// let a = Array::compact_ndarray(&array![-3i32, 0, 5, 10])?;
-/// let min = Array::compact_ndarray(&array![0i32, 1, 0, 0])?;
-/// let max = Array::compact_ndarray(&array![7i32, 7, 4, 7])?;
-/// let result = a.clamp(min, max).to_ndarray()?;
-/// assert_eq!(result, array![0, 1, 4, 7]);
-/// # Ok::<(), jix::Error>(())
-/// ```
-pub struct Clamp<S, SMin, SMax> {
-    a: S,
-    min: SMin,
-    max: SMax,
-    spec: ArraySpecDynamic,
-}
-impl<S, SMin, SMax> Clamp<S, SMin, SMax>
-where
-    S: ArrayStorageTyped,
-    SMin: ArrayStorageTyped<Item = S::Item>,
-    SMax: ArrayStorageTyped<Item = S::Item>,
-    S::Item: crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
-{
-    /// Constructs a [`Clamp`] storage. See the struct docs for semantics and examples.
-    pub fn new(a: S, min: SMin, max: SMax) -> Result<Self> {
-        ensure!(
-            a.shape() == min.shape() && a.shape() == max.shape(),
-            InvalidArgument,
-            "Clamp shape mismatch between `a` {:?}, `min` {:?} and `max` {:?}",
-            a.shape(),
-            min.shape(),
-            max.shape()
-        );
-        let specs = [a.spec(), min.spec(), max.spec()];
-        let (element_cost, read_shape_scale_weight, read_layout_order) =
-            combine_elementwise_hints(&specs.each_ref().map(|spec| {
-                (
-                    spec.element_cost(),
-                    spec.read_shape_scale_weight(),
-                    spec.read_layout_order(),
-                )
-            }));
-        let (block_shape, block_shape_fixed_dims) = combine_block_layout(
-            &specs
-                .each_ref()
-                .map(|spec| (spec.block_shape().as_slice(), spec.block_shape_fixed_dims())),
-        );
-        let spec = ArraySpecDynamic::new(
-            block_shape,
-            block_shape_fixed_dims,
-            element_cost,
-            read_shape_scale_weight,
-            read_layout_order,
-        );
-        Ok(Self { a, min, max, spec })
-    }
-
-    /// Constructs an array with [`Clamp`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array(a: Array<S>, min: Array<SMin>, max: Array<SMax>) -> Result<Array<Self>> {
-        Self::new(a.into_storage(), min.into_storage(), max.into_storage()).map(Array::from_storage)
-    }
-}
-impl<S, SMin, SMax> crate::storage::ArrayStorageImpl for Clamp<S, SMin, SMax> {}
-impl<S, SMin, SMax> ArrayStorage for Clamp<S, SMin, SMax>
-where
-    S: ArrayStorageTyped,
-    SMin: ArrayStorageTyped<Item = S::Item>,
-    SMax: ArrayStorageTyped<Item = S::Item>,
-    S::Item: crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
-{
-    type ElementType = Ty<S::Item>;
-
-    #[inline]
-    fn read_data<'a>(
-        &'a self,
-        index: &[Range<u64>],
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
-        self.read_as_elementwise_pipeline::<S::Item>(index, context)?
-            .to_buf(index, context, out)
-    }
-
-    #[inline]
-    fn read_as_elementwise_pipeline<'a, T>(
-        &'a self,
-        index: &[Range<u64>],
-        context: &'a ReadContext,
-    ) -> Result<impl ElementwisePipeline<T> + use<'a, T, S, SMin, SMax>>
-    where
-        T: Dtyped,
-    {
-        check_dtype(Dtype::new_ref::<T>(), Dtype::new_ref::<S::Item>())?;
-        let a = self
-            .a
-            .read_as_elementwise_pipeline::<S::Item>(index, context)?;
-        let min = self
-            .min
-            .read_as_elementwise_pipeline::<S::Item>(index, context)?;
-        let max = self
-            .max
-            .read_as_elementwise_pipeline::<S::Item>(index, context)?;
-
-        struct ClampPipeline<P, PMin, PMax, U> {
-            a: P,
-            min: PMin,
-            max: PMax,
-            phantom: std::marker::PhantomData<U>,
-        }
-        impl<T, U, P, PMin, PMax> ElementwisePipelineImpl<T> for ClampPipeline<P, PMin, PMax, U>
-        where
-            P: ElementwisePipelineImpl<U>,
-            PMin: ElementwisePipelineImpl<U>,
-            PMax: ElementwisePipelineImpl<U>,
-            U: crate::scalar::Maximum<Output = U> + crate::scalar::Minimum<Output = U> + Copy,
-            T: Dtyped,
-        {
-            const N_OPERANDS: Option<usize> =
-                n_operands_sum(&[P::N_OPERANDS, PMin::N_OPERANDS, PMax::N_OPERANDS]);
-            const MAX_ITEMSIZE: usize = max_itemsize(&[
-                size_of::<T>(),
-                P::MAX_ITEMSIZE,
-                PMin::MAX_ITEMSIZE,
-                PMax::MAX_ITEMSIZE,
-            ]);
-
-            #[inline]
-            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
-                self.a
-                    .operands()
-                    .chain(self.min.operands())
-                    .chain(self.max.operands())
-            }
-
-            #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
-                &self,
-                offset: usize,
-                status: &mut ArithmeticStatus,
-                simd: S,
-            ) -> [T; N] {
-                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, status, simd) };
-                let min = unsafe { self.min.read_bulk::<N, CONTIGUOUS, S>(offset, status, simd) };
-                let max = unsafe { self.max.read_bulk::<N, CONTIGUOUS, S>(offset, status, simd) };
-                let ys = U::minimum_bulk(U::maximum_bulk(a, min, simd), max, simd);
-
-                const { assert!(size_of::<U>() == size_of::<T>()) };
-                // SAFETY: we checked `T` and `U` are the same dtype in the outer func
-                unsafe { std::mem::transmute_copy::<[U; N], [T; N]>(&ys) }
-            }
-        }
-
-        Ok(ClampPipeline {
-            a,
-            min,
-            max,
-            phantom: std::marker::PhantomData,
-        })
-    }
-
-    #[inline(always)]
-    fn shape(&self) -> &[u64] {
-        self.a.shape()
-    }
-
-    #[inline(always)]
-    fn dtype(&self) -> &Dtype {
-        Dtype::new_ref::<S::Item>()
-    }
-
-    #[inline]
-    fn spec(&self) -> ArraySpec<'_> {
-        self.a
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
-    }
-
-    fn info(&self) -> ArrayStorageInfo<'_> {
-        ArrayStorageInfo::new_deps("Clamp", [&self.a, &self.min, &self.max])
-    }
-
-    crate::ops::impl_element_type_change_default!();
-}
-
 /// Element-wise approximate equality test.
 ///
 /// Produces a `bool8` array that is `true` at each position where the corresponding elements of
@@ -1090,26 +706,6 @@ where
 
     define_array_op2_method!(less: Less, crate::scalar::Less);
     define_array_op2_method!(less_equal: LessEqual, crate::scalar::LessEqual);
-    define_array_op2_method!(maximum: Maximum, crate::scalar::Maximum);
-    define_array_op2_method!(minimum: Minimum, crate::scalar::Minimum);
-
-    /// Applies the [`Clamp`] operation, see the op struct docs for details.
-    #[track_caller]
-    pub fn clamp<SMin, SMax>(
-        self,
-        min: Array<SMin>,
-        max: Array<SMax>,
-    ) -> Array<Clamp<S, SMin, SMax>>
-    where
-        S: ArrayStorageTyped,
-        SMin: ArrayStorageTyped<Item = S::Item>,
-        SMax: ArrayStorageTyped<Item = S::Item>,
-        S::Item:
-            crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
-    {
-        Clamp::new_array(self, min, max).unwrap()
-    }
-
     /// Applies the [`ApproxEq`] operation, see the op struct docs for details.
     #[track_caller]
     pub fn approx_equal<S2>(
@@ -1134,14 +730,13 @@ mod tests {
 
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::scalar::{Maximum, Minimum};
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::scalar::Complex<f64>;
-    use crate::ops::op2::tests::test_op2;
+    use crate::ops::elementwise::op2::tests::test_op2;
 
     #[test]
     fn u64_vs_i64_is_exact() {
@@ -1184,10 +779,8 @@ mod tests {
     /// their scalar semantics, on every SIMD level of the CPU, over edge cases (NaN included).
     #[test]
     fn simd_bodies_all_levels() {
-        use super::{
-            EqualKernel, LessEqualKernel, LessKernel, MaximumKernel, MinimumKernel, NotEqualKernel,
-        };
-        use crate::ops::op2::Op2Kernel;
+        use super::{EqualKernel, LessEqualKernel, LessKernel, NotEqualKernel};
+        use crate::ops::elementwise::op2::Op2Kernel;
         use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
         use fearless_simd::Simd;
 
@@ -1228,28 +821,6 @@ mod tests {
                 all!(NotEqualKernel, |x, y| bool8::from(x != y));
                 all!(LessKernel, |x, y| bool8::from(x < y));
                 all!(LessEqualKernel, |x, y| bool8::from(x <= y));
-                all!(MaximumKernel, Maximum::maximum);
-                all!(MinimumKernel, Minimum::minimum);
-                // Not just a NaN: the one NaN, whichever operand's it was (`-NaN` included).
-                macro_rules! nan_bits {
-                    ($kernel:ident, $t:ty) => {
-                        let (a, b) = (<$t>::simd_test_values(0), <$t>::simd_test_values(5));
-                        for (i, y) in $kernel
-                            .apply_bulk(a, b, &mut Default::default(), simd)
-                            .into_iter()
-                            .enumerate()
-                        {
-                            if y.is_nan() {
-                                let what = concat!(stringify!($kernel), " ", stringify!($t));
-                                assert_eq!(y.to_bits(), <$t>::NAN.to_bits(), "{what}: element {i}");
-                            }
-                        }
-                    };
-                }
-                nan_bits!(MaximumKernel, f32);
-                nan_bits!(MaximumKernel, f64);
-                nan_bits!(MinimumKernel, f32);
-                nan_bits!(MinimumKernel, f64);
             });
         }
         for_each_simd_level!(check);
@@ -1667,102 +1238,6 @@ mod tests {
                     )
                 });
             crate::util::assert_array_matches(&result, &expected);
-        }
-    }
-
-    // maximum: NaN propagates to the float *output*, which breaks assert_eq via PartialEq.
-    // Use op_safe_strategy for floats to keep all outputs finite.
-    test_op2!(
-        maximum,
-        |a, b| Maximum::maximum(a, b),
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool8],
-        any_strategy
-    );
-    test_op2!(
-        maximum,
-        |a, b| Maximum::maximum(a, b),
-        [f32, f64],
-        op_safe_strategy,
-        #[cfg(feature = "half")]
-        [f16]
-    );
-
-    // minimum edge cases: signed negatives, equal values, inf ordering (finite outputs),
-    // and a NaN-propagation case matching the kernel (checked directly since NaN output
-    // breaks the PartialEq-based assert_array_matches oracle).
-    #[test]
-    fn minimum_concrete() {
-        use crate::Array;
-        // int path: negatives, equal values, ordering.
-        let a = ndarray::array![1i32, -5, 3, 3];
-        let b = ndarray::array![4i32, -2, 3, -3];
-        let za = Array::compact_ndarray(&a).unwrap();
-        let zb = Array::compact_ndarray(&b).unwrap();
-        let expected = ndarray::Zip::from(&a)
-            .and(&b)
-            .map_collect(|&a, &b| Minimum::minimum(a, b));
-        crate::util::assert_array_matches(&za.view().minimum(zb.view()), &expected);
-
-        // float path: inf/-inf ordering, all finite outputs (no NaN yet).
-        let fa = ndarray::array![f32::NEG_INFINITY, 1.0, f32::INFINITY, -1.0];
-        let fb = ndarray::array![5.0f32, -1.0, 2.0, -1.0];
-        let zfa = Array::compact_ndarray(&fa).unwrap();
-        let zfb = Array::compact_ndarray(&fb).unwrap();
-        let fexp = ndarray::Zip::from(&fa)
-            .and(&fb)
-            .map_collect(|&a, &b| Minimum::minimum(a, b));
-        crate::util::assert_array_matches(&zfa.view().minimum(zfb.view()), &fexp);
-
-        // NaN-propagation edge: minimum(NaN, x) == NaN for any x, unlike f32::min which
-        // discards NaN when exactly one operand is NaN.
-        let na = ndarray::array![f32::NAN, 1.0f32];
-        let nb = ndarray::array![2.0f32, f32::NAN];
-        let zna = Array::compact_ndarray(&na).unwrap();
-        let znb = Array::compact_ndarray(&nb).unwrap();
-        let result = zna.view().minimum(znb.view()).to_ndarray::<Ix1>().unwrap();
-        assert!(result[[0]].is_nan());
-        assert!(result[[1]].is_nan());
-    }
-
-    // clamp: per-element bounds, min > max (max wins, as in numpy.clip / torch.clamp), and NaN
-    // in any operand propagating to the output.
-    #[test]
-    fn clamp_concrete() {
-        use crate::Array;
-        let a = ndarray::array![[-3i32, 0, 5], [10, 4, 4]];
-        let lo = ndarray::array![[0i32, 1, 0], [0, 6, 2]];
-        let hi = ndarray::array![[7i32, 7, 4], [7, 3, 9]];
-        let za = Array::compact_ndarray_with(&a, crate::util::arr_params(&[1, 2])).unwrap();
-        let zlo = Array::compact_ndarray(&lo).unwrap();
-        let zhi = Array::compact_ndarray(&hi).unwrap();
-        let expected = ndarray::array![[0i32, 1, 4], [7, 3, 4]]; // [1][1]: min 6 > max 3 -> 3
-        crate::util::assert_array_matches(&za.clamp(zlo, zhi), &expected);
-
-        let f = Array::compact_ndarray(&ndarray::array![f32::NAN, 1.0, 1.0, 5.0]).unwrap();
-        let flo = Array::compact_ndarray(&ndarray::array![0.0f32, f32::NAN, 0.0, 0.0]).unwrap();
-        let fhi = Array::compact_ndarray(&ndarray::array![2.0f32, 2.0, f32::NAN, 2.0]).unwrap();
-        let result = f.clamp(flo, fhi).to_ndarray::<Ix1>().unwrap();
-        assert!(result.iter().take(3).all(|x| x.is_nan()));
-        assert_eq!(result[3], 2.0);
-    }
-
-    proptest::proptest! {
-        #[test]
-        fn clamp_i32(
-            ((nd_a, za), (nd_lo, zlo)) in crate::util::arrays2_strategy_generic::<i32>(
-                crate::util::shape_strategy(),
-                <i32 as crate::util::ScalarStrategy>::any_strategy(),
-            ),
-            hi_offset in -50i32..50,
-        ) {
-            use crate::Array;
-            let nd_hi = nd_lo.mapv(|x| x.saturating_add(hi_offset));
-            let zhi = Array::compact_ndarray(&nd_hi).unwrap();
-            let expected = ndarray::Zip::from(&nd_a)
-                .and(&nd_lo)
-                .and(&nd_hi)
-                .map_collect(|&a, &lo, &hi| a.max(lo).min(hi));
-            crate::util::assert_array_matches(&za.clamp(zlo, zhi), &expected);
         }
     }
 }

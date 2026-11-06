@@ -280,6 +280,23 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a lazy view with each element repeated `repeats` times along `dim`.
+    /// See [`Repeat`] for details and examples.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `dim >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
+    /// internal dim is required), or if `self.shape()[dim] * repeats` overflows `u64`.
+    #[track_caller]
+    pub fn repeat(self, repeats: u64, dim: usize) -> Array<Repeat<S>> {
+        Repeat::new_array(self, repeats, dim).unwrap()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {

@@ -1,37 +1,5 @@
 use crate::ops::prelude::*;
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
-    /// Returns a view of one named field of a struct dtype. See [`SubDtype`] for details and
-    /// examples.
-    ///
-    /// The method is generic over the output element type, which must match the field dtype.
-    /// If the field dtype is not statically known, use [`dtype_sub_field_dyn()`](Self::dtype_sub_field_dyn)
-    /// instead.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the array dtype is not a struct dtype or has no field with the given name.
-    #[track_caller]
-    pub fn dtype_sub_field<T>(self, sub_field: &str) -> Array<SubDtype<S, Ty<T>>>
-    where
-        T: Dtyped,
-    {
-        SubDtype::new_array(self, sub_field).unwrap()
-    }
-
-    /// Returns a view of one named field of a struct dtype, for dynamically-typed fields. See
-    /// [`SubDtype`] for details and examples.
-    ///
-    /// If the type of the field is statically known, use [`dtype_sub_field()`](Self::dtype_sub_field)
-    /// instead to get better ergonomics and performance.
-    #[track_caller]
-    pub fn dtype_sub_field_dyn(self, sub_field: &str) -> Array<SubDtype<S, TypeDyn>> {
-        SubDtype::new_array(self, sub_field).unwrap()
-    }
-}
 /// Extracts one named field from a struct dtype array.
 ///
 /// The input array must have a struct dtype with a field named `sub_field`. The output has the
@@ -192,6 +160,39 @@ where
             dst_type: NewET::from_dtype(self.dst_type.dtype().clone())?,
             sub_field_offset: self.sub_field_offset,
         })
+    }
+}
+
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a view of one named field of a struct dtype. See [`SubDtype`] for details and
+    /// examples.
+    ///
+    /// The method is generic over the output element type, which must match the field dtype.
+    /// If the field dtype is not statically known, use [`dtype_sub_field_dyn()`](Self::dtype_sub_field_dyn)
+    /// instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the array dtype is not a struct dtype or has no field with the given name.
+    #[track_caller]
+    pub fn dtype_sub_field<T>(self, sub_field: &str) -> Array<SubDtype<S, Ty<T>>>
+    where
+        T: Dtyped,
+    {
+        SubDtype::new_array(self, sub_field).unwrap()
+    }
+
+    /// Returns a view of one named field of a struct dtype, for dynamically-typed fields. See
+    /// [`SubDtype`] for details and examples.
+    ///
+    /// If the type of the field is statically known, use [`dtype_sub_field()`](Self::dtype_sub_field)
+    /// instead to get better ergonomics and performance.
+    #[track_caller]
+    pub fn dtype_sub_field_dyn(self, sub_field: &str) -> Array<SubDtype<S, TypeDyn>> {
+        SubDtype::new_array(self, sub_field).unwrap()
     }
 }
 

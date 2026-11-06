@@ -65,27 +65,29 @@ def test_eval_scev():
 def test_kernel_names():
     ew = a.EW
     leaf = f"{ew}::OperandTyped<f32>"
-    op2 = "<jix::ops::op2::Op2<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline::Op2Pipeline"
-    add = f"{op2}<{leaf}, {leaf}, jix::ops::op2::AddKernel, f32, f32>"
+    op2 = "<jix::ops::elementwise::op2::Op2<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline::Op2Pipeline"
+    add = f"{op2}<{leaf}, {leaf}, jix::ops::elementwise::arith::AddKernel, f32, f32>"
     assert a.elementwise_kernel(f"{ew}::inner_loop::<f32, {add}, true, true>").name == "add_f32"
     assert a.elementwise_kernel(f"{ew}::inner_loop::<f32, {add}, true, false>") is None
-    less = f"{op2}<{leaf}, {leaf}, jix::ops::cmp::LessKernel, f32, f32>"
+    less = f"{op2}<{leaf}, {leaf}, jix::ops::elementwise::cmp::LessKernel, f32, f32>"
     assert (
         a.elementwise_kernel(f"{ew}::inner_loop::<jix::scalar::bool::bool8, {less}, true, true>").name
         == "less_f32_bool"
     )
     clamp = (
-        "<jix::ops::cmp::Clamp<_, _, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
+        "<jix::ops::elementwise::min_max::Clamp<_, _, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
         f"::ClampPipeline<{leaf}, {leaf}, {leaf}, f32>"
     )
     assert a.elementwise_kernel(f"{ew}::inner_loop::<f32, {clamp}, true, true>").name == "clamp_f32"
-    nested = f"{op2}<{add}, {leaf}, jix::ops::op2::MulKernel, f32, f32>"
+    nested = f"{op2}<{add}, {leaf}, jix::ops::elementwise::arith::MulKernel, f32, f32>"
     assert a.elementwise_kernel(f"{ew}::inner_loop::<f32, {nested}, true, true>").name == "mul(add(f32,f32),f32)"
 
-    leaf_fold = "jix::ops::reduction::fold_pairwise::<f32, jix::ops::reduction::ArgMaxKernel, 16, true, fearless_simd::generated::avx2::Avx2>::{closure#0}"
+    leaf_fold = "jix::ops::reduction::common::fold_pairwise::<f32, jix::ops::reduction::min_max::ArgMaxKernel, 16, true, fearless_simd::generated::avx2::Avx2>::{closure#0}"
     assert a.reduction_kernel(leaf_fold, "Avx2").name == "reduce_arg_max_f32_cell"
     assert a.reduction_kernel(leaf_fold, "Sse4_2") is None
-    update = "jix::ops::reduction::fold_multi_cell_contiguous::<u8, jix::ops::reduction::SumKernel, false>"
+    update = (
+        "jix::ops::reduction::common::fold_multi_cell_contiguous::<u8, jix::ops::reduction::arith::SumKernel, false>"
+    )
     k = a.reduction_kernel(update, "Neon")
     assert (k.name, k.elem_size) == ("reduce_sum_u8_update", 1)
 

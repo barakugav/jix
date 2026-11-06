@@ -219,6 +219,22 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.
+    /// See [`Broadcast`] for details and examples.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `shape.len() != self.ndim()` or any dimension with size > 1 is expanded.
+    #[track_caller]
+    pub fn broadcast(self, shape: &[u64]) -> Array<Broadcast<S>> {
+        Broadcast::new_array(self, shape).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ndarray::array;

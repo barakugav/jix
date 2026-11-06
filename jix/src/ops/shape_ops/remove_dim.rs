@@ -219,6 +219,24 @@ where
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a lazy view of the array with the specified length-1 dimensions removed.
+    /// See [`RemoveDim`] for details and examples.
+    ///
+    /// Each dim in `dim` must have length 1.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any dim is out of bounds, duplicated, or has length != 1.
+    #[track_caller]
+    pub fn remove_dim(self, dim: impl DimsArg) -> Array<RemoveDim<S>> {
+        RemoveDim::new_array(self, dim).unwrap()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {

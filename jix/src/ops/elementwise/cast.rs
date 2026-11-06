@@ -1,6 +1,6 @@
 use crate::ops::prelude::*;
 
-pub(crate) mod _traits {
+pub(crate) mod traits {
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
@@ -413,9 +413,9 @@ pub(crate) mod _traits {
 /// assert_eq!(result, array![bool8::FALSE, bool8::TRUE, bool8::TRUE, bool8::FALSE]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Cast<S, T>(crate::ops::op1::Op1<S, CastKernel<T>>);
+pub struct Cast<S, T>(crate::ops::elementwise::op1::Op1<S, CastKernel<T>>);
 struct CastKernel<T>(std::marker::PhantomData<T>);
-impl<T1, T2> crate::ops::op1::Op1Kernel<T1> for CastKernel<T2>
+impl<T1, T2> crate::ops::elementwise::op1::Op1Kernel<T1> for CastKernel<T2>
 where
     T1: crate::scalar::Cast<T2>,
 {
@@ -445,7 +445,7 @@ where
     /// Constructs a [`Cast`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S) -> crate::error::Result<Self> {
         let kernel = CastKernel(std::marker::PhantomData);
-        Ok(Self(crate::ops::op1::Op1::new(array, kernel)?))
+        Ok(Self(crate::ops::elementwise::op1::Op1::new(array, kernel)?))
     }
 
     /// Constructs an array with [`Cast`] storage. See the storage struct docs for semantics and examples.

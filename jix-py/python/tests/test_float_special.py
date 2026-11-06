@@ -1,6 +1,6 @@
 """
 Tests for element-wise float classification ops. Mirrors the test block in
-jix/src/ops/logical1.rs. isnan is kept as a property test; isfinite/isinf
+jix/src/ops/elementwise/float_special.rs. isnan is kept as a property test; isfinite/isinf
 use fixed-input `test_*_concrete` functions ([nan, inf, -inf, 0.0, 1.0] per dtype).
 """
 

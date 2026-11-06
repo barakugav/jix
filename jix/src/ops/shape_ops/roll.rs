@@ -194,6 +194,26 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Returns a lazy view of the array with elements rolled along the given dim.
+    /// See [`Roll`] for details and examples.
+    ///
+    /// `shift` is reduced modulo `shape[dim]`. Positive shifts move elements toward
+    /// larger indices (wrapping around at the end); negative shifts move them the other
+    /// way.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `dim >= self.ndim()`.
+    #[track_caller]
+    pub fn roll(self, shift: i64, dim: usize) -> Array<Roll<S>> {
+        Roll::new_array(self, shift, dim).unwrap()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {

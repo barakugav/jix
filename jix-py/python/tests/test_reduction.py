@@ -1,6 +1,6 @@
 """
 Property tests for reduction ops (max, min, argmax, argmin, sum, product, mean, var, std, all, any).
-Mirrors the test block in jix/src/ops/reduction.rs.
+Mirrors the test blocks in jix/src/ops/reduction/.
 
 Python-specific coverage beyond the Rust tests:
   - negative dim values (e.g. dim=-1 for last dim)
@@ -171,7 +171,7 @@ def test_max(dtype: np.dtype, data: DataObject):
 
 def test_min_concrete():
     # Edge inputs: dtype min/max (int8/uint8), float NaN/inf/-inf (min propagates NaN like
-    # numpy.min, not numpy.nanmin - see reduction.rs docs), and bool. Non-default block
+    # numpy.min, not numpy.nanmin - see reduction/min_max.rs docs), and bool. Non-default block
     # shapes cross block boundaries.
     d_i8 = np.array([[-128, 0, 127], [5, -100, 3]], dtype=np.int8)
     za = jix.compact(d_i8, params={"block_shape": [1, 2]})

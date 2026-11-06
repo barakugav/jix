@@ -182,22 +182,20 @@ TYPES = {
 EW = "jix::storage::elementwise_pipeline"
 INNER_LOOP = re.compile(rf"{EW}::inner_loop::<(.+?), (<.*), true, true>")
 LEAF = re.compile(rf"{EW}::OperandTyped<(.+)>")
-# `<jix::ops::op2::Op2<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline::Op2Pipeline<..>`
+# `<jix::ops::elementwise::op2::Op2<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline::Op2Pipeline<..>`
 NODE = re.compile(r"<[^<>]*(?:<[_, ]*>)?[^<>]* as [\w:]+>::read_as_elementwise_pipeline::(\w+)<(.*)>")
 
 # The reduction loops over contiguous items, by name suffix; groups: the item type, the op, and the
 # SIMD level of the loops instantiated per level. `cell`: the one-cell fold's leaf; `init` /
 # `update`: the fold across cells, of the first item / the others.
-LEAF_FOLD = (
-    r"fold_pairwise::<(.+), jix::ops::reduction::(\w+)Kernel, \d+, {}, fearless_simd::(?:\w+::)*(\w+)>::\{{closure#0\}}"
-)
+LEAF_FOLD = r"fold_pairwise::<(.+), jix::ops::reduction::(?:\w+::)?(\w+)Kernel, \d+, {}, fearless_simd::(?:\w+::)*(\w+)>::\{{closure#0\}}"
 REDUCTION_LOOPS = {
     LEAF_FOLD.format("true"): "cell",
     LEAF_FOLD.format("false"): "cell_strided",
-    r"fold_multi_cell_contiguous::<(.+), jix::ops::reduction::(\w+)Kernel, true>": "init",
-    r"fold_multi_cell_contiguous::<(.+), jix::ops::reduction::(\w+)Kernel, false>": "update",
-    r"fold_multi_cell::<(.+), jix::ops::reduction::(\w+)Kernel, false, true>": "init_strided",
-    r"fold_multi_cell::<(.+), jix::ops::reduction::(\w+)Kernel, false, false>": "update_strided",
+    r"fold_multi_cell_contiguous::<(.+), jix::ops::reduction::(?:\w+::)?(\w+)Kernel, true>": "init",
+    r"fold_multi_cell_contiguous::<(.+), jix::ops::reduction::(?:\w+::)?(\w+)Kernel, false>": "update",
+    r"fold_multi_cell::<(.+), jix::ops::reduction::(?:\w+::)?(\w+)Kernel, false, true>": "init_strided",
+    r"fold_multi_cell::<(.+), jix::ops::reduction::(?:\w+::)?(\w+)Kernel, false, false>": "update_strided",
 }
 
 
@@ -215,7 +213,7 @@ def split_generic_args(s: str) -> list[str]:
 
 
 def snake(path: str) -> str:
-    """`jix::ops::op2::GreaterEqualKernel<f32>` -> `greater_equal`."""
+    """`jix::ops::elementwise::cmp::GreaterEqualKernel<f32>` -> `greater_equal`."""
     name = re.sub(r"(?:Kernel|Pipeline)$", "", path.split("<")[0].rsplit("::", 1)[-1])
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
@@ -255,7 +253,7 @@ def elementwise_kernel(symbol: str) -> Kernel | None:
 def reduction_kernel(symbol: str, simd: str) -> Kernel | None:
     """Of the loops instantiated per SIMD level, the instance of `simd`. `len` counts items."""
     for pattern, loop in REDUCTION_LOOPS.items():
-        m = re.fullmatch(rf"jix::ops::reduction::{pattern}", symbol)
+        m = re.fullmatch(rf"jix::ops::reduction::common::{pattern}", symbol)
         if m and m.group(1) in TYPES and m.groups()[2:] in [(), (simd,)]:
             ty, size = TYPES[m.group(1)]
             return Kernel(f"reduce_{snake(m.group(2))}_{ty}_{loop}", symbol, size)

@@ -1,25 +1,5 @@
 use crate::ops::prelude::*;
 
-impl<S> Array<S>
-where
-    S: ArrayStorageTyped<Item = bool8>,
-{
-    /// Element-wise selection from `x` where `self` is `true`, and from `y` elsewhere. See
-    /// [`Select`] for details and examples.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `x` and `y` differ in dtype, or any two arrays differ in shape.
-    #[track_caller]
-    pub fn select<SX, SY>(self, x: Array<SX>, y: Array<SY>) -> Array<Select<S, SX, SY>>
-    where
-        SX: ArrayStorage,
-        SY: ArrayStorage<ElementType = SX::ElementType>,
-    {
-        Select::new_array(self, x, y).unwrap()
-    }
-}
-
 /// Selects elements element-wise from `x` or `y` depending on `condition`.
 ///
 /// For each index `i`, the output is `x[i]` if `condition[i]` is `true`, otherwise `y[i]`.
@@ -444,6 +424,26 @@ where
             y: self.y.element_type_change()?,
             spec: self.spec,
         })
+    }
+}
+
+impl<S> Array<S>
+where
+    S: ArrayStorageTyped<Item = bool8>,
+{
+    /// Element-wise selection from `x` where `self` is `true`, and from `y` elsewhere. See
+    /// [`Select`] for details and examples.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x` and `y` differ in dtype, or any two arrays differ in shape.
+    #[track_caller]
+    pub fn select<SX, SY>(self, x: Array<SX>, y: Array<SY>) -> Array<Select<S, SX, SY>>
+    where
+        SX: ArrayStorage,
+        SY: ArrayStorage<ElementType = SX::ElementType>,
+    {
+        Select::new_array(self, x, y).unwrap()
     }
 }
 

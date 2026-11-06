@@ -183,9 +183,29 @@ re-export, which also defines the function aliases such as `jix.pow`, + tests) i
 ## Adding an operation
 
 An op typically exists in two places that must stay in sync: the Rust implementation under
-`jix/src/ops/` (e.g. `op1.rs` unary, `op2.rs` binary, `cmp.rs`, `reduction.rs`, `shape_ops/`) and its
-Python dispatch wrapper under `jix-py/src/ops/`. After changing the Python surface, regenerate stubs
-with `maturin generate-stubs --out python`.
+`jix/src/ops/` and its Python dispatch wrapper under `jix-py/src/ops/`. Both are laid out by op
+family, with the same file names:
+
+- `ops/elementwise/` - `op1.rs` / `op2.rs` hold only the `Op1` / `Op2` engines and their macros
+  (`define_op1!` / `define_op2!` for the op structs, `define_array_op1_method!` /
+  `define_array_op2_method!` for the `Array` methods); the ops live in family files (`arith`,
+  `div_rem`, `rounding`, `exp_log`, `trig`, `cmp`, `min_max`, `bitwise`, `bit_count`,
+  `float_special`, `cast`, `complex`, `map`, `select`).
+- `ops/reduction/` - `common.rs` holds the reduction engine and macros; the ops live in
+  `arith`, `variance`, `min_max`, `bools`, `custom`.
+- `ops/shape_ops/` - one file per shape op.
+
+jix-py uses the same family files under `ops/elementwise/`, but keeps its reduction and shape op
+wrappers in single files (`ops/reduction.rs`, `ops/shape_ops.rs`).
+
+In core, a family file holds, in order: its scalar traits and per-dtype impls (a
+`pub(crate) mod traits`, re-exported as `jix::scalar::*` through the `traits` aggregators in the
+`mod.rs` files), the op structs, one `impl Array<S>` block with their methods, and the tests. Python
+tests are named after the same families (`jix-py/python/tests/test_<family>.py`). In jix-py, never
+name a file after a `#[pyfunction]` it holds (e.g. `slice.rs` holding `slice`): PyO3 generates a
+hidden module of the function's name that `#[pymodule_export]` relies on, and the file module would
+shadow it - that is why `cast` lives in `elementwise/casting.rs`. After changing the Python surface,
+regenerate stubs with `maturin generate-stubs --out python`.
 
 ## Testing Conventions
 
