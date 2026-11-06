@@ -18,7 +18,7 @@ use pyo3::exceptions::{
 use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
-use crate::ops::plain_from_numpy;
+use crate::ops::{plain_from_numpy, RoundingMode};
 use crate::util::{
     dim_arr, maybe_detach, numpy_empty_ordered, numpy_items, strided_span_bytes, DimArray,
     IntoPyResult, ItemOrTuple,
@@ -971,9 +971,15 @@ impl Array {
         binary_op_builtin(other, || crate::ops::multiply(other, slf))
     }
 
-    /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
-    pub fn divide(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::divide(slf, other)
+    /// Element-wise division of two arrays, with the quotient optionally rounded to an integer. See
+    /// [`jix.divide()`][jix.divide].
+    #[pyo3(signature = (other, *, rounding_mode=None))]
+    pub fn divide(
+        slf: &Bound<'_, Self>,
+        other: &Bound<'_, PyAny>,
+        rounding_mode: Option<RoundingMode>,
+    ) -> PyResult<Self> {
+        crate::ops::divide(slf, other, rounding_mode)
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
@@ -981,7 +987,7 @@ impl Array {
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::divide(slf, other))
+        binary_op_builtin(other, || crate::ops::divide(slf, other, None))
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
@@ -989,79 +995,60 @@ impl Array {
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::divide(other, slf))
-    }
-
-    /// Element-wise floored division of two arrays. See
-    /// [`jix.divide_floor()`][jix.divide_floor].
-    pub fn divide_floor(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::divide_floor(slf, other)
+        binary_op_builtin(other, || crate::ops::divide(other, slf, None))
     }
 
     /// Element-wise floored division of two arrays (`a // b`), as Python's and numpy's `//`. See
-    /// [`jix.divide_floor()`][jix.divide_floor].
+    /// [`jix.divide()`][jix.divide].
     pub fn __floordiv__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::divide_floor(slf, other))
+        binary_op_builtin(other, || {
+            crate::ops::divide(slf, other, Some(RoundingMode::Floor))
+        })
     }
 
     /// Element-wise floored division of two arrays (`a // b`), as Python's and numpy's `//`. See
-    /// [`jix.divide_floor()`][jix.divide_floor].
+    /// [`jix.divide()`][jix.divide].
     pub fn __rfloordiv__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::divide_floor(other, slf))
+        binary_op_builtin(other, || {
+            crate::ops::divide(other, slf, Some(RoundingMode::Floor))
+        })
     }
 
-    /// Element-wise truncated division of two arrays. See
-    /// [`jix.divide_trunc()`][jix.divide_trunc].
-    pub fn divide_trunc(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::divide_trunc(slf, other)
-    }
-
-    /// Element-wise Euclidean division of two arrays. See
-    /// [`jix.divide_euclid()`][jix.divide_euclid].
-    pub fn divide_euclid(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::divide_euclid(slf, other)
-    }
-
-    /// Element-wise floored remainder of two arrays. See
-    /// [`jix.remainder_floor()`][jix.remainder_floor].
-    pub fn remainder_floor(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::remainder_floor(slf, other)
+    /// Element-wise remainder of two arrays, floored by default. See
+    /// [`jix.remainder()`][jix.remainder].
+    #[pyo3(
+        signature = (other, *, rounding_mode: "Literal['trunc', 'floor', 'euclid']" = "floor")
+    )]
+    pub fn remainder(
+        slf: &Bound<'_, Self>,
+        other: &Bound<'_, PyAny>,
+        rounding_mode: &str,
+    ) -> PyResult<Self> {
+        crate::ops::remainder(slf, other, rounding_mode)
     }
 
     /// Element-wise floored remainder of two arrays (`a % b`), as Python's and numpy's `%`. See
-    /// [`jix.remainder_floor()`][jix.remainder_floor].
+    /// [`jix.remainder()`][jix.remainder].
     pub fn __mod__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::remainder_floor(slf, other))
+        binary_op_builtin(other, || crate::ops::remainder(slf, other, "floor"))
     }
 
     /// Element-wise floored remainder of two arrays (`a % b`), as Python's and numpy's `%`. See
-    /// [`jix.remainder_floor()`][jix.remainder_floor].
+    /// [`jix.remainder()`][jix.remainder].
     pub fn __rmod__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<ValueOrUnimplemented<Self>> {
-        binary_op_builtin(other, || crate::ops::remainder_floor(other, slf))
-    }
-
-    /// Element-wise truncated remainder of two arrays. See
-    /// [`jix.remainder_trunc()`][jix.remainder_trunc].
-    pub fn remainder_trunc(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::remainder_trunc(slf, other)
-    }
-
-    /// Element-wise Euclidean remainder of two arrays. See
-    /// [`jix.remainder_euclid()`][jix.remainder_euclid].
-    pub fn remainder_euclid(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::ops::remainder_euclid(slf, other)
+        binary_op_builtin(other, || crate::ops::remainder(other, slf, "floor"))
     }
 
     /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
@@ -2156,7 +2143,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f32>(Array::divide(&a, &b).unwrap())
+            eval::<f32>(Array::divide(&a, &b, None).unwrap())
         });
         assert_eq!(result, (a / b).into_dyn());
     }

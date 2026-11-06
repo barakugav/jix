@@ -2,13 +2,14 @@ use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
+use pyo3::{type_hint_identifier, type_hint_subscript};
 
 use crate::array::resolve_array_params;
 use crate::ops::asarray;
-use crate::type_hint::ArchiveValidation;
 use crate::util::IntoPyResult;
 use crate::Array;
 
@@ -153,6 +154,33 @@ pub fn read_array(
             reader.into_inner().seek(SeekFrom::Start(pos))?;
 
             Ok(Array::from_core(array.into_any()))
+        }
+    }
+}
+
+/// The `validation` mode of [`crate::archive::read_array`].
+pub struct ArchiveValidation(pub jix_core::ArchiveValidation);
+
+impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
+    type Error = PyErr;
+
+    const INPUT_TYPE: PyStaticExpr = type_hint_subscript!(
+        type_hint_identifier!("typing", "Literal"),
+        PyStaticExpr::Constant {
+            value: PyStaticConstant::Str("minimal")
+        },
+        PyStaticExpr::Constant {
+            value: PyStaticConstant::Str("strict")
+        }
+    );
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        match obj.extract::<&str>()? {
+            "minimal" => Ok(Self(jix_core::ArchiveValidation::Minimal)),
+            "strict" => Ok(Self(jix_core::ArchiveValidation::Strict)),
+            other => Err(PyValueError::new_err(format!(
+                "invalid validation value: '{other}', expected 'minimal' or 'strict'"
+            ))),
         }
     }
 }

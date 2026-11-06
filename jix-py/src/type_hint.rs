@@ -6,8 +6,8 @@ use std::convert::Infallible;
 use std::ops::Deref;
 
 use numpy::{PyArrayDescr, PyUntypedArray};
-use pyo3::exceptions::{PyTypeError, PyValueError};
-use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
+use pyo3::exceptions::PyTypeError;
+use pyo3::inspect::PyStaticExpr;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyInt};
 use pyo3::{type_hint_identifier, type_hint_subscript, PyClass, PyTypeInfo};
@@ -64,33 +64,6 @@ impl<'py> IntoPyObject<'py> for NpDtype<'py> {
 
     fn into_pyobject(self, _py: Python<'py>) -> Result<Self::Output, Self::Error> {
         Ok(self.0)
-    }
-}
-
-/// The `validation` mode of [`crate::archive::read_array`].
-pub struct ArchiveValidation(pub jix_core::ArchiveValidation);
-
-impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
-    type Error = PyErr;
-
-    const INPUT_TYPE: PyStaticExpr = type_hint_subscript!(
-        type_hint_identifier!("typing", "Literal"),
-        PyStaticExpr::Constant {
-            value: PyStaticConstant::Str("minimal")
-        },
-        PyStaticExpr::Constant {
-            value: PyStaticConstant::Str("strict")
-        }
-    );
-
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        match obj.extract::<&str>()? {
-            "minimal" => Ok(Self(jix_core::ArchiveValidation::Minimal)),
-            "strict" => Ok(Self(jix_core::ArchiveValidation::Strict)),
-            other => Err(PyValueError::new_err(format!(
-                "invalid validation value: '{other}'"
-            ))),
-        }
     }
 }
 

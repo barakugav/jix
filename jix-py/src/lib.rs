@@ -46,10 +46,7 @@ mod jix {
     pub use crate::ops::{asarray, cast};
 
     #[pymodule_export]
-    pub use crate::ops::{
-        add, divide, divide_euclid, divide_floor, divide_trunc, multiply, power, remainder_euclid,
-        remainder_floor, remainder_trunc, subtract,
-    };
+    pub use crate::ops::{add, divide, multiply, power, remainder, subtract};
 
     #[pymodule_export]
     pub use crate::ops::{

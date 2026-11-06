@@ -619,10 +619,10 @@ def test_float_operand_keeps_f16():
 
 
 def test_divide_floor_keeps_float_dtypes():
-    """divide_floor's dispatch has the floats: float inputs keep their dtype."""
+    """divide's floor dispatch has the floats: float inputs keep their dtype."""
     a = jix.compact(np.array([7.5, -7.5], dtype=np.float32))
     b = jix.compact(np.array([2.0, 2.0], dtype=np.float32))
-    result = jix.divide_floor(a, b)
+    result = jix.divide(a, b, rounding_mode="floor")
     assert result.dtype == np.float32
     np.testing.assert_array_equal(result.numpy(), [3.0, -4.0])
 
