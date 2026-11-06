@@ -70,6 +70,27 @@ impl<'py> IntoPyObject<'py> for NpDtype<'py> {
     }
 }
 
+/// An array shape, typed as `tuple[int, ...]` instead of a PyTuple's bare `tuple`.
+pub struct Shape<'py>(pub Bound<'py, PyTuple>);
+
+impl<'py> IntoPyObject<'py> for Shape<'py> {
+    type Target = PyTuple;
+    type Output = Bound<'py, PyTuple>;
+    type Error = Infallible;
+
+    const OUTPUT_TYPE: PyStaticExpr = type_hint_subscript!(
+        <PyTuple as PyTypeInfo>::TYPE_HINT,
+        <PyInt as PyTypeInfo>::TYPE_HINT,
+        PyStaticExpr::Constant {
+            value: PyStaticConstant::Ellipsis
+        }
+    );
+
+    fn into_pyobject(self, _py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(self.0)
+    }
+}
+
 /// A dim argument. Unlike a plain `i32` it rejects a `bool`.
 #[derive(Clone, Copy)]
 pub struct Dim(pub i32);

@@ -8,7 +8,7 @@ use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
-use crate::type_hint::{Dim, ItemOrTuple, NdArray, NpDtype, ValueOrUnimplemented};
+use crate::type_hint::{Dim, ItemOrTuple, NdArray, NpDtype, Shape, ValueOrUnimplemented};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyTuple};
 
@@ -347,8 +347,8 @@ impl Array {
     /// ```
     #[getter]
     #[inline]
-    pub fn shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        PyTuple::new(py, self.arr.shape().iter().copied())
+    pub fn shape<'py>(&self, py: Python<'py>) -> PyResult<Shape<'py>> {
+        PyTuple::new(py, self.arr.shape().iter().copied()).map(Shape)
     }
 
     /// The number of dimensions (dims) of the array.
