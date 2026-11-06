@@ -166,7 +166,7 @@ mod tests {
     use ndarray::Ix1;
 
     use super::Transmute;
-    use crate::codec::ReadContext;
+    use crate::ReadContext;
     use crate::dtype::Dtyped;
     use crate::storage::StridedBuf;
     use crate::util::assert_array_matches;

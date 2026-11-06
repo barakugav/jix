@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::codec::ReadContext;
+use crate::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, ensure, error, Result};
 use crate::storage::params::{
@@ -550,7 +550,7 @@ fn strides_from_ndarray<T>(shape: &[usize], strides: &[isize]) -> Result<DimArra
 mod tests {
     use ndarray::{array, s, ArrayD, Ix3};
 
-    use crate::codec::ReadContext;
+    use crate::ReadContext;
     use crate::scalar::bool8;
     use crate::{Array, ArrayParams};
 

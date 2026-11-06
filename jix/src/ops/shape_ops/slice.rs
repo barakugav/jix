@@ -459,7 +459,7 @@ mod tests {
 
     use super::SliceItem;
     use crate::array::Array;
-    use crate::codec::ReadContext;
+    use crate::ReadContext;
 
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::{ArrayStorage, CompactArray, PlainArray};

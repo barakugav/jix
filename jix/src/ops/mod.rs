@@ -129,7 +129,6 @@ pub(crate) mod prelude {
     pub(crate) use super::{
         max_itemsize, n_operands_sum, ElementwisePipeline, ElementwisePipelineImpl, Operand,
     };
-    pub(crate) use crate::codec::ReadContext;
     pub(crate) use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
     pub(crate) use crate::error::*;
     pub(crate) use crate::scalar::bool8;
@@ -147,6 +146,7 @@ pub(crate) mod prelude {
         IterExt, NdCopier, NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias,
         ScaleWeight, SliceExt, REQUIRE_ALIGNED,
     };
+    pub(crate) use crate::ReadContext;
     pub(crate) use crate::{
         Array, ArrayStorage, DimDyn, DimVec, Dimension, ElementType, Ty, TypeDyn, NDIM_MAX,
     };

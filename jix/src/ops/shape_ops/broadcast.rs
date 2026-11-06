@@ -239,7 +239,7 @@ where
 mod tests {
     use ndarray::array;
 
-    use crate::codec::ReadContext;
+    use crate::ReadContext;
     use crate::util::{shape_strategy, ScalarStrategy};
     use crate::{Array, CompactArray, IntoDimension, NDIM_MAX};
 

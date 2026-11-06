@@ -7,12 +7,14 @@ use std::sync::Arc;
 use crate::archive::block::{BlockArchiveWriter, BlockTableStorageRead};
 use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
-use crate::codec::{DecoderCodecConfig, ReadContext};
+use crate::codec::DecoderCodecConfig;
 use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
 use crate::util::{dim_arr, DimBitmap, IterExt};
-use crate::{ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, TypeDyn};
+use crate::{
+    ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, ReadContext, TypeDyn,
+};
 
 impl Array<Compact<TypeDyn>> {
     /// Load a compressed array from a `.jix` file, allocating storage on the heap.

@@ -1,4 +1,4 @@
-use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
+use crate::codec::{DecoderCodecConfig, Encoder};
 use crate::error::Result;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::{ArrayBlockTableStorageBase, BlockSize, Compact, StridedBuf};
@@ -6,7 +6,7 @@ use crate::util::iter::NdIter;
 use crate::util::{scale_read_shape, AlignedBytes, IterExt, NdCopier, PtrMutNoalias, PtrNoalias};
 use crate::{
     default_logical_strides, default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec,
-    Dimension,
+    Dimension, ReadContext,
 };
 
 use super::Array;

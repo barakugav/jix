@@ -2407,7 +2407,7 @@ pub(crate) mod tests {
         let n = (1u64 << 32) / 24 + 1;
         let a = Array::compact_ndarray(&array![[1.0f32]]).unwrap();
         let v = a.broadcast(&[n, 1]).var(1, 0.0);
-        let ctx = crate::codec::ReadContext::default();
+        let ctx = crate::ReadContext::default();
         assert!(v.storage().read_data(&[0..n], &ctx, None).is_err());
     }
 }

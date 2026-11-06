@@ -12,7 +12,6 @@
 
 use std::ops::Range;
 
-use crate::codec::ReadContext;
 use crate::dimension::dim_arr;
 use crate::dtype::Dtype;
 use crate::error::Result;
@@ -21,6 +20,7 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ElementType, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, NdCopier, PtrMutNoalias, PtrNoalias};
+use crate::ReadContext;
 use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dimension, TypeDyn};
 
 /// Heap-allocated, block-compressed nd-array storage.

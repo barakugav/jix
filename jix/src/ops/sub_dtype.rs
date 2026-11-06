@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn pull_returns_zero_copy_field_view() {
-        use crate::codec::ReadContext;
+        use crate::ReadContext;
         use crate::ArrayStorage;
 
         let pts = ndarray::array![

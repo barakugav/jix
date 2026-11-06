@@ -219,7 +219,7 @@ where
 mod tests {
     use ndarray::{array, Ix2};
 
-    use crate::codec::ReadContext;
+    use crate::ReadContext;
 
     use crate::{Array, ArrayStorage, CompactArray, IntoDimension};
 

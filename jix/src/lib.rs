@@ -381,8 +381,11 @@
 mod array;
 pub use array::Array;
 
+mod context;
+pub use context::ReadContext;
+
 pub(crate) mod codec;
-pub use codec::{Codec, Filter, ReadContext};
+pub use codec::{Codec, Filter};
 
 pub mod dtype;
 

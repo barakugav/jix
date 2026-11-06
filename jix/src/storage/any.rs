@@ -2,7 +2,7 @@ use std::hint::assert_unchecked;
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::codec::ReadContext;
+use crate::ReadContext;
 use crate::dtype::Dtype;
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, StridedBuf};

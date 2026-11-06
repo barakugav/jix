@@ -259,9 +259,9 @@ mod tests {
     use ndarray::array;
     use proptest::prelude::*;
 
-    use crate::codec::ReadContext;
     use crate::ops::InsertDim;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
+    use crate::ReadContext;
     use crate::{Array, CompactArray, NDIM_MAX};
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> CompactArray<i32> {

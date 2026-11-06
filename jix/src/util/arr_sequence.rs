@@ -2,7 +2,7 @@ use std::cell::UnsafeCell;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::codec::ReadContext;
+use crate::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{ArithmeticStatus, Result};
 use crate::ops::{max_itemsize, n_operands_mul, n_operands_sum, ElementwisePipelineImpl, Operand};

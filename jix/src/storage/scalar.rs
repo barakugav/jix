@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::codec::ReadContext;
+use crate::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
@@ -194,7 +194,7 @@ mod tests {
     use ndarray::array;
 
     use crate::__private::Scalar;
-    use crate::codec::ReadContext;
+    use crate::ReadContext;
     use crate::dtype::Dtyped;
     use crate::error::Result;
     use crate::{Array, ArrayParams};
