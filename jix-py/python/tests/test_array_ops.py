@@ -30,15 +30,32 @@ def test_asarray_from_numpy():
     np.testing.assert_array_equal(a.numpy(), arr)
 
 
-def test_asarray_from_scalar():
-    a = jix.asarray(42)
-    assert a.numpy()[()] == 42
+@pytest.mark.parametrize(
+    "value, dtype",
+    [
+        (True, np.bool_),
+        (42, np.int64),
+        (2.5, np.float64),
+        (1 - 2j, np.complex128),
+        (np.bool_(False), np.bool_),
+        (np.int8(-5), np.int8),
+        (np.int32(-7), np.int32),
+        (np.uint8(255), np.uint8),
+        (np.float32(1.5), np.float32),
+        (np.complex64(1 - 2j), np.complex64),
+        (np.array(3, dtype=np.int16), np.int16),
+    ],
+)
+def test_asarray_from_scalar(value, dtype):
+    a = jix.asarray(value)
+    assert a.shape == ()
+    assert a.dtype == dtype
+    assert a.numpy()[()] == value
 
 
 def test_asarray_from_jix_array_is_noop():
     arr = jix.compact([1, 2, 3], dtype=np.int32)
-    a = jix.asarray(arr)
-    np.testing.assert_array_equal(a.numpy(), [1, 2, 3])
+    assert jix.asarray(arr) is arr
 
 
 def test_asarray_dtype_string():

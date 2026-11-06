@@ -146,7 +146,6 @@ dependencies = [
  "arrayvec",
  "ctor",
  "jix",
- "ndarray",
  "numpy",
  "pyo3",
 ]

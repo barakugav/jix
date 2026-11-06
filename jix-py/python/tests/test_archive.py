@@ -124,10 +124,50 @@ def test_write_array_writer_keeps_buffer_raises():
         jix.write_array(make_array([1.0, 2.0]), Writer())
 
 
+def test_write_array_buffer_is_read_only_and_released():
+    calls = []
+
+    class Writer(io.BytesIO):
+        def write(self, b):
+            calls.append((b, b.readonly))
+            return super().write(b)
+
+    jix.write_array(make_array([1.0, 2.0]), Writer())
+    assert calls
+    for view, readonly in calls:
+        assert readonly
+        with pytest.raises(ValueError, match="released"):
+            view.tobytes()
+
+
 def test_write_array_bad_object():
     a = make_array([1.0])
     with pytest.raises(TypeError):
         jix.write_array(a, 42)
+
+
+def test_write_array_object_missing_seek():
+    class NoSeek:
+        def write(self, b):
+            return len(b)
+
+        def tell(self):
+            return 0
+
+    with pytest.raises(TypeError, match="seek"):
+        jix.write_array(make_array([1.0]), NoSeek())
+
+
+def test_write_array_object_missing_tell():
+    class NoTell:
+        def write(self, b):
+            return len(b)
+
+        def seek(self, offset, whence=0):
+            return 0
+
+    with pytest.raises(TypeError, match="tell"):
+        jix.write_array(make_array([1.0]), NoTell())
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +315,82 @@ def test_read_array_object_missing_seek():
 
     with pytest.raises(TypeError):
         jix.read_array(NoSeek())
+
+
+def test_read_array_object_missing_tell():
+    class NoTell:
+        def read(self, n):
+            return b""
+
+        def seek(self, offset, whence=0):
+            return 0
+
+    with pytest.raises(TypeError, match="tell"):
+        jix.read_array(NoTell())
+
+
+# ---------------------------------------------------------------------------
+# Unusual file-like objects
+# ---------------------------------------------------------------------------
+
+
+class _WriteReturnsNone(io.BytesIO):
+    def write(self, b):
+        super().write(b)
+
+
+class _ShortWriter(io.BytesIO):
+    """Takes at most 3 bytes per `write()` call."""
+
+    def write(self, b):
+        return super().write(bytes(b[:3]))
+
+
+class _SeekReturnsNone(io.BytesIO):
+    """`seek()` returns None instead of the new position, so the caller has to ask `tell()`."""
+
+    def seek(self, offset, whence=0):
+        super().seek(offset, whence)
+
+
+class _NoFlush:
+    def __init__(self):
+        self._buf = io.BytesIO()
+
+    def write(self, b):
+        return self._buf.write(b)
+
+    def seek(self, offset, whence=0):
+        return self._buf.seek(offset, whence)
+
+    def tell(self):
+        return self._buf.tell()
+
+    def getvalue(self):
+        return self._buf.getvalue()
+
+
+def _incompressible_array():
+    # Big enough to take several writes through the buffered writer.
+    return make_array(np.random.default_rng(0).random(5000))
+
+
+@pytest.mark.parametrize("writer_cls", [_WriteReturnsNone, _ShortWriter, _SeekReturnsNone, _NoFlush])
+def test_write_array_unusual_writer(writer_cls):
+    a = _incompressible_array()
+    writer = writer_cls()
+    jix.write_array(a, writer)
+    a2 = jix.read_array(io.BytesIO(writer.getvalue()))
+    np.testing.assert_array_equal(a2.numpy(), a.numpy())
+
+
+def test_read_array_reader_seek_returns_none():
+    a = _incompressible_array()
+    buf = io.BytesIO()
+    jix.write_array(a, buf)
+    reader = _SeekReturnsNone(buf.getvalue())
+    np.testing.assert_array_equal(jix.read_array(reader).numpy(), a.numpy())
+    assert reader.tell() == len(buf.getvalue())
 
 
 # ---------------------------------------------------------------------------

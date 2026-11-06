@@ -114,6 +114,12 @@ def broadcast_int32_arrays(draw):
         ((256, 256, 3), (3,)),
         # The classic NumPy docs example
         ((8, 1, 6, 1), (7, 1, 5)),  # -> (8, 7, 6, 5)
+        # Zero-length dims
+        ((0,), (0,)),
+        ((0,), (1,)),
+        ((3, 0), (3, 1)),
+        ((1, 0), (3, 1)),  # -> (3, 0)
+        ((0,), (3, 0)),
     ],
 )
 def test_broadcast_add_shapes(shape_a, shape_b):
@@ -137,6 +143,7 @@ def test_broadcast_add_shapes(shape_a, shape_b):
         ((3, 4), (5, 4)),
         ((3, 4), (3, 5)),
         ((2, 3), (4, 5)),
+        ((0,), (3,)),
     ],
 )
 def test_broadcast_incompatible_raises(shape_a, shape_b):

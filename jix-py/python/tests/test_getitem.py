@@ -163,6 +163,26 @@ def test_too_many_indices_raises():
             a[index]
 
 
+@pytest.mark.parametrize(
+    "index, exc",
+    [
+        (5, IndexError),
+        (-6, IndexError),
+        (slice(None, None, 2), ValueError),
+        ((Ellipsis, Ellipsis), IndexError),
+        ("bad", TypeError),
+    ],
+)
+def test_bad_index_raises(index, exc):
+    a = jix.compact(arange((5,)))
+    with pytest.raises(exc):
+        a[index]
+    with pytest.raises(exc):
+        a.numpy(index)
+    with pytest.raises(exc):
+        jix.slice(a, index)
+
+
 @pytest.mark.parametrize("index", [True, False, (0, True), np.True_])
 def test_bool_index_raises(index):
     a = jix.compact(arange((3, 4)))
