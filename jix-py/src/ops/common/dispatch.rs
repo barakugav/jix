@@ -8,7 +8,8 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use crate::ops::common::{CastKind, Operand, Precision, Rank, Scalar};
-use crate::util::{array_try_map, ItemOrTuple, IterExt};
+use crate::type_hint::ItemOrTuple;
+use crate::util::{array_try_map, IterExt};
 
 type TypedOperand<T> = CoreArray<IntoType<ArrayStorageAny, Ty<T>>>;
 

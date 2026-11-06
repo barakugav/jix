@@ -8,7 +8,7 @@ use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
-use crate::type_hint::{Dim, NdArray, NpDtype, ValueOrUnimplemented};
+use crate::type_hint::{Dim, ItemOrTuple, NdArray, NpDtype, ValueOrUnimplemented};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyTuple};
 
@@ -21,7 +21,7 @@ use crate::dtype::dtype_to_numpy;
 use crate::ops::{plain_from_numpy, RoundingMode};
 use crate::util::{
     dim_arr, maybe_detach, numpy_empty_ordered, numpy_items, strided_span_bytes, DimArray,
-    IntoPyResult, ItemOrTuple,
+    IntoPyResult,
 };
 
 /// A multi-dimensional compressed array.

@@ -20,6 +20,10 @@ mod ops;
 mod type_hint;
 mod util;
 
+pub use archive::ArchiveValidation;
+pub use ops::RoundingMode;
+pub use type_hint::*;
+
 #[doc = include_str!("../docs/module.md")]
 #[pymodule]
 mod jix {

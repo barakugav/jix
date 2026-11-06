@@ -41,7 +41,7 @@ macro_rules! define_reduction_op {
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-            dim: Option<crate::util::ItemOrTuple<crate::type_hint::Dim>>,
+            dim: Option<crate::type_hint::ItemOrTuple<crate::type_hint::Dim>>,
             keepdim: bool,
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {

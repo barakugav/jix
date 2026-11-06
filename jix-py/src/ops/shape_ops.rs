@@ -6,10 +6,10 @@ use pyo3::types::{PyBool, PyEllipsis, PySlice, PyTuple};
 
 use crate::ops::asarray_simple;
 use crate::ops::common::{operands_dtype_promotion_vec, Operand};
-use crate::type_hint::Dim;
+use crate::type_hint::{Dim, ItemOrTuple};
 use crate::util::{
     normalize_dim, normalize_dim_optional, normalize_dims, normalize_dims_optional, slice_unpack,
-    DimArray, IntoPyResult, ItemOrTuple,
+    DimArray, IntoPyResult,
 };
 use crate::Array;
 
