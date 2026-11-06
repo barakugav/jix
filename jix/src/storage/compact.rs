@@ -255,7 +255,7 @@ where
     where
         ET: ElementType,
     {
-        context.read_cached(self.cache_id, index, out, &|out| {
+        context.read_cached(self.cache_id, index, self.blocks.dtype(), out, &|out| {
             self.read_data_uncached(index, context, out)
         })
     }
@@ -539,6 +539,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
+    use crate::scalar::bool8;
     use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
     use crate::storage::ArrayStorageTyped;
     use crate::storage::{ArraySpec, StridedBuf};
@@ -1111,6 +1112,69 @@ mod tests {
         let per_read = calls.swap(0, Ordering::Relaxed);
         assert!(per_read > 0);
         (max, per_read)
+    }
+
+    /// The max of each row of an 8x8 array, counting the calls of its reduce function in `calls`,
+    /// and the number of calls a read of it makes.
+    fn counted_row_max(
+        calls: &'static AtomicUsize,
+    ) -> (Array<impl ArrayStorageTyped<Item = i32> + use<>>, usize) {
+        let nd = ndarray::Array2::from_shape_fn((8, 8), |(i, j)| (8 * i + j) as i32);
+        let params = ArrayParams::new().block_shape(&[4, 4]).unwrap();
+        let x = Array::compact_ndarray_with(&nd, params).unwrap();
+        let max = x.reduce_unordered(1, |a: i32, b: i32| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            a.max(b)
+        });
+        calls.store(0, Ordering::Relaxed);
+        let expected = (0..8).map(|i| 8 * i + 7).collect::<Vec<_>>();
+        assert_eq!(max.to_ndarray::<ndarray::Ix1>().unwrap().to_vec(), expected);
+        let per_read = calls.swap(0, Ordering::Relaxed);
+        assert!(per_read > 0);
+        (max, per_read)
+    }
+
+    #[test]
+    fn read_cache_serves_push_reads() {
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let (max, per_read) = counted_row_max(&CALLS);
+        let twice = max.view() + max.view();
+        let ctx = max.read_ctx();
+        const SENTINEL: i32 = -1;
+        let mut backing = [SENTINEL; 16];
+        ctx.top_level_read(twice.storage().spec().dynamic(), || {
+            max.storage().read_data(&[2..6], &ctx, None).unwrap();
+            assert_eq!(CALLS.load(Ordering::Relaxed), per_read / 2);
+            // A push read of the cached region copies it into `out`, at the strides of `out`.
+            let mut out = unsafe {
+                StridedBuf::from_raw_parts_mut(backing.as_mut_ptr().cast(), &[4], &[8], 4)
+            };
+            max.storage()
+                .read_data(&[2..6], &ctx, Some(&mut out))
+                .unwrap();
+            assert_eq!(CALLS.load(Ordering::Relaxed), per_read / 2);
+            // A push read is not added to the cache: the entry is still the pull read.
+            assert_eq!(ctx.read_cache_len(), 1);
+        });
+        let expected = [23, SENTINEL, 31, SENTINEL, 39, SENTINEL, 47, SENTINEL];
+        assert_eq!(&backing[..8], &expected);
+        assert!(backing[8..].iter().all(|&v| v == SENTINEL));
+    }
+
+    #[test]
+    fn select_push_read_is_cached() {
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let (max, per_read) = counted_row_max(&CALLS);
+        let nd = ndarray::Array1::from_iter((0..8).map(|i| bool8::from(i % 2 == 0)));
+        let cond = Array::compact_ndarray(&nd).unwrap();
+        // `select` reads `y` in pull mode, then `x` in push mode into its output.
+        let expr = cond.select(max.view(), max.view());
+        let expected = (0..8).map(|i| 8 * i + 7).collect::<Vec<_>>();
+        assert_eq!(
+            expr.to_ndarray::<ndarray::Ix1>().unwrap().to_vec(),
+            expected
+        );
+        assert_eq!(CALLS.load(Ordering::Relaxed), per_read);
     }
 
     #[test]

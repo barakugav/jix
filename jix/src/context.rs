@@ -6,12 +6,12 @@ use std::sync::Arc;
 
 use crate::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
 use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
-use crate::dtype::Alignment;
+use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::StridedBuf;
-use crate::util::{DimArray, RawAlignedBytes, SliceExt};
+use crate::util::{dim_arr, DimArray, RawAlignedBytes, SliceExt};
 use crate::DimDyn;
 
 /// A context with reusable buffers and a long-lived decoder instance.
@@ -175,10 +175,12 @@ impl ReadContext {
     /// Read the region `index` of the storage `id` with `read` (called with `out`), through the
     /// read cache.
     ///
-    /// A pull-mode read (`out` is `None`) of a region in the cache returns a read-only view of the
-    /// cached buffer, whatever the arrays to cache. Otherwise `read` reads the region and, if `id` is
-    /// one of the arrays to cache, its buffer is added to the cache: a buffer it allocated is
-    /// shared with the cache, and replaces the cached read of another region of `id`, if any.
+    /// A read of a region in the cache is served from the cache, whatever the arrays to cache: a
+    /// pull-mode read (`out` is `None`) returns a read-only view of the cached buffer, and a
+    /// push-mode read copies the cached region into `out`. Otherwise `read` reads the region and,
+    /// for a pull-mode read of one of the arrays to cache, its buffer is added to the cache: a
+    /// buffer it allocated is shared with the cache, and replaces the cached read of another region
+    /// of `id`, if any. A push-mode read is never added, as it writes to the caller's buffer.
     ///
     /// The cached buffers are reference counted, so evicting an entry never invalidates views
     /// handed out earlier; an allocation returns to the pool when its last reference is dropped.
@@ -187,6 +189,7 @@ impl ReadContext {
         &'a self,
         id: ArrayCacheId,
         index: &[Range<u64>],
+        dtype: &Dtype,
         out: Option<&'a mut StridedBuf<'b>>,
         read: &dyn CachedRead<'a, 'b>,
     ) -> Result<StridedBuf<'a>> {
@@ -194,22 +197,32 @@ impl ReadContext {
         if !self.cache_active.get() {
             return read.read(out);
         }
+        let mut cache = self.read_cache.borrow_mut();
+        if let Some(entry) = cache.get(id)
+            && entry.index.as_slice() == index
+        {
+            let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
+            let buf =
+                unsafe { StridedBuf::from_shared(buf, &entry.strides).with_offset(entry.offset) };
+            let Some(out) = out else {
+                return Ok(buf);
+            };
+            let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+            let (src, src_strides) = buf.data();
+            // SAFETY: the cached buffer holds the region at `src_strides`, and `out` was checked to
+            // hold it at its own strides.
+            unsafe { out.copy_from(src, src_strides, &shape, dtype) };
+            return Ok(out.view_mut());
+        }
         let mut insert = false;
         if out.is_none() {
-            let mut cache = self.read_cache.borrow_mut();
-            if let Some(entry) = cache.get(id)
-                && entry.index.as_slice() == index
-            {
-                let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
-                let buf = unsafe { StridedBuf::from_shared(buf, &entry.strides) };
-                return Ok(unsafe { buf.with_offset(entry.offset) });
-            }
             insert = self.is_cached(id);
             // Evict before reading, so the read can reuse the buffer.
             if insert && let Some(stale) = cache.remove(id) {
                 self.buffer_pool.return_shared(stale.data);
             }
         }
+        drop(cache);
 
         let buf = read.read(out)?;
 
