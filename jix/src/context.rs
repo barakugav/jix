@@ -100,22 +100,6 @@ impl Drop for CacheScopeGuard<'_> {
     }
 }
 
-/// The read of a storage passed to [`ReadContext::read_cached`]: a closure taking the `out` of the
-/// read. A trait object of it adds a single function to each storage, where a `dyn Fn` would add
-/// the `call_once` and `call_mut` shims too.
-pub(crate) trait CachedRead<'a, 'b: 'a> {
-    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>;
-}
-impl<'a, 'b: 'a, F> CachedRead<'a, 'b> for F
-where
-    F: Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
-{
-    #[inline(always)]
-    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>> {
-        self(out)
-    }
-}
-
 impl ReadContext {
     /// Creates a new `ReadContext` configured with the given decoder parameters.
     ///
@@ -184,19 +168,31 @@ impl ReadContext {
     ///
     /// The cached buffers are reference counted, so evicting an entry never invalidates views
     /// handed out earlier; an allocation returns to the pool when its last reference is dropped.
-    #[inline(never)]
+    #[inline(always)]
     pub(crate) fn read_cached<'a, 'b>(
         &'a self,
         id: ArrayCacheId,
         index: &[Range<u64>],
         dtype: &Dtype,
         out: Option<&'a mut StridedBuf<'b>>,
-        read: &dyn CachedRead<'a, 'b>,
+        read: impl Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
+    ) -> Result<StridedBuf<'a>> {
+        if !self.cache_active.get() {
+            return read(out);
+        }
+        self.read_cached_impl(id, index, dtype, out, &read)
+    }
+
+    #[inline(never)]
+    pub(crate) fn read_cached_impl<'a, 'b>(
+        &'a self,
+        id: ArrayCacheId,
+        index: &[Range<u64>],
+        dtype: &Dtype,
+        out: Option<&'a mut StridedBuf<'b>>,
+        read: &dyn Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
     ) -> Result<StridedBuf<'a>> {
         // Not generic and not inlined, so it adds no code to the many storages that call it.
-        if !self.cache_active.get() {
-            return read.read(out);
-        }
         let mut cache = self.read_cache.borrow_mut();
         if let Some(entry) = cache.get(id)
             && entry.index.as_slice() == index
@@ -224,7 +220,7 @@ impl ReadContext {
         }
         drop(cache);
 
-        let buf = read.read(out)?;
+        let buf = read(out)?;
 
         // A view of memory the read did not allocate, e.g. a cached buffer, is not cached.
         if !insert || !buf.owns_pool_buf() {

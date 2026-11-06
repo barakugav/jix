@@ -150,7 +150,7 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
-        context.read_cached(self.cache_id, index, self.dtype(), out, &|out| {
+        context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
             let dtype = self.dtype();
             let (itemsize, alignment) = (dtype.itemsize() as usize, dtype.alignment().as_usize());
 

@@ -241,7 +241,7 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        context.read_cached(self.cache_id, index, self.dtype(), out, &|out| {
+        context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
             let _scope = context.cache_scope(&self.cache_scope);
             read_data_dispatch(
                 &self.array,

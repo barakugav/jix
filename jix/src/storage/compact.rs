@@ -255,7 +255,7 @@ where
     where
         ET: ElementType,
     {
-        context.read_cached(self.cache_id, index, self.blocks.dtype(), out, &|out| {
+        context.read_cached(self.cache_id, index, self.blocks.dtype(), out, |out| {
             self.read_data_uncached(index, context, out)
         })
     }
