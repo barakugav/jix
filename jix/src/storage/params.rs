@@ -551,6 +551,7 @@ impl ArrayParams {
 }
 
 /// Internal specs of an array.
+#[doc(hidden)]
 pub struct ArraySpec<'a> {
     shared: &'a Arc<ArraySpecShared>,
     dynamic: &'a ArraySpecDynamic,
