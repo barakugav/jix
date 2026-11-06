@@ -111,37 +111,6 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Dim {
     }
 }
 
-/// An arithmetic error mode of [`crate::error::errstate`].
-pub struct ErrMode(pub jix_core::error::ArithmeticErrorMode);
-
-impl<'a, 'py> FromPyObject<'a, 'py> for ErrMode {
-    type Error = PyErr;
-
-    const INPUT_TYPE: PyStaticExpr = type_hint_subscript!(
-        type_hint_identifier!("typing", "Literal"),
-        PyStaticExpr::Constant {
-            value: PyStaticConstant::Str("ignore")
-        },
-        PyStaticExpr::Constant {
-            value: PyStaticConstant::Str("warn")
-        },
-        PyStaticExpr::Constant {
-            value: PyStaticConstant::Str("raise")
-        }
-    );
-
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        match obj.extract::<&str>()? {
-            "ignore" => Ok(Self(jix_core::error::ArithmeticErrorMode::Ignore)),
-            "warn" => Ok(Self(jix_core::error::ArithmeticErrorMode::Warn)),
-            "raise" => Ok(Self(jix_core::error::ArithmeticErrorMode::Error)),
-            other => Err(PyValueError::new_err(format!(
-                "invalid error mode '{other}', expected one of 'ignore', 'warn', 'raise'"
-            ))),
-        }
-    }
-}
-
 /// The result of a binary dunder. `NotImplemented` makes Python try the other operand's reflected
 /// op. Typed as an `Array`, like numpy's dunders.
 pub enum ValueOrUnimplemented<T>

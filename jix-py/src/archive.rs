@@ -7,7 +7,6 @@ use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
 
 use crate::array::resolve_array_params;
-use crate::error::{current_modes, ArithmeticErrorModes};
 use crate::ops::asarray;
 use crate::type_hint::ArchiveValidation;
 use crate::util::IntoPyResult;
@@ -219,9 +218,8 @@ pub fn write_array(
     let array = array.get();
     let path_or_writer = PathOrWriter::from_pyany(path_or_writer)?;
     let params = resolve_array_params(py, params)?;
-    let modes = current_modes(py)?;
 
-    let (result, warnings) = match path_or_writer {
+    match path_or_writer {
         PathOrWriter::Path(path) => {
             py.detach(|| {
                 let (file, original_file_size) = if !append {
@@ -240,8 +238,8 @@ pub fn write_array(
                     let original_size = (file_exists || original_size > 0).then_some(original_size);
                     (file, original_size)
                 };
-                let written = write_array_impl(array, BufWriter::new(&file), params, modes);
-                if !matches!(written, Ok((Ok(()), _))) {
+                let written = write_array_impl(array, BufWriter::new(&file), params);
+                if written.is_err() {
                     // Don't leave a partial archive behind
                     let revert_result = match original_file_size {
                         Some(original_size) => file.set_len(original_size),
@@ -260,31 +258,24 @@ pub fn write_array(
         PathOrWriter::PyWriter(writer) => {
             // cant detach the GIL here since the writer is a Python object
             let mut writer = BufWriter::new(writer);
-            let written = write_array_impl(array, &mut writer, params, modes);
+            let written = write_array_impl(array, &mut writer, params);
             // Drop the buffer of a failed write instead of writing it again on drop
             let _ = writer.into_parts();
             written
         }
-    }?;
-    // Emit the warnings of the read even if it raised
-    crate::error::emit_warnings(py, warnings)?;
-    result
+    }
 }
-/// Returns the result of the write and the warnings of the read, see
-/// [`crate::error::emit_warnings`].
 fn write_array_impl(
     array: &Array,
     mut writer: impl Write + Seek,
     params: jix_core::ArrayParams,
-    modes: ArithmeticErrorModes,
-) -> PyResult<(PyResult<()>, Vec<jix_core::Error>)> {
-    let context = array.read_ctx(modes)?;
-    let result = array
+) -> PyResult<()> {
+    let context = array.read_ctx()?;
+    array
         .arr
         .write_to(&mut writer, params, context.as_ref())
-        .into_py_result()
-        .and_then(|()| Ok(writer.flush()?));
-    Ok((result, context.take_warnings()))
+        .into_py_result()?;
+    Ok(writer.flush()?)
 }
 
 enum PathOrReader<'a> {

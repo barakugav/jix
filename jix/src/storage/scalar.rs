@@ -161,7 +161,7 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 _offset: usize,
-                _status: &mut crate::error::ArithmeticOpStatus,
+                _status: &mut crate::error::ArithmeticStatus,
                 _simd: S,
             ) -> [T; N] {
                 [self.0; N]

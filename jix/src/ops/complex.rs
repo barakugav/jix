@@ -31,7 +31,7 @@ impl<T> crate::ops::op1::Op1Kernel<Complex<T>> for RealKernel<T> {
     type Output = T;
 
     #[inline(always)]
-    fn apply(&self, x: Complex<T>, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
+    fn apply(&self, x: Complex<T>, _status: &mut crate::error::ArithmeticStatus) -> Self::Output {
         x.re
     }
 }
@@ -99,7 +99,7 @@ impl<T> crate::ops::op1::Op1Kernel<Complex<T>> for ImaginaryKernel<T> {
     type Output = T;
 
     #[inline(always)]
-    fn apply(&self, x: Complex<T>, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
+    fn apply(&self, x: Complex<T>, _status: &mut crate::error::ArithmeticStatus) -> Self::Output {
         x.im
     }
 }

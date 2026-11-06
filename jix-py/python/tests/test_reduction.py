@@ -316,7 +316,7 @@ def test_sum_product_wrap_like_numpy(dtype):
     info = np.iinfo(dtype)
     np_a = np.resize(np.array([info.max, info.min, info.max, 3], dtype=dtype), 1000)
     za = jix.compact(np_a)
-    with np.errstate(all="raise"), jix.errstate(all="raise"):
+    with np.errstate(all="raise"):
         np.testing.assert_array_equal(jix.sum(za).numpy(), np.sum(np_a))
         np.testing.assert_array_equal(jix.product(za).numpy(), np.prod(np_a))
 

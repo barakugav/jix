@@ -9,7 +9,7 @@ use std::ops::Range;
 use crate::buf_pool::PoolBuf;
 use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
-use crate::error::{ArithmeticOpStatus, Result};
+use crate::error::{ArithmeticStatus, Result};
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
@@ -57,7 +57,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: Simd>(
         &self,
         offset: usize,
-        status: &mut ArithmeticOpStatus,
+        status: &mut ArithmeticStatus,
         simd: S,
     ) -> [T; N];
 
@@ -245,7 +245,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
         output_contiguous: operand_contiguous(0),
     };
 
-    let mut status = ArithmeticOpStatus::default();
+    let mut status = ArithmeticStatus::default();
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
             let chunk_len = chunk_len_max.min(len - pos);
@@ -285,7 +285,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            let mut iteration_status = ArithmeticOpStatus::default();
+            let mut iteration_status = ArithmeticStatus::default();
             inner_loop(
                 dst,
                 dst_stride,
@@ -310,7 +310,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
         }
     });
 
-    context.check_op_status(status)
+    status.into_result()
 }
 
 // Identical to `to_buf_type_erased`, but the number of operands is not known at compile time.
@@ -378,7 +378,7 @@ fn to_buf_type_erased_dyn(
         output_contiguous: operand_contiguous(0),
     };
 
-    let mut status = ArithmeticOpStatus::default();
+    let mut status = ArithmeticStatus::default();
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
             let chunk_len = chunk_len_max.min(len - pos);
@@ -418,7 +418,7 @@ fn to_buf_type_erased_dyn(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            let mut iteration_status = ArithmeticOpStatus::default();
+            let mut iteration_status = ArithmeticStatus::default();
             inner_loop(
                 dst,
                 dst_stride,
@@ -443,7 +443,7 @@ fn to_buf_type_erased_dyn(
         }
     });
 
-    context.check_op_status(status)
+    status.into_result()
 }
 
 /// Whether to stage the non-contiguous *input* operands, on top of the ones staged for alignment.
@@ -603,7 +603,7 @@ fn inner_loop_impl<
     dst: PtrMutNoalias<T>,
     dst_stride: usize,
     len: usize,
-    status: &mut ArithmeticOpStatus,
+    status: &mut ArithmeticStatus,
     simd: S,
 ) where
     T: Dtyped,
@@ -614,7 +614,7 @@ fn inner_loop_impl<
         debug_assert!(dst.is_aligned());
     }
 
-    let mut loop_status = ArithmeticOpStatus::default();
+    let mut loop_status = ArithmeticStatus::default();
 
     let body_limit = len - len % LANES;
     let mut i = 0;
@@ -659,7 +659,7 @@ fn inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
     dst: PtrMutNoalias<T>,
     dst_stride: usize,
     len: usize,
-    status: &mut ArithmeticOpStatus,
+    status: &mut ArithmeticStatus,
 ) where
     T: Dtyped,
     P: ElementwisePipelineImpl<T>,
@@ -683,7 +683,7 @@ fn inner_loop_per_level<
     dst: PtrMutNoalias<T>,
     dst_stride: usize,
     len: usize,
-    status: &mut ArithmeticOpStatus,
+    status: &mut ArithmeticStatus,
     simd: S,
 ) {
     let lanes = const {
@@ -729,7 +729,7 @@ struct InnerLoopFlags {
     output_contiguous: bool,
 }
 type InnerLoop<'a> =
-    dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, InnerLoopFlags, &mut ArithmeticOpStatus) + 'a;
+    dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, InnerLoopFlags, &mut ArithmeticStatus) + 'a;
 
 /// One region a pipeline reads - or writes - plus the cursor it is walked through.
 ///
@@ -841,7 +841,7 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
         &self,
         offset: usize,
-        _status: &mut ArithmeticOpStatus,
+        _status: &mut ArithmeticStatus,
         _simd: S,
     ) -> [T; N] {
         let base = self.operand.current_ptr.get().cast::<T>();
@@ -1160,7 +1160,7 @@ mod tests {
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                status: &mut ArithmeticOpStatus,
+                status: &mut ArithmeticStatus,
                 simd: S,
             ) -> [T; N] {
                 let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS, _>(offset, status, simd) };

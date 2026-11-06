@@ -1,10 +1,11 @@
 use std::mem::{ManuallyDrop, MaybeUninit};
 
+use jix_core::error::ErrorKind;
 use jix_core::NDIM_MAX;
 use numpy::npyffi::{npy_intp, PyArray_Dims};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{
-    PyFloatingPointError, PyIndexError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
+    PyArithmeticError, PyIndexError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
 };
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::marker::Ungil;
@@ -89,9 +90,9 @@ impl<T> IntoPyResult<T> for Result<T, jix_core::Error> {
 
             let err_str = format!("{e}");
             match e.kind() {
-                jix_core::error::ErrorKind::Arithmetic => PyFloatingPointError::new_err(err_str),
-                jix_core::error::ErrorKind::UnsupportedDtype => PyTypeError::new_err(err_str),
-                jix_core::error::ErrorKind::Io => PyOSError::new_err(err_str),
+                ErrorKind::Arithmetic => PyArithmeticError::new_err(err_str),
+                ErrorKind::UnsupportedDtype => PyTypeError::new_err(err_str),
+                ErrorKind::Io => PyOSError::new_err(err_str),
                 _ => PyRuntimeError::new_err(err_str),
             }
         }

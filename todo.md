@@ -24,5 +24,5 @@
 - avoid reading in blocks when there is no benefit in it, instead of just when plain
 - dont convert prost errors to io
 - implement stack using insert_dim+concatenate
-- rework kernels errors and warnings reporting
 - review docs, correctness and style
+- merge divide_* and remainder_* funcs into one in py api

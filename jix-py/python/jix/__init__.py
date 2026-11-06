@@ -7,6 +7,7 @@ from .jix import absolute, clamp, concatenate, divide, log, multiply, negative, 
 __doc__ = jix.__doc__  # noqa: F405
 if hasattr(jix, "__all__"):  # noqa: F405
     __all__ = jix.__all__ + [  # noqa: F405
+        # append aliases explicitly
         "pow",
         "abs",
         "concat",

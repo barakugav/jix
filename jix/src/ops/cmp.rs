@@ -885,7 +885,7 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                status: &mut ArithmeticOpStatus,
+                status: &mut ArithmeticStatus,
                 simd: S,
             ) -> [T; N] {
                 let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, status, simd) };
@@ -991,7 +991,7 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
     type Output = bool8;
 
     #[inline(always)]
-    fn apply(&self, a: T, b: T, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
+    fn apply(&self, a: T, b: T, _status: &mut crate::error::ArithmeticStatus) -> Self::Output {
         a.approx_eq(&b, &self.rtol, &self.atol).into()
     }
 
@@ -1000,7 +1000,7 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
         &self,
         a: [T; N],
         b: [T; N],
-        _status: &mut crate::error::ArithmeticOpStatus,
+        _status: &mut crate::error::ArithmeticStatus,
         simd: S,
     ) -> [Self::Output; N] {
         T::approx_eq_bulk(a, b, &self.rtol, &self.atol, simd)
