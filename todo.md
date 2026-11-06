@@ -24,3 +24,4 @@
 - dont convert prost errors to io
 - implement stack using insert_dim+concatenate
 - review docs, correctness and style
+- review inlines

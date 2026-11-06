@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams, ReadContext};
+use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams};
 use crate::dtype::Dtype;
 use crate::error::{ensure, error, Result};
 use crate::util::{assert_unchecked_eq, SendSyncPtr, Unaligned};
-use crate::ElementType;
+use crate::{ElementType, ReadContext};
 
 const _: () = const {
     assert!(
@@ -464,12 +464,13 @@ mod tests {
     use std::io::Cursor;
 
     use super::{BlockSize, BlockTable};
-    use crate::codec::{EncoderParams, ReadContext};
+    use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
     use crate::error::Result;
     use crate::storage::block::{BlockTableStorage, Owned};
     use crate::storage::{ElementType, Ty};
     use crate::util::{cast_slice, AlignedBytes};
+    use crate::ReadContext;
 
     fn decode_block<S, ET>(
         table: &BlockTable<S, ET>,

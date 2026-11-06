@@ -7,12 +7,12 @@ use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::buf_pool::PoolBuf;
-use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{ArithmeticStatus, Result};
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
+use crate::ReadContext;
 use crate::{
     array_from_fn_inline, const_min, dim_arr, prev_power_of_two, strided_span_bytes, ArrayExt,
     DimArray, DimBitmap, DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn,
@@ -994,7 +994,7 @@ pub(crate) const fn n_operands_mul(count: Option<usize>, n: usize) -> Option<usi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{array_from_fn_inline, strided_span_bytes, Array, ArrayStorage, Ty};
+    use crate::{array_from_fn_inline, strided_span_bytes, Array, ArrayStorage, CompactArray, Ty};
 
     // ---------------------------------------------------------------------------
     // Harness
@@ -1940,7 +1940,7 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     /// Three 4x5 `Compact` arrays with distinct contents.
-    fn three_arrays() -> [Array<crate::storage::Compact<Ty<i32>>>; 3] {
+    fn three_arrays() -> [CompactArray<i32>; 3] {
         std::array::from_fn(|k| {
             let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| {
                 (i * 5 + j) as i32 * (k as i32 + 1)
@@ -2201,7 +2201,7 @@ mod tests {
         // sixteen (the destination included) and hands anything wider to `to_buf_impl_dyn`. Both
         // sides of that boundary are reachable with a count known at compile time, so walk each:
         // fifteen leaves plus the destination is the last const-generic arm, sixteen overflows it.
-        fn leaves<const N: usize>() -> [Array<crate::storage::Compact<Ty<i32>>>; N] {
+        fn leaves<const N: usize>() -> [CompactArray<i32>; N] {
             std::array::from_fn(|k| {
                 let nd = ndarray::Array1::from_shape_fn(6, |i| (i + k) as i32);
                 Array::compact_ndarray(&nd).unwrap()

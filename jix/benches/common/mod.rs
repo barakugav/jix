@@ -1,8 +1,7 @@
 #![allow(dead_code)]
 
 use fastrand::Rng;
-use jix::storage::Compact;
-use jix::{Array, ArrayParams, Ty};
+use jix::{Array, ArrayParams, CompactArray};
 
 pub fn create_data<T: Scalar>(profile: Profile, shape: &[u64], seed: u64) -> ndarray::ArrayD<T> {
     let dims = shape.iter().map(|&d| d as usize).collect::<Vec<_>>();
@@ -22,7 +21,7 @@ pub fn create_compact<'a>(
     block_shape: impl Into<Option<&'a [u32]>>,
     read_size: impl Into<Option<(u64, u64)>>,
     rng: &mut Rng,
-) -> Array<Compact<Ty<i32>>> {
+) -> CompactArray<i32> {
     let data = create_ndarray(shape, rng);
     let mut params = ArrayParams::new();
     if let Some(block_shape) = block_shape.into() {

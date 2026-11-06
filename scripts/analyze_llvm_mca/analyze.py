@@ -179,7 +179,7 @@ TYPES = {
     "num_complex::Complex<f64>": ("complex128", 16),
 }
 
-EW = "jix::storage::elementwise_pipeline"
+EW = "jix::ops::elementwise::pipeline"
 INNER_LOOP = re.compile(rf"{EW}::inner_loop::<(.+?), (<.*), true, true>")
 LEAF = re.compile(rf"{EW}::OperandTyped<(.+)>")
 # `<jix::ops::elementwise::op2::Op2<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline::Op2Pipeline<..>`

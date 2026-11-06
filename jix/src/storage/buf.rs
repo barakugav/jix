@@ -446,8 +446,8 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
 mod tests {
     use ndarray::array;
 
-    use crate::codec::ReadContext;
     use crate::Array;
+    use crate::ReadContext;
 
     #[test]
     fn out_smaller_than_the_region_is_rejected() {

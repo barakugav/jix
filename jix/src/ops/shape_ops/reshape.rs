@@ -437,16 +437,16 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::array::Array;
-    use crate::storage::Compact;
+
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::Ty;
+    use crate::CompactArray;
 
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
     /// Create a 1-D Array<Compact> from `vals` with the given block size.
-    fn make1d<T: crate::dtype::Dtyped>(vals: Vec<T>, block_size: usize) -> Array<Compact<Ty<T>>> {
+    fn make1d<T: crate::dtype::Dtyped>(vals: Vec<T>, block_size: usize) -> CompactArray<T> {
         let nd = ndarray::Array::from_shape_vec(vec![vals.len()], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[block_size])).unwrap()
     }
@@ -457,7 +457,7 @@ mod tests {
         rows: usize,
         cols: usize,
         block_shape: &[usize],
-    ) -> Array<Compact<Ty<T>>> {
+    ) -> CompactArray<T> {
         let nd = ndarray::Array::from_shape_vec(vec![rows, cols], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(block_shape)).unwrap()
     }
@@ -469,7 +469,7 @@ mod tests {
         d1: usize,
         d2: usize,
         block_shape: &[usize],
-    ) -> Array<Compact<Ty<T>>> {
+    ) -> CompactArray<T> {
         let nd = ndarray::Array::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(block_shape)).unwrap()
     }

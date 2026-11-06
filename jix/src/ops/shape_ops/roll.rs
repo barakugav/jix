@@ -219,15 +219,15 @@ where
 mod tests {
     use ndarray::{array, Ix2};
 
-    use crate::codec::ReadContext;
-    use crate::storage::Compact;
-    use crate::{Array, ArrayStorage, IntoDimension, Ty};
+    use crate::ReadContext;
+
+    use crate::{Array, ArrayStorage, CompactArray, IntoDimension};
 
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn make(vals: Vec<i32>, shape: impl IntoDimension) -> Array<Compact<Ty<i32>>> {
+    fn make(vals: Vec<i32>, shape: impl IntoDimension) -> CompactArray<i32> {
         let shape = shape.into_dimension().unwrap();
         let nd = ndarray::Array::from_shape_vec(shape, vals).unwrap();
         Array::compact_ndarray(&nd).unwrap()

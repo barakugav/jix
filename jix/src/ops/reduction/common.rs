@@ -1599,7 +1599,7 @@ pub(crate) mod tests {
 
     // pub(crate) fn carray_strategy_for_reduction_single_dim<T: crate::util::ScalarStrategy>(
     //     elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    // ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>>>>, usize)>
+    // ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<CompactArray<T>>, usize)>
     // {
     //     let shape = reduction_shape_strategy();
     //     let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
@@ -2407,7 +2407,7 @@ pub(crate) mod tests {
         let n = (1u64 << 32) / 24 + 1;
         let a = Array::compact_ndarray(&array![[1.0f32]]).unwrap();
         let v = a.broadcast(&[n, 1]).var(1, 0.0);
-        let ctx = crate::codec::ReadContext::default();
+        let ctx = crate::ReadContext::default();
         assert!(v.storage().read_data(&[0..n], &ctx, None).is_err());
     }
 }

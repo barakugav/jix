@@ -459,17 +459,17 @@ mod tests {
 
     use super::SliceItem;
     use crate::array::Array;
-    use crate::codec::ReadContext;
-    use crate::storage::Compact;
-    use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{ArrayStorage, Ty};
+    use crate::ReadContext;
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>>> {
+    use crate::util::{arr_params, shape_strategy, ScalarStrategy};
+    use crate::{ArrayStorage, CompactArray, PlainArray};
+
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>>> {
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([d0, d1, d2], vals).unwrap();
         Array::compact_ndarray_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
@@ -587,7 +587,7 @@ mod tests {
         assert_eq!(got, array![[0, 1, 2, 3], [8, 9, 10, 11], [16, 17, 18, 19]]);
     }
 
-    fn plain6x4() -> Array<crate::storage::Plain<Vec<i32>, Ty<i32>>> {
+    fn plain6x4() -> PlainArray<i32> {
         Array::plain_ndarray(ndarray::Array::from_shape_vec((6, 4), arange(24)).unwrap()).unwrap()
     }
 
@@ -866,7 +866,7 @@ mod tests {
     // Bound checks in DimSlice::resolve.
     // -----------------------------------------------------------------------
 
-    fn try_slice_one_dim(arr: Array<Compact<Ty<i32>>>, item: SliceItem) -> super::Result<()> {
+    fn try_slice_one_dim(arr: CompactArray<i32>, item: SliceItem) -> super::Result<()> {
         super::Slice::new_array(
             arr,
             super::SliceSpec::new(&[item, SliceItem::new(None, None, 1)]).unwrap(),

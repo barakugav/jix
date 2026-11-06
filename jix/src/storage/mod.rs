@@ -49,6 +49,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::dtype::Dtyped;
+use crate::ops::ElementwisePipeline;
 use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
 
 pub(crate) mod core_trait;
@@ -73,9 +74,6 @@ pub(crate) mod scalar;
 
 mod buf;
 pub use buf::*;
-
-mod elementwise_pipeline;
-pub use elementwise_pipeline::*;
 
 mod info;
 pub use info::*;
@@ -148,7 +146,7 @@ macro_rules! impl_array_storage_smart_ptr {
             fn read_data<'a>(
                 &'a self,
                 index: &[Range<u64>],
-                context: &'a crate::codec::ReadContext,
+                context: &'a crate::ReadContext,
                 out: Option<&'a mut StridedBuf<'_>>,
             ) -> crate::error::Result<StridedBuf<'a>> {
                 (**self).read_data(index, context, out)
@@ -159,7 +157,7 @@ macro_rules! impl_array_storage_smart_ptr {
             fn read_as_elementwise_pipeline<'a, T>(
                 &'a self,
                 index: &[Range<u64>],
-                context: &'a crate::codec::ReadContext,
+                context: &'a crate::ReadContext,
             ) -> crate::error::Result<impl ElementwisePipeline<T> + use<'a, T, S>>
             where
                 T: Dtyped,
@@ -216,7 +214,7 @@ impl ArrayStorage for &dyn ArrayStorage {
     fn read_data<'a>(
         &'a self,
         index: &[Range<u64>],
-        context: &'a crate::codec::ReadContext,
+        context: &'a crate::ReadContext,
         out: Option<&'a mut crate::storage::StridedBuf<'_>>,
     ) -> crate::error::Result<crate::storage::StridedBuf<'a>> {
         (**self).read_data(index, context, out)
@@ -259,7 +257,7 @@ macro_rules! impl_array_storage_forward {
         fn read_data<'rd>(
             &'rd self,
             index: &[::core::ops::Range<u64>],
-            context: &'rd crate::codec::ReadContext,
+            context: &'rd crate::ReadContext,
             out: Option<&'rd mut crate::storage::StridedBuf<'_>>,
         ) -> crate::error::Result<crate::storage::StridedBuf<'rd>> {
             self.0.read_data(index, context, out)
@@ -270,8 +268,8 @@ macro_rules! impl_array_storage_forward {
         fn read_as_elementwise_pipeline<$lifetime, $generic>(
             &$lifetime self,
             index: &[::core::ops::Range<u64>],
-            context: &$lifetime crate::codec::ReadContext,
-        ) -> crate::error::Result<impl crate::storage::ElementwisePipeline<$generic> + use<$lifetime, $generic, $($generics),*>>
+            context: &$lifetime crate::ReadContext,
+        ) -> crate::error::Result<impl crate::ops::ElementwisePipeline<$generic> + use<$lifetime, $generic, $($generics),*>>
         where
             $generic: crate::dtype::Dtyped,
         {

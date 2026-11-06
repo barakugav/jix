@@ -126,7 +126,9 @@ pub(crate) mod prelude {
     pub(crate) use std::ops::Range;
 
     pub(crate) use super::DimsArg;
-    pub(crate) use crate::codec::ReadContext;
+    pub(crate) use super::{
+        max_itemsize, n_operands_sum, ElementwisePipeline, ElementwisePipelineImpl, Operand,
+    };
     pub(crate) use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
     pub(crate) use crate::error::*;
     pub(crate) use crate::scalar::bool8;
@@ -135,9 +137,8 @@ pub(crate) mod prelude {
         read_layout_order_insert_dont_care_dim, ArraySpecDynamic,
     };
     pub(crate) use crate::storage::{
-        check_out_buf, materialize_out_buf, max_itemsize, n_operands_sum,
-        read_data_and_map_strides, ArraySpec, ArrayStorageInfo, ArrayStorageTyped, BlockSize,
-        ElementwisePipeline, ElementwisePipelineImpl, Operand, StridedBuf,
+        check_out_buf, materialize_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo,
+        ArrayStorageTyped, BlockSize, StridedBuf,
     };
     pub(crate) use crate::util::{
         array_from_fn_inline, calc_block_end, default_logical_strides, default_strides,
@@ -145,6 +146,7 @@ pub(crate) mod prelude {
         IterExt, NdCopier, NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias,
         ScaleWeight, SliceExt, REQUIRE_ALIGNED,
     };
+    pub(crate) use crate::ReadContext;
     pub(crate) use crate::{
         Array, ArrayStorage, DimDyn, DimVec, Dimension, ElementType, Ty, TypeDyn, NDIM_MAX,
     };

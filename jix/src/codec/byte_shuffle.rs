@@ -13,7 +13,7 @@ use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 const MIN_BYTES_PER_ITERATION: usize = 256;
 
 #[derive(Default)]
-pub(in crate::codec::filter) struct ByteShuffleFilter;
+pub(super) struct ByteShuffleFilter;
 impl FilterImpl for ByteShuffleFilter {
     fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _buf_pool: &BufferPool) {
         encode(src, dst, dtype.itemsize() as usize);

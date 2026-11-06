@@ -55,8 +55,8 @@ mod jix {
     #[pymodule_export]
     pub use crate::ops::{
         bitwise_and, bitwise_left_shift, bitwise_not, bitwise_or, bitwise_right_shift,
-        bitwise_rotate_left, bitwise_rotate_right, bitwise_xor, count_ones, count_zeros,
-        leading_zeros, logical_and, logical_not, logical_or, logical_xor, reverse_bits, swap_bytes,
+        bitwise_rotate_left, bitwise_rotate_right, bitwise_xor, byteswap, count_ones, count_zeros,
+        leading_zeros, logical_and, logical_not, logical_or, logical_xor, reverse_bits,
         trailing_zeros,
     };
 

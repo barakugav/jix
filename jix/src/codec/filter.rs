@@ -1,10 +1,7 @@
 use crate::buf_pool::BufferPool;
-use crate::codec::filter::bit_shuffle::BitShuffleFilter;
-use crate::codec::filter::byte_shuffle::ByteShuffleFilter;
+use crate::codec::bit_shuffle::BitShuffleFilter;
+use crate::codec::byte_shuffle::ByteShuffleFilter;
 use crate::dtype::Dtype;
-
-mod bit_shuffle;
-mod byte_shuffle;
 
 /// A pre-compression byte transform applied to block data before encoding.
 ///
@@ -54,13 +51,13 @@ impl Filter {
     }
 }
 
-trait FilterImpl {
+pub(super) trait FilterImpl {
     fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool);
     fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool);
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use crate::buf_pool::BufferPool;
     use crate::codec::filter::FilterImpl;
     use crate::dtype::Dtyped;

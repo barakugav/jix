@@ -1,14 +1,12 @@
 use std::ops::Range;
 
-use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_range, check_ndim, Result};
+use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{
-    check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, ElementwisePipeline,
-    ElementwisePipelineImpl, Operand, StridedBuf, Ty,
-};
+use crate::storage::{check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, StridedBuf, Ty};
 use crate::util::dim_arr;
+use crate::ReadContext;
 use crate::{cast_slice, cast_slice_mut, ArrayParams, DimDyn, Dimension, ElementType};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
@@ -196,9 +194,9 @@ mod tests {
     use ndarray::array;
 
     use crate::__private::Scalar;
-    use crate::codec::ReadContext;
     use crate::dtype::Dtyped;
     use crate::error::Result;
+    use crate::ReadContext;
     use crate::{Array, ArrayParams};
 
     pub fn plain_scalar<T>(value: T, shape: &[u64]) -> Result<Array<Scalar<T>>>
