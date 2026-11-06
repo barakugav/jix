@@ -460,7 +460,7 @@ mod tests {
     use super::SliceItem;
     use crate::array::Array;
     use crate::codec::ReadContext;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, PlainArray};
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::{ArrayStorage, Ty};
 
@@ -587,7 +587,7 @@ mod tests {
         assert_eq!(got, array![[0, 1, 2, 3], [8, 9, 10, 11], [16, 17, 18, 19]]);
     }
 
-    fn plain6x4() -> Array<crate::storage::Plain<Vec<i32>, Ty<i32>>> {
+    fn plain6x4() -> PlainArray<i32> {
         Array::plain_ndarray(ndarray::Array::from_shape_vec((6, 4), arange(24)).unwrap()).unwrap()
     }
 
