@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
 use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
+use crate::context::CacheScopeGuard;
 use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
 use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight};
 use crate::{
-    dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt, BLOCK_SIZE_BYTES_MAX,
+    dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, ReadContext, SliceExt,
+    BLOCK_SIZE_BYTES_MAX,
 };
 
 const ELEMENT_COST_MAX: f32 = u64::MAX as f32; // 2^64
@@ -888,7 +890,7 @@ impl ArraySpecDynamic {
         cache_id: Option<ArrayCacheId>,
         inners: impl IntoIterator<Item = &'s ArraySpecDynamic>,
         repeats_across_inners: bool,
-    ) -> (Self, Option<Arc<ArrayCacheIdSet>>) {
+    ) -> (Self, CacheScope) {
         self.merge_cache_ids(inners, repeats_across_inners);
         let scope = self.arrays_to_cache.take();
         self.arrays_to_cache_potentially = None;
@@ -896,6 +898,9 @@ impl ArraySpecDynamic {
         if let Some(cache_id) = cache_id {
             self.add_cache_id(cache_id);
         }
+        let scope = CacheScope {
+            arrays_to_cache: scope,
+        };
         (self, scope)
     }
 
@@ -966,6 +971,16 @@ impl ArraySpecDynamic {
         }
         self.read_shape_scale_order =
             scale_order_from_weights(&self.read_shape_scale_weight, &self.read_layout_order);
+    }
+}
+
+pub(crate) struct CacheScope {
+    arrays_to_cache: Option<Arc<ArrayCacheIdSet>>,
+}
+impl CacheScope {
+    #[inline]
+    pub(crate) fn enter<'a>(&self, context: &'a ReadContext) -> CacheScopeGuard<'a> {
+        context.cache_scope(&self.arrays_to_cache)
     }
 }
 

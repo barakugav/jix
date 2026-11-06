@@ -33,9 +33,7 @@ use crate::ops::prelude::*;
 pub struct Flip<S: ArrayStorage> {
     array: S,
     is_flipped: DimArray<bool>,
-    /// The arrays to cache in the cache scope in which `array` is read, see
-    /// [`ReadContext::cache_scope`].
-    cache_scope: Option<Arc<ArrayCacheIdSet>>,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 
@@ -104,7 +102,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let _scope = context.cache_scope(&self.cache_scope);
+        let _cache_scope = self.cache_scope.enter(context);
 
         let ndim = index.len();
         let dtype = self.dtype();

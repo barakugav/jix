@@ -45,9 +45,7 @@ pub struct Tile<S: ArrayStorage> {
     dim: DimIdx,
     repeats: u64,
     new_shape: DimDyn,
-    /// The arrays to cache in the cache scope in which `array` is read, see
-    /// [`ReadContext::cache_scope`].
-    cache_scope: Option<Arc<ArrayCacheIdSet>>,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 
@@ -91,14 +89,14 @@ impl<S: ArrayStorage> Tile<S> {
         let mut read_shape_scale_weight =
             inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>();
         read_shape_scale_weight[dim] = ScaleWeight::FULL;
-        let (spec, cache_scope) = ArraySpecDynamic::new(
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             inner_spec.element_cost(),
             read_shape_scale_weight,
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
-        )
-        .with_cache_scope(None, [inner_spec.dynamic()], true);
+        );
+        let (spec, cache_scope) = spec.with_cache_scope(None, [inner_spec.dynamic()], true);
 
         Ok(Self {
             array,
@@ -132,7 +130,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let _scope = context.cache_scope(&self.cache_scope);
+        let _cache_scope = self.cache_scope.enter(context);
 
         let ndim = index.len();
         let out_shape_usize = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);

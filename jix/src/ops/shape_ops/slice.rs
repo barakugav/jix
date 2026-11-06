@@ -58,9 +58,7 @@ pub struct Slice<S: ArrayStorage> {
     no_steps: bool,
 
     shape: DimDyn,
-    /// The arrays to cache in the cache scope in which `array` is read, see
-    /// [`ReadContext::cache_scope`].
-    cache_scope: Option<Arc<ArrayCacheIdSet>>,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 
@@ -96,14 +94,14 @@ impl<S: ArrayStorage> Slice<S> {
                 // block_shape_fixed_dims is unchanged
             }
         }
-        let (spec, cache_scope) = ArraySpecDynamic::new(
+        let spec = ArraySpecDynamic::new(
             block_shape,
             inner_spec.block_shape_fixed_dims(),
             inner_spec.element_cost(),
             DimArray::from_slice(inner_spec.read_shape_scale_weight()).unwrap(),
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
-        )
-        .with_cache_scope(None, [inner_spec.dynamic()], true);
+        );
+        let (spec, cache_scope) = spec.with_cache_scope(None, [inner_spec.dynamic()], true);
 
         Ok(Self {
             array,
@@ -141,7 +139,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let _scope = context.cache_scope(&self.cache_scope);
+        let _cache_scope = self.cache_scope.enter(context);
         let ndim = self.slice.as_ref().len();
 
         // Fast path: all dims have step == 1. Map index [a, b) to inner [start + a, start + b) and forward.

@@ -60,9 +60,7 @@ where
     borders: Vec<u64>,
 
     shape: DimDyn,
-    /// The arrays to cache in the cache scope in which the inputs are read, see
-    /// [`ReadContext::cache_scope`].
-    cache_scope: Option<Arc<ArrayCacheIdSet>>,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 impl<ArraysT> Concatenate<ArraysT>
@@ -148,16 +146,17 @@ where
                 .collect::<Vec<_>>();
             combine_block_layout(&inputs)
         };
-        // The inputs are read at different regions, so an array reachable from more than one of them
-        // is not cached for it.
-        let (spec, cache_scope) = ArraySpecDynamic::new(
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
-        )
-        .with_cache_scope(None, (0..narrays).map(|i| arrays.spec(i).dynamic()), false);
+        );
+        // The inputs are read at different regions, so an array reachable from more than one of them
+        // is not cached for it.
+        let (spec, cache_scope) =
+            spec.with_cache_scope(None, (0..narrays).map(|i| arrays.spec(i).dynamic()), false);
 
         let shape = DimDyn::from_slice(&shape);
         Ok(Self {
@@ -214,7 +213,7 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let _scope = context.cache_scope(&self.cache_scope);
+        let _cache_scope = self.cache_scope.enter(context);
 
         let concat_dim = self.concat_dim as usize;
         let req_start = index[concat_dim].start;
@@ -318,7 +317,6 @@ where
             self.arrays
                 .read_data(arr, sub_index.as_ref(), context, Some(&mut sub))?;
         }
-
         Ok(out)
     }
 

@@ -47,10 +47,8 @@ pub struct InsertDim<S: ArrayStorage> {
     original_dims: DimArray<DimIdx>,
 
     shape: DimDyn,
-    /// The arrays to cache in the cache scope in which `array` is read, see
-    /// [`ReadContext::cache_scope`]. `None` if it is read in the current scope, as the dims are
-    /// inserted in front.
-    cache_scope: Option<Option<Arc<ArrayCacheIdSet>>>,
+    /// `None` if `array` is read in the current scope, as the dims are inserted in front.
+    cache_scope: Option<CacheScope>,
     spec: ArraySpecDynamic,
 }
 
@@ -193,10 +191,7 @@ where
                 self.spec().read_layout_order(),
             ));
         };
-        let _scope = self
-            .cache_scope
-            .as_ref()
-            .map(|ids| context.cache_scope(ids));
+        let _cache_scope = self.cache_scope.as_ref().map(|s| s.enter(context));
         unsafe {
             read_data_and_map_strides(
                 &self.array,

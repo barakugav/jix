@@ -43,9 +43,7 @@ pub struct PermuteDims<S: ArrayStorage> {
     inv_dims: DimArray<DimIdx>,
 
     shape: DimDyn,
-    /// The arrays to cache in the cache scope in which `array` is read, see
-    /// [`ReadContext::cache_scope`].
-    cache_scope: Option<Arc<ArrayCacheIdSet>>,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 
@@ -84,7 +82,7 @@ impl<S: ArrayStorage> PermuteDims<S> {
         let inner_spec = array.spec();
         let block_shape = dim_arr(ndim, |i| inner_spec.block_shape()[dims[i]]);
         let inner_block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
-        let (spec, cache_scope) = ArraySpecDynamic::new(
+        let spec = ArraySpecDynamic::new(
             block_shape,
             (0..ndim)
                 .map(|i| inner_block_shape_fixed_dims.get(dims[i]))
@@ -96,8 +94,8 @@ impl<S: ArrayStorage> PermuteDims<S> {
                 .iter()
                 .map(|&old| inv_dims[old as usize])
                 .collect(),
-        )
-        .with_cache_scope(None, [inner_spec.dynamic()], true);
+        );
+        let (spec, cache_scope) = spec.with_cache_scope(None, [inner_spec.dynamic()], true);
         let dims = dim_arr(ndim, |i| dims[i] as DimIdx);
         Ok(Self {
             shape,
@@ -132,8 +130,8 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let _scope = context.cache_scope(&self.cache_scope);
         let ndim = self.dims.as_ref().len();
+        let _cache_scope = self.cache_scope.enter(context);
         unsafe {
             read_data_and_map_strides(
                 &self.array,

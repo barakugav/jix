@@ -124,7 +124,6 @@ pub use into_type::*;
 
 pub(crate) mod prelude {
     pub(crate) use std::ops::Range;
-    pub(crate) use std::sync::Arc;
 
     pub(crate) use super::DimsArg;
     pub(crate) use super::{
@@ -133,10 +132,10 @@ pub(crate) mod prelude {
     pub(crate) use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
     pub(crate) use crate::error::*;
     pub(crate) use crate::scalar::bool8;
-    pub(crate) use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
+    pub(crate) use crate::storage::cache_id::ArrayCacheId;
     pub(crate) use crate::storage::params::{
         combine_block_layout, combine_elementwise_hints, combine_select_hints,
-        read_layout_order_insert_dont_care_dim, ArraySpecDynamic,
+        read_layout_order_insert_dont_care_dim, ArraySpecDynamic, CacheScope,
     };
     pub(crate) use crate::storage::{
         check_out_buf, materialize_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo,

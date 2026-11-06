@@ -35,9 +35,7 @@ pub struct Reshape<S> {
     array: S,
 
     new_shape: DimArray<u64>,
-    /// The arrays to cache in the cache scope in which `array` is read, see
-    /// [`ReadContext::cache_scope`].
-    cache_scope: Option<Arc<ArrayCacheIdSet>>,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 impl<S> Reshape<S> {
@@ -130,14 +128,14 @@ impl<S> Reshape<S> {
                 (0..new_shape.len() as DimIdx).collect::<DimArray<_>>()
             }
         };
-        let (spec, cache_scope) = ArraySpecDynamic::new(
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             inner_spec.element_cost(),
             read_shape_scale_weight,
             read_layout_order,
-        )
-        .with_cache_scope(None, [inner_spec.dynamic()], true);
+        );
+        let (spec, cache_scope) = spec.with_cache_scope(None, [inner_spec.dynamic()], true);
 
         Ok(Self {
             new_shape,
@@ -263,7 +261,7 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let _scope = context.cache_scope(&self.cache_scope);
+        let _cache_scope = self.cache_scope.enter(context);
         let dtype = self.dtype();
         let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let mut out = materialize_out_buf(
@@ -377,7 +375,6 @@ where
             self.array
                 .read_data(read_range.as_ref(), context, Some(&mut sub))?;
         }
-
         Ok(out)
     }
 

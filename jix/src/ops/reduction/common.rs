@@ -14,9 +14,7 @@ pub(crate) struct ReductionOp<S: ArrayStorage, K> {
 
     shape: DimDyn,
     cache_id: ArrayCacheId,
-    /// The arrays to cache in the cache scope in which `array` is read, see
-    /// [`ReadContext::cache_scope`].
-    cache_scope: Option<Arc<ArrayCacheIdSet>>,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 pub(crate) trait ReductionOpKernel<T> {
@@ -173,32 +171,32 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
         let item_bytes = (K::Output::DTYPE.itemsize() as usize).max(size_of::<K::State>());
         check_shape_overflow(shape.as_slice(), item_bytes as _)?;
 
-        let spec = array.spec();
+        let inner_spec = array.spec();
         let reduced_prod = (0..input_ndim)
             .filter(|&dim| is_reduced[dim])
             .map(|dim| array.shape()[dim])
             .product::<u64>();
-        let element_cost = (spec.element_cost() as f64 * (reduced_prod as f64 + 4.0)) as f32;
+        let element_cost = (inner_spec.element_cost() as f64 * (reduced_prod as f64 + 4.0)) as f32;
         let dim_orig2new = |d: usize| (d - (0..d).filter(|&j| is_reduced[j]).count()) as DimIdx;
-        let read_shape_scale_weight = spec
+        let read_shape_scale_weight = inner_spec
             .read_shape_scale_weight()
             .iter()
             .enumerate()
             .filter_map(|(d, &w)| (!is_reduced[d]).then_some(w))
             .collect();
-        let read_layout_order = spec
+        let read_layout_order = inner_spec
             .read_layout_order()
             .iter()
             .filter(|&&d| !is_reduced[d as usize])
             .map(|&d| dim_orig2new(d as usize))
             .collect();
-        let cache_id = ArrayCacheId::new();
-        let (spec, cache_scope) = ArraySpecDynamic::new(
+        let spec = ArraySpecDynamic::new(
             dim_new2orig
                 .iter()
-                .map(|&dim| spec.block_shape()[dim])
+                .map(|&dim| inner_spec.block_shape()[dim])
                 .collect(),
-            spec.block_shape_fixed_dims()
+            inner_spec
+                .block_shape_fixed_dims()
                 .into_iter()
                 .enumerate()
                 .filter_map(|(dim, c)| is_reduced[dim].not().then_some(c))
@@ -206,8 +204,11 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
-        )
-        .with_cache_scope(Some(cache_id), [spec.dynamic()], true);
+        );
+
+        let cache_id = ArrayCacheId::new();
+        let (spec, cache_scope) =
+            spec.with_cache_scope(Some(cache_id), [inner_spec.dynamic()], true);
 
         Ok(Self {
             kernel,
@@ -242,7 +243,7 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
-            let _scope = context.cache_scope(&self.cache_scope);
+            let _cache_scope = self.cache_scope.enter(context);
             read_data_dispatch(
                 &self.array,
                 self.shape(),

@@ -52,9 +52,7 @@ where
     stack_dim: DimIdx,
 
     shape: DimDyn,
-    /// The arrays to cache in the cache scope in which the inputs are read, see
-    /// [`ReadContext::cache_scope`].
-    cache_scope: Option<Arc<ArrayCacheIdSet>>,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 impl<ArraysT> Stack<ArraysT>
@@ -132,14 +130,15 @@ where
             .map(|&d| if d as usize >= dim { d + 1 } else { d })
             .collect::<DimArray<_>>();
         read_layout_order_insert_dont_care_dim(&mut read_layout_order, dim);
-        let (spec, cache_scope) = ArraySpecDynamic::new(
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
-        )
-        .with_cache_scope(None, (0..narrays).map(|i| arrays.spec(i).dynamic()), true);
+        );
+        let (spec, cache_scope) =
+            spec.with_cache_scope(None, (0..narrays).map(|i| arrays.spec(i).dynamic()), true);
 
         Ok(Self {
             shape: new_shape,
@@ -179,7 +178,7 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let _scope = context.cache_scope(&self.cache_scope);
+        let _cache_scope = self.cache_scope.enter(context);
         let output_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let mut out = materialize_out_buf(
             out,
