@@ -114,6 +114,10 @@ impl<S: ArrayStorage> Slice<S> {
     pub fn new_array(array: Array<S>, slice: SliceSpec) -> Result<Array<Self>> {
         Self::new(array.into_storage(), slice).map(Array::from_storage)
     }
+
+    fn is_identity(&self) -> bool {
+        self.no_steps && self.shape() == self.array.shape()
+    }
 }
 
 impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Slice<S> {}
@@ -219,8 +223,10 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
+        if self.is_identity() {
+            return self.array.spec();
+        }
         self.array
             .spec()
             .with_dynamic_spec(&self.spec)
@@ -228,6 +234,13 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Slice", [&self.array])
+    }
+    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn>> {
+        if self.is_identity() {
+            self.array.as_compact()
+        } else {
+            None
+        }
     }
 
     type ElementTypeChange<NewET: crate::ElementType> = Slice<S::ElementTypeChange<NewET>>;
@@ -431,7 +444,7 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::Ty;
+    use crate::{ArrayStorage, Ty};
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>>> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
@@ -464,6 +477,14 @@ mod tests {
     #[test]
     fn shape_slice_identity_rangefull() {
         assert_eq!(make2d(arange(12), 3, 4).slice((.., ..)).shape(), &[3, 4]);
+    }
+
+    #[test]
+    fn identity_rangefull_keeps_compact() {
+        let a = make2d(arange(12), 3, 4).slice((.., ..));
+        assert!(a.is_compact());
+        assert!(a.storage().as_compact().is_some());
+        assert!(!make2d(arange(12), 3, 4).slice((.., 1..)).is_compact());
     }
 
     #[test]

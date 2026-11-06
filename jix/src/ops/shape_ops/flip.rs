@@ -54,6 +54,9 @@ impl<S: ArrayStorage> Flip<S> {
                 InvalidShapeOperation,
                 "duplicate dim {d} in flip"
             );
+            if input_shape[d] <= 1 {
+                continue; // flipping a dim of size 0 or 1 does nothing
+            }
             is_flipped[d] = true;
         }
         Ok(Self { array, is_flipped })
@@ -62,6 +65,10 @@ impl<S: ArrayStorage> Flip<S> {
     /// Constructs an array with [`Flip`] storage. See the storage struct docs for semantics and examples.
     pub fn new_array(array: Array<S>, dim: impl DimsArg) -> Result<Array<Self>> {
         Self::new(array.into_storage(), dim).map(Array::from_storage)
+    }
+
+    fn is_identity(&self) -> bool {
+        !self.is_flipped.contains(&true)
     }
 }
 
@@ -75,6 +82,9 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
+        if self.is_identity() {
+            return self.array.read_data(index, context, out);
+        }
         check_out_buf(
             out.as_deref(),
             self.shape(),
@@ -168,12 +178,21 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         self.array.dtype()
     }
 
-    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
+        if self.is_identity() {
+            return self.array.spec();
+        }
         self.array.spec().with_cleared_flags()
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Flip", [&self.array])
+    }
+    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn>> {
+        if self.is_identity() {
+            self.array.as_compact()
+        } else {
+            None
+        }
     }
 
     type ElementTypeChange<NewET: crate::ElementType> = Flip<S::ElementTypeChange<NewET>>;
@@ -195,7 +214,7 @@ mod tests {
 
     use crate::codec::ReadContext;
     use crate::storage::Compact;
-    use crate::{Array, IntoDimension, Ty};
+    use crate::{Array, ArrayStorage, IntoDimension, Ty};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -316,6 +335,14 @@ mod tests {
             .to_ndarray::<Ix2>()
             .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
+    }
+
+    #[test]
+    fn identity_keeps_compact() {
+        let a = make(arange(4), [1u64, 4]).flip([0]);
+        assert!(a.is_compact());
+        assert!(a.storage().as_compact().is_some());
+        assert!(!make(arange(4), [1u64, 4]).flip([1]).is_compact());
     }
 
     // -----------------------------------------------------------------------

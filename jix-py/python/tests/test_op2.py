@@ -372,8 +372,7 @@ def test_float_special_values(jix_fn, numpy_fn, dtype: np.dtype):
     values = [0.0, -0.0, 1.0, -1.0, 5.0, -2.5, np.inf, -np.inf, np.nan]
     a = np.array([x for x in values for _ in values], dtype=dtype)
     b = np.array([y for _ in values for y in values], dtype=dtype)
-    with jix.errstate(divide="ignore", invalid="ignore"):
-        result = jix_fn(jix.compact(a), jix.compact(b)).numpy()
+    result = jix_fn(jix.compact(a), jix.compact(b)).numpy()
     with np.errstate(divide="ignore", invalid="ignore"):
         expected = numpy_fn(a, b)
     np.testing.assert_array_equal(result, expected)
@@ -668,10 +667,9 @@ def test_power_shortcut_edge_cases_follow_sqrt():
     the general pow path (`pow(-inf, 0.5) == +inf`, `pow(-0.0, 0.5) == +0.0`)."""
     np_a = np.array([-np.inf, -0.0, -1.0, 4.0], dtype=np.float64)
     za = jix.compact(np_a)
-    with jix.errstate(invalid="ignore"):
-        np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), jix.sqrt(za).numpy())
-        with np.errstate(invalid="ignore"):
-            np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), np.power(np_a, 0.5))
+    np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), jix.sqrt(za).numpy())
+    with np.errstate(invalid="ignore"):
+        np.testing.assert_array_equal(jix.power(za, 0.5).numpy(), np.power(np_a, 0.5))
 
 
 def test_power_shortcut_not_taken_for_array_exponent():

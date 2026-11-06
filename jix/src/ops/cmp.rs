@@ -885,7 +885,7 @@ where
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                status: &mut ArithmeticOpStatus,
+                status: &mut ArithmeticStatus,
                 simd: S,
             ) -> [T; N] {
                 let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS, S>(offset, status, simd) };
@@ -991,7 +991,7 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
     type Output = bool8;
 
     #[inline(always)]
-    fn apply(&self, a: T, b: T, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
+    fn apply(&self, a: T, b: T, _status: &mut crate::error::ArithmeticStatus) -> Self::Output {
         a.approx_eq(&b, &self.rtol, &self.atol).into()
     }
 
@@ -1000,7 +1000,7 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
         &self,
         a: [T; N],
         b: [T; N],
-        _status: &mut crate::error::ArithmeticOpStatus,
+        _status: &mut crate::error::ArithmeticStatus,
         simd: S,
     ) -> [Self::Output; N] {
         T::approx_eq_bulk(a, b, &self.rtol, &self.atol, simd)
@@ -1114,10 +1114,10 @@ where
     #[track_caller]
     pub fn approx_equal<S2>(
         self,
-        other: crate::Array<S2>,
+        other: Array<S2>,
         rtol: <S::Item as crate::scalar::ApproxEq>::RelativeTolerance,
         atol: <S::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
-    ) -> crate::Array<ApproxEq<S, S2>>
+    ) -> Array<ApproxEq<S, S2>>
     where
         S: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
         S2: ArrayStorageTyped<Item = S::Item>,
@@ -1755,8 +1755,9 @@ mod tests {
             ),
             hi_offset in -50i32..50,
         ) {
+            use crate::Array;
             let nd_hi = nd_lo.mapv(|x| x.saturating_add(hi_offset));
-            let zhi = crate::Array::compact_ndarray(&nd_hi).unwrap();
+            let zhi = Array::compact_ndarray(&nd_hi).unwrap();
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_lo)
                 .and(&nd_hi)

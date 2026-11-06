@@ -4,6 +4,7 @@ use jix_core::scalar::Complex;
 use pyo3::prelude::*;
 
 use crate::ops::common::{define_op1, define_op1_desc, OpDescriptor, Operand, Rank};
+use crate::Array;
 
 /// Extracts the real part of each complex element.
 ///
@@ -31,7 +32,7 @@ use crate::ops::common::{define_op1, define_op1_desc, OpDescriptor, Operand, Ran
 ///     assert np.array_equal(result.numpy(), [1.0, 3.0, -5.0])
 ///     ```
 #[pyo3::pyfunction]
-pub fn real<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array>> {
+pub fn real<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let array = Operand::from_any(array)?;
     #[allow(clippy::collapsible_if)]
@@ -47,10 +48,7 @@ pub fn real<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array>
             define_op1_desc!(Real, [Complex<f32>, Complex<f64>], None),
         )
     });
-    Bound::new(
-        py,
-        crate::Array::from_core(DISPATCH_TABLE.dispatch1(array)?),
-    )
+    Bound::new(py, Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
 }
 
 define_op1!(

@@ -65,6 +65,10 @@ impl<S: ArrayStorage> Roll<S> {
     pub fn new_array(array: Array<S>, shift: i64, dim: usize) -> Result<Array<Self>> {
         Self::new(array.into_storage(), shift, dim).map(Array::from_storage)
     }
+
+    fn is_identity(&self) -> bool {
+        self.shift == 0
+    }
 }
 
 impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Roll<S> {}
@@ -77,6 +81,9 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
+        if self.is_identity() {
+            return self.array.read_data(index, context, out);
+        }
         check_out_buf(
             out.as_deref(),
             self.shape(),
@@ -157,12 +164,21 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         self.array.dtype()
     }
 
-    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
+        if self.is_identity() {
+            return self.array.spec();
+        }
         self.array.spec().with_cleared_flags()
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Roll", [&self.array])
+    }
+    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn>> {
+        if self.is_identity() {
+            self.array.as_compact()
+        } else {
+            None
+        }
     }
 
     type ElementTypeChange<NewET: crate::ElementType> = Roll<S::ElementTypeChange<NewET>>;
@@ -185,7 +201,7 @@ mod tests {
 
     use crate::codec::ReadContext;
     use crate::storage::Compact;
-    use crate::{Array, IntoDimension, Ty};
+    use crate::{Array, ArrayStorage, IntoDimension, Ty};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -258,6 +274,14 @@ mod tests {
             .to_ndarray()
             .unwrap();
         assert_eq!(got, nd);
+    }
+
+    #[test]
+    fn identity_keeps_compact() {
+        let a = make(arange(12), [3u64, 4]).roll(3, 0);
+        assert!(a.is_compact());
+        assert!(a.storage().as_compact().is_some());
+        assert!(!make(arange(12), [3u64, 4]).roll(1, 0).is_compact());
     }
 
     #[test]

@@ -1,10 +1,11 @@
 use std::mem::{ManuallyDrop, MaybeUninit};
 
+use jix_core::error::ErrorKind;
 use jix_core::NDIM_MAX;
 use numpy::npyffi::{npy_intp, PyArray_Dims};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{
-    PyFloatingPointError, PyIndexError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
+    PyArithmeticError, PyIndexError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
 };
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::marker::Ungil;
@@ -12,7 +13,7 @@ use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::slice::PySliceIndices;
 use pyo3::types::{PySlice, PyTuple};
-use pyo3::{type_hint_subscript, type_hint_union};
+use pyo3::{type_hint_subscript, type_hint_union, PyTypeInfo};
 
 use crate::type_hint::Dim;
 
@@ -89,9 +90,9 @@ impl<T> IntoPyResult<T> for Result<T, jix_core::Error> {
 
             let err_str = format!("{e}");
             match e.kind() {
-                jix_core::error::ErrorKind::Arithmetic => PyFloatingPointError::new_err(err_str),
-                jix_core::error::ErrorKind::UnsupportedDtype => PyTypeError::new_err(err_str),
-                jix_core::error::ErrorKind::Io => PyOSError::new_err(err_str),
+                ErrorKind::Arithmetic => PyArithmeticError::new_err(err_str),
+                ErrorKind::UnsupportedDtype => PyTypeError::new_err(err_str),
+                ErrorKind::Io => PyOSError::new_err(err_str),
                 _ => PyRuntimeError::new_err(err_str),
             }
         }
@@ -218,7 +219,7 @@ pub(crate) fn numpy_items(py: Python) -> PyResult<&'static NumpyItems> {
 }
 
 #[inline]
-pub(crate) fn normalize_dim(dim: Dim, ndim: usize) -> pyo3::PyResult<usize> {
+pub(crate) fn normalize_dim(dim: Dim, ndim: usize) -> PyResult<usize> {
     let dim = dim.0;
     let ndim = ndim as i32;
     if dim < -ndim || dim >= ndim {
@@ -233,7 +234,7 @@ pub(crate) fn normalize_dim(dim: Dim, ndim: usize) -> pyo3::PyResult<usize> {
     })
 }
 #[inline]
-pub(crate) fn normalize_dim_optional(dim: Option<Dim>, ndim: usize) -> pyo3::PyResult<usize> {
+pub(crate) fn normalize_dim_optional(dim: Option<Dim>, ndim: usize) -> PyResult<usize> {
     match dim {
         Some(dim) => normalize_dim(dim, ndim),
         None => {
@@ -248,7 +249,7 @@ pub(crate) fn normalize_dim_optional(dim: Option<Dim>, ndim: usize) -> pyo3::PyR
 }
 
 #[inline]
-pub(crate) fn normalize_dims(dims: &[Dim], ndim: usize) -> pyo3::PyResult<DimArray<usize>> {
+pub(crate) fn normalize_dims(dims: &[Dim], ndim: usize) -> PyResult<DimArray<usize>> {
     if ndim > NDIM_MAX {
         return Err(PyValueError::new_err(format!(
             "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
@@ -266,7 +267,7 @@ pub(crate) fn normalize_dims(dims: &[Dim], ndim: usize) -> pyo3::PyResult<DimArr
 pub(crate) fn normalize_dims_optional(
     dims: Option<&[Dim]>,
     ndim: usize,
-) -> pyo3::PyResult<DimArray<usize>> {
+) -> PyResult<DimArray<usize>> {
     if ndim > NDIM_MAX {
         return Err(PyValueError::new_err(format!(
             "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
@@ -291,7 +292,7 @@ where
     const INPUT_TYPE: PyStaticExpr = type_hint_union!(
         T::INPUT_TYPE,
         type_hint_subscript!(
-            <PyTuple as pyo3::PyTypeInfo>::TYPE_HINT,
+            <PyTuple as PyTypeInfo>::TYPE_HINT,
             T::INPUT_TYPE,
             PyStaticExpr::Constant {
                 value: PyStaticConstant::Ellipsis

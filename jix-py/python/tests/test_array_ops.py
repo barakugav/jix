@@ -121,6 +121,18 @@ def test_cast_scalar_dtypes(src_dtype, dst_dtype):
     np.testing.assert_array_equal(result.numpy(), data.astype(dst_dtype))
 
 
+@pytest.mark.parametrize(
+    "src_dtype, dst_dtype",
+    [(np.int8, np.uint8), (np.uint16, np.int16), (np.int32, np.uint32), (np.uint64, np.int64)],
+)
+def test_cast_same_size_int(src_dtype, dst_dtype):
+    info = np.iinfo(src_dtype)
+    data = np.array([info.min, 0, 1, info.max], dtype=src_dtype)
+    result = jix.cast(jix.compact(data), dst_dtype)
+    assert result.dtype == np.dtype(dst_dtype)
+    np.testing.assert_array_equal(result.numpy(), data.astype(dst_dtype))
+
+
 def test_cast_preserves_shape():
     arr = np.arange(12, dtype=np.int32).reshape(3, 4)
     za = jix.compact(arr)
@@ -720,6 +732,27 @@ def test_where_2d():
     y = np.array([[10, 20], [30, 40]], dtype=np.int32)
     r = jix.where(jix.compact(cond), jix.compact(x), jix.compact(y))
     np.testing.assert_array_equal(r.numpy(), np.where(cond, x, y))
+
+
+def test_where_scalar_condition_returns_operand():
+    x = jix.compact([1, 2, 3], dtype=np.int32)
+    y = jix.compact([10, 20, 30], dtype=np.int32)
+    assert jix.where(True, x, y) is x
+    assert jix.where(np.False_, x, y) is y
+    # broadcasting and type promotion still apply
+    y = jix.compact([[10], [20]], dtype=np.int64)
+    r = jix.where(True, x, y)
+    assert r.dtype == np.int64
+    np.testing.assert_array_equal(r.numpy(), [[1, 2, 3], [1, 2, 3]])
+    with pytest.raises(TypeError):
+        jix.where(1, x, y)
+
+
+def test_where_same_operands_returns_operand():
+    x = jix.compact([1, 2, 3], dtype=np.int32)
+    assert jix.where(jix.compact([True, False, True]), x, x) is x
+    with pytest.raises(TypeError):
+        jix.where(jix.compact([1, 0, 1]), x, x)
 
 
 # ---------------------------------------------------------------------------

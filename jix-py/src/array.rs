@@ -8,7 +8,6 @@ use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
-use crate::error::{current_modes, ArithmeticErrorModes};
 use crate::type_hint::{Dim, NdArray, NpDtype, ValueOrUnimplemented};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyTuple};
@@ -160,19 +159,16 @@ impl Array {
     ///
     /// The context is taken out of the cache for the lifetime of the returned guard and
     /// returned to it on drop, so successive reads of the same array reuse the same
-    /// decompressor state instead of re-initializing it on every call. It is configured with the
-    /// arithmetic error `modes` (see `jix.errstate`); the warnings of the read are collected with
-    /// [`ContextGuard::take_warnings`].
-    pub(crate) fn read_ctx(&self, modes: ArithmeticErrorModes) -> PyResult<ContextGuard<'_>> {
+    /// decompressor state instead of re-initializing it on every call.
+    pub(crate) fn read_ctx(&self) -> PyResult<ContextGuard<'_>> {
         let mut cache = self
             .cache
             .lock()
             .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))?;
-        let mut context = cache
+        let context = cache
             .context
             .take()
             .unwrap_or_else(|| Box::new(self.arr.read_ctx()));
-        crate::error::configure_context_error_modes(&mut context, modes);
         Ok(ContextGuard {
             array: self,
             context: Some(context),
@@ -660,10 +656,9 @@ impl Array {
 
         let should_detach =
             !self.arr.storage().spec().flags().plain_read() || nitems * itemsize > 4096;
-        let modes = current_modes(py)?;
-        let (result, warnings) = maybe_detach(py, should_detach, || {
-            let context_guard = self.read_ctx(modes)?;
-            let context = context_guard.as_ref();
+        maybe_detach(py, should_detach, || {
+            let context = self.read_ctx()?;
+            let context = context.as_ref();
 
             let mut out = unsafe {
                 StridedBuf::from_raw_parts_mut(
@@ -673,15 +668,11 @@ impl Array {
                     itemsize,
                 )
             };
-            let result = self
-                .arr
+            self.arr
                 .to_buf_strided(&index, context, Some(&mut out))
-                .map(drop);
-            Ok::<_, PyErr>((result.into_py_result(), context_guard.take_warnings()))
+                .map(drop)
+                .into_py_result()
         })?;
-        // Emit the warnings of the read even if it raised
-        crate::error::emit_warnings(py, warnings)?;
-        result?;
 
         Ok(NdArray(np_arr))
     }
@@ -1792,14 +1783,13 @@ pub fn compact<'py>(
     let params = resolve_array_params(py, params)?;
 
     let array = array.get();
-    let modes = current_modes(py)?;
-    let (compacted, warnings) = py.detach(|| {
-        let context = array.read_ctx(modes)?;
-        let compacted = array.arr.compact_with(params, context.as_ref());
-        Ok::<_, PyErr>((compacted.into_py_result(), context.take_warnings()))
+    let compacted = py.detach(|| {
+        let context = array.read_ctx()?;
+        array
+            .arr
+            .compact_with(params, context.as_ref())
+            .into_py_result()
     })?;
-    crate::error::emit_warnings(py, warnings)?;
-    let compacted = compacted?;
 
     Bound::new(py, Array::from_core(compacted.into_any()))
 }
@@ -1940,12 +1930,6 @@ impl Drop for ContextGuard<'_> {
 impl ContextGuard<'_> {
     pub(crate) fn as_ref(&self) -> &ReadContext {
         self.context.as_ref().unwrap()
-    }
-
-    /// The warnings of the reads made with this context, to emit with
-    /// `crate::error::emit_warnings` once the GIL is held.
-    pub(crate) fn take_warnings(&self) -> Vec<jix_core::Error> {
-        self.as_ref().take_warnings()
     }
 }
 

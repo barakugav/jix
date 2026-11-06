@@ -78,7 +78,8 @@ pub enum ErrorKind {
     InvalidArchive,
     /// Compression/decompression failure, or invalid compression params/metadata
     CodecError,
-    /// An element-wise operation hit an arithmetic error.
+    /// An integer element-wise operation hit a result it can't represent (e.g. division by zero,
+    /// an integer raised to a negative integer power, etc).
     Arithmetic,
 }
 
@@ -298,152 +299,92 @@ pub(crate) fn check_region_size(index: &[Range<u64>], itemsize: usize) -> Result
     Ok(())
 }
 
-/// An arithmetic error an element-wise operation can hit while computing its output.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// An arithmetic error an integer element-wise operation can hit while computing its output: a
+/// result with no integer value. It always fails the read, with [`ErrorKind::Arithmetic`].
+///
+/// Float operations report no errors: their `inf` and `NaN` results carry them.
+/// Integer overflow wraps (two's complement), also `MIN / -1`.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 #[repr(u8)]
-pub enum ArithmeticErrorKind {
-    /// Division by zero.
+pub(crate) enum ArithmeticErrorKind {
+    /// Integer division or remainder by zero.
     DivideByZero = 1,
-    /// Overflow occurred during the operation.
-    Overflow = 2,
-    /// Underflow occurred during the operation.
-    Underflow = 4,
-    /// An invalid operation, like NumPy's `invalid` (e.g. a NaN result from non-NaN operands).
-    InvalidOperation = 8,
+    /// An integer base raised to a negative integer exponent.
+    NegativePower = 2,
 }
 
-/// Setting of how to handle arithmetic errors during element-wise operations.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ArithmeticErrorMode {
-    /// Ignore the error, keep a default value for the result.
-    Ignore,
-    /// Warn on the error, but keep the value for the element.
-    Warn,
-    /// Fail the read with an [`ErrorKind::Arithmetic`] error.
-    Error,
-}
-
-pub(crate) struct ArithmeticErrorModes {
-    divide_by_zero: ArithmeticErrorMode,
-    overflow: ArithmeticErrorMode,
-    underflow: ArithmeticErrorMode,
-    invalid_operation: ArithmeticErrorMode,
-}
-impl ArithmeticErrorModes {
-    pub(crate) fn set(&mut self, error: ArithmeticErrorKind, mode: ArithmeticErrorMode) {
-        match error {
-            ArithmeticErrorKind::DivideByZero => self.divide_by_zero = mode,
-            ArithmeticErrorKind::Overflow => self.overflow = mode,
-            ArithmeticErrorKind::Underflow => self.underflow = mode,
-            ArithmeticErrorKind::InvalidOperation => self.invalid_operation = mode,
-        }
-    }
-
-    pub(crate) fn get(&self, error: ArithmeticErrorKind) -> ArithmeticErrorMode {
-        match error {
-            ArithmeticErrorKind::DivideByZero => self.divide_by_zero,
-            ArithmeticErrorKind::Overflow => self.overflow,
-            ArithmeticErrorKind::Underflow => self.underflow,
-            ArithmeticErrorKind::InvalidOperation => self.invalid_operation,
-        }
-    }
-
-    pub(crate) fn check_op_status(
-        &self,
-        status: ArithmeticOpStatus,
-        warnings: &mut Vec<Error>,
-    ) -> Result<()> {
-        let mut raised = None;
-        let kinds = [
-            (ArithmeticErrorKind::DivideByZero, "divide by zero"),
-            (ArithmeticErrorKind::Overflow, "overflow"),
-            (ArithmeticErrorKind::Underflow, "underflow"),
-            (ArithmeticErrorKind::InvalidOperation, "invalid operation"),
-        ];
-        for (kind, description) in kinds {
-            if !status.contains(kind) {
-                continue;
-            }
-            match self.get(kind) {
-                ArithmeticErrorMode::Ignore => {}
-                ArithmeticErrorMode::Warn => {
-                    let warning = create_err(description);
-                    if !warnings.iter().any(|w| w.message() == warning.message()) {
-                        warnings.push(warning);
-                    }
-                }
-                ArithmeticErrorMode::Error => {
-                    raised.get_or_insert_with(|| create_err(description));
-                }
-            }
-
-            fn create_err(description: &str) -> Error {
-                Error::new(
-                    crate::error::ErrorKind::Arithmetic,
-                    format!("{} encountered", description),
-                )
-            }
-        }
-        raised.map_or(Ok(()), Err)
-    }
-}
-impl Default for ArithmeticErrorModes {
-    fn default() -> Self {
-        Self {
-            divide_by_zero: ArithmeticErrorMode::Error,
-            overflow: ArithmeticErrorMode::Warn,
-            underflow: ArithmeticErrorMode::Warn,
-            invalid_operation: ArithmeticErrorMode::Error,
-        }
-    }
-}
-
-/// The [`ArithmeticErrorKind`]s an element-wise computation hit, one bit per error.
+/// The arithmetic errors an element-wise computation hit.
 ///
 /// Scalar kernels that can hit an error, like [`scalar::Div`](crate::scalar::Div), take a
-/// `&mut ArithmeticOpStatus`: rather than panicking, they produce a fallback value for the element and set
-/// the error's bit. After the computation, the status is checked against the mode configured
-/// in the read context.
+/// `&mut ArithmeticStatus`: rather than panicking, they produce a fallback value for the element
+/// and set the status to error. After the computation, [`into_result`](Self::into_result) turns
+/// the status to `Ok` or an error with [`ErrorKind::Arithmetic`].
 ///
 /// ```
 /// use jix::scalar::Div;
-/// use jix::error::{ArithmeticErrorKind, ArithmeticOpStatus};
+/// use jix::error::{ArithmeticStatus, ErrorKind};
 ///
-/// let mut status = ArithmeticOpStatus::default();
+/// let mut status = ArithmeticStatus::default();
 /// assert_eq!(7i32.div(2, &mut status), 3);
-/// assert!(status.is_ok());
+/// assert!(status.into_result().is_ok());
 /// assert_eq!(7i32.div(0, &mut status), 0);
-/// assert!(status.contains(ArithmeticErrorKind::DivideByZero));
+/// assert_eq!(status.into_result().unwrap_err().kind(), ErrorKind::Arithmetic);
 /// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ArithmeticOpStatus(u8);
-impl ArithmeticOpStatus {
+pub struct ArithmeticStatus(u8);
+impl ArithmeticStatus {
+    /// Create a new `ArithmeticStatus` with no errors set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Set `error` if `cond` holds.
     #[inline(always)]
-    pub fn set_if(&mut self, error: ArithmeticErrorKind, cond: bool) {
+    pub(crate) fn set_if(&mut self, error: ArithmeticErrorKind, cond: bool) {
         self.0 |= error as u8 * cond as u8;
     }
 
     /// Whether `error` is set.
     #[inline(always)]
-    pub fn contains(self, error: ArithmeticErrorKind) -> bool {
+    pub(crate) fn contains(self, error: ArithmeticErrorKind) -> bool {
         (self.0 & error as u8) != 0
     }
 
     /// Whether no error is set.
     #[inline(always)]
-    pub fn is_ok(self) -> bool {
+    pub(crate) fn is_ok(self) -> bool {
         self.0 == 0
     }
+
+    /// `Ok` if no error is set, else an [`ErrorKind::Arithmetic`] error describing the first one.
+    #[inline]
+    pub fn into_result(self) -> Result<()> {
+        #[cold]
+        #[inline(never)]
+        fn fail(status: ArithmeticStatus) -> Result<()> {
+            let message = if status.contains(ArithmeticErrorKind::DivideByZero) {
+                "integer division or modulo by zero"
+            } else if status.contains(ArithmeticErrorKind::NegativePower) {
+                "integers to negative integer powers are not allowed"
+            } else {
+                "unknown arithmetic error"
+            };
+            Err(Error::new(ErrorKind::Arithmetic, message))
+        }
+        if !self.is_ok() {
+            return fail(self);
+        }
+        Ok(())
+    }
 }
-impl std::ops::BitOrAssign for ArithmeticOpStatus {
+impl std::ops::BitOrAssign for ArithmeticStatus {
     #[inline(always)]
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0;
     }
 }
-impl From<ArithmeticErrorKind> for ArithmeticOpStatus {
+impl From<ArithmeticErrorKind> for ArithmeticStatus {
     #[inline(always)]
     fn from(error: ArithmeticErrorKind) -> Self {
         Self(error as u8)

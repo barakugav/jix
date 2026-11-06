@@ -2,12 +2,14 @@ use std::sync::LazyLock;
 
 use jix_core::dtype::Dtyped;
 use jix_core::scalar::{f16, Complex};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::ops::common::{
     define_op1, define_op1_desc, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
 };
 use crate::util::IntoPyResult;
+use crate::Array;
 
 /// Arithmetic negation applied element-wise (`-array`).
 ///
@@ -46,7 +48,7 @@ use crate::util::IntoPyResult;
 ///     assert np.array_equal(result.numpy(), [-1, -2, 56])
 ///     ```
 #[pyo3::pyfunction]
-pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<crate::Array> {
+pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<Array> {
     static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
         let mut fns = vec![
             OpFnDescriptor::new1::<u8>(CastKind::None, |a| Ok((-a.cast::<i8>()).into_any())),
@@ -62,7 +64,7 @@ pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<crate::Array> {
         OpDescriptor::new("negative", fns)
     });
     let array = Operand::from_any(array)?;
-    Ok(crate::Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
+    Ok(Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
 }
 
 /// Rounds each element down to the nearest integer (towards -inf).
@@ -86,7 +88,7 @@ pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<crate::Array> {
 ///     assert np.array_equal(result.numpy(), [1.0, 2.0, -2.0, -3.0])
 ///     ```
 #[pyo3::pyfunction]
-pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array>> {
+pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let array = Operand::from_any(array)?;
     #[allow(clippy::collapsible_if)]
@@ -100,10 +102,7 @@ pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array
         OpDescriptor::new("floor", define_op1_desc!(Floor, [f16, f32, f64], None))
     });
 
-    Bound::new(
-        py,
-        crate::Array::from_core(DISPATCH_TABLE.dispatch1(array)?),
-    )
+    Bound::new(py, Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
 }
 /// Rounds each element up to the nearest integer (towards +inf).
 ///
@@ -126,7 +125,7 @@ pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array
 ///     assert np.array_equal(result.numpy(), [2.0, 2.0, -1.0, 0.0])
 ///     ```
 #[pyo3::pyfunction]
-pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array>> {
+pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let array = Operand::from_any(array)?;
     #[allow(clippy::collapsible_if)]
@@ -138,10 +137,7 @@ pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array>
 
     static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> =
         LazyLock::new(|| OpDescriptor::new("ceil", define_op1_desc!(Ceil, [f16, f32, f64], None)));
-    Bound::new(
-        py,
-        crate::Array::from_core(DISPATCH_TABLE.dispatch1(array)?),
-    )
+    Bound::new(py, Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
 }
 /// Rounds each element to the nearest integer.
 ///
@@ -168,7 +164,7 @@ pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array>
 ///     assert np.array_equal(result.numpy(), [1.0, 2.0, 3.0, -1.0])
 ///     ```
 #[pyo3::pyfunction]
-pub fn round<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array>> {
+pub fn round<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let array = Operand::from_any(array)?;
     #[allow(clippy::collapsible_if)]
@@ -181,18 +177,14 @@ pub fn round<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, crate::Array
     static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
         OpDescriptor::new("round", define_op1_desc!(Round, [f16, f32, f64], None))
     });
-    Bound::new(
-        py,
-        crate::Array::from_core(DISPATCH_TABLE.dispatch1(array)?),
-    )
+    Bound::new(py, Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
 }
 define_op1!(
     /// Computes the square root of each element.
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// A negative input produces `NaN`, an invalid operation reported according to
-    /// [`jix.errstate()`][jix.errstate], as numpy.
+    /// A negative input produces `NaN`.
     ///
     /// Args:
     ///     array: Input array.
@@ -210,10 +202,9 @@ define_op1!(
     ///     result = jix.sqrt(a)
     ///     assert np.array_equal(result.numpy(), [2.0, 3.0, 4.0])
     ///
-    ///     # A negative input produces NaN, an error that raises by default.
+    ///     # A negative input produces NaN.
     ///     b = jix.compact([-1.0], dtype=np.float32)
-    ///     with jix.errstate(invalid="ignore"):
-    ///         assert np.isnan(jix.sqrt(b).numpy()[0])
+    ///     assert np.isnan(jix.sqrt(b).numpy()[0])
     ///     ```
     sqrt,
     Sqrt,
@@ -265,8 +256,7 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// A finite input whose result is `inf` overflows, reported according to
-    /// [`jix.errstate()`][jix.errstate], as numpy.
+    /// A result too large for the dtype is `inf`.
     ///
     /// Args:
     ///     array: Input array.
@@ -299,8 +289,7 @@ define_op1!(
 ///
 /// Supported dtypes: `f16`, `f32`, `f64`.
 ///
-/// Zero produces `-inf`, a divide by zero, and a negative input `NaN`, an invalid operation,
-/// both reported according to [`jix.errstate()`][jix.errstate], as numpy.
+/// Zero produces `-inf` and a negative input `NaN`.
 ///
 /// Args:
 ///     array: Input array.
@@ -336,15 +325,14 @@ define_op1!(
 ///     assert abs(result_d.numpy()[1] - 1.0) < 1e-10 # log10(10) = 1
 ///     assert abs(result_d.numpy()[2] - 2.0) < 1e-10 # log10(100) = 2
 ///
-///     # Zero produces -inf and a negative input NaN, errors that raise by default.
+///     # Zero produces -inf and a negative input NaN.
 ///     b = jix.compact([0.0, -1.0], dtype=np.float32)
-///     with jix.errstate(divide="ignore", invalid="ignore"):
-///         result_b = jix.log(b).numpy()
+///     result_b = jix.log(b).numpy()
 ///     assert np.isneginf(result_b[0])
 ///     assert np.isnan(result_b[1])
 ///     ```
 #[pyo3::pyfunction(signature = (array, base=None))]
-pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<crate::Array> {
+pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> PyResult<Array> {
     struct LogArgs {
         base: f64,
     }
@@ -385,22 +373,21 @@ pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<
     });
     let base = base.unwrap_or(core::f64::consts::E);
     if base <= 0.0 || base == 1.0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(PyValueError::new_err(format!(
             "log base must be a positive number other than 1, got {base}"
         )));
     }
     let array = Operand::from_any(array)?;
     let args = LogArgs { base };
     let res = DISPATCH_TABLE.dispatch_args([array], args)?;
-    Ok(crate::Array::from_core(res))
+    Ok(Array::from_core(res))
 }
 define_op1!(
     /// Computes the sine of each element (input in radians).
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// An infinite input produces `NaN`, an invalid operation reported according to
-    /// [`jix.errstate()`][jix.errstate], as numpy.
+    /// An infinite input produces `NaN`.
     ///
     /// Args:
     ///     array: Input array.
@@ -431,8 +418,7 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// An infinite input produces `NaN`, an invalid operation reported according to
-    /// [`jix.errstate()`][jix.errstate], as numpy.
+    /// An infinite input produces `NaN`.
     ///
     /// Args:
     ///     array: Input array.
@@ -463,8 +449,7 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// An infinite input produces `NaN`, an invalid operation reported according to
-    /// [`jix.errstate()`][jix.errstate], as numpy.
+    /// An infinite input produces `NaN`.
     ///
     /// Args:
     ///     array: Input array.
@@ -495,8 +480,7 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// An input outside `[-1, 1]` produces `NaN`, an invalid operation reported according to
-    /// [`jix.errstate()`][jix.errstate], as numpy.
+    /// An input outside `[-1, 1]` produces `NaN`.
     ///
     /// Args:
     ///     array: Input array.
@@ -527,8 +511,7 @@ define_op1!(
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
-    /// An input outside `[-1, 1]` produces `NaN`, an invalid operation reported according to
-    /// [`jix.errstate()`][jix.errstate], as numpy.
+    /// An input outside `[-1, 1]` produces `NaN`.
     ///
     /// Args:
     ///     array: Input array.
@@ -673,9 +656,7 @@ define_op1!(
 ///     assert np.array_equal(result.numpy(), [3, 0, 5, 7])
 ///     ```
 #[pyo3::pyfunction]
-pub fn absolute<'py>(
-    array: &pyo3::Bound<'py, pyo3::PyAny>,
-) -> pyo3::PyResult<Bound<'py, crate::Array>> {
+pub fn absolute<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let mut operand = Operand::from_any(array)?;
 
@@ -704,18 +685,17 @@ pub fn absolute<'py>(
         return operand.into_py_array(py);
     }
 
-    static DISPATCH_TABLE: std::sync::LazyLock<crate::ops::common::OpDescriptor<1, ()>> =
-        std::sync::LazyLock::new(|| {
-            crate::ops::common::OpDescriptor::new(
-                "absolute",
-                crate::ops::common::define_op1_desc!(
-                    Abs,
-                    [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
-                    None
-                ),
-            )
-        });
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "absolute",
+            define_op1_desc!(
+                Abs,
+                [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+                None
+            ),
+        )
+    });
 
     let res = DISPATCH_TABLE.dispatch1(operand)?;
-    Bound::new(py, crate::Array::from_core(res))
+    Bound::new(py, Array::from_core(res))
 }

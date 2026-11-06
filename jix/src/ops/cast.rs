@@ -422,7 +422,7 @@ where
     type Output = T2;
 
     #[inline(always)]
-    fn apply(&self, x: T1, _status: &mut crate::error::ArithmeticOpStatus) -> Self::Output {
+    fn apply(&self, x: T1, _status: &mut crate::error::ArithmeticStatus) -> Self::Output {
         x.cast()
     }
 
@@ -430,7 +430,7 @@ where
     fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
         &self,
         xs: [T1; N],
-        _status: &mut crate::error::ArithmeticOpStatus,
+        _status: &mut crate::error::ArithmeticStatus,
         simd: S,
     ) -> [Self::Output; N] {
         T1::cast_bulk(xs, simd)
@@ -492,9 +492,11 @@ mod tests {
 
     #[test]
     fn cast_rejects_widened_shape_overflow() {
+        use crate::Array;
+
         // n * 1 byte fits u64, so broadcast accepts it, but n * 8 bytes does not.
         let n = (1u64 << 61) + 1;
-        let a = crate::Array::compact_ndarray(&ndarray::array![7u8])
+        let a = Array::compact_ndarray(&ndarray::array![7u8])
             .unwrap()
             .broadcast(&[n]);
         let err = super::Cast::<_, f64>::new_array(a).map(|_| ()).unwrap_err();

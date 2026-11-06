@@ -187,6 +187,7 @@ where
     /// To skip leading non-overlapping arrays efficiently, the first overlapping sub-array is
     /// located with a linear scan for small `borders` slices or a binary search otherwise.
     /// The loop then runs forward and breaks as soon as an array starts past the requested range.
+    /// A request that lies inside a single sub-array is forwarded to it as is.
     ///
     /// Each overlapping sub-array is read with a local (array-relative) index on the concat dim,
     /// straight into its sub-region of `buf` at the right byte offset using the destination's own
@@ -207,6 +208,39 @@ where
             self.dtype().itemsize() as usize,
         )?;
 
+        let concat_dim = self.concat_dim as usize;
+        let req_start = index[concat_dim].start;
+        let req_end = index[concat_dim].end;
+
+        // Find the first sub-array whose end exceeds req_start (the first that may overlap).
+        const BINARY_SEARCH_THRESHOLD: usize = 32;
+        let first_arr = if self.borders.len() <= BINARY_SEARCH_THRESHOLD {
+            self.borders
+                .iter()
+                .position(|&b| b > req_start)
+                .unwrap_or(self.borders.len())
+        } else {
+            self.borders.partition_point(|&b| b <= req_start)
+        };
+
+        if first_arr < self.borders.len() && req_end <= self.borders[first_arr] {
+            let arr_start = if first_arr == 0 {
+                0
+            } else {
+                self.borders[first_arr - 1]
+            };
+            let sub_index = dim_arr(index.len(), |dim| {
+                if dim == concat_dim {
+                    (req_start - arr_start)..(req_end - arr_start)
+                } else {
+                    index[dim].clone()
+                }
+            });
+            return self
+                .arrays
+                .read_data(first_arr, sub_index.as_ref(), context, out);
+        }
+
         let itemsize = dtype.itemsize() as usize;
         let output_shape = dim_arr(index.len(), |dim| {
             (index[dim].end - index[dim].start) as usize
@@ -224,7 +258,6 @@ where
 
         // When the destination is contiguous and all dims before concat_dim have size <=1, each
         // array's data is a contiguous run in the destination.
-        let concat_dim = self.concat_dim as usize;
         let inner_contiguous = out.is_contiguous(output_shape.as_ref(), dtype)
             && output_shape
                 .as_ref()
@@ -233,19 +266,6 @@ where
                 .all(|&s| s <= 1);
         let (out_buf, output_strides) = out.data_mut();
         let concat_stride = output_strides[concat_dim];
-        let req_start = index[concat_dim].start;
-        let req_end = index[concat_dim].end;
-
-        // Find the first sub-array whose end exceeds req_start (the first that may overlap).
-        const BINARY_SEARCH_THRESHOLD: usize = 32;
-        let first_arr = if self.borders.len() <= BINARY_SEARCH_THRESHOLD {
-            self.borders
-                .iter()
-                .position(|&b| b > req_start)
-                .unwrap_or(self.borders.len())
-        } else {
-            self.borders.partition_point(|&b| b <= req_start)
-        };
 
         for arr in first_arr..self.borders.len() {
             let arr_start = if arr == 0 { 0 } else { self.borders[arr - 1] };
@@ -436,6 +456,24 @@ mod tests {
         let actual = concatenate((za, zb), 1).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_read_inside_one_array() {
+        let a = array![[1i32, 2], [3, 4]];
+        let b = array![[5i32, 6]];
+        let empty = ndarray::Array2::<i32>::zeros((0, 2));
+        let z = |nd: &ndarray::Array2<i32>| Array::compact_ndarray(nd).unwrap();
+        let c = concatenate(vec![z(&empty), z(&a), z(&empty), z(&b)], 0);
+        let ctx = c.read_ctx();
+        assert_eq!(
+            c.to_ndarray_sub(&[1..2, 0..2], &ctx).unwrap(),
+            array![[3, 4]]
+        );
+        assert_eq!(c.to_ndarray_sub(&[2..3, 1..2], &ctx).unwrap(), array![[6]]);
+        // a single non-empty array serves every read
+        let c = concatenate(vec![z(&empty), z(&a), z(&empty)], 0);
+        assert_eq!(c.to_ndarray().unwrap(), a);
     }
 
     #[test]

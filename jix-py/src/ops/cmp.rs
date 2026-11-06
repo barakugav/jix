@@ -11,6 +11,7 @@ use crate::ops::common::{
     broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Scalar,
 };
 use crate::util::IntoPyResult;
+use crate::Array;
 
 define_op2!(
     /// Element-wise equality test (`a == b`).
@@ -417,7 +418,7 @@ pub fn clamp<'py>(
     array: &Bound<'py, PyAny>,
     min: Option<&Bound<'py, PyAny>>,
     max: Option<&Bound<'py, PyAny>>,
-) -> pyo3::PyResult<Bound<'py, crate::Array>> {
+) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let (min, max) = match (min, max) {
         (None, None) => return asarray_simple(array),
@@ -460,7 +461,7 @@ pub fn clamp<'py>(
         Operand::from_any(max)?,
     ])?;
     let res = DISPATCH_TABLE.dispatch3(array, min, max)?;
-    Bound::new(py, crate::Array::from_core(res))
+    Bound::new(py, Array::from_core(res))
 }
 
 /// Element-wise approximate equality test, analogous to `numpy.isclose`.
@@ -531,7 +532,7 @@ pub fn isclose<'py>(
     b: &Bound<'py, PyAny>,
     rtol: &Bound<'py, PyAny>,
     atol: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, crate::Array>> {
+) -> PyResult<Bound<'py, Array>> {
     let py = a.py();
 
     struct ApproxEqualArgs {
@@ -628,5 +629,5 @@ pub fn isclose<'py>(
             atol: atol_scalar,
         },
     )?;
-    Bound::new(py, crate::Array::from_core(res))
+    Bound::new(py, Array::from_core(res))
 }

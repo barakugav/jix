@@ -64,8 +64,12 @@ impl Array<Compact<TypeDyn>> {
     /// - `path`: path to the `.jix` file containing the array.
     /// - `offset`: byte offset of the start of the array's archive section within the file.
     /// - `len`: byte length of the array's archive section.
-    /// - `params`: parameters controlling how the array is read and decoded. See
-    ///   [`ArrayParams`] for details.
+    /// - `params`: never changes the loaded data - the block shape comes from the file
+    ///   (`params.block_shape` is ignored) and the blocks are decoded with the codec they were
+    ///   written with. The params are recorded in the array's storage spec, where they (a) seed
+    ///   arrays derived from this one (e.g. the codec used by
+    ///   [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    ///   [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list.
     ///
     /// # Examples
     ///
@@ -119,8 +123,12 @@ impl Array<Compact<TypeDyn>> {
     /// - `reader`: any source implementing `Read` + `Seek` containing the array's archive section.
     /// - `len`: byte length of the archive section within the reader, used for bounds checking.
     ///   Pass `None` to skip bounds checking.
-    /// - `params`: parameters controlling how the array is read and decoded. See
-    ///   [`ArrayParams`] for details.
+    /// - `params`: never changes the loaded data - the block shape comes from the file
+    ///   (`params.block_shape` is ignored) and the blocks are decoded with the codec they were
+    ///   written with. The params are recorded in the array's storage spec, where they (a) seed
+    ///   arrays derived from this one (e.g. the codec used by
+    ///   [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    ///   [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list.
     ///
     /// # Examples
     ///
@@ -183,8 +191,12 @@ impl Array<CompactMmap<TypeDyn>> {
     /// - `path`: path to the `.jix` file containing the array.
     /// - `offset`: byte offset of the start of the array's archive section within the file.
     /// - `len`: byte length of the array's archive section.
-    /// - `params`: parameters controlling how the array is read and decoded. See
-    ///   [`ArrayParams`] for details.
+    /// - `params`: never changes the loaded data - the block shape comes from the file
+    ///   (`params.block_shape` is ignored) and the blocks are decoded with the codec they were
+    ///   written with. The params are recorded in the array's storage spec, where they (a) seed
+    ///   arrays derived from this one (e.g. the codec used by
+    ///   [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    ///   [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list.
     ///
     /// # Safety
     ///

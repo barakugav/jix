@@ -85,8 +85,7 @@ def test_sqrt_concrete():
 def test_exp(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
     rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
-    # Its overflows (float16 past 11.1, float32 past 88.8) are tested in test_errstate.py.
-    with jix.errstate(over="ignore"), np.errstate(over="ignore"):
+    with np.errstate(over="ignore"):
         assert_array_matches(jix.exp(za), np.exp(np_a).astype(dtype), data=data, rtol=rtol)
 
 
@@ -114,7 +113,7 @@ def test_log_base2_concrete():
     # and a non-power value, up to the op_safe_non_negative_strategy bound (100.0).
     values = [[0.0, 1.0, 2.0], [4.0, 0.25, 100.0]]
     for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
-        with jix.errstate(divide="ignore"), np.errstate(divide="ignore"):
+        with np.errstate(divide="ignore"):
             check_op1_concrete(lambda za: jix.log(za, base=2), np.log2, [(dtype, values)], rtol=rtol)
             check_op1_concrete(jix.log2, np.log2, [(dtype, values)], rtol=rtol)
 
@@ -123,7 +122,7 @@ def test_log_base10_concrete():
     # Domain is non-negative (incl. 0.0): 0, 1, powers of 10, and a non-power value.
     values = [[0.0, 1.0, 10.0], [100.0, 0.25, 50.0]]
     for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
-        with jix.errstate(divide="ignore"), np.errstate(divide="ignore"):
+        with np.errstate(divide="ignore"):
             check_op1_concrete(lambda za: jix.log(za, base=10), np.log10, [(dtype, values)], rtol=rtol)
             check_op1_concrete(jix.log10, np.log10, [(dtype, values)], rtol=rtol)
 

@@ -67,14 +67,14 @@ def test_write_array_path_append():
 
 def test_write_array_path_failure_leaves_no_partial_file(tmp_path):
     a = make_array([1.0, 2.0])
-    bad = jix.compact(np.zeros(2)) / jix.compact(np.zeros(2))
+    bad = jix.compact(np.ones(2, dtype=np.int32)) // jix.compact(np.zeros(2, dtype=np.int32))
     p = tmp_path / "out.jix"
-    with jix.errstate(invalid="raise"), pytest.raises(FloatingPointError):
+    with pytest.raises(ArithmeticError):
         jix.write_array(bad, p)
     assert not p.exists()
     jix.write_array(a, p)
     size = p.stat().st_size
-    with jix.errstate(invalid="raise"), pytest.raises(FloatingPointError):
+    with pytest.raises(ArithmeticError):
         jix.write_array(bad, p, append=True)
     assert p.stat().st_size == size
 

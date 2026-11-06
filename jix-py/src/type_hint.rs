@@ -6,10 +6,11 @@ use std::convert::Infallible;
 use std::ops::Deref;
 
 use numpy::{PyArrayDescr, PyUntypedArray};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::prelude::*;
-use pyo3::{type_hint_identifier, type_hint_subscript};
+use pyo3::types::{PyBool, PyInt};
+use pyo3::{type_hint_identifier, type_hint_subscript, PyClass, PyTypeInfo};
 
 /// `numpy.typing.NDArray[typing.Any]`
 const NDARRAY_TYPE_HINT: PyStaticExpr = type_hint_subscript!(
@@ -100,46 +101,13 @@ pub struct Dim(pub i32);
 impl<'a, 'py> FromPyObject<'a, 'py> for Dim {
     type Error = PyErr;
 
-    const INPUT_TYPE: PyStaticExpr = <pyo3::types::PyInt as pyo3::PyTypeInfo>::TYPE_HINT;
+    const INPUT_TYPE: PyStaticExpr = <PyInt as PyTypeInfo>::TYPE_HINT;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        if obj.is_instance_of::<pyo3::types::PyBool>() {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "a dim must be an int, not a bool",
-            ));
+        if obj.is_instance_of::<PyBool>() {
+            return Err(PyTypeError::new_err("a dim must be an int, not a bool"));
         }
         Ok(Self(obj.extract()?))
-    }
-}
-
-/// An arithmetic error mode of [`crate::error::errstate`].
-pub struct ErrMode(pub jix_core::error::ArithmeticErrorMode);
-
-impl<'a, 'py> FromPyObject<'a, 'py> for ErrMode {
-    type Error = PyErr;
-
-    const INPUT_TYPE: PyStaticExpr = type_hint_subscript!(
-        type_hint_identifier!("typing", "Literal"),
-        PyStaticExpr::Constant {
-            value: PyStaticConstant::Str("ignore")
-        },
-        PyStaticExpr::Constant {
-            value: PyStaticConstant::Str("warn")
-        },
-        PyStaticExpr::Constant {
-            value: PyStaticConstant::Str("raise")
-        }
-    );
-
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        match obj.extract::<&str>()? {
-            "ignore" => Ok(Self(jix_core::error::ArithmeticErrorMode::Ignore)),
-            "warn" => Ok(Self(jix_core::error::ArithmeticErrorMode::Warn)),
-            "raise" => Ok(Self(jix_core::error::ArithmeticErrorMode::Error)),
-            other => Err(PyValueError::new_err(format!(
-                "invalid error mode '{other}', expected one of 'ignore', 'warn', 'raise'"
-            ))),
-        }
     }
 }
 
@@ -147,7 +115,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ErrMode {
 /// op. Typed as an `Array`, like numpy's dunders.
 pub enum ValueOrUnimplemented<T>
 where
-    T: pyo3::PyClass + Into<pyo3::PyClassInitializer<T>> + pyo3::PyTypeInfo,
+    T: PyClass + Into<PyClassInitializer<T>> + PyTypeInfo,
 {
     Value(T),
     NotImplemented,
@@ -155,13 +123,13 @@ where
 
 impl<'py, T> IntoPyObject<'py> for ValueOrUnimplemented<T>
 where
-    T: pyo3::PyClass + Into<pyo3::PyClassInitializer<T>> + pyo3::PyTypeInfo,
+    T: PyClass + Into<PyClassInitializer<T>> + PyTypeInfo,
 {
     type Target = PyAny;
     type Output = Bound<'py, PyAny>;
     type Error = PyErr;
 
-    const OUTPUT_TYPE: PyStaticExpr = <T as pyo3::PyTypeInfo>::TYPE_HINT;
+    const OUTPUT_TYPE: PyStaticExpr = <T as PyTypeInfo>::TYPE_HINT;
 
     fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
         match self {

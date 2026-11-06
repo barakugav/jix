@@ -1,7 +1,7 @@
 macro_rules! define_scalar_op1_trait {
     (
         $(#[$trait_meta:meta])* $Trait:ident,
-        $(#[$fn_meta:meta])* $f:ident $(($status:ident))?,
+        $(#[$fn_meta:meta])* $f:ident,
         bulk_fn: $f_bulk:ident,
     ) => {
         $(#[$trait_meta])*
@@ -11,7 +11,7 @@ macro_rules! define_scalar_op1_trait {
 
             $(#[$fn_meta])*
             #[allow(clippy::wrong_self_convention)]
-            fn $f(self $(, $status: &mut crate::error::ArithmeticOpStatus)?) -> Self::Output;
+            fn $f(self) -> Self::Output;
 
             #[doc = concat!(
                 "Apply [`", stringify!($f), "`](Self::", stringify!($f), ") on each of `xs`, ",
@@ -20,7 +20,6 @@ macro_rules! define_scalar_op1_trait {
             #[inline(always)]
             fn $f_bulk<const N: usize, S: fearless_simd::Simd>(
                 xs: [Self; N],
-                $($status: &mut crate::error::ArithmeticOpStatus,)?
                 simd: S,
             ) -> [Self::Output; N]
             where
@@ -29,7 +28,7 @@ macro_rules! define_scalar_op1_trait {
                 let _ = simd;
                 crate::util::ArrayExt::map_inline(
                     xs,
-                    #[inline(always)] |x| Self::$f(x $(, $status)?),
+                    #[inline(always)] |x| Self::$f(x),
                 )
             }
         }
@@ -86,20 +85,20 @@ macro_rules! impl_scalar_op1 {
         @impl_one
         impl $Trait:ident for $t:ty {
             type Output = $Out:ty;
-            fn $f:ident = |$x:ident $(, $status:ident)?| $f_expr:expr,
-            $(fn $f_bulk:ident = |$($v:ident),+| $f_bulk_expr:expr,)?
+            fn $f:ident = |$x:ident| $f_expr:expr,
+            $(fn $f_bulk:ident = |$v:ident| $f_bulk_expr:expr,)?
         }
     ) => {
         impl $Trait for $t {
             type Output = $Out;
             #[inline(always)]
-            fn $f(self $(, $status: &mut crate::error::ArithmeticOpStatus)?) -> Self::Output {
+            fn $f(self) -> Self::Output {
                 let $x = self;
                 $f_expr
             }
 
             $(crate::scalar::traits_util::impl_scalar_op1!(
-                @bulk $Trait::$f, fn $f_bulk = |$($v),+| $f_bulk_expr
+                @bulk $Trait::$f, fn $f_bulk = |$v| $f_bulk_expr
             );)?
         }
     };
@@ -116,27 +115,6 @@ macro_rules! impl_scalar_op1 {
                 xs,
                 #[inline(always)] |x| <Self as $Trait>::$f(x),
                 #[inline(always)] |$v| $f_bulk_expr,
-                simd,
-            )
-        }
-    };
-    (
-        @bulk $Trait:ident::$f:ident,
-        fn $f_bulk:ident = |$v:ident, $status:ident| $f_bulk_expr:expr
-    ) => {
-        #[inline(always)]
-        fn $f_bulk<const N: usize, S: fearless_simd::Simd>(
-            xs: [Self; N],
-            status: &mut crate::error::ArithmeticOpStatus,
-            simd: S,
-        ) -> [Self::Output; N] {
-            #[allow(unused_imports)]
-            use fearless_simd::{Bytes, Select, SimdBase, SimdFloat, SimdInt, SimdMask};
-            crate::scalar::simd::map_vectors_status::<Self, Self::Output, N, S>(
-                xs,
-                status,
-                #[inline(always)] |x, status| <Self as $Trait>::$f(x, status),
-                #[inline(always)] |$v, $status| $f_bulk_expr,
                 simd,
             )
         }
@@ -169,7 +147,7 @@ macro_rules! define_scalar_op2_trait {
             fn $f(
                 self,
                 rhs: Rhs
-                $(, $status: &mut crate::error::ArithmeticOpStatus)?
+                $(, $status: &mut crate::error::ArithmeticStatus)?
             ) -> Self::Output;
 
             #[doc = concat!(
@@ -180,7 +158,7 @@ macro_rules! define_scalar_op2_trait {
             fn $f_bulk<const N: usize, S: fearless_simd::Simd>(
                 xs: [Self; N],
                 ys: [Rhs; N],
-                $($status: &mut crate::error::ArithmeticOpStatus,)?
+                $($status: &mut crate::error::ArithmeticStatus,)?
                 simd: S,
             ) -> [Self::Output; N]
             where
@@ -269,7 +247,7 @@ macro_rules! impl_scalar_op2 {
             fn $f(
                 self,
                 rhs: $rhs
-                $(, $status: &mut crate::error::ArithmeticOpStatus)?
+                $(, $status: &mut crate::error::ArithmeticStatus)?
             ) -> Self::Output {
                 let $a = self;
                 let $b = rhs;
@@ -311,7 +289,7 @@ macro_rules! impl_scalar_op2 {
         fn $f_bulk<const N: usize, S: fearless_simd::Simd>(
             xs: [Self; N],
             ys: [$rhs; N],
-            status: &mut crate::error::ArithmeticOpStatus,
+            status: &mut crate::error::ArithmeticStatus,
             simd: S,
         ) -> [Self::Output; N] {
             #[allow(unused_imports)]

@@ -9,7 +9,7 @@ use std::ops::Range;
 use crate::buf_pool::PoolBuf;
 use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
-use crate::error::{ArithmeticOpStatus, Result};
+use crate::error::{ArithmeticStatus, Result};
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
@@ -57,7 +57,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: Simd>(
         &self,
         offset: usize,
-        status: &mut ArithmeticOpStatus,
+        status: &mut ArithmeticStatus,
         simd: S,
     ) -> [T; N];
 
@@ -245,7 +245,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
         output_contiguous: operand_contiguous(0),
     };
 
-    let mut status = ArithmeticOpStatus::default();
+    let mut status = ArithmeticStatus::default();
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
             let chunk_len = chunk_len_max.min(len - pos);
@@ -285,7 +285,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            let mut iteration_status = ArithmeticOpStatus::default();
+            let mut iteration_status = ArithmeticStatus::default();
             inner_loop(
                 dst,
                 dst_stride,
@@ -310,7 +310,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
         }
     });
 
-    context.check_op_status(status)
+    status.into_result()
 }
 
 // Identical to `to_buf_type_erased`, but the number of operands is not known at compile time.
@@ -378,7 +378,7 @@ fn to_buf_type_erased_dyn(
         output_contiguous: operand_contiguous(0),
     };
 
-    let mut status = ArithmeticOpStatus::default();
+    let mut status = ArithmeticStatus::default();
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
             let chunk_len = chunk_len_max.min(len - pos);
@@ -418,7 +418,7 @@ fn to_buf_type_erased_dyn(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            let mut iteration_status = ArithmeticOpStatus::default();
+            let mut iteration_status = ArithmeticStatus::default();
             inner_loop(
                 dst,
                 dst_stride,
@@ -443,7 +443,7 @@ fn to_buf_type_erased_dyn(
         }
     });
 
-    context.check_op_status(status)
+    status.into_result()
 }
 
 /// Whether to stage the non-contiguous *input* operands, on top of the ones staged for alignment.
@@ -603,7 +603,7 @@ fn inner_loop_impl<
     dst: PtrMutNoalias<T>,
     dst_stride: usize,
     len: usize,
-    status: &mut ArithmeticOpStatus,
+    status: &mut ArithmeticStatus,
     simd: S,
 ) where
     T: Dtyped,
@@ -614,7 +614,7 @@ fn inner_loop_impl<
         debug_assert!(dst.is_aligned());
     }
 
-    let mut loop_status = ArithmeticOpStatus::default();
+    let mut loop_status = ArithmeticStatus::default();
 
     let body_limit = len - len % LANES;
     let mut i = 0;
@@ -659,7 +659,7 @@ fn inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
     dst: PtrMutNoalias<T>,
     dst_stride: usize,
     len: usize,
-    status: &mut ArithmeticOpStatus,
+    status: &mut ArithmeticStatus,
 ) where
     T: Dtyped,
     P: ElementwisePipelineImpl<T>,
@@ -683,7 +683,7 @@ fn inner_loop_per_level<
     dst: PtrMutNoalias<T>,
     dst_stride: usize,
     len: usize,
-    status: &mut ArithmeticOpStatus,
+    status: &mut ArithmeticStatus,
     simd: S,
 ) {
     let lanes = const {
@@ -729,7 +729,7 @@ struct InnerLoopFlags {
     output_contiguous: bool,
 }
 type InnerLoop<'a> =
-    dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, InnerLoopFlags, &mut ArithmeticOpStatus) + 'a;
+    dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, InnerLoopFlags, &mut ArithmeticStatus) + 'a;
 
 /// One region a pipeline reads - or writes - plus the cursor it is walked through.
 ///
@@ -841,7 +841,7 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
         &self,
         offset: usize,
-        _status: &mut ArithmeticOpStatus,
+        _status: &mut ArithmeticStatus,
         _simd: S,
     ) -> [T; N] {
         let base = self.operand.current_ptr.get().cast::<T>();
@@ -1160,7 +1160,7 @@ mod tests {
             unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: fearless_simd::Simd>(
                 &self,
                 offset: usize,
-                status: &mut ArithmeticOpStatus,
+                status: &mut ArithmeticStatus,
                 simd: S,
             ) -> [T; N] {
                 let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS, _>(offset, status, simd) };
@@ -1520,7 +1520,7 @@ mod tests {
     #[track_caller]
     fn pipeline_elements<S, T>(storage: &S, index: &[Range<u64>]) -> Vec<T>
     where
-        S: crate::ArrayStorage,
+        S: ArrayStorage,
         T: Dtyped + std::fmt::Debug + PartialEq,
     {
         let context = ReadContext::default();
@@ -1574,7 +1574,7 @@ mod tests {
     /// checked against.
     fn read_data_elements<S, T>(storage: &S, index: &[Range<u64>]) -> Vec<T>
     where
-        S: crate::ArrayStorage,
+        S: ArrayStorage,
         T: Dtyped,
     {
         let context = ReadContext::default();
@@ -1598,7 +1598,7 @@ mod tests {
     /// how far the chain fused.
     fn operand_counts<S, T>(storage: &S, index: &[Range<u64>]) -> (Option<usize>, usize)
     where
-        S: crate::ArrayStorage,
+        S: ArrayStorage,
         T: Dtyped,
     {
         fn declared<T, P: ElementwisePipelineImpl<T>>(_pipeline: &P) -> Option<usize> {
@@ -1616,7 +1616,7 @@ mod tests {
     #[track_caller]
     fn operand_count<S, T>(storage: &S, index: &[Range<u64>]) -> usize
     where
-        S: crate::ArrayStorage,
+        S: ArrayStorage,
         T: Dtyped,
     {
         let (declared, walked) = operand_counts::<S, T>(storage, index);
@@ -1632,7 +1632,7 @@ mod tests {
         // The default `read_as_elementwise_pipeline`: a storage that does not
         // decompose reads its region once and presents itself as a single operand.
         let nd = ndarray::Array2::from_shape_fn((5, 7), |(i, j)| (i * 7 + j) as f32);
-        let arr = crate::Array::compact_ndarray(&nd).unwrap();
+        let arr = Array::compact_ndarray(&nd).unwrap();
         let index = full_index(arr.storage.shape());
         assert_eq!(
             pipeline_elements::<_, f32>(&arr.storage, &index),
@@ -1647,11 +1647,11 @@ mod tests {
         // A fresh pair of arrays per chain: `Array<Compact<..>>` owns its blocks and is not `Clone`.
         let a = || {
             let nd = ndarray::Array2::from_shape_fn((6, 9), |(i, j)| (i * 9 + j) as f32);
-            crate::Array::compact_ndarray(&nd).unwrap()
+            Array::compact_ndarray(&nd).unwrap()
         };
         let b = || {
             let nd = ndarray::Array2::from_shape_fn((6, 9), |(i, j)| (i as f32) - (j as f32) * 0.5);
-            crate::Array::compact_ndarray(&nd).unwrap()
+            Array::compact_ndarray(&nd).unwrap()
         };
 
         // Op1 over one leaf, Op2 over two, and Op1/Op2 stacked - three leaves under three nodes,
@@ -1695,8 +1695,8 @@ mod tests {
         let nd_a = ndarray::Array2::from_shape_fn((4, 6), |(i, j)| (i * 6 + j) as i32);
         let nd_b = ndarray::Array2::from_shape_fn((4, 6), |(i, j)| (i as i32) * 100 + j as i32);
         let nd_b_t = nd_b.t();
-        let a = crate::Array::plain_ndarray_ref(&nd_a).unwrap();
-        let b = crate::Array::plain_ndarray_ref(&nd_b_t).unwrap();
+        let a = Array::plain_ndarray_ref(&nd_a).unwrap();
+        let b = Array::plain_ndarray_ref(&nd_b_t).unwrap();
         let sum = a.add(b.permute_dims(&[1, 0]));
         let index = full_index(sum.storage.shape());
         assert_eq!(
@@ -1734,9 +1734,9 @@ mod tests {
         use core::ops::Add;
 
         let nd = ndarray::Array1::from_vec(vec![1.0f32, 2.0, 3.0]);
-        let sum = crate::Array::compact_ndarray(&nd)
+        let sum = Array::compact_ndarray(&nd)
             .unwrap()
-            .add(crate::Array::compact_ndarray(&nd).unwrap());
+            .add(Array::compact_ndarray(&nd).unwrap());
         let index = full_index(sum.storage.shape());
         let context = ReadContext::default();
         assert!(sum
@@ -1746,8 +1746,8 @@ mod tests {
     }
 
     /// An `Array` broadcasting one `f32` across a 4x5 region.
-    fn scalar_4x5(value: f32) -> crate::Array<crate::storage::scalar::Scalar<f32>> {
-        crate::Array::from_storage(
+    fn scalar_4x5(value: f32) -> Array<crate::storage::scalar::Scalar<f32>> {
+        Array::from_storage(
             crate::storage::scalar::Scalar::new(value, &[4, 5], crate::ArrayParams::default())
                 .unwrap(),
         )
@@ -1768,9 +1768,7 @@ mod tests {
         );
 
         let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as f32);
-        let sum = crate::Array::compact_ndarray(&nd)
-            .unwrap()
-            .add(scalar_4x5(7.0));
+        let sum = Array::compact_ndarray(&nd).unwrap().add(scalar_4x5(7.0));
         assert_eq!(operand_count::<_, f32>(&sum.storage, &index), 1);
         assert_eq!(
             pipeline_elements::<_, f32>(&sum.storage, &index),
@@ -1781,7 +1779,7 @@ mod tests {
     /// `read_data` in pull mode, as `(strides, elements)` read back through those strides.
     fn pull_strides_and_elements<S, T>(storage: &S, index: &[Range<u64>]) -> (Vec<usize>, Vec<T>)
     where
-        S: crate::ArrayStorage,
+        S: ArrayStorage,
         T: Dtyped,
     {
         let context = ReadContext::default();
@@ -1805,7 +1803,7 @@ mod tests {
         use core::ops::Neg;
 
         let nd = ndarray::Array2::from_shape_fn((1, 1), |_| 3.0f32);
-        let neg = crate::Array::compact_ndarray(&nd)
+        let neg = Array::compact_ndarray(&nd)
             .unwrap()
             .broadcast(&[4, 5])
             .neg();
@@ -1822,7 +1820,7 @@ mod tests {
         use core::ops::Neg;
 
         let nd = ndarray::Array2::from_shape_fn((4, 1), |(i, _)| i as f32);
-        let neg = crate::Array::compact_ndarray(&nd)
+        let neg = Array::compact_ndarray(&nd)
             .unwrap()
             .broadcast(&[4, 5])
             .neg();
@@ -1854,11 +1852,9 @@ mod tests {
 
         let lhs = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as f32);
         let rhs = ndarray::Array2::from_shape_fn((1, 1), |_| 100.0f32);
-        let sum = crate::Array::compact_ndarray(&lhs).unwrap().add(
-            crate::Array::compact_ndarray(&rhs)
-                .unwrap()
-                .broadcast(&[4, 5]),
-        );
+        let sum = Array::compact_ndarray(&lhs)
+            .unwrap()
+            .add(Array::compact_ndarray(&rhs).unwrap().broadcast(&[4, 5]));
         let index = full_index(sum.storage.shape());
 
         let (strides, elements) = pull_strides_and_elements::<_, f32>(&sum.storage, &index);
@@ -1874,7 +1870,7 @@ mod tests {
         use core::ops::Neg;
 
         let nd = ndarray::Array2::from_shape_fn((1, 1), |_| 3.0f32);
-        let neg = crate::Array::compact_ndarray(&nd)
+        let neg = Array::compact_ndarray(&nd)
             .unwrap()
             .broadcast(&[4, 5])
             .neg();
@@ -1906,9 +1902,9 @@ mod tests {
         let nd_x = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as i32);
         let nd_y = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| -((i * 5 + j) as i32));
         let selected = crate::ops::where_condition(
-            crate::Array::compact_ndarray(&nd_c).unwrap(),
-            crate::Array::compact_ndarray(&nd_x).unwrap(),
-            crate::Array::compact_ndarray(&nd_y).unwrap(),
+            Array::compact_ndarray(&nd_c).unwrap(),
+            Array::compact_ndarray(&nd_x).unwrap(),
+            Array::compact_ndarray(&nd_y).unwrap(),
         );
         let index = full_index(selected.storage.shape());
         assert_eq!(operand_count::<_, i32>(&selected.storage, &index), 3);
@@ -1926,9 +1922,9 @@ mod tests {
 
         let nd_a = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as f32);
         let nd_b = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (j * 4 + i) as f32);
-        let sum = crate::Array::compact_ndarray(&nd_a)
+        let sum = Array::compact_ndarray(&nd_a)
             .unwrap()
-            .add(crate::Array::compact_ndarray(&nd_b).unwrap());
+            .add(Array::compact_ndarray(&nd_b).unwrap());
         let index = full_index(sum.storage.shape());
         let expected = read_data_elements::<_, f32>(&sum.storage, &index);
 
@@ -1945,12 +1941,12 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     /// Three 4x5 `Compact` arrays with distinct contents.
-    fn three_arrays() -> [crate::Array<crate::storage::Compact<crate::Ty<i32>>>; 3] {
+    fn three_arrays() -> [Array<crate::storage::Compact<Ty<i32>>>; 3] {
         std::array::from_fn(|k| {
             let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| {
                 (i * 5 + j) as i32 * (k as i32 + 1)
             });
-            crate::Array::compact_ndarray(&nd).unwrap()
+            Array::compact_ndarray(&nd).unwrap()
         })
     }
 
@@ -2003,9 +1999,9 @@ mod tests {
         });
         let mixed = crate::ops::map_multiple(
             (
-                crate::Array::compact_ndarray(&nd_i).unwrap(),
-                crate::Array::compact_ndarray(&nd_f).unwrap(),
-                crate::Array::compact_ndarray(&nd_b).unwrap(),
+                Array::compact_ndarray(&nd_i).unwrap(),
+                Array::compact_ndarray(&nd_f).unwrap(),
+                Array::compact_ndarray(&nd_b).unwrap(),
             ),
             |(x, y, flag): (i32, f32, crate::scalar::bool8)| {
                 if flag.into() {
@@ -2031,7 +2027,7 @@ mod tests {
         let index = full_index(&[4u64, 5]);
         let sums = three_arrays().map(|arr| {
             let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (j * 4 + i) as i32);
-            arr.add(crate::Array::compact_ndarray(&nd).unwrap())
+            arr.add(Array::compact_ndarray(&nd).unwrap())
         });
         let mapped = crate::ops::map_multiple(sums, |xs: [i32; 3]| xs[0] ^ xs[1] ^ xs[2]);
         assert_eq!(operand_count::<_, i32>(&mapped.storage, &index), 6);
@@ -2045,7 +2041,7 @@ mod tests {
     #[track_caller]
     fn declared_n_operands<S, T>(storage: &S, index: &[Range<u64>]) -> Option<usize>
     where
-        S: crate::ArrayStorage,
+        S: ArrayStorage,
         T: Dtyped,
     {
         operand_counts::<S, T>(storage, index).0
@@ -2054,7 +2050,7 @@ mod tests {
     /// The declared `MAX_ITEMSIZE` for a pipeline over `storage`.
     fn declared_max_itemsize<S, T>(storage: &S, index: &[Range<u64>]) -> usize
     where
-        S: crate::ArrayStorage,
+        S: ArrayStorage,
         T: Dtyped,
     {
         fn declared<T, P: ElementwisePipelineImpl<T>>(_pipeline: &P) -> usize {
@@ -2074,7 +2070,7 @@ mod tests {
         let index = full_index(&[4u64, 5]);
         let arr = || {
             let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as i64);
-            crate::Array::compact_ndarray(&nd).unwrap()
+            Array::compact_ndarray(&nd).unwrap()
         };
 
         let leaf = arr();
@@ -2094,7 +2090,7 @@ mod tests {
         assert_eq!(declared_max_itemsize::<_, f64>(&widened.storage, &index), 8);
 
         let mixed = crate::ops::where_condition(
-            crate::Array::compact_ndarray(&ndarray::Array2::from_elem(
+            Array::compact_ndarray(&ndarray::Array2::from_elem(
                 (4, 5),
                 crate::scalar::bool8::TRUE,
             ))
@@ -2118,13 +2114,13 @@ mod tests {
         let index = full_index(&[4u64, 5]);
         let compact = || {
             let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as i32);
-            crate::Array::compact_ndarray(&nd).unwrap()
+            Array::compact_ndarray(&nd).unwrap()
         };
         let flags = || {
             let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| {
                 crate::scalar::bool8::from((i + j) % 2 == 0)
             });
-            crate::Array::compact_ndarray(&nd).unwrap()
+            Array::compact_ndarray(&nd).unwrap()
         };
 
         // Anything built from a fixed set of operands knows its count statically.
@@ -2209,10 +2205,10 @@ mod tests {
         // sixteen (the destination included) and hands anything wider to `to_buf_impl_dyn`. Both
         // sides of that boundary are reachable with a count known at compile time, so walk each:
         // fifteen leaves plus the destination is the last const-generic arm, sixteen overflows it.
-        fn leaves<const N: usize>() -> [crate::Array<crate::storage::Compact<crate::Ty<i32>>>; N] {
+        fn leaves<const N: usize>() -> [Array<crate::storage::Compact<Ty<i32>>>; N] {
             std::array::from_fn(|k| {
                 let nd = ndarray::Array1::from_shape_fn(6, |i| (i + k) as i32);
-                crate::Array::compact_ndarray(&nd).unwrap()
+                Array::compact_ndarray(&nd).unwrap()
             })
         }
         // Leaf `k` holds `i + k`, so element `i` of an `n`-leaf sum is `n * i + n * (n - 1) / 2`.
@@ -2310,7 +2306,7 @@ mod tests {
         let arrays = (0..n)
             .map(|k| {
                 let nd = ndarray::Array1::from_shape_fn(6, |i| (i + k) as i32);
-                crate::Array::compact_ndarray(&nd).unwrap()
+                Array::compact_ndarray(&nd).unwrap()
             })
             .collect::<Vec<_>>();
         let mapped = crate::ops::map_multiple(arrays, |xs: &[i32]| xs.iter().sum::<i32>());

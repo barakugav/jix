@@ -1,6 +1,12 @@
-use jix_core::scalar::bool8;
+use std::sync::LazyLock;
 
-use crate::ops::common::{define_op1, define_op2};
+use jix_core::scalar::bool8;
+use pyo3::prelude::*;
+
+use crate::ops::common::{
+    define_op1, define_op1_desc, define_op2, OpDescriptor, Operand, Precision, Rank,
+};
+use crate::Array;
 
 define_op2!(
     /// Element-wise logical AND of two arrays.
@@ -638,39 +644,54 @@ define_op1!(
     }
 );
 
-define_op1!(
-    /// Reverses the byte order of each element.
-    ///
-    /// Supported dtypes: `i16`, `i32`, `i64`, `u16`, `u32`, `u64`.
-    /// Output dtype and shape equal the input.
-    ///
-    /// Swaps the bytes of each element (e.g. converts between big-endian and little-endian
-    /// representation). Single-byte types (`i8`, `u8`) are not supported since swapping
-    /// one byte is a no-op.
-    ///
-    /// Args:
-    ///     array: Input array.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([0x12345678], dtype=np.uint32)
-    ///     result = jix.swap_bytes(a)
-    ///     assert result.numpy()[0] == 0x78563412
-    ///     ```
-    swap_bytes,
-    SwapBytes,
-    dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64],
-        None
+/// Reverses the byte order of each element.
+///
+/// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`.
+/// Output dtype and shape equal the input.
+///
+/// Swaps the bytes of each element (e.g. converts between big-endian and little-endian
+/// representation). For single-byte types (`i8`, `u8`, `bool`) this is a no-op: a
+/// [`jix.Array`][jix.Array] input is returned as is (the same object).
+///
+/// Args:
+///     array: Input array.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
+///         the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([0x12345678], dtype=np.uint32)
+///     result = jix.swap_bytes(a)
+///     assert result.numpy()[0] == 0x78563412
+///     ```
+#[pyo3::pyfunction]
+pub fn swap_bytes<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "swap_bytes",
+            define_op1_desc!(SwapBytes, [u16, i16, u32, i32, u64, i64], None),
+        )
+    });
+
+    let py = array.py();
+    let array = Operand::from_any(array)?;
+
+    // swapping the bytes of a single-byte element is a no-op
+    if matches!(
+        array.rank_precision(),
+        Some((Rank::UInt | Rank::Int, Some(Precision::P1)) | (Rank::Bool, _))
+    ) {
+        return array.into_py_array(py);
     }
-);
+
+    let res = DISPATCH_TABLE.dispatch1(array)?;
+    Bound::new(py, Array::from_core(res))
+}
 
 define_op1!(
     /// Reverses the bit order of each element.

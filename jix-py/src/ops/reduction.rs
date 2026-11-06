@@ -3,8 +3,7 @@ use jix_core::scalar::{f16, Complex};
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
 
-use crate::type_hint::Dim;
-use crate::util::DimArray;
+use crate::util::IntoPyResult;
 
 fn keepdim_after_multi_reduction(
     array: ArrayAny,
@@ -12,7 +11,7 @@ fn keepdim_after_multi_reduction(
 ) -> PyResult<ArrayAny> {
     // keepdim=true: re-insert singleton dims via insert_dim
     let res = jix_core::ops::InsertDim::new_array(array, original_reduced_dims);
-    let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+    let ret = res.into_py_result()?;
     Ok(ret.into_any())
 }
 
@@ -20,7 +19,7 @@ fn keepdim_after_multi_reduction(
 fn keepdim_after_reduction(array: ArrayAny, original_reduced_dim: usize) -> PyResult<ArrayAny> {
     // keepdim=true: re-insert singleton dim via insert_dim
     let res = jix_core::ops::InsertDim::new_array(array, [original_reduced_dim]);
-    let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+    let ret = res.into_py_result()?;
     Ok(ret.into_any())
 }
 
@@ -42,12 +41,12 @@ macro_rules! define_reduction_op {
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-            dim: Option<crate::util::ItemOrTuple<Dim>>,
+            dim: Option<crate::util::ItemOrTuple<crate::type_hint::Dim>>,
             keepdim: bool,
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
             struct DispatchArgs {
-                dims: DimArray<usize>,
+                dims: crate::util::DimArray<usize>,
                 $($($extra_arg: $extra_ty),*)?
             }
             static DISPATCH_TABLE: ::std::sync::LazyLock<crate::ops::common::OpDescriptor<1, DispatchArgs>> = ::std::sync::LazyLock::new(|| {
@@ -92,7 +91,7 @@ macro_rules! define_reduction_op {
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-            dim: Option<Dim>,
+            dim: Option<crate::type_hint::Dim>,
             keepdim: bool,
         ) -> pyo3::PyResult<crate::Array> {
             struct DispatchArgs {

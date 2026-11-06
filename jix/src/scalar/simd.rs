@@ -1,6 +1,6 @@
 //! Building blocks of the SIMD `*_bulk` functions of the scalar traits.
 
-use crate::error::ArithmeticOpStatus;
+use crate::error::ArithmeticStatus;
 use crate::scalar::bool8;
 use crate::util::{array_from_fn_inline, ArrayExt};
 use fearless_simd::{Simd, SimdBase, SimdElement};
@@ -243,38 +243,12 @@ where
 }
 
 #[inline(always)]
-pub(crate) fn map_vectors_status<T, U, const N: usize, S>(
-    xs: [T; N],
-    status: &mut ArithmeticOpStatus,
-    mut f_scalar: impl FnMut(T, &mut ArithmeticOpStatus) -> U,
-    mut f_simd: impl FnMut(T::V<S>, &mut ArithmeticOpStatus) -> U::V<S>,
-    simd: S,
-) -> [U; N]
-where
-    T: SimdElementExt,
-    U: SimdElementExt,
-    S: Simd,
-{
-    let mut simd_status = ArithmeticOpStatus::default();
-    let ys = map_vectors(
-        xs,
-        #[inline(always)]
-        |x| f_scalar(x, status),
-        #[inline(always)]
-        |x| f_simd(x, &mut simd_status),
-        simd,
-    );
-    *status |= simd_status;
-    ys
-}
-
-#[inline(always)]
 pub(crate) fn map_vectors2_status<T1, T2, U, const N: usize, S>(
     xs: [T1; N],
     ys: [T2; N],
-    status: &mut ArithmeticOpStatus,
-    mut f_scalar: impl FnMut(T1, T2, &mut ArithmeticOpStatus) -> U,
-    mut f_simd: impl FnMut(T1::V<S>, T2::V<S>, &mut ArithmeticOpStatus) -> U::V<S>,
+    status: &mut ArithmeticStatus,
+    mut f_scalar: impl FnMut(T1, T2, &mut ArithmeticStatus) -> U,
+    mut f_simd: impl FnMut(T1::V<S>, T2::V<S>, &mut ArithmeticStatus) -> U::V<S>,
     simd: S,
 ) -> [U; N]
 where
@@ -283,7 +257,7 @@ where
     U: SimdElementExt,
     S: Simd,
 {
-    let mut simd_status = ArithmeticOpStatus::default();
+    let mut simd_status = ArithmeticStatus::default();
     let zs = map_vectors2(
         xs,
         ys,
