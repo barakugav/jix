@@ -8,7 +8,7 @@ use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
-use crate::type_hint::{Dim, ItemOrTuple, NdArray, NpDtype, Shape, ValueOrUnimplemented};
+use crate::type_hint::{Dim, ItemOrTuple, NumpyArray, NumpyDtype, Shape, ValueOrUnimplemented};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyTuple};
 
@@ -446,8 +446,8 @@ impl Array {
     /// ```
     #[getter]
     #[inline]
-    pub fn dtype<'py>(&self, py: Python<'py>) -> PyResult<NpDtype<'py>> {
-        self.numpy_dtype(py).map(NpDtype)
+    pub fn dtype<'py>(&self, py: Python<'py>) -> PyResult<NumpyDtype<'py>> {
+        self.numpy_dtype(py).map(NumpyDtype)
     }
 
     /// Decode the array (or a sub-region of it) into a NumPy array.
@@ -558,8 +558,8 @@ impl Array {
         &self,
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
-        out: Option<NdArray<'py>>,
-    ) -> PyResult<NdArray<'py>> {
+        out: Option<NumpyArray<'py>>,
+    ) -> PyResult<NumpyArray<'py>> {
         let out = out.map(|out| out.0);
         let (index, out_shape, drop_dims) = self.parse_index(index)?;
         // NumPy expands an inner shape of the dtype into trailing dims of its base dtype.
@@ -605,7 +605,7 @@ impl Array {
 
         let nitems = read_shape.iter().product::<usize>();
         if nitems == 0 {
-            return Ok(NdArray(np_arr));
+            return Ok(NumpyArray(np_arr));
         }
 
         // `to_buf_strided` wants one stride per *array* dimension, but an integer index item drops
@@ -674,7 +674,7 @@ impl Array {
                 .into_py_result()
         })?;
 
-        Ok(NdArray(np_arr))
+        Ok(NumpyArray(np_arr))
     }
 
     /// Returns the single element of a zero-dimensional array as a Python scalar.
@@ -772,7 +772,7 @@ impl Array {
     /// Returns:
     ///     A NumPy array. See `numpy()` for details.
     #[inline]
-    pub fn __getitem__<'py>(&self, index: &Bound<'py, PyAny>) -> PyResult<NdArray<'py>> {
+    pub fn __getitem__<'py>(&self, index: &Bound<'py, PyAny>) -> PyResult<NumpyArray<'py>> {
         self.numpy(index.py(), Some(index), None)
     }
 
@@ -795,7 +795,7 @@ impl Array {
         py: Python<'py>,
         dtype: Option<&Bound<'py, PyAny>>,
         copy: Option<bool>,
-    ) -> PyResult<NdArray<'py>> {
+    ) -> PyResult<NumpyArray<'py>> {
         if copy == Some(false) {
             return Err(PyValueError::new_err(
                 "a jix Array cannot be converted to a NumPy array without a copy",

@@ -23,9 +23,9 @@ const NDARRAY_TYPE_HINT: PyStaticExpr = type_hint_subscript!(
 
 /// A NumPy array of any dtype and shape.
 #[derive(Debug)]
-pub struct NdArray<'py>(pub Bound<'py, PyUntypedArray>);
+pub struct NumpyArray<'py>(pub Bound<'py, PyUntypedArray>);
 
-impl<'py> Deref for NdArray<'py> {
+impl<'py> Deref for NumpyArray<'py> {
     type Target = Bound<'py, PyUntypedArray>;
 
     fn deref(&self) -> &Self::Target {
@@ -33,7 +33,7 @@ impl<'py> Deref for NdArray<'py> {
     }
 }
 
-impl<'a, 'py> FromPyObject<'a, 'py> for NdArray<'py> {
+impl<'a, 'py> FromPyObject<'a, 'py> for NumpyArray<'py> {
     type Error = PyErr;
 
     const INPUT_TYPE: PyStaticExpr = NDARRAY_TYPE_HINT;
@@ -43,7 +43,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for NdArray<'py> {
     }
 }
 
-impl<'py> IntoPyObject<'py> for NdArray<'py> {
+impl<'py> IntoPyObject<'py> for NumpyArray<'py> {
     type Target = PyUntypedArray;
     type Output = Bound<'py, PyUntypedArray>;
     type Error = Infallible;
@@ -56,9 +56,9 @@ impl<'py> IntoPyObject<'py> for NdArray<'py> {
 }
 
 /// A NumPy dtype.
-pub struct NpDtype<'py>(pub Bound<'py, PyArrayDescr>);
+pub struct NumpyDtype<'py>(pub Bound<'py, PyArrayDescr>);
 
-impl<'py> IntoPyObject<'py> for NpDtype<'py> {
+impl<'py> IntoPyObject<'py> for NumpyDtype<'py> {
     type Target = PyArrayDescr;
     type Output = Bound<'py, PyArrayDescr>;
     type Error = Infallible;
