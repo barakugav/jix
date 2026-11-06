@@ -1901,8 +1901,7 @@ mod tests {
         });
         let nd_x = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as i32);
         let nd_y = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| -((i * 5 + j) as i32));
-        let selected = crate::ops::where_condition(
-            Array::compact_ndarray(&nd_c).unwrap(),
+        let selected = Array::compact_ndarray(&nd_c).unwrap().select(
             Array::compact_ndarray(&nd_x).unwrap(),
             Array::compact_ndarray(&nd_y).unwrap(),
         );
@@ -2089,15 +2088,12 @@ mod tests {
         let widened = scalar_4x5(1.0).cast::<f64>();
         assert_eq!(declared_max_itemsize::<_, f64>(&widened.storage, &index), 8);
 
-        let mixed = crate::ops::where_condition(
-            Array::compact_ndarray(&ndarray::Array2::from_elem(
-                (4, 5),
-                crate::scalar::bool8::TRUE,
-            ))
-            .unwrap(),
-            arr().cast::<i16>(),
-            arr().cast::<i16>(),
-        );
+        let mixed = Array::compact_ndarray(&ndarray::Array2::from_elem(
+            (4, 5),
+            crate::scalar::bool8::TRUE,
+        ))
+        .unwrap()
+        .select(arr().cast::<i16>(), arr().cast::<i16>());
         assert_eq!(declared_max_itemsize::<_, i16>(&mixed.storage, &index), 8);
 
         let mapped = crate::ops::map_multiple(
@@ -2148,7 +2144,7 @@ mod tests {
             Some(3)
         );
 
-        let selected = crate::ops::where_condition(flags(), compact(), compact());
+        let selected = flags().select(compact(), compact());
         assert_eq!(
             declared_n_operands::<_, i32>(&selected.storage, &index),
             Some(3)

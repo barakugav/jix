@@ -1462,7 +1462,7 @@ mod tests {
             .map(|x: i32| x);
 
         // `y` is the costliest of the three, so its F-order layout wins - not `x`'s.
-        let out = crate::ops::where_condition(cond.view(), c_order.view(), costly);
+        let out = cond.view().select(c_order.view(), costly);
         assert_eq!(out.storage().spec().read_layout_order(), &[1, 0]);
     }
 
