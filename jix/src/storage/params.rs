@@ -663,13 +663,10 @@ pub(crate) struct ArraySpecDynamic {
     /// Both sets only follow the storages an array reads at the region it is read at: element-wise
     /// ops, broadcasts and dims inserted in front. Other shape ops and reductions read their inner
     /// storages at other regions, so they clear the sets and read their inner storages in a cache
-    /// scope of their own (see [`with_cache_scope`](Self::with_cache_scope)).
+    /// scope of their own (see [`with_cache_scope`](Self::with_cache_scope)). A top level read of
+    /// this array caches these in the cache scope of the read array (see
+    /// [`ReadContext::cache_scope`](crate::ReadContext::cache_scope)).
     pub(crate) arrays_to_cache: Option<Arc<ArrayCacheIdSet>>,
-
-    /// Whether a storage reachable from this array, itself included, reads its inner storages in a
-    /// cache scope of its own with arrays to cache, so a read of this array uses the read cache
-    /// even if [`arrays_to_cache`](Self::arrays_to_cache) is `None`.
-    pub(crate) has_cache_scopes: bool,
 }
 impl ArraySpecOwned {
     pub(crate) fn new(
@@ -853,7 +850,6 @@ impl ArraySpecDynamic {
             read_layout_order,
             arrays_to_cache_potentially: None,
             arrays_to_cache: None,
-            has_cache_scopes: false,
         }
     }
 
@@ -894,7 +890,6 @@ impl ArraySpecDynamic {
         self.merge_cache_ids(inners, repeats_across_inners);
         let scope = self.arrays_to_cache.take();
         self.arrays_to_cache_potentially = None;
-        self.has_cache_scopes |= scope.is_some();
         if let Some(cache_id) = cache_id {
             self.add_cache_id(cache_id);
         }
@@ -914,9 +909,7 @@ impl ArraySpecDynamic {
     ) {
         self.arrays_to_cache_potentially = None;
         self.arrays_to_cache = None;
-        self.has_cache_scopes = false;
         for inner in inners {
-            self.has_cache_scopes |= inner.has_cache_scopes;
             let Some(inner_ids) = &inner.arrays_to_cache_potentially else {
                 continue;
             };
@@ -939,12 +932,6 @@ impl ArraySpecDynamic {
                 }
             }
         }
-    }
-
-    /// Whether a read of this array uses the [`ReadContext`](crate::ReadContext) read cache.
-    #[inline]
-    pub(crate) fn uses_read_cache(&self) -> bool {
-        self.arrays_to_cache.is_some() || self.has_cache_scopes
     }
 
     /// Add the cache id of the storage of this spec to

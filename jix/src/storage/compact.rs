@@ -888,7 +888,8 @@ mod tests {
         let xx = za.view() + za.view();
         let storage = za.storage();
 
-        ctx.top_level_read(xx.storage().spec().dynamic(), || {
+        {
+            let _scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
             let a = storage.read_data(&[4..20], &ctx, None).unwrap();
             let b = storage.read_data(&[4..20], &ctx, None).unwrap();
             assert_eq!(
@@ -902,7 +903,7 @@ mod tests {
             assert_eq!(read_i32s(&a, 16), (4..20).collect::<Vec<_>>());
             assert_eq!(read_i32s(&b, 16), (4..20).collect::<Vec<_>>());
             assert_eq!(read_i32s(&c, 16), (20..36).collect::<Vec<_>>());
-        });
+        }
 
         // Outside of a top level read nothing is cached.
         let a = storage.read_data(&[4..20], &ctx, None).unwrap();
@@ -923,14 +924,13 @@ mod tests {
     #[test]
     fn arrays_to_cache_are_reachable_more_than_once() {
         type Ids = HashSet<ArrayCacheId>;
-        // The arrays to cache potentially, the arrays to cache and whether there are cache scopes.
-        let ids = |spec: ArraySpec<'_>| -> (Ids, Ids, bool) {
+        // The arrays to cache potentially and the arrays to cache.
+        let ids = |spec: ArraySpec<'_>| -> (Ids, Ids) {
             let dynamic = spec.dynamic();
             let set = |s: &Option<Arc<ArrayCacheIdSet>>| s.iter().flat_map(|s| s.iter()).collect();
             (
                 set(&dynamic.arrays_to_cache_potentially),
                 set(&dynamic.arrays_to_cache),
-                dynamic.has_cache_scopes,
             )
         };
         // The id of an op: the one id it reaches that its inputs do not.
@@ -943,60 +943,40 @@ mod tests {
         let (x_id, y_id) = (x.storage().0.cache_id, y.storage().0.cache_id);
         let none = Ids::new();
 
-        assert_eq!(
-            ids(x.storage().spec()),
-            (Ids::from([x_id]), none.clone(), false)
-        );
+        assert_eq!(ids(x.storage().spec()), (Ids::from([x_id]), none.clone()));
         let xy = x.view() + y.view();
         let xy_id = own_id(xy.storage().spec(), &Ids::from([x_id, y_id]));
         let xy_ids = Ids::from([x_id, y_id, xy_id]);
-        assert_eq!(
-            ids(xy.storage().spec()),
-            (xy_ids.clone(), none.clone(), false)
-        );
+        assert_eq!(ids(xy.storage().spec()), (xy_ids.clone(), none.clone()));
         let xx = x.view() + x.view();
         let xx_id = own_id(xx.storage().spec(), &Ids::from([x_id]));
         assert_eq!(
             ids(xx.storage().spec()),
-            (Ids::from([x_id, xx_id]), Ids::from([x_id]), false)
+            (Ids::from([x_id, xx_id]), Ids::from([x_id]))
         );
         // A repeated op is cached, as are the storages it reaches.
         let sq = xy.view() * xy.view();
         let sq_id = own_id(sq.storage().spec(), &xy_ids);
         let mut sq_ids = xy_ids.clone();
         sq_ids.insert(sq_id);
-        assert_eq!(ids(sq.storage().spec()), (sq_ids, xy_ids.clone(), false));
+        assert_eq!(ids(sq.storage().spec()), (sq_ids, xy_ids.clone()));
 
         // Broadcasts and dims inserted in front keep the ids, as they read their input at the
         // region other such paths read it at.
         let bcast = xy.view().insert_dim([0, 1]).broadcast(&[2, 3, 64]);
-        assert_eq!(
-            ids(bcast.storage().spec()),
-            (xy_ids.clone(), none.clone(), false)
-        );
+        assert_eq!(ids(bcast.storage().spec()), (xy_ids.clone(), none.clone()));
         // Other shape ops read their input at other regions: they clear the ids, and cache the
         // arrays their input reaches more than once in a scope of their own.
-        let sliced = xy.view().slice((0..8,));
-        assert_eq!(
-            ids(sliced.storage().spec()),
-            (none.clone(), none.clone(), false)
-        );
         let sliced = xx.view().slice((0..8,));
-        assert_eq!(
-            ids(sliced.storage().spec()),
-            (none.clone(), none.clone(), true)
-        );
+        assert_eq!(ids(sliced.storage().spec()), (none.clone(), none.clone()));
         let inserted = xx.view().insert_dim(1);
-        assert_eq!(
-            ids(inserted.storage().spec()),
-            (none.clone(), none.clone(), true)
-        );
-        // The scope propagates to the arrays reaching it.
+        assert_eq!(ids(inserted.storage().spec()), (none.clone(), none.clone()));
+        // `x` is reached twice, but each time in a scope of its own.
         let outer = inserted.view() + x.view().insert_dim(1);
         let outer_id = own_id(outer.storage().spec(), &none);
         assert_eq!(
             ids(outer.storage().spec()),
-            (Ids::from([outer_id]), none.clone(), true)
+            (Ids::from([outer_id]), none.clone())
         );
 
         // Reductions too, but they keep their own id.
@@ -1004,22 +984,16 @@ mod tests {
         let sum_id = own_id(sum.storage().spec(), &none);
         assert_eq!(
             ids(sum.storage().spec()),
-            (Ids::from([sum_id]), none.clone(), true)
+            (Ids::from([sum_id]), none.clone())
         );
 
         // A stack reads its inputs at the same region, a concatenation at different ones.
         let stacked = crate::ops::stack([x.view(), y.view(), x.view()], 0);
-        assert_eq!(
-            ids(stacked.storage().spec()),
-            (none.clone(), none.clone(), true)
-        );
+        assert_eq!(ids(stacked.storage().spec()), (none.clone(), none.clone()));
         let cat = crate::ops::concatenate([x.view(), y.view(), x.view()], 0);
-        assert_eq!(
-            ids(cat.storage().spec()),
-            (none.clone(), none.clone(), false)
-        );
+        assert_eq!(ids(cat.storage().spec()), (none.clone(), none.clone()));
         let cat = crate::ops::concatenate((xx.view(), y.view()), 0);
-        assert_eq!(ids(cat.storage().spec()), (none.clone(), none, true));
+        assert_eq!(ids(cat.storage().spec()), (none.clone(), none));
     }
 
     #[test]
@@ -1028,7 +1002,8 @@ mod tests {
         let xy = x.view() + y.view();
         let sq = xy.view() * xy.view();
         let ctx = x.read_ctx();
-        ctx.top_level_read(sq.storage().spec().dynamic(), || {
+        {
+            let _scope = ctx.cache_scope(&sq.storage().spec().dynamic().arrays_to_cache);
             let a = xy.storage().read_data(&[4..20], &ctx, None).unwrap();
             let b = xy.storage().read_data(&[4..20], &ctx, None).unwrap();
             assert_eq!(a.data_ptr(), b.data_ptr());
@@ -1038,7 +1013,7 @@ mod tests {
             );
             // `x` and `y` are reached twice too, through `xy`.
             assert_eq!(context_read_cache_len(&ctx), 3);
-        });
+        }
         assert_eq!(context_read_cache_len(&ctx), 0);
     }
 
@@ -1049,12 +1024,13 @@ mod tests {
         // `x` is reached twice, but not from the reduction.
         let expr = (x.view() + max.view().insert_dim(0).broadcast(&[64])) * x.view();
         let ctx = x.read_ctx();
-        ctx.top_level_read(expr.storage().spec().dynamic(), || {
+        {
+            let _scope = ctx.cache_scope(&expr.storage().spec().dynamic().arrays_to_cache);
             let a = x.storage().read_data(&[4..20], &ctx, None).unwrap();
             max.storage().read_data(&[], &ctx, None).unwrap();
             let b = x.storage().read_data(&[4..20], &ctx, None).unwrap();
             assert_eq!(a.data_ptr(), b.data_ptr());
-        });
+        }
         let expected = (0..64).map(|i| (i + 63) * i).collect::<Vec<_>>();
         assert_eq!(
             expr.to_ndarray::<ndarray::Ix1>().unwrap().to_vec(),
@@ -1067,7 +1043,8 @@ mod tests {
         let x = arange64();
         let max = (x.view() * x.view()).max(0);
         let ctx = x.read_ctx();
-        ctx.top_level_read(max.storage().spec().dynamic(), || {
+        {
+            let _scope = ctx.cache_scope(&max.storage().spec().dynamic().arrays_to_cache);
             let max = max.storage().read_data(&[], &ctx, None).unwrap();
             assert_eq!(
                 unsafe { max.data_ptr().cast::<i32>().read_unaligned() },
@@ -1075,7 +1052,7 @@ mod tests {
             );
             // The reads of `x` within the reduction were cached, but are dropped after it.
             assert_eq!(context_read_cache_len(&ctx), 0);
-        });
+        }
     }
 
     #[test]
@@ -1085,18 +1062,37 @@ mod tests {
         let flipped = x.view().flip(0);
         let expr = (x.view() + flipped.view()) * x.view();
         let ctx = x.read_ctx();
-        ctx.top_level_read(expr.storage().spec().dynamic(), || {
+        {
+            let _scope = ctx.cache_scope(&expr.storage().spec().dynamic().arrays_to_cache);
             let a = x.storage().read_data(&[4..20], &ctx, None).unwrap();
             let f = flipped.storage().read_data(&[4..20], &ctx, None).unwrap();
             assert_eq!(read_i32s(&f, 16), (44..60).rev().collect::<Vec<_>>());
             let b = x.storage().read_data(&[4..20], &ctx, None).unwrap();
             assert_eq!(a.data_ptr(), b.data_ptr());
-        });
+        }
         let expected = (0..64).map(|i| (i + 63 - i) * i).collect::<Vec<_>>();
         assert_eq!(
             expr.to_ndarray::<ndarray::Ix1>().unwrap().to_vec(),
             expected
         );
+    }
+
+    #[test]
+    fn nested_top_level_read_restores_the_cache() {
+        let x = arange64();
+        let xx = x.view() + x.view();
+        let ctx = x.read_ctx();
+        let scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
+        let a = x.storage().read_data(&[4..20], &ctx, None).unwrap();
+        // The nested read caches `x` at another region, replacing the entry until it ends.
+        let sq = x.view() * x.view();
+        let nested = sq.to_ndarray_sub::<ndarray::Ix1>(&[20..36], &ctx).unwrap();
+        assert_eq!(nested.to_vec(), (20..36).map(|i| i * i).collect::<Vec<_>>());
+        let b = x.storage().read_data(&[4..20], &ctx, None).unwrap();
+        assert_eq!(a.data_ptr(), b.data_ptr());
+        assert_eq!(context_read_cache_len(&ctx), 1);
+        drop(scope);
+        assert_eq!(context_read_cache_len(&ctx), 0);
     }
 
     /// A reduction of `0..64` to its max, counting the calls of its reduce function in `calls`,
@@ -1143,7 +1139,8 @@ mod tests {
         let ctx = max.read_ctx();
         const SENTINEL: i32 = -1;
         let mut backing = [SENTINEL; 16];
-        ctx.top_level_read(twice.storage().spec().dynamic(), || {
+        {
+            let _scope = ctx.cache_scope(&twice.storage().spec().dynamic().arrays_to_cache);
             max.storage().read_data(&[2..6], &ctx, None).unwrap();
             assert_eq!(CALLS.load(Ordering::Relaxed), per_read / 2);
             // A push read of the cached region copies it into `out`, at the strides of `out`.
@@ -1156,7 +1153,7 @@ mod tests {
             assert_eq!(CALLS.load(Ordering::Relaxed), per_read / 2);
             // A push read is not added to the cache: the entry is still the pull read.
             assert_eq!(context_read_cache_len(&ctx), 1);
-        });
+        }
         let expected = [23, SENTINEL, 31, SENTINEL, 39, SENTINEL, 47, SENTINEL];
         assert_eq!(&backing[..8], &expected);
         assert!(backing[8..].iter().all(|&v| v == SENTINEL));

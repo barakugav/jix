@@ -9,7 +9,6 @@ use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
-use crate::storage::params::ArraySpecDynamic;
 use crate::storage::StridedBuf;
 use crate::util::{dim_arr, DimArray, RawAlignedBytes, SliceExt};
 use crate::DimDyn;
@@ -68,10 +67,11 @@ pub struct ReadContext {
     /// a repeated read (e.g. of `x` in `x + x`) is computed only once. See
     /// [`read_cached`](Self::read_cached).
     read_cache: RefCell<ArrayCacheIdMap<CacheEntry>>,
-    /// The storages whose reads are added to `read_cache` in the current scope. See
-    /// [`top_level_read`](Self::top_level_read) and [`cache_scope`](Self::cache_scope).
+    /// The storages whose reads are added to `read_cache` in the current cache scope. See
+    /// [`cache_scope`](Self::cache_scope).
     arrays_to_cache: RefCell<Option<Arc<ArrayCacheIdSet>>>,
-    /// Whether a top level read that uses `read_cache` is in progress.
+    /// Whether reads use `read_cache`: whether the current cache scope or an enclosing one has
+    /// arrays to cache.
     cache_active: Cell<bool>,
 }
 
@@ -114,6 +114,7 @@ impl Default for ReadContext {
 
 /// A cached read of the region `index` of a storage, laid out at `strides` from `offset` in
 /// `data`.
+#[derive(Clone)]
 struct CacheEntry {
     index: DimArray<Range<u64>>,
     strides: DimArray<usize>,
@@ -121,13 +122,20 @@ struct CacheEntry {
     data: Arc<RawAlignedBytes>,
 }
 
-/// A cache scope of a storage that reads its inner storages at other regions than its own, see
-/// [`ReadContext::cache_scope`]. The scope ends when it is dropped.
+/// A cache scope, see [`ReadContext::cache_scope`]. The scope ends when it is dropped.
 pub(crate) struct CacheScopeGuard<'a> {
     context: &'a ReadContext,
-    /// The arrays to cache of the enclosing scope, restored when the scope ends. `None` if no
-    /// scope was entered, as the read cache is not used.
-    prev: Option<Option<Arc<ArrayCacheIdSet>>>,
+    /// The state of the read cache before the scope, restored when it ends. `None` if the scope
+    /// changes nothing, as the read cache is not used in it.
+    prev: Option<CacheState>,
+}
+
+/// The state of the read cache that a cache scope changes, see [`ReadContext::cache_scope`].
+struct CacheState {
+    active: bool,
+    arrays_to_cache: Option<Arc<ArrayCacheIdSet>>,
+    /// The entries of the arrays to cache of the scope, which the reads in the scope replace.
+    entries: Vec<(ArrayCacheId, CacheEntry)>,
 }
 impl Drop for CacheScopeGuard<'_> {
     #[inline]
@@ -139,36 +147,6 @@ impl Drop for CacheScopeGuard<'_> {
 }
 
 impl ReadContext {
-    /// Run `read`, a top level read of an array of spec `spec`, with the reads of its
-    /// [`arrays_to_cache`](ArraySpecDynamic::arrays_to_cache) (the storages reachable more than
-    /// once from the read array) going through the read cache.
-    ///
-    /// The read cache is cleared before and after `read`, so cached buffers do not outlive it, and
-    /// the previous set is restored afterwards, so a nested top level read does not disturb the
-    /// outer one.
-    #[inline]
-    pub(crate) fn top_level_read<R>(&self, spec: &ArraySpecDynamic, read: impl FnOnce() -> R) -> R {
-        // Nothing is cached outside of a read that uses the cache, so without one it is empty.
-        let active = spec.uses_read_cache();
-        if !active && !self.cache_active.get() {
-            return read();
-        }
-        self.clear_read_cache();
-        let prev_active = self.cache_active.replace(active);
-        let prev = self.arrays_to_cache.replace(spec.arrays_to_cache.clone());
-        let result = read();
-        self.clear_read_cache();
-        self.arrays_to_cache.replace(prev);
-        self.cache_active.set(prev_active);
-        result
-    }
-
-    fn clear_read_cache(&self) {
-        self.read_cache
-            .borrow_mut()
-            .clear_with(|entry| self.buffer_pool.return_shared(entry.data));
-    }
-
     /// Read the region `index` of the storage `id` with `read` (called with `out`), through the
     /// read cache.
     ///
@@ -213,6 +191,8 @@ impl ReadContext {
             let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
             let buf =
                 unsafe { StridedBuf::from_shared(buf, &entry.strides).with_offset(entry.offset) };
+            // Not borrowed while copying, so a cache scope that ends on a panic can borrow it.
+            drop(cache);
             let Some(out) = out else {
                 return Ok(buf);
             };
@@ -255,22 +235,26 @@ impl ReadContext {
         Ok(buf)
     }
 
-    /// Enter a cache scope of a storage that reads its inner storages at other regions than the
-    /// one it is read at (shape ops other than broadcasts, reductions), which reads outside of it
-    /// do not read: only `arrays_to_cache`, the arrays its inner storages reach more than once (see
-    /// [`ArraySpecDynamic::with_cache_scope`]), are cached while it reads them.
+    /// Enter the cache scope of a read of a storage at some region, in which the reads of
+    /// `arrays_to_cache`, the storages it reaches more than once at that region, are cached.
     ///
-    /// The scope ends when the returned guard is dropped, which restores the arrays to cache of
-    /// the enclosing scope and drops the entries of `arrays_to_cache`, so the reads in the scope
-    /// do not evict entries of the enclosing scope for long.
+    /// A top level read of an array is the scope of the read array, and a storage that reads its
+    /// inner storages at other regions than the one it is read at (shape ops other than
+    /// broadcasts, reductions) reads them in a scope of its own (see
+    /// [`ArraySpecDynamic`](crate::storage::params::ArraySpecDynamic)).
+    ///
+    /// The read cache is used in a scope with arrays to cache and in the scopes it encloses, so
+    /// the reads in a scope without arrays to cache within it still hit the cached entries.
+    ///
+    /// The scope ends when the returned guard is dropped, which restores the read cache to its
+    /// state before the scope: the entries of the reads in the scope are dropped, the entries
+    /// they replaced are restored, and the arrays to cache of the enclosing scope are restored.
     #[inline]
     pub(crate) fn cache_scope(
         &self,
         arrays_to_cache: &Option<Arc<ArrayCacheIdSet>>,
     ) -> CacheScopeGuard<'_> {
-        let prev = self
-            .cache_active
-            .get()
+        let prev = (self.cache_active.get() || arrays_to_cache.is_some())
             .then(|| self.enter_cache_scope(arrays_to_cache));
         CacheScopeGuard {
             context: self,
@@ -279,22 +263,43 @@ impl ReadContext {
     }
 
     #[inline(never)]
-    fn enter_cache_scope(
-        &self,
-        arrays_to_cache: &Option<Arc<ArrayCacheIdSet>>,
-    ) -> Option<Arc<ArrayCacheIdSet>> {
-        self.arrays_to_cache.replace(arrays_to_cache.clone())
+    fn enter_cache_scope(&self, arrays_to_cache: &Option<Arc<ArrayCacheIdSet>>) -> CacheState {
+        // The entries the reads in the scope may replace are saved, but stay in the cache for the
+        // reads in the scope to hit.
+        let mut entries = Vec::new();
+        let cache = self.read_cache.borrow();
+        if let Some(ids) = arrays_to_cache
+            && !cache.is_empty()
+        {
+            ids.iter().for_each(|id| {
+                if let Some(entry) = cache.get(id) {
+                    entries.push((id, entry.clone()));
+                }
+            });
+        }
+        CacheState {
+            active: self.cache_active.replace(true),
+            arrays_to_cache: self.arrays_to_cache.replace(arrays_to_cache.clone()),
+            entries,
+        }
     }
 
     #[inline(never)]
-    fn exit_cache_scope(&self, prev: Option<Arc<ArrayCacheIdSet>>) {
-        if let Some(ids) = self.arrays_to_cache.replace(prev) {
-            let mut cache = self.read_cache.borrow_mut();
-            for id in ids.iter() {
+    fn exit_cache_scope(&self, prev: CacheState) {
+        self.cache_active.set(prev.active);
+        let ids = self.arrays_to_cache.replace(prev.arrays_to_cache);
+        // Only the arrays to cache of the scope are added to the cache in it, enclosed scopes
+        // restore their own.
+        let mut cache = self.read_cache.borrow_mut();
+        if let Some(ids) = ids {
+            ids.iter().for_each(|id| {
                 if let Some(entry) = cache.remove(id) {
                     self.buffer_pool.return_shared(entry.data);
                 }
-            }
+            });
+        }
+        for (id, entry) in prev.entries {
+            cache.insert(id, entry);
         }
     }
 

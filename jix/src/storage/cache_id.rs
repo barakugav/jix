@@ -141,6 +141,14 @@ impl<V> ArrayCacheIdMap<V> {
         }
     }
 
+    #[inline]
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::Inline { keys, .. } => keys.iter().all(Option::is_none),
+            Self::Heap(map) => map.is_empty(),
+        }
+    }
+
     pub(crate) fn keys(&self) -> impl Iterator<Item = ArrayCacheId> + '_ {
         let (inline, heap) = match self {
             Self::Inline { keys, .. } => (Some(keys.iter().flatten()), None),
@@ -151,18 +159,6 @@ impl<V> ArrayCacheIdMap<V> {
             .flatten()
             .chain(heap.into_iter().flatten())
             .copied()
-    }
-
-    /// Removes all the entries, passing their values to `f`. Clears the map in place, rather than
-    /// moving it, as the inline variant can be large.
-    pub(crate) fn clear_with(&mut self, f: impl FnMut(V)) {
-        match self {
-            Self::Inline { keys, values } => {
-                *keys = [None; INLINE_LEN];
-                values.iter_mut().filter_map(Option::take).for_each(f);
-            }
-            Self::Heap(map) => map.drain().map(|(_, value)| value).for_each(f),
-        }
     }
 }
 
@@ -200,8 +196,10 @@ mod tests {
     fn array_id_map_spills_to_the_heap() {
         let ids = (0..6).map(|_| ArrayCacheId::new()).collect::<Vec<_>>();
         let mut map = ArrayCacheIdMap::default();
+        assert!(map.is_empty());
         for (n, &id) in ids.iter().enumerate() {
             assert_eq!(map.insert(id, n), None);
+            assert!(!map.is_empty());
             assert_eq!(map.insert(id, n * 10), Some(n));
             assert_eq!(
                 matches!(map, ArrayCacheIdMap::Inline { .. }),
@@ -216,11 +214,14 @@ mod tests {
         }
         assert_eq!(map.remove(ids[2]), Some(20));
         assert_eq!(map.remove(ids[2]), None);
-        let mut values = Vec::new();
-        map.clear_with(|value| values.push(value));
+        let mut values = ids
+            .iter()
+            .filter_map(|&id| map.remove(id))
+            .collect::<Vec<_>>();
         values.sort();
         assert_eq!(values, [0, 10, 30, 40, 50]);
         assert_eq!(map.keys().count(), 0);
+        assert!(map.is_empty());
 
         // Removing from the inline map frees a slot for the next insert.
         let mut map = ArrayCacheIdMap::default();
@@ -231,6 +232,10 @@ mod tests {
         map.insert(ids[4], ());
         assert!(matches!(map, ArrayCacheIdMap::Inline { .. }));
         assert!(map.contains_key(ids[4]) && !map.contains_key(ids[0]));
+        map.remove(ids[1]);
+        assert!(!map.is_empty());
+        map.remove(ids[4]);
+        assert!(map.is_empty());
     }
 
     #[test]
