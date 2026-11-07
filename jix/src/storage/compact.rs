@@ -539,6 +539,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
+    use crate::context::tests::context_read_cache_len;
     use crate::scalar::bool8;
     use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
     use crate::storage::ArrayStorageTyped;
@@ -1036,9 +1037,9 @@ mod tests {
                 (4..20).map(|i| 2 * i).collect::<Vec<_>>()
             );
             // `x` and `y` are reached twice too, through `xy`.
-            assert_eq!(ctx.read_cache_len(), 3);
+            assert_eq!(context_read_cache_len(&ctx), 3);
         });
-        assert_eq!(ctx.read_cache_len(), 0);
+        assert_eq!(context_read_cache_len(&ctx), 0);
     }
 
     #[test]
@@ -1073,7 +1074,7 @@ mod tests {
                 63 * 63
             );
             // The reads of `x` within the reduction were cached, but are dropped after it.
-            assert_eq!(ctx.read_cache_len(), 0);
+            assert_eq!(context_read_cache_len(&ctx), 0);
         });
     }
 
@@ -1154,7 +1155,7 @@ mod tests {
                 .unwrap();
             assert_eq!(CALLS.load(Ordering::Relaxed), per_read / 2);
             // A push read is not added to the cache: the entry is still the pull read.
-            assert_eq!(ctx.read_cache_len(), 1);
+            assert_eq!(context_read_cache_len(&ctx), 1);
         });
         let expected = [23, SENTINEL, 31, SENTINEL, 39, SENTINEL, 47, SENTINEL];
         assert_eq!(&backing[..8], &expected);

@@ -63,6 +63,7 @@ pub struct ReadContext {
     #[cfg(not(miri))]
     pub(crate) decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     pub(crate) buffer_pool: BufferPool,
+
     /// The last pull-mode read of each storage with an [`ArrayCacheId`] whose reads are cached, so
     /// a repeated read (e.g. of `x` in `x + x`) is computed only once. See
     /// [`read_cached`](Self::read_cached).
@@ -72,6 +73,43 @@ pub struct ReadContext {
     arrays_to_cache: RefCell<Option<Arc<ArrayCacheIdSet>>>,
     /// Whether a top level read that uses `read_cache` is in progress.
     cache_active: Cell<bool>,
+}
+
+impl ReadContext {
+    /// Creates a new `ReadContext` configured with the given decoder parameters.
+    ///
+    /// Prefer [`Array::read_ctx()`](crate::Array::read_ctx) over calling this directly - it
+    /// automatically uses the decoder parameters that match the array's stored codec configuration.
+    pub(crate) fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
+        Ok(Self {
+            #[cfg(not(miri))]
+            decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
+            buffer_pool: BufferPool::new(),
+            read_cache: RefCell::new(ArrayCacheIdMap::default()),
+            arrays_to_cache: RefCell::new(None),
+            cache_active: Cell::new(false),
+        })
+    }
+
+    #[inline]
+    pub(crate) fn decoder<'a>(&'a self, config: &'a DecoderCodecConfig) -> Decoder<'a> {
+        Decoder::new(self, config)
+    }
+
+    #[inline]
+    pub(crate) fn allocate_buf(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
+        self.buffer_pool.get(size, alignment)
+    }
+}
+const _: fn() = || {
+    fn assert_send<T: Send>() {}
+    assert_send::<ReadContext>();
+};
+
+impl Default for ReadContext {
+    fn default() -> Self {
+        Self::new(&DecoderParams::default()).unwrap()
+    }
 }
 
 /// A cached read of the region `index` of a storage, laid out at `strides` from `offset` in
@@ -101,31 +139,6 @@ impl Drop for CacheScopeGuard<'_> {
 }
 
 impl ReadContext {
-    /// Creates a new `ReadContext` configured with the given decoder parameters.
-    ///
-    /// Prefer [`Array::read_ctx()`](crate::Array::read_ctx) over calling this directly - it
-    /// automatically uses the decoder parameters that match the array's stored codec configuration.
-    pub(crate) fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
-        Ok(Self {
-            #[cfg(not(miri))]
-            decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
-            buffer_pool: BufferPool::new(),
-            read_cache: RefCell::new(ArrayCacheIdMap::default()),
-            arrays_to_cache: RefCell::new(None),
-            cache_active: Cell::new(false),
-        })
-    }
-
-    #[inline]
-    pub(crate) fn decoder<'a>(&'a self, config: &'a DecoderCodecConfig) -> Decoder<'a> {
-        Decoder::new(self, config)
-    }
-
-    #[inline]
-    pub(crate) fn allocate_buf(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
-        self.buffer_pool.get(size, alignment)
-    }
-
     /// Run `read`, a top level read of an array of spec `spec`, with the reads of its
     /// [`arrays_to_cache`](ArraySpecDynamic::arrays_to_cache) (the storages reachable more than
     /// once from the read array) going through the read cache.
@@ -285,11 +298,6 @@ impl ReadContext {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn read_cache_len(&self) -> usize {
-        self.read_cache.borrow().keys().count()
-    }
-
     /// Whether reads of the storage `id` are added to the read cache in the current scope.
     fn is_cached(&self, id: ArrayCacheId) -> bool {
         self.arrays_to_cache
@@ -298,13 +306,10 @@ impl ReadContext {
             .is_some_and(|ids| ids.contains(id))
     }
 }
-const _: fn() = || {
-    fn assert_send<T: Send>() {}
-    assert_send::<ReadContext>();
-};
 
-impl Default for ReadContext {
-    fn default() -> Self {
-        Self::new(&DecoderParams::default()).unwrap()
+pub(crate) mod tests {
+    #[allow(unused)]
+    pub(crate) fn context_read_cache_len(context: &super::ReadContext) -> usize {
+        context.read_cache.borrow().keys().count()
     }
 }
