@@ -63,15 +63,15 @@ pub struct ReadContext {
     pub(crate) decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     pub(crate) buffer_pool: BufferPool,
 
-    /// The last pull-mode read of each storage with an [`ArrayCacheId`] whose reads are cached, so
-    /// a repeated read (e.g. of `x` in `x + x`) is computed only once. See
+    /// The last pull-mode read of each of the arrays to cache of the current cache scope, so a
+    /// repeated read (e.g. of `x` in `x + x`) is computed only once. See
     /// [`read_cached`](Self::read_cached).
     read_cache: RefCell<ArrayCacheIdMap<CacheEntry>>,
-    /// The storages whose reads are added to `read_cache` in the current cache scope. See
+    /// The storages whose reads are cached in the current cache scope. See
     /// [`cache_scope`](Self::cache_scope).
     arrays_to_cache: RefCell<Option<Arc<ArrayCacheIdSet>>>,
-    /// Whether reads use `read_cache`: whether the current cache scope or an enclosing one has
-    /// arrays to cache.
+    /// Whether `arrays_to_cache` is `Some`, for the fast path of
+    /// [`read_cached`](Self::read_cached).
     cache_active: Cell<bool>,
 }
 
@@ -114,7 +114,6 @@ impl Default for ReadContext {
 
 /// A cached read of the region `index` of a storage, laid out at `strides` from `offset` in
 /// `data`.
-#[derive(Clone)]
 struct CacheEntry {
     index: DimArray<Range<u64>>,
     strides: DimArray<usize>,
@@ -130,12 +129,13 @@ pub(crate) struct CacheScopeGuard<'a> {
     prev: Option<CacheState>,
 }
 
-/// The state of the read cache that a cache scope changes, see [`ReadContext::cache_scope`].
+/// The state of the read cache of the scope enclosing a cache scope, see
+/// [`ReadContext::cache_scope`].
 struct CacheState {
-    active: bool,
     arrays_to_cache: Option<Arc<ArrayCacheIdSet>>,
-    /// The entries of the arrays to cache of the scope, which the reads in the scope replace.
-    entries: Vec<(ArrayCacheId, CacheEntry)>,
+    /// The entries, hidden from the reads in the scope. `None` if the scope does not use the read
+    /// cache or there are none.
+    entries: Option<Box<ArrayCacheIdMap<CacheEntry>>>,
 }
 impl Drop for CacheScopeGuard<'_> {
     #[inline]
@@ -148,14 +148,14 @@ impl Drop for CacheScopeGuard<'_> {
 
 impl ReadContext {
     /// Read the region `index` of the storage `id` with `read` (called with `out`), through the
-    /// read cache.
+    /// read cache if `id` is one of the arrays to cache of the current cache scope.
     ///
-    /// A read of a region in the cache is served from the cache, whatever the arrays to cache: a
-    /// pull-mode read (`out` is `None`) returns a read-only view of the cached buffer, and a
-    /// push-mode read copies the cached region into `out`. Otherwise `read` reads the region and,
-    /// for a pull-mode read of one of the arrays to cache, its buffer is added to the cache: a
-    /// buffer it allocated is shared with the cache, and replaces the cached read of another region
-    /// of `id`, if any. A push-mode read is never added, as it writes to the caller's buffer.
+    /// A read of the cached region of `id` is served from the cache: a pull-mode read (`out` is
+    /// `None`) returns a read-only view of the cached buffer, and a push-mode read copies the
+    /// cached region into `out`. Otherwise `read` reads the region and, for a pull-mode read, its
+    /// buffer is added to the cache: a buffer it allocated is shared with the cache, and replaces
+    /// the cached read of another region of `id`, if any. A push-mode read is never added, as it
+    /// writes to the caller's buffer.
     ///
     /// The cached buffers are reference counted, so evicting an entry never invalidates views
     /// handed out earlier; an allocation returns to the pool when its last reference is dropped.
@@ -184,6 +184,9 @@ impl ReadContext {
         read: &dyn Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
     ) -> Result<StridedBuf<'a>> {
         // Not generic and not inlined, so it adds no code to the many storages that call it.
+        if !self.is_cached(id) {
+            return read(out);
+        }
         let mut cache = self.read_cache.borrow_mut();
         if let Some(entry) = cache.get(id)
             && entry.index.as_slice() == index
@@ -203,20 +206,17 @@ impl ReadContext {
             unsafe { out.copy_from(src, src_strides, &shape, dtype) };
             return Ok(out.view_mut());
         }
-        let mut insert = false;
-        if out.is_none() {
-            insert = self.is_cached(id);
-            // Evict before reading, so the read can reuse the buffer.
-            if insert && let Some(stale) = cache.remove(id) {
-                self.buffer_pool.return_shared(stale.data);
-            }
+        let pull = out.is_none();
+        // Evict before reading, so the read can reuse the buffer.
+        if pull && let Some(stale) = cache.remove(id) {
+            self.buffer_pool.return_shared(stale.data);
         }
         drop(cache);
 
         let buf = read(out)?;
 
         // A view of memory the read did not allocate, e.g. a cached buffer, is not cached.
-        if !insert || !buf.owns_pool_buf() {
+        if !pull || !buf.owns_pool_buf() {
             return Ok(buf);
         }
         let (buf, offset, strides) = buf.into_pool_buf();
@@ -243,12 +243,10 @@ impl ReadContext {
     /// broadcasts, reductions) reads them in a scope of its own (see
     /// [`ArraySpecDynamic`](crate::storage::params::ArraySpecDynamic)).
     ///
-    /// The read cache is used in a scope with arrays to cache and in the scopes it encloses, so
-    /// the reads in a scope without arrays to cache within it still hit the cached entries.
-    ///
-    /// The scope ends when the returned guard is dropped, which restores the read cache to its
-    /// state before the scope: the entries of the reads in the scope are dropped, the entries
-    /// they replaced are restored, and the arrays to cache of the enclosing scope are restored.
+    /// A scope is isolated from the enclosing ones: the read cache is used in it only if it has
+    /// arrays to cache, and its reads see only its own entries. The scope ends when the returned
+    /// guard is dropped, which drops its entries and restores the read cache of the enclosing
+    /// scope.
     #[inline]
     pub(crate) fn cache_scope(
         &self,
@@ -264,21 +262,16 @@ impl ReadContext {
 
     #[inline(never)]
     fn enter_cache_scope(&self, arrays_to_cache: &Option<Arc<ArrayCacheIdSet>>) -> CacheState {
-        // The entries the reads in the scope may replace are saved, but stay in the cache for the
-        // reads in the scope to hit.
-        let mut entries = Vec::new();
-        let cache = self.read_cache.borrow();
-        if let Some(ids) = arrays_to_cache
-            && !cache.is_empty()
-        {
-            ids.iter().for_each(|id| {
-                if let Some(entry) = cache.get(id) {
-                    entries.push((id, entry.clone()));
-                }
-            });
+        // Without arrays to cache the read cache is not used, so its entries need no hiding.
+        let mut entries = None;
+        if arrays_to_cache.is_some() {
+            let mut cache = self.read_cache.borrow_mut();
+            if !cache.is_empty() {
+                entries = Some(Box::new(std::mem::take(&mut *cache)));
+            }
         }
+        self.cache_active.set(arrays_to_cache.is_some());
         CacheState {
-            active: self.cache_active.replace(true),
             arrays_to_cache: self.arrays_to_cache.replace(arrays_to_cache.clone()),
             entries,
         }
@@ -286,24 +279,18 @@ impl ReadContext {
 
     #[inline(never)]
     fn exit_cache_scope(&self, prev: CacheState) {
-        self.cache_active.set(prev.active);
-        let ids = self.arrays_to_cache.replace(prev.arrays_to_cache);
-        // Only the arrays to cache of the scope are added to the cache in it, enclosed scopes
-        // restore their own.
-        let mut cache = self.read_cache.borrow_mut();
-        if let Some(ids) = ids {
-            ids.iter().for_each(|id| {
-                if let Some(entry) = cache.remove(id) {
-                    self.buffer_pool.return_shared(entry.data);
-                }
-            });
-        }
-        for (id, entry) in prev.entries {
-            cache.insert(id, entry);
+        self.cache_active.set(prev.arrays_to_cache.is_some());
+        let used_cache = self.arrays_to_cache.replace(prev.arrays_to_cache).is_some();
+        if used_cache {
+            let mut cache = self.read_cache.borrow_mut();
+            cache.clear_with(|entry| self.buffer_pool.return_shared(entry.data));
+            if let Some(entries) = prev.entries {
+                *cache = *entries;
+            }
         }
     }
 
-    /// Whether reads of the storage `id` are added to the read cache in the current scope.
+    /// Whether the reads of the storage `id` are cached in the current cache scope.
     fn is_cached(&self, id: ArrayCacheId) -> bool {
         self.arrays_to_cache
             .borrow()

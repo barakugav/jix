@@ -1095,6 +1095,25 @@ mod tests {
         assert_eq!(context_read_cache_len(&ctx), 0);
     }
 
+    #[test]
+    fn cache_scope_is_isolated() {
+        let x = arange64();
+        let xx = x.view() + x.view();
+        let to_cache = &xx.storage().spec().dynamic().arrays_to_cache;
+        let ctx = x.read_ctx();
+        let _scope = ctx.cache_scope(to_cache);
+        let read = || x.storage().read_data(&[4..20], &ctx, None).unwrap();
+        let a = read();
+        for inner_to_cache in [to_cache, &None] {
+            // A scope does not see the entries of the enclosing one, whether it caches or not.
+            let inner = ctx.cache_scope(inner_to_cache);
+            assert_ne!(read().data_ptr(), a.data_ptr());
+            drop(inner);
+            // They are restored when it ends.
+            assert_eq!(read().data_ptr(), a.data_ptr());
+        }
+    }
+
     /// A reduction of `0..64` to its max, counting the calls of its reduce function in `calls`,
     /// and the number of calls a read of it makes.
     fn counted_max(
