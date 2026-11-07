@@ -1,6 +1,4 @@
-#[cfg(not(miri))]
-use std::cell::UnsafeCell;
-use std::cell::{Cell, RefCell};
+use std::cell::{RefCell, UnsafeCell};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -65,14 +63,13 @@ pub struct ReadContext {
 
     /// The last pull-mode read of each of the arrays to cache of the current cache scope, so a
     /// repeated read (e.g. of `x` in `x + x`) is computed only once. See
-    /// [`read_cached`](Self::read_cached).
-    read_cache: RefCell<ArrayCacheIdMap<CacheEntry>>,
-    /// The storages whose reads are cached in the current cache scope. See
-    /// [`cache_scope`](Self::cache_scope).
-    arrays_to_cache: RefCell<Option<Arc<ArrayCacheIdSet>>>,
-    /// Whether `arrays_to_cache` is `Some`, for the fast path of
-    /// [`read_cached`](Self::read_cached).
-    cache_active: Cell<bool>,
+    /// [`read_cached`](Self::read_cached). Boxed, so a cache scope moves it aside by pointer.
+    read_cache: RefCell<Box<ArrayCacheIdMap<CacheEntry>>>,
+    /// The storages whose reads are cached in the current cache scope, see
+    /// [`cache_scope`](Self::cache_scope). Only accessed by [`is_caching`](Self::is_caching),
+    /// [`is_cached`](Self::is_cached) and
+    /// [`replace_arrays_to_cache`](Self::replace_arrays_to_cache).
+    arrays_to_cache: UnsafeCell<Option<Arc<ArrayCacheIdSet>>>,
 }
 
 impl ReadContext {
@@ -85,9 +82,8 @@ impl ReadContext {
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
             buffer_pool: BufferPool::new(),
-            read_cache: RefCell::new(ArrayCacheIdMap::default()),
-            arrays_to_cache: RefCell::new(None),
-            cache_active: Cell::new(false),
+            read_cache: RefCell::new(Box::default()),
+            arrays_to_cache: UnsafeCell::new(None),
         })
     }
 
@@ -168,7 +164,7 @@ impl ReadContext {
         out: Option<&'a mut StridedBuf<'b>>,
         read: impl Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
     ) -> Result<StridedBuf<'a>> {
-        if !self.cache_active.get() {
+        if !self.is_caching() {
             return read(out);
         }
         self.read_cached_impl(id, index, dtype, out, &read)
@@ -252,7 +248,7 @@ impl ReadContext {
         &self,
         arrays_to_cache: &Option<Arc<ArrayCacheIdSet>>,
     ) -> CacheScopeGuard<'_> {
-        let prev = (self.cache_active.get() || arrays_to_cache.is_some())
+        let prev = (self.is_caching() || arrays_to_cache.is_some())
             .then(|| self.enter_cache_scope(arrays_to_cache));
         CacheScopeGuard {
             context: self,
@@ -267,35 +263,47 @@ impl ReadContext {
         if arrays_to_cache.is_some() {
             let mut cache = self.read_cache.borrow_mut();
             if !cache.is_empty() {
-                entries = Some(Box::new(std::mem::take(&mut *cache)));
+                entries = Some(std::mem::take(&mut *cache));
             }
         }
-        self.cache_active.set(arrays_to_cache.is_some());
         CacheState {
-            arrays_to_cache: self.arrays_to_cache.replace(arrays_to_cache.clone()),
+            arrays_to_cache: self.replace_arrays_to_cache(arrays_to_cache.clone()),
             entries,
         }
     }
 
     #[inline(never)]
     fn exit_cache_scope(&self, prev: CacheState) {
-        self.cache_active.set(prev.arrays_to_cache.is_some());
-        let used_cache = self.arrays_to_cache.replace(prev.arrays_to_cache).is_some();
+        let used_cache = self.replace_arrays_to_cache(prev.arrays_to_cache).is_some();
         if used_cache {
             let mut cache = self.read_cache.borrow_mut();
             cache.clear_with(|entry| self.buffer_pool.return_shared(entry.data));
             if let Some(entries) = prev.entries {
-                *cache = *entries;
+                *cache = entries;
             }
         }
     }
 
+    // SAFETY of the accesses to `arrays_to_cache`: `ReadContext` is not `Sync`, and none of these
+    // methods keeps a reference to it past its body or runs code that could access it meanwhile.
+
+    /// Whether the current cache scope has arrays to cache.
+    #[inline(always)]
+    fn is_caching(&self) -> bool {
+        unsafe { (*self.arrays_to_cache.get()).is_some() }
+    }
+
     /// Whether the reads of the storage `id` are cached in the current cache scope.
     fn is_cached(&self, id: ArrayCacheId) -> bool {
-        self.arrays_to_cache
-            .borrow()
-            .as_ref()
-            .is_some_and(|ids| ids.contains(id))
+        let ids = unsafe { &*self.arrays_to_cache.get() };
+        ids.as_ref().is_some_and(|ids| ids.contains(id))
+    }
+
+    fn replace_arrays_to_cache(
+        &self,
+        ids: Option<Arc<ArrayCacheIdSet>>,
+    ) -> Option<Arc<ArrayCacheIdSet>> {
+        unsafe { std::mem::replace(&mut *self.arrays_to_cache.get(), ids) }
     }
 }
 
