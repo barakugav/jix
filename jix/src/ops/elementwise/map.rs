@@ -242,10 +242,11 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
             (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
         );
         check_shape_overflow(shape, O::DTYPE.itemsize() as _)?;
+        let specs = (0..narrays).map(|i| arrays.spec(i)).collect::<Vec<_>>();
         let (element_cost, read_shape_scale_weight, read_layout_order) = {
-            let inputs = (0..narrays)
-                .map(|i| {
-                    let sp = arrays.spec(i);
+            let inputs = specs
+                .iter()
+                .map(|sp| {
                     (
                         sp.element_cost(),
                         sp.read_shape_scale_weight(),
@@ -256,26 +257,22 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
             combine_elementwise_hints(&inputs)
         };
         let (block_shape, block_shape_fixed_dims) = {
-            let inputs = (0..narrays)
-                .map(|i| {
-                    let sp = arrays.spec(i);
-                    (sp.block_shape().as_slice(), sp.block_shape_fixed_dims())
-                })
+            let inputs = specs
+                .iter()
+                .map(|sp| (sp.block_shape().as_slice(), sp.block_shape_fixed_dims()))
                 .collect::<Vec<_>>();
             combine_block_layout(&inputs)
         };
         let cache_id = ArrayCacheId::new();
-        let spec = ArraySpecDynamic::new(
+        let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
-        )
-        .with_cache_ids(
-            Some(cache_id),
-            (0..narrays).map(|i| arrays.spec(i).dynamic()),
         );
+        spec.add_cache_ids_from(specs.as_slice());
+        spec.add_cache_id(cache_id);
         Ok(Self {
             arrays,
             map_fn,

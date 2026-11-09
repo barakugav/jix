@@ -182,12 +182,11 @@ pub(crate) struct ArrayBlockTableStorageBase<S, ET>
 where
     S: BlockTableStorage,
 {
-    /// Identifies the array data in the [`ReadContext`] read cache.
-    cache_id: ArrayCacheId,
     pub(crate) blocks: BlockTable<S, ET>,
     shape: DimDyn,
 
     pub(crate) spec: ArraySpecOwned,
+    cache_id: ArrayCacheId,
 }
 impl<S, ET> ArrayBlockTableStorageBase<S, ET>
 where
@@ -225,10 +224,10 @@ where
         let cache_id = ArrayCacheId::new();
         spec.dynamic_mut().add_cache_id(cache_id);
         Ok(Self {
-            cache_id,
             blocks,
             shape,
             spec,
+            cache_id,
         })
     }
 
@@ -243,8 +242,6 @@ where
         self.shape.as_slice()
     }
 
-    /// Read a rectangular sub-region of the nd-array. Pull-mode reads go through the context's
-    /// read cache, see [`ReadContext::read_cached`].
     #[inline]
     fn read_data<'rd>(
         &'rd self,
@@ -1196,6 +1193,21 @@ mod tests {
         let expected = [23, SENTINEL, 31, SENTINEL, 39, SENTINEL, 47, SENTINEL];
         assert_eq!(&backing[..8], &expected);
         assert!(backing[8..].iter().all(|&v| v == SENTINEL));
+    }
+
+    #[test]
+    fn read_cache_checks_push_reads() {
+        let x = arange64();
+        let xx = x.view() + x.view();
+        let ctx = x.read_ctx();
+        let _scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
+        x.storage().read_data(&[4..20], &ctx, None).unwrap();
+        // A push read of the cached region into a too small `out` fails, as an uncached one does.
+        let mut backing = [0i32; 16];
+        let mut out =
+            unsafe { StridedBuf::from_raw_parts_mut(backing.as_mut_ptr().cast(), &[8], &[4], 4) };
+        let res = x.storage().read_data(&[4..20], &ctx, Some(&mut out));
+        assert!(res.is_err());
     }
 
     #[test]

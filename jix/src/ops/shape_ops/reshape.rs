@@ -128,14 +128,15 @@ impl<S> Reshape<S> {
                 (0..new_shape.len() as DimIdx).collect::<DimArray<_>>()
             }
         };
-        let spec = ArraySpecDynamic::new(
+        let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             inner_spec.element_cost(),
             read_shape_scale_weight,
             read_layout_order,
         );
-        let (spec, cache_scope) = spec.with_cache_scope(None, [inner_spec.dynamic()], true);
+        spec.add_cache_ids_from([&inner_spec]);
+        let cache_scope = spec.with_cache_scope();
 
         Ok(Self {
             new_shape,

@@ -61,10 +61,8 @@ impl<S: ArrayStorage> Flip<S> {
             }
             is_flipped[d] = true;
         }
-        let inner_spec = array.spec().dynamic();
-        let (spec, cache_scope) = inner_spec
-            .clone()
-            .with_cache_scope(None, [inner_spec], true);
+        let mut spec = array.spec().dynamic().clone();
+        let cache_scope = spec.with_cache_scope();
         Ok(Self {
             array,
             is_flipped,

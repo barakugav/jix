@@ -7,7 +7,7 @@ use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
-use crate::storage::StridedBuf;
+use crate::storage::{check_oucheck_out_buf_implt_holds, StridedBuf};
 use crate::util::{dim_arr, DimArray, RawAlignedBytes, SliceExt};
 use crate::DimDyn;
 
@@ -112,13 +112,13 @@ struct Cache {
     arrays_to_cache: Arc<ArrayCacheIdSet>,
     map: Box<CacheMap>,
 }
+type CacheMap = ArrayCacheIdMap<CacheEntry>;
 struct CacheEntry {
     index: DimArray<Range<u64>>,
     strides: DimArray<usize>,
     offset: usize,
     data: Arc<RawAlignedBytes>,
 }
-type CacheMap = ArrayCacheIdMap<CacheEntry>;
 
 pub(crate) struct CacheScope {
     pub(crate) arrays_to_cache: Option<Arc<ArrayCacheIdSet>>,
@@ -149,16 +149,6 @@ impl Drop for CacheScopeGuard<'_> {
 impl ReadContext {
     /// Read the region `index` of the storage `id` with `read` (called with `out`), through the
     /// read cache if `id` is one of the arrays to cache of the current cache scope.
-    ///
-    /// A read of the cached region of `id` is served from the cache: a pull-mode read (`out` is
-    /// `None`) returns a read-only view of the cached buffer, and a push-mode read copies the
-    /// cached region into `out`. Otherwise `read` reads the region and, for a pull-mode read, its
-    /// buffer is added to the cache: a buffer it allocated is shared with the cache, and replaces
-    /// the cached read of another region of `id`, if any. A push-mode read is never added, as it
-    /// writes to the caller's buffer.
-    ///
-    /// The cached buffers are reference counted, so evicting an entry never invalidates views
-    /// handed out earlier; an allocation returns to the pool when its last reference is dropped.
     #[inline(always)]
     pub(crate) fn read_cached<'a, 'b>(
         &'a self,
@@ -207,11 +197,13 @@ impl ReadContext {
                     None => buf,
                     // user provided an output buffer, copy the cached data into it
                     Some(out) => {
+                        check_out_buf_impl(out, index, dtype.itemsize() as usize)?;
+
                         let shape =
                             dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
                         let (src, src_strides) = buf.data();
-                        // SAFETY: the cached buffer holds the region at `src_strides`, and `out` was checked to
-                        // hold it at its own strides.
+                        // SAFETY: the cached buffer holds the region at `src_strides`, and `out`
+                        // was checked to hold it at its own strides.
                         unsafe { out.copy_from(src, src_strides, &shape, dtype) };
                         out.view_mut()
                     }
@@ -254,18 +246,6 @@ impl ReadContext {
         Ok(buf)
     }
 
-    /// Enter the cache scope of a read of a storage at some region, in which the reads of
-    /// `arrays_to_cache`, the storages it reaches more than once at that region, are cached.
-    ///
-    /// A top level read of an array is the scope of the read array, and a storage that reads its
-    /// inner storages at other regions than the one it is read at (shape ops other than
-    /// broadcasts, reductions) reads them in a scope of its own (see
-    /// [`ArraySpecDynamic`](crate::storage::params::ArraySpecDynamic)).
-    ///
-    /// A scope is isolated from the enclosing ones: the read cache is used in it only if it has
-    /// arrays to cache, and its reads see only its own entries. The scope ends when the returned
-    /// guard is dropped, which drops its entries and restores the read cache of the enclosing
-    /// scope.
     #[inline]
     pub(crate) fn cache_scope(
         &self,
@@ -279,7 +259,6 @@ impl ReadContext {
         }
     }
 
-    /// Replace the read cache with a new one for `arrays_to_cache`, returning the enclosing one.
     #[inline(never)]
     fn enter_cache_scope(&self, arrays_to_cache: &Option<Arc<ArrayCacheIdSet>>) -> Option<Cache> {
         let cache = arrays_to_cache.as_ref().map(|ids| {
@@ -294,8 +273,6 @@ impl ReadContext {
         self.read_cache.replace(cache)
     }
 
-    /// Restore the read cache `prev` of the enclosing scope, returning the entries of the ended
-    /// scope to the pool.
     #[inline(never)]
     fn exit_cache_scope(&self, prev: Option<Cache>) {
         self.is_cache_enabled.set(prev.is_some());
@@ -308,7 +285,6 @@ impl ReadContext {
         }
     }
 
-    /// Whether the current cache scope has arrays to cache.
     #[inline(always)]
     fn is_cache_enabled(&self) -> bool {
         let enabled = self.is_cache_enabled.get();

@@ -57,8 +57,7 @@ impl BufferPool {
         pool.push(buf);
     }
 
-    /// Drops one reference to a shared buffer, returning the allocation to the pool if it was the
-    /// last one.
+    /// Returns a shared buffer to the pool if this was the last reference.
     pub(crate) fn return_shared(&self, buf: Arc<RawAlignedBytes>) {
         if let Some(buf) = Arc::into_inner(buf) {
             self.return_buf(buf);
@@ -101,33 +100,24 @@ impl BufferPool {
     }
 }
 
-/// An RAII guard for a temporary scratch buffer borrowed from a [`BufferPool`].
-///
-/// Obtained via [`BufferPool::get`] (or [`ReadContext::allocate_buf`](crate::ReadContext::allocate_buf)). The slices it hands out cover
-/// the whole allocation, which may be larger than the size asked for: slice them to that size
-/// wherever the length matters. When `PoolBuf` is dropped, the underlying allocation is returned to
-/// the pool for reuse.
+/// A scratch buffer borrowed from a [`BufferPool`], returned to it on drop.
 pub(crate) struct PoolBuf<'a> {
-    /// Taken back into the pool on drop.
     buf: ManuallyDrop<RawAlignedBytes>,
     buffers: &'a BufferPool,
 }
 impl PoolBuf<'_> {
-    /// The whole allocation, at least the size requested from [`BufferPool::get`].
     #[inline(always)]
     pub(crate) fn as_slice(&self) -> &[u8] {
         // SAFETY: the allocation holds `capacity` bytes.
         unsafe { std::slice::from_raw_parts(self.buf.as_ptr(), self.buf.capacity()) }
     }
 
-    /// The whole allocation, at least the size requested from [`BufferPool::get`].
     #[inline(always)]
     pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
         // SAFETY: the allocation holds `capacity` bytes.
         unsafe { std::slice::from_raw_parts_mut(self.buf.as_mut_ptr(), self.buf.capacity()) }
     }
 
-    /// Take the allocation out of the guard, which then does not return it to the pool.
     pub(crate) fn into_inner(self) -> RawAlignedBytes {
         let mut this = ManuallyDrop::new(self);
         // SAFETY: `this` is never used or dropped again.
@@ -142,8 +132,6 @@ impl Drop for PoolBuf<'_> {
     }
 }
 
-/// A read-only, reference-counted buffer whose allocation returns to its [`BufferPool`] when the
-/// last reference is dropped.
 pub(crate) struct PoolBufShared<'a> {
     buf: ManuallyDrop<Arc<RawAlignedBytes>>,
     buffers: &'a BufferPool,
@@ -157,14 +145,12 @@ impl<'a> PoolBufShared<'a> {
         }
     }
 
-    /// The whole allocation.
     #[inline(always)]
     pub(crate) fn as_slice(&self) -> &[u8] {
         // SAFETY: the allocation holds `capacity` bytes.
         unsafe { std::slice::from_raw_parts(self.buf.as_ptr(), self.buf.capacity()) }
     }
 
-    /// The reference to the allocation, without returning it to the pool.
     pub(crate) fn into_arc(self) -> Arc<RawAlignedBytes> {
         let mut this = ManuallyDrop::new(self);
         // SAFETY: `this` is never dropped, so `this.buf` is taken only once.

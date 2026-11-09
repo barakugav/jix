@@ -146,17 +146,20 @@ where
                 .collect::<Vec<_>>();
             combine_block_layout(&inputs)
         };
-        let spec = ArraySpecDynamic::new(
+        let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
         );
-        // The inputs are read at different regions, so an array reachable from more than one of them
-        // is not cached for it.
-        let (spec, cache_scope) =
-            spec.with_cache_scope(None, (0..narrays).map(|i| arrays.spec(i).dynamic()), false);
+        spec.add_cache_ids_from_impl(
+            (0..narrays).map(|i| arrays.spec(i).dynamic()),
+            // The inputs are read at different regions, so dont enabled the cache for array reachable from different
+            // input arrays
+            false,
+        );
+        let cache_scope = spec.with_cache_scope();
 
         let shape = DimDyn::from_slice(&shape);
         Ok(Self {

@@ -96,23 +96,22 @@ where
         check_shape_overflow(new_shape.as_slice(), dtype.itemsize() as _)?;
         let new_shape = DimDyn::from_slice(&new_shape);
 
+        let specs = (0..narrays).map(|i| arrays.spec(i)).collect::<Vec<_>>();
         // Combine the block layout over the (equal-shape) inputs, then insert the new stack dim:
         // it carries no data of its own, so its block is 1 and non-fixed.
         let (mut block_shape, mut block_shape_fixed_dims) = {
-            let inputs = (0..narrays)
-                .map(|i| {
-                    let sp = arrays.spec(i);
-                    (sp.block_shape().as_slice(), sp.block_shape_fixed_dims())
-                })
+            let inputs = specs
+                .iter()
+                .map(|sp| (sp.block_shape().as_slice(), sp.block_shape_fixed_dims()))
                 .collect::<Vec<_>>();
             combine_block_layout(&inputs)
         };
         block_shape.insert(dim, 1);
         block_shape_fixed_dims.insert(dim, false);
         let (element_cost, shared_weight, shared_layout_order) = {
-            let inputs = (0..narrays)
-                .map(|i| {
-                    let sp = arrays.spec(i);
+            let inputs = specs
+                .iter()
+                .map(|sp| {
                     (
                         sp.element_cost(),
                         sp.read_shape_scale_weight(),
@@ -130,15 +129,15 @@ where
             .map(|&d| if d as usize >= dim { d + 1 } else { d })
             .collect::<DimArray<_>>();
         read_layout_order_insert_dont_care_dim(&mut read_layout_order, dim);
-        let spec = ArraySpecDynamic::new(
+        let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
         );
-        let (spec, cache_scope) =
-            spec.with_cache_scope(None, (0..narrays).map(|i| arrays.spec(i).dynamic()), true);
+        spec.add_cache_ids_from(specs.as_slice());
+        let cache_scope = spec.with_cache_scope();
 
         Ok(Self {
             shape: new_shape,

@@ -60,7 +60,6 @@ enum StridedBufData<'a> {
         buf: PoolBuf<'a>,
         offset: usize,
     },
-    /// A read-only view of a buffer shared with the [`ReadContext`] read cache.
     Shared {
         buf: PoolBufShared<'a>,
         offset: usize,
@@ -164,19 +163,6 @@ impl<'a> StridedBuf<'a> {
             data: StridedBufData::Shared { buf, offset: 0 },
             strides: strides.to_dim_vec::<DimDyn>(),
         }
-    }
-
-    pub(crate) fn into_shared(
-        self,
-    ) -> Result<(Arc<RawAlignedBytes>, usize, DimArray<usize>), Self> {
-        Ok(match self.data {
-            StridedBufData::PoolBuf { buf, offset }
-            | StridedBufData::PoolBufMut { buf, offset } => {
-                (Arc::new(buf.into_inner()), offset, self.strides)
-            }
-            StridedBufData::Shared { buf, offset } => (buf.into_arc(), offset, self.strides),
-            _ => return Err(self),
-        })
     }
 
     #[inline]
@@ -348,6 +334,19 @@ impl<'a> StridedBuf<'a> {
             strides,
         }
     }
+
+    pub(crate) fn into_shared(
+        self,
+    ) -> Result<(Arc<RawAlignedBytes>, usize, DimArray<usize>), Self> {
+        Ok(match self.data {
+            StridedBufData::PoolBuf { buf, offset }
+            | StridedBufData::PoolBufMut { buf, offset } => {
+                (Arc::new(buf.into_inner()), offset, self.strides)
+            }
+            StridedBufData::Shared { buf, offset } => (buf.into_arc(), offset, self.strides),
+            _ => return Err(self),
+        })
+    }
 }
 
 pub(crate) fn check_out_buf(
@@ -358,13 +357,23 @@ pub(crate) fn check_out_buf(
 ) -> Result<()> {
     check_get_range(array_shape, index)?;
     check_region_size(index, itemsize)?;
-    let Some(out) = out else { return Ok(()) };
+    match out {
+        Some(out) => check_out_buf_impl(out, index, itemsize),
+        None => Ok(()),
+    }
+}
+
+pub(crate) fn check_out_buf_impl(
+    out: &StridedBuf,
+    index: &[Range<u64>],
+    itemsize: usize,
+) -> Result<()> {
     ensure!(
-        out.strides().len() == array_shape.len(),
+        out.strides().len() == index.len(),
         InvalidArgument,
         "out buffer has {} strides but array has {} dimensions",
         out.strides().len(),
-        array_shape.len()
+        index.len()
     );
     ensure!(
         out.is_writable(),

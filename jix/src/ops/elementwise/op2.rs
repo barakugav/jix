@@ -74,14 +74,16 @@ impl<S1, S2, K> Op2<S1, S2, K> {
                 (a_spec.block_shape(), a_spec.block_shape_fixed_dims()),
                 (b_spec.block_shape(), b_spec.block_shape_fixed_dims()),
             ]);
-            ArraySpecDynamic::new(
+            let mut spec = ArraySpecDynamic::new(
                 block_shape,
                 block_shape_fixed_dims,
                 element_cost,
                 read_shape_scale_weight,
                 read_layout_order,
-            )
-            .with_cache_ids(Some(cache_id), [a_spec.dynamic(), b_spec.dynamic()])
+            );
+            spec.add_cache_ids_from([&a_spec, &b_spec]);
+            spec.add_cache_id(cache_id);
+            spec
         };
         Ok(Self {
             a,

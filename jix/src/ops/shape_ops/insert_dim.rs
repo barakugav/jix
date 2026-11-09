@@ -113,22 +113,19 @@ where
                 read_layout_order_insert_dont_care_dim(&mut read_layout_order, d);
             }
         }
-        let spec = ArraySpecDynamic::new(
+        let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             orig_spec.element_cost(),
             read_shape_scale_weight,
             read_layout_order,
         );
+        spec.add_cache_ids_from([&orig_spec]);
         // Dims inserted in front keep the inner dims aligned to the last ones, as broadcasting
         // aligns the operands of element-wise ops, so the inner storages are read at the region
         // other paths of element-wise ops, broadcasts and dims inserted in front read them at.
-        let (spec, cache_scope) = if (0..dim.len()).all(|d| is_inserted[d]) {
-            (spec.with_cache_ids(None, [orig_spec.dynamic()]), None)
-        } else {
-            let (spec, cache_scope) = spec.with_cache_scope(None, [orig_spec.dynamic()], true);
-            (spec, Some(cache_scope))
-        };
+        let inserted_dims_in_front = (0..dim.len()).all(|d| is_inserted[d]);
+        let cache_scope = (!inserted_dims_in_front).then(|| spec.with_cache_scope());
 
         Ok(Self {
             array,

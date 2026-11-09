@@ -190,7 +190,7 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
             .filter(|&&d| !is_reduced[d as usize])
             .map(|&d| dim_orig2new(d as usize))
             .collect();
-        let spec = ArraySpecDynamic::new(
+        let mut spec = ArraySpecDynamic::new(
             dim_new2orig
                 .iter()
                 .map(|&dim| inner_spec.block_shape()[dim])
@@ -207,8 +207,9 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
         );
 
         let cache_id = ArrayCacheId::new();
-        let (spec, cache_scope) =
-            spec.with_cache_scope(Some(cache_id), [inner_spec.dynamic()], true);
+        spec.add_cache_ids_from([&inner_spec]);
+        let cache_scope = spec.with_cache_scope();
+        spec.add_cache_id(cache_id);
 
         Ok(Self {
             kernel,
