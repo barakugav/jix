@@ -173,6 +173,8 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
         /* decoder_config */ DecoderCodecConfig,
     ) -> Result<B>,
 ) -> Result<B::Output> {
+    let _cache_scope = context.cache_scope(&storage.spec().dynamic().arrays_to_cache);
+
     let shape = storage.shape();
     let ndim = shape.len();
     let dtype = storage.dtype();

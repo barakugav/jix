@@ -34,6 +34,8 @@ pub struct Roll<S: ArrayStorage> {
     dim: DimIdx,
     /// `shift` normalized to `[0, shape[dim])`. Zero means the op is a pass-through.
     shift: u64,
+    cache_scope: CacheScope,
+    spec: ArraySpecDynamic,
 }
 
 impl<S: ArrayStorage> Roll<S> {
@@ -54,10 +56,16 @@ impl<S: ArrayStorage> Roll<S> {
             shift.rem_euclid(len as i64) as u64
         };
 
+        let inner_spec = array.spec().dynamic();
+        let (spec, cache_scope) = inner_spec
+            .clone()
+            .with_cache_scope(None, [inner_spec], true);
         Ok(Self {
             array,
             dim: dim as DimIdx,
             shift,
+            cache_scope,
+            spec,
         })
     }
 
@@ -90,6 +98,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             index,
             self.dtype().itemsize() as usize,
         )?;
+        let _cache_scope = self.cache_scope.enter(context);
 
         let k = self.dim as usize;
         let shift = self.shift;
@@ -168,7 +177,10 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         if self.is_identity() {
             return self.array.spec();
         }
-        self.array.spec().with_cleared_flags()
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Roll", [&self.array])
@@ -190,6 +202,8 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             array: self.array.element_type_change()?,
             dim: self.dim,
             shift: self.shift,
+            cache_scope: self.cache_scope,
+            spec: self.spec,
         })
     }
 }

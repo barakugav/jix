@@ -29,6 +29,7 @@ pub struct Repeat<S: ArrayStorage> {
     dim: DimIdx,
     repeats: u64,
     new_shape: DimDyn,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 
@@ -78,12 +79,14 @@ impl<S: ArrayStorage> Repeat<S> {
             inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>(),
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
         );
+        let (spec, cache_scope) = spec.with_cache_scope(None, [inner_spec.dynamic()], true);
 
         Ok(Self {
             array,
             dim: dim as DimIdx,
             repeats,
             new_shape,
+            cache_scope,
             spec,
         })
     }
@@ -110,6 +113,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             index,
             self.dtype().itemsize() as usize,
         )?;
+        let _cache_scope = self.cache_scope.enter(context);
 
         let ndim = self.new_shape.ndim();
         let dtype = self.dtype();
@@ -240,7 +244,6 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
                 copy_region((g_count - 1)..g_count, 0..p_end_tail);
             }
         }
-
         Ok(out)
     }
 
@@ -275,6 +278,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             dim: self.dim,
             repeats: self.repeats,
             new_shape: self.new_shape,
+            cache_scope: self.cache_scope,
             spec: self.spec,
         })
     }

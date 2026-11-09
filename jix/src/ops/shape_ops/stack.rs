@@ -52,6 +52,7 @@ where
     stack_dim: DimIdx,
 
     shape: DimDyn,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 impl<ArraysT> Stack<ArraysT>
@@ -136,9 +137,12 @@ where
             read_shape_scale_weight,
             read_layout_order,
         );
+        let (spec, cache_scope) =
+            spec.with_cache_scope(None, (0..narrays).map(|i| arrays.spec(i).dynamic()), true);
 
         Ok(Self {
             shape: new_shape,
+            cache_scope,
             spec,
             arrays,
             stack_dim: dim as DimIdx,
@@ -174,6 +178,7 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
+        let _cache_scope = self.cache_scope.enter(context);
         let output_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let mut out = materialize_out_buf(
             out,

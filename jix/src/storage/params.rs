@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
+use crate::context::CacheScope;
 use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::block::BlockSize;
+use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
 use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight};
 use crate::{
     dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt, BLOCK_SIZE_BYTES_MAX,
@@ -648,6 +650,22 @@ pub(crate) struct ArraySpecDynamic {
     /// order so the copy runs straight through instead of transposing. It is a pure hint: it never
     /// changes which values a read produces, only the strides of a freshly allocated destination.
     pub(crate) read_layout_order: DimArray<DimIdx>,
+
+    /// The storages with an [`ArrayCacheId`] reachable from this array, itself included. `None` if
+    /// there are none.
+    pub(crate) arrays_to_cache_potentially: Option<Arc<ArrayCacheIdSet>>,
+
+    /// The storages with an [`ArrayCacheId`] reachable from this array more than once, e.g. `x` in
+    /// `x + x`. Their reads go through the [`ReadContext`](crate::ReadContext) read cache, so a
+    /// region read again is computed only once. `None` if there are none.
+    ///
+    /// Both sets only follow the storages an array reads at the region it is read at: element-wise
+    /// ops, broadcasts and dims inserted in front. Other shape ops and reductions read their inner
+    /// storages at other regions, so they clear the sets and read their inner storages in a cache
+    /// scope of their own (see [`with_cache_scope`](Self::with_cache_scope)). A top level read of
+    /// this array caches these in the cache scope of the read array (see
+    /// [`ReadContext::cache_scope`](crate::ReadContext::cache_scope)).
+    pub(crate) arrays_to_cache: Option<Arc<ArrayCacheIdSet>>,
 }
 impl ArraySpecOwned {
     pub(crate) fn new(
@@ -829,7 +847,97 @@ impl ArraySpecDynamic {
             read_shape_scale_weight,
             read_shape_scale_order,
             read_layout_order,
+            arrays_to_cache_potentially: None,
+            arrays_to_cache: None,
         }
+    }
+
+    /// Set [`arrays_to_cache_potentially`](Self::arrays_to_cache_potentially) and
+    /// [`arrays_to_cache`](Self::arrays_to_cache) from the cache id of the storage of this spec, if
+    /// it has one, and the specs of its inner storages, for a storage that reads its inner storages
+    /// at the region it is read at: the union of their ids, where an id reachable from more than
+    /// one inner is also marked to be cached.
+    #[inline(never)]
+    pub(crate) fn with_cache_ids<'s>(
+        mut self,
+        cache_id: Option<ArrayCacheId>,
+        inners: impl IntoIterator<Item = &'s ArraySpecDynamic>,
+    ) -> Self {
+        self.merge_cache_ids(inners, true);
+        if let Some(cache_id) = cache_id {
+            self.add_cache_id(cache_id);
+        }
+        self
+    }
+
+    /// Like [`with_cache_ids`](Self::with_cache_ids), for a storage that reads its inner storages
+    /// at other regions than the one it is read at (shape ops other than broadcasts, reductions):
+    /// reads outside of the storage do not read the same regions of the storages it reaches, so
+    /// their ids are cleared and only `cache_id` is kept.
+    ///
+    /// Returns the spec and the arrays to cache in the scope in which the storage reads its inner
+    /// storages (see [`ReadContext::cache_scope`](crate::ReadContext::cache_scope)): the ones the
+    /// inners reach more than once, counting the ones reachable from more than one inner only if
+    /// `repeats_across_inners`, that is if the storage reads all its inners at the same region.
+    #[inline(never)]
+    pub(crate) fn with_cache_scope<'s>(
+        mut self,
+        cache_id: Option<ArrayCacheId>,
+        inners: impl IntoIterator<Item = &'s ArraySpecDynamic>,
+        repeats_across_inners: bool,
+    ) -> (Self, CacheScope) {
+        self.merge_cache_ids(inners, repeats_across_inners);
+        let scope = self.arrays_to_cache.take();
+        self.arrays_to_cache_potentially = None;
+        if let Some(cache_id) = cache_id {
+            self.add_cache_id(cache_id);
+        }
+        let scope = CacheScope {
+            arrays_to_cache: scope,
+        };
+        (self, scope)
+    }
+
+    /// Set the cache ids of this spec from the specs of `inners`: the union of their sets, where
+    /// an id reachable from more than one inner is also marked to be cached if
+    /// `repeats_across_inners`.
+    fn merge_cache_ids<'s>(
+        &mut self,
+        inners: impl IntoIterator<Item = &'s ArraySpecDynamic>,
+        repeats_across_inners: bool,
+    ) {
+        self.arrays_to_cache_potentially = None;
+        self.arrays_to_cache = None;
+        for inner in inners {
+            let Some(inner_ids) = &inner.arrays_to_cache_potentially else {
+                continue;
+            };
+            let Some(ids) = &mut self.arrays_to_cache_potentially else {
+                // Copy on write: the sets are only cloned if a second inner has cache ids.
+                self.arrays_to_cache_potentially = Some(inner_ids.clone());
+                self.arrays_to_cache = inner.arrays_to_cache.clone();
+                continue;
+            };
+            let ids = Arc::make_mut(ids);
+            for id in inner_ids.iter() {
+                if !ids.insert(id) && repeats_across_inners {
+                    Arc::make_mut(self.arrays_to_cache.get_or_insert_default()).insert(id);
+                }
+            }
+            if let Some(to_cache) = &inner.arrays_to_cache {
+                let ids = Arc::make_mut(self.arrays_to_cache.get_or_insert_default());
+                for id in to_cache.iter() {
+                    ids.insert(id);
+                }
+            }
+        }
+    }
+
+    /// Add the cache id of the storage of this spec to
+    /// [`arrays_to_cache_potentially`](Self::arrays_to_cache_potentially).
+    #[inline(never)]
+    pub(crate) fn add_cache_id(&mut self, id: ArrayCacheId) {
+        Arc::make_mut(self.arrays_to_cache_potentially.get_or_insert_default()).insert(id);
     }
 
     pub(crate) fn add_elementwise_cost(&mut self, extra: f32) {

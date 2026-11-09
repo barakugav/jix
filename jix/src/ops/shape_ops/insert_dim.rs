@@ -47,6 +47,8 @@ pub struct InsertDim<S: ArrayStorage> {
     original_dims: DimArray<DimIdx>,
 
     shape: DimDyn,
+    /// `None` if `array` is read in the current scope, as the dims are inserted in front.
+    cache_scope: Option<CacheScope>,
     spec: ArraySpecDynamic,
 }
 
@@ -118,11 +120,21 @@ where
             read_shape_scale_weight,
             read_layout_order,
         );
+        // Dims inserted in front keep the inner dims aligned to the last ones, as broadcasting
+        // aligns the operands of element-wise ops, so the inner storages are read at the region
+        // other paths of element-wise ops, broadcasts and dims inserted in front read them at.
+        let (spec, cache_scope) = if (0..dim.len()).all(|d| is_inserted[d]) {
+            (spec.with_cache_ids(None, [orig_spec.dynamic()]), None)
+        } else {
+            let (spec, cache_scope) = spec.with_cache_scope(None, [orig_spec.dynamic()], true);
+            (spec, Some(cache_scope))
+        };
 
         Ok(Self {
             array,
             original_dims,
             shape,
+            cache_scope,
             spec,
         })
     }
@@ -179,6 +191,7 @@ where
                 self.spec().read_layout_order(),
             ));
         };
+        let _cache_scope = self.cache_scope.as_ref().map(|s| s.enter(context));
         unsafe {
             read_data_and_map_strides(
                 &self.array,
@@ -229,6 +242,7 @@ where
             array: self.array.element_type_change()?,
             original_dims: self.original_dims,
             shape: self.shape,
+            cache_scope: self.cache_scope,
             spec: self.spec,
         })
     }
