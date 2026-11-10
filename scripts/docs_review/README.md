@@ -52,22 +52,27 @@ once per unit, on the orchestrator's side.
 python scripts/docs_review/unit_prompt.py --list
 ```
 
+Give the unit its own worktree of the branch, and print the scanner's prompt for it:
+
 ```bash
-python scripts/docs_review/unit_prompt.py scanner ops-arith
+git worktree add --detach /tmp/docs-review/ops-arith HEAD
 ```
 
-Launch an agent with that prompt in a fresh worktree of the branch, and save its final message.
-Then, for the same worktree:
+```bash
+python scripts/docs_review/unit_prompt.py scanner ops-arith --workdir /tmp/docs-review/ops-arith
+```
+
+Launch an agent with that prompt and save its final message. Then, for the same worktree:
 
 ```bash
-python scripts/docs_review/unit_prompt.py verifier ops-arith --workdir <worktree> --report <file>
+python scripts/docs_review/unit_prompt.py verifier ops-arith --workdir /tmp/docs-review/ops-arith --report <file>
 ```
 
 Launch a second agent with that prompt. When it is done, apply the worktree's diff to the branch
 and run the gates:
 
 ```bash
-git -C <worktree> diff | git apply
+git -C /tmp/docs-review/ops-arith diff | git apply
 ```
 
 ```bash
