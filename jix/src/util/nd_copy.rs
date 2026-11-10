@@ -7,8 +7,10 @@ use crate::util::{
 use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 
 /// A copy at least this large, between two layouts that order the dims differently, is cut into
-/// tiles (see [`NdCopier::copy`]). Below it the whole region sits in cache anyway.
-const BLOCKED_COPY_MIN_BYTES: usize = 1 << 20;
+/// tiles (see [`NdCopier::copy`]). A region this size still sits in L2, but with power-of-two
+/// strides its lines collide in L1 and the tiled copy is measurably faster; below it the plain
+/// copy wins.
+const BLOCKED_COPY_MIN_BYTES: usize = 128 << 10;
 /// Size of one tile of a blocked copy. A tile is staged through two compact scratch buffers of
 /// this size, which together should sit in L1.
 const BLOCKED_COPY_TILE_BYTES: usize = 16 << 10;

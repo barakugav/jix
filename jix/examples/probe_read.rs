@@ -163,6 +163,19 @@ fn gen_data<T: Elem>(profile: &str, n: usize, seed: u64) -> Vec<T> {
                 x
             })
         })),
+        // A random walk: smooth and compressible, but with no period for a longer window to
+        // find (the sine in `smooth`/`noisy` repeats every 10000 elements). Floats step in 1/8s.
+        "walk" => {
+            let mut x = 0i64;
+            out.extend((0..n).map(|_| {
+                x += (rng.next() % 17) as i64 - 8;
+                T::from_f64(if T::IS_FLOAT {
+                    x as f64 / 8.0
+                } else {
+                    x as f64
+                })
+            }))
+        }
         // A handful of distinct small values.
         "lowent" => out.extend((0..n).map(|_| T::from_f64((rng.next() % 8) as f64))),
         // Mostly zeros with a few random small values.
