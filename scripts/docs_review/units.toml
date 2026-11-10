@@ -1,0 +1,372 @@
+# The units of the docs review.
+#
+# A unit is the share of one scanner agent. Every file is in the `edit` list of exactly one unit,
+# so scanners can run in parallel without touching the same file.
+#
+#   id       name of the unit, also the subject of its commit
+#   context  context packs to read besides general.md and api_index.md (scripts/docs_review/context/)
+#   edit     files the scanner may change
+#   read     files to consult for cross-checking, read-only
+#   notes    unit-specific guidance
+#
+# Three kinds of units:
+#   - op families pair the Rust file with its Python counterpart, so the two sets of docs are
+#     checked against each other;
+#   - core modules are grouped by module;
+#   - "overview" holds every landing page, since they share text that must stay in sync.
+#
+# Out of scope: plain // comments, generated code (jix/src/archive/schema/_proto_gen), the .proto
+# files (their comments end up in generated code), tests and benches directories, scripts/,
+# CLAUDE.md, todo.md.
+
+# ----------------------------------------------------------------------------------------------
+# Package level
+# ----------------------------------------------------------------------------------------------
+
+[[unit]]
+id = "overview"
+pilot = true
+context = ["python"]
+edit = [
+    "README.md",
+    "jix/README.md",
+    "jix-py/README.md",
+    "jix-macros/README.md",
+    "jix-py/docs/index.md",
+    "jix-py/docs/module.md",
+    "jix-py/docs/about.md",
+    "docs/benchmarks.md",
+    "THANKS.md",
+    "jix/src/lib.rs",
+    "jix-py/src/lib.rs",
+    "jix/src/ops/mod.rs",
+]
+read = ["jix/src/storage/mod.rs", "jix/src/array/mod.rs", "jix-py/src/array.rs", "jix-py/python/jix/__init__.py"]
+notes = """
+These pages repeat each other on purpose: crates.io, PyPI and the docs site each show one of them
+alone. jix-py/README.md is a copy of the top of jix-py/docs/index.md, and the "When should I use
+this library?" section appears in five files. Do not remove a passage because another page has
+it. Keep the copies in sync instead: a fix made to one copy goes to every copy. Within a single
+page, the redundancy rule applies as usual.
+Check every example against the current API (api_index.md), and every claim about what the
+library does against the code.
+"""
+
+# ----------------------------------------------------------------------------------------------
+# Op families (Rust + Python)
+# ----------------------------------------------------------------------------------------------
+
+[[unit]]
+id = "ops-arith"
+pilot = true
+context = ["ops", "python"]
+edit = ["jix/src/ops/elementwise/arith.rs", "jix-py/src/ops/elementwise/arith.rs"]
+read = ["jix-py/src/array.rs", "jix/src/ops/elementwise/op1.rs", "jix/src/ops/elementwise/op2.rs"]
+
+[[unit]]
+id = "ops-div-rem"
+context = ["ops", "python"]
+edit = ["jix/src/ops/elementwise/div_rem.rs", "jix-py/src/ops/elementwise/div_rem.rs"]
+read = ["jix-py/src/array.rs", "jix/src/error.rs"]
+
+[[unit]]
+id = "ops-rounding-exp-log"
+context = ["ops", "python"]
+edit = [
+    "jix/src/ops/elementwise/rounding.rs",
+    "jix/src/ops/elementwise/exp_log.rs",
+    "jix-py/src/ops/elementwise/rounding.rs",
+    "jix-py/src/ops/elementwise/exp_log.rs",
+]
+read = ["jix-py/src/array.rs", "jix-py/python/jix/__init__.py"]
+
+[[unit]]
+id = "ops-trig-float-special"
+context = ["ops", "python"]
+edit = [
+    "jix/src/ops/elementwise/trig.rs",
+    "jix/src/ops/elementwise/float_special.rs",
+    "jix-py/src/ops/elementwise/trig.rs",
+    "jix-py/src/ops/elementwise/float_special.rs",
+]
+read = ["jix-py/src/array.rs"]
+
+[[unit]]
+id = "ops-cmp"
+context = ["ops", "python"]
+edit = ["jix/src/ops/elementwise/cmp.rs", "jix-py/src/ops/elementwise/cmp.rs"]
+read = ["jix-py/src/array.rs"]
+
+[[unit]]
+id = "ops-min-max"
+context = ["ops", "python"]
+edit = ["jix/src/ops/elementwise/min_max.rs", "jix-py/src/ops/elementwise/min_max.rs"]
+read = ["jix-py/src/array.rs", "jix-py/python/jix/__init__.py"]
+
+[[unit]]
+id = "ops-bitwise"
+context = ["ops", "python"]
+edit = ["jix/src/ops/elementwise/bitwise.rs", "jix-py/src/ops/elementwise/bitwise.rs"]
+read = ["jix-py/src/array.rs"]
+
+[[unit]]
+id = "ops-bit-count"
+context = ["ops", "python"]
+edit = ["jix/src/ops/elementwise/bit_count.rs", "jix-py/src/ops/elementwise/bit_count.rs"]
+read = ["jix-py/src/array.rs"]
+
+[[unit]]
+id = "ops-cast-complex-select"
+context = ["ops", "python"]
+edit = [
+    "jix/src/ops/elementwise/cast.rs",
+    "jix/src/ops/elementwise/complex.rs",
+    "jix/src/ops/elementwise/select.rs",
+    "jix-py/src/ops/elementwise/casting.rs",
+    "jix-py/src/ops/elementwise/complex.rs",
+    "jix-py/src/ops/elementwise/select.rs",
+]
+read = ["jix-py/src/array.rs", "jix-py/src/ops/common/dtype_promote.rs"]
+
+[[unit]]
+id = "ops-elementwise-engine"
+context = ["ops", "read_model"]
+edit = [
+    "jix/src/ops/elementwise/map.rs",
+    "jix/src/ops/elementwise/op1.rs",
+    "jix/src/ops/elementwise/op2.rs",
+    "jix/src/ops/elementwise/pipeline.rs",
+    "jix/src/ops/elementwise/mod.rs",
+]
+read = ["jix/src/storage/core_trait.rs", "jix/src/storage/buf.rs"]
+notes = "Rust only. map.rs is public API; op1, op2 and pipeline are the internal engine."
+
+[[unit]]
+id = "ops-reduction-engine"
+context = ["ops", "read_model"]
+edit = ["jix/src/ops/reduction/common.rs", "jix/src/ops/reduction/custom.rs", "jix/src/ops/reduction/mod.rs"]
+read = ["jix/src/ops/dims_arg.rs"]
+notes = "Rust only. common.rs is the internal engine; custom.rs (reduce_unordered) is public API."
+
+[[unit]]
+id = "ops-reduction"
+context = ["ops", "python"]
+edit = [
+    "jix/src/ops/reduction/arith.rs",
+    "jix/src/ops/reduction/variance.rs",
+    "jix/src/ops/reduction/min_max.rs",
+    "jix/src/ops/reduction/bools.rs",
+    "jix-py/src/ops/reduction.rs",
+]
+read = ["jix/src/ops/reduction/common.rs", "jix-py/src/array.rs", "jix-py/python/jix/__init__.py"]
+
+[[unit]]
+id = "ops-shape-a"
+context = ["ops"]
+edit = [
+    "jix/src/ops/shape_ops/reshape.rs",
+    "jix/src/ops/shape_ops/slice.rs",
+    "jix/src/ops/shape_ops/broadcast.rs",
+    "jix/src/ops/shape_ops/permute_dims.rs",
+    "jix/src/ops/shape_ops/insert_dim.rs",
+    "jix/src/ops/shape_ops/remove_dim.rs",
+    "jix/src/ops/shape_ops/mod.rs",
+]
+read = ["jix-py/src/ops/shape_ops.rs"]
+notes = "Rust only. The Python shape docs belong to py-shape: report a Rust/Python mismatch whose fix is on the Python side under 'Outside my unit'."
+
+[[unit]]
+id = "ops-shape-b"
+context = ["ops"]
+edit = [
+    "jix/src/ops/shape_ops/concatenate.rs",
+    "jix/src/ops/shape_ops/stack.rs",
+    "jix/src/ops/shape_ops/flip.rs",
+    "jix/src/ops/shape_ops/roll.rs",
+    "jix/src/ops/shape_ops/tile.rs",
+    "jix/src/ops/shape_ops/repeat.rs",
+    "jix/src/util/arr_sequence.rs",
+]
+read = ["jix-py/src/ops/shape_ops.rs"]
+notes = "Rust only. The Python shape docs belong to py-shape: report a Rust/Python mismatch whose fix is on the Python side under 'Outside my unit'."
+
+[[unit]]
+id = "py-shape"
+context = ["ops", "python"]
+edit = ["jix-py/src/ops/shape_ops.rs"]
+read = ["jix/src/ops/shape_ops", "jix-py/src/array.rs", "jix-py/python/jix/__init__.py"]
+notes = "Python only. The Rust shape docs belong to ops-shape-a and ops-shape-b."
+
+[[unit]]
+id = "ops-misc"
+context = ["ops", "python"]
+edit = [
+    "jix/src/ops/transmute.rs",
+    "jix/src/ops/sub_dtype.rs",
+    "jix/src/ops/into_type.rs",
+    "jix/src/ops/maybe_compact.rs",
+    "jix/src/ops/dims_arg.rs",
+    "jix-py/src/ops/sub_dtype.rs",
+]
+read = ["jix/src/dtype.rs", "jix/src/element_type.rs"]
+
+# ----------------------------------------------------------------------------------------------
+# Core modules (Rust)
+# ----------------------------------------------------------------------------------------------
+
+[[unit]]
+id = "storage-core"
+pilot = true
+context = ["read_model"]
+edit = [
+    "jix/src/storage/mod.rs",
+    "jix/src/storage/core_trait.rs",
+    "jix/src/storage/buf.rs",
+    "jix/src/storage/any.rs",
+    "jix/src/storage/info.rs",
+    "jix/src/storage/scalar.rs",
+    "jix/src/storage/cache_id.rs",
+]
+read = ["jix/src/lib.rs", "jix/src/array/read.rs", "jix/src/context.rs"]
+notes = "storage/mod.rs and the ArrayStorage trait docs restate parts of the crate docs in lib.rs (owned by 'overview'). A short restatement in a module overview is fine; within each of these docs the redundancy rule applies."
+
+[[unit]]
+id = "storage-backends"
+context = ["read_model"]
+edit = ["jix/src/storage/compact.rs", "jix/src/storage/block.rs", "jix/src/storage/plain.rs"]
+read = ["jix/src/storage/params.rs", "jix/src/storage/buf.rs", "jix/src/array/construct.rs"]
+
+[[unit]]
+id = "storage-params"
+context = ["read_model"]
+edit = ["jix/src/storage/params.rs", "jix/src/util/cpu_cache.rs"]
+read = ["jix/src/codec/mod.rs", "jix/src/codec/filter.rs", "jix-py/src/archive.rs"]
+
+[[unit]]
+id = "array"
+context = ["read_model"]
+edit = ["jix/src/array/mod.rs", "jix/src/array/read.rs", "jix/src/array/construct.rs", "jix/src/array/compact.rs"]
+read = ["jix/src/storage/core_trait.rs", "jix/src/storage/buf.rs", "jix/src/storage/params.rs"]
+
+[[unit]]
+id = "core-misc"
+context = ["read_model"]
+edit = ["jix/src/dimension.rs", "jix/src/error.rs", "jix/src/element_type.rs", "jix/src/context.rs"]
+read = ["jix/src/storage/core_trait.rs"]
+
+[[unit]]
+id = "dtype"
+context = []
+edit = [
+    "jix/src/dtype.rs",
+    "jix/src/scalar/mod.rs",
+    "jix/src/scalar/bool.rs",
+    "jix/src/scalar/simd.rs",
+    "jix/src/scalar/traits_util.rs",
+    "jix-macros/src/lib.rs",
+]
+read = ["jix-py/src/dtype.rs", "jix-macros/tests/derive_external.rs"]
+
+[[unit]]
+id = "archive"
+context = ["read_model"]
+edit = [
+    "jix/src/archive/mod.rs",
+    "jix/src/archive/array.rs",
+    "jix/src/archive/block.rs",
+    "jix/src/archive/common.rs",
+    "jix/src/archive/version.rs",
+    "jix/src/archive/schema/mod.rs",
+    "jix/src/archive/schema/conversions.rs",
+]
+read = ["jix/schema/proto/jix/v1", "jix/src/storage/params.rs"]
+
+[[unit]]
+id = "codec"
+context = []
+edit = [
+    "jix/src/codec/mod.rs",
+    "jix/src/codec/filter.rs",
+    "jix/src/codec/byte_shuffle.rs",
+    "jix/src/codec/bit_shuffle.rs",
+]
+read = ["jix/src/storage/params.rs"]
+
+[[unit]]
+id = "util-a"
+context = ["read_model"]
+edit = [
+    "jix/src/util/mod.rs",
+    "jix/src/util/arr_ext.rs",
+    "jix/src/util/arrayvec.rs",
+    "jix/src/util/aligned_vec/mod.rs",
+    "jix/src/util/aligned_vec/raw.rs",
+    "jix/src/util/bitmap.rs",
+    "jix/src/util/buf_pool.rs",
+    "jix/src/util/hint.rs",
+    "jix/src/util/bench_util.rs",
+]
+read = []
+notes = "Internal helpers. Docs here speak to maintainers."
+
+[[unit]]
+id = "util-b"
+context = ["read_model"]
+edit = [
+    "jix/src/util/iter/mod.rs",
+    "jix/src/util/iter/nd.rs",
+    "jix/src/util/iter/block.rs",
+    "jix/src/util/iter/strides.rs",
+    "jix/src/util/nd_copy.rs",
+    "jix/src/util/nd_iter_unordered.rs",
+    "jix/src/util/nd_iter_unordered_dyn.rs",
+    "jix/src/util/test_util.rs",
+]
+read = []
+notes = "Internal helpers. Docs here speak to maintainers."
+
+# ----------------------------------------------------------------------------------------------
+# Python bindings (the rest)
+# ----------------------------------------------------------------------------------------------
+
+[[unit]]
+id = "py-array"
+context = ["python", "read_model"]
+edit = ["jix-py/src/array.rs", "jix-py/src/ops/as_array.rs", "jix-py/python/jix/__init__.py"]
+read = ["jix/src/array", "jix-py/src/ops", "jix-py/src/archive.rs"]
+notes = "Most Array methods carry a one-line doc pointing to the module function; that is intended. Check that each pointer names the right function."
+
+[[unit]]
+id = "py-archive-misc"
+context = ["python"]
+edit = [
+    "jix-py/src/archive.rs",
+    "jix-py/src/type_hint.rs",
+    "jix-py/src/util.rs",
+    "jix-py/src/dtype.rs",
+    "jix-py/src/ops/mod.rs",
+    "jix-py/src/ops/elementwise/mod.rs",
+    "jix-py/src/ops/common/mod.rs",
+    "jix-py/src/ops/common/broadcast.rs",
+    "jix-py/src/ops/common/dispatch.rs",
+    "jix-py/src/ops/common/dtype_promote.rs",
+    "jix-py/src/ops/common/macros.rs",
+    "jix-py/src/ops/common/operand.rs",
+]
+read = ["jix/src/archive/mod.rs", "jix/src/storage/params.rs"]
+
+# ----------------------------------------------------------------------------------------------
+# Last, after every unit above is committed
+# ----------------------------------------------------------------------------------------------
+
+[[unit]]
+id = "cross-cutting"
+context = ["ops", "python", "read_model"]
+edit = []
+read = ["jix/src", "jix-py/src", "jix-py/docs", "README.md"]
+notes = """
+Runs alone, on the result of all other units, and may edit any in-scope file. Looks only for what
+a single unit cannot see: the same fact stated differently in two places, a term used
+inconsistently across modules, a name that is absent from api_index.md, and the 'Outside my
+unit' entries collected from the unit reports.
+"""
