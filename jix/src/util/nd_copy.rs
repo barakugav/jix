@@ -1,7 +1,94 @@
 use std::ptr;
 
 use crate::dtype::{Alignment, Dtype, Itemsize};
+use crate::util::{strided_span_bytes, DimArray};
 use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
+
+/// A copy at least this large, between two layouts that order the dims differently, is cut into
+/// tiles (see [`NdCopier::copy`]). Below it the whole region sits in cache anyway.
+const BLOCKED_COPY_MIN_BYTES: usize = 1 << 20;
+/// Size of one tile of a blocked copy. A tile is staged through two compact scratch buffers of
+/// this size, which together should sit in L1.
+const BLOCKED_COPY_TILE_BYTES: usize = 16 << 10;
+/// How long a run a tile of a blocked copy writes to the destination, when the region allows.
+/// Long runs touch every destination cache line once; short ones leave lines half written, to be
+/// fetched again when the neighbouring tile completes them.
+const BLOCKED_COPY_DST_RUN_BYTES: usize = 1024;
+/// A run that is contiguous in both layouts and at least this long needs no blocking: every run
+/// is a streaming copy of its own, whatever order the runs are visited in.
+const BLOCKED_COPY_MAX_RUN_BYTES: usize = 4096;
+
+/// The dims a blocked copy should tile over, outermost first in the destination's order, or none
+/// if the copy needs no blocking.
+///
+/// Order the dims of each side outermost first (by stride). Where the two orders agree the copy
+/// already streams through both sides. Where they differ, the dims *outside* the common innermost
+/// suffix are the ones to tile over - unless that common suffix is already a long contiguous run,
+/// in which case each run streams on its own and the order the runs are visited in is free.
+/// Dims of extent 1 take no part in either order; a broadcast (stride 0) source is never blocked.
+fn blocked_copy_split_dims(
+    shape: &[usize],
+    src_strides: &[usize],
+    dst_strides: &[usize],
+    itemsize: usize,
+) -> DimArray<usize> {
+    if (0..shape.len()).any(|d| shape[d] > 1 && src_strides[d] == 0) {
+        return DimArray::new();
+    }
+    let (src_order, dst_order) = (
+        dims_outermost_first(shape, src_strides),
+        dims_outermost_first(shape, dst_strides),
+    );
+    let suffix_len = src_order
+        .iter()
+        .rev()
+        .zip(dst_order.iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let n = dst_order.len();
+    if suffix_len == n {
+        return DimArray::new();
+    }
+    let run_bytes = dst_order[n - suffix_len..]
+        .iter()
+        .map(|&d| shape[d])
+        .product::<usize>()
+        * itemsize;
+    if run_bytes >= BLOCKED_COPY_MAX_RUN_BYTES {
+        return DimArray::new();
+    }
+    DimArray::from_slice(&dst_order[..n - suffix_len]).unwrap()
+}
+
+/// The dims of extent above 1, sorted by descending stride: the layout's outermost dim first.
+fn dims_outermost_first(shape: &[usize], strides: &[usize]) -> DimArray<usize> {
+    let mut order = (0..shape.len())
+        .filter(|&d| shape[d] > 1)
+        .collect::<DimArray<usize>>();
+    order
+        .as_mut_slice()
+        .sort_by_key(|&d| std::cmp::Reverse(strides[d]));
+    order
+}
+
+/// Packed strides for `shape` that nest the dims in the same order as `like_strides` does.
+fn packed_strides_like(
+    shape: &[usize],
+    like_strides: &[usize],
+    itemsize: usize,
+) -> DimArray<usize> {
+    let mut order = (0..shape.len()).collect::<DimArray<usize>>();
+    order
+        .as_mut_slice()
+        .sort_by_key(|&d| std::cmp::Reverse(like_strides[d]));
+    let mut strides = DimArray::from_slice(like_strides).unwrap();
+    let mut acc = itemsize;
+    for &d in order.iter().rev() {
+        strides[d] = acc;
+        acc *= shape[d];
+    }
+    strides
+}
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// byte slices under independent source and destination strides.
@@ -67,6 +154,26 @@ impl NdCopier {
         if shape.contains(&0) {
             return;
         }
+        // A big copy between layouts that disagree on the dim order (a transpose) walks one side
+        // with a huge stride: a cache and TLB miss per element. Cut it into tiles instead.
+        let itemsize = dtype.itemsize() as usize;
+        let nbytes = shape.iter().product::<usize>() * itemsize;
+        if nbytes >= BLOCKED_COPY_MIN_BYTES {
+            let split_dims = blocked_copy_split_dims(shape, src_strides, dst_strides, itemsize);
+            if !split_dims.is_empty() {
+                return unsafe {
+                    self.copy_blocked(
+                        src.as_ptr(),
+                        dst.as_mut_ptr(),
+                        shape,
+                        src_strides,
+                        dst_strides,
+                        dtype,
+                        &split_dims,
+                    )
+                };
+            }
+        }
         // Dim ordering, size-1-dim dropping and contiguous-run coalescing all happen inside
         // `nd_iter_unordered` (see `scalar_fn` / `copy_untyped`); here we just dispatch by dtype.
         let args = NdCopyArgs {
@@ -78,6 +185,147 @@ impl NdCopier {
             dtype,
         };
         unsafe { (self.0)(args) }
+    }
+
+    /// [`copy`](Self::copy) for a large region whose two layouts order the dims differently.
+    ///
+    /// The region is cut into small tiles over `split_dims`, and each tile takes three plain
+    /// copies through two compact scratch buffers:
+    ///
+    /// 1. gather the tile from the source into a buffer packed in the *source's* dim order,
+    /// 2. reorder it into a buffer packed in the *destination's* dim order,
+    /// 3. write that out to the destination.
+    ///
+    /// Steps 1 and 3 run along their side's own innermost dim, so every cache line of the source
+    /// and of the destination is touched once, in whole runs. Only step 2 jumps around, and it
+    /// stays in L1. A copy straight from source to destination would instead revisit each line
+    /// once per element of the other side's run - and with a power-of-two stride (an array whose
+    /// dims are powers of two) those lines all fall in the same few cache sets and evict each
+    /// other between visits.
+    ///
+    /// A tile is long along the destination's innermost dim ([`BLOCKED_COPY_DST_RUN_BYTES`]),
+    /// which matters most, and spends the rest of its budget on the source's innermost dim.
+    #[allow(clippy::too_many_arguments)]
+    #[inline(never)]
+    unsafe fn copy_blocked(
+        &self,
+        src: *const u8,
+        dst: *mut u8,
+        shape: &[usize],
+        src_strides: &[usize],
+        dst_strides: &[usize],
+        dtype: &Dtype,
+        split_dims: &[usize],
+    ) {
+        let ndim = shape.len();
+        let itemsize = dtype.itemsize() as usize;
+
+        // Tile shape: dims outside `split_dims` keep their whole extent.
+        let mut tile = DimArray::from_slice(shape).unwrap();
+        for &d in split_dims {
+            tile[d] = 1;
+        }
+        let cell_bytes = tile.iter().product::<usize>() * itemsize;
+        let mut budget = (BLOCKED_COPY_TILE_BYTES / cell_bytes).max(1);
+        let dst_inner = *split_dims.last().unwrap();
+        let src_inner = split_dims
+            .iter()
+            .copied()
+            .min_by_key(|&d| src_strides[d])
+            .unwrap();
+        let run_len = (BLOCKED_COPY_DST_RUN_BYTES / cell_bytes).max(1);
+        // The destination's innermost dim first, then the source's, then the rest inside out.
+        let grow_order = [dst_inner, src_inner]
+            .into_iter()
+            .chain(split_dims.iter().rev().copied())
+            .enumerate();
+        for (i, d) in grow_order {
+            if tile[d] != 1 {
+                continue; // already grown
+            }
+            let cap = if i == 0 { run_len.min(budget) } else { budget };
+            tile[d] = shape[d].min(cap).max(1);
+            budget /= tile[d];
+        }
+
+        let tile_bytes = tile.iter().product::<usize>() * itemsize;
+        let alignment = dtype.alignment().as_usize();
+        let mut gathered = crate::util::AlignedBytes::with_capacity_exact(alignment, tile_bytes);
+        let mut reordered = crate::util::AlignedBytes::with_capacity_exact(alignment, tile_bytes);
+        unsafe {
+            gathered.set_len(tile_bytes);
+            reordered.set_len(tile_bytes);
+        }
+
+        // Odometer over the tiles of `split_dims`, the destination's outermost dim slowest.
+        let mut start = DimArray::from_slice(shape).unwrap();
+        start.as_mut_slice().fill(0);
+        let mut size = tile.clone();
+        loop {
+            for &d in split_dims {
+                size[d] = tile[d].min(shape[d] - start[d]);
+            }
+            let (src_off, dst_off) = (0..ndim).fold((0, 0), |(s, t), d| {
+                (s + start[d] * src_strides[d], t + start[d] * dst_strides[d])
+            });
+            let nbytes = size.iter().product::<usize>() * itemsize;
+            let gathered_strides = packed_strides_like(&size, src_strides, itemsize);
+            let reordered_strides = packed_strides_like(&size, dst_strides, itemsize);
+            let step = |src: PtrNoalias<'_, u8>,
+                        dst: PtrMutNoalias<'_, u8>,
+                        src_strides: &[usize],
+                        dst_strides: &[usize]| {
+                let args = NdCopyArgs {
+                    src,
+                    dst,
+                    shape: &size,
+                    src_strides,
+                    dst_strides,
+                    dtype,
+                };
+                unsafe { (self.0)(args) }
+            };
+            unsafe {
+                step(
+                    PtrNoalias::new(
+                        src.add(src_off),
+                        strided_span_bytes(&size, src_strides, itemsize),
+                    ),
+                    PtrMutNoalias::from_slice(&mut gathered.as_mut_slice()[..nbytes]),
+                    src_strides,
+                    &gathered_strides,
+                );
+                step(
+                    PtrNoalias::from_slice(&gathered.as_slice()[..nbytes]),
+                    PtrMutNoalias::from_slice(&mut reordered.as_mut_slice()[..nbytes]),
+                    &gathered_strides,
+                    &reordered_strides,
+                );
+                step(
+                    PtrNoalias::from_slice(&reordered.as_slice()[..nbytes]),
+                    PtrMutNoalias::new(
+                        dst.add(dst_off),
+                        strided_span_bytes(&size, dst_strides, itemsize),
+                    ),
+                    &reordered_strides,
+                    dst_strides,
+                );
+            }
+
+            // Advance to the next tile.
+            let mut advanced = false;
+            for &d in split_dims.iter().rev() {
+                start[d] += tile[d];
+                if start[d] < shape[d] {
+                    advanced = true;
+                    break;
+                }
+                start[d] = 0;
+            }
+            if !advanced {
+                break;
+            }
+        }
     }
 
     unsafe fn scalar_fn<T: Copy + 'static>(args: NdCopyArgs) {
@@ -888,5 +1136,164 @@ mod tests {
         fuzz::<crate::scalar::Complex<f64>>();
         fuzz::<StructNoPad>();
         fuzz::<[u8; 3]>();
+    }
+
+    // Strides that nest the dims in `order` (outermost first), leaving `mult - 1` empty slots after
+    // every element along every dim (`mult == 1` is packed).
+    fn order_strides(shape: &[usize], order: &[usize], itemsize: usize, mult: usize) -> Vec<usize> {
+        let mut strides = vec![0usize; shape.len()];
+        let mut acc = itemsize;
+        for &d in order.iter().rev() {
+            strides[d] = acc * mult;
+            acc *= shape[d] * mult;
+        }
+        strides
+    }
+
+    // A copy between two layouts given by their dim orders, over a region big enough for the
+    // blocked path, checked against the naive reference. The source bytes come from a hash of
+    // their offset - `check`'s pattern repeats every 256 bytes, which a tile landing a whole
+    // number of periods off would get past. `blocked` asserts which path the copy takes.
+    fn check_orders<T: Dtyped>(
+        shape: &[usize],
+        src_order: &[usize],
+        dst_order: &[usize],
+        (src_mult, dst_mult): (usize, usize),
+        misalign: usize,
+        blocked: bool,
+    ) {
+        let dtype = T::DTYPE;
+        let itemsize = dtype.itemsize() as usize;
+        let src_strides = order_strides(shape, src_order, itemsize, src_mult);
+        let dst_strides = order_strides(shape, dst_order, itemsize, dst_mult);
+        let nbytes = shape.iter().product::<usize>() * itemsize;
+        let takes_blocked_path = nbytes >= BLOCKED_COPY_MIN_BYTES
+            && !blocked_copy_split_dims(shape, &src_strides, &dst_strides, itemsize).is_empty();
+        assert_eq!(takes_blocked_path, blocked, "shape={shape:?}");
+
+        let src_len = buf_len(shape, &src_strides, itemsize);
+        let dst_len = buf_len(shape, &dst_strides, itemsize);
+        let mut src_buf = TestBuf::<T>::new(src_len, misalign);
+        let mut dst_buf = TestBuf::<T>::new(dst_len, misalign);
+        let (src_ptr, dst_ptr) = (src_buf.ptr(), dst_buf.ptr());
+        for i in 0..src_len {
+            let h = (i as u64).wrapping_mul(0x9E3779B97F4A7C15);
+            unsafe { src_ptr.add(i).write((h >> 56) as u8) };
+        }
+        unsafe { dst_ptr.write_bytes(0, dst_len) };
+
+        let src = unsafe { std::slice::from_raw_parts(src_ptr, src_len) };
+        let expected = reference_copy(src, dst_len, shape, &src_strides, &dst_strides, itemsize);
+        let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
+        unsafe {
+            NdCopier::new(&dtype).copy(
+                PtrNoalias::from_slice(src),
+                PtrMutNoalias::from_slice(dst),
+                shape,
+                &src_strides,
+                &dst_strides,
+                &dtype,
+            );
+        }
+        let actual = unsafe { std::slice::from_raw_parts(dst_ptr, dst_len) };
+        assert!(
+            actual == expected.as_slice(),
+            "itemsize={itemsize} misalign={misalign} shape={shape:?} src_order={src_order:?} \
+             dst_order={dst_order:?} mult={:?}",
+            (src_mult, dst_mult)
+        );
+    }
+
+    // Big transposed copies take the blocked path: 2D transposes whose extents are not multiples
+    // of the tile, each dispatch route, aligned and not, packed and gapped.
+    #[test]
+    #[cfg_attr(miri, ignore)] // megabyte-sized regions
+    fn blocked_copy_2d_transpose() {
+        for misalign in [0, 1] {
+            check_orders::<u32>(&[300, 1100], &[0, 1], &[1, 0], (1, 1), misalign, true);
+            check_orders::<u32>(&[1100, 300], &[1, 0], &[0, 1], (1, 1), misalign, true);
+            check_orders::<u64>(&[1030, 257], &[0, 1], &[1, 0], (1, 1), misalign, true);
+            check_orders::<u8>(&[2000, 600], &[0, 1], &[1, 0], (1, 1), misalign, true);
+            check_orders::<u16>(&[4099, 131], &[0, 1], &[1, 0], (1, 1), misalign, true);
+            check_orders::<StructNoPad>(&[300, 400], &[0, 1], &[1, 0], (1, 1), misalign, true);
+            check_orders::<[u8; 3]>(&[700, 600], &[0, 1], &[1, 0], (1, 1), misalign, true);
+        }
+        // Power-of-two extents: the strides that alias in the cache.
+        check_orders::<u32>(&[1024, 512], &[0, 1], &[1, 0], (1, 1), 0, true);
+        // Gaps in the source, in the destination, in both.
+        check_orders::<u32>(&[300, 1100], &[0, 1], &[1, 0], (2, 1), 0, true);
+        check_orders::<u32>(&[300, 1100], &[0, 1], &[1, 0], (1, 2), 0, true);
+        check_orders::<u64>(&[500, 300], &[0, 1], &[1, 0], (3, 2), 1, true);
+        // A very thin region: one dim shorter than a tile's run.
+        check_orders::<u32>(&[3, 100_000], &[0, 1], &[1, 0], (1, 1), 0, true);
+        check_orders::<u32>(&[100_000, 3], &[0, 1], &[1, 0], (1, 1), 0, true);
+    }
+
+    // Every way two layouts of a 3D / 4D region can disagree, including size-1 dims.
+    #[test]
+    #[cfg_attr(miri, ignore)] // megabyte-sized regions
+    fn blocked_copy_nd_permutations() {
+        let shape = [70usize, 90, 60];
+        let orders: [[usize; 3]; 6] = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        for src_order in orders {
+            for dst_order in orders {
+                // Blocked exactly when the orders differ: the longest shared inner run here is
+                // 60 * 4 bytes, short of the size that skips blocking.
+                let blocked = src_order != dst_order;
+                check_orders::<u32>(&shape, &src_order, &dst_order, (1, 1), 0, blocked);
+            }
+        }
+        check_orders::<u16>(
+            &[20, 30, 25, 41],
+            &[0, 1, 2, 3],
+            &[3, 2, 1, 0],
+            (1, 1),
+            0,
+            true,
+        );
+        check_orders::<u16>(
+            &[20, 30, 25, 41],
+            &[0, 1, 2, 3],
+            &[2, 3, 0, 1],
+            (1, 1),
+            1,
+            true,
+        );
+        check_orders::<u64>(
+            &[1, 300, 1, 500],
+            &[0, 1, 2, 3],
+            &[3, 2, 1, 0],
+            (1, 1),
+            0,
+            true,
+        );
+        check_orders::<u64>(
+            &[300, 1, 500, 1],
+            &[0, 1, 2, 3],
+            &[2, 0, 3, 1],
+            (1, 1),
+            0,
+            true,
+        );
+    }
+
+    // Copies that must NOT be blocked: agreeing layouts, a long run shared by both layouts, a
+    // region under the size threshold.
+    #[test]
+    #[cfg_attr(miri, ignore)] // megabyte-sized regions
+    fn blocked_copy_is_skipped_when_it_cannot_help() {
+        check_orders::<u32>(&[300, 1100], &[0, 1], &[0, 1], (1, 1), 0, false);
+        check_orders::<u32>(&[300, 1100], &[0, 1], &[0, 1], (2, 1), 0, false);
+        // Dims 0 and 1 swap, but dim 2 is an 8000-byte run in both layouts.
+        check_orders::<u32>(&[16, 16, 2000], &[0, 1, 2], &[1, 0, 2], (1, 1), 0, false);
+        // Transposed, but small.
+        check_orders::<u32>(&[100, 100], &[0, 1], &[1, 0], (1, 1), 0, false);
     }
 }

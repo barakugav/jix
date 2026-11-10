@@ -4,7 +4,10 @@ use std::ops::Range;
 use crate::error::{check_get_buffer_size, check_get_range, check_region_size, ensure, Result};
 use crate::storage::{check_out_buf, materialize_out_buf, ArrayStorageTyped, StridedBuf};
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, cast_slice_mut, dim_arr, IterExt};
+use crate::util::{
+    calc_block_end, cast_slice_mut, dim_arr, strides_for_layout_order, DimArray, DimIdx, IterExt,
+    NdCopier, PtrMutNoalias, PtrNoalias,
+};
 use crate::ReadContext;
 use crate::{default_strides, ArrayStorage, Dim, DimDyn, Dimension, PlainArray};
 
@@ -471,6 +474,13 @@ fn to_buf_strided_slow_dyn_dispatch<'a>(
     to_ndarray_fn(storage, index, context, out)
 }
 
+/// A pushed read whose tiles would land in the destination as runs shorter than this is staged
+/// through a scratch buffer instead (see [`staged_chunk_shape`]).
+const STAGE_MAX_RUN_BYTES: usize = 1024;
+/// Size of the scratch buffer a staged read gathers into before copying out. Small under test,
+/// so that modest arrays take more than one chunk.
+const STAGE_BYTES: usize = if cfg!(test) { 16 << 10 } else { 8 << 20 };
+
 // index range and buffer size are not checked
 #[inline(never)]
 fn to_buf_strided_slow_dyn<'a, D: Dimension>(
@@ -486,6 +496,7 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     let spec = storage.spec();
     let out_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
     let out_shape_usize = D::vec(ndim, |dim| out_shape[dim] as usize);
+    let pushed = out.is_some();
     let mut out = materialize_out_buf(
         out,
         context,
@@ -497,6 +508,48 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
         return Ok(out);
     }
     let read_shape = spec.read_shape_heuristic::<D>(out_shape.as_ref(), shape, dtype.itemsize());
+    let (out_buf, out_strides) = out.data_mut();
+
+    // Only a caller-supplied destination can disagree with the layout the storage reads into:
+    // one allocated here already follows `read_layout_order`.
+    let chunk_shape = pushed
+        .then(|| {
+            staged_chunk_shape::<D>(
+                &read_shape,
+                out_shape.as_ref(),
+                shape,
+                out_strides,
+                spec.read_layout_order(),
+                dtype.itemsize() as usize,
+            )
+        })
+        .flatten();
+    match chunk_shape {
+        None => read_tiles::<D>(storage, index, context, out_buf, out_strides, &read_shape)?,
+        Some(chunk_shape) => read_staged::<D>(
+            storage,
+            index,
+            context,
+            out_buf,
+            out_strides,
+            &read_shape,
+            &chunk_shape,
+        )?,
+    }
+    Ok(out)
+}
+
+/// Read `index` into `out_buf` one `read_shape` tile at a time, each pushed straight into its
+/// place in the destination.
+fn read_tiles<D: Dimension>(
+    storage: &dyn ArrayStorage,
+    index: &[Range<u64>],
+    context: &ReadContext,
+    out_buf: &mut [u8],
+    out_strides: &[usize],
+    read_shape: &D,
+) -> Result<()> {
+    let ndim = index.len();
     // Block-space begin/end for NdIter.
     let block_begin = D::vec(ndim, |dim| index[dim].start / read_shape[dim]);
     let block_end = D::vec(ndim, |dim| {
@@ -510,8 +563,6 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
             D::vec(ndim, |dim| read_shape[dim]),
         )
         .build();
-
-    let (out_buf, out_strides) = out.data_mut();
 
     for (block_idx, (block_inner_offset, block_size)) in block_iter {
         let inner_index = D::vec(ndim, |dim| {
@@ -528,7 +579,153 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
             unsafe { StridedBuf::from_slice_mut(&mut out_buf[out_offset..], out_strides) };
         storage.read_data(inner_index.as_ref(), context, Some(&mut block_out))?;
     }
-    Ok(out)
+    Ok(())
+}
+
+/// Decide whether a pushed read should be staged, and if so the shape of the chunks to stage.
+///
+/// A tile is read in the storage's own layout (`layout_order`) and lands in the destination at the
+/// destination's strides. When the two order the dims differently - a transposed read - a tile
+/// that is thin along the destination's innermost dim lands as many tiny runs, each a stride apart:
+/// a cache and TLB miss per run, an order of magnitude slower than the decode itself.
+///
+/// Such a read is staged: whole chunks, grown along the destination's inner dims up to
+/// [`STAGE_BYTES`], are gathered tile by tile into a scratch buffer in the storage's layout, then
+/// copied out once per chunk with a blocked copy. Chunks stay whole multiples of the read tile, so
+/// no block is decoded twice.
+///
+/// Returns `None` when the tiles already land well: the layouts agree, or a tile's run in the
+/// destination is at least [`STAGE_MAX_RUN_BYTES`] long.
+fn staged_chunk_shape<D: Dimension>(
+    read_shape: &D,
+    out_shape: &[u64],
+    array_shape: &[u64],
+    out_strides: &[usize],
+    layout_order: &[DimIdx],
+    itemsize: usize,
+) -> Option<D> {
+    let ndim = out_shape.len();
+    // The read region's dims with any extent, in the destination's order: innermost first.
+    let mut dst_order = (0..ndim)
+        .filter(|&d| out_shape[d] > 1)
+        .collect::<DimArray<usize>>();
+    dst_order.as_mut_slice().sort_by_key(|&d| out_strides[d]);
+    let src_order = layout_order
+        .iter()
+        .rev()
+        .map(|&d| d as usize)
+        .filter(|&d| out_shape[d] > 1);
+    if dst_order.iter().copied().eq(src_order) {
+        return None;
+    }
+
+    // What one tile covers of the read region, per dim.
+    let tile_len = |dim: usize| read_shape[dim].min(out_shape[dim]);
+    let innermost = dst_order[0];
+    let run_bytes = tile_len(innermost) as usize * out_strides[innermost];
+    if run_bytes >= STAGE_MAX_RUN_BYTES {
+        return None;
+    }
+
+    // Grow the tile into a chunk, the destination's innermost dims first.
+    let budget = (STAGE_BYTES / itemsize).max(1) as u64;
+    let mut chunk_shape = read_shape.clone();
+    let mut volume = (0..ndim).map(tile_len).product::<u64>();
+    let mut grown = false;
+    for &dim in dst_order.iter() {
+        let len = tile_len(dim);
+        let multiplier = (budget / volume).min(out_shape[dim].div_ceil(len));
+        if multiplier <= 1 {
+            continue;
+        }
+        grown = true;
+        let new_len = len * multiplier;
+        volume = volume / len * new_len.min(out_shape[dim]);
+        // A chunk that covers the whole read range is snapped to the array, like the read tile.
+        chunk_shape[dim] = if new_len >= out_shape[dim] {
+            array_shape[dim].max(1)
+        } else {
+            new_len
+        };
+    }
+    grown.then_some(chunk_shape)
+}
+
+/// Read `index` chunk by chunk through a scratch buffer laid out the way the storage reads, and
+/// copy each chunk into its place in `out_buf`. See [`staged_chunk_shape`].
+fn read_staged<D: Dimension>(
+    storage: &dyn ArrayStorage,
+    index: &[Range<u64>],
+    context: &ReadContext,
+    out_buf: &mut [u8],
+    out_strides: &[usize],
+    read_shape: &D,
+    chunk_shape: &D,
+) -> Result<()> {
+    let ndim = index.len();
+    let dtype = storage.dtype();
+    let itemsize = dtype.itemsize() as usize;
+    let spec = storage.spec();
+    let layout_order = spec.read_layout_order();
+    let copier = NdCopier::new(dtype);
+
+    let chunk_len = |dim: usize| chunk_shape[dim].min(index[dim].end - index[dim].start);
+    let stage_bytes = (0..ndim).map(chunk_len).product::<u64>() as usize * itemsize;
+    let mut stage = context.allocate_buf(stage_bytes, dtype.alignment());
+
+    let chunk_begin = D::vec(ndim, |dim| index[dim].start / chunk_shape[dim]);
+    let chunk_end = D::vec(ndim, |dim| {
+        calc_block_end(index[dim].start, index[dim].end, chunk_shape[dim])
+    });
+    let chunk_iter = NdIter::builder_with_begin(chunk_begin, chunk_end)
+        .with_block_offset_size_ext(
+            &D::vec(ndim, |dim| index[dim].start),
+            &D::vec(ndim, |dim| index[dim].end),
+            D::vec(ndim, |dim| chunk_shape[dim]),
+        )
+        .build();
+    for (chunk_idx, (chunk_inner_offset, chunk_size)) in chunk_iter {
+        let chunk_index = D::vec(ndim, |dim| {
+            let start = chunk_idx[dim] * chunk_shape[dim] + chunk_inner_offset[dim];
+            start..start + chunk_size[dim]
+        });
+        let size = D::vec(ndim, |dim| chunk_size[dim] as usize);
+        let stage_strides = strides_for_layout_order(size.as_ref(), itemsize, layout_order);
+        let nbytes = size.as_ref().iter().product::<usize>() * itemsize;
+        let stage_buf = &mut stage.as_mut_slice()[..nbytes];
+        read_tiles::<D>(
+            storage,
+            chunk_index.as_ref(),
+            context,
+            stage_buf,
+            stage_strides.as_ref(),
+            read_shape,
+        )?;
+
+        let out_offset = (0..ndim)
+            .map(|dim| (chunk_index[dim].start - index[dim].start) as usize * out_strides[dim])
+            .sum::<usize>();
+        unsafe {
+            copier.copy(
+                PtrNoalias::from_slice(stage_buf),
+                PtrMutNoalias::from_slice(&mut out_buf[out_offset..]),
+                size.as_ref(),
+                stage_strides.as_ref(),
+                out_strides,
+                dtype,
+            )
+        };
+        #[cfg(test)]
+        STAGED_CHUNKS.with(|c| c.set(c.get() + 1));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Number of chunks read through [`read_staged`] on this thread, for the tests to tell which
+    /// path a read took.
+    static STAGED_CHUNKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl<S: ArrayStorage> Array<S> {
@@ -939,5 +1136,183 @@ mod tests {
             a.to_ndarray_sub::<Ix1>(&[0..1], &ctx).unwrap_err().kind(),
             ErrorKind::InvalidIndex
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // staged reads - a pushed destination whose layout disagrees with the storage's
+    // -----------------------------------------------------------------------
+
+    /// Read `index` of `view` into a packed row-major buffer and return it with the number of
+    /// staged chunks the read took.
+    fn read_c_order<S>(view: &Array<S>, index: &[std::ops::Range<u64>]) -> (Vec<i32>, usize)
+    where
+        S: crate::ArrayStorage,
+    {
+        let n = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        let mut got = vec![0i32; n];
+        let bytes = unsafe { std::slice::from_raw_parts_mut(got.as_mut_ptr().cast::<u8>(), n * 4) };
+        super::STAGED_CHUNKS.with(|c| c.set(0));
+        view.to_buf_slice(index, bytes, &view.read_ctx()).unwrap();
+        (got, super::STAGED_CHUNKS.with(|c| c.get()))
+    }
+
+    /// A compact `i32` array of distinct values, with small read tiles so that modest shapes go
+    /// through the tiling path.
+    fn staged_source(
+        shape: &[usize],
+        block: &[u32],
+    ) -> (ndarray::ArrayD<i32>, crate::CompactArray<i32>) {
+        let n = shape.iter().product::<usize>();
+        let nd = ndarray::ArrayD::from_shape_vec(
+            shape.to_vec(),
+            (0..n as i32).map(|x| x.wrapping_mul(31) - 5).collect(),
+        )
+        .unwrap();
+        let params = ArrayParams::new()
+            .block_shape(block)
+            .unwrap()
+            .read_size((1024, 4096));
+        (
+            nd.clone(),
+            Array::compact_ndarray_with(&nd, params).unwrap(),
+        )
+    }
+
+    fn slice_of(nd: &ndarray::ArrayViewD<'_, i32>, index: &[std::ops::Range<u64>]) -> Vec<i32> {
+        let info = index
+            .iter()
+            .map(|r| ndarray::SliceInfoElem::from(r.start as usize..r.end as usize))
+            .collect::<Vec<_>>();
+        nd.slice(info.as_slice()).iter().copied().collect()
+    }
+
+    #[test]
+    fn staged_read_of_a_transposed_view() {
+        // Whole-row blocks read through a transpose into a row-major buffer: each block would
+        // land as a column of single elements, so the read is staged - in several chunks.
+        for block in [[1u32, 300], [4, 300], [1, 100], [7, 13]] {
+            let (nd, a) = staged_source(&[200, 300], &block);
+            let t = a.view().permute_dims(&[1, 0]);
+            let expected = nd.view().reversed_axes();
+            for index in [
+                [0..300, 0..200],
+                [3..299, 7..191],
+                [0..300, 5..6],
+                [17..18, 0..200],
+            ] {
+                let (got, staged) = read_c_order(&t, &index);
+                assert_eq!(
+                    got,
+                    slice_of(&expected, &index),
+                    "block={block:?} {index:?}"
+                );
+                // Only the whole-row-ish blocks need staging, and only for a region with more
+                // than one row of the transposed view.
+                if block[0] <= 4
+                    && index[0].end - index[0].start > 1
+                    && index[1].end - index[1].start > 1
+                {
+                    assert!(staged > 1, "block={block:?} {index:?} staged={staged}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn staged_read_of_3d_permutations() {
+        let (nd, a) = staged_source(&[20, 30, 40], &[1, 6, 40]);
+        for perm in [
+            [0usize, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ] {
+            let view = a.view().permute_dims(&perm);
+            let expected = nd.view().permuted_axes(perm.to_vec());
+            let shape = perm.map(|d| nd.shape()[d] as u64);
+            let full = shape.map(|s| 0..s);
+            let inner = shape.map(|s| 1..s - 2);
+            for index in [full, inner] {
+                let (got, _) = read_c_order(&view, &index);
+                assert_eq!(
+                    got,
+                    slice_of(&expected.view(), &index),
+                    "perm={perm:?} {index:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn staged_read_through_an_elementwise_op() {
+        let (nd, a) = staged_source(&[200, 300], &[1, 300]);
+        let view = a
+            .view()
+            .permute_dims(&[1, 0])
+            .map(|x: i32| x.wrapping_add(7));
+        let expected = nd.view().reversed_axes().mapv(|x| x.wrapping_add(7));
+        let index = [2..297, 0..200];
+        let (got, staged) = read_c_order(&view, &index);
+        assert_eq!(got, slice_of(&expected.view(), &index));
+        assert!(staged > 1);
+    }
+
+    #[test]
+    fn staged_read_into_a_column_major_destination() {
+        // No view at all: the array itself, pushed into a column-major buffer.
+        let (nd, a) = staged_source(&[200, 300], &[1, 300]);
+        let ctx = a.read_ctx();
+        let mut dst = vec![0i32; 200 * 300];
+        super::STAGED_CHUNKS.with(|c| c.set(0));
+        {
+            let mut out = unsafe {
+                StridedBuf::from_raw_parts_mut(
+                    dst.as_mut_ptr().cast::<u8>(),
+                    &[200, 300],
+                    &[4, 800],
+                    4,
+                )
+            };
+            a.to_buf_strided(&[0..200, 0..300], &ctx, Some(&mut out))
+                .unwrap();
+        }
+        assert!(super::STAGED_CHUNKS.with(|c| c.get()) > 1);
+        for r in 0..200 {
+            for c in 0..300 {
+                assert_eq!(dst[c * 200 + r], nd[[r, c]], "({r}, {c})");
+            }
+        }
+    }
+
+    #[test]
+    fn reads_that_land_well_are_not_staged() {
+        let (nd, a) = staged_source(&[200, 300], &[1, 300]);
+        // The destination follows the storage's layout.
+        let (got, staged) = read_c_order(&a, &[0..200, 0..300]);
+        assert_eq!(got, nd.iter().copied().collect::<Vec<_>>());
+        assert_eq!(staged, 0);
+
+        // Transposed, but the blocks are tall: a tile already lands as kilobyte runs. (A read
+        // size big enough to keep whole blocks in a tile.)
+        let nd =
+            ndarray::Array2::from_shape_fn((600, 300), |(r, c)| (r * 300 + c) as i32).into_dyn();
+        let params = ArrayParams::new()
+            .block_shape(&[300, 10])
+            .unwrap()
+            .read_size((16 << 10, 64 << 10));
+        let a = Array::compact_ndarray_with(&nd, params).unwrap();
+        let t = a.view().permute_dims(&[1, 0]);
+        let (got, staged) = read_c_order(&t, &[0..300, 0..600]);
+        assert_eq!(
+            got,
+            nd.view()
+                .reversed_axes()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(staged, 0);
     }
 }
