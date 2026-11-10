@@ -3,7 +3,7 @@
 //! Every `Array<S>` is backed by a storage type `S: ArrayStorage`, which exposes three things:
 //! the array's shape, its element dtype, and [`read_data`](ArrayStorage::read_data)
 //! which reads any rectangular sub-region and returns it as a
-//! [`StridedBuf`] - either a borrowed strided view or bytes written into
+//! [`StridedBuf`] - a borrowed view, a freshly materialized buffer, or bytes written into
 //! a caller-supplied destination. All higher-level operations are built on top of these three methods.
 //!
 //! # Storage implementations
@@ -12,7 +12,7 @@
 //! - [`Compact`] - heap-allocated
 //! - [`CompactMmap`] - memory-mapped file
 //!
-//! An adapter lets non-compressed data participate in the same `Array` world (such as math operations with compressed arrays):
+//! An adapter lets uncompressed data participate in the same `Array` world (such as math operations with compressed arrays):
 //! - [`Plain`] - a zero-copy view into a contiguous or strided in-memory buffer.
 //!
 //! Operations on `Array` produce lazy views whose storage wraps the original and applies
@@ -42,7 +42,7 @@
 //!
 //! - [`ArrayStorage`] - the trait all storage backends implement.
 //! - [`Compact`] - the main block-compressed storage backend.
-//! - [`Plain`] - adapter for non-compressed data.
+//! - [`Plain`] - adapter for uncompressed data.
 
 use std::ops::Range;
 use std::rc::Rc;

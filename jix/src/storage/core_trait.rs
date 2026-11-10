@@ -44,8 +44,8 @@ pub(crate) use sealed::ArrayStorageImpl;
 /// arr.reshape(new_shape)     -> Array<Reshape<S>>
 /// arr.permute_dims(dims)     -> Array<PermuteDims<S>>
 /// arr1.add(arr2)             -> Array<Add<S1, S2>>
-/// arr.sum(dim)              -> Array<Sum<S>>
-/// arr.cast::<f32>()          -> Array<Cast<S>>
+/// arr.sum(dim)               -> Array<Sum<S>>
+/// arr.cast::<f32>()          -> Array<Cast<S, f32>>
 /// ```
 ///
 /// No data is copied or computed until `read_data` is called. At that point the index
@@ -56,8 +56,7 @@ pub(crate) use sealed::ArrayStorageImpl;
 ///
 /// Because `Array<S>` is monomorphized over `S` at compile time, chains of operations
 /// carry zero heap allocation or virtual dispatch overhead. The full static type of an
-/// expression - e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` - is resolved by the compiler,
-/// and only the final `read_data` call touches actual bytes.
+/// expression - e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` - is resolved by the compiler.
 pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// The compile-time element type of arrays backed by this storage.
     ///
@@ -116,7 +115,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// Compared to [`read_data`](Self::read_data), which materializes the region into a single
     /// buffer, this method hands back a pipeline that builds a tree of operations in which the
     /// leaves are operands and inner nodes are ops. The default implementation of this method
-    /// reads the region in a leaf buffer, but ops override it to build a tree recursively from
+    /// reads the region into a leaf buffer, but ops override it to build a tree recursively from
     /// their inner storage dependencies.
     ///
     /// # Arguments

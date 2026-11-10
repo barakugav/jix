@@ -8,7 +8,7 @@ use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, StridedBuf};
 use crate::ReadContext;
 use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 
-/// A type-erased array storage backend that wraps any dynamically-typed storage via `Arc<dyn ArrayStorage>`.
+/// A type-erased array storage backend that wraps any storage via `Arc<dyn ArrayStorage>`.
 ///
 /// `ArrayStorageAny` holds a dynamically-dispatched storage backend and implements `ArrayStorage` by forwarding to it.
 /// It is `Clone` (cloning the `Arc`), which makes it easy to store heterogeneous arrays in a collection such

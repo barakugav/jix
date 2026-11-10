@@ -44,7 +44,8 @@ impl<T> Scalar<T> {
     /// # Errors
     ///
     /// Returns an error if `shape.len()` exceeds the maximum supported number
-    /// of dimensions.
+    /// of dimensions, if a dim of `shape` exceeds `i64::MAX` or its byte size
+    /// overflows `u64`, or if `T` has a zero itemsize.
     pub fn new(data: T, shape: &[u64], mut params: ArrayParams) -> Result<Self>
     where
         T: Dtyped,
