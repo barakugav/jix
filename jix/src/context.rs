@@ -81,6 +81,7 @@ impl ReadContext {
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
             buffer_pool: BufferPool::new(),
+
             read_cache: RefCell::new(None),
             is_cache_enabled: Cell::new(false),
             temp_cache_maps: RefCell::new(Vec::new()),
@@ -115,9 +116,10 @@ struct Cache {
 type CacheMap = ArrayCacheIdMap<CacheEntry>;
 struct CacheEntry {
     index: DimArray<Range<u64>>,
-    strides: DimArray<usize>,
-    offset: usize,
+
     data: Arc<RawAlignedBytes>,
+    offset: usize,
+    strides: DimArray<usize>,
 }
 
 pub(crate) struct CacheScope {
@@ -229,9 +231,9 @@ impl ReadContext {
         let buf = unsafe { StridedBuf::from_shared(buf, &strides).with_offset(offset) };
         let entry = CacheEntry {
             index: index.to_dim_vec::<DimDyn>(),
-            strides,
-            offset,
             data,
+            offset,
+            strides,
         };
         let stale = self
             .read_cache
