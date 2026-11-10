@@ -7,7 +7,7 @@ use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
-use crate::storage::{check_oucheck_out_buf_implt_holds, StridedBuf};
+use crate::storage::{check_out_buf_impl, StridedBuf};
 use crate::util::{dim_arr, DimArray, RawAlignedBytes, SliceExt};
 use crate::DimDyn;
 
@@ -171,7 +171,7 @@ impl ReadContext {
         index: &[Range<u64>],
         dtype: &Dtype,
         out: Option<&'a mut StridedBuf<'b>>,
-        read: &dyn Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
+        read_fn: &dyn CachedReadFn<'a, 'b>,
     ) -> Result<StridedBuf<'a>> {
         let pull = out.is_none();
         let mut cache_guard = self.read_cache.borrow_mut();
@@ -181,7 +181,7 @@ impl ReadContext {
             .filter(|c| c.arrays_to_cache.contains(id));
         let Some(cache) = cache else {
             drop(cache_guard); // before calling unknown `read()`
-            return read(out);
+            return read_fn.read(out);
         };
         // Search for a matching cache entry for this array ID and index
         if let Some(entry) = cache.map.get(id) {
@@ -217,7 +217,7 @@ impl ReadContext {
         }
 
         drop(cache_guard); // before calling unknown `read()`
-        let buf = read(out)?;
+        let buf = read_fn.read(out)?;
         if !pull {
             return Ok(buf); // user provided an output buffer, we can't hold a ref to it in cache
         }
@@ -290,6 +290,20 @@ impl ReadContext {
         let enabled = self.is_cache_enabled.get();
         debug_assert!(enabled == self.read_cache.borrow().is_some());
         enabled
+    }
+}
+
+// could be replaced by `Fn`, but a trait generate less binary
+trait CachedReadFn<'a, 'b: 'a> {
+    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>;
+}
+impl<'a, 'b: 'a, F> CachedReadFn<'a, 'b> for F
+where
+    F: Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
+{
+    #[inline(always)]
+    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>> {
+        self(out)
     }
 }
 
