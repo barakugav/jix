@@ -82,7 +82,7 @@ pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<Array> {
 /// input is returned as is (the same object), not wrapped in a new view.
 ///
 /// For **complex** types the result is the modulus `sqrt(re^2 + im^2)` computed via
-/// `hypot` for numerical stability. The output dtype is the real component type.
+/// `hypot` for numerical stability.
 ///
 /// For **signed integer** types, the minimum value overflows: `abs(-128)` on `int8`
 /// wraps back to `-128`.
@@ -312,7 +312,7 @@ define_op2!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
     ///
-    /// For **integer** types the result wraps on underflow (two's complement).
+    /// For **integer** types the result wraps on overflow (two's complement).
     /// For **complex** types each component is subtracted independently:
     /// `(a + bi) - (c + di) = (a-c) + (b-d)i`.
     /// Two `bool` operands give `int8`: `True - False` is `1`, `False - True` is `-1` (numpy
@@ -435,8 +435,8 @@ pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<A
 ///
 /// **Type promotion**: when `a` and `b` do not directly match a supported pair,
 /// both operands are cast under Safe casting rules and the first matching pair
-/// is used, e.g. `u8 ** i8 -> i16`. A `u64` base or exponent with a signed one
-/// promotes to float: `u64 ** i64 -> f64`.
+/// is used, e.g. `u8 ** i8 -> i16`. A `u64` exponent, or a `u64` base with a signed
+/// exponent, promotes to float: `u64 ** i64 -> f64`.
 ///
 /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
 ///
