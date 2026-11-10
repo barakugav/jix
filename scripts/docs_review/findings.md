@@ -19,3 +19,13 @@ Docs, not fixed:
 - `CLAUDE.md` (Architecture, `read_data`) gives `materialize_out_buf(out, ctx, out_shape, dtype)`;
   the function also takes a `layout_order` argument (`jix/src/storage/buf.rs:428`). `CLAUDE.md` is
   out of scope for the review.
+
+## overview
+
+Needs the maintainer:
+
+- `jix-py/docs/module.md:80` says an `Array` "wraps compressed array data". An array made with
+  `jix.asarray` is plain, so this covers only the usual case.
+- `jix-py/docs/module.md:89` calls `jix.asarray` a "zero-copy" view of "any array-like". A Python
+  list or scalar has to be converted first (as the `asarray` docstring itself says), so
+  "zero-copy" holds only for inputs that already are buffers.

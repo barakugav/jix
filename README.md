@@ -13,7 +13,7 @@ A multi-dimensional array library with block-compressed storage and lazy-evaluat
 Only the blocks that overlap a read request are decompressed, so random access into large arrays is relatively cheap.
 
 **Lazy operation chains.** Every operation - arithmetic, shape change, reduction, type cast - returns a new view that wraps the
-input(s) and records the transformation, nothing is computed until data is explicitly requested.
+input(s) and records the transformation; nothing is computed until data is explicitly requested.
 A chain of such operations builds a pipeline that runs in a single decompression pass the moment you ask for output.
 
 ```rust

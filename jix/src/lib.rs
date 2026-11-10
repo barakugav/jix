@@ -414,10 +414,10 @@ pub use error::Error;
 /// Compact (compressed) owned array of type `T` (type alias).
 pub type CompactArray<T> = Array<storage::Compact<Ty<T>>>;
 
-/// Plain (not-compressed) owned array (type alias).
+/// Plain (uncompressed) owned array (type alias).
 pub type PlainArray<T> = Array<storage::Plain<Vec<T>, Ty<T>>>;
 
-/// Plain (not-compressed) borrowed array (type alias).
+/// Plain (uncompressed) borrowed array (type alias).
 pub type PlainArrayRef<'a, T> = Array<storage::Plain<&'a (), Ty<T>>>;
 
 /// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn ArrayStorage>`.
