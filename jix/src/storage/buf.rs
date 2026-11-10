@@ -46,11 +46,6 @@ pub struct StridedBuf<'a> {
     data: StridedBufData<'a>,
     /// Byte stride per dimension of the read region.
     strides: DimArray<usize>,
-    /// A hint on a writable destination: it is far larger than the cache, so whoever writes the
-    /// final bytes into it should use non-temporal stores (see
-    /// [`copy_nonoverlapping_nontemporal`](crate::util::copy_nonoverlapping_nontemporal)). Set by
-    /// the array-level read for a big pushed destination; never changes what is written.
-    nontemporal: bool,
 }
 
 enum StridedBufData<'a> {
@@ -114,7 +109,6 @@ impl<'a> StridedBuf<'a> {
         Self {
             data: StridedBufData::Slice(data),
             strides: strides.to_dim_vec::<DimDyn>(),
-            nontemporal: false,
         }
     }
 
@@ -131,7 +125,6 @@ impl<'a> StridedBuf<'a> {
         Self {
             data: StridedBufData::SliceMut(data),
             strides: strides.to_dim_vec::<DimDyn>(),
-            nontemporal: false,
         }
     }
 
@@ -145,7 +138,6 @@ impl<'a> StridedBuf<'a> {
         Self {
             data: StridedBufData::PoolBufMut { buf, offset: 0 },
             strides: strides.to_dim_vec::<DimDyn>(),
-            nontemporal: false,
         }
     }
 
@@ -164,18 +156,6 @@ impl<'a> StridedBuf<'a> {
             StridedBufData::PoolBufMut { buf, offset } => StridedBufData::PoolBuf { buf, offset },
             data => data,
         };
-    }
-
-    /// Whether the final bytes of this destination should be written with non-temporal stores.
-    #[inline]
-    pub(crate) fn nontemporal(&self) -> bool {
-        self.nontemporal
-    }
-
-    /// Set the non-temporal hint, see [`nontemporal`](Self::nontemporal).
-    #[inline]
-    pub(crate) fn set_nontemporal(&mut self, nontemporal: bool) {
-        self.nontemporal = nontemporal;
     }
 
     /// The byte stride of each dimension.
@@ -267,9 +247,8 @@ impl<'a> StridedBuf<'a> {
         shape: &[usize],
         dtype: &Dtype,
     ) {
-        let nontemporal = self.nontemporal;
         let (dst, dst_strides) = self.data_mut();
-        let copier = NdCopier::new(dtype).nontemporal(nontemporal);
+        let copier = NdCopier::new(dtype);
         unsafe {
             copier.copy(
                 PtrNoalias::from_slice(src),
@@ -289,11 +268,7 @@ impl<'a> StridedBuf<'a> {
     /// The caller must ensure that the resulting view is still valid for the same shape and strides.
     #[inline]
     pub(crate) unsafe fn with_offset(self, n: usize) -> Self {
-        let StridedBuf {
-            data,
-            strides,
-            nontemporal,
-        } = self;
+        let StridedBuf { data, strides } = self;
         let data = match data {
             StridedBufData::Slice(s) => StridedBufData::Slice(&s[n..]),
             StridedBufData::SliceMut(s) => StridedBufData::SliceMut(&mut s[n..]),
@@ -306,11 +281,7 @@ impl<'a> StridedBuf<'a> {
                 offset: offset + n,
             },
         };
-        StridedBuf {
-            data,
-            strides,
-            nontemporal,
-        }
+        StridedBuf { data, strides }
     }
 
     #[allow(unused)]
@@ -320,19 +291,16 @@ impl<'a> StridedBuf<'a> {
         StridedBuf {
             data: StridedBufData::Slice(data),
             strides: self.strides.clone(),
-            nontemporal: false,
         }
     }
 
     #[inline]
     pub(crate) fn view_mut(&mut self) -> StridedBuf<'_> {
         let strides = self.strides.clone();
-        let nontemporal = self.nontemporal;
         let (data, _) = self.data_mut();
         StridedBuf {
             data: StridedBufData::SliceMut(data),
             strides,
-            nontemporal,
         }
     }
 }
@@ -452,12 +420,9 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
 
     let is_push = out.is_some();
     let mut inner_out = out.as_deref_mut().map(|o| {
-        let nontemporal = o.nontemporal();
         let (data, strides) = o.data_mut();
         let inner_strides = outer2inner_strides_fn(strides);
-        let mut inner_out = unsafe { StridedBuf::from_slice_mut(data, inner_strides.as_ref()) };
-        inner_out.set_nontemporal(nontemporal);
-        inner_out
+        unsafe { StridedBuf::from_slice_mut(data, inner_strides.as_ref()) }
     });
 
     let inner_buf = inner.read_data(inner_index, context, inner_out.as_mut())?;

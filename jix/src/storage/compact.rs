@@ -304,9 +304,6 @@ where
             return Ok(out);
         }
         let is_contiguous = out.is_contiguous(out_shape.as_ref(), dtype);
-        // A destination far larger than the cache: decode in cache and copy out with
-        // non-temporal stores, rather than decoding straight into it.
-        let nontemporal = out.nontemporal();
 
         let ndim = shape.len();
         let block_shape = self.block_shape();
@@ -336,7 +333,6 @@ where
         if let Some(single_block_idx) = single_block_idx
             && is_block_aligned
             && is_contiguous
-            && !nontemporal
         {
             let (out_buf, _out_strides) = out.data_mut();
             let buf = &mut out_buf[..nitems * dtype.itemsize() as usize];
@@ -362,7 +358,6 @@ where
             &mut out,
             context,
             single_block_idx,
-            nontemporal,
         )?;
 
         Ok(out)
@@ -396,7 +391,6 @@ fn read_data_slow<ActualD: Dimension>(
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
     single_block_idx: Option<u64>,
-    nontemporal: bool,
 ) -> Result<()> {
     let shape = storage.shape;
     let dtype = storage.dtype;
@@ -408,7 +402,7 @@ fn read_data_slow<ActualD: Dimension>(
     let out_shape = ActualD::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
     let block_shape_u64 = ActualD::vec(ndim, |dim| block_shape[dim] as u64);
     let block_strides = default_strides(&block_shape_u64, itemsize);
-    let copier = NdCopier::new(dtype).nontemporal(nontemporal);
+    let copier = NdCopier::new(dtype);
 
     // Pre-allocate a buffer large enough for a full block.
     let full_buf_len =
@@ -444,9 +438,8 @@ fn read_data_slow<ActualD: Dimension>(
 
     // A block can be decoded straight into `buf` - skipping `tmp_buf` and the
     // `nd_copy` scatter - when the destination is C-contiguous and the block is a single
-    // contiguous run. Not for a non-temporal destination: there the block is decoded in cache
-    // (`tmp_buf`) and streamed out by the copy.
-    let read_into_out = !nontemporal && {
+    // contiguous run
+    let read_into_out = {
         let c_strides = default_strides(&out_shape, itemsize);
         let out_buf_contiguous =
             (0..ndim).all(|d| out_shape[d] == 1 || out_strides[d] == c_strides[d]);
@@ -799,67 +792,6 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(got, [1, 2, 3, 4, 5, 6]);
-    }
-
-    /// Read `index` into a destination with the non-temporal hint set and compare against the
-    /// same read without it. The hint moves every block through `tmp_buf` and a streaming copy;
-    /// it must never change what is written, nor touch bytes outside the region.
-    fn check_nontemporal_matches(shape: &[usize], block_shape: &[u32], index: &[Range<u64>]) {
-        let n: usize = shape.iter().product();
-        let nd = ndarray::ArrayD::from_shape_vec(
-            shape.to_vec(),
-            (0..n as i32)
-                .map(|x| x.wrapping_mul(2_654_435) ^ 0x55)
-                .collect(),
-        )
-        .unwrap();
-        let params = ArrayParams::new().block_shape(block_shape).unwrap();
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
-        let ctx = za.read_ctx();
-        let storage = za.into_storage();
-
-        let out_shape = index
-            .iter()
-            .map(|r| (r.end - r.start) as usize)
-            .collect::<Vec<_>>();
-        let nitems: usize = out_shape.iter().product();
-        let strides = crate::util::default_strides_slice(&out_shape, 4);
-        const SENTINEL: i32 = 0x7E57_7E57;
-        // One element of slack on each side, at every offset within a cache line.
-        for shift in [0usize, 1, 3, 15] {
-            let read = |nontemporal: bool| {
-                let mut backing = vec![SENTINEL; shift + nitems + 1];
-                {
-                    let bytes = unsafe {
-                        std::slice::from_raw_parts_mut(
-                            backing.as_mut_ptr().add(shift).cast::<u8>(),
-                            nitems * 4,
-                        )
-                    };
-                    let mut out = unsafe { StridedBuf::from_slice_mut(bytes, strides.as_ref()) };
-                    out.set_nontemporal(nontemporal);
-                    storage.read_data(index, &ctx, Some(&mut out)).unwrap();
-                    crate::util::nontemporal_fence();
-                }
-                assert!(backing[..shift].iter().all(|&v| v == SENTINEL));
-                assert_eq!(backing[shift + nitems], SENTINEL);
-                backing[shift..shift + nitems].to_vec()
-            };
-            assert_eq!(read(true), read(false), "shift={shift} {index:?}");
-        }
-    }
-
-    #[test]
-    fn nontemporal_destination_reads_the_same() {
-        // Whole-row blocks (the direct-decode shape), an aligned single block, clipped blocks,
-        // square blocks scattered row by row, and a 3D array.
-        check_nontemporal_matches(&[64, 512], &[1, 512], &[0..64, 0..512]);
-        check_nontemporal_matches(&[64, 512], &[4, 512], &[4..8, 0..512]);
-        check_nontemporal_matches(&[64, 512], &[4, 512], &[3..61, 0..512]);
-        check_nontemporal_matches(&[300, 300], &[100, 128], &[0..300, 0..300]);
-        check_nontemporal_matches(&[300, 300], &[100, 128], &[7..291, 13..287]);
-        check_nontemporal_matches(&[20, 30, 70], &[5, 30, 70], &[0..20, 0..30, 0..70]);
-        check_nontemporal_matches(&[20, 30, 70], &[7, 11, 64], &[1..19, 2..29, 3..67]);
     }
 
     #[test]

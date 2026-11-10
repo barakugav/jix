@@ -17,9 +17,6 @@ pub(crate) use arr_ext::*;
 mod nd_copy;
 pub(crate) use nd_copy::*;
 
-mod nontemporal;
-pub(crate) use nontemporal::*;
-
 mod os_mem;
 pub(crate) use os_mem::*;
 
