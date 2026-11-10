@@ -1,7 +1,9 @@
 use std::ptr;
 
 use crate::dtype::{Alignment, Dtype, Itemsize};
-use crate::util::{strided_span_bytes, DimArray};
+use crate::util::{
+    copy_nonoverlapping_nontemporal, strided_span_bytes, DimArray, NONTEMPORAL_MIN_RUN_BYTES,
+};
 use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 
 /// A copy at least this large, between two layouts that order the dims differently, is cut into
@@ -99,7 +101,12 @@ fn packed_strides_like(
 /// byte-wise fallback for everything else. Each [`copy`](Self::copy) then moves one region by
 /// driving an [`NdIterUnordered`] over `shape` (which sorts, coalesces and walks the dims) and
 /// copying one contiguous-or-strided inner loop at each visited position.
-pub(crate) struct NdCopier(NdCopyFn);
+pub(crate) struct NdCopier {
+    copy_fn: NdCopyFn,
+    /// Write contiguous runs of the destination with non-temporal stores, see
+    /// [`nontemporal`](Self::nontemporal).
+    nontemporal: bool,
+}
 
 type NdCopyFn = unsafe fn(NdCopyArgs);
 type InnerLoopFn<T> = unsafe fn(PtrNoalias<'_, T>, PtrMutNoalias<'_, T>, usize, usize, usize);
@@ -110,12 +117,13 @@ struct NdCopyArgs<'a> {
     src_strides: &'a [usize],
     dst_strides: &'a [usize],
     dtype: &'a Dtype,
+    nontemporal: bool,
 }
 
 impl NdCopier {
     #[inline]
     pub(crate) const fn new(dtype: &Dtype) -> Self {
-        Self(match (dtype.itemsize(), dtype.alignment().as_usize()) {
+        let copy_fn: NdCopyFn = match (dtype.itemsize(), dtype.alignment().as_usize()) {
             (1, 1) => Self::scalar_fn::<u8>,
             (2, 2) => Self::scalar_fn::<u16>,
             (4, 4) => Self::scalar_fn::<u32>,
@@ -123,7 +131,21 @@ impl NdCopier {
             (8, 8) => Self::scalar_fn::<u64>,
             (16, 8) => Self::scalar_fn::<[u64; 2]>,
             _ => Self::copy_untyped,
-        })
+        };
+        Self {
+            copy_fn,
+            nontemporal: false,
+        }
+    }
+
+    /// Write the destination's contiguous runs with non-temporal stores (see
+    /// [`copy_nonoverlapping_nontemporal`]). For a destination far larger than the cache: it is
+    /// then written at about twice the throughput, but is not left in the cache. Whoever sets this
+    /// runs [`nontemporal_fence`](crate::util::nontemporal_fence) once the copies are done.
+    #[inline]
+    pub(crate) const fn nontemporal(mut self, nontemporal: bool) -> Self {
+        self.nontemporal = nontemporal;
+        self
     }
 
     /// Copies a rectangular `shape` region from `src` to `dst` under independent byte strides.
@@ -183,8 +205,9 @@ impl NdCopier {
             src_strides,
             dst_strides,
             dtype,
+            nontemporal: self.nontemporal,
         };
-        unsafe { (self.0)(args) }
+        unsafe { (self.copy_fn)(args) }
     }
 
     /// [`copy`](Self::copy) for a large region whose two layouts order the dims differently.
@@ -274,7 +297,8 @@ impl NdCopier {
             let step = |src: PtrNoalias<'_, u8>,
                         dst: PtrMutNoalias<'_, u8>,
                         src_strides: &[usize],
-                        dst_strides: &[usize]| {
+                        dst_strides: &[usize],
+                        nontemporal: bool| {
                 let args = NdCopyArgs {
                     src,
                     dst,
@@ -282,8 +306,9 @@ impl NdCopier {
                     src_strides,
                     dst_strides,
                     dtype,
+                    nontemporal,
                 };
-                unsafe { (self.0)(args) }
+                unsafe { (self.copy_fn)(args) }
             };
             unsafe {
                 step(
@@ -294,12 +319,14 @@ impl NdCopier {
                     PtrMutNoalias::from_slice(&mut gathered.as_mut_slice()[..nbytes]),
                     src_strides,
                     &gathered_strides,
+                    false,
                 );
                 step(
                     PtrNoalias::from_slice(&gathered.as_slice()[..nbytes]),
                     PtrMutNoalias::from_slice(&mut reordered.as_mut_slice()[..nbytes]),
                     &gathered_strides,
                     &reordered_strides,
+                    false,
                 );
                 step(
                     PtrNoalias::from_slice(&reordered.as_slice()[..nbytes]),
@@ -309,6 +336,7 @@ impl NdCopier {
                     ),
                     &reordered_strides,
                     dst_strides,
+                    self.nontemporal,
                 );
             }
 
@@ -336,6 +364,7 @@ impl NdCopier {
             src_strides,
             dst_strides,
             dtype,
+            nontemporal,
         } = args;
         debug_assert_eq!(size_of::<T>(), dtype.itemsize() as usize);
         debug_assert_eq!(align_of::<T>(), dtype.alignment().as_usize());
@@ -366,6 +395,7 @@ impl NdCopier {
                 src_stride == size_of::<T>(),
                 dst_stride == size_of::<T>(),
                 src_stride == 0,
+                nontemporal,
             );
             unsafe { inner_loop_fn(src, dst, len, src_stride, dst_stride) };
             return;
@@ -387,6 +417,7 @@ impl NdCopier {
             src_contiguous,
             dst_contiguous,
             iter.inner_strides()[1] == 0,
+            nontemporal,
         );
 
         iter.foreach_inner_1d_impl::<true>(
@@ -409,8 +440,15 @@ impl NdCopier {
         src_contiguous: bool,
         dst_contiguous: bool,
         src_broadcast: bool,
+        nontemporal: bool,
     ) -> InnerLoopFn<T> {
-        if src_contiguous && dst_contiguous {
+        if nontemporal
+            && src_contiguous
+            && dst_contiguous
+            && inner_len * size_of::<T>() >= NONTEMPORAL_MIN_RUN_BYTES
+        {
+            Self::inner_loop_contiguous_nontemporal::<T>
+        } else if src_contiguous && dst_contiguous {
             // For the both-contiguous run, peel a small fixed length into a single `[T; N]` move
             // (branchless); longer runs fall through to `copy_nonoverlapping`.
             match (inner_len, aligned) {
@@ -505,6 +543,24 @@ impl NdCopier {
         }
     }
 
+    unsafe fn inner_loop_contiguous_nontemporal<T: Copy>(
+        src: PtrNoalias<T>,
+        dst: PtrMutNoalias<T>,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+    ) {
+        debug_assert_eq!(src_stride, size_of::<T>());
+        debug_assert_eq!(dst_stride, size_of::<T>());
+        unsafe {
+            copy_nonoverlapping_nontemporal(
+                src.as_ptr().cast::<u8>(),
+                dst.as_mut_ptr().cast::<u8>(),
+                len * size_of::<T>(),
+            )
+        };
+    }
+
     unsafe fn inner_loop_contiguous_const_len<T: Copy, const LEN: usize, const ALIGNED: bool>(
         src: PtrNoalias<T>,
         dst: PtrMutNoalias<T>,
@@ -572,6 +628,19 @@ impl NdCopier {
         }
     }
 
+    unsafe fn inner_loop_untyped_nontemporal(
+        src: PtrNoalias<u8>,
+        dst: PtrMutNoalias<u8>,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+        itemsize: usize,
+    ) {
+        debug_assert_eq!(src_stride, itemsize);
+        debug_assert_eq!(dst_stride, itemsize);
+        unsafe { copy_nonoverlapping_nontemporal(src.as_ptr(), dst.as_mut_ptr(), len * itemsize) };
+    }
+
     unsafe fn inner_loop_untyped_broadcast(
         src: PtrNoalias<u8>,
         dst: PtrMutNoalias<u8>,
@@ -607,11 +676,23 @@ impl NdCopier {
             src_strides,
             dst_strides,
             dtype,
+            nontemporal,
         } = args;
         let itemsize = dtype.itemsize() as usize;
-        let pick_inner_loop = |src_stride: usize, dst_stride: usize| {
+        let pick_inner_loop = |src_stride: usize, dst_stride: usize, len: usize| {
             let dst_contiguous = dst_stride == itemsize;
             if dst_contiguous && src_stride == itemsize {
+                if nontemporal && len * itemsize >= NONTEMPORAL_MIN_RUN_BYTES {
+                    return Self::inner_loop_untyped_nontemporal
+                        as unsafe fn(
+                            PtrNoalias<u8>,
+                            PtrMutNoalias<u8>,
+                            usize,
+                            usize,
+                            usize,
+                            usize,
+                        );
+                }
                 Self::inner_loop_untyped::<true>
             } else if dst_contiguous && src_stride == 0 {
                 Self::inner_loop_untyped_broadcast
@@ -631,7 +712,7 @@ impl NdCopier {
             let src_stride = src_strides[0];
             let dst_stride = dst_strides[0];
 
-            let inner_loop_fn = pick_inner_loop(src_stride, dst_stride);
+            let inner_loop_fn = pick_inner_loop(src_stride, dst_stride, len);
             unsafe { inner_loop_fn(src, dst, len, src_stride, dst_stride, itemsize) };
             return;
         }
@@ -644,7 +725,7 @@ impl NdCopier {
             [(dtype.itemsize(), Alignment::of::<u8>()); 2],
         );
         let [dst_inner_stride, src_inner_stride] = iter.inner_strides();
-        let inner_loop_fn = pick_inner_loop(src_inner_stride, dst_inner_stride);
+        let inner_loop_fn = pick_inner_loop(src_inner_stride, dst_inner_stride, iter.inner_len());
         // `move` for the same reason as in `scalar_fn`.
         iter.foreach_inner_1d_impl::<true>(
             move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
@@ -848,26 +929,31 @@ mod tests {
         let src = unsafe { std::slice::from_raw_parts(src_ptr, src_len) };
         let expected = reference_copy(src, dst_len, shape, src_strides, dst_strides, itemsize);
 
-        let copier = NdCopier::new(&dtype);
-        let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
-        unsafe {
-            copier.copy(
-                PtrNoalias::from_slice(src),
-                PtrMutNoalias::from_slice(dst),
-                shape,
-                src_strides,
-                dst_strides,
-                &dtype,
+        // Regular and non-temporal stores must write the same bytes.
+        for nontemporal in [false, true] {
+            unsafe { dst_ptr.write_bytes(0, dst_len) };
+            let copier = NdCopier::new(&dtype).nontemporal(nontemporal);
+            let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
+            unsafe {
+                copier.copy(
+                    PtrNoalias::from_slice(src),
+                    PtrMutNoalias::from_slice(dst),
+                    shape,
+                    src_strides,
+                    dst_strides,
+                    &dtype,
+                );
+            }
+            crate::util::nontemporal_fence();
+
+            let actual = unsafe { std::slice::from_raw_parts(dst_ptr, dst_len) };
+            assert_eq!(
+                actual,
+                expected.as_slice(),
+                "itemsize={itemsize} misalign={misalign} nontemporal={nontemporal} shape={shape:?} \
+                 src_strides={src_strides:?} dst_strides={dst_strides:?}"
             );
         }
-
-        let actual = unsafe { std::slice::from_raw_parts(dst_ptr, dst_len) };
-        assert_eq!(
-            actual,
-            expected.as_slice(),
-            "itemsize={itemsize} misalign={misalign} shape={shape:?} \
-             src_strides={src_strides:?} dst_strides={dst_strides:?}"
-        );
     }
 
     // For a fixed (element type, shape), exercise a representative set of source/dst layouts, each
@@ -1184,24 +1270,28 @@ mod tests {
 
         let src = unsafe { std::slice::from_raw_parts(src_ptr, src_len) };
         let expected = reference_copy(src, dst_len, shape, &src_strides, &dst_strides, itemsize);
-        let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
-        unsafe {
-            NdCopier::new(&dtype).copy(
-                PtrNoalias::from_slice(src),
-                PtrMutNoalias::from_slice(dst),
-                shape,
-                &src_strides,
-                &dst_strides,
-                &dtype,
+        for nontemporal in [false, true] {
+            unsafe { dst_ptr.write_bytes(0, dst_len) };
+            let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
+            unsafe {
+                NdCopier::new(&dtype).nontemporal(nontemporal).copy(
+                    PtrNoalias::from_slice(src),
+                    PtrMutNoalias::from_slice(dst),
+                    shape,
+                    &src_strides,
+                    &dst_strides,
+                    &dtype,
+                );
+            }
+            crate::util::nontemporal_fence();
+            let actual = unsafe { std::slice::from_raw_parts(dst_ptr, dst_len) };
+            assert!(
+                actual == expected.as_slice(),
+                "itemsize={itemsize} misalign={misalign} nontemporal={nontemporal} shape={shape:?} \
+                 src_order={src_order:?} dst_order={dst_order:?} mult={:?}",
+                (src_mult, dst_mult)
             );
         }
-        let actual = unsafe { std::slice::from_raw_parts(dst_ptr, dst_len) };
-        assert!(
-            actual == expected.as_slice(),
-            "itemsize={itemsize} misalign={misalign} shape={shape:?} src_order={src_order:?} \
-             dst_order={dst_order:?} mult={:?}",
-            (src_mult, dst_mult)
-        );
     }
 
     // Big transposed copies take the blocked path: 2D transposes whose extents are not multiples

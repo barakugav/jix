@@ -5,8 +5,9 @@ use crate::error::{check_get_buffer_size, check_get_range, check_region_size, en
 use crate::storage::{check_out_buf, materialize_out_buf, ArrayStorageTyped, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{
-    calc_block_end, cast_slice_mut, dim_arr, strides_for_layout_order, DimArray, DimIdx, IterExt,
-    NdCopier, PtrMutNoalias, PtrNoalias,
+    advise_huge_pages, calc_block_end, cast_slice_mut, dim_arr, is_resident,
+    nontemporal_min_read_bytes, strides_for_layout_order, DimArray, DimIdx, IterExt, NdCopier,
+    NontemporalFenceGuard, PtrMutNoalias, PtrNoalias, HUGE_PAGE_MIN_BYTES,
 };
 use crate::ReadContext;
 use crate::{default_strides, ArrayStorage, Dim, DimDyn, Dimension, PlainArray};
@@ -250,6 +251,12 @@ impl<S: ArrayStorage> Array<S> {
             }
         };
 
+        // A big destination is populated by page faults as it is first written: ask for huge
+        // pages, which take a few hundred times fewer of them.
+        if size_of_val(array.as_slice_memory_order().unwrap_or(&[])) >= HUGE_PAGE_MIN_BYTES {
+            advise_huge_pages(array.as_mut_ptr().cast::<u8>(), array.len() * itemsize);
+        }
+
         {
             let buf_strides = dim_arr(ndim, |dim| array.strides()[dim] as usize * itemsize);
             let buf = unsafe {
@@ -416,7 +423,7 @@ impl<S: ArrayStorage> Array<S> {
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
+        mut out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         let shape = self.shape();
         let dtype = self.dtype();
@@ -428,9 +435,22 @@ impl<S: ArrayStorage> Array<S> {
         )?;
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
 
+        // A caller's destination far larger than the cache would not hold on to what is written
+        // into it anyway: let whoever writes its final bytes stream them out. Only for memory that
+        // was written before - a fresh allocation is zeroed into the cache by its first touch.
+        let nontemporal = out.as_deref().is_some_and(|out| {
+            let (data, _strides) = out.data();
+            nitems.saturating_mul(dtype.itemsize() as usize) >= nontemporal_min_read_bytes()
+                && is_resident(data.as_ptr(), data.len())
+        });
+        if let Some(out) = out.as_deref_mut() {
+            out.set_nontemporal(nontemporal);
+        }
+
         let spec = self.storage.spec();
         let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
         let small_read = spec.flags().plain_read() || nitems as u64 <= min_nitems;
+        let _fence = nontemporal.then_some(NontemporalFenceGuard);
         if small_read {
             // Fast path for small reads
             self.storage.read_data(index, context, out)
@@ -508,6 +528,7 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
         return Ok(out);
     }
     let read_shape = spec.read_shape_heuristic::<D>(out_shape.as_ref(), shape, dtype.itemsize());
+    let nontemporal = out.nontemporal();
     let (out_buf, out_strides) = out.data_mut();
 
     // Only a caller-supplied destination can disagree with the layout the storage reads into:
@@ -525,7 +546,15 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
         })
         .flatten();
     match chunk_shape {
-        None => read_tiles::<D>(storage, index, context, out_buf, out_strides, &read_shape)?,
+        None => read_tiles::<D>(
+            storage,
+            index,
+            context,
+            out_buf,
+            out_strides,
+            &read_shape,
+            nontemporal,
+        )?,
         Some(chunk_shape) => read_staged::<D>(
             storage,
             index,
@@ -534,13 +563,15 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
             out_strides,
             &read_shape,
             &chunk_shape,
+            nontemporal,
         )?,
     }
     Ok(out)
 }
 
 /// Read `index` into `out_buf` one `read_shape` tile at a time, each pushed straight into its
-/// place in the destination.
+/// place in the destination. `nontemporal` is the destination's
+/// [non-temporal hint](StridedBuf::nontemporal), handed on to every tile.
 fn read_tiles<D: Dimension>(
     storage: &dyn ArrayStorage,
     index: &[Range<u64>],
@@ -548,6 +579,7 @@ fn read_tiles<D: Dimension>(
     out_buf: &mut [u8],
     out_strides: &[usize],
     read_shape: &D,
+    nontemporal: bool,
 ) -> Result<()> {
     let ndim = index.len();
     // Block-space begin/end for NdIter.
@@ -577,6 +609,7 @@ fn read_tiles<D: Dimension>(
 
         let mut block_out =
             unsafe { StridedBuf::from_slice_mut(&mut out_buf[out_offset..], out_strides) };
+        block_out.set_nontemporal(nontemporal);
         storage.read_data(inner_index.as_ref(), context, Some(&mut block_out))?;
     }
     Ok(())
@@ -653,6 +686,7 @@ fn staged_chunk_shape<D: Dimension>(
 
 /// Read `index` chunk by chunk through a scratch buffer laid out the way the storage reads, and
 /// copy each chunk into its place in `out_buf`. See [`staged_chunk_shape`].
+#[allow(clippy::too_many_arguments)]
 fn read_staged<D: Dimension>(
     storage: &dyn ArrayStorage,
     index: &[Range<u64>],
@@ -661,13 +695,14 @@ fn read_staged<D: Dimension>(
     out_strides: &[usize],
     read_shape: &D,
     chunk_shape: &D,
+    nontemporal: bool,
 ) -> Result<()> {
     let ndim = index.len();
     let dtype = storage.dtype();
     let itemsize = dtype.itemsize() as usize;
     let spec = storage.spec();
     let layout_order = spec.read_layout_order();
-    let copier = NdCopier::new(dtype);
+    let copier = NdCopier::new(dtype).nontemporal(nontemporal);
 
     let chunk_len = |dim: usize| chunk_shape[dim].min(index[dim].end - index[dim].start);
     let stage_bytes = (0..ndim).map(chunk_len).product::<u64>() as usize * itemsize;
@@ -700,6 +735,7 @@ fn read_staged<D: Dimension>(
             stage_buf,
             stage_strides.as_ref(),
             read_shape,
+            false, // the scratch buffer is reused, and read back right away
         )?;
 
         let out_offset = (0..ndim)
@@ -1284,6 +1320,61 @@ mod tests {
                 assert_eq!(dst[c * 200 + r], nd[[r, c]], "({r}, {c})");
             }
         }
+    }
+
+    #[test]
+    fn read_into_a_written_destination_matches_a_fresh_one() {
+        // A destination that was written before is resident, and - being over the (test-sized)
+        // threshold - is read into with non-temporal stores; a fresh allocation is not. Both
+        // must hold the same values, through the plain, compact, staged and op paths.
+        let (nd, a) = staged_source(&[200, 300], &[1, 300]);
+        let plain = Array::plain_ndarray(nd.clone()).unwrap();
+        let expected = nd.iter().copied().collect::<Vec<_>>();
+        let expected_t = nd
+            .view()
+            .reversed_axes()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+
+        fn read_into<S: crate::ArrayStorage>(
+            array: &Array<S>,
+            index: &[std::ops::Range<u64>],
+            dst: &mut [i32],
+        ) {
+            let bytes = unsafe {
+                std::slice::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), dst.len() * 4)
+            };
+            array.to_buf_slice(index, bytes, &array.read_ctx()).unwrap();
+        }
+        let written = || vec![-1i32; 200 * 300];
+
+        let mut dst = written();
+        read_into(&a, &[0..200, 0..300], &mut dst);
+        assert_eq!(dst, expected);
+
+        let mut dst = written();
+        read_into(&plain, &[0..200, 0..300], &mut dst);
+        assert_eq!(dst, expected);
+
+        let mut dst = written();
+        read_into(&a.view().permute_dims(&[1, 0]), &[0..300, 0..200], &mut dst);
+        assert_eq!(dst, expected_t);
+
+        let mut dst = written();
+        read_into(
+            &plain.view().permute_dims(&[1, 0]),
+            &[0..300, 0..200],
+            &mut dst,
+        );
+        assert_eq!(dst, expected_t);
+
+        let mut dst = written();
+        read_into(&a.view().map(|x: i32| x ^ 1), &[0..200, 0..300], &mut dst);
+        assert_eq!(dst, expected.iter().map(|x| x ^ 1).collect::<Vec<_>>());
+
+        // And `to_ndarray`, which allocates (and advises) its own destination.
+        assert_eq!(a.to_ndarray::<IxDyn>().unwrap(), nd);
     }
 
     #[test]

@@ -42,7 +42,17 @@ impl BufferPool {
         let pool = unsafe { &mut *pool };
         let buf = match pool.pop() {
             Some(buf) if buf.capacity() >= size => buf,
-            _ => unsafe { RawAlignedBytes::with_capacity_unchecked(size, pool_align.as_usize()) },
+            _ => {
+                let mut buf = unsafe {
+                    RawAlignedBytes::with_capacity_unchecked(size, pool_align.as_usize())
+                };
+                // A big scratch buffer (a staged chunk, a whole pulled region) is populated by
+                // page faults on its first use: ask for huge pages.
+                if size >= crate::util::HUGE_PAGE_MIN_BYTES {
+                    crate::util::advise_huge_pages(buf.as_mut_ptr(), size);
+                }
+                buf
+            }
         };
         PoolBuf {
             buf: ManuallyDrop::new(buf),
