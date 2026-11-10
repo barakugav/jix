@@ -173,6 +173,8 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
         /* decoder_config */ DecoderCodecConfig,
     ) -> Result<B>,
 ) -> Result<B::Output> {
+    let _cache_scope = context.cache_scope(&storage.spec().dynamic().arrays_to_cache);
+
     let shape = storage.shape();
     let ndim = shape.len();
     let dtype = storage.dtype();
@@ -301,7 +303,8 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
             tmp_block_plain.reserve(block_size_bytes);
             unsafe { tmp_block_plain.set_len(block_size_bytes) };
             if !full_block {
-                tmp_block_plain.fill(0); // zero-pad
+                // TODO: to we need to fill all?
+                tmp_block_plain.fill(0); // zero-pad,
             }
             let src_byte_offset = (0..ndim)
                 .map(|dim| {

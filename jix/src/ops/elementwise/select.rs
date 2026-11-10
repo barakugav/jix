@@ -41,6 +41,7 @@ pub struct Select<SC, SX, SY> {
     condition: SC,
     x: SX,
     y: SY,
+    cache_id: ArrayCacheId,
     spec: ArraySpecDynamic,
 }
 impl<SC, SX, SY> Select<SC, SX, SY>
@@ -100,17 +101,21 @@ where
             (x_spec.block_shape(), x_spec.block_shape_fixed_dims()),
             (y_spec.block_shape(), y_spec.block_shape_fixed_dims()),
         ]);
-        let spec = ArraySpecDynamic::new(
+        let cache_id = ArrayCacheId::new();
+        let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
         );
+        spec.add_cache_ids_from([&c_spec, &x_spec, &y_spec]);
+        spec.add_cache_id(cache_id);
         Ok(Self {
             condition,
             x,
             y,
+            cache_id,
             spec,
         })
     }
@@ -120,18 +125,9 @@ where
         Self::new(condition.into_storage(), x.into_storage(), y.into_storage())
             .map(Array::from_storage)
     }
-}
-impl<SC, SX, SY> crate::storage::ArrayStorageImpl for Select<SC, SX, SY> {}
-impl<SC, SX, SY> ArrayStorage for Select<SC, SX, SY>
-where
-    SC: ArrayStorageTyped<Item = bool8>,
-    SX: ArrayStorage,
-    SY: ArrayStorage<ElementType = SX::ElementType>,
-{
-    type ElementType = SX::ElementType;
 
     #[inline]
-    fn read_data<'a>(
+    fn read_data_uncached<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
@@ -324,6 +320,27 @@ where
 
         Ok(out)
     }
+}
+impl<SC, SX, SY> crate::storage::ArrayStorageImpl for Select<SC, SX, SY> {}
+impl<SC, SX, SY> ArrayStorage for Select<SC, SX, SY>
+where
+    SC: ArrayStorageTyped<Item = bool8>,
+    SX: ArrayStorage,
+    SY: ArrayStorage<ElementType = SX::ElementType>,
+{
+    type ElementType = SX::ElementType;
+
+    #[inline]
+    fn read_data<'a>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
+            self.read_data_uncached(index, context, out)
+        })
+    }
 
     #[inline]
     fn read_as_elementwise_pipeline<'a, T>(
@@ -422,6 +439,7 @@ where
             condition: self.condition,
             x: self.x.element_type_change()?,
             y: self.y.element_type_change()?,
+            cache_id: self.cache_id,
             spec: self.spec,
         })
     }

@@ -42,6 +42,7 @@ pub struct RemoveDim<S> {
     dims_mapping: DimArray<DimIdx>,
 
     shape: DimDyn,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 
@@ -110,18 +111,21 @@ where
             .filter(|&&d| !is_removed[d as usize])
             .map(|&d| out_dim(d as usize))
             .collect();
-        let spec = ArraySpecDynamic::new(
+        let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             inner_spec.element_cost(),
             read_shape_scale_weight,
             read_layout_order,
         );
+        spec.add_cache_ids_from([&inner_spec]);
+        let cache_scope = spec.with_cache_scope();
 
         Ok(Self {
             array,
             dims_mapping,
             shape,
+            cache_scope,
             spec,
         })
     }
@@ -164,6 +168,7 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
+        let _cache_scope = self.cache_scope.enter(context);
         unsafe {
             read_data_and_map_strides(
                 &self.array,
@@ -214,6 +219,7 @@ where
             array: self.array.element_type_change()?,
             dims_mapping: self.dims_mapping,
             shape: self.shape,
+            cache_scope: self.cache_scope,
             spec: self.spec,
         })
     }

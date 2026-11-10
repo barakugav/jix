@@ -1,11 +1,12 @@
 use std::ops::Range;
+use std::sync::Arc;
 
-use crate::buf_pool::PoolBuf;
+use crate::buf_pool::{PoolBuf, PoolBufShared};
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_region_size, ensure, Result};
 use crate::util::{
     default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
-    SliceExt,
+    RawAlignedBytes, SliceExt,
 };
 use crate::{ArrayStorage, DimDyn, DimIdx, NdCopier, PtrMutNoalias, PtrNoalias, ReadContext};
 
@@ -51,8 +52,18 @@ pub struct StridedBuf<'a> {
 enum StridedBufData<'a> {
     Slice(&'a [u8]),
     SliceMut(&'a mut [u8]),
-    PoolBuf { buf: PoolBuf<'a>, offset: usize },
-    PoolBufMut { buf: PoolBuf<'a>, offset: usize },
+    PoolBuf {
+        buf: PoolBuf<'a>,
+        offset: usize,
+    },
+    PoolBufMut {
+        buf: PoolBuf<'a>,
+        offset: usize,
+    },
+    Shared {
+        buf: PoolBufShared<'a>,
+        offset: usize,
+    },
 }
 
 impl<'a> StridedBuf<'a> {
@@ -141,6 +152,19 @@ impl<'a> StridedBuf<'a> {
         }
     }
 
+    /// Create a read-only view into a shared pooled buffer with the given (byte) `strides`.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`from_slice`](Self::from_slice).
+    #[inline]
+    pub(crate) unsafe fn from_shared(buf: PoolBufShared<'a>, strides: &[usize]) -> Self {
+        Self {
+            data: StridedBufData::Shared { buf, offset: 0 },
+            strides: strides.to_dim_vec::<DimDyn>(),
+        }
+    }
+
     #[inline]
     pub(crate) fn is_writable(&self) -> bool {
         matches!(
@@ -187,6 +211,7 @@ impl<'a> StridedBuf<'a> {
             StridedBufData::SliceMut(s) => &**s,
             StridedBufData::PoolBuf { buf, offset }
             | StridedBufData::PoolBufMut { buf, offset } => &buf.as_slice()[*offset..],
+            StridedBufData::Shared { buf, offset } => &buf.as_slice()[*offset..],
         };
         (data, self.strides.as_ref())
     }
@@ -197,7 +222,9 @@ impl<'a> StridedBuf<'a> {
         let data = match &mut self.data {
             StridedBufData::SliceMut(s) => &mut **s,
             StridedBufData::PoolBufMut { buf, offset } => &mut buf.as_mut_slice()[*offset..],
-            StridedBufData::Slice(_) | StridedBufData::PoolBuf { .. } => {
+            StridedBufData::Slice(_)
+            | StridedBufData::PoolBuf { .. }
+            | StridedBufData::Shared { .. } => {
                 panic!("data_mut on a read-only StridedBuf view")
             }
         };
@@ -280,6 +307,10 @@ impl<'a> StridedBuf<'a> {
                 buf,
                 offset: offset + n,
             },
+            StridedBufData::Shared { buf, offset } => StridedBufData::Shared {
+                buf,
+                offset: offset + n,
+            },
         };
         StridedBuf { data, strides }
     }
@@ -303,6 +334,19 @@ impl<'a> StridedBuf<'a> {
             strides,
         }
     }
+
+    pub(crate) fn into_shared(
+        self,
+    ) -> Result<(Arc<RawAlignedBytes>, usize, DimArray<usize>), Self> {
+        Ok(match self.data {
+            StridedBufData::PoolBuf { buf, offset }
+            | StridedBufData::PoolBufMut { buf, offset } => {
+                (Arc::new(buf.into_inner()), offset, self.strides)
+            }
+            StridedBufData::Shared { buf, offset } => (buf.into_arc(), offset, self.strides),
+            _ => return Err(self),
+        })
+    }
 }
 
 pub(crate) fn check_out_buf(
@@ -313,13 +357,23 @@ pub(crate) fn check_out_buf(
 ) -> Result<()> {
     check_get_range(array_shape, index)?;
     check_region_size(index, itemsize)?;
-    let Some(out) = out else { return Ok(()) };
+    match out {
+        Some(out) => check_out_buf_impl(out, index, itemsize),
+        None => Ok(()),
+    }
+}
+
+pub(crate) fn check_out_buf_impl(
+    out: &StridedBuf,
+    index: &[Range<u64>],
+    itemsize: usize,
+) -> Result<()> {
     ensure!(
-        out.strides().len() == array_shape.len(),
+        out.strides().len() == index.len(),
         InvalidArgument,
         "out buffer has {} strides but array has {} dimensions",
         out.strides().len(),
-        array_shape.len()
+        index.len()
     );
     ensure!(
         out.is_writable(),

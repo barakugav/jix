@@ -43,6 +43,7 @@ pub struct PermuteDims<S: ArrayStorage> {
     inv_dims: DimArray<DimIdx>,
 
     shape: DimDyn,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 
@@ -81,7 +82,7 @@ impl<S: ArrayStorage> PermuteDims<S> {
         let inner_spec = array.spec();
         let block_shape = dim_arr(ndim, |i| inner_spec.block_shape()[dims[i]]);
         let inner_block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
-        let spec = ArraySpecDynamic::new(
+        let mut spec = ArraySpecDynamic::new(
             block_shape,
             (0..ndim)
                 .map(|i| inner_block_shape_fixed_dims.get(dims[i]))
@@ -94,9 +95,12 @@ impl<S: ArrayStorage> PermuteDims<S> {
                 .map(|&old| inv_dims[old as usize])
                 .collect(),
         );
+        spec.add_cache_ids_from([&inner_spec]);
+        let cache_scope = spec.with_cache_scope();
         let dims = dim_arr(ndim, |i| dims[i] as DimIdx);
         Ok(Self {
             shape,
+            cache_scope,
             spec,
             array,
             dims,
@@ -128,6 +132,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
             self.dtype().itemsize() as usize,
         )?;
         let ndim = self.dims.as_ref().len();
+        let _cache_scope = self.cache_scope.enter(context);
         unsafe {
             read_data_and_map_strides(
                 &self.array,
@@ -169,6 +174,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
             dims: self.dims,
             inv_dims: self.inv_dims,
             shape: self.shape,
+            cache_scope: self.cache_scope,
             spec: self.spec,
         })
     }

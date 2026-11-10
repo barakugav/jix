@@ -1,10 +1,15 @@
-#[cfg(not(miri))]
-use std::cell::UnsafeCell;
+use std::cell::{Cell, RefCell, UnsafeCell};
+use std::ops::Range;
+use std::sync::Arc;
 
-use crate::buf_pool::{BufferPool, PoolBuf};
+use crate::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
 use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
-use crate::dtype::Alignment;
+use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
+use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
+use crate::storage::{check_out_buf_impl, StridedBuf};
+use crate::util::{dim_arr, DimArray, RawAlignedBytes, SliceExt};
+use crate::DimDyn;
 
 /// A context with reusable buffers and a long-lived decoder instance.
 ///
@@ -55,7 +60,17 @@ pub struct ReadContext {
     #[cfg(not(miri))]
     pub(crate) decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     pub(crate) buffer_pool: BufferPool,
+
+    /// The read cache of the current cache scope, `None` if the scope has no arrays to cache.
+    read_cache: RefCell<Option<Cache>>,
+    /// equals `read_cache.is_some()`.
+    /// So the reads in a scope without arrays to cache never touch the `RefCell`.
+    is_cache_enabled: Cell<bool>,
+    /// Reuseable cache maps for cache scopes.
+    #[allow(clippy::vec_box)]
+    temp_cache_maps: RefCell<Vec<Box<CacheMap>>>,
 }
+
 impl ReadContext {
     /// Creates a new `ReadContext` configured with the given decoder parameters.
     ///
@@ -66,6 +81,10 @@ impl ReadContext {
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
             buffer_pool: BufferPool::new(),
+
+            read_cache: RefCell::new(None),
+            is_cache_enabled: Cell::new(false),
+            temp_cache_maps: RefCell::new(Vec::new()),
         })
     }
 
@@ -87,5 +106,215 @@ const _: fn() = || {
 impl Default for ReadContext {
     fn default() -> Self {
         Self::new(&DecoderParams::default()).unwrap()
+    }
+}
+
+struct Cache {
+    arrays_to_cache: Arc<ArrayCacheIdSet>,
+    map: Box<CacheMap>,
+}
+type CacheMap = ArrayCacheIdMap<CacheEntry>;
+struct CacheEntry {
+    index: DimArray<Range<u64>>,
+
+    data: Arc<RawAlignedBytes>,
+    offset: usize,
+    strides: DimArray<usize>,
+}
+
+pub(crate) struct CacheScope {
+    pub(crate) arrays_to_cache: Option<Arc<ArrayCacheIdSet>>,
+}
+impl CacheScope {
+    #[inline]
+    pub(crate) fn enter<'a>(&self, context: &'a ReadContext) -> CacheScopeGuard<'a> {
+        context.cache_scope(&self.arrays_to_cache)
+    }
+}
+pub(crate) struct CacheScopeGuard<'a> {
+    context: &'a ReadContext,
+    /// The read cache of the enclosing scope, hidden from the reads in the scope and restored when
+    /// it ends. `None` if the scope changes nothing, as neither it nor the enclosing scope uses
+    /// the read cache.
+    prev: Option<Option<Cache>>,
+}
+
+impl Drop for CacheScopeGuard<'_> {
+    #[inline]
+    fn drop(&mut self) {
+        if let Some(prev) = self.prev.take() {
+            self.context.exit_cache_scope(prev);
+        }
+    }
+}
+
+impl ReadContext {
+    /// Read the region `index` of the storage `id` with `read` (called with `out`), through the
+    /// read cache if `id` is one of the arrays to cache of the current cache scope.
+    #[inline(always)]
+    pub(crate) fn read_cached<'a, 'b>(
+        &'a self,
+        id: ArrayCacheId,
+        index: &[Range<u64>],
+        dtype: &Dtype,
+        out: Option<&'a mut StridedBuf<'b>>,
+        read: impl Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
+    ) -> Result<StridedBuf<'a>> {
+        if !self.is_cache_enabled() {
+            return read(out);
+        }
+        self.read_cached_impl(id, index, dtype, out, &read)
+    }
+
+    #[inline(never)]
+    fn read_cached_impl<'a, 'b>(
+        &'a self,
+        id: ArrayCacheId,
+        index: &[Range<u64>],
+        dtype: &Dtype,
+        out: Option<&'a mut StridedBuf<'b>>,
+        read_fn: &dyn CachedReadFn<'a, 'b>,
+    ) -> Result<StridedBuf<'a>> {
+        let pull = out.is_none();
+        let mut cache_guard = self.read_cache.borrow_mut();
+        // Check if cache is enabled for this array ID
+        let cache = cache_guard
+            .as_mut()
+            .filter(|c| c.arrays_to_cache.contains(id));
+        let Some(cache) = cache else {
+            drop(cache_guard); // before calling unknown `read()`
+            return read_fn.read(out);
+        };
+        // Search for a matching cache entry for this array ID and index
+        if let Some(entry) = cache.map.get(id) {
+            if entry.index.as_slice() == index {
+                let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
+                let buf = unsafe {
+                    StridedBuf::from_shared(buf, &entry.strides).with_offset(entry.offset)
+                };
+                drop(cache_guard);
+
+                return Ok(match out {
+                    // user didnt provide an output buffer, return the cached buffer as is
+                    None => buf,
+                    // user provided an output buffer, copy the cached data into it
+                    Some(out) => {
+                        check_out_buf_impl(out, index, dtype.itemsize() as usize)?;
+
+                        let shape =
+                            dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+                        let (src, src_strides) = buf.data();
+                        // SAFETY: the cached buffer holds the region at `src_strides`, and `out`
+                        // was checked to hold it at its own strides.
+                        unsafe { out.copy_from(src, src_strides, &shape, dtype) };
+                        out.view_mut()
+                    }
+                });
+            } else {
+                // Evict before reading, so the read can reuse the buffer.
+                if pull && let Some(stale) = cache.map.remove(id) {
+                    self.buffer_pool.return_shared(stale.data);
+                }
+            }
+        }
+
+        drop(cache_guard); // before calling unknown `read()`
+        let buf = read_fn.read(out)?;
+        if !pull {
+            return Ok(buf); // user provided an output buffer, we can't hold a ref to it in cache
+        }
+        let (data, offset, strides) = match buf.into_shared() {
+            Ok(parts) => parts,
+            Err(buf) => return Ok(buf), // A view of memory outside the pool is not cached.
+        };
+        let buf = PoolBufShared::new(data.clone(), &self.buffer_pool);
+        let buf = unsafe { StridedBuf::from_shared(buf, &strides).with_offset(offset) };
+        let entry = CacheEntry {
+            index: index.to_dim_vec::<DimDyn>(),
+            data,
+            offset,
+            strides,
+        };
+        let stale = self
+            .read_cache
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .map
+            .insert(id, entry);
+        if let Some(stale) = stale {
+            self.buffer_pool.return_shared(stale.data);
+        }
+        Ok(buf)
+    }
+
+    #[inline]
+    pub(crate) fn cache_scope(
+        &self,
+        arrays_to_cache: &Option<Arc<ArrayCacheIdSet>>,
+    ) -> CacheScopeGuard<'_> {
+        let prev = (self.is_cache_enabled() || arrays_to_cache.is_some())
+            .then(|| self.enter_cache_scope(arrays_to_cache));
+        CacheScopeGuard {
+            context: self,
+            prev,
+        }
+    }
+
+    #[inline(never)]
+    fn enter_cache_scope(&self, arrays_to_cache: &Option<Arc<ArrayCacheIdSet>>) -> Option<Cache> {
+        let cache = arrays_to_cache.as_ref().map(|ids| {
+            let map = self.temp_cache_maps.borrow_mut().pop().unwrap_or_default();
+            debug_assert!(map.is_empty());
+            Cache {
+                arrays_to_cache: ids.clone(),
+                map,
+            }
+        });
+        self.is_cache_enabled.set(cache.is_some());
+        self.read_cache.replace(cache)
+    }
+
+    #[inline(never)]
+    fn exit_cache_scope(&self, prev: Option<Cache>) {
+        self.is_cache_enabled.set(prev.is_some());
+        let ended = self.read_cache.replace(prev);
+        if let Some(mut ended) = ended {
+            ended
+                .map
+                .clear_with(|entry| self.buffer_pool.return_shared(entry.data));
+            self.temp_cache_maps.borrow_mut().push(ended.map);
+        }
+    }
+
+    #[inline(always)]
+    fn is_cache_enabled(&self) -> bool {
+        let enabled = self.is_cache_enabled.get();
+        debug_assert!(enabled == self.read_cache.borrow().is_some());
+        enabled
+    }
+}
+
+// could be replaced by `Fn`, but a trait generate less binary
+trait CachedReadFn<'a, 'b: 'a> {
+    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>;
+}
+impl<'a, 'b: 'a, F> CachedReadFn<'a, 'b> for F
+where
+    F: Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
+{
+    #[inline(always)]
+    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>> {
+        self(out)
+    }
+}
+
+pub(crate) mod tests {
+    #[allow(unused)]
+    pub(crate) fn context_read_cache_len(context: &super::ReadContext) -> usize {
+        match &*context.read_cache.borrow() {
+            Some(cache) => cache.map.keys().count(),
+            None => 0,
+        }
     }
 }

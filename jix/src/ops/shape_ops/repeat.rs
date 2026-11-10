@@ -29,6 +29,7 @@ pub struct Repeat<S: ArrayStorage> {
     dim: DimIdx,
     repeats: u64,
     new_shape: DimDyn,
+    cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 
@@ -71,19 +72,22 @@ impl<S: ArrayStorage> Repeat<S> {
             .saturating_mul(repeats.min(BlockSize::MAX as u64) as BlockSize)
             .min(new_len.min(BlockSize::MAX as u64) as BlockSize)
             .max(1);
-        let spec = ArraySpecDynamic::new(
+        let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             inner_spec.element_cost(),
             inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>(),
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
         );
+        spec.add_cache_ids_from([&inner_spec]);
+        let cache_scope = spec.with_cache_scope();
 
         Ok(Self {
             array,
             dim: dim as DimIdx,
             repeats,
             new_shape,
+            cache_scope,
             spec,
         })
     }
@@ -110,6 +114,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             index,
             self.dtype().itemsize() as usize,
         )?;
+        let _cache_scope = self.cache_scope.enter(context);
 
         let ndim = self.new_shape.ndim();
         let dtype = self.dtype();
@@ -240,7 +245,6 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
                 copy_region((g_count - 1)..g_count, 0..p_end_tail);
             }
         }
-
         Ok(out)
     }
 
@@ -275,6 +279,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             dim: self.dim,
             repeats: self.repeats,
             new_shape: self.new_shape,
+            cache_scope: self.cache_scope,
             spec: self.spec,
         })
     }
