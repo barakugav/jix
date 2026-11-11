@@ -3,11 +3,11 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{BitAnd, BitOr, BitXor, Not};
 
-/// A one-byte boolean, the boolean element type of jix arrays. `0` is `false`, any other value is `true`.
+/// A one-byte boolean, the boolean element type of jix arrays. `0` is `false`, any other value
+/// is `true`.
 ///
-/// An std rust `bool` must be exactly `0` or `1`, so we cant interpret bytes from a file or
-/// other external sources as `bool` as it is undefined behavior for any other value.
-/// For `bool8`, any byte value is valid. `0` is `false`, any other value is `true`.
+/// Every byte is a valid `bool8`, unlike a Rust `bool`, for which any byte other than `0` or `1`
+/// is undefined behavior; so bytes from a file or other external source can be read as `bool8`.
 ///
 /// ```
 /// use jix::scalar::bool8;

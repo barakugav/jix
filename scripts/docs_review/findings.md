@@ -197,3 +197,13 @@ Docs, not fixed:
 
 - `jix/src/archive/mod.rs:23` doc line is 131 columns (over the 100-column limit).
 - `jix/src/storage/params.rs:59,66,73,80,122,208,593,594,597,938,941,1051` doc lines over 100 columns.
+
+## dtype
+
+Needs the maintainer:
+
+- `jix/src/scalar/mod.rs:9` the module doc says each trait has a scalar fn (`add`) and a bulk one (`add_bulk`); reduction traits such as `Sum` use `update`/`update_bulk` instead (`jix/src/ops/reduction/arith.rs:66-71`). The pattern holds, only the names differ; left as is.
+
+Docs, not fixed:
+
+- `jix/src/ops/elementwise/cast.rs:15,19` the `Cast` trait doc lines exceed 100 columns.
