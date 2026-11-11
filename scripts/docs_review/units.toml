@@ -365,8 +365,21 @@ context = ["ops", "python", "read_model"]
 edit = []
 read = ["jix/src", "jix-py/src", "jix-py/docs", "README.md"]
 notes = """
-Runs alone, on the result of all other units, and may edit any in-scope file. Looks only for what
-a single unit cannot see: the same fact stated differently in two places, a term used
-inconsistently across modules, a name that is absent from api_index.md, and the 'Outside my
-unit' entries collected from the unit reports.
+Runs alone, on the result of all other units. It may edit any in-scope file - the doc comments
+under jix/src, jix-py/src and jix-macros/src, and the markdown pages - plus
+scripts/docs_review/findings.md. It does not redo the units' work; it handles only what a single
+unit could not see:
+
+1. The "Docs, not fixed" entries of scripts/docs_review/findings.md. Fix each one that is a doc
+   comment or markdown in scope, and delete the entry from findings.md once fixed. Leave the
+   entries about macro-generated docs, tests, CLAUDE.md and other out-of-scope files, and leave
+   every "Needs the maintainer" entry.
+2. A fact stated differently in two places: the same op in the Rust and the Python docs, a concept
+   in a module overview and in the item docs, the copies of the landing pages.
+3. A Python function whose "Supported dtypes" omits inputs that its dispatch table accepts through
+   a cast, where its siblings state it (as "integers and `bool` are cast to a float first").
+4. A term used inconsistently across modules (general.md, Vocabulary), and a name that is absent
+   from api_index.md.
+
+Work from grep across the tree rather than reading every file in full.
 """
