@@ -302,6 +302,9 @@ define_reduction_op!(
     ///
     /// Uses Welford's online algorithm for numerical stability.
     ///
+    /// Reducing an empty dim makes [`Variance::new`] fail with `ErrorKind::InvalidArgument`, and
+    /// [`Array::var()`](crate::Array::var) panic.
+    ///
     /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
@@ -395,6 +398,9 @@ define_reduction_op!(
     /// Equivalent to `sqrt(variance)`, with the same real-valued output dtypes and the same
     /// `ddof` parameter as [`Variance`]: use `ddof=0` for population std and `ddof=1` for
     /// sample std.
+    ///
+    /// Reducing an empty dim makes [`StandardDeviation::new`] fail with
+    /// `ErrorKind::InvalidArgument`, and [`Array::std()`](crate::Array::std) panic.
     ///
     /// The result is a lazy view.
     ///

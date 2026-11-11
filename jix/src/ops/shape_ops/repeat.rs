@@ -92,7 +92,8 @@ impl<S: ArrayStorage> Repeat<S> {
         })
     }
 
-    /// Constructs an array with [`Repeat`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Repeat`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(array: Array<S>, repeats: u64, dim: usize) -> Result<Array<Self>> {
         Self::new(array.into_storage(), repeats, dim).map(Array::from_storage)
     }

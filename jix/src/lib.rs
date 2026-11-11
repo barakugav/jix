@@ -79,24 +79,23 @@
 //!   by an mmap'd file, without using the compact format.
 //! - **Long and/or complex pipelines of operations.**
 //!   Plain iterators over regular ndarrays already
-//!   give you lazy element-wise evaluation for free (although naive use of the `ndarray` crate may still
-//!   produce NumPy-style intermediates), so for simple `map`/`zip`-style pipelines
-//!   jix offers little over hand-written iterator code.
-//!   The advantage shows up once the pipeline includes
-//!   operations that change the shape or the access pattern - reductions, broadcasts,
-//!   dim permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on.
-//!   These are awkward or impractical to express as plain iterator chains,
-//!   especially when combined with element-wise operations.
-//!   Jix composes element-wise and shape-changing operations uniformly in the same operation chain,
-//!   all as lazy views, and because the full chain is encoded in the static type the compiler is able to
-//!   inline the whole pipeline into a single read loop - no virtual dispatch, no runtime scheduler,
-//!   no (large) intermediate allocations beyond the final output.
+//!   give you lazy element-wise evaluation for free (although naive use of the `ndarray` crate may
+//!   still produce NumPy-style intermediates), so for simple `map`/`zip`-style pipelines jix offers
+//!   little over hand-written iterator code. The advantage shows up once the pipeline includes
+//!   operations that change the shape or the access pattern - reductions, broadcasts, dim
+//!   permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on. These are
+//!   awkward or impractical to express as plain iterator chains, especially when combined with
+//!   element-wise operations. Jix composes element-wise and shape-changing operations uniformly in
+//!   the same operation chain, all as lazy views, and because the full chain is encoded in the
+//!   static type the compiler is able to inline the whole pipeline into a single read loop - no
+//!   virtual dispatch, no runtime scheduler, no (large) intermediate allocations beyond the final
+//!   output.
 //!
 //! # Core type: `Array<S>`
 //!
 //! [`Array<S>`](Array) is generic over its storage backend [`S: ArrayStorage`](ArrayStorage). The
-//! storage trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else - slicing,
-//! arithmetic, reductions, serialization - is implemented on top of those three.
+//! storage trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else -
+//! slicing, arithmetic, reductions, serialization - is implemented on top of those three.
 //!
 //! The type parameter `S` carries the full operation chain at compile time:
 //!
@@ -372,10 +371,11 @@
 //! # Acknowledgements
 //!
 //! This project would not exist without the work of several upstream authors and communities.
-//! Specifically, this project was greatly inspired by the [C-Blosc2](https://github.com/Blosc/c-blosc2) library.
-//! This crate can almost be seen as a port of ideas and natural Rust evolution of C-Blosc2.
-//! See the `THANKS.md` at the repository root for a more complete list of contributors and inspirations,
-//! and the `NOTICE` file for full attribution and license text.
+//! Specifically, this project was greatly inspired by the
+//! [C-Blosc2](https://github.com/Blosc/c-blosc2) library. This crate can almost be seen as a port
+//! of ideas and natural Rust evolution of C-Blosc2. See the `THANKS.md` at the repository root for
+//! a more complete list of contributors and inspirations, and the `NOTICE` file for full
+//! attribution and license text.
 
 mod array;
 pub use array::Array;

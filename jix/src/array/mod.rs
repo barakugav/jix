@@ -224,6 +224,10 @@ impl<S: ArrayStorage> Array<S> {
     /// Any context, e.g. `ReadContext::default()`, gives correct results; this one uses the
     /// array's own decoder configuration.
     ///
+    /// # Panics
+    ///
+    /// Panics if the context cannot be created.
+    ///
     /// # Examples
     ///
     /// ```

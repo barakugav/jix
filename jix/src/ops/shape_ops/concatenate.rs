@@ -171,7 +171,8 @@ where
         })
     }
 
-    /// Constructs an array with [`Concatenate`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Concatenate`] storage. See the storage struct docs for semantics
+    /// and examples.
     pub fn new_array(arrays: ArraysT, dim: usize) -> Result<Array<Self>> {
         Self::new(arrays, dim).map(Array::from_storage)
     }

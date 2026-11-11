@@ -54,8 +54,8 @@ impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffset<D, S> {
 /// An nd-iterator extension that tracks `N` offsets into `N` strided arrays simultaneously.
 ///
 /// Like [`NdIterExtStridesOffset`] but for a fixed number of operands sharing one index walk: on
-/// each dimension change every offset is advanced by `(after - before) * strides[operand][dim]`, and
-/// [`value`](NdIterExtension::value) yields `[S; N]`.
+/// each dimension change every offset is advanced by `(after - before) * strides[operand][dim]`,
+/// and [`value`](NdIterExtension::value) yields `[S; N]`.
 pub(crate) struct NdIterExtStridesOffsetMulti<D: Dimension, S, const N: usize> {
     strides: [D::Vec<S>; N],
     offsets: [S; N],
@@ -105,8 +105,8 @@ impl<D: Dimension, S: Idx, const N: usize> NdIterExtension
     impl_merge_extension!();
 }
 
-/// The runtime-length sibling of [`NdIterExtStridesOffsetMulti`], for callers whose operand count is
-/// not known at compile time.
+/// The runtime-length sibling of [`NdIterExtStridesOffsetMulti`], for callers whose operand count
+/// is not known at compile time.
 pub(crate) struct NdIterExtStridesOffsetMultiDyn<D: Dimension, S> {
     strides: Vec<D::Vec<S>>,
     offsets: Vec<S>,

@@ -286,7 +286,8 @@ define_op1!(
 define_op2!(
     /// Element-wise left shift (`a << b`).
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`; `bool` is cast to
+    /// `u8`.
     /// Output dtype equals the promoted input type.
     ///
     /// Vacated bits are filled with zeros. As in numpy, shifting by the bit width of the type
@@ -325,7 +326,8 @@ define_op2!(
 define_op2!(
     /// Element-wise right shift (`a >> b`).
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`; `bool` is cast to
+    /// `u8`.
     /// Output dtype equals the promoted input type.
     ///
     /// For **unsigned** types this is a logical shift: vacated bits are filled with zeros.

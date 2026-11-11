@@ -12,7 +12,8 @@ use crate::Array;
 /// Arithmetic negation applied element-wise.
 ///
 /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`,
-/// `Complex<f32>`, `Complex<f64>`.
+/// `Complex<f32>`, `Complex<f64>`. Unsigned integers and `bool` are also accepted, as described
+/// under `array`.
 ///
 /// For **integer** types the result is the two's-complement negation. Negating the
 /// minimum representable value (e.g. `int8` `-128`) overflows and wraps.
@@ -411,8 +412,9 @@ pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<A
 /// Element-wise exponentiation (`a` raised to the power `b`).
 ///
 /// Supported base dtypes: `u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`,
-/// `f16`, `f32`, `f64`. For an **integer** base the exponent must be an integer; for a
-/// **float** base it may be an integer or a float. Complex dtypes are not supported yet.
+/// `f16`, `f32`, `f64`. An **integer** base takes an integer exponent, and is promoted to a
+/// float with a float exponent; a **float** base takes an integer or a float exponent. Complex
+/// dtypes are not supported yet.
 ///
 /// For a directly supported `(base, exponent)` pair the output dtype equals the
 /// base dtype - e.g. `u8 ** u8 -> u8`, `i32 ** i32 -> i32`, `f32 ** i32 -> f32`,

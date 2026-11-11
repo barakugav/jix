@@ -35,8 +35,9 @@ use crate::Array;
 ///     params: Block layout and codec configuration. See [`jix.compact()`][jix.compact] for
 ///         details. These never change the loaded data: the block shape comes from the archive
 ///         (`block_shape` is ignored) and the blocks are decoded with the codec they were written
-///         with. They mostly affect arrays later created from the result (e.g. via `compact()` or
-///         `write_array()`), which inherit them, so their codec settings come from `params`.
+///         with. They mostly affect arrays later created from the result (e.g. via `compact()`,
+///         or `write_array()` of a lazy view of it), which inherit them, so their codec settings
+///         come from `params`.
 ///     validation: How strictly the archive is validated:
 ///
 ///         - `None` (default): currently the same as `strict`; this may change.
