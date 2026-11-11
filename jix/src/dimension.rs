@@ -11,16 +11,13 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// Arrays always track their number of dims at runtime (see [`Array::shape`](crate::Array::shape)).
 /// `Dimension` is a crate-internal argument helper (public APIs take shapes as `&[u64]`): internal
-/// functions that accept [`IntoDimension`] can be given a `u64`, an array or tuple of `u64`, or a
-/// slice.
+/// functions that accept [`IntoDimension`] can be given a `u64`, an array or tuple of `u64`, a
+/// slice, or a `Dimension` itself.
 ///
 /// # Two implementors
 ///
 /// - **[`Dim<N>`]** - the ndim is known at compile time. Implemented for `N = 0..=8`.
 /// - **[`DimDyn`]** - the ndim is only known at runtime, stored in a stack-allocated array.
-///
-/// Every `Dimension` value also implements [`IntoDimension`] (with `Dimension = Self`), so a
-/// `Dim<N>` or `DimDyn` can be passed directly to any function that accepts `IntoDimension`.
 #[allow(unused)]
 pub(crate) trait Dimension:
     Index<usize, Output = u64>
@@ -38,8 +35,7 @@ pub(crate) trait Dimension:
     /// - `Some(N)` for [`Dim<N>`]: the compiler can prove `ndim == N`.
     /// - `None` for [`DimDyn`]: ndim is determined at runtime.
     ///
-    /// This constant is used internally to skip runtime length checks when the ndim is statically
-    /// known.
+    /// Used internally to skip runtime length checks when the ndim is statically known.
     const NDIM: Option<usize>;
 
     /// The type of the index pattern for this dimension.
@@ -321,11 +317,8 @@ impl_dim!(6, index = { (u64, u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[
 impl_dim!(7, nd_dim = ndarray::IxDyn, index = { (u64, u64, u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4], i[5], i[6]) });
 impl_dim!(8, nd_dim = ndarray::IxDyn, index = { (u64, u64, u64, u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7]) });
 
-/// Conversion into a [`Dimension`] value, encoding the ndim in the type.
-///
-/// This trait is the mechanism by which ordinary Rust types (integers, arrays, tuples,
-/// ndarray dimension types) become valid shape arguments. The associated type `Dimension`
-/// carries the ndim information statically when the argument type allows it.
+/// Conversion of a shape argument into a [`Dimension`] value, encoding the ndim in the type when
+/// the argument type allows it.
 ///
 /// # Implemented for
 ///
@@ -339,12 +332,6 @@ impl_dim!(8, nd_dim = ndarray::IxDyn, index = { (u64, u64, u64, u64, u64, u64, u
 /// | `&[u64]` / `&Vec<u64>` | `DimDyn` | Slice/vec - ndim only known at runtime. |
 /// | `ndarray::Dim<[usize; N]>` (N=0..=6) | `Dim<N>` | ndarray static dimension. |
 /// | `ndarray::IxDyn` | `DimDyn` | ndarray dynamic dimension. |
-///
-/// # Return value
-///
-/// `into_dimension` returns `Option<Self::Dimension>`. It returns `None` only when the input
-/// cannot fit (e.g. a slice longer than [`NDIM_MAX`]). For all fixed-size types (arrays, tuples,
-/// `u64`) the conversion is infallible.
 pub(crate) trait IntoDimension {
     /// The [`Dimension`] type produced by this conversion.
     type Dimension: Dimension;
@@ -492,11 +479,8 @@ impl IntoDimension for ndarray::IxDyn {
     }
 }
 
-/// Stack-allocated vector for per-dimension data, with capacity [`NDIM_MAX`].
-///
-/// Used throughout the library to store shapes, strides, block shapes, and other per-dim
-/// values without heap allocation. The capacity is always exactly [`NDIM_MAX`] (8), so no
-/// array with more dimensions than supported can overflow this container.
+/// Stack-allocated vector for per-dim data (shapes, strides, block shapes, ...), with capacity
+/// [`NDIM_MAX`]: enough for any supported array.
 pub(crate) type DimArray<T> = crate::util::arrayvec::ArrayVec<T, NDIM_MAX>;
 
 /// Integer type used to store a dim index inside a struct.
