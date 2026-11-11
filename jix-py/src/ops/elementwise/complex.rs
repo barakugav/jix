@@ -6,9 +6,8 @@ use crate::Array;
 
 /// Extracts the real part of each complex element.
 ///
-/// Supported dtypes: `Complex<f32>`, `Complex<f64>`. Output dtype is the
-/// corresponding real component type (`f32` for `Complex<f32>`, `f64` for
-/// `Complex<f64>`). An array of any other dtype is returned as is.
+/// Supported dtypes: `Complex<f32>`, `Complex<f64>`; the output dtype is `f32` or `f64`
+/// respectively. An array of any other dtype is returned as is.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -48,9 +47,8 @@ pub fn real<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 define_op1!(
     /// Extracts the imaginary part of each complex element.
     ///
-    /// Supported dtypes: `Complex<f32>`, `Complex<f64>`. Output dtype is the
-    /// corresponding real component type (`f32` for `Complex<f32>`, `f64` for
-    /// `Complex<f64>`).
+    /// Supported dtypes: `Complex<f32>`, `Complex<f64>`; the output dtype is `f32` or `f64`
+    /// respectively.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///

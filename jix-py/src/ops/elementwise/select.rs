@@ -4,22 +4,18 @@ use crate::ops::common::{broadcast_operands, operands_dtype_promotion, Operand, 
 use crate::util::IntoPyResult;
 use crate::Array;
 
-/// Selects elements element-wise from `x` or `y` based on `condition`.
+/// Selects `x[i]` where `condition[i]` is `True` and `y[i]` elsewhere.
 ///
-/// For each index `i`, the output is `x[i]` if `condition[i]` is `True`, otherwise `y[i]`.
+/// Unlike numpy, `condition` must already have dtype `bool`; use
+/// [`jix.cast(condition, 'bool')`][jix.cast] if needed.
 ///
-/// `condition` must have dtype `bool`. Output dtype is the common dtype of `x` and `y`.
-///
-/// **Type promotion**: if `x` and `y` have different dtypes, they are cast to a common dtype.
+/// **Type promotion**: `x` and `y` are cast to a common dtype, which is the output dtype.
 ///
 /// **Broadcasting**: the shapes of `condition`, `x`, and `y` are broadcast to a common shape
 /// following numpy rules, which is the output shape.
 ///
 /// If `condition` is a scalar, or `x` and `y` are the same object, the selected operand is returned
 /// as is (after broadcasting and type promotion).
-///
-/// This function deviates from numpy: `condition` must already have `bool` dtype; use
-/// [`jix.cast(condition, 'bool')`][jix.cast] if needed (numpy implicitly casts the condition to bool).
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -29,8 +25,7 @@ use crate::Array;
 ///     y: Values to use where `condition` is False.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] with the broadcast shape of `condition`, `x`, and `y`.
-///         Elements are drawn from `x` where `condition` is `True`, and from `y` elsewhere.
+///     A lazy [`jix.Array`][jix.Array] view.
 ///
 /// Examples:
 ///     ```python

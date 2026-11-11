@@ -81,3 +81,9 @@ Docs, not fixed:
 Needs the maintainer:
 
 - `jix/src/ops/elementwise/bit_count.rs:416` the plain `//` comment above `swap_bytes_concrete` says single-byte types do not support `swap_bytes` and points to the `SwapBytes` doc. `SwapBytes` is implemented for `i8`/`u8` (a no-op) via `int_op1!` (`:52`), and the doc now says so; the comment should say `u8` is skipped because swapping is a no-op.
+
+## ops-cast-complex-select
+
+Needs the maintainer:
+
+- `jix-py/src/ops/elementwise/casting.rs:21` "any cast involving struct dtypes is not supported" is too broad: a cast to the identical struct dtype is accepted as a no-op (`casting.rs:55-56`). Unsupported casts raise `TypeError` (`casting.rs:133-137`), which no `Raises:` section documents.
