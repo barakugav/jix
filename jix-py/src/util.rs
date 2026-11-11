@@ -168,7 +168,7 @@ pub(crate) fn numpy_empty_ordered<'py>(
     }
     let mut permute = PyArray_Dims {
         ptr: permute.as_mut_ptr(),
-        len: ndim as std::ffi::c_int,
+        len: permute.len() as std::ffi::c_int,
     };
     // SAFETY: `arr` is a live NumPy array of `ndim` dims and `permute` is a permutation of them.
     let np_arr =

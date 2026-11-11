@@ -13,7 +13,7 @@ use crate::ops::prelude::*;
 /// [`Array::into_typed`](crate::Array::into_typed), and
 /// [`Array::into_type_dyn`](crate::Array::into_type_dyn), which either wrap the array in `IntoType`
 /// or, for some storages, swap the element-type parameter in-place. For example,
-/// [`View`](crate::storage::View) can not be re-tagged in-place, but
+/// a borrowed `&S` (from [`Array::view`](crate::Array::view)) can not be re-tagged in-place, but
 /// [`Compact`](crate::storage::Compact) can.
 ///
 /// # Examples
@@ -31,7 +31,7 @@ use crate::ops::prelude::*;
 ///
 /// // Erase the static element type - always succeeds.
 /// let dyn_a = a.view().into_type_dyn();
-/// // dyn_a: Array<IntoType<View<Compact<Ty<f32>>>, TypeDyn>>
+/// // dyn_a: Array<IntoType<&Compact<Ty<f32>>, TypeDyn>>
 /// // dyn_a: Array<Storage::ElementType = TypeDyn>
 /// assert_eq!(dyn_a.dtype(), &f32::DTYPE);
 ///

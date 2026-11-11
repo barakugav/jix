@@ -847,7 +847,7 @@ impl Array {
         ) -> std::fmt::Result {
             let info = storage.info();
             let deps = info.dependencies();
-            if ["View", "Any", "IntoType", "IntoDim"].contains(&info.name()) && deps.len() == 1 {
+            if ["Any", "IntoType", "IntoDim"].contains(&info.name()) && deps.len() == 1 {
                 return format_storage(deps[0], f, n_printed);
             }
             f.write_str(info.name())?;
