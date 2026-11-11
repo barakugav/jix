@@ -4,44 +4,28 @@ mod common;
 mod schema;
 mod version;
 
-/// Controls how aggressively an archive's internal consistency is verified at load time.
+/// How thoroughly an archive's consistency is verified at load time.
 ///
-/// When reading an archive, jix performs sanity checks to ensure the file is well-formed before
-/// trusting its contents. These checks fall into two cost categories:
+/// - **O(1) checks** are always performed. They examine a constant amount of metadata: the file
+///   magic, the archive type tag, shape and block-shape consistency, and similar fixed-size
+///   fields.
+/// - **O(data_size) checks** scan structures that grow with the array, most notably the
+///   per-block offset table. They are only performed in [`ArchiveValidation::Strict`] mode.
 ///
-/// - **O(1) checks** are *always* performed regardless of the validation mode. They examine
-///   only a constant amount of metadata - the file magic header, the archive type tag,
-///   declared shape and block-shape consistency, and similar fixed-size fields. The cost
-///   is negligible, so there is never a reason to skip them.
-///
-/// - **O(data_size) checks** scan structures whose size grows with the array (most notably
-///   the per-block offset table, which has one entry per block). For very large arrays this
-///   can become non-trivial - on the order of memory-touch cost over the whole offset table.
-///   These checks are only performed in [`ArchiveValidation::Strict`] mode.
-///
-/// As a concrete example, [`ArchiveValidation::Strict`] currently verifies that every block's
-/// `(offset, len)` location lies within the block-data section - an O(nblocks) scan. This is illustrative only: future versions of
-/// the library may add new checks, remove existing ones, or move checks between the two
-/// categories. Do not rely on any specific check being present or absent in either mode -
-/// treat this enum as a coarse "be paranoid" vs "trust the source" knob, not as a contract
-/// over a particular set of validations.
+/// For example, [`ArchiveValidation::Strict`] currently verifies that every block's
+/// `(offset, len)` location lies within the block-data section, an O(nblocks) scan. Future
+/// versions may add, remove or move checks between the two categories, so do not rely on any
+/// specific check: treat this enum as a coarse "be paranoid" vs "trust the source" knob.
 ///
 /// The default is [`ArchiveValidation::Strict`]. Use [`ArchiveValidation::Minimal`] when the
-/// archive comes from a trusted source (e.g. produced by your own pipeline) and the extra
-/// scan cost is measurable in your workload.
+/// archive comes from a trusted source and the extra scan cost is measurable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum ArchiveValidation {
-    /// Perform only the constant-time (O(1)) consistency checks.
-    ///
-    /// Suitable for archives produced by a trusted source where the O(data_size) scans would
-    /// add measurable overhead with no expected benefit.
+    /// Perform only the O(1) checks. Suitable for archives from a trusted source.
     Minimal,
-    /// Perform all checks, including those that scan structures whose size grows with the
-    /// array (O(data_size)).
-    ///
-    /// This is the default and the right choice unless you have a specific reason to skip the
-    /// extra scans. Use it whenever the archive's origin is untrusted or unverified.
+    /// Perform all checks, including the O(data_size) scans. The default; use it whenever the
+    /// archive's origin is untrusted or unverified.
     #[default]
     Strict,
 }

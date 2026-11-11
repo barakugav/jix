@@ -19,12 +19,10 @@ use crate::{
 impl Array<Compact<TypeDyn>> {
     /// Load a compressed array from a `.jix` file, allocating storage on the heap.
     ///
-    /// This is the most common way to read an array that was previously saved with
-    /// [`write_to_file`](Array::write_to_file) or [`write_to`](Array::write_to).
-    ///
-    /// Use [`read_from_file_with`](Array::read_from_file_with) if the array occupies only
-    /// part of a larger file, or [`read_from_file_mmap`](Array::read_from_file_mmap) for
-    /// memory-mapped (zero-copy) loading.
+    /// Reads an array saved with [`write_to_file`](Array::write_to_file) or
+    /// [`write_to`](Array::write_to). Use [`read_from_file_with`](Array::read_from_file_with) if
+    /// the array occupies only part of a larger file, or
+    /// [`read_from_file_mmap`](Array::read_from_file_mmap) for memory-mapped (zero-copy) loading.
     ///
     /// # Arguments
     ///
@@ -57,21 +55,20 @@ impl Array<Compact<TypeDyn>> {
 
     /// Load a compressed array from a byte range within a file with specified parameters.
     ///
-    /// Use this when multiple arrays are packed into a single file and you know the byte `offset`
-    /// and `len` of the array you want to read. This avoids opening separate files per array and
-    /// lets a container format embed arrays alongside other data.
+    /// Use this when several arrays, or an array and other data, are packed into one file and you
+    /// know the byte `offset` and `len` of the array to read.
     ///
     /// # Arguments
     ///
     /// - `path`: path to the `.jix` file containing the array.
     /// - `offset`: byte offset of the start of the array's archive section within the file.
     /// - `len`: byte length of the array's archive section.
-    /// - `params`: never changes the loaded data - the block shape comes from the file
-    ///   (`params.block_shape` is ignored) and the blocks are decoded with the codec they were
-    ///   written with. The params are recorded in the array's storage spec, where they (a) seed
-    ///   arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list.
+    /// - `params`: never changes the loaded data - the block shape and codec come from the file
+    ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
+    ///   where they seed arrays derived from this one (e.g. the codec used by
+    ///   [`Array::compact`]/[`Array::compact_with`]) and steer read behavior such as
+    ///   [`read_size`](ArrayParams::read_size).
+    /// - `validation`: how thoroughly the archive is checked, see [`ArchiveValidation`].
     ///
     /// # Examples
     ///
@@ -117,20 +114,17 @@ impl Array<Compact<TypeDyn>> {
 
     /// Load a compressed array from a generic reader.
     ///
-    /// `len` is the byte length of the archive within the reader. When provided, it enables
-    /// bounds checking on section offsets; pass `None` to skip bounds checking.
-    ///
     /// # Arguments
     ///
     /// - `reader`: any source implementing `Read` + `Seek` containing the array's archive section.
     /// - `len`: byte length of the archive section within the reader, used for bounds checking.
     ///   Pass `None` to skip bounds checking.
-    /// - `params`: never changes the loaded data - the block shape comes from the file
-    ///   (`params.block_shape` is ignored) and the blocks are decoded with the codec they were
-    ///   written with. The params are recorded in the array's storage spec, where they (a) seed
-    ///   arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list.
+    /// - `params`: never changes the loaded data - the block shape and codec come from the file
+    ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
+    ///   where they seed arrays derived from this one (e.g. the codec used by
+    ///   [`Array::compact`]/[`Array::compact_with`]) and steer read behavior such as
+    ///   [`read_size`](ArrayParams::read_size).
+    /// - `validation`: how thoroughly the archive is checked, see [`ArchiveValidation`].
     ///
     /// # Examples
     ///
@@ -178,35 +172,31 @@ impl Array<Compact<TypeDyn>> {
 impl Array<CompactMmap<TypeDyn>> {
     /// Load a compressed array from a file using memory mapping (zero-copy).
     ///
-    /// Instead of copying the file's bytes into heap memory, this maps the file into virtual
-    /// address space. The OS pages data in on demand, so startup is fast and only the blocks you
-    /// actually read are loaded into physical memory. The mapping stays alive for as long as the
-    /// returned array (or any clone/view of it) exists.
+    /// The file is mapped into virtual address space instead of copied to the heap. The OS pages
+    /// data in on demand, so only the blocks you read are loaded into physical memory. The
+    /// mapping stays alive as long as the returned array or any clone or view of it exists.
     ///
-    /// This is particularly useful for large arrays when you only access a subset of blocks, or
-    /// when you want to build a lazy pipeline over the raw data without first copying it to heap.
-    /// See [`write_to_file`](Array::write_to_file) for how to use a memory-mapped array as the
-    /// source of a streaming write pipeline.
+    /// Useful for large arrays when you only access a subset of blocks, or as the source of a
+    /// streaming write pipeline (see [`write_to_file`](Array::write_to_file)).
     ///
     /// # Arguments
     ///
     /// - `path`: path to the `.jix` file containing the array.
     /// - `offset`: byte offset of the start of the array's archive section within the file.
     /// - `len`: byte length of the array's archive section.
-    /// - `params`: never changes the loaded data - the block shape comes from the file
-    ///   (`params.block_shape` is ignored) and the blocks are decoded with the codec they were
-    ///   written with. The params are recorded in the array's storage spec, where they (a) seed
-    ///   arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list.
+    /// - `params`: never changes the loaded data - the block shape and codec come from the file
+    ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
+    ///   where they seed arrays derived from this one (e.g. the codec used by
+    ///   [`Array::compact`]/[`Array::compact_with`]) and steer read behavior such as
+    ///   [`read_size`](ArrayParams::read_size).
+    /// - `validation`: how thoroughly the archive is checked, see [`ArchiveValidation`].
     ///
     /// # Safety
     ///
-    /// This function is marked `unsafe` because of the potential for *Undefined Behavior* (UB)
-    /// using the mmap array if the underlying file is subsequently modified, in or
-    /// out of process. Applications must consider the risk and take appropriate precautions when using
-    /// file-backed arrays. Solutions such as file permissions, locks or process-private (e.g. unlinked)
-    /// files exist but are platform specific and limited.
+    /// Using the returned array is *Undefined Behavior* if the underlying file is modified, in or
+    /// out of process, while it is mapped. Applications must consider the risk and take
+    /// appropriate precautions. Solutions such as file permissions, locks or process-private (e.g.
+    /// unlinked) files exist but are platform specific and limited.
     ///
     /// # Examples
     ///
@@ -267,10 +257,9 @@ where
 {
     /// Save the array to a new file at `path`.
     ///
-    /// This is the most common way to persist an array. Works for any array type: a
-    /// `Array<Compact>` streams its already-compressed blocks directly to disk without
+    /// Works for any array: a compact array streams its compressed blocks to disk without
     /// decompressing; a lazy view (slice, op chain, etc.) compresses on the fly, so the full
-    /// decompressed data is never held in memory.
+    /// decompressed data is never held in memory. On error, the partial file is removed.
     ///
     /// # Arguments
     ///
@@ -345,27 +334,24 @@ where
 
     /// Write the array to a generic writer.
     ///
-    /// Like [`write_to_file`](Array::write_to_file) but accepts an arbitrary writer and additional
-    /// encoding parameters. Useful for writing into an in-memory buffer, writing multiple arrays
-    /// into a single open file handle, or integrating into a custom container format. Also,
-    /// this is the right choice when you need control over the block shape or codec.
+    /// Like [`write_to_file`](Array::write_to_file) but takes any writer (an in-memory buffer, a
+    /// file holding several arrays, a custom container format) and encoding parameters, for
+    /// control over the block shape or codec.
     ///
-    /// **When the array is already compact** (`Array<Compact>` or `Array<CompactMmap>`), its
-    /// existing compressed blocks are streamed directly to the writer - `params` is ignored
-    /// entirely. No decompression or re-compression takes place.
+    /// **When the array is already compact** (`Compact` or `CompactMmap` storage, also behind a
+    /// view or another wrapper that leaves the data unchanged), its compressed blocks are copied
+    /// to the writer as-is and `params` is ignored.
     ///
     /// **For any other array** (lazy views, op chains, plain buffers), each block is read from
-    /// the source and compressed according to `params` before being written.
+    /// the source and compressed according to `params`.
     ///
     /// # Arguments
     ///
-    /// - `writer`: any destination implementing `Write` + `Seek` to which the array's archive
-    ///   section will be written. Must support seeking back, so it can't be a file opened in
-    ///   append mode.
+    /// - `writer`: any destination implementing `Write` + `Seek`. It must support seeking back,
+    ///   so it can't be a file opened in append mode.
     /// - `params`: encoding parameters controlling block shape and codec. Ignored when the array
     ///   is already compact.
-    /// - `context`: read context carrying reusable buffers and decoder state, used to read the
-    ///   source array.
+    /// - `context`: read context used to read the source array.
     ///
     /// # Examples
     ///

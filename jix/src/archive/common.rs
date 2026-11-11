@@ -19,7 +19,7 @@ struct Header {
 #[derive(Default, Clone, Copy)]
 #[repr(C)]
 pub(crate) struct Section {
-    /// Offsets in bytes from the beginning of the archive.
+    /// Offset in bytes from the beginning of the archive.
     pub(crate) offset: i64,
     /// Size of the section in bytes.
     pub(crate) size: u64,
