@@ -41,9 +41,9 @@ use proptest::strategy::BoxedStrategy;
 ///
 /// - `any_strategy()`: full domain, finite only for floats (used for codec roundtrip tests).
 /// - `op_safe_strategy()`: bounded range that avoids overflow when values are
-///   combined arithmetically (used for op2, cast tests). For integer types,
-///   values are small and positive so that e.g. `a = a_extra + b` still fits
-///   in the type. Floats default to `any_strategy()`.
+///   combined arithmetically (used for op2, cast tests). Integers are small so
+///   that e.g. `a = a_extra + b` still fits in the type; floats are in
+///   `[-100, 100]` in steps of `0.01`.
 pub(crate) trait ScalarStrategy:
     Dtyped + Default + core::fmt::Debug + Clone + 'static
 {
@@ -74,10 +74,10 @@ pub(crate) trait ScalarStrategy:
     fn shift_safe_strategy() -> BoxedStrategy<Self> {
         Self::any_strategy()
     }
-    /// Small set of 3 distinct values used for equality/comparison tests. Ensures that
-    /// ~33 % of generated pairs are equal, so both the `true` and `false` branches of
-    /// `equal`/`not_equal` are exercised. For float types the set includes `NaN` to cover
-    /// the `NaN != NaN` (IEEE 754) edge case. Defaults to `any_strategy` for types where
+    /// Small set of distinct values for equality/comparison tests, so that both the `true`
+    /// and `false` branches of `equal`/`not_equal` are exercised: 3 for integers (~33 % of
+    /// pairs equal); for float and complex types a set that includes `NaN`, to cover the
+    /// `NaN != NaN` (IEEE 754) edge case. Defaults to `any_strategy` for types where
     /// equal pairs happen naturally (e.g. `bool8` has only 2 values -> 50 % hit rate).
     fn comparable_strategy() -> BoxedStrategy<Self> {
         Self::any_strategy()
@@ -687,7 +687,7 @@ where
 struct TestArrayLayout {
     /// Memory order of the dims, outermost (largest stride) first. `[0, 1, .., n-1]` is row-major.
     dim_order: Vec<usize>,
-    /// Extra bytes inserted before each dim' stride, indexed like `dim_order`. All-zero is packed.
+    /// Extra bytes inserted before each dim's stride, indexed like `dim_order`. All-zero is packed.
     padding_strides: Vec<usize>,
     /// Dims given a stride of 0, so every index along them aliases one element. Indexed by dim.
     zero_stride_dims: Vec<bool>,
@@ -921,7 +921,7 @@ where
 }
 
 /// Like [`assert_array_matches`], but compares elements with [`ApproxEq`] under
-/// the given relative and absolute tolerances instead of bit-for-bit equality.
+/// the given relative and absolute tolerances instead of `==`.
 ///
 /// This is the right check for results of order-dependent floating-point
 /// arithmetic: a reduction reads its input block-by-block, so the accumulator
@@ -943,9 +943,7 @@ pub(crate) fn assert_array_matches_approx<S, T, D>(
 }
 
 /// Shared implementation of [`assert_array_matches`] and
-/// [`assert_array_matches_approx`]: checks storage invariants, then compares the
-/// full read and 16 random sub-range reads against `expected` using the
-/// element-wise comparator `eq`.
+/// [`assert_array_matches_approx`]; see [`assert_array_matches_dyn`].
 fn assert_array_matches_with<S, T, D>(
     actual: &Array<S>,
     expected: &ndarray::Array<T, D>,

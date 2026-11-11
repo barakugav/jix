@@ -6,9 +6,8 @@ use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// byte slices under independent source and destination strides.
 ///
-/// [`new`](Self::new) inspects the dtype once and picks the cheapest copy routine up front: a
-/// monomorphized scalar copy for the common power-of-two `(itemsize, alignment)` pairs, a
-/// field-by-field copy for structs that decompose into at most four scalar fields, or a generic
+/// [`new`](Self::new) inspects the dtype once and picks the copy routine up front: a monomorphized
+/// copy for the common power-of-two `(itemsize, alignment)` pairs, whatever the dtype kind, or a
 /// byte-wise fallback for everything else. Each [`copy`](Self::copy) then moves one region by
 /// driving an [`NdIterUnordered`] over `shape` (which sorts, coalesces and walks the dims) and
 /// copying one contiguous-or-strided inner loop at each visited position.
