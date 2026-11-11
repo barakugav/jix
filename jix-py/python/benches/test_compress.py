@@ -1,53 +1,38 @@
-import io
+"""Compressing the array: how long it takes, and how much it stores.
 
-import blosc2
+One run yields both metrics - the timed call produces the array whose stored size is then measured -
+so this feeds the throughput plot and the compressed-size plot without compressing twice.
+"""
+
 import numpy as np
 import pytest
-import zarr
 
-import jix
+from benches import report_spec
 from benches.array_impls import ARRAY_IMPLS
-from benches.conftest import record
-from benches.data import PROFILES
+from benches.conftest import DTYPES, record
+from benches.data import make_data
 
-NCOLS = 64
-BLOCK = (32, NCOLS)
+SHAPE = report_spec.SHAPE
+BLOCK = (64, 200)
 
 
-@pytest.mark.parametrize("library", [name for name in ARRAY_IMPLS if name not in ("numpy", "jix-plain")])
-@pytest.mark.parametrize("profile", list(PROFILES))
-@pytest.mark.parametrize("size", [256, 1024, 4096], ids=lambda n: f"n{n}")
-def test_compress(benchmark, library, profile, size):
-    from benches.data import make_data
-
-    data = make_data(profile, (size, NCOLS), dtype=np.int32, seed=0)
+@pytest.mark.parametrize("library", report_spec.COMPRESS_LIBRARIES)
+@pytest.mark.parametrize("distribution", report_spec.DISTRIBUTIONS)
+def test_compress(benchmark, library, distribution):
+    data = make_data(distribution, SHAPE, dtype=DTYPES["i32"], seed=0)
     cls = ARRAY_IMPLS[library]
     result = benchmark(lambda: cls.from_numpy(data, block_shape=BLOCK))
-    stored = stored_bytes(result.raw)
-    case = f"compress_{profile}_b{BLOCK[0]}x{BLOCK[1]}"
+    stored = result.stored_bytes()
     record(
         benchmark,
-        case=case,
+        section="compress",
+        case=distribution,
         library=library,
-        size=size,
         raw_bytes=int(data.nbytes),
         stored_bytes=stored,
+        # The report plots the stored size as a fraction of the raw array, so record the usual
+        # raw/stored ratio and let the renderer invert it.
         ratio=data.nbytes / stored,
+        also={"compress_ratio": "ratio"},
     )
-    assert result is not None
-
-
-def stored_bytes(raw):
-    match raw:
-        case jix.Array():
-            buf = io.BytesIO()
-            raw.write_to(buf)
-            return buf.getbuffer().nbytes
-        case np.ndarray():
-            return int(raw.nbytes)
-        case blosc2.NDArray():
-            return int(raw.schunk.cbytes)
-        case zarr.Array():
-            return int(raw.nbytes_stored())
-        case _:
-            raise ValueError(f"cannot measure stored bytes of {type(raw).__name__}")
+    assert np.prod(result.raw.shape) == np.prod(SHAPE)

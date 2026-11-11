@@ -11,10 +11,6 @@ on:
         description: "Run ubuntu aarch64 (ubuntu-24.04-arm)"
         type: boolean
         default: false
-      macos_arm:
-        description: "Run macos arm64 (macos-14)"
-        type: boolean
-        default: false
       suites:
         description: "Which suites to run"
         type: choice
@@ -22,6 +18,10 @@ on:
         default: both
       fast:
         description: "Fast, low-fidelity run (quick dev cycle)"
+        type: boolean
+        default: false
+      all_rust_benches:
+        description: "Run the whole Criterion suite, not just the benches the report uses"
         type: boolean
         default: false
       rust_harness_args:
@@ -47,14 +47,12 @@ jobs:
         env:
           UBUNTU_X86: ${{ inputs.ubuntu_x86 }}
           UBUNTU_ARM64: ${{ inputs.ubuntu_arm64 }}
-          MACOS_ARM: ${{ inputs.macos_arm }}
         run: |
           python3 -c '
           import json, os, sys
           legs = [
               (os.environ["UBUNTU_X86"], {"name": "linux-x86_64", "runner": "ubuntu-24.04", "os": "linux", "arch": "x86_64"}),
               (os.environ["UBUNTU_ARM64"], {"name": "linux-aarch64", "runner": "ubuntu-24.04-arm", "os": "linux", "arch": "aarch64"}),
-              (os.environ["MACOS_ARM"], {"name": "macos-aarch64", "runner": "macos-14", "os": "macos", "arch": "aarch64"}),
           ]
           include = [leg for on, leg in legs if on == "true"]
           if not include:
@@ -100,7 +98,8 @@ jobs:
             --suites "${{ inputs.suites }}" \
             --rust-args "${{ inputs.rust_harness_args }}" \
             --py-args "${{ inputs.python_harness_args }}" \
-            ${{ inputs.fast && '--fast' || '' }}
+            ${{ inputs.fast && '--fast' || '' }} \
+            ${{ inputs.all_rust_benches && '--all-rust-benches' || '' }}
       - name: Run benchmarks (base ref)
         if: inputs.compare_to != ''
         run: |
@@ -109,7 +108,8 @@ jobs:
             --rust-args "${{ inputs.rust_harness_args }}" \
             --py-args "${{ inputs.python_harness_args }}" \
             --gitsha "${{ inputs.compare_to }}" \
-            ${{ inputs.fast && '--fast' || '' }}
+            ${{ inputs.fast && '--fast' || '' }} \
+            ${{ inputs.all_rust_benches && '--all-rust-benches' || '' }}
       - uses: actions/upload-artifact@v7
         with:
           name: bench-${{ matrix.os }}-${{ matrix.arch }}-${{ github.run_id }}

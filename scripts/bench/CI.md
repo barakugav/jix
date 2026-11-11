@@ -1,10 +1,15 @@
 # Benchmarks: CI matrix and cross-run comparison
 
+This page is about running the suite and comparing two runs, which is what you want when checking
+a change for regressions. **To produce the published benchmark report, see
+[`README.md`](README.md)** - it covers the workflow, downloading the artifacts, and building the
+plots. [`DEVELOPER.md`](DEVELOPER.md) covers changing the suite itself.
+
 ## Running the matrix
 
 Trigger the `Benchmarks` workflow manually (Actions -> Benchmarks -> Run workflow):
 
-- Check the runners to use (ubuntu x86_64, ubuntu aarch64, macos arm64) - all off by default.
+- Check the runners to use (ubuntu x86_64, ubuntu aarch64) - both off by default.
 - `suites`: run both suites, or just `rust` / `python`.
 - `fast`: a quick, low-fidelity run (reduced Criterion sampling and pytest-benchmark timing) for
   short dev cycles - not for authoritative numbers.
@@ -25,6 +30,10 @@ to the harness (`cargo bench --` for the Rust runner, pytest for the Python one)
 
     python jix/benches/run.py --fast -- reduction
     python jix-py/python/benches/run_all.py --fast -- -k op2
+
+`jix/benches/run.py --report` restricts the Rust run to the `vs_ndarray` target, which is the only
+one the report uses; `scripts/bench/run.py` passes it by default and `--all-rust-benches` turns it
+off.
 
 `--fast` trades fidelity for speed; drop it for real measurements.
 
@@ -62,4 +71,5 @@ significance 0.05 and noise threshold 0.01 (Improved / Regressed / WithinNoise /
   noise floor. Prefer `compare_to` (same-machine A/B) for PR-vs-main.
 - GitHub rotates runner hardware; two same-label runs can land on different CPUs. `meta.json`
   records the CPU model and `compare` warns when base/new CPUs differ.
-- macOS/Windows runners carry minute multipliers; keep the checkboxes off unless needed.
+- Both runners are Linux; GitHub's macOS runners carry a minute multiplier and are not in the
+  matrix.

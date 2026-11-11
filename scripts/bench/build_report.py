@@ -1,0 +1,114 @@
+"""Build the report from downloaded benchmark artifacts.
+
+Reads one or more artifact directories - whatever `gh run download` produced - and writes the
+plots and `report.md`. Runs no benchmarks.
+
+    python scripts/bench/build_report.py --artifacts scripts/bench/artifacts
+
+Each artifact directory holds one `<sha>/` per benched ref, containing `meta.json`, `python/`, and
+`rust/criterion/`. The platform each one ran on comes from `meta.json`, so the artifacts can be
+passed in any order.
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "jix-py" / "python"))
+
+from benches import report_bars, report_spec  # noqa: E402
+
+
+def load_run(run_dir):
+    """Rows from one benched sha: its Python JSON, its Criterion tree, or both."""
+    meta = json.loads((run_dir / "meta.json").read_text())
+    platform = f"{meta['platform']['os']}-{meta['platform']['arch']}"
+    rows = []
+    python_json = run_dir / "python" / "python.json"
+    if python_json.exists():
+        rows += report_bars.load_python(python_json, platform)
+    criterion = run_dir / "rust" / "criterion"
+    if criterion.exists():
+        rows += report_bars.load_rust(criterion, platform, report_spec.RUST_CASE_LABELS)
+    return platform, rows, meta
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Build the benchmark report from downloaded artifacts.")
+    parser.add_argument("--artifacts", type=Path, required=True, help="directory holding downloaded artifacts")
+    parser.add_argument("--out", type=Path, default=Path(__file__).parent / "report" / "plots")
+    parser.add_argument("--template", type=Path, default=Path(__file__).parent / "report" / "report.template.md")
+    parser.add_argument("--report", type=Path, default=Path(__file__).parent / "report" / "report.md")
+    parser.add_argument("--note", default="", help="extra provenance line, e.g. when meta predates --fast")
+    args = parser.parse_args(argv)
+
+    runs = sorted(args.artifacts.glob("**/meta.json"))
+    if not runs:
+        raise SystemExit(f"no meta.json under {args.artifacts} - is that the download directory?")
+
+    rows, platforms, metas = [], [], {}
+    for meta_path in runs:
+        platform, run_rows, meta = load_run(meta_path.parent)
+        metas[platform] = meta
+        if not run_rows:
+            print(f"warning: {meta_path.parent} has no results, skipping")
+            continue
+        platforms.append(platform)
+        rows += run_rows
+        print(f"{platform}: {len(run_rows)} rows from {meta['sha'][:8]} ({meta['platform']['cpu_model']})")
+
+    # Published reports come from the two CI runners, in that order. A local run is on whatever
+    # machine you are sitting at, so fall back to plotting what is actually there.
+    ordered = [p for p in report_spec.PLATFORMS if p in platforms]
+    extra = sorted(set(platforms) - set(ordered))
+    if extra:
+        print(f"note: results from platforms the report does not publish: {extra}")
+    ordered = ordered or extra
+    if not ordered:
+        raise SystemExit("no usable results found")
+
+    for section in report_spec.SECTIONS:
+        source = section.get("source", section["key"])
+        present = {row["case"] for row in rows if row["section"] == source}
+        missing = [c for c in section["cases"] if c not in present]
+        if missing and len(missing) < len(section["cases"]):
+            # Partial coverage usually means the benchmark changed since the run: surviving cases
+            # keep their ids and get drawn under the new labels, which is worse than no plot.
+            names = ", ".join(repr(c.replace("\n", " ")) for c in missing)
+            print(f"WARNING: {section['key']} is missing {len(missing)}/{len(section['cases'])} cases ({names})")
+            print("         The run probably predates a change to this benchmark. Do not publish it.")
+        out = report_bars.plot_section(rows, {**section, "platforms": ordered}, args.out)
+        print(out if out else f"(no data for {section['key']})")
+
+    # Tables carry the first platform only; the plots carry the rest.
+    single = [row for row in rows if row["platform"] == ordered[0]]
+    stamp = ", ".join(f"{p} ({metas[p]['platform']['cpu_model']})" for p in ordered)
+    banner = f"*Measured on {stamp}. Benched commit `{metas[ordered[0]]['sha'][:8]}`.*"
+    if any(meta.get("fast") for meta in metas.values()) or args.note:
+        note = args.note or "a --fast run: reduced sampling, enough to check the pipeline, not to quote"
+        banner = f"> **These numbers are low-fidelity** - {note}.\n\n{banner}"
+    print(
+        report_bars.render_report(
+            single, args.template, args.report, args.out, report_spec.SECTIONS, banner, versions(metas, ordered)
+        )
+    )
+
+
+def versions(metas, platforms):
+    """The toolchain and library versions line, from the runs' own `meta.json`."""
+    lines = set()
+    for platform in platforms:
+        meta = metas[platform]
+        rustc = meta["platform"]["rustc"].split()[1]  # "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+        libs = ", ".join(f"{lib} {meta['libs'][lib]}" for lib in ("numpy", "blosc2", "zarr"))
+        lines.add(f"rustc {rustc}, Python {meta['platform']['python']}, {libs}.")
+    if len(lines) > 1:
+        # The runners install from the same pins, so a difference means a pin is too loose.
+        print(f"WARNING: platforms ran with different versions: {sorted(lines)}")
+    return " ".join(sorted(lines))
+
+
+if __name__ == "__main__":
+    main()

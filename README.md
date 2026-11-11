@@ -97,6 +97,14 @@ can be used independently, and each fits a different scenario.
     inline the whole pipeline into a single read loop - no virtual dispatch, no runtime scheduler,
     no (large) intermediate allocations beyond the final output.
 
+## Benchmarks
+
+[![Reading a random region](scripts/bench/report/plots/read.png)](scripts/bench/report/report.md)
+
+jix against NumPy, Blosc2 and Zarr in Python and `ndarray` in Rust, on reads, compression,
+elementwise operations, reductions and lazy chains - including the cases where jix comes out
+behind. See the [benchmark report](scripts/bench/report/report.md).
+
 ## Thanks
 
 This project would not exist without the work of several upstream
