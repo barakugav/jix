@@ -28,7 +28,7 @@ use crate::Array;
 /// `rounding_mode`.
 ///
 /// For true division of **float** types the results are the IEEE 754 ones, and division by zero
-/// produces `+/-inf` or `NaN`. For **complex** types this is full complex division.
+/// produces `+-inf` or `NaN`. For **complex** types this is full complex division.
 ///
 /// With a `rounding_mode`, for **integer** dtypes a zero divisor raises an `ArithmeticError` when
 /// the result is read, and the minimum signed value by `-1` wraps to itself.
@@ -54,8 +54,8 @@ use crate::Array;
 ///         `"floor"` or `"euclid"`.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-///         No computation occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
+///         broadcast shape. No computation occurs until the result is read.
 ///
 /// Examples:
 ///     ```python
@@ -144,8 +144,8 @@ pub fn divide<'py>(
 ///     rounding_mode: How to round the quotient: `"floor"`, `"trunc"` or `"euclid"`.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-///         No computation occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
+///         broadcast shape. No computation occurs until the result is read.
 ///
 /// Examples:
 ///     ```python
