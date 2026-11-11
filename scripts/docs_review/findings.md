@@ -186,3 +186,14 @@ Docs, not fixed:
 - `jix-py/src/array.rs:392` `__len__` raises ValueError on a zero-dimensional array (`jix-py/src/array.rs:395-397`) but has no `Raises:` section.
 - `jix-py/src/array.rs:512` `numpy` Raises ValueError omits the error for an `out` whose inner (dtype) dims are not C-contiguous (`jix-py/src/array.rs:281-290`).
 - `jix/src/storage/params.rs:159` The `block_size` setter doc says an unset block size defaults to `block_shape.product() * itemsize` when a block shape is given; the code does that only when all dims are fixed and otherwise uses the L1 cache size (`jix/src/storage/params.rs:348-350`).
+
+## py-archive-misc
+
+Needs the maintainer:
+
+- `jix-py/src/archive.rs:35` `read_array` `params` says arrays later created from the result "(e.g. via `compact()` or `write_array()`)" inherit the codec settings, but `write_array` on the loaded compact array itself streams its blocks and ignores params (`jix/src/archive/array.rs` `write_to`); only lazy views of it inherit. Consider dropping `write_array()` from the example.
+
+Docs, not fixed:
+
+- `jix/src/archive/mod.rs:23` doc line is 131 columns (over the 100-column limit).
+- `jix/src/storage/params.rs:59,66,73,80,122,208,593,594,597,938,941,1051` doc lines over 100 columns.

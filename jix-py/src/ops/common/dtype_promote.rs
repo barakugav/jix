@@ -48,15 +48,12 @@ impl Precision {
 pub(crate) enum CastKind {
     /// No casting
     None,
-    /// f16->f32->f64
-    /// i8->i16->i32->i64
-    /// u8->u16->u32->u64
-    /// u8->i16
-    /// u16->i32
-    /// u32->i64
-    /// u64->f64
+    /// Widening casts: bool to any type; uint, int, float or complex to the same kind of equal or
+    /// higher precision; float to complex of equal or higher precision; uint to an int of higher
+    /// precision; uint or int to a float or complex of higher precision, or to `f64` and
+    /// `Complex<f64>`.
     Safe,
-    /// Allow any cast, even if it loses information
+    /// Any cast, even a lossy one, except complex to uint, int or float
     Unsafe,
 }
 

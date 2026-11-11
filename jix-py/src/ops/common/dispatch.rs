@@ -22,7 +22,7 @@ type TypedOperand<T> = CoreArray<IntoType<ArrayStorageAny, Ty<T>>>;
 /// [`dispatch_args`](Self::dispatch_args) walks `fns` in order and picks the first whose input
 /// dtypes are reachable from the operands' dtypes under each descriptor's [`CastKind`], casting
 /// the operands to that descriptor's dtypes before invoking it. Order therefore matters: list
-/// exact/narrower dtypes before wider cast targets. Returns `UnsupportedDtype` if none match.
+/// exact/narrower dtypes before wider cast targets. Raises `TypeError` if none match.
 pub(crate) struct OpDescriptor<const IN_N: usize, ExtraArgs> {
     name: &'static str,
     fns: Vec<OpFnDescriptor<IN_N, ExtraArgs>>,
@@ -160,7 +160,7 @@ impl OpFnDescriptor<3, ()> {
     }
 }
 impl<ExtraArgs> OpFnDescriptor<2, ExtraArgs> {
-    /// Like [`new2`] but passes `extra_args` through to the closure.
+    /// Like [`new2`](OpFnDescriptor::new2) but passes `extra_args` through to the closure.
     /// Both inputs must have the same dtype `T`.
     pub(crate) fn new2_args<T>(
         allowed_cast: CastKind,

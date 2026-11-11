@@ -15,26 +15,19 @@ use crate::Array;
 
 /// Load a compressed array from a `.jix` file or a file-like object.
 ///
-/// When reading an archive, jix performs sanity checks to ensure the file is well-formed before
-/// trusting its contents. These checks fall into two cost categories:
-///
-/// - **O(1) checks** are *always* performed regardless of the validation mode. They examine
-///   only a constant amount of metadata - the file magic header, the archive type tag,
-///   declared shape and block-shape consistency, and similar fixed-size fields. The cost
-///   is negligible, so there is never a reason to skip them.
-///
-/// - **O(data_size) checks** scan structures whose size grows with the array (most notably
-///   the per-block offset table, which has one entry per block). For very large arrays this
-///   can become non-trivial - on the order of memory-touch cost over the whole offset table.
-///   These checks are only performed in `strict` mode.
+/// Reading always runs constant-time (O(1)) sanity checks on the archive metadata: the file magic
+/// header, the archive type tag, declared shape and block-shape consistency, and similar
+/// fixed-size fields. Checks that scan structures growing with the array (O(data_size), most
+/// notably the per-block offset table, one entry per block) can be costly for very large arrays,
+/// and run only in `strict` mode.
 ///
 /// Args:
 ///     path_or_reader: A file path or any seekable binary file-like object with `.read()`,
 ///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle).
 ///     offset: Byte offset within the file to start reading from. Only supported when
 ///         `path_or_reader` is a file path. Defaults to `0`.
-///     len: Number of bytes to read. Defaults to the remaining file size from `offset`.
-///         When `path_or_reader` is a file-like object, still used for bounds checking if provided.
+///     len: Number of bytes to read. Defaults to the file size minus `offset`. For a file-like
+///         object it is only used for bounds checking, which is skipped when `len` is unset.
 ///     mmap: If `True`, maps the file into virtual address space instead of copying bytes onto
 ///         the heap; blocks are paged in on demand. Defaults to `False`. **Caution:** modifying
 ///         the file while the returned array is live has undefined behavior. Not supported for
@@ -44,16 +37,13 @@ use crate::Array;
 ///         (`block_shape` is ignored) and the blocks are decoded with the codec they were written
 ///         with. They mostly affect arrays later created from the result (e.g. via `compact()` or
 ///         `write_array()`), which inherit them, so their codec settings come from `params`.
-///     validation: Controls how strictly the archive is validated. Can be one of:
+///     validation: How strictly the archive is validated:
 ///
-///         - `None` (default): Currently the same as the `strict` mode, may change in the future.
-///         - `minimal`: Perform only the constant-time (O(1)) consistency checks.
-///             Suitable for archives produced by a trusted source where the O(data_size) scans
-///             would add measurable overhead with no expected benefit.
-///         - `strict`: Perform all checks, including those that scan structures whose size grows
-///             with the array (O(data_size)). This is the right choice unless you have a specific
-///             reason to skip the extra scans. Use it whenever the archive's origin is untrusted
-///             or unverified.
+///         - `None` (default): currently the same as `strict`; this may change.
+///         - `minimal`: only the O(1) checks. For archives from a trusted source, where the
+///             O(data_size) scans would add measurable overhead.
+///         - `strict`: all checks, including the O(data_size) scans. Use it whenever the
+///             archive's origin is untrusted or unverified.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] loaded from the file.
@@ -187,18 +177,17 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
 
 /// Write a compressed array to a file or a file-like object.
 ///
-/// Works for any array type: a compact array (the result of [`jix.compact()`][jix.compact] or
-/// [`jix.read_array()`][jix.read_array]) streams its already-compressed blocks directly to the destination
-/// without decompressing - `params` is ignored in this case and no re-compression takes place.
-/// A lazy view (slice, arithmetic op chain, etc.) compresses on the fly, so the full
-/// data (compressed or decompressed) is never held in memory.
+/// A compact array (the result of [`jix.compact()`][jix.compact] or
+/// [`jix.read_array()`][jix.read_array]) streams its compressed blocks to the destination as they
+/// are, with no decompression or re-compression. A lazy view (slice, arithmetic op chain, etc.)
+/// is compressed on the fly, so the full data (compressed or decompressed) is never held in memory.
 ///
 /// Args:
 ///     array: The array to write.
 ///     path_or_writer: A file path or any seekable binary file-like object with `.write()`,
 ///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle). The writer
-///         must support seeking backwards. For the same reason a file object opened in append
-///         mode (`"ab"`) raises; use `append=True` with a path instead. As with `io.RawIOBase`,
+///         must support seeking backwards, so a file object opened in append mode (`"ab"`)
+///         raises; use `append=True` with a path instead. As with `io.RawIOBase`,
 ///         `.write(b)` must only access `b` during the call, and must not keep `b` or any view of
 ///         it (a slice, `np.frombuffer(b)`, ...) after it returns.
 ///     append: When `False` (default), the file is created anew and must not already exist.
@@ -422,7 +411,8 @@ impl<'a> PathOrWriter<'a> {
     }
 }
 
-/// Wraps any Python file-like object that has `.write()`, `.seek()`, `.tell()` methods, and optionally `.flush()`.
+/// Wraps any Python file-like object that has `.write()`, `.seek()`, `.tell()` and optionally
+/// `.flush()` methods.
 struct PyWriter<'py> {
     write_fn: Bound<'py, PyAny>,
     seek_fn: Bound<'py, PyAny>,
