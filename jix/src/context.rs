@@ -13,13 +13,10 @@ use crate::DimDyn;
 
 /// A context with reusable buffers and a long-lived decoder instance.
 ///
-/// Allocating temporary buffers on demand and initializing a codec decoder on every block read
-/// internally in the array storage can be expensive, especially for small blocks.
-/// `ReadContext` holds reusable buffers and decoder instances that can be shared across multiple
-/// reads to amortize these costs.
+/// Pass one `ReadContext` to many successive reads: it saves allocating scratch buffers and
+/// initializing a decoder on every block read, a cost that matters most for small blocks.
 ///
-/// A `ReadContext` is tied to a single thread - it is `!Sync`.
-/// For concurrent reads from multiple threads, create one `ReadContext` per thread.
+/// `ReadContext` is `!Sync`: for concurrent reads, create one per thread.
 ///
 /// # Obtaining a `ReadContext`
 ///
@@ -39,8 +36,7 @@ use crate::DimDyn;
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
-/// `ReadContext::default()` is also available if you need to create a context independently of a
-/// specific array.
+/// `ReadContext::default()` creates a context independent of any array:
 /// ```
 /// use jix::ReadContext;
 /// use jix::Array;
@@ -51,11 +47,6 @@ use crate::DimDyn;
 /// assert_eq!(out, array![42, 17, 6]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-///
-/// # Reusing a context
-///
-/// A single `ReadContext` can be passed to multiple successive reads. Reusing it avoids
-/// reinitializing the decompressor and keeps the scratch buffer allocations warm.
 pub struct ReadContext {
     #[cfg(not(miri))]
     pub(crate) decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
@@ -63,10 +54,10 @@ pub struct ReadContext {
 
     /// The read cache of the current cache scope, `None` if the scope has no arrays to cache.
     read_cache: RefCell<Option<Cache>>,
-    /// equals `read_cache.is_some()`.
-    /// So the reads in a scope without arrays to cache never touch the `RefCell`.
+    /// Equals `read_cache.is_some()`, so the reads in a scope without arrays to cache never touch
+    /// the `RefCell`.
     is_cache_enabled: Cell<bool>,
-    /// Reuseable cache maps for cache scopes.
+    /// Reusable cache maps for cache scopes.
     #[allow(clippy::vec_box)]
     temp_cache_maps: RefCell<Vec<Box<CacheMap>>>,
 }

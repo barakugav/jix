@@ -246,3 +246,9 @@ Docs, not fixed:
 
 - `jix/src/array/mod.rs:51` doc line is 111 columns, over the 100-column limit.
 - `jix/src/array/read.rs:250,322` `to_buf_slice` and `to_buf_strided` Errors omit `InvalidShapeOperation`, raised by `check_region_size` on 32-bit targets when the region does not fit in memory (`jix/src/error.rs:286-300`).
+
+## core-misc
+
+Needs the maintainer:
+
+- `jix/src/context.rs:23` The `ReadContext` doc (and its example comment) says `Array::read_ctx()` picks up the decoder parameters stored with the array, and `ReadContext::new` (`jix/src/context.rs:66-69`) says it uses the matching decoder params; but `DecoderParams` is an empty placeholder (`jix/src/codec/mod.rs:225`) and `ReadContext::new` ignores it, so `read_ctx()` is currently identical to `ReadContext::default()`. Left as stated design intent.

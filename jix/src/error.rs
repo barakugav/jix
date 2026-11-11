@@ -1,8 +1,4 @@
 //! Error type for the `jix` crate.
-//!
-//! [`Error`] is the single error type returned by all fallible operations in this crate.
-//! It pairs an [`ErrorKind`] for programmatic branching with a human-readable message for
-//! diagnostics and logging.
 
 use core::fmt;
 use std::borrow::Cow;
@@ -11,11 +7,10 @@ use std::ops::Range;
 use crate::dtype::Dtype;
 use crate::{Dimension, IterExt, NDIM_MAX};
 
-/// Error type for all operations in this crate.
+/// The single error type of all fallible operations in this crate.
 ///
-/// An error consists of an [`ErrorKind`] for programmatic matching and a human-readable
-/// message for diagnostics. Use [`Error::kind`] to branch on the failure category and
-/// [`Error::message`] (or the [`Display`](fmt::Display) impl) for a descriptive string.
+/// [`Error::kind`] gives the failure category, for programmatic matching; [`Error::message`] (or
+/// the [`Display`](fmt::Display) impl) gives a human-readable description.
 pub struct Error(Box<ErrorRepr>);
 struct ErrorRepr {
     kind: ErrorKind,
@@ -51,10 +46,7 @@ impl Error {
     }
 }
 
-/// Categories errors returned by this crate.
-///
-/// Match on this to distinguish failure modes programmatically; the human-readable
-/// description is available via [`Error::message`] or the [`Display`](fmt::Display) impl.
+/// The category of an [`Error`], for programmatic matching.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 pub enum ErrorKind {
@@ -64,7 +56,8 @@ pub enum ErrorKind {
     InvalidBufferSize,
     /// Number of dimensions exceeds max, see [`NDIM_MAX`]
     TooManyDimensions,
-    /// Shape operation (e.g. reshape, permute_dims, concat) is invalid for the given shape and arguments
+    /// Shape operation (e.g. reshape, permute_dims, concatenate) is invalid for the given shape and
+    /// arguments
     InvalidShapeOperation,
     /// Unsupported dtype by operation, or incorrect dtype when accessing array data, etc
     UnsupportedDtype,
@@ -73,13 +66,13 @@ pub enum ErrorKind {
 
     /// I/O error while reading/writing archive file, or invalid file path, etc
     Io,
-    /// Archive file (serialized array) is invalid or corrupted,
+    /// Archive file (serialized array) is invalid or corrupted
     /// (e.g. missing required metadata, invalid metadata values, invalid layout, etc)
     InvalidArchive,
     /// Compression/decompression failure, or invalid compression params/metadata
     CodecError,
     /// An integer element-wise operation hit a result it can't represent (e.g. division by zero,
-    /// an integer raised to a negative integer power, etc).
+    /// or an integer raised to a negative integer power).
     Arithmetic,
 }
 
@@ -303,7 +296,7 @@ pub(crate) fn check_region_size(index: &[Range<u64>], itemsize: usize) -> Result
 /// result with no integer value. It always fails the read, with [`ErrorKind::Arithmetic`].
 ///
 /// Float operations report no errors: their `inf` and `NaN` results carry them.
-/// Integer overflow wraps (two's complement), also `MIN / -1`.
+/// Integer overflow wraps (two's complement), including `MIN / -1`.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 #[repr(u8)]
@@ -319,7 +312,7 @@ pub(crate) enum ArithmeticErrorKind {
 /// Scalar kernels that can hit an error, like [`scalar::Div`](crate::scalar::Div), take a
 /// `&mut ArithmeticStatus`: rather than panicking, they produce a fallback value for the element
 /// and set the status to error. After the computation, [`into_result`](Self::into_result) turns
-/// the status to `Ok` or an error with [`ErrorKind::Arithmetic`].
+/// the status into `Ok` or an error with [`ErrorKind::Arithmetic`].
 ///
 /// ```
 /// use jix::scalar::Div;

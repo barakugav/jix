@@ -3,10 +3,8 @@ use std::marker::PhantomData;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 
-/// Compile-time element-type tracking for [`ArrayStorage`](crate::ArrayStorage).
-///
-/// Every [`ArrayStorage`](crate::ArrayStorage) has an associated `type ElementType: ElementType`. There are two
-/// implementors:
+/// Compile-time element-type tracking: the bound on the `ElementType` associated type of
+/// [`ArrayStorage`](crate::ArrayStorage). Its two implementors:
 ///
 /// - [`Ty<T>`] - the concrete element type `T` is known at compile time. All element-wise
 ///   operations (arithmetic, comparisons, reductions, cast) are available.
@@ -14,7 +12,7 @@ use crate::error::{check_dtype, Result};
 ///   start with this. Call [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert
 ///   the expected element type and recover compile-time tracking.
 ///
-/// This trait is sealed, it cannot be implemented outside this crate.
+/// This trait is sealed: it cannot be implemented outside this crate.
 pub trait ElementType: Clone + Send + Sync + crate::util::Sealed {
     /// `Some(dtype)` when the element type is statically known ([`Ty<T>`]),
     /// `None` for [`TypeDyn`].
