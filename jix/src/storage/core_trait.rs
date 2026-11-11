@@ -15,24 +15,20 @@ pub(crate) use sealed::ArrayStorageImpl;
 
 /// The backing data source of an [`Array<S>`](crate::Array).
 ///
-/// `Array<S>` is generic over its storage `S: ArrayStorage`, which provides three pieces
-/// of information: the array's shape, its element type, and the ability to read any
-/// rectangular sub-region into a byte buffer. Everything else - slicing, reshaping,
-/// arithmetic, reductions - is built on top of these three methods.
+/// `Array<S>` is generic over its storage `S: ArrayStorage`, which provides three things: the
+/// array's shape, its element type, and reading any rectangular sub-region into a byte buffer.
+/// Everything else - slicing, reshaping, arithmetic, reductions - is built on these three methods.
 ///
 /// # Primary storage backends
 ///
-/// The main concrete storages are the block-compressed backends:
-/// [`Compact`](crate::storage::Compact) (heap-allocated) and
-/// [`CompactMmap`](crate::storage::CompactMmap) (memory-mapped file).
-/// These store the array as independently
-/// compressed nd-blocks and are the primary on-disk format.
+/// The block-compressed backends [`Compact`](crate::storage::Compact) (heap-allocated) and
+/// [`CompactMmap`](crate::storage::CompactMmap) (memory-mapped file) store the array as
+/// independently compressed nd-blocks, the primary on-disk format.
 ///
 /// # Adapter
 ///
-/// An adapter lets plain data participate in the same `Array<S>` world:
-/// - [`Plain`](crate::storage::Plain) - wraps a contiguous or strided in-memory ndarray, used when
-///   operating on regular Rust/ndarray data alongside compressed arrays.
+/// [`Plain`](crate::storage::Plain) wraps a contiguous or strided in-memory buffer, so regular
+/// Rust/ndarray data can be combined with compact arrays.
 ///
 /// # Lazy operation views
 ///
@@ -60,8 +56,8 @@ pub(crate) use sealed::ArrayStorageImpl;
 pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// The compile-time element type of arrays backed by this storage.
     ///
-    /// Either [`Ty<T>`](crate::Ty) - element type `T` is known at compile time - or [`TypeDyn`](crate::TypeDyn) - element
-    /// type is only available at runtime via [`dtype()`](ArrayStorage::dtype).
+    /// Either [`Ty<T>`](crate::Ty) (`T` known at compile time) or [`TypeDyn`](crate::TypeDyn)
+    /// (only available at runtime via [`dtype()`](ArrayStorage::dtype)).
     ///
     /// Operations that require knowing the element type (arithmetic, comparisons, reductions,
     /// cast) are bounded on [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), a shorthand for
@@ -74,9 +70,8 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
 
     /// Read a sub-region of the array and return it as a [`StridedBuf`](crate::storage::StridedBuf).
     ///
-    /// This is the single I/O method that every storage backend must implement.
-    /// All higher-level read operations (`to_ndarray`, `to_ndarray_sub`, etc.) bottom
-    /// out here.
+    /// The single I/O method of a storage: all higher-level reads (`to_ndarray`,
+    /// `to_ndarray_sub`, etc.) bottom out here.
     ///
     /// The two modes mirror NumPy's `out=`:
     /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
@@ -94,10 +89,6 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// - `context` - read context carrying reusable buffers and decoder state.
     /// - `out` - optional destination, as described above.
     ///
-    /// # Returns
-    ///
-    /// A [`StridedBuf`](crate::storage::StridedBuf) with the region's bytes.
-    ///
     /// # Alignment
     ///
     /// No alignment is required of `out`, and none is promised of the returned buffer: it is only
@@ -112,11 +103,10 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
 
     /// Read a sub-region as an element-wise pipeline over `T`.
     ///
-    /// Compared to [`read_data`](Self::read_data), which materializes the region into a single
-    /// buffer, this method hands back a pipeline that builds a tree of operations in which the
-    /// leaves are operands and inner nodes are ops. The default implementation of this method
-    /// reads the region into a leaf buffer, but ops override it to build a tree recursively from
-    /// their inner storage dependencies.
+    /// Where [`read_data`](Self::read_data) materializes the region into a single buffer, this
+    /// returns a tree of operations with operands at the leaves and ops at the inner nodes. The
+    /// default implementation reads the region into a leaf buffer; ops override it to build the
+    /// tree recursively from their inner storages.
     ///
     /// # Arguments
     ///

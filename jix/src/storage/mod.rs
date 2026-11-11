@@ -1,19 +1,19 @@
 //! Storage backends for [`Array`](crate::Array).
 //!
-//! Every `Array<S>` is backed by a storage type `S: ArrayStorage`, which exposes three things:
-//! the array's shape, its element dtype, and [`read_data`](ArrayStorage::read_data)
-//! which reads any rectangular sub-region and returns it as a
-//! [`StridedBuf`] - a borrowed view, a freshly materialized buffer, or bytes written into
-//! a caller-supplied destination. All higher-level operations are built on top of these three methods.
+//! Every `Array<S>` is backed by a storage `S` implementing [`ArrayStorage`], which exposes three
+//! things: the array's shape, its element dtype, and [`read_data`](ArrayStorage::read_data),
+//! which reads any rectangular sub-region as a [`StridedBuf`] - a borrowed view, a freshly
+//! materialized buffer, or bytes written into a caller-supplied destination. All other operations
+//! are built on these three.
 //!
 //! # Storage implementations
 //!
-//! The primary storages are block-compressed backends:
+//! The primary storages are block-compressed:
 //! - [`Compact`] - heap-allocated
 //! - [`CompactMmap`] - memory-mapped file
 //!
-//! An adapter lets uncompressed data participate in the same `Array` world (such as math operations with compressed arrays):
-//! - [`Plain`] - a zero-copy view into a contiguous or strided in-memory buffer.
+//! [`Plain`] is a zero-copy view into a contiguous or strided in-memory buffer, so uncompressed
+//! data can be combined with compact arrays.
 //!
 //! Operations on `Array` produce lazy views whose storage wraps the original and applies
 //! the transformation at read time. These are defined in [`jix::ops`](crate::ops) and include shape
@@ -23,26 +23,18 @@
 //! # Element types
 //!
 //! Every storage carries its compile-time element type as the associated type
-//! **[`ElementType`]**, accessible via `S::ElementType`. This is either [`Ty<T>`] (the concrete
-//! scalar type `T` is known at compile time) or [`TypeDyn`] (only known at runtime, e.g. for
-//! arrays loaded from disk). The number of dims is always a runtime property, read from
-//! [`shape`](ArrayStorage::shape).
+//! **[`ElementType`]**: either [`Ty<T>`] (`T` known at compile time) or [`TypeDyn`] (only known
+//! at runtime, e.g. for arrays loaded from disk). The number of dims is always a runtime
+//! property, read from [`shape`](ArrayStorage::shape).
 //!
-//! The [`ArrayStorageTyped`] supertrait is a shorthand for
-//! `ArrayStorage<ElementType = Ty<T>>`. All element-wise operations require it -
-//! the element type must be known at compile time so the compiler can dispatch to the
-//! correct scalar implementation.
+//! [`ArrayStorageTyped`] is a shorthand for `ArrayStorage<ElementType = Ty<T>>`. All
+//! element-wise operations require it, so the compiler can dispatch to the correct scalar
+//! implementation.
 //!
-//! Arrays constructed from typed sources (e.g. [`Array::compact_ndarray`](crate::Array::compact_ndarray))
-//! are automatically typed. Arrays loaded from disk carry [`TypeDyn`]; call
+//! Arrays built from typed sources (e.g. [`Array::compact_ndarray`](crate::Array::compact_ndarray))
+//! are typed. Arrays loaded from disk carry [`TypeDyn`]; call
 //! [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
 //! type and regain compile-time tracking.
-//!
-//! # Notable items in this module
-//!
-//! - [`ArrayStorage`] - the trait all storage backends implement.
-//! - [`Compact`] - the main block-compressed storage backend.
-//! - [`Plain`] - adapter for uncompressed data.
 
 use std::ops::Range;
 use std::rc::Rc;
@@ -80,12 +72,12 @@ pub use buf::*;
 mod info;
 pub use info::*;
 
-/// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.
+/// An [`ArrayStorage`] whose element type is statically known.
 ///
-/// `ArrayStorageTyped` is a shorthand for `ArrayStorage<ElementType = Ty<T>>`. It exposes the
-/// concrete item type as the associated type `Item`. All element-wise operations - arithmetic,
-/// comparisons, reductions, type casts - are bounded on this trait so the compiler can dispatch
-/// to the correct scalar implementation without runtime checks.
+/// Shorthand for `ArrayStorage<ElementType = Ty<T>>`, with `T` as the associated type `Item`.
+/// All element-wise operations - arithmetic, comparisons, reductions, type casts - are bounded
+/// on this trait so the compiler can dispatch to the correct scalar implementation without
+/// runtime checks.
 ///
 /// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use
 /// [`Array::into_typed::<T>()`](crate::Array::into_typed).

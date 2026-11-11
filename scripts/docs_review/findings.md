@@ -143,3 +143,13 @@ Needs the maintainer:
 
 - `jix-py/src/ops/elementwise/arith.rs:416` `jix.power` says "For an integer base the exponent must be an integer", but an integer base with a float exponent is accepted via Safe promotion (e.g. `i32 ** f32 -> f64` through the `(f64, f64)` pair). Consider "directly supported pairs take an integer exponent for an integer base".
 - `jix-py/src/ops/elementwise/arith.rs:14` `jix.negative` "Supported dtypes" omits unsigned ints and `bool`, which are accepted (handled as described under Args).
+
+## storage-core (pass 2)
+
+Needs the maintainer:
+
+- `jix/src/storage/core_trait.rs:51` The "# Flexibility" heading of the `ArrayStorage` docs does not match its content (zero overhead from monomorphization); something like "Static dispatch" would fit better.
+
+Docs, not fixed:
+
+- `jix/src/storage/core_trait.rs:63` Pre-existing doc/comment lines over 100 columns: `core_trait.rs:63,71,78,80,81`, `buf.rs:19,266,294`, `cache_id.rs:97,158`, `mod.rs:235`.

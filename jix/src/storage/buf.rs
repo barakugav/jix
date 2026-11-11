@@ -95,8 +95,8 @@ impl<'a> StridedBuf<'a> {
     /// through any other pointer during `'a`: when used as the `out` of a read, it must not overlap
     /// memory read by any array in the lazy chain (e.g. a [`Plain`](crate::storage::Plain) over the
     /// same buffer). `data` must be non-null even for an empty region, e.g. `NonNull::dangling()`.
-    /// The caller should ensure there are no two different indices that result in the same byte
-    /// offset (i.e. the strides must not alias, broadcasted dimensions are not allowed).
+    /// No two different indices may map to the same byte offset (the strides must not alias, so
+    /// no broadcast dims).
     #[inline]
     pub unsafe fn from_raw_parts_mut(
         data: *mut u8,
@@ -128,9 +128,8 @@ impl<'a> StridedBuf<'a> {
     /// # Safety
     ///
     /// The caller must ensure every strided access implied by `strides` (and the read shape it will
-    /// be used with) stays in bounds of `data`.
-    /// The caller should ensure there are no two different indices that result in the same byte
-    /// offset (i.e. the strides must not alias, broadcasted dimensions are not allowed).
+    /// be used with) stays in bounds of `data`. No two different indices may map to the same byte
+    /// offset (the strides must not alias, so no broadcast dims).
     #[inline]
     pub(crate) unsafe fn from_slice_mut(data: &'a mut [u8], strides: &[usize]) -> Self {
         Self {
@@ -239,7 +238,7 @@ impl<'a> StridedBuf<'a> {
     }
 
     /// Whether the strides are exactly row-major packed for `shape` and `dtype`'s itemsize, and
-    /// the base pointer is aligned to `dtype`'s alignment (and the strides).
+    /// the base pointer is aligned to `dtype`'s alignment.
     #[inline]
     pub(crate) fn is_contiguous_aligned(&self, shape: &[usize], dtype: &Dtype) -> bool {
         let (data, _strides) = self.data();

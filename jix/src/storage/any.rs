@@ -8,15 +8,11 @@ use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, StridedBuf};
 use crate::ReadContext;
 use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 
-/// A type-erased array storage backend that wraps any storage via `Arc<dyn ArrayStorage>`.
+/// A type-erased storage: any storage behind an `Arc`, with reads forwarded to it dynamically.
 ///
-/// `ArrayStorageAny` holds a dynamically-dispatched storage backend and implements `ArrayStorage` by forwarding to it.
-/// It is `Clone` (cloning the `Arc`), which makes it easy to store heterogeneous arrays in a collection such
-/// as `Vec<ArrayAny>`.
-///
-/// Use [`ArrayAny`](crate::ArrayAny) (the alias `Array<ArrayStorageAny>`) when you need to
-/// hold arrays of different concrete storage types behind a uniform handle, or convert an
-/// existing array with [`Array::into_any`](crate::Array::into_any).
+/// Cloning clones the `Arc`. Use [`ArrayAny`](crate::ArrayAny) (the alias
+/// `Array<ArrayStorageAny>`) to hold arrays of different storage types in one collection, such
+/// as a `Vec<ArrayAny>`; convert an array with [`Array::into_any`](crate::Array::into_any).
 #[derive(Clone)]
 pub struct ArrayStorageAny {
     inner: Arc<dyn AnyInner>,
