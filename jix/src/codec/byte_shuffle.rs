@@ -43,11 +43,7 @@ fn encode_impl<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) {
     encode_impl_generic_inline(src, dst, ITEMSIZE, n_elements_done);
 }
 
-/// Encode main loop.
-///
-/// # Returns
-///
-/// The number of items encoded.
+/// Encode main loop. Returns the number of items encoded.
 #[inline(always)]
 fn encode_simd<const ITEMSIZE: usize, S: Simd>(src: &[u8], dst: &mut [u8], simd: S) -> usize {
     let nitems = src.len() / ITEMSIZE;
@@ -151,11 +147,7 @@ fn decode_impl<const ITEMSIZE: usize>(src: &[u8], dst: &mut [u8]) {
     decode_impl_generic_inline(src, dst, ITEMSIZE, n_elements_done);
 }
 
-/// Decode main loop.
-///
-/// # Returns
-///
-/// The number of items decoded.
+/// Decode main loop. Returns the number of items decoded.
 #[inline(always)]
 fn decode_simd<const ITEMSIZE: usize, S: Simd>(src: &[u8], dst: &mut [u8], simd: S) -> usize {
     let nitems = src.len() / ITEMSIZE;
@@ -285,8 +277,9 @@ mod tests {
         assert_eq!(optimized_decoded, reference_decoded);
     }
 
-    /// `decode_simd` at every SIMD level this CPU supports (not only the one `fearless_simd::dispatch!` picks),
-    /// against the reference, for every power-of-two itemsize and lengths around the chunk sizes.
+    /// `decode_simd` at every SIMD level this CPU supports (not only the one
+    /// `fearless_simd::dispatch!` picks), against the reference, for every power-of-two
+    /// itemsize and lengths around the chunk sizes.
     #[test]
     fn decode_simd_all_levels() {
         use super::{decode_impl_generic, decode_simd};
@@ -332,8 +325,9 @@ mod tests {
         }
     }
 
-    /// `encode_simd` at every SIMD level this CPU supports (not only the one `fearless_simd::dispatch!` picks),
-    /// against the reference, for every power-of-two itemsize and lengths around the chunk sizes.
+    /// `encode_simd` at every SIMD level this CPU supports (not only the one
+    /// `fearless_simd::dispatch!` picks), against the reference, for every power-of-two
+    /// itemsize and lengths around the chunk sizes.
     #[test]
     fn encode_simd_all_levels() {
         use super::{encode_impl_generic, encode_simd};

@@ -36,14 +36,13 @@ use crate::dtype::Dtype;
 /// out_bit[b, i, n] = bit[n, b, i]
 /// ```
 ///
-/// Concretely, the output is `B*8` consecutive *bit-planes* of `N/8` bytes
-/// each, laid out byte-plane-major, bit-plane-minor, element-minor-most.
+/// That is, `B*8` consecutive *bit-planes* of `N/8` bytes each, ordered by
+/// byte-plane, then bit-plane.
 ///
 /// # Three-pass algorithm
 ///
-/// The transposition is performed in three out-of-place passes, exactly
-/// mirroring the reference `bitshuffle.c` (as used by c-blosc2). Letting
-/// `G = N/8` denote the number of 8-element groups:
+/// Three out-of-place passes, mirroring the reference `bitshuffle.c` (as used
+/// by c-blosc2). `G = N/8` is the number of 8-element groups:
 ///
 /// ```text
 ///            pass 1: byte-shuffle                  (AoS -> SoA)
@@ -62,37 +61,28 @@ use crate::dtype::Dtype;
 ///   (8, B, G)   length-G byte runs                  (B, 8, G) length-G byte runs
 /// ```
 ///
-/// Pass 1 is handled entirely by [`ByteShuffleFilter`]: it transposes the
-/// `(N, B)` AoS byte matrix to the `(B, N)` SoA byte matrix.
+/// Pass 1 is [`ByteShuffleFilter`].
 ///
-/// Pass 2 is where the actual bit-level work happens. It reads each contiguous
-/// 8-byte group from the byte-shuffled buffer as a `u64`, interprets it as an
-/// 8*8 bit matrix with **rows = elements** (0..8 within the group) and
-/// **columns = bit-within-byte** (0..8), applies a constant-time bit-matrix
-/// transpose (see [`transpose8x8`]), and scatters the 8 resulting bytes into
-/// 8 separate bit-plane regions of the destination - so byte `k` of the
-/// transposed group goes to the `k`-th bit-plane.
+/// Pass 2 does the bit-level work. Each 8-byte group of one byte-plane (8
+/// consecutive elements) is read as a `u64`, viewed as an 8*8 bit matrix with
+/// **rows = elements** and **columns = bit-within-byte**, transposed by
+/// [`transpose8x8`], and its 8 bytes are scattered to the 8 bit-plane regions
+/// of the destination: byte `k` goes to bit-plane `k`.
 ///
-/// Pass 3 is pure data movement: it swaps the outer `(8, B)` dims of the
-/// `(8, B, G)` byte array while keeping each length-`G` inner run intact, so
-/// that the final layout is byte-plane-major with bit-planes nested inside
-/// (the `(B, 8, G)` layout expected by the bitshuffle wire format).
+/// Pass 3 only moves length-`G` byte runs, swapping the outer `(8, B)` dims
+/// to give the `(B, 8, G)` layout of the bitshuffle wire format.
 ///
 /// # Decoding
 ///
-/// Decoding is the exact inverse of encoding in reverse pass order. Pass 3
-/// and pass 1 have trivial byte-level inverses (the reverse outer-dim swap
-/// and [`ByteShuffleFilter::decode`] respectively). Pass 2's inverse gathers
-/// 8 bytes from 8 different bit-plane regions and applies [`transpose8x8`]
-/// again - because [`transpose8x8`] is self-inverse, a single primitive serves
-/// both directions; only the surrounding data-movement pattern changes.
+/// The inverse passes in reverse order. Passes 3 and 1 have trivial
+/// byte-level inverses (the reverse outer-dim swap and
+/// [`ByteShuffleFilter::decode`]). Pass 2's inverse gathers 8 bytes from the 8
+/// bit-plane regions and applies the self-inverse [`transpose8x8`] again.
 ///
 /// # Tail handling
 ///
-/// Bit-shuffle groups 8 elements at a time (the pass-2 `u64` is exactly 8
-/// bytes of a single byte-plane, i.e. 8 elements). Any trailing `N mod 8`
-/// elements that don't fill a group are copied verbatim at the end of the
-/// buffer, exactly as in the reference C implementation.
+/// The trailing `N mod 8` elements, which do not fill a group, are copied
+/// verbatim to the end of the buffer, as in the reference C implementation.
 #[derive(Default)]
 pub(super) struct BitShuffleFilter;
 
@@ -100,17 +90,14 @@ impl FilterImpl for BitShuffleFilter {
     /// Encode: `(N, B)` element-major bytes -> `(B, 8, G)` bit-plane-major
     /// bytes, where `G = N/8`.
     ///
-    /// Buffer routing mirrors `bitshuffle.c` exactly - three distinct buffers,
-    /// ping-ponging so the final result lands back in `dst`:
+    /// Buffer routing mirrors `bitshuffle.c`, ping-ponging through a scratch
+    /// `tmp` so the result lands in `dst`:
     ///
     /// | pass | function                   | in    | out   |
     /// |------|----------------------------|-------|-------|
     /// | 1    | [`ByteShuffleFilter::encode`] (AoS->SoA) | `src` | `dst` |
     /// | 2    | [`trans_bit_byte`]         | `dst` | `tmp` |
     /// | 3    | [`trans_bitrow_eight`]     | `tmp` | `dst` |
-    ///
-    /// After pass 3 the final output is in `dst`; `tmp` is scratch and is
-    /// discarded on return.
     fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, buf_pool: &BufferPool) {
         assert_eq!(src.len(), dst.len());
         let typesize = dtype.itemsize() as usize;
@@ -190,19 +177,14 @@ impl FilterImpl for BitShuffleFilter {
 ///   where the output stride between consecutive bit-planes is
 ///   `bit_row_skip = B * G = typesize * n_per_plane`.
 ///
-/// **What actually happens in one iteration.** For each `(b, g)` we pull the
-/// 8 consecutive input bytes `src[b*N + g*8 + 0..8]` into a `u64` via
-/// [`transpose8x8`]. These 8 bytes are the 8 consecutive elements
-/// `g*8 .. g*8+8` of byte-plane `b`. Viewed as an 8*8 bit matrix, rows index
-/// elements within the group and columns index bit-position within a byte.
-/// After [`transpose8x8`], rows index bit-position and columns index
-/// element-within-group, so output byte `k` now contains bit `k` of those 8
-/// elements - exactly what belongs in bit-plane `k` at position `(b, g)` of
-/// the bit-plane-major output.
+/// **One iteration.** For each `(b, g)`, the 8 input bytes
+/// `src[b*N + g*8 + 0..8]` are byte-plane `b` of elements `g*8 .. g*8+8`.
+/// [`transpose8x8`] turns rows = elements, columns = bit-within-byte into
+/// rows = bit, columns = element, so output byte `k` holds bit `k` of those 8
+/// elements and goes to bit-plane `k` at position `(b, g)`.
 ///
 /// Equivalent to `bshuf_trans_bit_byte_scal` from the reference C
-/// implementation on little-endian targets (the `u64` read + `TRANS_BIT_8X8`
-/// + strided scatter pattern).
+/// implementation on little-endian targets.
 fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     fearless_simd::dispatch!(SimdLevel::new(), simd => trans_bit_byte_simd(src, dst, n_full, typesize, simd))
 }
@@ -236,9 +218,8 @@ fn trans_bit_byte_simd<S: Simd>(
 
 /// Encode pass 3 - outer-dim swap.
 ///
-/// Swaps the `(8, B)` outer dims of an `(8, B, G)` byte array, keeping each
-/// length-`G` innermost run intact. No bits are permuted within a byte; this
-/// pass is pure data movement via `copy_from_slice` on length-`G` runs.
+/// Swaps the `(8, B)` outer dims of an `(8, B, G)` byte array by copying whole
+/// length-`G` runs; no bits move within a byte.
 ///
 /// * Input:  `src[i * B*G + b * G + g]` - bit-plane `i`, byte-plane `b`, group `g`.
 /// * Output: `dst[b * 8*G + i * G + g]` - byte-plane `b`, bit-plane `i`, group `g`.
@@ -272,8 +253,8 @@ fn trans_bitrow_eight_simd<S: Simd>(
 
 /// Decode pass 1 - inverse of [`trans_bitrow_eight`].
 ///
-/// `(B, 8, G) -> (8, B, G)` byte-level outer-dim swap. Pure data movement in
-/// length-`G` runs; reads and writes are just the encode-side roles flipped.
+/// `(B, 8, G) -> (8, B, G)`: the same length-`G` run copies with the source
+/// and destination roles swapped.
 fn untrans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     fearless_simd::dispatch!(SimdLevel::new(), simd => untrans_bitrow_eight_simd(src, dst, n_full, typesize, simd))
 }
@@ -297,12 +278,10 @@ fn untrans_bitrow_eight_simd<S: Simd>(
 
 /// Decode pass 2 - inverse of [`trans_bit_byte`]; gather + bit-transpose.
 ///
-/// `(8, B, G) -> (B, G, 8)` bytes. For each `(b, g)` we read 8 bytes, one from
-/// each of the 8 bit-plane regions of the input (`src[k * bit_row_skip + b * G + g]`
-/// for `k in 0..8`). These 8 bytes are the encode-pass-2 output for that
-/// `(b, g)`, in bit-transposed form. Applying [`transpose8x8`] again - which
-/// is self-inverse - restores the original element-major 8-byte group, which
-/// we then write contiguously at `dst[b * N + g * 8 .. b * N + g * 8 + 8]`.
+/// `(8, B, G) -> (B, G, 8)` bytes. For each `(b, g)`, gathers one byte from
+/// each of the 8 bit-plane regions (`src[k * bit_row_skip + b * G + g]` for
+/// `k in 0..8`), restores the element-major 8-byte group with the self-inverse
+/// [`transpose8x8`], and writes it to `dst[b * N + g * 8 .. b * N + g * 8 + 8]`.
 fn untrans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     fearless_simd::dispatch!(SimdLevel::new(), simd => untrans_bit_byte_simd(src, dst, n_full, typesize, simd))
 }
@@ -342,8 +321,7 @@ fn untrans_bit_byte_simd<S: Simd>(
 /// is the same `u64` with rows and columns swapped, written back as 8 bytes.
 ///
 /// **Delta-swap structure.** The three stages swap progressively larger
-/// blocks across the anti-diagonal of the matrix, following the classic
-/// recursive 8*8 -> two 4*4s -> four 2*2s -> sixteen 1*1s decomposition:
+/// blocks across the main diagonal of the matrix:
 ///
 /// | stage | delta | mask                     | what it swaps              |
 /// |-------|-------|--------------------------|----------------------------|
@@ -351,11 +329,9 @@ fn untrans_bit_byte_simd<S: Simd>(
 /// | 2     | 14    | `0x0000CCCC0000CCCC`     | 2*2 blocks within 4*4s     |
 /// | 3     | 28    | `0x00000000F0F0F0F0`     | 4*4 blocks within the 8*8  |
 ///
-/// Each stage is the classic XOR-swap `t = (x ^ (x >> k)) & mask;
-/// x ^= t ^ (t << k)` which simultaneously exchanges bits at distance k
-/// wherever the mask is set. Applying the three stages in order performs the
-/// full 8*8 bit transpose; applying them a second time performs the inverse
-/// (and, since transpose is an involution, returns the original value).
+/// Each stage is the XOR-swap `t = (x ^ (x >> k)) & mask; x ^= t ^ (t << k)`,
+/// which exchanges each bit selected by `mask` with the bit `k` positions
+/// above it. The three stages in order perform the full transpose.
 ///
 /// Only little-endian targets are supported - a big-endian transpose would
 /// require a mirrored mask schedule. A compile-time assert enforces this.
@@ -439,8 +415,8 @@ mod tests {
 
     /// Trivial reference implementation of bitshuffle, for tests.
     ///
-    /// This file intentionally has no passes, no intermediate buffers, and no
-    /// bit-matrix tricks. It works directly from the mathematical definition
+    /// No passes, intermediate buffers or bit-matrix tricks: it works directly
+    /// from the definition
     ///
     /// ```text
     ///   out_bit[b, i, g, k] = in_bit[g*8 + k, b, i]
@@ -454,9 +430,6 @@ mod tests {
     ///
     /// Tail handling matches the three-pass implementation: the last `N mod 8`
     /// elements don't fill a group and are copied through verbatim.
-    ///
-    /// It is O(N * B * 8) with poor constants and no SIMD - strictly a test
-    /// oracle, never called on the hot path.
     fn bit_shuffle_trivial(src: &[u8], dst: &mut [u8], typesize: usize) {
         assert_eq!(src.len(), dst.len());
         assert_eq!(src.len() % typesize, 0);

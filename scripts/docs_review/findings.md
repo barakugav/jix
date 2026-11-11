@@ -258,3 +258,14 @@ Needs the maintainer:
 Docs, not fixed:
 
 - `jix/src/archive/block.rs:303` `BlockTable::read_content` error list omits the `InvalidArchive` raised when a section size is not a multiple of the item size (`read_section`, `jix/src/archive/block.rs:438-442`).
+
+## codec
+
+Needs the maintainer:
+
+- `jix/src/codec/mod.rs:66` `EncoderParams::level` returns `InvalidArgument` for a level outside the `i8` range, but has no `# Errors` section (unlike `filters`).
+- `jix/src/storage/params.rs:206` `ArrayParams::level` has the same undocumented `InvalidArgument` error.
+
+Docs, not fixed:
+
+- `jix/src/storage/params.rs:208` the `ArrayParams::level` doc line is 101 columns (outside the codec unit's edit list).
