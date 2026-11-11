@@ -3,20 +3,15 @@ use crate::codec::bit_shuffle::BitShuffleFilter;
 use crate::codec::byte_shuffle::ByteShuffleFilter;
 use crate::dtype::Dtype;
 
-/// A pre-compression byte transform applied to block data before encoding.
+/// A byte transform applied to block data before compression and reversed after decompression.
 ///
-/// Filters rearrange the raw element bytes into a layout that compresses more efficiently,
-/// then reverse the transform after decompression. They are applied in pipeline order during
-/// encoding and reversed during decoding.
+/// Filters rearrange the raw element bytes into a layout that compresses better. A pipeline of
+/// filters is applied in order when encoding and in reverse order when decoding.
 ///
-/// For most numeric workloads [`ByteShuffle`](Filter::ByteShuffle) is the right default.
-/// It is fast and reliably improves compression ratios for uniform-dtype arrays by grouping
-/// bytes of the same significance across consecutive elements (e.g. all the low bytes
-/// together, then all the high bytes).
-///
-/// [`BitShuffle`](Filter::BitShuffle) applies the same idea at the bit level, which can
-/// squeeze out more compression for data with low bit entropy, at the cost of higher CPU
-/// usage.
+/// For most numeric workloads [`ByteShuffle`](Filter::ByteShuffle) is the right default: it is
+/// fast and reliably improves the ratio by grouping bytes of the same significance across
+/// elements (e.g. all the low bytes, then all the high bytes). [`BitShuffle`](Filter::BitShuffle)
+/// does the same per bit, which can compress low-entropy data better at a higher CPU cost.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum Filter {
@@ -29,10 +24,9 @@ pub enum Filter {
     ByteShuffle,
     /// Groups bits by their position within each element across a block.
     ///
-    /// Analogous to byte shuffle but operating at the bit level. Yields better compression
-    /// ratios than byte shuffle for data with low bit entropy (e.g. arrays of small integers
-    /// stored in a wider type, or arrays with many repeated values), at the cost of higher
-    /// CPU usage for both encode and decode.
+    /// Compresses better than byte shuffle on data with low bit entropy (e.g. small integers
+    /// stored in a wider type, or many repeated values), at a higher CPU cost to both encode
+    /// and decode.
     BitShuffle,
 }
 impl Filter {
