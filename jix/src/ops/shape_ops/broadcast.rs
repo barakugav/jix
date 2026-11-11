@@ -10,7 +10,7 @@ use crate::ops::prelude::*;
 /// To replicate along a dim of any length, use [`Repeat`](crate::ops::Repeat) (each element
 /// duplicated in place) or [`Tile`](crate::ops::Tile) (the whole sequence duplicated).
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///

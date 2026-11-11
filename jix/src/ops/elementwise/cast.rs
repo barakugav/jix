@@ -387,7 +387,7 @@ pub(crate) mod traits {
 ///
 /// The output dtype is `T` (element type `Ty<T>`) and the shape is the input shape.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::cast()`](crate::Array::cast).

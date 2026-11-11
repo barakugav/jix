@@ -100,7 +100,7 @@ define_op2!(
     /// See [`jix::scalar::Maximum`](crate::scalar::Maximum) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::maximum()`](crate::Array::maximum).
@@ -134,7 +134,7 @@ define_op2!(
     /// See [`jix::scalar::Minimum`](crate::scalar::Minimum) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::minimum()`](crate::Array::minimum).
@@ -171,7 +171,7 @@ define_op2!(
 /// [`jix::scalar::Minimum`](crate::scalar::Minimum) scalar traits). All three arrays must have
 /// the same dtype and shape.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::clamp()`](crate::Array::clamp).

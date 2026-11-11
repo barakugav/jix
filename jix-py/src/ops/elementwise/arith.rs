@@ -27,8 +27,7 @@ use crate::Array;
 ///         A `bool` input is cast to `i8` (False -> 0, True -> -1).
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation
-///         occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
 ///
 /// Examples:
 ///     ```python
@@ -90,8 +89,7 @@ pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<Array> {
 ///     array: Input array.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation
-///         occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
 ///
 /// Examples:
 ///     ```python
@@ -156,8 +154,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`.
     ///
     /// Examples:
     ///     ```python
@@ -197,8 +194,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`.
     ///
     /// Examples:
     ///     ```python
@@ -268,7 +264,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
-    ///         broadcast shape. No computation occurs until the result is read.
+    ///         broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -324,7 +320,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
-    ///         broadcast shape. No computation occurs until the result is read.
+    ///         broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -369,7 +365,7 @@ define_op2!(
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
-///         broadcast shape. No computation occurs until the result is read.
+///         broadcast shape.
 ///
 /// Examples:
 ///     ```python
@@ -439,7 +435,7 @@ pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<A
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
-///         broadcast shape. No computation occurs until the result is read.
+///         broadcast shape.
 ///
 /// Examples:
 ///     ```python

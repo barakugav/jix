@@ -23,7 +23,7 @@ where
 /// of inputs, at position `dim` - unlike [`Concatenate`](crate::ops::Concatenate), which joins
 /// along an existing dim.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///

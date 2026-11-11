@@ -7,7 +7,7 @@ use crate::ops::prelude::*;
 /// `(a, b, c, ...) -> (a, a, b, b, c, c, ...)` whereas `tile` repeats the whole sequence
 /// `(a, b, c, ...) -> (a, b, c, a, b, c, ...)`.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///

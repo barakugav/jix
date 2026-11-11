@@ -42,7 +42,8 @@ Do not edit them; if one is wrong, put it in your report.
 These sentences repeat across ops so that each item reads on its own. Keep them; only fix one
 that is wrong for its op.
 
-- "The result is a lazy view; no computation occurs until the array is read." (Rust), and
-  "No computation occurs until the result is read." in a Python `Returns` entry.
+- "The result is a lazy view." A doc says that the result is lazy once: this sentence, or "A lazy
+  [`jix.Array`] view ..." in a Python `Returns` entry. It does not add "no computation occurs
+  until the array is read".
 - "See [`jix::scalar::X`] scalar trait for the per-element semantics."
 - "This struct is the bare storage implementation, the operation is also available as ..."

@@ -12,8 +12,6 @@ define_op2!(
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
     /// Args:
     ///     a: First operand.
     ///     b: Second operand.
@@ -51,8 +49,6 @@ define_op2!(
     ///
     /// Each operand is cast to `bool` (zero -> `False`, any non-zero value -> `True`).
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
     /// Args:
     ///     a: First operand.
     ///     b: Second operand.
@@ -84,8 +80,6 @@ define_op2!(
     /// Accepted input dtypes: any integer, float or complex dtype, and `bool`.
     ///
     /// Each operand is cast to `bool` (zero -> `False`, any non-zero value -> `True`).
-    ///
-    /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// Args:
     ///     a: First operand.
@@ -119,8 +113,6 @@ define_op1!(
     ///
     /// Each element is cast to `bool` (zero -> `False`, any non-zero value -> `True`), then
     /// negated.
-    ///
-    /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// Args:
     ///     array: Input array.
@@ -164,8 +156,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -203,8 +194,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -242,8 +232,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -275,8 +264,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
     ///
     /// Examples:
     ///     ```python
@@ -314,8 +302,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -356,8 +343,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -394,8 +380,7 @@ define_op2!(
     ///     b: Rotation amount.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -441,8 +426,7 @@ define_op2!(
     ///     b: Rotation amount.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
     ///
     /// Examples:
     ///     ```python

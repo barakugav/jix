@@ -10,7 +10,7 @@ use crate::ops::prelude::*;
 ///
 /// Output dtype equals the input dtype.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///

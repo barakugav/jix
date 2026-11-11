@@ -92,7 +92,7 @@ define_reduction_op!(
     /// is `NaN`. This matches the element-wise [`Maximum`](crate::ops::Maximum) op and
     /// `numpy.max` (not `numpy.nanmax`, which would ignore `NaN`).
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::max()`](crate::Array::max).
@@ -169,7 +169,7 @@ define_reduction_op!(
     /// is `NaN`. This matches the element-wise [`Minimum`](crate::ops::Minimum) op and
     /// `numpy.min` (not `numpy.nanmin`, which would ignore `NaN`).
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::min()`](crate::Array::min).
@@ -246,7 +246,7 @@ define_reduction_op!(
     /// **float** types `NaN` propagates: if any element along the reduced dim is `NaN`, the
     /// index of the first `NaN` is returned.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::argmax()`](crate::Array::argmax).
@@ -325,7 +325,7 @@ define_reduction_op!(
     /// **float** types `NaN` propagates: if any element along the reduced dim is `NaN`, the
     /// index of the first `NaN` is returned.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::argmin()`](crate::Array::argmin).

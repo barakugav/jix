@@ -14,7 +14,7 @@ use crate::ops::prelude::*;
 /// place `(a, b, c, ...) -> (a, a, b, b, c, c, ...)`. When the input dim already has
 /// length 1, [`Broadcast`](crate::ops::Broadcast) is a zero-cost alternative.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///

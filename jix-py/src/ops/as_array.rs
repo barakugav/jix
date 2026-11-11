@@ -21,8 +21,8 @@ use crate::util::numpy_items;
 ///     value: The array-like to convert.
 ///     dtype: Optional dtype to cast the array to. Accepts a numpy dtype object, a dtype string
 ///         (e.g. `'float32'`), or a Python type like `np.float32` - anything `numpy.dtype()`
-///         accepts. When omitted, the input dtype is preserved. The cast is a lazy view, so no
-///         computation happens until the result is read (see [`jix.cast()`][jix.cast]).
+///         accepts. When omitted, the input dtype is preserved. The cast is a lazy view (see
+///         [`jix.cast()`][jix.cast]).
 ///     params: Block layout and codec configuration. See [`jix.compact()`][jix.compact] for
 ///         details. The returned array is never compressed, so these mostly affect only arrays
 ///         later created from it (e.g. via `compact()` or `write_array()`), which inherit them.

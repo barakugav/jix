@@ -12,8 +12,7 @@ use crate::Array;
 ///     array: Input array.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-///         the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
 ///
 /// Examples:
 ///     ```python
@@ -47,8 +46,7 @@ pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///     array: Input array.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-///         the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
 ///
 /// Examples:
 ///     ```python
@@ -85,8 +83,7 @@ pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///     array: Input array.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-///         the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
 ///
 /// Examples:
 ///     ```python

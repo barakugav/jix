@@ -35,7 +35,7 @@ use crate::ops::reduction::common::{ReductionOp, ReductionOpKernel};
 /// value and no first element there is nothing to return. [`Reduce::new`] returns an
 /// `Err`, and [`Array::reduce_unordered`] panics at construction time.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation; the operation is also available as
 /// [`Array::reduce_unordered()`](crate::Array::reduce_unordered).
@@ -165,7 +165,7 @@ where
 /// Unlike [`Reduce`], `Fold` supports empty reductions: when a reduced dim has length
 /// `0`, every output cell receives `init` unchanged (the closure is never invoked).
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation; the operation is also available as
 /// [`Array::fold()`](crate::Array::fold).

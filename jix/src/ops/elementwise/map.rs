@@ -7,7 +7,7 @@ use crate::{ArraySequence, ArraySequenceTyped, ElementwisePipelineTuple};
 /// The output array has the same shape as the input, and dtype determined by the output of
 /// `F: Fn(S::Item) -> O`.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::map()`](crate::Array::map).
@@ -78,7 +78,7 @@ where
 /// The two input arrays must have the same shape. The output array has the same shape, and dtype
 /// determined by the output of `F: Fn(S1::Item, S2::Item) -> O`.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as [`map2`].
 ///
@@ -175,7 +175,7 @@ where
 /// Use a tuple when the inputs have different element types; use a fixed-length array, slice, or
 /// `Vec` when they are homogeneous.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`map_multiple`].

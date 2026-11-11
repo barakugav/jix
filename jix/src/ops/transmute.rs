@@ -8,7 +8,7 @@ use crate::ops::prelude::*;
 /// [`Array::cast()`](crate::Array::cast). The two dtypes may differ in alignment (e.g. `u32` align
 /// 4 vs `[u8; 4]` align 1), which reads handle transparently. The output shape is the input shape.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::transmute_elements()`](crate::Array::transmute_elements) and

@@ -6,7 +6,7 @@ use crate::scalar::Complex;
 /// Supported dtypes: `Complex<f32>`, `Complex<f64>`; the output dtype is `f32` or `f64`
 /// respectively.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::real()`](crate::Array::real).
@@ -74,7 +74,7 @@ where
 /// Supported dtypes: `Complex<f32>`, `Complex<f64>`; the output dtype is `f32` or `f64`
 /// respectively.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::imag()`](crate::Array::imag).

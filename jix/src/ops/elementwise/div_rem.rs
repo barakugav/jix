@@ -619,7 +619,7 @@ define_op2!(
     /// Available via the `/` operator on arrays. For dividing every element by a constant, use
     /// [`Array::map`]: `a.map(|x| x / 2i32)`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -644,7 +644,7 @@ define_op2!(
     /// See [`jix::scalar::DivideTrunc`](crate::scalar::DivideTrunc) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -674,7 +674,7 @@ define_op2!(
     /// See [`jix::scalar::DivideFloor`](crate::scalar::DivideFloor) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -704,7 +704,7 @@ define_op2!(
     /// See [`jix::scalar::DivideEuclid`](crate::scalar::DivideEuclid) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -737,7 +737,7 @@ define_op2!(
     /// Available via the `%` operator on arrays and as [`Array::remainder_trunc`]. For the
     /// remainder of every element by a constant, use [`Array::map`]: `a.map(|x| x % 3i32)`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -762,7 +762,7 @@ define_op2!(
     /// See [`jix::scalar::RemainderFloor`](crate::scalar::RemainderFloor) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -786,7 +786,7 @@ define_op2!(
     /// See [`jix::scalar::RemainderEuclid`](crate::scalar::RemainderEuclid) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```

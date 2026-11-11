@@ -55,7 +55,7 @@ use crate::Array;
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
-///         broadcast shape. No computation occurs until the result is read.
+///         broadcast shape.
 ///
 /// Examples:
 ///     ```python
@@ -145,7 +145,7 @@ pub fn divide<'py>(
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
-///         broadcast shape. No computation occurs until the result is read.
+///         broadcast shape.
 ///
 /// Examples:
 ///     ```python

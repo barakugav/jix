@@ -10,8 +10,7 @@ use crate::ops::prelude::*;
 /// See also [`Flip`](crate::ops::Flip), which reverses element order along a dim
 /// without wrapping.
 ///
-/// Output shape and dtype equal the input. The result is a lazy view; no computation
-/// occurs until the array is read.
+/// Output shape and dtype equal the input. The result is a lazy view.
 ///
 /// # Examples
 ///

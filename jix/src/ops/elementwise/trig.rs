@@ -63,7 +63,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Sin`](crate::scalar::Sin) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::sin()`](crate::Array::sin).
@@ -93,7 +93,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Cos`](crate::scalar::Cos) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::cos()`](crate::Array::cos).
@@ -124,7 +124,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Tan`](crate::scalar::Tan) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::tan()`](crate::Array::tan).
@@ -154,7 +154,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Asin`](crate::scalar::Asin) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::asin()`](crate::Array::asin).
@@ -184,7 +184,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Acos`](crate::scalar::Acos) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::acos()`](crate::Array::acos).
@@ -214,7 +214,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Atan`](crate::scalar::Atan) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::atan()`](crate::Array::atan).

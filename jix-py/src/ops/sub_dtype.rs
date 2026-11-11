@@ -8,7 +8,7 @@ use crate::Array;
 ///
 /// The output has the dtype of field `sub_field` and the same shape as the input.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// Args:
 ///     array: Input array. Must have a struct dtype (e.g. a NumPy structured array).
