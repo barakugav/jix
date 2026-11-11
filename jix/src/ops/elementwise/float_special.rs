@@ -37,33 +37,23 @@ pub(crate) mod traits {
         };
     }
     classify_op1!(
-        /// NaN test operation, as [`f32::is_nan`].
-        ///
-        /// Output dtype is `bool8`.
-        ///
-        /// Returns `true` if the element is `NaN`, `false` otherwise.
+        /// NaN test operation, as [`f32::is_nan`]. The output dtype is `bool8`.
         IsNan,
         /// Test whether the value is `NaN` (not a number).
         is_nan,
         is_nan_bulk
     );
     classify_op1!(
-        /// Finiteness test operation, as [`f32::is_finite`].
-        ///
-        /// Output dtype is `bool8`.
-        ///
-        /// Returns `true` if the element is a finite number, `false` for `+/-inf` and `NaN`.
+        /// Finiteness test operation, as [`f32::is_finite`]: `false` for `+/-inf` and `NaN`. The
+        /// output dtype is `bool8`.
         IsFinite,
         /// Test whether the value is finite (not `+/-inf` and not `NaN`).
         is_finite,
         is_finite_bulk
     );
     classify_op1!(
-        /// Infinity test operation, as [`f32::is_infinite`].
-        ///
-        /// Output dtype is `bool8`.
-        ///
-        /// Returns `true` only for `+inf` and `-inf`; returns `false` for finite values and `NaN`.
+        /// Infinity test operation, as [`f32::is_infinite`]: `true` only for `+inf` and `-inf`. The
+        /// output dtype is `bool8`.
         IsInfinite,
         /// Test whether the value is infinite (`+inf` or `-inf`).
         is_infinite,
