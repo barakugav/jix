@@ -63,3 +63,15 @@ Docs, not fixed:
 
 - `jix/src/ops/elementwise/cmp.rs:634` `ApproxEq::new_array` doc line is over 100 columns (as are the macro-generated constructor docs in the same file).
 - `jix-py/src/array.rs:1269` `__ge__` one-line doc is 107 columns.
+
+## ops-bitwise
+
+Needs the maintainer:
+
+- `jix-py/src/ops/elementwise/bitwise.rs:378,424` `bitwise_rotate_left/right`: a `bool` array `a` (or an untyped Python int `a` with an array `b`) passes Safe casting to the first `(i8, u32)` entry, so it is rotated as `i8` and the output is `i8`, not "`a`'s dtype". Is accepting `bool` here intended?
+- `jix-py/src/ops/elementwise/bitwise.rs:297,336` `bitwise_left_shift/right_shift`: `bool` inputs are accepted (Safe cast to `u8`) but are not in the "Supported dtypes" list.
+
+Docs, not fixed:
+
+- `jix-py/python/tests/test_bitwise.py:7` the module docstring says the logical ops cast "any non-complex input" to bool, but complex is accepted too (Unsafe allows Complex -> Bool), and lines 35 and 43 of the same file test it.
+- `jix/src/ops/elementwise/op2.rs:352` the macro arm `fixed_lhs_type` fixes the type of the right-hand operand (`S2::Item`). This is an internal name.
