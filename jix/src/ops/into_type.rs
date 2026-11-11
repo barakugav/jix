@@ -62,7 +62,8 @@ where
         })
     }
 
-    /// Constructs an array with [`IntoType`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`IntoType`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>) -> Result<Array<Self>> {
         Self::new(array.into_storage()).map(Array::from_storage)
     }

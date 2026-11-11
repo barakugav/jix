@@ -5,7 +5,7 @@ use crate::ops::common::define_op1;
 define_op1!(
     /// Computes the sine of each element (input in radians).
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
+    /// Supported dtypes: `f16`, `f32`, `f64`; integers and `bool` are cast to a float first.
     ///
     /// An infinite input produces `NaN`.
     ///
@@ -37,7 +37,7 @@ define_op1!(
 define_op1!(
     /// Computes the cosine of each element (input in radians).
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
+    /// Supported dtypes: `f16`, `f32`, `f64`; integers and `bool` are cast to a float first.
     ///
     /// An infinite input produces `NaN`.
     ///
@@ -69,7 +69,7 @@ define_op1!(
 define_op1!(
     /// Computes the tangent of each element (input in radians).
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
+    /// Supported dtypes: `f16`, `f32`, `f64`; integers and `bool` are cast to a float first.
     ///
     /// An infinite input produces `NaN`.
     ///
@@ -101,7 +101,7 @@ define_op1!(
 define_op1!(
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
+    /// Supported dtypes: `f16`, `f32`, `f64`; integers and `bool` are cast to a float first.
     ///
     /// An input outside `[-1, 1]` produces `NaN`.
     ///
@@ -133,7 +133,7 @@ define_op1!(
 define_op1!(
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
+    /// Supported dtypes: `f16`, `f32`, `f64`; integers and `bool` are cast to a float first.
     ///
     /// An input outside `[-1, 1]` produces `NaN`.
     ///
@@ -166,7 +166,7 @@ define_op1!(
 define_op1!(
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
+    /// Supported dtypes: `f16`, `f32`, `f64`; integers and `bool` are cast to a float first.
     ///
     /// Args:
     ///     array: Input array.

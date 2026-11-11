@@ -276,6 +276,8 @@ impl<S: ArrayStorage> Array<S> {
     ///   has a different number of dimensions than the array.
     /// - [`InvalidBufferSize`](crate::error::ErrorKind::InvalidBufferSize) - `buf` has the wrong
     ///   length for the requested range and dtype.
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - on a 32-bit
+    ///   target, the region does not fit in memory.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
