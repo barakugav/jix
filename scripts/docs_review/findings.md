@@ -99,3 +99,9 @@ Needs the maintainer:
 Docs, not fixed:
 
 - `jix/src/ops/reduction/common.rs:2051` the `//` comments of the `sum_multi_bulk_multi_tile_2d_reduce_outer` / `_reduce_inner` / `_3d_reduce_middle` tests describe the old layout ("bulks split the reduced dim ...; tiles split the non-reduced dim"). The current engine does the reverse: a bulk holds the full reduced extent (`common.rs:450-473`).
+
+## ops-reduction
+
+Needs the maintainer:
+
+- `jix/src/ops/reduction/min_max.rs:159,236,316,395`, `jix/src/ops/reduction/variance.rs:388,482` - Max, Min, ArgMax, ArgMin, Variance and StandardDeviation have `SUPPORTS_EMPTY = false`, so reducing an empty dim fails with `InvalidArgument` (the `Array` methods panic, the Python functions raise), but neither the Rust struct docs nor the `jix-py/src/ops/reduction.rs` docstrings mention it (only `Mean` does). Consider one line per op.

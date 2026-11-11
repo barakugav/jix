@@ -47,10 +47,9 @@ pub(crate) mod traits {
 
     /// Scalar kernel trait for the element-wise `sum` reduction.
     ///
-    /// Integer types accumulate into a wider output to reduce overflow risk (`i8..=i64 ->
-    /// i64`; `u8..=u64` and `bool8 -> u64`), which wraps on overflow. Floating-point and complex
-    /// types keep their input width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`,
-    /// ...), matching NumPy.
+    /// Integer types accumulate into a 64-bit output (`i8..=i64 -> i64`; `u8..=u64` and
+    /// `bool8 -> u64`), which wraps on overflow. Floating-point and complex types keep their input
+    /// width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...), matching NumPy.
     pub trait Sum {
         /// The sum element type: `i64`/`u64` for integers and `bool8`, otherwise the input type.
         type Output;
@@ -58,9 +57,9 @@ pub(crate) mod traits {
         /// result does not depend on how the stream is grouped, `false` for the float and
         /// complex ones, where every partial sum rounds.
         const IS_PRECISE: bool;
-        /// Return the initial accumulator (zero).
+        /// Return the initial accumulator: zero, `-0.0` for floating-point types.
         fn init() -> Self::Output;
-        /// Return the sum of an empty stream (zero).
+        /// Return the sum of an empty stream: zero, `+0.0` for floating-point types.
         fn empty() -> Self::Output;
         /// Fold `item` into the running sum.
         fn update(state: Self::Output, item: Self) -> Self::Output;
@@ -141,10 +140,9 @@ pub(crate) mod traits {
 
     /// Scalar kernel trait for the element-wise `product` reduction.
     ///
-    /// Integer types accumulate into a wider output to reduce overflow risk (`i8..=i64 ->
-    /// i64`; `u8..=u64 -> u64`), which wraps on overflow. Floating-point and complex types keep
-    /// their input width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...),
-    /// matching NumPy.
+    /// Integer types accumulate into a 64-bit output (`i8..=i64 -> i64`; `u8..=u64 -> u64`),
+    /// which wraps on overflow. Floating-point and complex types keep their input width
+    /// (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...), matching NumPy.
     pub trait Product {
         /// The product element type: `i64`/`u64` for integers, otherwise the input type.
         type Output;
@@ -335,10 +333,9 @@ define_reduction_op!(
     /// | `Complex<f32>` | `Complex<f32>` |
     /// | `Complex<f64>` | `Complex<f64>` |
     ///
-    /// Integer inputs are widened to a 64-bit accumulator to reduce overflow on large
-    /// reductions; floating-point and complex inputs keep their width, matching NumPy (except
-    /// `bool8`, which jix sums into `u64` whereas NumPy uses `int64`).
-    /// An empty reduction (zero elements along the reduced dims) returns `0`.
+    /// The output dtypes match NumPy, except for `bool8`, which NumPy sums into `int64`. Integer
+    /// sums wrap on overflow. An empty reduction (zero elements along the reduced dims) returns
+    /// `0`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -428,10 +425,9 @@ define_reduction_op!(
     /// | `Complex<f32>` | `Complex<f32>` |
     /// | `Complex<f64>` | `Complex<f64>` |
     ///
-    /// Integer inputs are widened to a 64-bit accumulator to reduce overflow on large
-    /// reductions; floating-point and complex inputs keep their width, matching NumPy. `bool8`
-    /// is not supported (NumPy would promote it to `int64`).
-    /// An empty reduction (zero elements along the reduced dims) returns `1`.
+    /// The output dtypes match NumPy. `bool8` is not supported (NumPy would promote it to
+    /// `int64`). Integer products wrap on overflow. An empty reduction (zero elements along the
+    /// reduced dims) returns `1`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -511,10 +507,10 @@ define_reduction_op!(
     /// Reduces one or more dims by computing the arithmetic mean.
     ///
     /// Integer and `bool8` inputs promote to `f64`; floating-point and complex inputs keep
-    /// their input width (`f16 -> f16`, `f32 -> f32`, `f64 -> f64`, `Complex<f32> ->
-    /// Complex<f32>`, `Complex<f64> -> Complex<f64>`), matching NumPy.
+    /// their dtype, matching NumPy.
     ///
-    /// Reducing an empty slice (zero elements) panics.
+    /// Reducing an empty dim makes [`Mean::new`] fail with `ErrorKind::InvalidArgument`, and
+    /// [`Array::mean()`](crate::Array::mean) panic.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
