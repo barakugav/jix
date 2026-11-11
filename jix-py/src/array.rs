@@ -58,8 +58,8 @@ use crate::util::{
 /// # Reading data
 ///
 /// Call `.numpy()` (or `[]`) to decode the array - or a sub-region of it - into a NumPy
-/// array. The result is always a fresh allocation; mutations to it do not affect the
-/// source array. Both forms accept the same index syntax:
+/// array. Unless `out=` is given, the result is a fresh allocation; mutations to it do not
+/// affect the source array. Both forms accept the same index syntax:
 ///
 /// ```python
 /// a.numpy()           # full array
@@ -82,10 +82,10 @@ use crate::util::{
 /// ## Shape operations
 ///
 /// Shape operations remap the array's indices without copying data, returning lazy views.
-/// Reshape (and its `flatten` shorthand) are uniquely prone to read-amplification: when the
+/// Reshape (and its `flatten` shorthand) is uniquely prone to read-amplification: when the
 /// new layout crosses block boundaries that the original layout respected, reading the view
 /// may decompress more data than the request appears to touch. Materialize the result with
-/// [`jix.compact()`][jix.Array.compact] to re-encode with a block layout suited to the new
+/// [`.compact()`][jix.Array.compact] to re-encode with a block layout suited to the new
 /// shape when you intend to read it more than once.
 ///
 /// # Persistence
@@ -117,10 +117,7 @@ use crate::util::{
 /// into a raw byte buffer. The primary concrete storage is a heap-allocated block-compressed
 /// backend; a memory-mapped variant is also available. Every operation constructs a new
 /// storage that wraps the input(s) and applies its transformation on each read request.
-///
-/// Because the entire operation chain is resolved at read time, there is no intermediate
-/// allocation or data copy until you ask for output. The read releases the GIL while
-/// decompressing, so Python threads can run concurrently.
+/// Reads release the GIL while decompressing, so Python threads can run concurrently.
 #[pyclass(module = "jix", frozen)]
 pub struct Array {
     pub(crate) arr: ArrayAny,
@@ -333,9 +330,6 @@ impl Array {
 impl Array {
     /// The shape of the array: a tuple of dim lengths.
     ///
-    /// Returns:
-    ///     The shape as a tuple of integers.
-    ///
     /// ```python
     /// import jix
     ///
@@ -352,9 +346,6 @@ impl Array {
     }
 
     /// The number of dimensions (dims) of the array.
-    ///
-    /// Returns:
-    ///     The number of dimensions as an integer.
     ///
     /// ```python
     /// import jix
@@ -373,9 +364,6 @@ impl Array {
 
     /// The total number of elements in the array (the product of the dim lengths).
     ///
-    /// Returns:
-    ///     The total element count as an integer.
-    ///
     /// ```python
     /// import jix
     ///
@@ -391,9 +379,6 @@ impl Array {
     }
 
     /// The length of the array along the first dim (dim 0).
-    ///
-    /// Returns:
-    ///     The length of dim 0 as an integer.
     ///
     /// ```python
     /// import jix
@@ -430,9 +415,6 @@ impl Array {
     }
 
     /// The data type of the array elements, as a NumPy dtype object.
-    ///
-    /// Returns:
-    ///     The element dtype as a `numpy.dtype` object.
     ///
     /// ```python
     /// import jix
@@ -484,8 +466,8 @@ impl Array {
     ///         **Ellipsis (`...`):** Expands to as many full-range slices as needed to cover all
     ///         remaining dims. At most one ellipsis is allowed.
     ///
-    ///         **Omitted trailing dims:** If the index covers fewer dims than the array has
-    ///         dimensions, the remaining dims receive implicit full-range slices.
+    ///         **Omitted trailing dims:** If the index covers fewer dims than the array has, the
+    ///         remaining dims receive implicit full-range slices.
     ///
     ///     out: An existing NumPy array to decode into, instead of allocating a new one. It must
     ///         have the same dtype as `self` and exactly the shape the `index` selects, and it must
@@ -497,10 +479,7 @@ impl Array {
     ///         overlap (e.g. a `sliding_window_view`). The destination must also be aligned to the
     ///         dtype.
     ///
-    ///         When `out` is given it is returned as-is, so `arr.numpy(out=dst) is dst`.
-    ///
-    ///         `out` must not share memory with a buffer this array reads from - see the warning
-    ///         below.
+    ///         It must not share memory with a buffer this array reads from (see the warning).
     ///
     /// Warning:
     ///     **`out` must not overlap memory the array itself reads from.** jix does not check for
@@ -524,17 +503,17 @@ impl Array {
     ///
     /// Returns:
     ///     A NumPy array with the same dtype as `self`, and the shape determined by the `index`
-    ///         argument (or `self.shape` when no index is supplied). Without `out`, a brand-new
-    ///         allocation is created (with implementation defined memory layout, but mostly it
-    ///         try to follow the source array's memory order like NumPy `order='K'`).
-    ///         With `out`, that same object.
+    ///         argument (or `self.shape` when no index is supplied). Without `out`, a new
+    ///         allocation whose memory layout is implementation-defined (it usually follows the
+    ///         source's memory order, like NumPy `order='K'`). With `out`, that same object, so
+    ///         `arr.numpy(out=dst) is dst`.
     ///
     /// Raises:
-    ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds,
-    ///         more index items than array dimensions, or more than one ellipsis.
+    ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds or
+    ///         `start > stop`, more index items than array dimensions, or more than one ellipsis.
     ///     ValueError: Slice step other than 1. Or `out` has the wrong dtype or shape, is not
-    ///         writeable, is not aligned to the dtype, or has a negative or zero stride on a
-    ///         dim longer than 1.
+    ///         writeable, is not aligned to the dtype, has a negative or zero stride on a dim
+    ///         longer than 1, or has overlapping elements.
     ///     TypeError: Unsupported index item type (anything other than an integer, slice, `...`,
     ///         or tuple of these). Or `out` is not a NumPy array.
     ///
@@ -708,26 +687,21 @@ impl Array {
 
     /// Read the array (or a sub-region of it) into a new plain (uncompressed) jix array.
     ///
-    /// Identical to `numpy()`, except the decoded elements are wrapped as a plain
-    /// [`jix.Array`][jix.Array] - a view over a freshly-allocated buffer, with no block compression -
-    /// rather than returned as a NumPy array. Equivalent to `jix.asarray(self.numpy(index))`,
+    /// Equivalent to `jix.asarray(self.numpy(index))`, a view over a freshly allocated buffer,
     /// except that a dtype with an inner shape stays the dtype, while NumPy expands it into
     /// trailing dims.
     ///
-    /// Like [`compact()`][jix.Array.compact], `plain()` materializes an intermediate array: it
-    /// breaks the lazy operation chain - or a shape view such as the output of
-    /// [`reshape()`][jix.Array.reshape] - so that later reads consume the stored result directly
-    /// instead of re-running the whole pipeline. Unlike `compact()`, the result is kept
-    /// uncompressed, skipping the compression pass, so it is cheaper to produce and to read back at
-    /// the cost of keeping the full data in memory.
+    /// Like [`compact()`][jix.Array.compact], `plain()` breaks the lazy operation chain - or a
+    /// shape view such as the output of [`reshape()`][jix.Array.reshape] - so that later reads use
+    /// the stored result instead of re-running the pipeline. Skipping compression makes it cheaper
+    /// to produce and to read back, at the cost of keeping the full data in memory.
     ///
-    /// This is especially useful when a deep or expensive view is broadcast into another operation:
-    /// broadcasting reads the same logical elements many times, so each read re-evaluates the whole
-    /// view unless it is materialized first. For example, `a / a.std(dim=1, keepdim=True)`
+    /// This helps most when an expensive view is broadcast into another operation, since each
+    /// broadcast read re-evaluates the view. For example, `a / a.std(dim=1, keepdim=True)`
     /// recomputes the standard deviation for every element it is broadcast against, whereas
-    /// `a / a.std(dim=1, keepdim=True).plain()` computes it once and reuses the stored result.
-    /// Reach for [`compact()`][jix.Array.compact] instead when you would rather compress the
-    /// intermediate (e.g. it is large, or will be read many times).
+    /// `a / a.std(dim=1, keepdim=True).plain()` computes it once. Use
+    /// [`compact()`][jix.Array.compact] instead to compress the intermediate (e.g. it is large,
+    /// or will be read many times).
     ///
     /// Args:
     ///     index: See `numpy()` for accepted index types and behavior.
@@ -762,15 +736,7 @@ impl Array {
         )
     }
 
-    /// Read elements from the array (or a sub-region of it) and return them as a NumPy array.
-    ///
-    /// This function is identical to `numpy()`, see that method for details.
-    ///
-    /// Args:
-    ///     index: See `numpy()` for accepted index types and behavior.
-    ///
-    /// Returns:
-    ///     A NumPy array. See `numpy()` for details.
+    /// Read the array (or a sub-region of it) into a NumPy array: `a[index]` is `a.numpy(index)`.
     #[inline]
     pub fn __getitem__<'py>(&self, index: &Bound<'py, PyAny>) -> PyResult<NumpyArray<'py>> {
         self.numpy(index.py(), Some(index), None)
@@ -825,9 +791,6 @@ impl Array {
     }
 
     /// Return a string representation of the array as `Array(shape=..., dtype=..., storage=...)`.
-    ///
-    /// Returns:
-    ///     A string of the form `Array(shape=..., dtype=..., storage=...)`.
     pub fn __str__(&self) -> String {
         let arr = &self.arr;
         let shape_str = arr
@@ -886,9 +849,6 @@ impl Array {
     }
 
     /// Return a string representation of the array as `Array(shape=..., dtype=..., storage=...)`.
-    ///
-    /// Returns:
-    ///     A string of the form `Array(shape=..., dtype=..., storage=...)`.
     pub fn __repr__(&self) -> String {
         self.__str__()
     }
@@ -1628,69 +1588,37 @@ impl Array {
 
 /// Compact any array-like object to a new [`jix.Array`][jix.Array] by compressing it into new blocks.
 ///
-/// Accepts Python scalars, lists, tuples, NumPy arrays, and any other object accepted by
-/// [`numpy.asarray`](https://numpy.org/doc/stable/reference/generated/numpy.asarray.html).
+/// The data is compressed even if the input is already a jix array. Besides converting non-jix
+/// objects, the main use of `compact` is to materialize a lazy operation chain, such as the result
+/// of `a * 2.0 + b`: every read of a lazy array re-runs the whole pipeline, which is flexible but
+/// can be slow for repeated access, while the compacted result is a standalone compressed array.
 ///
-/// A new jix compact array is created, with all the input data compressed into blocks. The data
-/// is compressed even if the input is already a jix array.
-///
-/// The primary use of `compact`, other than compacting non-jix objects, is to materialize a
-/// lazy operation chain. A [`jix.Array`][jix.Array] can wrap an arbitrary lazy computation - for
-/// example the result of `a * 2.0 + b`. Reads to such lazy arrays always perform the whole
-/// computation pipeline on the fly, which is very flexible but can be inefficient for repeated
-/// access. Calling `array_view.compact()` breaks the lazy chain and materializes the result as a
-/// standalone compressed array.
-///
-/// In contrast to "simple" views such as unary element-wise operations, lazy ops that change
-/// the shape of the array (e.g. `reshape`, `broadcast`, `permute_dims`) can cause block
-/// boundaries to no longer align with the logical layout of the array, causing reads to
-/// decompress excess data. Calling `compact` on the result of such an operation re-encodes the
-/// data with a freshly derived block shape that matches the new layout. The block shape is
-/// automatically derived using a heuristic that aims to preserve user choices, but it is not
-/// perfect - pass explicit `params` after shape-changing ops when you know the access pattern.
-///
-/// Codec settings (compression level, filters, etc.) are inherited from the source storage if the
-/// source is a jix array. Otherwise, they are either passed explicitly via `params` or chosen
-/// automatically based on the input dtype and size. See `params` for details.
-///
-/// Note:
-///     **On copy** (e.g. [`jix.compact()`][jix.Array.compact]): a new compressed array is created,
-///     inheriting any unset fields from the source array's storage. After shape-changing operations
-///     (`reshape`, `permute_dims`, etc.) the inherited block layout may not suit the new
-///     shape - consider passing explicit params to `.compact()` after such ops.
+/// Lazy ops that change the shape (e.g. `reshape`, `broadcast`, `permute_dims`) can leave block
+/// boundaries misaligned with the new layout, so that reads decompress excess data. Compacting
+/// their result re-encodes the data with a block shape derived for the new layout, by a heuristic
+/// that aims to preserve user choices. It is not perfect: pass explicit `params` when you know
+/// the access pattern.
 ///
 /// Args:
-///     array: The input data to compress. May be a Python scalar, list, tuple, NumPy array,
-///         jix array, or any other object accepted by `jix.asarray`.
+///     array: The input data to compress: a Python scalar, list, tuple, NumPy array, jix array,
+///         or any other object accepted by
+///         [`numpy.asarray`](https://numpy.org/doc/stable/reference/generated/numpy.asarray.html).
 ///     dtype: Optional dtype to cast the array to before compressing. Accepts anything
 ///         `numpy.dtype()` accepts. When omitted the input dtype is preserved.
-///     params: Controls the block layout and codec configuration:
+///     params: A dictionary of block layout and codec settings, with the optional keys below.
+///         Unset keys are inherited from the source storage if `array` is a jix array, and
+///         chosen automatically otherwise. The block layout is critical for performance and
+///         should match your access pattern; the codec defaults suit most workloads.
 ///
-///         - **Block layout** - the nd-block shape used to divide the array into independently
-///           compressed blocks. A good block layout is critical for performance and should match the
-///           access pattern of your workload.
-///         - **Codec** - compression settings used when writing and reading blocks. The defaults
-///           (Zstd level 3 with byte shuffling, block sized automatically according to the CPU
-///           cache sizes) are suitable for most workloads.
-///
-///         When omitted, defaults are chosen automatically.
-///         If the source array is a jix array, unset fields are inherited from the source storage.
-///         A dictionary with the following optional keys:
-///
-///         - `block_shape`: Explicit storage block shape, as a list of integers (one per
-///             dimension). When set, array data is divided into nd-blocks of exactly this shape
-///             (each dimension is clamped to the array boundary). Choosing a block shape that
-///             matches your access pattern is the most important tuning knob: if you always read
-///             row slices, a block shape of `[1, <row_length>]` avoids decompressing neighboring
-///             rows. When not set, the shape is auto-computed to fit approximately
-///             `block_size` bytes.
-///         - `block_shape_fixed_dims`: Per-dimension flag controlling how `block_shape` is scaled
-///             when a downstream operation auto-computes a new block shape. One bool per
-///             dimension: `True` pins the block size for that dimension exactly (the default for
-///             every dimension when `block_shape` is set by the user); `False` allows the block
-///             size to be freely resized (used when an op makes the original size irrelevant,
-///             e.g. a broadcast dimension). Requires `block_shape` to also be set. Length must
-///             equal the number of dimensions.
+///         - `block_shape`: The block shape, as a list of integers (one per dimension), each
+///             clamped to the array boundary. For example, if you always read row slices,
+///             `[1, <row_length>]` avoids decompressing neighboring rows. When not set, the shape
+///             is auto-computed to fit approximately `block_size` bytes.
+///         - `block_shape_fixed_dims`: One bool per dimension, controlling how `block_shape` is
+///             scaled when a downstream operation auto-computes a new block shape: `True` pins the
+///             block length of that dimension (the default for every dimension when `block_shape`
+///             is set); `False` lets it be freely resized (used when an op makes the original
+///             length irrelevant, e.g. a broadcast dimension). Requires `block_shape`.
 ///         - `block_size`: Target block size in bytes, used when auto-computing or scaling the
 ///             block shape for dimensions that are not fixed. Ignored when all dimensions are
 ///             fixed. Defaults to a size chosen automatically according to the CPU cache sizes.
@@ -1717,8 +1645,8 @@ impl Array {
 ///             the counter-pressure is cache residency, which the `max` ceiling bounds.
 ///
 ///             When unset, the range is chosen automatically according to the CPU cache sizes.
-///         - `codec`: Compression algorithm applied to each block. Currently the only accepted
-///             value is `"zstd"`. Defaults to `"zstd"` when left unset.
+///         - `codec`: Compression algorithm applied to each block. The only accepted value, and
+///             the default, is `"zstd"`.
 ///         - `compression_level`: Compression level passed to the codec.
 ///             Higher values compress more but are slower to encode. Defaults to 3.
 ///         - `filters`: List of filters applied to the raw block bytes *before* compression.

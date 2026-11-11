@@ -173,3 +173,16 @@ Docs, not fixed:
 - `jix/src/ops/shape_ops/concatenate.rs:10` The `concatenate` Panics list does not mention overflow of the concatenated length or byte size (`concatenate.rs:111-119`).
 - `jix/src/ops/shape_ops/stack.rs:10` The `stack` Panics list does not mention the output shape/byte-size overflow check (`stack.rs:96`).
 - `jix/src/ops/shape_ops/roll.rs:215` `Array::roll` repeats the struct doc's paragraph on modulo reduction and shift direction (`roll.rs:6-8`).
+
+## py-array
+
+Needs the maintainer:
+
+- `jix-py/src/array.rs:85` The `Array` class doc says reshape/flatten are "uniquely prone" to read amplification, but the `jix.compact` doc (`jix-py/src/array.rs:1596`) lists `broadcast` and `permute_dims` as causing the same block misalignment. One of them should give way.
+- `jix-py/src/array.rs:703` `plain` recommends `compact()` when the intermediate "will be read many times", but the same doc says a plain result is cheaper to read back. Maybe it means "kept around for a long time".
+
+Docs, not fixed:
+
+- `jix-py/src/array.rs:392` `__len__` raises ValueError on a zero-dimensional array (`jix-py/src/array.rs:395-397`) but has no `Raises:` section.
+- `jix-py/src/array.rs:512` `numpy` Raises ValueError omits the error for an `out` whose inner (dtype) dims are not C-contiguous (`jix-py/src/array.rs:281-290`).
+- `jix/src/storage/params.rs:159` The `block_size` setter doc says an unset block size defaults to `block_shape.product() * itemsize` when a block shape is given; the code does that only when all dims are fixed and otherwise uses the L1 cache size (`jix/src/storage/params.rs:348-350`).
