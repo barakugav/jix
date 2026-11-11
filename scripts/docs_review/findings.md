@@ -105,3 +105,16 @@ Docs, not fixed:
 Needs the maintainer:
 
 - `jix/src/ops/reduction/min_max.rs:159,236,316,395`, `jix/src/ops/reduction/variance.rs:388,482` - Max, Min, ArgMax, ArgMin, Variance and StandardDeviation have `SUPPORTS_EMPTY = false`, so reducing an empty dim fails with `InvalidArgument` (the `Array` methods panic, the Python functions raise), but neither the Rust struct docs nor the `jix-py/src/ops/reduction.rs` docstrings mention it (only `Mean` does). Consider one line per op.
+
+## ops-misc
+
+Needs the maintainer:
+
+- `jix/src/ops/transmute.rs:17` The Safety section names `bool` as a type with invalid bit patterns, but `bool` is not `Dtyped` and the `Dtyped` contract (`jix/src/dtype.rs:1179-1180`) requires every bit pattern to be valid, so the example is stale. Should the section name a real case, or should `Transmute` stop being `unsafe`?
+- `jix/src/ops/sub_dtype.rs:192` `dtype_sub_field_dyn` panics (it unwraps `SubDtype::new_array`) on a non-struct dtype, an inner shape, a missing field or a zero-sized field, but has no Panics section.
+
+Docs, not fixed:
+
+- `jix/src/ops/transmute.rs:67`, `jix/src/ops/sub_dtype.rs:70`, `jix/src/ops/into_type.rs:65`, `jix/src/ops/maybe_compact.rs:43` `new_array` doc lines exceed 100 columns.
+- `jix/src/ops/transmute.rs:19`, `jix/src/ops/transmute.rs:124`, `jix/src/ops/transmute.rs:143` doc lines exceed 100 columns.
+- `jix/src/ops/shape_ops/insert_dim.rs:26`, `jix/src/ops/shape_ops/remove_dim.rs:24` (and `insert_dim.rs:139`, `remove_dim.rs:133`) doc lines exceed 100 columns.

@@ -3,8 +3,7 @@ use crate::ops::prelude::*;
 /// Extracts one named field from a struct dtype array.
 ///
 /// The input array must have a struct dtype with a field named `sub_field`. The output has the
-/// dtype of that field and the same shape as the input. Field bytes are copied out of each
-/// element on demand.
+/// dtype of that field and the same shape as the input.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -170,13 +169,13 @@ where
     /// Returns a view of one named field of a struct dtype. See [`SubDtype`] for details and
     /// examples.
     ///
-    /// The method is generic over the output element type, which must match the field dtype.
-    /// If the field dtype is not statically known, use [`dtype_sub_field_dyn()`](Self::dtype_sub_field_dyn)
-    /// instead.
+    /// If the field dtype is not statically known, use
+    /// [`dtype_sub_field_dyn()`](Self::dtype_sub_field_dyn) instead.
     ///
     /// # Panics
     ///
-    /// Panics if the array dtype is not a struct dtype or has no field with the given name.
+    /// Panics if the array dtype is not a struct dtype, has an inner shape or has no field with the
+    /// given name, or if the field dtype is zero-sized or not `T`.
     #[track_caller]
     pub fn dtype_sub_field<T>(self, sub_field: &str) -> Array<SubDtype<S, Ty<T>>>
     where
@@ -188,8 +187,7 @@ where
     /// Returns a view of one named field of a struct dtype, for dynamically-typed fields. See
     /// [`SubDtype`] for details and examples.
     ///
-    /// If the type of the field is statically known, use [`dtype_sub_field()`](Self::dtype_sub_field)
-    /// instead to get better ergonomics and performance.
+    /// If the field type is statically known, prefer [`dtype_sub_field()`](Self::dtype_sub_field).
     #[track_caller]
     pub fn dtype_sub_field_dyn(self, sub_field: &str) -> Array<SubDtype<S, TypeDyn>> {
         SubDtype::new_array(self, sub_field).unwrap()

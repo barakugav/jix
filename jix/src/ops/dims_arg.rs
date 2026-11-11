@@ -1,7 +1,7 @@
 /// An argument that specifies a set of dim indices.
 ///
-/// Operations that add or remove dims - `insert_dim`, `remove_dim`, `sum`, `max`, etc. - are
-/// generic over `Dims: DimsArg`, so a single dim (`usize`), a fixed set (`[usize; N]` or a tuple of
+/// Operations that take dims - `insert_dim`, `remove_dim`, `flip`, `sum`, `max`, etc. - accept
+/// any `impl DimsArg`, so a single dim (`usize`), a fixed set (`[usize; N]` or a tuple of
 /// `usize`) or a runtime list (`&[usize]`, `Vec<usize>`) can be passed.
 ///
 /// # Examples

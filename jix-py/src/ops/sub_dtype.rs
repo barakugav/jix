@@ -6,9 +6,7 @@ use crate::Array;
 
 /// Extracts one named field from a struct dtype array.
 ///
-/// `array` must have a struct dtype (e.g. a NumPy structured array). The output has the dtype
-/// of field `sub_field` and the same shape as the input. Field bytes are sliced out of each
-/// element on demand.
+/// The output has the dtype of field `sub_field` and the same shape as the input.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -17,12 +15,11 @@ use crate::Array;
 ///     sub_field: The name of the field to extract.
 ///
 /// Raises:
-///     TypeError: If the array dtype is not a struct dtype or does not have a field named
-///         `sub_field`.
+///     TypeError: If the array dtype is not a struct dtype, has an inner shape or does not have a
+///         field named `sub_field`, or if that field is zero-sized.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view of the specified field, with the field's dtype and the same
-///         shape as the input.
+///     A [`jix.Array`][jix.Array] view of the field.
 ///
 /// Examples:
 ///     ```python
