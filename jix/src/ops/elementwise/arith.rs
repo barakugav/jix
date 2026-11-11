@@ -13,19 +13,14 @@ pub(crate) mod traits {
     use crate::scalar::Complex;
 
     define_scalar_op1_trait!(
-        /// Sign operation: as [`i32::signum`] for signed integers, `0` or `1` for unsigned
-        /// integers, and as `numpy.sign` for floats.
+        /// Sign operation. The output dtype is the input dtype.
         ///
         /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
         /// `f16`, `f32`, `f64`.
         ///
-        /// For **signed integer** types: returns `-1`, `0`, or `+1` of the same type.
-        ///
-        /// For **unsigned integer** types: returns `0` or `1` of the same type (since
-        /// unsigned values cannot be negative).
-        ///
-        /// For **float** types: returns `+1.0` for positive values, `-1.0` for negative values,
-        /// `0.0` for `+0.0` and `-0.0`, and `NaN` for `NaN`, like `numpy.sign`.
+        /// - **signed integers**: `-1`, `0` or `+1`, as [`i32::signum`].
+        /// - **unsigned integers**: `0` or `1`.
+        /// - **floats**: `+1.0`, `-1.0`, `0.0` for `+-0.0`, and `NaN` for `NaN`, as `numpy.sign`.
         Sign,
         /// Compute the sign of the value.
         sign,
@@ -55,7 +50,7 @@ pub(crate) mod traits {
         }
     );
     define_scalar_op1_trait!(
-        /// Absolute value operation: the magnitude for complex types.
+        /// Absolute value operation.
         ///
         /// Supported dtypes and output dtype:
         ///
@@ -312,14 +307,11 @@ pub(crate) mod traits {
         simd: mul_bulk, [i16, i32, i64, u8, u16, u32, u64]
     );
     define_scalar_op2_trait!(
-        /// Exponentiation operation: as [`i32::wrapping_pow`] for integers, [`f32::powf`] for
-        /// floats.
+        /// Exponentiation operation: as [`i32::wrapping_pow`] for integers (wrapping on
+        /// overflow), [`f32::powf`] for floats (`+-inf` and `NaN` included, no error reported).
         ///
-        /// Integer results wrap on overflow. A negative exponent of an integer base gives `0`
-        /// and reports an arithmetic error to `status`.
-        ///
-        /// Float values follow [`f32::powf`] (`+-inf` and `NaN` included), and no error is
-        /// reported.
+        /// A negative exponent of an integer base gives `0` and reports an arithmetic error to
+        /// `status`.
         Pow,
         /// Raise to the power of another value, reporting an arithmetic error to `status`.
         pow(status),

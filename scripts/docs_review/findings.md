@@ -136,3 +136,10 @@ Docs, not fixed:
 - `jix/src/util/nd_copy.rs:453-454` and `:799` These plain comments name `create_scalar_fn` and a field-by-field `copy_struct` route. Neither exists: a 12/4 struct goes through `copy_untyped`.
 - `jix/src/util/nd_iter_unordered.rs:276-277`, `jix/src/util/nd_iter_unordered_dyn.rs:220-221` These plain comments repeat "and" across the line break.
 - `jix/src/util/nd_copy.rs:71` This plain comment names `nd_iter_unordered` instead of `NdIterUnordered`.
+
+## ops-arith
+
+Needs the maintainer:
+
+- `jix-py/src/ops/elementwise/arith.rs:416` `jix.power` says "For an integer base the exponent must be an integer", but an integer base with a float exponent is accepted via Safe promotion (e.g. `i32 ** f32 -> f64` through the `(f64, f64)` pair). Consider "directly supported pairs take an integer exponent for an integer base".
+- `jix-py/src/ops/elementwise/arith.rs:14` `jix.negative` "Supported dtypes" omits unsigned ints and `bool`, which are accepted (handled as described under Args).
