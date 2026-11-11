@@ -245,6 +245,21 @@ def test_bitwise_rotate_right_concrete():
         assert_array_matches(jix.bitwise_rotate_right(za, zb), expected)
 
 
+# rotate ops never cast: the value keeps its dtype and the amount must be u32 (or a Python int).
+@pytest.mark.parametrize("op", [jix.bitwise_rotate_left, jix.bitwise_rotate_right])
+def test_bitwise_rotate_does_not_cast(op):
+    za = jix.compact(np.array([1, 2, 3], dtype=np.uint8))
+    assert op(za, 1).dtype == np.uint8
+    assert op(za, jix.compact(np.array([1, 1, 1], dtype=np.uint32))).dtype == np.uint8
+    # an untyped Python int value picks the first, unsigned, implementation
+    assert op(1, jix.compact(np.array([1, 2, 3], dtype=np.uint32))).dtype == np.uint8
+    for amount_dtype in (np.uint8, np.int32, np.bool_):
+        with pytest.raises(TypeError):
+            op(za, jix.compact(np.ones(3, dtype=amount_dtype)))
+    with pytest.raises(TypeError):
+        op(jix.compact(np.array([True, False, True])), 1)
+
+
 # ---------------------------------------------------------------------------
 # Logical binary ops: bool output; reference uses np.logical_* to match cast::<T, bool>
 # ---------------------------------------------------------------------------
