@@ -1,0 +1,31 @@
+{{!-- cargo-about template for THIRD_PARTY_LICENSES, see about.toml --}}
+THIRD-PARTY LICENSES
+====================
+
+The jix Python wheels statically link the third-party Rust crates listed below,
+including the Zstandard C library bundled by the zstd-sys crate. Their license
+texts follow, grouped by license, each with the crates it applies to.
+
+Licenses of the jix project itself, and of the third-party code it derives
+from, are in the LICENSE-APACHE, LICENSE-MIT and NOTICE files.
+
+Overview:
+{{#each overview}}
+- {{{name}}}
+{{/each}}
+{{#each licenses}}
+{{!-- The jix crates themselves share one license text of their own, skip it --}}
+{{#unless (eq used_by.[0].crate.repository "https://github.com/barakugav/jix")}}
+
+================================================================================
+{{{name}}}
+
+Used by:
+{{#each used_by}}
+- {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+--------------------------------------------------------------------------------
+
+{{{text}}}
+{{/unless}}
+{{/each}}

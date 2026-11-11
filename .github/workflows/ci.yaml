@@ -37,6 +37,9 @@ jobs:
             jix/schema
             jix-py
       - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9
       - uses: actions/setup-python@v7
         with:
           python-version: 3.13
@@ -164,6 +167,16 @@ jobs:
           push: false
           archive: false
           pr_comment: false
+      - name: Check license file copies
+        run: |
+          for f in jix/LICENSE-APACHE jix/LICENSE-MIT jix/NOTICE \
+                   jix-macros/LICENSE-APACHE jix-macros/LICENSE-MIT \
+                   jix-py/LICENSE-APACHE jix-py/LICENSE-MIT jix-py/NOTICE; do
+            cmp "$(basename "$f")" "$f"
+          done
+      - name: Check third-party licenses
+        run: cargo about generate --fail --locked -o "$RUNNER_TEMP/THIRD_PARTY_LICENSES" about.hbs
+        working-directory: jix-py
 
       ############ Tests ############
       - name: Test jix-macros

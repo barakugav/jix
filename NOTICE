@@ -2,18 +2,24 @@
 Jix
 Copyright 2026 Barak Ugav
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this project except in compliance with the License.
-A copy of the License is available in the LICENSE file at the root of
-this repository, or at:
+Licensed under either of
 
-    http://www.apache.org/licenses/LICENSE-2.0
+- Apache License, Version 2.0 (LICENSE-APACHE or
+  http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license (LICENSE-MIT or http://opensource.org/licenses/MIT)
+
+at your option. Both license files accompany this NOTICE.
 
 =======================================================================
 
 This project includes software derived from third-party projects.
 Their original copyright notices and license terms are reproduced
 below as required by their licenses.
+
+Binary distributions (the Python wheels) also statically link
+third-party Rust crates and C libraries. Their licenses are listed in
+the THIRD_PARTY_LICENSES file shipped alongside this NOTICE in those
+distributions.
 
 =======================================================================
 Bitshuffle
