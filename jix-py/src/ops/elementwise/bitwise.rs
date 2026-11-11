@@ -367,8 +367,8 @@ define_op2!(
     /// Element-wise bitwise left rotation.
     ///
     /// Supported value dtypes (`a`): `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// The rotation amount (`b`) is cast to `u32`, so it must be `bool`, `u8`, `u16`, `u32` or a
-    /// Python int. Output dtype equals `a`'s dtype.
+    /// The rotation amount (`b`) must be `u32` or a Python int. No operand is cast, and the output
+    /// dtype equals `a`'s dtype.
     ///
     /// Bits shifted out of the most-significant end wrap around to the least-significant end.
     /// The rotation amount is taken modulo the bit width of the type.
@@ -396,16 +396,16 @@ define_op2!(
     BitwiseRotateLeft,
     dispatch = {
         [
-            (i8, u32),
             (u8, u32),
-            (i16, u32),
+            (i8, u32),
             (u16, u32),
-            (i32, u32),
+            (i16, u32),
             (u32, u32),
-            (i64, u32),
-            (u64, u32)
+            (i32, u32),
+            (u64, u32),
+            (i64, u32)
         ],
-        Safe
+        None
     }
 );
 
@@ -413,8 +413,8 @@ define_op2!(
     /// Element-wise bitwise right rotation.
     ///
     /// Supported value dtypes (`a`): `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// The rotation amount (`b`) is cast to `u32`, so it must be `bool`, `u8`, `u16`, `u32` or a
-    /// Python int. Output dtype equals `a`'s dtype.
+    /// The rotation amount (`b`) must be `u32` or a Python int. No operand is cast, and the output
+    /// dtype equals `a`'s dtype.
     ///
     /// Bits shifted out of the least-significant end wrap around to the most-significant end.
     /// The rotation amount is taken modulo the bit width of the type.
@@ -442,15 +442,15 @@ define_op2!(
     BitwiseRotateRight,
     dispatch = {
         [
-            (i8, u32),
             (u8, u32),
-            (i16, u32),
+            (i8, u32),
             (u16, u32),
-            (i32, u32),
+            (i16, u32),
             (u32, u32),
-            (i64, u32),
-            (u64, u32)
+            (i32, u32),
+            (u64, u32),
+            (i64, u32)
         ],
-        Safe
+        None
     }
 );
