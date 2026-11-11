@@ -20,11 +20,6 @@ use crate::util::IntoPyResult;
 /// Casting from a complex type to a real numeric type (int, uint, or float), or any cast
 /// involving struct dtypes, is not supported.
 ///
-/// Output dtype is the target dtype. Output shape equals the input shape.
-///
-/// `dtype` may be a numpy dtype object, a dtype string (e.g. `'float32'`), or a Python
-/// type like `np.float32`.
-///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:

@@ -10,13 +10,12 @@ pub(crate) mod traits {
     /// Cast a scalar value to another scalar type.
     ///
     /// Supported casts:
-    /// - Between any two integer types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// - Between any two floating-point types: `f16` (requires the `half` feature), `f32`, `f64`.
-    /// - Between any two complex types: `Complex<f16>` (requires the `half` feature), `Complex<f32>`, `Complex<f64>`.
-    /// - From any integer to floating-point type, or vice versa.
-    /// - From any integer or floating-point type to a complex type. A complex value can only be
-    ///   cast to another complex type or to `bool8` - not to a real integer or floating-point type.
-    /// - Between `bool8` and any other scalar, and vice versa: zero -> `bool8::FALSE`, any non-zero value -> `bool8::TRUE`.
+    /// - Between any two integer or floating-point types: `i8`, `i16`, `i32`, `i64`, `u8`,
+    ///   `u16`, `u32`, `u64`, `f16` (requires the `half` feature), `f32`, `f64`.
+    /// - From any of these or a complex type to a complex type: `Complex<f16>` (requires the
+    ///   `half` feature), `Complex<f32>`, `Complex<f64>`. A complex value cannot be cast to a
+    ///   real integer or floating-point type.
+    /// - Between `bool8` and any scalar: zero -> `bool8::FALSE`, non-zero -> `bool8::TRUE`.
     pub trait Cast<T> {
         /// Casts `self` to `T`.
         fn cast(self) -> T;
@@ -377,19 +376,16 @@ pub(crate) mod traits {
 /// Casts each element to a new element type, returned by [`Array::cast`].
 ///
 /// Supported casts:
-/// - Between any two integer types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-/// - Between any two floating-point types: `f16` (requires the `half` feature), `f32`, `f64`.
-/// - Between any two complex types: `Complex<f32>`, `Complex<f64>`.
-/// - From any integer to floating-point type, or vice versa.
-/// - From any integer or floating-point type to a complex type. A complex value can only be
-///   cast to another complex type or to `bool8` - not to a real integer or floating-point type.
-/// - Between `bool8` and any other scalar, and vice versa: zero -> `bool8::FALSE`, any non-zero value -> `bool8::TRUE`.
+/// - Between any two integer or floating-point types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`,
+///   `u32`, `u64`, `f16` (requires the `half` feature), `f32`, `f64`.
+/// - From any of these or a complex type to a complex type: `Complex<f32>`, `Complex<f64>`. A
+///   complex value cannot be cast to a real integer or floating-point type.
+/// - Between `bool8` and any scalar: zero -> `bool8::FALSE`, non-zero -> `bool8::TRUE`.
 ///
-/// The cast is checked via the [`Cast<T>`](crate::scalar::Cast) trait bound on the source element
-/// type; unsupported source-to-target type pairs are rejected at compile time.
+/// The [`Cast<T>`](crate::scalar::Cast) bound on the source element type rejects unsupported
+/// pairs at compile time.
 ///
-/// Output dtype is the target dtype; output element type is `Ty<T>`. Output shape equals the
-/// input shape.
+/// The output dtype is `T` (element type `Ty<T>`) and the shape is the input shape.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///

@@ -1,13 +1,10 @@
 use crate::ops::prelude::*;
 
-/// Selects elements element-wise from `x` or `y` depending on `condition`.
+/// Selects `x[i]` where `condition[i]` is true and `y[i]` elsewhere, like
+/// `numpy.where(condition, x, y)`.
 ///
-/// For each index `i`, the output is `x[i]` if `condition[i]` is `true`, otherwise `y[i]`.
-/// Semantics match `numpy.where(condition, x, y)`.
-///
-/// `condition` must have dtype `bool8`. `x` and `y` must have the same dtype. All three arrays
-/// must have the same shape. Output dtype equals the dtype of `x` and `y`. Output shape equals
-/// the input shape.
+/// `condition` must have dtype `bool8`, and `x` and `y` the same dtype, which is the output
+/// dtype. All three arrays must have the same shape, which is the output shape.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -535,7 +532,7 @@ mod tests {
     }
 
     /// Compresses `cond`/`x`/`y` (with `block_shape`, if given, applied to all three), runs
-    /// `select` on them, and asserts the result matches the elementwise `if c { x }
+    /// `select` on them, and asserts the result matches the element-wise `if c { x }
     /// else { y }` reference. Shared by the concrete per-byte-width tests below, which only
     /// differ in the fixed input arrays.
     fn check_select_concrete<T, InD>(
@@ -850,10 +847,9 @@ mod tests {
 
     // --- strided output buffer ---
 
-    /// Read a `select` view into a *strided* destination and assert every logical output
-    /// element lands in its own slot with the bytes between slots left untouched - i.e. `read_data`
-    /// selects straight into the caller's byte strides instead of staging through a contiguous
-    /// scratch and scattering at the end.
+    /// Read a `select` view into a *strided* destination and assert every output element lands
+    /// in its own slot with the bytes between slots untouched, i.e. `read_data` writes straight
+    /// into the caller's strides instead of staging through a contiguous scratch.
     ///
     /// `inner_gap` is how many element slots each consecutive innermost element advances (1 is a
     /// row-major-contiguous destination; 2 leaves one untouched gap element between slots), and
