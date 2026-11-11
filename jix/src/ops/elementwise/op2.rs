@@ -349,13 +349,13 @@ macro_rules! define_array_op2_method {
             $Op::new_array(self, other).unwrap()
         }
     };
-    ($method:ident : $Op:ident, $($trait:ident)::+, fixed_lhs_type = $lhs_type:ty) => {
+    ($method:ident : $Op:ident, $($trait:ident)::+, fixed_rhs_type = $rhs_type:ty) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
             S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Item = $lhs_type>,
+            S2: crate::storage::ArrayStorageTyped<Item = $rhs_type>,
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, other).unwrap()
