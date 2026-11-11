@@ -126,7 +126,7 @@ define_op1!(
     /// See [`jix::scalar::CountOnes`](crate::scalar::CountOnes) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::count_ones()`](crate::Array::count_ones).
@@ -157,7 +157,7 @@ define_op1!(
     /// See [`jix::scalar::CountZeros`](crate::scalar::CountZeros) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::count_zeros()`](crate::Array::count_zeros).
@@ -188,7 +188,7 @@ define_op1!(
     /// See [`jix::scalar::LeadingZeros`](crate::scalar::LeadingZeros) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::leading_zeros()`](crate::Array::leading_zeros).
@@ -219,7 +219,7 @@ define_op1!(
     /// See [`jix::scalar::TrailingZeros`](crate::scalar::TrailingZeros) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::trailing_zeros()`](crate::Array::trailing_zeros).
@@ -250,7 +250,7 @@ define_op1!(
     /// See [`jix::scalar::SwapBytes`](crate::scalar::SwapBytes) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::swap_bytes()`](crate::Array::swap_bytes).
@@ -281,7 +281,7 @@ define_op1!(
     /// See [`jix::scalar::ReverseBits`](crate::scalar::ReverseBits) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::reverse_bits()`](crate::Array::reverse_bits).

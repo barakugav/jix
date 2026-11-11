@@ -29,8 +29,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] with the broadcast shape. No computation occurs until
-    ///         the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -74,8 +73,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] with the broadcast shape. No computation occurs until
-    ///         the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -124,8 +122,7 @@ define_op2!(
 ///         bound.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape and the promoted dtype. No
-///         computation occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape and the promoted dtype.
 ///
 /// Examples:
 ///     ```python

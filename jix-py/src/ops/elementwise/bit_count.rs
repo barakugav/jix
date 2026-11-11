@@ -16,7 +16,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view.
     ///
     /// Examples:
     ///     ```python
@@ -48,7 +48,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view.
     ///
     /// Examples:
     ///     ```python
@@ -85,7 +85,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view.
     ///
     /// Examples:
     ///     ```python
@@ -122,7 +122,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view.
     ///
     /// Examples:
     ///     ```python
@@ -158,7 +158,7 @@ define_op1!(
 ///     array: Input array.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] view.
 ///
 /// Examples:
 ///     ```python
@@ -203,7 +203,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view.
     ///
     /// Examples:
     ///     ```python

@@ -9,7 +9,7 @@ use crate::ops::prelude::*;
 /// See also [`Roll`](crate::ops::Roll), which cyclically shifts elements along a dim
 /// without reversing them.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///

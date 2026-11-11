@@ -7,7 +7,7 @@ use crate::ops::prelude::*;
 ///
 /// Output dtype equals the input dtype, and the number of dims is unchanged.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///

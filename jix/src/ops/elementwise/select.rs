@@ -6,7 +6,7 @@ use crate::ops::prelude::*;
 /// `condition` must have dtype `bool8`, and `x` and `y` the same dtype, which is the output
 /// dtype. All three arrays must have the same shape, which is the output shape.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::select()`](crate::Array::select).

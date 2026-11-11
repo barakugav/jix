@@ -302,7 +302,7 @@ define_reduction_op!(
     ///
     /// Uses Welford's online algorithm for numerical stability.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::var()`](crate::Array::var).
@@ -396,7 +396,7 @@ define_reduction_op!(
     /// `ddof` parameter as [`Variance`]: use `ddof=0` for population std and `ddof=1` for
     /// sample std.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::std()`](crate::Array::std).

@@ -8,7 +8,7 @@ define_reduction_op!(
     ///
     /// Input and output dtype are `bool8`. An empty reduction returns `true`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::all()`](crate::Array::all).
@@ -74,7 +74,7 @@ define_reduction_op!(
     ///
     /// Input and output dtype are `bool8`. An empty reduction returns `false`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::any()`](crate::Array::any).

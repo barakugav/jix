@@ -400,7 +400,7 @@ pub(crate) struct ParsedBasicIndex {
 ///
 /// Output dtype and total number of elements equal the input.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// Args:
 ///     array: Input array.
@@ -482,7 +482,7 @@ pub fn unsqueeze<'py>(
 ///
 /// Output dtype and total number of elements equal the input.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// Args:
 ///     array: Input array.
@@ -525,8 +525,7 @@ pub fn remove_dim<'py>(
 
 /// Removes length-1 dimensions from an array's shape.
 ///
-/// Output dtype and total number of elements equal the input. The result is a lazy view; no
-/// computation occurs until the array is read.
+/// Output dtype and total number of elements equal the input. The result is a lazy view.
 ///
 /// Args:
 ///     array: Input array.
@@ -576,7 +575,7 @@ pub fn squeeze<'py>(
 ///
 /// Output dtype equals the input dtype.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// Args:
 ///     array: Input array.
@@ -637,7 +636,7 @@ pub fn permute_dims<'py>(
 ///
 /// Output dtype equals the input dtype.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// Args:
 ///     array: Input array.
@@ -808,7 +807,7 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///
 /// **Type promotion**: if the arrays have different dtypes, they are cast to a common dtype.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// Args:
 ///     arrays: Sequence of arrays to concatenate.
@@ -892,7 +891,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Bo
 ///
 /// **Type promotion**: if the arrays have different dtypes, they are cast to a common dtype.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// Args:
 ///     arrays: Sequence of arrays to stack.
@@ -975,8 +974,7 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Array> {
 /// `(a, b, c) -> (a, a, b, b, c, c)`, whereas `tile` duplicates the whole sequence
 /// `(a, b, c) -> (a, b, c, a, b, c)`.
 ///
-/// Output dtype equals the input dtype. The result is a lazy view; no computation occurs
-/// until the array is read.
+/// Output dtype equals the input dtype. The result is a lazy view.
 ///
 /// Args:
 ///     array: Input array.
@@ -1042,7 +1040,7 @@ pub fn repeat<'py>(
 /// See also [`jix.roll()`][jix.roll], which cyclically shifts elements along a dim
 /// without reversing them.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// Args:
 ///     array: Input array.
@@ -1106,7 +1104,7 @@ pub fn flip<'py>(
 /// See also [`jix.flip()`][jix.flip], which reverses element order along a dim without
 /// wrapping.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// Args:
 ///     array: Input array.
@@ -1165,7 +1163,7 @@ pub fn roll<'py>(
 /// Unlike `numpy.tile`, this takes a single integer `repeats` along a single `dim`, and adds no
 /// leading dims. `dim` must satisfy `-ndim <= dim < ndim`.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// Args:
 ///     array: Input array.

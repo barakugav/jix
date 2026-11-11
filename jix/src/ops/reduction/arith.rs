@@ -337,7 +337,7 @@ define_reduction_op!(
     /// sums wrap on overflow. An empty reduction (zero elements along the reduced dims) returns
     /// `0`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::sum()`](crate::Array::sum).
@@ -429,7 +429,7 @@ define_reduction_op!(
     /// `int64`). Integer products wrap on overflow. An empty reduction (zero elements along the
     /// reduced dims) returns `1`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::product()`](crate::Array::product).
@@ -512,7 +512,7 @@ define_reduction_op!(
     /// Reducing an empty dim makes [`Mean::new`] fail with `ErrorKind::InvalidArgument`, and
     /// [`Array::mean()`](crate::Array::mean) panic.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::mean()`](crate::Array::mean).
