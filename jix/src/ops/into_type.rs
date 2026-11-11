@@ -2,19 +2,17 @@ use std::marker::PhantomData;
 
 use crate::ops::prelude::*;
 
-/// A lazy storage adapter that re-tags an array's element-type parameter without copying data.
+/// A lazy storage adapter that re-tags an array's element type as `ET` without touching its bytes.
 ///
-/// `IntoType<S, ET>` wraps an [`Array<S>`](crate::Array) and presents it as having element type
-/// `ET`, without touching the underlying bytes. At construction time, if `ET` is a concrete type
-/// ([`Ty<T>`](crate::Ty)), the runtime [`Dtype`](crate::dtype::Dtype) is validated to
-/// match `T`; if it is [`TypeDyn`](crate::TypeDyn) the conversion always succeeds.
+/// At construction, if `ET` is [`Ty<T>`](crate::Ty) the runtime
+/// [`Dtype`](crate::dtype::Dtype) must match `T`; if it is [`TypeDyn`](crate::TypeDyn)
+/// construction always succeeds.
 ///
-/// The typical entry points are [`Array::into_type`](crate::Array::into_type),
-/// [`Array::into_typed`](crate::Array::into_typed), and
-/// [`Array::into_type_dyn`](crate::Array::into_type_dyn), which either wrap the array in `IntoType`
-/// or, for some storages, swap the element-type parameter in-place. For example,
-/// a borrowed `&S` (from [`Array::view`](crate::Array::view)) can not be re-tagged in-place, but
-/// [`Compact`](crate::storage::Compact) can.
+/// The entry points are [`Array::into_type`](crate::Array::into_type),
+/// [`Array::into_typed`](crate::Array::into_typed) and
+/// [`Array::into_type_dyn`](crate::Array::into_type_dyn), which wrap the array in `IntoType` or,
+/// for some storages, re-tag it in place: a borrowed `&S` (from
+/// [`Array::view`](crate::Array::view)) is wrapped, a [`Compact`](crate::storage::Compact) is not.
 ///
 /// # Examples
 ///
@@ -53,7 +51,7 @@ where
     S: ArrayStorage,
     ET: ElementType,
 {
-    /// Constructs a [`IntoType`] storage. See the struct docs for semantics and examples.
+    /// Constructs an [`IntoType`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S) -> Result<Self> {
         if let Some(expected_dtype) = ET::DTYPE {
             check_dtype(array.dtype(), &expected_dtype)?;
@@ -161,21 +159,14 @@ where
     /// Re-tag this array's element type as `NewET`, returning an error if the runtime dtype does
     /// not match.
     ///
-    /// This is the bridge between dynamic and static element-type tracking. Arrays loaded from
-    /// files carry [`TypeDyn`] as their element type because the compiler cannot know the dtype
-    /// at that point. After you have confirmed the dtype (e.g. by reading `array.dtype()` or
-    /// knowing the data ahead of time), call `into_type::<Ty<T>>()` (or the
-    /// [`into_typed::<T>`](Self::into_typed) sugar) to recover a statically-typed element type.
-    /// Subsequent operations on the result will propagate the static `Ty<T>` through the type
-    /// system.
+    /// Arrays loaded from files carry [`TypeDyn`]. Once the dtype is known, `into_type::<Ty<T>>()`
+    /// (or [`into_typed::<T>`](Self::into_typed)) recovers the static `Ty<T>` that most
+    /// element-wise operations require (`ArrayStorageTyped`);
+    /// [`into_type_dyn`](Self::into_type_dyn) erases it.
     ///
-    /// Most element-wise operations require a static element type (`ArrayStorageTyped`).
-    ///
-    /// This method replaces the inner storage with `S::ElementTypeChange<NewET>`, which is
-    /// implemented by the simpler [`IntoType<S, NewET>`](crate::ops::IntoType) adaptor for some
-    /// storages, but may be implemented as an in-place replacement for others.
-    ///
-    /// See [`into_type_dyn`](Self::into_type_dyn).
+    /// The storage becomes `S::ElementTypeChange<NewET>`: an
+    /// [`IntoType<S, NewET>`](crate::ops::IntoType) wrapper for some storages, the same storage
+    /// re-tagged in place for others.
     ///
     /// # Errors
     ///
