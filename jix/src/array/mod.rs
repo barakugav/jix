@@ -13,13 +13,13 @@ mod read;
 /// `Array<S>` is the central type in jix. It behaves like a regular n-dimensional array, but
 /// its data is stored in a compressed format and decoded on demand. Its core functionality is
 /// provided by [`shape()`](Array::shape), [`dtype()`](Array::dtype),
-/// and [`to_buf_strided()`](Array::to_buf_strided), all other functions are built on top of those.
+/// and [`to_buf_strided()`](Array::to_buf_strided); all other functions are built on top of those.
 ///
 /// An array is generic over `S: ArrayStorage`, which provides the implementation of the three core
 /// methods. The main concrete storage backend is the block-compressed
 /// [`Compact`](crate::storage::Compact) type, which divides the array into n-dimensional blocks
 /// and compresses each block independently, and it's the return type of the common creation
-/// methods for arrays (e.g.[`compact_ndarray()`](Array::compact_ndarray) and
+/// methods for arrays (e.g. [`compact_ndarray()`](Array::compact_ndarray) and
 /// [`compact()`](Array::compact)).
 ///
 /// # Storage variants
@@ -43,7 +43,7 @@ mod read;
 ///   .reshape(...)          -> Array<Reshape<Neg<Compact>>>
 ///   .permute_dims(dims)    -> Array<PermuteDims<Reshape<...>>>
 ///   .add(other_array)      -> Array<Add<PermuteDims<...>, Compact>>
-///   .sum(dim)             -> Array<Sum<Add<...>>>
+///   .sum(dim)              -> Array<Sum<Add<...>>>
 ///   .compact()?            -> Array<Compact> - materialize the pipeline
 /// ```
 ///
@@ -104,8 +104,8 @@ mod read;
 ///     .floor()                                     // Array<Floor<Exp<Compact>>>
 ///     .map(|x| x * 2.0f32)                         // Array<Map<Floor<...>>>
 ///     + ones;                                      // Array<Add<Map<...>, Compact>>
-/// // lazy view arrays are still functional arrays
-/// // access to data execute the pipeline on demand, possibly on a sub set of the original array
+/// // Lazy views are still arrays: reading data runs the pipeline on demand, possibly on a
+/// // subset of the original array.
 /// assert_eq!(scaled.shape(), &[2, 3]);
 /// assert_eq!(scaled.dtype(), &f32::DTYPE);
 /// assert_eq!(scaled.to_ndarray::<Ix2>()?[[1, 1]], 957.0);
@@ -114,7 +114,7 @@ mod read;
 /// let result = scaled
 ///     .argmax(/* dim */ 1)                        // Array<ArgMax<Add<Map<...>, Compact>>>
 ///     .cast::<i16>()                               // Array<Cast<ArgMax<Add<...>>>>
-///     // materialize the pipeline bt recompressing
+///     // materialize the pipeline by recompressing
 ///     .compact()?;                                 // Array<Compact>
 /// assert_eq!(result.shape(), &[2]);
 /// assert_eq!(result.dtype(), &i16::DTYPE);
@@ -125,23 +125,20 @@ mod read;
 ///
 /// # Performance notes
 ///
-/// The n-dimensional block shape used by `Array<Compact>` has a huge effect on both compression
-/// ratio and read performance. If the access pattern is known in advance, providing a matching
-/// block shape can improve the performance of the library significantly. If not provided, the
-/// block shape is chosen automatically according to the CPU cache sizes.
-/// Additional arrays that are created from existing arrays (`.compact()`, `.reshape()`, result
-/// of operations, etc.) choose their block shape with a heuristic, trying to preserve the original
-/// user block shape as much as possible while respecting the new shape and layout.
+/// The block shape of an `Array<Compact>` has a large effect on both compression ratio and read
+/// performance; a block shape matching a known access pattern can help significantly. If none is
+/// given, it is chosen according to the CPU cache sizes. Arrays created from existing arrays
+/// (`.compact()`, `.reshape()`, results of operations, etc.) choose their block shape with a
+/// heuristic that tries to preserve the user's block shape while respecting the new shape and
+/// layout.
 ///
 /// Shape-changing operations - [`reshape`](Array::reshape),
 /// [`broadcast`](Array::broadcast), [`permute_dims`](Array::permute_dims) - remap how
 /// output indices translate to positions in the underlying blocks. When the new layout crosses
 /// block boundaries that the original respected, a single read may decompress many more blocks
-/// than necessary. To avoid this, materialize with [`compact`](Array::compact) (automatic block shape)
-/// or [`compact_with`](Array::compact_with) (explicit [`ArrayParams`](crate::ArrayParams)) after a
-/// shape change.
-/// To ensure a well-aligned block layout, pass explicit `ArrayParams` with a block
-/// shape that matches the expected access pattern.
+/// than necessary. To avoid this, materialize with [`compact`](Array::compact) (automatic block
+/// shape) or [`compact_with`](Array::compact_with) (explicit [`ArrayParams`](crate::ArrayParams),
+/// e.g. a block shape matching the expected access pattern) after a shape change.
 ///
 /// # Element type tracking
 ///
@@ -151,10 +148,9 @@ mod read;
 /// at runtime (e.g. for arrays loaded from files), `S::ElementType = TypeDyn`, and those
 /// operations are not available until the type is asserted.
 ///
-/// Arrays constructed from typed sources automatically carry `Ty<T>`: `compact_ndarray(&array![1.0f32])`
-/// returns `Array<Compact<Ty<f32>>>`. Arrays loaded from disk carry `TypeDyn`. Use
-/// [`into_typed::<T>()`](Array::into_typed) to assert the expected element type - validated
-/// against the stored dtype at runtime - and recover `Ty<T>`. Use
+/// Arrays built from typed sources carry `Ty<T>`: `compact_ndarray(&array![1.0f32])` returns
+/// `Array<Compact<Ty<f32>>>`. Use [`into_typed::<T>()`](Array::into_typed) to assert the element
+/// type - validated against the stored dtype at runtime - and recover `Ty<T>`. Use
 /// [`into_type_dyn()`](Array::into_type_dyn) to erase the static element type.
 ///
 /// The number of dims is a runtime property, read from [`shape`](Array::shape).
@@ -181,7 +177,7 @@ impl<S: ArrayStorage> Array<S> {
         self.shape().iter().product()
     }
 
-    /// Check if the array is empty (has zero elements in any dimension).
+    /// Check if the array is empty (a dimension has size 0).
     pub fn is_empty(&self) -> bool {
         self.shape().contains(&0)
     }
@@ -218,18 +214,15 @@ impl<S: ArrayStorage> Array<S> {
             .unwrap_or_else(|| self.storage.dtype())
     }
 
-    /// Create a [`ReadContext`] with parameters derived from this array.
+    /// Create a [`ReadContext`] with the decoder parameters of this array.
     ///
-    /// A context encapsulates reusable buffers and codec decompressor instance. Use it for
-    /// repeated reads, sharing the allocation and initialization overhead.
+    /// A context holds reusable buffers and a decompressor instance; reuse one across repeated
+    /// reads to share the allocation and setup cost. [`to_ndarray`](Array::to_ndarray) builds one
+    /// internally; [`to_ndarray_sub`](Array::to_ndarray_sub), [`to_buf_slice`](Array::to_buf_slice)
+    /// and [`to_buf_strided`](Array::to_buf_strided) take one.
     ///
-    /// [`to_ndarray`](Array::to_ndarray) builds a context internally. Call this when using
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub) or [`to_buf_slice`](Array::to_buf_slice)
-    /// directly.
-    ///
-    /// Using a context created in other ways (e.g. `ReadContext::default()`) is also valid, and will
-    /// yield correct results. Using this method allows an easy way to ensure all reads from an array
-    /// use the same decoding configuration.
+    /// Any context, e.g. `ReadContext::default()`, gives correct results; this one uses the
+    /// array's own decoder configuration.
     ///
     /// # Examples
     ///
@@ -253,12 +246,10 @@ impl<S: ArrayStorage> Array<S> {
         ReadContext::new(self.storage.spec().decoder_params())
     }
 
-    /// Create an array with a storage reference to this array, without cloning the underlying data.
+    /// Borrow this array as an `Array<&S>`, without cloning the storage.
     ///
-    /// Almost all ops on arrays accept ownership of an `Array<S>` rather than a reference, for
-    /// example `a + b` for two arrays consumes `a` and `b`. To reuse an array without cloning its
-    /// storage, call `view` to get an `Array<&S>`, which doesn't own the storage but can
-    /// be used in any API that accepts an owned `Array<S>`.
+    /// Almost all ops take their arrays by value: `a + b` consumes `a` and `b`. An `Array<&S>` can
+    /// be passed to any API that takes an owned `Array<S>`, so `view` lets an array be reused.
     ///
     /// # Examples
     ///
@@ -288,13 +279,12 @@ impl<S: ArrayStorage> Array<S> {
         Array::from_storage(ArrayStorageAny::new(self.into_storage()))
     }
 
-    /// Check if this array storage is compact block-compressed storage.
+    /// Check if this array's storage is block-compressed.
     ///
-    /// This function returns `true` for arrays that are stored in compact block-compressed form,
-    /// i.e. those created by [`compact_ndarray`](Array::compact_ndarray), [`compact`](Array::compact),
-    /// [`read_from_file`](Array::read_from_file), etc., and `false` for arrays with storage
-    /// implementations with uncompressed data, such as lazy operation views, plain ndarray views,
-    /// etc.
+    /// `true` for arrays created by [`compact_ndarray`](Array::compact_ndarray),
+    /// [`compact`](Array::compact), [`read_from_file`](Array::read_from_file), etc., also through
+    /// [`view`](Array::view) or [`into_any`](Array::into_any); `false` for lazy operation views and
+    /// plain ndarray views.
     ///
     /// # Example
     /// ```
@@ -314,7 +304,7 @@ impl<S: ArrayStorage> Array<S> {
 
     /// Return a reference to the underlying storage backend.
     ///
-    /// Rarely needed to be used directly by users.
+    /// Rarely needed directly.
     #[inline(always)]
     pub fn storage(&self) -> &S {
         &self.storage
@@ -322,7 +312,7 @@ impl<S: ArrayStorage> Array<S> {
 
     /// Construct an `Array` by wrapping a storage backend directly.
     ///
-    /// Rarely needed to be used directly by users.
+    /// Rarely needed directly.
     #[inline(always)]
     pub fn from_storage(storage: S) -> Self {
         #[cfg(debug_assertions)]
@@ -361,7 +351,7 @@ impl<S: ArrayStorage> Array<S> {
 
     /// Consume this array and return the underlying storage backend.
     ///
-    /// Rarely needed to be used directly by users.
+    /// Rarely needed directly.
     #[inline(always)]
     pub fn into_storage(self) -> S {
         self.storage

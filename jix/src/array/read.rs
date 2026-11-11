@@ -11,35 +11,25 @@ use crate::{default_strides, ArrayStorage, Dim, DimDyn, Dimension, PlainArray};
 use super::Array;
 
 impl<S: ArrayStorage> Array<S> {
-    /// Read the entire array into a fresh heap-allocated [`ndarray::Array`].
+    /// Read the entire array into a new heap-allocated [`ndarray::Array`].
     ///
-    /// This is the simplest way to materialize a jix array into a standard in-memory ndarray.
-    /// All blocks of the underlying compact storage are decompressed and the elements are
-    /// returned in an ndarray with the same shape and element type as the source. The memory
-    /// layout of the returned array is an implementation detail and may vary.
+    /// For a lazy view (e.g. `Array<Add<Mul<Compact, _>, _>>`), `to_ndarray` runs the whole
+    /// operation pipeline, and every call redoes the work. To read the result more than once,
+    /// materialize it first with [`compact`](Array::compact) (or
+    /// [`compact_with`](Array::compact_with) to control the block shape).
     ///
-    /// For a lazy view (e.g. `Array<Add<Mul<Compact, _>, _>>`), `to_ndarray` walks the entire
-    /// operation pipeline: each composed op is evaluated on the fly as data flows out of the
-    /// innermost storage. Materializing the same chain repeatedly will redo the work; if you
-    /// plan to read the result more than once, call [`compact`](Array::compact) first to re-compress
-    /// the result into a fresh `Array<Compact>` (or [`compact_with`](Array::compact_with) to control
-    /// the block shape).
+    /// `to_ndarray` creates its own [`ReadContext`]. For repeated reads (e.g. tile by tile) prefer
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub) with a context from [`read_ctx`](Array::read_ctx),
+    /// which shares the decompressor and scratch buffers across calls.
     ///
-    /// `to_ndarray` allocates a fresh [`ReadContext`] internally, so callers don't need to
-    /// manage one. For repeated reads (e.g. iterating tiles over a large array) prefer
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub) with an explicit context obtained from
-    /// [`read_ctx`](Array::read_ctx) - that way the codec scratch buffers and decompressor
-    /// instance are shared across calls.
-    ///
-    /// The returned array is not necessarily C-contiguous. The implementation is free to
-    /// choose any memory layout it prefers, mostly for performance reasons.
-    /// If you need a specific memory layout, use [`to_buf_strided`](Array::to_buf_strided) and
-    /// pass a pre-allocated buffer with your specified strides.
+    /// The returned array is not necessarily C-contiguous: the implementation picks the memory
+    /// layout. For a specific layout, use [`to_buf_strided`](Array::to_buf_strided) with a
+    /// destination of your own strides.
     ///
     /// # Errors
     ///
-    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - the result
-    ///   does not fit in memory.
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - `D` has a
+    ///   different ndim than the array, or the result does not fit in memory.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
@@ -54,8 +44,7 @@ impl<S: ArrayStorage> Array<S> {
     /// # Ok::<(), jix::Error>(())
     /// ```
     ///
-    /// Materialize a lazy pipeline. None of the arithmetic runs at construction time - it
-    /// only executes when `to_ndarray` walks the chain:
+    /// Materialize a lazy pipeline. The arithmetic only runs inside `to_ndarray`:
     ///
     /// ```
     /// use jix::Array;
@@ -88,19 +77,12 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// `index` contains one half-open `start..end` range per dimension within
     /// `0..self.shape()[dim]`. The result has shape `[index[0].len(), index[1].len(), ...]`
-    /// and contains the corresponding elements from the source.
+    /// and contains the corresponding elements from the source. Use it to read a window of a
+    /// large array, or to stream over it tile by tile without holding all of it in memory.
     ///
-    /// The returned array is not necessarily C-contiguous. The implementation is free to
-    /// choose any memory layout it prefers, mostly for performance reasons.
-    /// If you need a specific memory layout, use [`to_buf_strided`](Array::to_buf_strided) and
-    /// pass a pre-allocated buffer with your specified strides.
-    ///
-    /// # When to use this over [`to_ndarray`](Array::to_ndarray)
-    ///
-    /// Use `to_ndarray_sub` when you only need a window of a large array, or when you want
-    /// to stream over an array tile-by-tile without ever materializing the whole thing in
-    /// memory. Use `to_ndarray` when you need the entire array at once and don't plan to
-    /// issue further reads.
+    /// The returned array is not necessarily C-contiguous: the implementation picks the memory
+    /// layout. For a specific layout, use [`to_buf_strided`](Array::to_buf_strided) with a
+    /// destination of your own strides.
     ///
     /// # What gets decompressed
     ///
@@ -109,9 +91,8 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// - **Block-aligned ranges**: if `index` aligns to block boundaries on every dim,
     ///   exactly the covered blocks are decompressed - no wasted work.
-    /// - **Unaligned ranges**: the overlapping boundary blocks are decompressed in full and
-    ///   the requested slice is copied out. Elements outside `index` within those boundary
-    ///   blocks are decoded but then discarded.
+    /// - **Unaligned ranges**: the overlapping boundary blocks are decompressed in full, and
+    ///   their elements outside `index` are discarded.
     ///
     /// To keep sub-region reads cheap, choose a `block_shape` (via
     /// [`ArrayParams::block_shape`](crate::ArrayParams::block_shape) when creating the array)
@@ -120,32 +101,27 @@ impl<S: ArrayStorage> Array<S> {
     /// For lazy views (e.g. after `reshape`, `permute_dims`, `broadcast`, or element-wise
     /// ops), the index range is propagated inward through the chain and only the
     /// corresponding region of the innermost storage is read. A shape-changing op can
-    /// scramble the mapping such that a small output range still touches many input blocks -
-    /// if this matters for performance, materialize with [`compact`](Array::compact) before
-    /// iterating sub-regions.
+    /// scramble the mapping such that a small output range still touches many input blocks;
+    /// materialize with [`compact`](Array::compact) before iterating sub-regions to avoid this.
     ///
     /// # `ReadContext` reuse
     ///
-    /// `context` carries the decoder instance and scratch buffers used during decompression.
-    /// Allocating these on every read is expensive, especially for small windows. Obtain a
-    /// single context via [`read_ctx`](Array::read_ctx) once and pass it to every call.
-    /// [`read_ctx`](Array::read_ctx) inherits the array's stored decoder configuration;
-    /// `ReadContext::default()` works too but uses default decoder parameters regardless of
-    /// the array.
+    /// `context` carries the decoder instance and scratch buffers. Creating these for every read
+    /// is expensive, especially for small windows, so create one context with
+    /// [`read_ctx`](Array::read_ctx), which uses the array's decoder configuration, and pass it to
+    /// every call. `ReadContext::default()` works too, with default decoder parameters.
     ///
     /// # Errors
     ///
     /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` is out of bounds or
     ///   has a different number of dimensions than the array.
-    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - the result
-    ///   does not fit in memory.
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - `D` has a
+    ///   different ndim than the array, or the result does not fit in memory.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
     ///
-    /// Stream a large array tile-by-tile, reusing a single `ReadContext`. The block shape
-    /// is chosen to divide the tile shape, so every tile read decompresses exactly its
-    /// covering blocks with no boundary waste:
+    /// Stream a large array tile by tile, reusing a single `ReadContext`:
     ///
     /// ```
     /// use jix::{Array, ArrayParams};
@@ -263,11 +239,9 @@ impl<S: ArrayStorage> Array<S> {
 
     /// Read a rectangular sub-region into a caller-supplied byte buffer.
     ///
-    /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub), and the contiguous-destination shorthand for
-    /// [`to_buf_strided`](Array::to_buf_strided). `buf` must be exactly
-    /// `index.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes; it needs no
-    /// particular alignment. Elements are written in row-major (C-contiguous) order.
+    /// The packed-destination shorthand for [`to_buf_strided`](Array::to_buf_strided). `buf` must
+    /// be exactly `index.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes; it
+    /// needs no particular alignment. Elements are written in row-major (C-contiguous) order.
     ///
     /// Use [`to_buf_strided`](Array::to_buf_strided) instead when the destination is strided rather
     /// than packed, or when you would rather let the array hand back a buffer of its own than
@@ -275,6 +249,8 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
+    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` is out of bounds or
+    ///   has a different number of dimensions than the array.
     /// - [`InvalidBufferSize`](crate::error::ErrorKind::InvalidBufferSize) - `buf` has the wrong
     ///   length for the requested range and dtype.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
@@ -317,14 +293,14 @@ impl<S: ArrayStorage> Array<S> {
 
     /// Read a rectangular sub-region and return it as a [`StridedBuf`].
     ///
-    /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub), and [`to_buf_slice`](Array::to_buf_slice).
+    /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray),
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub) and [`to_buf_slice`](Array::to_buf_slice).
     ///
     /// The two modes mirror NumPy's `out=`:
-    /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
+    /// - **pull** (`out` is `None`): the array returns the cheapest buffer it can - a borrowed view
     ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized one -
     ///   and picks the strides. The bytes are only contiguous if the strides say so.
-    /// - **push** (`out` is `Some(dst)`): the region must be written into `dst` at `dst`'s own strides,
+    /// - **push** (`out` is `Some(dst)`): the region is written into `dst` at `dst`'s own strides,
     ///   and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have one stride
     ///   per array dimension.
     ///
@@ -348,7 +324,8 @@ impl<S: ArrayStorage> Array<S> {
     /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` has the wrong number
     ///   of ranges, or a range starts after it ends or reaches past the array shape.
     /// - [`InvalidArgument`](crate::error::ErrorKind::InvalidArgument) - `out` is a read-only
-    ///   view, or has a number of strides that does not match the array's dimensions.
+    ///   view, has a number of strides that does not match the array's dimensions, has strides
+    ///   that overlap over the region, or is too small for it.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
@@ -533,29 +510,27 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
 }
 
 impl<S: ArrayStorage> Array<S> {
-    /// Read the entire array into a fresh heap-allocated `Array<Plain>`.
+    /// Read the entire array into a new heap-allocated `Array<Plain>`.
     ///
-    /// Similar to [`to_ndarray`](Array::to_ndarray), but returns a jix `Array<Plain>` instead of an
-    /// `ndarray::Array`.
     /// Equivalent to `Array::plain_ndarray(self.to_ndarray()?)`.
     ///
-    /// Like [`compact`](Array::compact), `to_plain` can be used to materialize an intermediate
-    /// array: it breaks the lazy storage chain - be it an operation pipeline or a shape view such
-    /// as the output of [`reshape`](Array::reshape) - so that later reads consume the stored result
-    /// directly instead of re-running the whole pipeline. The difference is that `to_plain` keeps
-    /// the result uncompressed, skipping the compression pass [`compact`](Array::compact) performs,
-    /// so it is cheaper to produce and to read back at the cost of holding the full data in memory.
+    /// Like [`compact`](Array::compact), `to_plain` materializes an intermediate array: it breaks
+    /// the lazy storage chain - an operation pipeline or a shape view such as the output of
+    /// [`reshape`](Array::reshape) - so that later reads use the stored result instead of
+    /// re-running the pipeline. Unlike `compact` it skips compression, so it is cheaper to produce
+    /// and to read back, at the cost of holding the full data uncompressed in memory.
     ///
-    /// This is especially useful when a deep or expensive view is broadcast into another operation.
-    /// Because broadcasting reads the same logical elements many times, each read would otherwise
-    /// re-evaluate the entire view; materializing it once with `to_plain` (or
-    /// [`compact`](Array::compact)) avoids the repeated work. For example, dividing an array by its
-    /// per-row standard deviation (`a / a.std(dim=1)` in NumPy terms; in Rust the reduction must be
-    /// broadcast back to `a`'s shape explicitly) recomputes the reduction for every element it is
-    /// broadcast against unless the `std` result is materialized first.
+    /// This pays off most when an expensive view is broadcast into another operation: broadcasting
+    /// reads the same elements many times, and each read would re-evaluate the view. For example,
+    /// dividing an array by its per-row standard deviation (`a / a.std(dim=1)` in NumPy terms; in
+    /// Rust the reduction must be broadcast back to `a`'s shape explicitly) recomputes the
+    /// reduction for every element it is broadcast against unless the `std` result is materialized
+    /// first.
     ///
     /// # Errors
     ///
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - the result
+    ///   does not fit in memory.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples

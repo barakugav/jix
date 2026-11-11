@@ -14,29 +14,21 @@ use super::Array;
 impl<S: ArrayStorage> Array<S> {
     /// Compress the data of this array into a new `Array<Compact>` with new blocks.
     ///
-    /// The primary use of `compact` is to materialize a lazy operation chain:
-    /// An `Array<S>` can have an arbitrary storage implementation, often a lazy view of one or
-    /// more computations, for example `Array<Floor<Map<Compact>>>` (see the examples).
-    /// Reads to such lazy view arrays always perform the whole computation pipeline on the fly,
-    /// which is very flexible but can be inefficient for repeated access. Copying the data and
-    /// re-compressing it into a new array with `compact` breaks the lazy storage chain and materializes
-    /// the result as a standalone `Array<Compact>`.
+    /// The primary use of `compact` is to materialize a lazy view such as
+    /// `Array<Floor<Map<Compact>>>`. Every read of a lazy view runs the whole pipeline, which is
+    /// flexible but slow for repeated access; `compact` breaks the chain and stores the result as a
+    /// standalone `Array<Compact>`.
     ///
-    /// In contrast to "simple" views such as unary element-wise operations, lazy ops that change the
-    /// shape of the array (e.g. `reshape`, `broadcast`, `permute_dims`) can cause block boundaries
-    /// to no longer align with the logical layout of the array, causing reads to decompress excess
-    /// data. Calling `compact` on the result of such an operation re-encodes the data with a freshly
-    /// derived block shape that matches the new layout. The block shape of copied arrays is
-    /// automatically derived and tuned from the underlying storage(s), using a heuristic that aims
-    /// to preserve user choices (that may depend on the user knowledge of the access pattern), but
-    /// it's not perfect - you may want to explicitly pass some parameters via
-    /// [`compact_with`](Array::compact_with).
+    /// Shape-changing ops (e.g. `reshape`, `broadcast`, `permute_dims`) can leave block boundaries
+    /// misaligned with the logical layout, so reads decompress excess data. `compact` re-encodes
+    /// the data with a block shape derived from the source storage(s) by a heuristic that tries to
+    /// preserve the user's choices and match the new layout. It is not perfect: to set parameters
+    /// explicitly, use [`compact_with`](Array::compact_with). Codec settings (compression level,
+    /// filters, etc.) are also inherited from the source storage.
     ///
-    /// It's also possible to materialize a lazy operation chain directly into a file without holding
-    /// the whole result (compressed or decompressed) in memory.
-    /// See [`write_to_file`](Array::write_to_file) and its variants for details and examples.
-    ///
-    /// Codec settings (compression level, filters, etc.) are also inherited from the source storage.
+    /// To materialize a lazy chain straight into a file without holding the whole result
+    /// (compressed or decompressed) in memory, see [`write_to_file`](Array::write_to_file) and its
+    /// variants.
     ///
     /// # Errors
     ///
@@ -60,11 +52,10 @@ impl<S: ArrayStorage> Array<S> {
         self.compact_with(ArrayParams::default(), &context)
     }
 
-    /// Compress the data of this array into a new `Array<Compact>` with explicit control over parameters.
+    /// Compress the data of this array into a new `Array<Compact>` with explicit [`ArrayParams`].
     ///
-    /// Like [`compact`](Array::compact) (see its documentation), but with explicit [`ArrayParams`].
-    /// Any optional field in `params` that is not set will be inherited from the source storage
-    /// if possible.
+    /// Like [`compact`](Array::compact). Fields not set in `params` are inherited from the source
+    /// storage.
     ///
     /// # Errors
     ///

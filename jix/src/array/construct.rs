@@ -16,13 +16,13 @@ use super::Array;
 impl<T> CompactArray<T> {
     /// Compress an ndarray into a block-compressed `Array<Compact>` with default encoding settings.
     ///
-    /// The array is partitioned into n-dimensional blocks, each independently compressed. The
-    /// block shape is derived automatically according to the CPU cache sizes. Use
-    /// [`compact_ndarray_with`](Array::compact_ndarray_with) for explicit control over block shape,
-    /// compression level, and other codec settings. If the access pattern is known in advance,
-    /// providing a matching block shape can improve read performance significantly.
+    /// The array is partitioned into n-dimensional blocks, each compressed independently, with a
+    /// block shape chosen according to the CPU cache sizes. Use
+    /// [`compact_ndarray_with`](Array::compact_ndarray_with) to set the block shape, compression
+    /// level and other codec settings; a block shape matching a known access pattern can improve
+    /// read performance significantly.
     ///
-    /// The element type `Ty<T>` is inferred from the ndarray argument's type.
+    /// The element type `Ty<T>` is inferred from the ndarray's element type.
     ///
     /// # Errors
     ///
@@ -72,11 +72,9 @@ impl<T> CompactArray<T> {
 
     /// Compress an ndarray into a block-compressed `Array<Compact>` with explicit `ArrayParams`.
     ///
-    /// See [`compact_ndarray`](Array::compact_ndarray) for the default-parameter version, which has more
-    /// documentation and examples.
-    ///
-    /// Use this method to specify encoding parameters such as block shape, compression level, etc.
-    /// See [`ArrayParams`] for details on the available parameters and their effects on performance.
+    /// Like [`compact_ndarray`](Array::compact_ndarray), which has more documentation, but with
+    /// explicit block shape, compression level, etc. See [`ArrayParams`] for the parameters and
+    /// their effects on performance.
     ///
     /// # Examples
     ///
@@ -129,8 +127,7 @@ impl Array<Compact<TypeDyn>> {
     ///   dimensions are allowed.
     /// - `strides`: strides of the n-dimensional array, in bytes. Must be the same length as
     ///   `shape`.
-    /// - `dtype`: element type of the array. The buffer is interpreted as containing elements of
-    ///   this type.
+    /// - `dtype`: element type of the buffer.
     /// - `params`: block layout and codec parameters. See [`ArrayParams`] for details.
     ///
     /// # Safety
@@ -160,16 +157,9 @@ impl Array<Compact<TypeDyn>> {
 impl<T> CompactArray<T> {
     /// Create a block-compressed array by evaluating a function `f` at each index.
     ///
-    /// The function `f` is called with the index of each element in the output array, and should
-    /// return the value for that element.
-    /// Elements are visited in an arbitrary order - this is not some theoretical use case, most of
-    /// the time elements will NOT be visited in row-major order, and the function should not rely
-    /// on any specific order for correctness or performance.
-    ///
-    /// # Arguments
-    ///
-    /// - `shape`: shape of the output array.
-    /// - `f`: function that produces the value of each element given its index.
+    /// `f` gets the index of each element and returns its value. Elements are visited in an
+    /// arbitrary order, usually not row-major, so `f` should not rely on the order for correctness
+    /// or performance.
     ///
     /// # Examples
     ///
@@ -196,19 +186,12 @@ impl<T> CompactArray<T> {
         Self::compact_fn_with(shape, ArrayParams::default(), f)
     }
 
-    /// Create a block-compressed array by evaluating a function `f` at each index, with explicit `ArrayParams`.
+    /// Create a block-compressed array by evaluating a function `f` at each index, with explicit
+    /// [`ArrayParams`] for the block layout and codec.
     ///
-    /// The function `f` is called with the index of each element in the output array, and should
-    /// return the value for that element.
-    /// Elements are visited in an arbitrary order - this is not some theoretical use case, most of
-    /// the time elements will NOT be visited in row-major order, and the function should not rely
-    /// on any specific order for correctness or performance.
-    ///
-    /// # Arguments
-    ///
-    /// - `shape`: shape of the output array.
-    /// - `params`: block layout and codec parameters. See [`ArrayParams`] for details.
-    /// - `f`: function that produces the value of each element given its index.
+    /// `f` gets the index of each element and returns its value. Elements are visited in an
+    /// arbitrary order, usually not row-major, so `f` should not rely on the order for correctness
+    /// or performance.
     ///
     /// # Examples
     ///
