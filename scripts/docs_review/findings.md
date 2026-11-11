@@ -35,3 +35,10 @@ Needs the maintainer:
 Needs the maintainer:
 
 - `jix-py/src/ops/elementwise/div_rem.rs:163` `remainder` (and `Array.remainder`, `jix-py/src/array.rs:1026`) annotates `rounding_mode` with a string `"Literal['trunc', 'floor', 'euclid']"` in `#[pyo3(signature = ...)]`, which CLAUDE.md says to avoid (emitted as a quoted string without imports). `divide` instead takes `RoundingMode`, whose `INPUT_TYPE` is a proper `typing.Literal`; `remainder` could do the same with a `RoundingMode::Floor` default.
+
+## ops-rounding-exp-log
+
+Docs, not fixed:
+
+- `jix-py/src/ops/elementwise/trig.rs:8`, `:40`, `:72` and the other trig functions: "Supported dtypes: `f16`, `f32`, `f64`" omits that integer and bool inputs are accepted and cast to a float first (the dispatch uses `Safe`, e.g. `trig.rs:33`).
+- `jix/src/ops/elementwise/exp_log.rs:130` the `Ln` doc example line is about 120 columns, over the 100-column limit.
