@@ -29,3 +29,9 @@ Needs the maintainer:
 - `jix-py/docs/module.md:89` calls `jix.asarray` a "zero-copy" view of "any array-like". A Python
   list or scalar has to be converted first (as the `asarray` docstring itself says), so
   "zero-copy" holds only for inputs that already are buffers.
+
+## ops-div-rem
+
+Needs the maintainer:
+
+- `jix-py/src/ops/elementwise/div_rem.rs:163` `remainder` (and `Array.remainder`, `jix-py/src/array.rs:1026`) annotates `rounding_mode` with a string `"Literal['trunc', 'floor', 'euclid']"` in `#[pyo3(signature = ...)]`, which CLAUDE.md says to avoid (emitted as a quoted string without imports). `divide` instead takes `RoundingMode`, whose `INPUT_TYPE` is a proper `typing.Literal`; `remainder` could do the same with a `RoundingMode::Floor` default.
