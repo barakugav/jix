@@ -100,9 +100,8 @@ pub(crate) mod traits {
     int_op1!(
         /// Byte-order reversal operation, as [`u32::swap_bytes`].
         ///
-        /// Swaps the bytes of the value (e.g. converts between big-endian and little-endian
-        /// representation). Single-byte types (`i8`, `u8`) are not supported since swapping one
-        /// byte is a no-op.
+        /// Converts between big-endian and little-endian representation. A no-op for the
+        /// single-byte `i8` and `u8`.
         SwapBytes,
         /// Reverse the byte order.
         swap_bytes,

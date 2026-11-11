@@ -75,3 +75,9 @@ Docs, not fixed:
 
 - `jix-py/python/tests/test_bitwise.py:7` the module docstring says the logical ops cast "any non-complex input" to bool, but complex is accepted too (Unsafe allows Complex -> Bool), and lines 35 and 43 of the same file test it.
 - `jix/src/ops/elementwise/op2.rs:352` the macro arm `fixed_lhs_type` fixes the type of the right-hand operand (`S2::Item`). This is an internal name.
+
+## ops-bit-count
+
+Needs the maintainer:
+
+- `jix/src/ops/elementwise/bit_count.rs:416` the plain `//` comment above `swap_bytes_concrete` says single-byte types do not support `swap_bytes` and points to the `SwapBytes` doc. `SwapBytes` is implemented for `i8`/`u8` (a no-op) via `int_op1!` (`:52`), and the doc now says so; the comment should say `u8` is skipped because swapping is a no-op.

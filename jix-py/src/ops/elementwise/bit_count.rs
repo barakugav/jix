@@ -16,8 +16,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
-    ///         dtype. No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -49,8 +48,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
-    ///         dtype. No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -87,8 +85,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
-    ///         dtype. No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -125,8 +122,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
-    ///         dtype. No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -154,16 +150,15 @@ define_op1!(
 /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`.
 /// Output dtype and shape equal the input.
 ///
-/// Swaps the bytes of each element (e.g. converts between big-endian and little-endian
-/// representation). For single-byte types (`i8`, `u8`, `bool`) this is a no-op: a
-/// [`jix.Array`][jix.Array] input is returned as is (the same object).
+/// Converts between big-endian and little-endian representation. For single-byte types
+/// (`i8`, `u8`, `bool`) this is a no-op: a [`jix.Array`][jix.Array] input is returned as is
+/// (the same object).
 ///
 /// Args:
 ///     array: Input array.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-///         the result is read.
+///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
 ///
 /// Examples:
 ///     ```python
@@ -208,8 +203,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view. No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
