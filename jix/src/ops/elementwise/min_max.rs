@@ -8,26 +8,15 @@ pub(crate) mod traits {
     use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
 
     define_scalar_op2_trait!(
-        /// Maximum operation with NaN-propagating semantics for floating-point types.
+        /// Maximum operation, NaN-propagating for floats.
         ///
-        /// This trait exists because neither of the standard alternatives covers all supported dtypes:
-        ///
-        /// - [`std::cmp::max`] requires [`Ord`], which floating-point types do not implement due to
-        ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
-        /// - [`f32::max`] / [`f64::max`] use **NaN-ignoring** semantics: when exactly one operand is
-        ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmax` / `numpy.nanmax`, not
-        ///   `numpy.maximum`.
-        ///
-        /// `Maximum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
-        /// the result is `NaN`. This matches `numpy.maximum` and makes NaN visible rather than
-        /// silently discarding it. The result is always the `NaN` of [`f32::NAN`] / [`f64::NAN`],
-        /// not the operand's (`numpy.maximum` keeps the operand's sign and payload).
+        /// For integer and `bool8` types it is [`std::cmp::max`], which floats cannot use as they
+        /// are not [`Ord`]. Unlike [`f32::max`] / [`f64::max`], which return the non-`NaN` operand
+        /// as `numpy.fmax` / `numpy.nanmax` do, a float result is `NaN` if *either* operand is
+        /// `NaN`, as in `numpy.maximum`. That `NaN` is always the type's `NAN` constant, not the
+        /// operand's (`numpy.maximum` keeps the operand's sign and payload).
         ///
         /// Of `+0.0` and `-0.0` either may be returned, as with [`f32::max`].
-        ///
-        /// For integer and `bool8` types the implementation delegates to [`std::cmp::max`], which is
-        /// equivalent. The trait therefore provides a single uniform interface usable across all
-        /// supported numeric dtypes.
         Maximum,
         /// Compute the maximum with another value.
         maximum,
@@ -62,26 +51,15 @@ pub(crate) mod traits {
     );
 
     define_scalar_op2_trait!(
-        /// Minimum operation with NaN-propagating semantics for floating-point types.
+        /// Minimum operation, NaN-propagating for floats.
         ///
-        /// This trait exists because neither of the standard alternatives covers all supported dtypes:
-        ///
-        /// - [`std::cmp::min`] requires [`Ord`], which floating-point types do not implement due to
-        ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
-        /// - [`f32::min`] / [`f64::min`] use **NaN-ignoring** semantics: when exactly one operand is
-        ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmin` / `numpy.nanmin`, not
-        ///   `numpy.minimum`.
-        ///
-        /// `Minimum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
-        /// the result is `NaN`. This matches `numpy.minimum` and makes NaN visible rather than
-        /// silently discarding it. The result is always the `NaN` of [`f32::NAN`] / [`f64::NAN`],
-        /// not the operand's (`numpy.minimum` keeps the operand's sign and payload).
+        /// For integer and `bool8` types it is [`std::cmp::min`], which floats cannot use as they
+        /// are not [`Ord`]. Unlike [`f32::min`] / [`f64::min`], which return the non-`NaN` operand
+        /// as `numpy.fmin` / `numpy.nanmin` do, a float result is `NaN` if *either* operand is
+        /// `NaN`, as in `numpy.minimum`. That `NaN` is always the type's `NAN` constant, not the
+        /// operand's (`numpy.minimum` keeps the operand's sign and payload).
         ///
         /// Of `+0.0` and `-0.0` either may be returned, as with [`f32::min`].
-        ///
-        /// For integer and `bool8` types the implementation delegates to [`std::cmp::min`], which is
-        /// equivalent. The trait therefore provides a single uniform interface usable across all
-        /// supported numeric dtypes.
         Minimum,
         /// Compute the minimum with another value.
         minimum,
@@ -185,7 +163,7 @@ define_op2!(
     simd: minimum_bulk,
 );
 
-/// Element-wise clamp of `a` to the range `[min, max]`, where `min` and `max` are arrays.
+/// Element-wise clamp of `a` to the range `[min, max]`.
 ///
 /// Computed as `minimum(maximum(a, min), max)`, the order used by `numpy.clip` and
 /// `torch.clamp`: where `min > max` the result is `max`. For **float** types a `NaN` in any
@@ -267,7 +245,7 @@ where
         })
     }
 
-    /// Constructs an array with [`Clamp`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Clamp`] storage. See the struct docs for semantics and examples.
     pub fn new_array(a: Array<S>, min: Array<SMin>, max: Array<SMax>) -> Result<Array<Self>> {
         Self::new(a.into_storage(), min.into_storage(), max.into_storage()).map(Array::from_storage)
     }
