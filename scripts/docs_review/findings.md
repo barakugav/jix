@@ -222,3 +222,15 @@ Docs, not fixed:
 - `jix/src/storage/block.rs:67` doc line over 100 columns (102).
 - `jix/src/storage/plain.rs:31,88,314,798` doc lines over 100 columns (101-107).
 - `jix/src/storage/compact.rs:456` plain `//` comment still says "`nd_copy` scatter"; the copy is now done by `NdCopier`.
+
+## storage-params
+
+Needs the maintainer:
+
+- `jix/src/storage/params.rs:188` `ArrayParams::level` returns `InvalidArgument` for a level outside `i8` (`jix/src/codec/mod.rs:69-76`) but has no `# Errors` section, unlike `filters`; the same holds for `EncoderParams::level` (`jix/src/codec/mod.rs:66`).
+- `jix/src/storage/params.rs:129` `block_shape_fixed_dims` "When unset, an explicit block shape is all-fixed": under `compact_with` an inherited block shape takes the source spec's fixed dims, and all dims are unfixed when the inherited block exceeds `BLOCK_SIZE_BYTES_MAX` (`params.rs:248-266`).
+
+Docs, not fixed:
+
+- `jix/src/storage/params.rs:187` doc lines over 100 columns (also `params.rs:564,565,568,1020`), and `jix/src/codec/mod.rs:68`, `jix/src/array/compact.rs:63`.
+- `jix/src/storage/params.rs:233` `inherit_unset_from_array` is `pub(crate)` and `#[allow(unused)]` but carries an `ignore` example written as public API usage; it never runs.
