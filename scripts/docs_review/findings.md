@@ -42,3 +42,13 @@ Docs, not fixed:
 
 - `jix-py/src/ops/elementwise/trig.rs:8`, `:40`, `:72` and the other trig functions: "Supported dtypes: `f16`, `f32`, `f64`" omits that integer and bool inputs are accepted and cast to a float first (the dispatch uses `Safe`, e.g. `trig.rs:33`).
 - `jix/src/ops/elementwise/exp_log.rs:130` the `Ln` doc example line is about 120 columns, over the 100-column limit.
+
+## ops-trig-float-special
+
+Needs the maintainer:
+
+- `jix-py/src/ops/elementwise/trig.rs:8` (and :40, :72, :104, :136, :169) "Supported dtypes: `f16`, `f32`, `f64`" is incomplete: the dispatch is `[f16, f32, f64], Safe`, and `CastKind::Safe` (`jix-py/src/ops/common/dtype_promote.rs:81-125`) also accepts bool and integer inputs, cast to float. Same in `jix-py/src/ops/elementwise/exp_log.rs:15,50,84`; wants one family-wide wording.
+
+Docs, not fixed:
+
+- `jix/src/ops/elementwise/float_special.rs:112,144,149` doc example lines are 101-104 columns, over the 100-column limit.

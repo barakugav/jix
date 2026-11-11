@@ -11,8 +11,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`. `True` where the
-    ///         element is `NaN`, `False` otherwise.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`.
     ///
     /// Examples:
     ///     ```python
@@ -39,8 +38,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`. `True` for finite
-    ///         values, `False` for `+/-inf` and `NaN`.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`.
     ///
     /// Examples:
     ///     ```python
@@ -67,8 +65,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`. `True` only for
-    ///         `+inf` and `-inf`, `False` for finite values and `NaN`.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`.
     ///
     /// Examples:
     ///     ```python
