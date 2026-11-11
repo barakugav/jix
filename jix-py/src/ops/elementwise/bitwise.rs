@@ -5,14 +5,10 @@ use crate::ops::common::{define_op1, define_op2};
 define_op2!(
     /// Element-wise logical AND of two arrays.
     ///
-    /// Accepted input dtypes: any integer (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), `f16`, `f32`, `f64`,
-    /// and `bool`. Output dtype is always `bool`.
+    /// Accepted input dtypes: any integer, float or complex dtype, and `bool`.
     ///
-    /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`;
-    /// for `bool` this is the identity), then the logical AND is applied.
-    ///
-    /// Mixed dtypes are allowed: each operand is independently cast to `bool` before the
-    /// operation.
+    /// Each operand is cast to `bool` (zero -> `False`, any non-zero value -> `True`), so mixed
+    /// dtypes are allowed.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
@@ -23,8 +19,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. `True` where both
-    ///         operands are truthy, `False` otherwise.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -52,11 +47,9 @@ define_op2!(
 define_op2!(
     /// Element-wise logical OR of two arrays.
     ///
-    /// Accepted input dtypes: any integer (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), `f16`, `f32`, `f64`,
-    /// and `bool`. Output dtype is always `bool`.
+    /// Accepted input dtypes: any integer, float or complex dtype, and `bool`.
     ///
-    /// Each element is first cast to `bool` (zero -> `False`, any non-zero -> `True`), then the
-    /// logical OR is applied.
+    /// Each operand is cast to `bool` (zero -> `False`, any non-zero value -> `True`).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -65,8 +58,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. `True` where at least
-    ///         one operand is truthy, `False` otherwise.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -89,11 +81,9 @@ define_op2!(
 define_op2!(
     /// Element-wise logical XOR of two arrays.
     ///
-    /// Accepted input dtypes: any integer (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), `f16`, `f32`, `f64`,
-    /// and `bool`. Output dtype is always `bool`.
+    /// Accepted input dtypes: any integer, float or complex dtype, and `bool`.
     ///
-    /// Each element is first cast to `bool` (zero -> `False`, any non-zero -> `True`), then the
-    /// logical XOR is applied.
+    /// Each operand is cast to `bool` (zero -> `False`, any non-zero value -> `True`).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -102,8 +92,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. `True` where exactly
-    ///         one operand is truthy, `False` otherwise.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -126,11 +115,10 @@ define_op2!(
 define_op1!(
     /// Element-wise logical NOT.
     ///
-    /// Accepted input dtypes: any integer (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), `f16`, `f32`, `f64`,
-    /// and `bool`. Output dtype is always `bool`.
+    /// Accepted input dtypes: any integer, float or complex dtype, and `bool`.
     ///
-    /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`),
-    /// then negated.
+    /// Each element is cast to `bool` (zero -> `False`, any non-zero value -> `True`), then
+    /// negated.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -138,8 +126,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`. `True` for zero
-    ///         (falsy) elements, `False` for non-zero (truthy) elements.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`.
     ///
     /// Examples:
     ///     ```python
@@ -164,8 +151,7 @@ define_op2!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`.
     /// Output dtype equals the promoted input type.
     ///
-    /// Applies the bitwise AND to each pair of corresponding bits. For `bool` this is
-    /// equivalent to logical AND.
+    /// For `bool` this is logical AND.
     ///
     /// **Type promotion**: if `a` and `b` have different integer/bool dtypes, both are cast
     /// to the smallest integer type that can represent both (Safe casting rules).
@@ -178,8 +164,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///         occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -205,8 +191,7 @@ define_op2!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`.
     /// Output dtype equals the promoted input type.
     ///
-    /// Applies the bitwise OR to each pair of corresponding bits. For `bool` this is
-    /// equivalent to logical OR.
+    /// For `bool` this is logical OR.
     ///
     /// **Type promotion**: if `a` and `b` have different integer/bool dtypes, both are cast
     /// to the smallest integer type that can represent both (Safe casting rules).
@@ -218,8 +203,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///         occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -245,8 +230,7 @@ define_op2!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`.
     /// Output dtype equals the promoted input type.
     ///
-    /// Applies the bitwise XOR to each pair of corresponding bits. For `bool` this is
-    /// equivalent to logical XOR.
+    /// For `bool` this is logical XOR.
     ///
     /// **Type promotion**: if `a` and `b` have different integer/bool dtypes, both are cast
     /// to the smallest integer type that can represent both (Safe casting rules).
@@ -258,8 +242,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///         occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -285,8 +269,7 @@ define_op1!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`.
     /// Output dtype and shape equal the input.
     ///
-    /// Flips every bit. For `bool` this is equivalent to logical NOT.
-    /// For signed integers the result is `-(x + 1)` (e.g. `~0` on `int32` gives `-1`).
+    /// For `bool` this is logical NOT. For signed integers the result is `-(x + 1)`.
     ///
     /// Args:
     ///     array: Input array.
@@ -318,9 +301,8 @@ define_op2!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
     /// Output dtype equals the promoted input type.
     ///
-    /// Shifts the bits of each element of `a` left by the corresponding value in `b`.
-    /// Vacated bits are filled with zeros. As numpy, shifting by the bit width of the type or
-    /// more, or by a negative value, gives `0`.
+    /// Vacated bits are filled with zeros. As in numpy, shifting by the bit width of the type
+    /// or more, or by a negative value, gives `0`.
     ///
     /// **Type promotion**: if `a` and `b` have different integer dtypes, both are cast to
     /// the smallest integer type that can represent both (Safe casting rules).
@@ -332,8 +314,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///         occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -361,9 +343,8 @@ define_op2!(
     ///
     /// For **unsigned** types this is a logical shift: vacated bits are filled with zeros.
     /// For **signed** types this is an arithmetic shift: vacated bits are filled with the
-    /// sign bit (the result preserves the sign). As numpy, shifting by the bit width of the
-    /// type or more, or by a negative value, shifts all the bits out: `0`, or `-1` for a negative
-    /// signed value.
+    /// sign bit. As in numpy, shifting by the bit width of the type or more, or by a negative
+    /// value, shifts all the bits out: `0`, or `-1` for a negative signed value.
     ///
     /// **Type promotion**: if `a` and `b` have different integer dtypes, both are cast to
     /// the smallest integer type that can represent both (Safe casting rules).
@@ -375,8 +356,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///         occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -400,22 +381,21 @@ define_op2!(
     /// Element-wise bitwise left rotation.
     ///
     /// Supported value dtypes (`a`): `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// The rotation amount (`b`) must be castable to `u32`. Output dtype equals `a`'s dtype.
+    /// The rotation amount (`b`) is cast to `u32`, so it must be `bool`, `u8`, `u16`, `u32` or a
+    /// Python int. Output dtype equals `a`'s dtype.
     ///
-    /// Rotates the bits of each element of `a` left by the corresponding value in `b`
-    /// (interpreted as `u32`). Unlike a left shift, bits shifted out of the most-significant
-    /// position wrap around to the least-significant position, so no bits are lost.
+    /// Bits shifted out of the most-significant end wrap around to the least-significant end.
     /// The rotation amount is taken modulo the bit width of the type.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
     ///     a: Value to rotate.
-    ///     b: Rotation amount. Must be castable to `u32`.
+    ///     b: Rotation amount.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///         occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -448,22 +428,21 @@ define_op2!(
     /// Element-wise bitwise right rotation.
     ///
     /// Supported value dtypes (`a`): `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// The rotation amount (`b`) must be castable to `u32`. Output dtype equals `a`'s dtype.
+    /// The rotation amount (`b`) is cast to `u32`, so it must be `bool`, `u8`, `u16`, `u32` or a
+    /// Python int. Output dtype equals `a`'s dtype.
     ///
-    /// Rotates the bits of each element of `a` right by the corresponding value in `b`
-    /// (interpreted as `u32`). Unlike a right shift, bits shifted out of the least-significant
-    /// position wrap around to the most-significant position, so no bits are lost.
+    /// Bits shifted out of the least-significant end wrap around to the most-significant end.
     /// The rotation amount is taken modulo the bit width of the type.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
     ///     a: Value to rotate.
-    ///     b: Rotation amount. Must be castable to `u32`.
+    ///     b: Rotation amount.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///         occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape. No computation occurs
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
