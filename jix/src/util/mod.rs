@@ -283,18 +283,12 @@ impl<Iter: Iterator> IterExt for Iter {}
 //     }
 // }
 
-/// A state machine for applying a pipeline of in-place byte transformations using two
-/// pre-allocated scratch buffers, alternating between them at each step.
+/// Applies a pipeline of byte transformations with two pre-allocated scratch buffers,
+/// alternating between them at each step, so no step allocates.
 ///
-/// This avoids per-step heap allocations. The two variants are:
-///
-/// - [`Init`](Self::Init): no transformation applied yet; holds a reference to the
-///   original source data alongside the two reusable scratch buffers.
-/// - [`Alternating`](Self::Alternating): at least one transformation has been applied;
-///   `main_buf` holds the most recently written output and `secondary_buf` is the next
-///   write target.
-///
-/// # Usage
+/// - [`Init`](Self::Init): no step applied yet; the current data is `original_data`.
+/// - [`Alternating`](Self::Alternating): `main_buf` holds the current data and
+///   `secondary_buf` is the next write target.
 ///
 /// Call [`edit`](Self::edit) to obtain `(src, dst)` for each step and write the
 /// transformed bytes into `dst`. After all steps, call [`data`](Self::data) to read
@@ -311,10 +305,8 @@ pub(crate) enum AlternatingBuffers<'a> {
     },
 }
 impl<'a> AlternatingBuffers<'a> {
-    /// Creates a new `AlternatingBuffers` in the [`Init`](Self::Init) state.
-    ///
-    /// `data` is the original source slice. `tmp_buf1` and `tmp_buf2` are the two
-    /// scratch buffers that will be alternated between during transformation steps.
+    /// Starts in the [`Init`](Self::Init) state over the source `data`, with `tmp_buf1` and
+    /// `tmp_buf2` as the scratch buffers.
     #[inline]
     pub(crate) fn with_const_src(
         data: &'a [u8],
@@ -336,11 +328,8 @@ impl<'a> AlternatingBuffers<'a> {
         }
     }
 
-    /// Returns the current data.
-    ///
-    /// - In [`Init`](Self::Init): the original source slice (no transformation applied yet).
-    /// - In [`Alternating`](Self::Alternating): the contents of `main_buf`, i.e. the output
-    ///   of the most recently completed transformation step.
+    /// Returns the current data: `original_data` in [`Init`](Self::Init), `main_buf` in
+    /// [`Alternating`](Self::Alternating).
     #[allow(dead_code)]
     pub(crate) fn data(&self) -> &[u8] {
         match self {
@@ -370,16 +359,13 @@ impl<'a> AlternatingBuffers<'a> {
         }
     }
 
-    /// Returns `(src, dst)` for the next transformation step, advancing internal state.
+    /// Returns `(src, dst)` for the next step: `src` is the current data, and `dst` becomes
+    /// the current data, so [`data`](Self::data) reflects what the caller writes into it.
     ///
-    /// - In [`Init`](Self::Init): transitions `self` to [`Alternating`](Self::Alternating)
-    ///   with `tmp_buf1` as `main_buf`, then returns `(original_data, tmp_buf1)`. After
-    ///   writing the transformed output into `dst`, [`data`](Self::data) will return its
-    ///   contents with no further state change.
+    /// - In [`Init`](Self::Init): switches to [`Alternating`](Self::Alternating) with
+    ///   `tmp_buf1` as `main_buf`, then returns `(original_data, tmp_buf1)`.
     /// - In [`Alternating`](Self::Alternating): swaps `main_buf` <-> `secondary_buf`, then
-    ///   returns `(old_main_data, old_secondary_buf)`. The caller writes transformed output
-    ///   into `dst` (which is the new `main_buf`), and [`data`](Self::data) will immediately
-    ///   reflect the new contents.
+    ///   returns `(old main_buf, new main_buf)`.
     pub(crate) fn edit(&mut self) -> (&[u8], &mut [u8]) {
         match self {
             Self::Init {
@@ -417,9 +403,10 @@ impl<'a> AlternatingBuffers<'a> {
 /// *redone once per tile band* along that dim (see
 /// [`read_shape_scale_weight`](crate::storage::params::ArraySpecDynamic::read_shape_scale_weight)).
 ///
-/// Always in `[0, 1]`: leaves duplicate nothing ([`NONE`](Self::NONE)), a fully duplicated dim is
-/// [`FULL`](Self::FULL), and every combine renormalizes by a divisor strictly larger than the sum it
-/// divides. Stored as `u16` fixed point rather than `f32` to keep [`ArraySpecDynamic`] small.
+/// Always in `[0, 1]`: leaves duplicate nothing ([`NONE`](Self::NONE)), a fully duplicated dim
+/// is [`FULL`](Self::FULL), and every combine renormalizes by a divisor strictly larger than the
+/// sum it divides. Stored as `u16` fixed point rather than `f32` to keep [`ArraySpecDynamic`]
+/// small.
 ///
 /// [`ArraySpecDynamic`]: crate::storage::params::ArraySpecDynamic
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
@@ -456,26 +443,24 @@ impl ScaleWeight {
 /// `read_shape` enters holding the block-shape seed - the storage granularity, i.e. the smallest
 /// per-dim read below which blocks would be decoded more than once - and leaves holding the chosen
 /// tile. `scale_order` lists the dims in **ascending coverage priority** (see
-/// [`read_shape_scale_order`](crate::storage::params::ArraySpecDynamic::read_shape_scale_order)):
-/// the down-scan shrinks from the front and the up-scan grows from the back, so the *last* dim
-/// listed is the first one grown - for a C-contiguous leaf that is the innermost dim.
+/// [`read_shape_scale_order`](crate::storage::params::ArraySpecDynamic::read_shape_scale_order)),
+/// so the *last* dim listed is the first one grown - for a C-contiguous leaf, the innermost dim.
 ///
-/// `weight[d]` is the per-dim coverage weight: non-[`NONE`](ScaleWeight::NONE) means a tile that does
-/// not cover `d` re-reads underlying data once per band, so growing `d` buys real work. Those dims
-/// may spend up to 2 times the byte budget; dims that save nothing stop at
-/// `min_nitems`, since past that a bigger tile only costs cache.
+/// A non-[`NONE`](ScaleWeight::NONE) `weight[d]` means a tile that does not cover `d` re-reads
+/// underlying data once per band, so growing `d` saves work: it may grow the tile up to
+/// `2 * max_nitems` items. Other dims stop at `min_nitems`, since past that a bigger tile only
+/// costs cache.
 ///
 /// 1. clamp each scaled dim into `[1, max_shape]`,
-/// 2. scale down to `<= max_nitems` if the seed itself does not fit - shrinking the lowest-priority
-///    dims first.
-/// 3. scale up in priority order, highest first, by an integer multiple of the (block-aligned)
-///    seed toward each dim's extent, up to that dim's target,
+/// 2. scale down to `<= max_nitems` if the seed itself does not fit, shrinking the lowest-priority
+///    dims first,
+/// 3. scale up, highest priority first, by an integer multiple of the (block-aligned) seed toward
+///    each dim's extent, up to that dim's target,
 /// 4. snap any scaled dim that reached `max_shape[d]` to the full `array_shape[d]`, so the read
 ///    boundary doesn't split the requested range along an unaligned start.
 ///
-/// Only the dims listed in `scale_order` are touched; any dim absent from it is left exactly as
-/// seeded and still counts toward the budget. Both callers pass the spec's full
-/// `read_shape_scale_order`, so in practice every dim is scaled.
+/// Dims absent from `scale_order` are left exactly as seeded and still count toward the budget.
+/// Both callers pass the spec's full `read_shape_scale_order`, so in practice every dim is scaled.
 pub(crate) fn scale_read_shape(
     read_shape: &mut [u64],
     max_shape: &[u64],
@@ -675,8 +660,8 @@ pub(crate) const REQUIRE_ALIGNED: bool = !cfg!(any(
 ///
 /// Rust only puts `noalias` on a parameter that arrives as a reference; a bare `*const T` gets
 /// nothing, and the callee then has to assume it may alias every other pointer it holds. This
-/// wrapper keeps the reference in the ABI (that is the whole point) while saying in the type what
-/// is really being passed: a non-aliasing pointer to `T`.
+/// wrapper keeps the reference in the ABI while its type says what is really passed: a
+/// non-aliasing pointer to `T`.
 ///
 /// `noalias` is a *parameter* attribute, so it only lands on a direct reference-typed argument of
 /// a function that is not inlined away - which in practice means the `#[inline(never)]` inner

@@ -7,8 +7,7 @@ use crate::NDIM_MAX;
 /// Bit `d` (the low bit is dimension 0) stores one boolean for dimension `d`; callers decide what a
 /// set bit means. The bitmap tracks its own dimension count ([`len`](Self::len)), so it builds (via
 /// [`FromIterator`]), iterates (via [`IntoIterator`]), and compares as a fixed-length sequence of
-/// booleans. Since the maximum number of dimensions is [`NDIM_MAX`] (which is 8), all flags fit in a
-/// single `u8`.
+/// booleans. The maximum number of dimensions, [`NDIM_MAX`], is 8, so all flags fit in one `u8`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct DimBitmap {
     bits: u8,
@@ -71,8 +70,8 @@ impl DimBitmap {
         self.bits & mask == mask
     }
 
-    /// Inserts a new dimension at position `pos`, shifting higher dimensions up by one, and
-    /// grows the length by one. The inserted dimension takes `value`.
+    /// Inserts a dimension with flag `value` at position `pos`, shifting higher dimensions up by
+    /// one.
     #[inline]
     pub(crate) fn insert(&mut self, pos: usize, value: bool) {
         assert!(pos <= self.len() && self.len() < NDIM_MAX);
