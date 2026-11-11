@@ -300,11 +300,11 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The two modes mirror NumPy's `out=`:
     /// - **pull** (`out` is `None`): the array returns the cheapest buffer it can - a borrowed view
-    ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized one -
-    ///   and picks the strides. The bytes are only contiguous if the strides say so.
+    ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized one
+    ///   - and picks the strides. The bytes are only contiguous if the strides say so.
     /// - **push** (`out` is `Some(dst)`): the region is written into `dst` at `dst`'s own strides,
-    ///   and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have one stride
-    ///   per array dimension.
+    ///   and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have one
+    ///   stride per array dimension.
     ///
     /// For the common case of pushing into a packed row-major buffer, use
     /// [`to_buf_slice`](Array::to_buf_slice), which builds the `StridedBuf` for you.

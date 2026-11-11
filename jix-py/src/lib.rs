@@ -6,10 +6,11 @@
 //! # Acknowledgements
 //!
 //! This project would not exist without the work of several upstream authors and communities.
-//! Specifically, this project was greatly inspired by the [C-Blosc2](https://github.com/Blosc/c-blosc2) library.
-//! This crate can almost be seen as a port of ideas and natural Rust evolution of C-Blosc2.
-//! See the `THANKS.md` at the repository root for a more complete list of contributors and inspirations,
-//! and the `NOTICE` file for full attribution and license text.
+//! Specifically, this project was greatly inspired by the
+//! [C-Blosc2](https://github.com/Blosc/c-blosc2) library. This crate can almost be seen as a port
+//! of ideas and natural Rust evolution of C-Blosc2. See the `THANKS.md` at the repository root for
+//! a more complete list of contributors and inspirations, and the `NOTICE` file for full
+//! attribution and license text.
 
 use pyo3::prelude::*;
 

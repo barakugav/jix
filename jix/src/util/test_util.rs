@@ -64,7 +64,9 @@ pub(crate) trait ScalarStrategy:
     fn op_safe_non_negative_strategy() -> BoxedStrategy<Self> {
         Self::op_safe_strategy()
     }
-    /// Overridden for the floats, which have no other use for it.
+    /// Strictly positive values for the floats, which override it. The default is
+    /// [`op_safe_non_negative_strategy`](Self::op_safe_non_negative_strategy), which may yield
+    /// zero.
     fn op_safe_positive_strategy() -> BoxedStrategy<Self> {
         Self::op_safe_non_negative_strategy()
     }

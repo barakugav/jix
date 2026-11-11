@@ -413,8 +413,7 @@ mod tests {
         [EDGE_U8, EDGE_U16, EDGE_U32, EDGE_U64]
     );
 
-    // No u8 case: single-byte types don't support swap_bytes (swapping one byte is a no-op),
-    // see the doc comment on `SwapBytes` above.
+    // No u8 case: swapping the bytes of a single-byte type is a no-op.
     concrete_op1!(
         swap_bytes_concrete,
         swap_bytes,

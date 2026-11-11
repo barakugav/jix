@@ -117,7 +117,8 @@ where
         })
     }
 
-    /// Constructs an array with [`Select`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Select`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(condition: Array<SC>, x: Array<SX>, y: Array<SY>) -> Result<Array<Self>> {
         Self::new(condition.into_storage(), x.into_storage(), y.into_storage())
             .map(Array::from_storage)

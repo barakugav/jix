@@ -97,9 +97,9 @@ and `read_data(index_ranges, ctx, out)` which reads a rectangular sub-region and
   returned buffer is a view of `dst`. This is what lets a whole op pipeline write straight into the
   caller's final destination.
 
-Impls start with `check_out_buf(...)` and then `materialize_out_buf(out, ctx, out_shape, dtype)`,
-which resolves the two modes into a single writable buffer - the caller's in push mode, a pooled
-allocation in pull mode.
+Impls start with `check_out_buf(...)` and then
+`materialize_out_buf(out, ctx, out_shape, dtype, layout_order)`, which resolves the two modes into
+a single writable buffer - the caller's in push mode, a pooled allocation in pull mode.
 
 `Array::to_buf_strided(index, ctx, out)` is the array-level entry point: same two modes, plus a
 heuristic that cuts an oversized request into cache-sized pieces read one at a time.

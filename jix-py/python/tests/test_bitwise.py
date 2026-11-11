@@ -4,7 +4,7 @@ Mirrors the test block in jix/src/ops/elementwise/bitwise.rs.
 
 Auto-cast section verifies that Safe/Unsafe dispatch rules work for non-matching inputs:
 - bitwise_and/or/xor use CastKind::Safe, so e.g. u8+u16 -> u16.
-- logical_and/or/xor use CastKind::Unsafe, so any non-complex input casts to bool.
+- logical_and/or/xor use CastKind::Unsafe, so any input, complex included, casts to bool.
 """
 
 import numpy as np

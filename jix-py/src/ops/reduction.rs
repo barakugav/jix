@@ -131,6 +131,8 @@ define_reduction_op!(
     /// For **float** types, `NaN` is propagated: if any element is `NaN`, the result is
     /// `NaN`. This matches `numpy.max` (not `numpy.nanmax`, which would ignore `NaN`).
     ///
+    /// An empty reduction raises `RuntimeError`.
+    ///
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
@@ -169,6 +171,8 @@ define_reduction_op!(
     /// For **float** types, `NaN` is propagated: if any element is `NaN`, the result is
     /// `NaN`. This matches `numpy.min` (not `numpy.nanmin`, which would ignore `NaN`).
     ///
+    /// An empty reduction raises `RuntimeError`.
+    ///
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
@@ -205,6 +209,8 @@ define_reduction_op!(
     /// If multiple elements share the maximum value, the index of the first occurrence is
     /// returned. For **float** types, `NaN` propagates: if any element along the reduced dim
     /// is `NaN`, the index of the first `NaN` is returned, as in `numpy.argmax`.
+    ///
+    /// An empty reduction raises `RuntimeError`.
     ///
     /// Args:
     ///     array: Input array.
@@ -243,6 +249,8 @@ define_reduction_op!(
     /// If multiple elements share the minimum value, the index of the first occurrence is
     /// returned. For **float** types, `NaN` propagates: if any element along the reduced dim
     /// is `NaN`, the index of the first `NaN` is returned, as in `numpy.argmin`.
+    ///
+    /// An empty reduction raises `RuntimeError`.
     ///
     /// Args:
     ///     array: Input array.
@@ -349,6 +357,8 @@ define_reduction_op!(
     /// and complex inputs keep their input width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> ->
     /// Complex<f32>`, ...).
     ///
+    /// An empty reduction raises `RuntimeError`.
+    ///
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
@@ -383,6 +393,8 @@ define_reduction_op!(
     /// promote to `f64`, real floats keep their width (`f16 -> f16`, `f32 -> f32`, `f64 ->
     /// f64`), and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
     /// `Complex<f64> -> f64`).
+    ///
+    /// An empty reduction raises `RuntimeError`.
     ///
     /// Args:
     ///     array: Input array.
@@ -421,6 +433,8 @@ define_reduction_op!(
     /// `jix.var`): integer and `bool` inputs promote to `f64`, real floats keep their width,
     /// and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
     /// `Complex<f64> -> f64`).
+    ///
+    /// An empty reduction raises `RuntimeError`.
     ///
     /// Args:
     ///     array: Input array.

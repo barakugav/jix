@@ -92,6 +92,9 @@ define_reduction_op!(
     /// is `NaN`. This matches the element-wise [`Maximum`](crate::ops::Maximum) op and
     /// `numpy.max` (not `numpy.nanmax`, which would ignore `NaN`).
     ///
+    /// Reducing an empty dim makes [`Max::new`] fail with `ErrorKind::InvalidArgument`, and
+    /// [`Array::max()`](crate::Array::max) panic.
+    ///
     /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
@@ -169,6 +172,9 @@ define_reduction_op!(
     /// is `NaN`. This matches the element-wise [`Minimum`](crate::ops::Minimum) op and
     /// `numpy.min` (not `numpy.nanmin`, which would ignore `NaN`).
     ///
+    /// Reducing an empty dim makes [`Min::new`] fail with `ErrorKind::InvalidArgument`, and
+    /// [`Array::min()`](crate::Array::min) panic.
+    ///
     /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
@@ -245,6 +251,9 @@ define_reduction_op!(
     /// Output dtype is `u64`. As in `numpy.argmax`, ties return the *first* index, and for
     /// **float** types `NaN` propagates: if any element along the reduced dim is `NaN`, the
     /// index of the first `NaN` is returned.
+    ///
+    /// Reducing an empty dim makes [`ArgMax::new`] fail with `ErrorKind::InvalidArgument`, and
+    /// [`Array::argmax()`](crate::Array::argmax) panic.
     ///
     /// The result is a lazy view.
     ///
@@ -324,6 +333,9 @@ define_reduction_op!(
     /// Output dtype is `u64`. As in `numpy.argmin`, ties return the *first* index, and for
     /// **float** types `NaN` propagates: if any element along the reduced dim is `NaN`, the
     /// index of the first `NaN` is returned.
+    ///
+    /// Reducing an empty dim makes [`ArgMin::new`] fail with `ErrorKind::InvalidArgument`, and
+    /// [`Array::argmin()`](crate::Array::argmin) panic.
     ///
     /// The result is a lazy view.
     ///

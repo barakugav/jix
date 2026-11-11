@@ -40,7 +40,8 @@ impl<S, F> Map<S, F> {
         Ok(Self(Op1::new(array, map_fn)?))
     }
 
-    /// Constructs an array with [`Map`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Map`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array<O>(array: Array<S>, map_fn: F) -> Result<Array<Self>>
     where
         S: ArrayStorageTyped,
@@ -107,7 +108,8 @@ impl<S1, S2, F> Map2<S1, S2, F> {
         Ok(Self(Op2::new(a, b, map_fn, false)?))
     }
 
-    /// Constructs an array with [`Map2`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Map2`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array<O>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Result<Array<Self>>
     where
         S1: ArrayStorageTyped,

@@ -124,7 +124,8 @@ pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> 
     /// `&[Array<_>]`), or one whose arrays are themselves pipelines with an unknown operand count.
     const N_OPERANDS: Option<usize>;
 
-    /// The largest [`MAX_ITEMSIZE`](ElementwisePipelineImpl::MAX_ITEMSIZE) of the arrays' pipelines.
+    /// The largest [`MAX_ITEMSIZE`](ElementwisePipelineImpl::MAX_ITEMSIZE) of the arrays'
+    /// pipelines.
     const MAX_ITEMSIZE: usize;
 
     /// The leaf operands the pipeline reads from.

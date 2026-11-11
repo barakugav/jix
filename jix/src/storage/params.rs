@@ -126,7 +126,9 @@ impl ArrayParams {
     ///
     /// `fixed` must have one entry per dimension. A block shape is required: set with
     /// [`block_shape`](Self::block_shape) or inherited from the source in [`Array::compact_with`].
-    /// When unset, an explicit block shape is all-fixed and an auto-computed one all-non-fixed.
+    /// When unset, a block shape set with `block_shape` is all-fixed, an inherited one keeps the
+    /// source's fixed dims, and an auto-computed one is all-non-fixed. An inherited block shape
+    /// larger than the maximum block size has no fixed dim.
     ///
     /// Fails with `TooManyDimensions` if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries.
     pub fn block_shape_fixed_dims(mut self, fixed: &[bool]) -> Result<Self> {
@@ -186,6 +188,8 @@ impl ArrayParams {
     ///
     /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the
     /// default.
+    ///
+    /// Fails with `InvalidArgument` if `level` does not fit in an `i8`.
     pub fn level(mut self, level: i32) -> Result<Self> {
         self.encoder_params
             .get_or_insert_with(EncoderParams::default)

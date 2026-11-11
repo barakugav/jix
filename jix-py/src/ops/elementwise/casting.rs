@@ -17,13 +17,16 @@ use crate::util::IntoPyResult;
 ///   `bool`.
 ///
 /// `bool` conversions follow C semantics: zero -> `False`, any non-zero value -> `True`.
-/// Casting from a complex type to a real numeric type (int, uint, or float), or any cast
-/// involving struct dtypes, is not supported.
+/// Casting from a complex type to a real numeric type (int, uint, or float) is not supported,
+/// and a struct dtype can only be cast to itself.
 ///
 /// Args:
 ///     array: Array to cast.
 ///     dtype: The target dtype. Accepts a numpy dtype object, a dtype string (e.g.
 ///         `'float32'`), or a Python type like `np.float32`.
+///
+/// Raises:
+///     TypeError: If the cast is not supported.
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] view with the new dtype.

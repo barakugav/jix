@@ -82,7 +82,7 @@ use crate::util::{
 /// ## Shape operations
 ///
 /// Shape operations remap the array's indices without copying data, returning lazy views.
-/// Reshape (and its `flatten` shorthand) is uniquely prone to read-amplification: when the
+/// Reshape (and its `flatten` shorthand) is the most prone to read-amplification: when the
 /// new layout crosses block boundaries that the original layout respected, reading the view
 /// may decompress more data than the request appears to touch. Materialize the result with
 /// [`.compact()`][jix.Array.compact] to re-encode with a block layout suited to the new
@@ -90,9 +90,10 @@ use crate::util::{
 ///
 /// # Persistence
 ///
-/// Save an array with [`.write_to(path)`][jix.Array.write_to] or [`jix.write_array()`][jix.write_array],
-/// and reload it with [`jix.read_array()`][jix.read_array]. Multiple arrays can
-/// be written back-to-back into a single file and read back by supplying `offset` and `len`.
+/// Save an array with [`.write_to(path)`][jix.Array.write_to] or
+/// [`jix.write_array()`][jix.write_array], and reload it with [`jix.read_array()`][jix.read_array].
+/// Multiple arrays can be written back-to-back into a single file and read back by supplying
+/// `offset` and `len`.
 ///
 /// ```python
 /// a.write_to("data.jix")
@@ -435,10 +436,10 @@ impl Array {
 
     /// Decode the array (or a sub-region of it) into a NumPy array.
     ///
-    /// This is the primary way to materialize a [`jix.Array`][jix.Array] into a form that ordinary Python
-    /// and NumPy code can consume. It decodes the compressed block data, copies it into a
-    /// NumPy array - freshly allocated unless you pass `out` - and returns that array. Mutations
-    /// to the result do not affect this array.
+    /// This is the primary way to materialize a [`jix.Array`][jix.Array] into a form that ordinary
+    /// Python and NumPy code can consume. It decodes the compressed block data, copies it into a
+    /// NumPy array - freshly allocated unless you pass `out` - and returns that array. Mutations to
+    /// the result do not affect this array.
     ///
     /// Args:
     ///     index: Selects a sub-region to read. Accepts the same syntax Python uses inside
@@ -475,10 +476,10 @@ impl Array {
     ///         be writeable.
     ///
     ///         The destination does not have to be C-contiguous - almost any strided view works.
-    ///         Three kinds of view are rejected: reversed ones (a negative stride, e.g. `big[::-1]`),
-    ///         broadcast ones (a zero stride over a dim longer than 1) and ones whose elements
-    ///         overlap (e.g. a `sliding_window_view`). The destination must also be aligned to the
-    ///         dtype.
+    ///         Three kinds of view are rejected: reversed ones (a negative stride, e.g.
+    ///         `big[::-1]`), broadcast ones (a zero stride over a dim longer than 1) and ones whose
+    ///         elements overlap (e.g. a `sliding_window_view`). The destination must also be
+    ///         aligned to the dtype.
     ///
     ///         It must not share memory with a buffer this array reads from (see the warning).
     ///
@@ -702,8 +703,7 @@ impl Array {
     /// broadcast read re-evaluates the view. For example, `a / a.std(dim=1, keepdim=True)`
     /// recomputes the standard deviation for every element it is broadcast against, whereas
     /// `a / a.std(dim=1, keepdim=True).plain()` computes it once. Use
-    /// [`compact()`][jix.Array.compact] instead to compress the intermediate (e.g. it is large,
-    /// or will be read many times).
+    /// [`compact()`][jix.Array.compact] instead to compress the intermediate (e.g. it is large).
     ///
     /// Args:
     ///     index: See `numpy()` for accepted index types and behavior.
@@ -783,7 +783,8 @@ impl Array {
         Ok(arr)
     }
 
-    /// Copies the data of an array into a new compact array by compressing it into new blocks. See [`jix.compact()`][jix.compact].
+    /// Copies the data of an array into a new compact array by compressing it into new blocks. See
+    /// [`jix.compact()`][jix.compact].
     #[pyo3(signature = (*, params=None))]
     pub fn compact<'py>(
         slf: &Bound<'py, Self>,
@@ -1105,7 +1106,8 @@ impl Array {
         crate::ops::ceil(slf)
     }
 
-    /// Rounds each element down to the nearest integer (towards -inf). See [`jix.floor()`][jix.floor].
+    /// Rounds each element down to the nearest integer (towards -inf). See
+    /// [`jix.floor()`][jix.floor].
     pub fn floor<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::floor(slf)
     }
@@ -1170,7 +1172,8 @@ impl Array {
         crate::ops::bitwise_not(slf)
     }
 
-    /// Element-wise left shift (`a << b`). See [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
+    /// Element-wise left shift (`a << b`). See
+    /// [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
     pub fn __lshift__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
@@ -1178,7 +1181,8 @@ impl Array {
         binary_op_builtin(other, || crate::ops::bitwise_left_shift(slf, other))
     }
 
-    /// Element-wise left shift (`a << b`). See [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
+    /// Element-wise left shift (`a << b`). See
+    /// [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
     pub fn __rlshift__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
@@ -1186,7 +1190,8 @@ impl Array {
         binary_op_builtin(other, || crate::ops::bitwise_left_shift(other, slf))
     }
 
-    /// Element-wise right shift (`a >> b`). See [`jix.bitwise_right_shift()`][jix.bitwise_right_shift].
+    /// Element-wise right shift (`a >> b`). See
+    /// [`jix.bitwise_right_shift()`][jix.bitwise_right_shift].
     pub fn __rshift__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
@@ -1194,7 +1199,8 @@ impl Array {
         binary_op_builtin(other, || crate::ops::bitwise_right_shift(slf, other))
     }
 
-    /// Element-wise right shift (`a >> b`). See [`jix.bitwise_right_shift()`][jix.bitwise_right_shift].
+    /// Element-wise right shift (`a >> b`). See
+    /// [`jix.bitwise_right_shift()`][jix.bitwise_right_shift].
     pub fn __rrshift__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,
@@ -1255,7 +1261,8 @@ impl Array {
 
     // == reduction ops ==
 
-    /// Reduces one or more dims with logical AND: returns `True` if all elements are truthy. See [`jix.all()`][jix.all].
+    /// Reduces one or more dims with logical AND: returns `True` if all elements are truthy. See
+    /// [`jix.all()`][jix.all].
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn all(
         slf: &Bound<'_, Self>,
@@ -1265,7 +1272,8 @@ impl Array {
         crate::ops::all(slf, dim, keepdim)
     }
 
-    /// Reduces one or more dims with logical OR: returns `True` if any element is truthy. See [`jix.any()`][jix.any].
+    /// Reduces one or more dims with logical OR: returns `True` if any element is truthy. See
+    /// [`jix.any()`][jix.any].
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn any(
         slf: &Bound<'_, Self>,
@@ -1295,13 +1303,15 @@ impl Array {
         crate::ops::min(slf, dim, keepdim)
     }
 
-    /// Returns the index of the maximum element along a single dim. See [`jix.argmax()`][jix.argmax].
+    /// Returns the index of the maximum element along a single dim. See
+    /// [`jix.argmax()`][jix.argmax].
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn argmax(slf: &Bound<'_, Self>, dim: Option<Dim>, keepdim: bool) -> PyResult<Self> {
         crate::ops::argmax(slf, dim, keepdim)
     }
 
-    /// Returns the index of the minimum element along a single dim. See [`jix.argmin()`][jix.argmin].
+    /// Returns the index of the minimum element along a single dim. See
+    /// [`jix.argmin()`][jix.argmin].
     #[pyo3(signature = (dim=None, *, keepdim=false))]
     pub fn argmin(slf: &Bound<'_, Self>, dim: Option<Dim>, keepdim: bool) -> PyResult<Self> {
         crate::ops::argmin(slf, dim, keepdim)
@@ -1382,7 +1392,8 @@ impl Array {
         crate::ops::flatten(slf)
     }
 
-    /// Reorders the dims of an array (generalized transpose). See [`jix.permute_dims()`][jix.permute_dims].
+    /// Reorders the dims of an array (generalized transpose). See
+    /// [`jix.permute_dims()`][jix.permute_dims].
     #[pyo3(signature = (dims=None))]
     pub fn permute_dims<'py>(
         slf: &Bound<'py, Self>,
@@ -1401,14 +1412,16 @@ impl Array {
         crate::ops::swapdims(slf, dim0, dim1)
     }
 
-    /// Reverses all dims; shorthand for `permute_dims()` with no arguments. See [`jix.permute_dims()`][jix.permute_dims].
+    /// Reverses all dims; shorthand for `permute_dims()` with no arguments. See
+    /// [`jix.permute_dims()`][jix.permute_dims].
     #[allow(non_snake_case)]
     #[getter]
     pub fn T<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Array>> {
         crate::ops::permute_dims(slf, None)
     }
 
-    /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See [`jix.broadcast()`][jix.broadcast].
+    /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See
+    /// [`jix.broadcast()`][jix.broadcast].
     #[pyo3(signature = (shape))]
     pub fn broadcast<'py>(
         slf: &Bound<'py, Self>,
@@ -1434,7 +1447,8 @@ impl Array {
         crate::ops::squeeze(slf, dim)
     }
 
-    /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
+    /// Inserts new length-1 dimensions at specified positions in the array's shape. See
+    /// [`jix.unsqueeze()`][jix.unsqueeze].
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Self>,
         dim: ItemOrTuple<Dim>,
@@ -1512,22 +1526,26 @@ impl Array {
         crate::ops::tan(slf)
     }
 
-    /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`. See [`jix.asin()`][jix.asin].
+    /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`. See
+    /// [`jix.asin()`][jix.asin].
     pub fn asin(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::asin(slf)
     }
 
-    /// Computes the arccosine of each element; output is in radians in `[0, pi]`. See [`jix.acos()`][jix.acos].
+    /// Computes the arccosine of each element; output is in radians in `[0, pi]`. See
+    /// [`jix.acos()`][jix.acos].
     pub fn acos(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::acos(slf)
     }
 
-    /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`. See [`jix.atan()`][jix.atan].
+    /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`. See
+    /// [`jix.atan()`][jix.atan].
     pub fn atan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::atan(slf)
     }
 
-    /// Computes the logarithm of each element; defaults to the natural logarithm. See [`jix.log()`][jix.log].
+    /// Computes the logarithm of each element; defaults to the natural logarithm. See
+    /// [`jix.log()`][jix.log].
     #[pyo3(signature = (base=None))]
     pub fn log(slf: &Bound<'_, Self>, base: Option<f64>) -> PyResult<Self> {
         crate::ops::log(slf, base)
@@ -1567,7 +1585,8 @@ impl Array {
 
     // == dim ops ==
 
-    /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_dim()`][jix.insert_dim].
+    /// Inserts new length-1 dimensions at specified positions. See
+    /// [`jix.insert_dim()`][jix.insert_dim].
     pub fn insert_dim<'py>(
         slf: &Bound<'py, Self>,
         dim: ItemOrTuple<Dim>,
@@ -1575,7 +1594,8 @@ impl Array {
         crate::ops::insert_dim(slf, dim)
     }
 
-    /// Removes length-1 dimensions from the array's shape. See [`jix.remove_dim()`][jix.remove_dim].
+    /// Removes length-1 dimensions from the array's shape. See
+    /// [`jix.remove_dim()`][jix.remove_dim].
     pub fn remove_dim<'py>(
         slf: &Bound<'py, Self>,
         dim: ItemOrTuple<Dim>,
@@ -1589,7 +1609,8 @@ impl Array {
     const __array_ufunc__: Option<()> = None;
 }
 
-/// Compact any array-like object to a new [`jix.Array`][jix.Array] by compressing it into new blocks.
+/// Compact any array-like object to a new [`jix.Array`][jix.Array] by compressing it into new
+/// blocks.
 ///
 /// The data is compressed even if the input is already a jix array. Besides converting non-jix
 /// objects, the main use of `compact` is to materialize a lazy operation chain, such as the result

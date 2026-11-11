@@ -65,7 +65,8 @@ impl<S: ArrayStorage> Roll<S> {
         })
     }
 
-    /// Constructs an array with [`Roll`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Roll`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(array: Array<S>, shift: i64, dim: usize) -> Result<Array<Self>> {
         Self::new(array.into_storage(), shift, dim).map(Array::from_storage)
     }

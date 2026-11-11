@@ -335,7 +335,7 @@ impl<ET> BlockTable<Owned, ET> {
     /// - `data` - contiguous raw (uncompressed) item bytes.
     /// - `dtype` - element type of the stored items.
     /// - `block_size` - number of items per block (must be `> 0`).
-    /// - `encoder_params` - codec pipeline (filters + compressor) applied to each block. TODO
+    /// - `encoder_params` - codec pipeline (filters + compressor) applied to each block.
     ///
     /// # Errors
     ///

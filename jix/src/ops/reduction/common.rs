@@ -1495,7 +1495,8 @@ pub(crate) mod tests {
         fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>);
     }
 
-    /// Implements [`ReductionCompare`] with exact comparison, see [`crate::util::assert_array_matches`].
+    /// Implements [`ReductionCompare`] with exact comparison, see
+    /// [`crate::util::assert_array_matches`].
     macro_rules! reduction_compare_exact {
         ($($t:ty),* $(,)?) => {$(
             impl ReductionCompare for $t {
@@ -2049,22 +2050,22 @@ pub(crate) mod tests {
     #[test]
     fn sum_multi_bulk_multi_tile_2d_reduce_outer() {
         // Reduce dim 0 (the strided/outer dim), tile == block == [2, 3]. Current scheme:
-        // bulks split the reduced dim 0 (8/2 = 4 bulks); within each bulk, tiles split the
-        // non-reduced dim 1 (6/3 = 2 tiles/bulk).
+        // bulks split the non-reduced dim 1 (6/3 = 2 bulks); within each bulk, tiles split the
+        // reduced dim 0 (8/2 = 4 tiles/bulk).
         check_sum_divided(&[8, 6], &[2, 3], (32, 64), &[0]);
     }
 
     #[test]
     fn sum_multi_bulk_multi_tile_2d_reduce_inner() {
         // Reduce dim 1 (the contiguous/inner dim), tile == block == [3, 2]. bulks split
-        // reduced dim 1 (8/2 = 4); tiles split non-reduced dim 0 (6/3 = 2).
+        // non-reduced dim 0 (6/3 = 2); tiles split reduced dim 1 (8/2 = 4).
         check_sum_divided(&[6, 8], &[3, 2], (32, 64), &[1]);
     }
 
     #[test]
     fn sum_multi_bulk_multi_tile_3d_reduce_middle() {
-        // 3D, reduce the middle dim, tile == block == [2, 2, 2]. bulks split reduced dim 1
-        // (4/2 = 2); tiles split the two non-reduced dims 0 and 2 ((4/2)*(4/2) = 4 tiles/bulk).
+        // 3D, reduce the middle dim, tile == block == [2, 2, 2]. bulks split the two non-reduced
+        // dims 0 and 2 ((4/2)*(4/2) = 4 bulks); tiles split reduced dim 1 (4/2 = 2 tiles/bulk).
         check_sum_divided(&[4, 4, 4], &[2, 2, 2], (32, 64), &[1]);
     }
 

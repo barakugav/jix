@@ -217,7 +217,7 @@ fn nd_iter_unordered_nd_walk<I: Idx, OuterD: Dimension>(
 
     if OuterD::NDIM == Some(1) {
         // Special case for 2D: the outer `NdIter` is just a single loop over the outer dim, and
-        // and inner loop is a flat 1-d run.
+        // the inner loop is a flat 1-d run.
 
         let outer_len = shape[0].u64();
         let outer_strides = strides.iter().map(|s| s[0]).collect::<Vec<_>>();
@@ -329,10 +329,10 @@ mod tests {
         }
     }
 
-    /// The whole contract of this type: it must be indistinguishable from [`NdIterUnordered`] on the
-    /// same input - same flags, same offsets, same order, same number of inner runs. What the walk
-    /// itself has to do (dim ordering, coalescing, the flags, the scalar and empty sentinels) is
-    /// pinned down by the tests in `nd_iter_unordered.rs`, so the cases below only need to reach
+    /// The whole contract of this type: it must be indistinguishable from [`NdIterUnordered`] on
+    /// the same input - same flags, same offsets, same order, same number of inner runs. What the
+    /// walk itself has to do (dim ordering, coalescing, the flags, the scalar and empty sentinels)
+    /// is pinned down by the tests in `nd_iter_unordered.rs`, so the cases below only need to reach
     /// each structurally different path and let the comparison do the checking.
     #[track_caller]
     fn assert_same<const N: usize>(
@@ -368,7 +368,8 @@ mod tests {
     // Every structurally different path through `new` / `foreach_inner_1d`
     // ---------------------------------------------------------------------------
 
-    /// A two-operand walk to compare: `(shape, per-operand strides, per-operand (size, alignment))`.
+    /// A two-operand walk to compare: `(shape, per-operand strides, per-operand (size,
+    /// alignment))`.
     type Case<'a> = (&'a [usize], [&'a [usize]; 2], [(usize, usize); 2]);
 
     #[test]

@@ -8,7 +8,8 @@
 //! - [`CompactMmap`] - memory-mapped; the OS pages data from disk on demand.
 //!
 //! All three are thin wrappers around [`ArrayBlockTableStorageBase`], which contains the
-//! actual nd-array logic and delegates 1D block I/O to [`BlockTable`](crate::storage::block::BlockTable).
+//! actual nd-array logic and delegates 1D block I/O to
+//! [`BlockTable`](crate::storage::block::BlockTable).
 
 use std::ops::Range;
 
@@ -455,7 +456,7 @@ fn read_data_slow<ActualD: Dimension>(
     }
 
     // A block can be decoded straight into `buf` - skipping `tmp_buf` and the
-    // `nd_copy` scatter - when the destination is C-contiguous and the block is a single
+    // `NdCopier` scatter - when the destination is C-contiguous and the block is a single
     // contiguous run
     let read_into_out = {
         let c_strides = default_strides(&out_shape, itemsize);

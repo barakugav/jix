@@ -106,14 +106,14 @@ impl<S: ArrayStorage> Array<S> {
     /// # Block layout
     ///
     /// `params.block_shape` divides the array into an N-dimensional grid of target blocks. To read
-    /// from `self` efficiently, data is fetched in larger *chunks* - each spanning a whole number of
-    /// target blocks per dimension - with a single `read_data` call per chunk, then carved into
+    /// from `self` efficiently, data is fetched in larger *chunks* - each spanning a whole number
+    /// of target blocks per dimension - with a single `read_data` call per chunk, then carved into
     /// individual target blocks in memory. The chunk shape is derived from `self`'s own block shape
     /// and scaled toward its preferred read size (see `scale_read_shape`), keeping reads aligned to
     /// how `self` is stored. Blocks are therefore produced in chunk-traversal order rather than
     /// global C order, so each block is handed to the builder together with its logical (C-order)
-    /// `block_index`. Boundary blocks - those that extend beyond the array's shape - are zero-padded
-    /// to fill the full `block_shape` before compression.
+    /// `block_index`. Boundary blocks - those that extend beyond the array's shape - are
+    /// zero-padded to fill the full `block_shape` before compression.
     pub(crate) fn compact_into_builder<B>(
         &self,
         params: &mut ArrayParams,

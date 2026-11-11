@@ -93,7 +93,8 @@ where
         false
     }
 
-    /// Advance the iterator along a single dim, returning `false` if the dim wrapped back to `begin`.
+    /// Advance the iterator along a single dim, returning `false` if the dim wrapped back to
+    /// `begin`.
     #[inline(always)]
     fn advance_dim(&mut self, dim: usize) -> bool {
         // `counters[dim]` counts the current position too, so it is >= 1 here and cannot underflow.

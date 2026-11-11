@@ -189,6 +189,11 @@ where
     /// [`SubDtype`] for details and examples.
     ///
     /// If the field type is statically known, prefer [`dtype_sub_field()`](Self::dtype_sub_field).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the array dtype is not a struct dtype, has an inner shape or has no field with the
+    /// given name, or if the field dtype is zero-sized.
     #[track_caller]
     pub fn dtype_sub_field_dyn(self, sub_field: &str) -> Array<SubDtype<S, TypeDyn>> {
         SubDtype::new_array(self, sub_field).unwrap()

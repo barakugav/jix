@@ -47,7 +47,8 @@ where
         Ok(Self(crate::ops::elementwise::op1::Op1::new(array, kernel)?))
     }
 
-    /// Constructs an array with [`Real`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Real`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(array: Array<S>) -> crate::error::Result<Array<Self>> {
         Self::new(array.into_storage()).map(Array::from_storage)
     }
@@ -115,7 +116,8 @@ where
         Ok(Self(crate::ops::elementwise::op1::Op1::new(array, kernel)?))
     }
 
-    /// Constructs an array with [`Imaginary`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Imaginary`] storage. See the storage struct docs for semantics
+    /// and examples.
     pub fn new_array(array: Array<S>) -> crate::error::Result<Array<Self>> {
         Self::new(array.into_storage()).map(Array::from_storage)
     }
@@ -149,7 +151,8 @@ where
         Real::new_array(self).unwrap()
     }
 
-    /// Extracts the imaginary part of each complex element. See [`Imaginary`] for details and examples.
+    /// Extracts the imaginary part of each complex element. See [`Imaginary`] for details and
+    /// examples.
     #[track_caller]
     pub fn imag(self) -> Array<Imaginary<S, T>> {
         Imaginary::new_array(self).unwrap()

@@ -48,7 +48,7 @@ pub(crate) use sealed::ArrayStorageImpl;
 /// transformation propagates inward through the storage chain and only the minimum
 /// required data is read from the innermost backend.
 ///
-/// # Flexibility
+/// # Static dispatch
 ///
 /// Because `Array<S>` is monomorphized over `S` at compile time, chains of operations
 /// carry zero heap allocation or virtual dispatch overhead. The full static type of an

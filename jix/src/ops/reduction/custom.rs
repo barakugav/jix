@@ -78,7 +78,8 @@ impl<S: ArrayStorage, F> Reduce<S, F> {
         Ok(Self(ReductionOp::new(array, ReduceKernel(f), dims)?))
     }
 
-    /// Constructs an array with [`Reduce`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Reduce`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(array: Array<S>, dims: impl DimsArg, f: F) -> Result<Array<Reduce<S, F>>>
     where
         S: ArrayStorageTyped,
@@ -229,7 +230,8 @@ impl<S: ArrayStorage, B, F> Fold<S, B, F> {
         )?))
     }
 
-    /// Constructs an array with [`Fold`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Fold`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(
         array: Array<S>,
         dims: impl DimsArg,

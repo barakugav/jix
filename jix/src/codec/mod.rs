@@ -63,6 +63,8 @@ impl EncoderParams {
     ///
     /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the
     /// default.
+    ///
+    /// Fails with `InvalidArgument` if `level` does not fit in an `i8`.
     pub fn level(&mut self, level: i32) -> Result<&mut Self> {
         self.level = level.try_into().map_err(|_| {
             error!(
