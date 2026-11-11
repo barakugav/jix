@@ -27,11 +27,10 @@ use std::sync::OnceLock;
 
 /// Sizes of the caches visible to one thread, in bytes.
 ///
-/// The values are monotonic: `l1_data <= l2 <= l3`. If a level is absent
-/// from the hardware (e.g. no L3 on Apple Silicon M1/M2/M3) or detection
-/// fails for that level, its field equals the next level down rather than
-/// an arbitrary default. This way callers doing cache-blocked kernels can
-/// safely use `l3` as "the largest working set that fits in on-chip cache"
+/// The values are monotonic: `l1_data <= l2 <= l3`. A level that is absent
+/// from the hardware (e.g. no L3 on Apple Silicon M1/M2/M3) or not detected
+/// takes its [`DEFAULT`](Self::DEFAULT), raised to the next level down if
+/// that is larger. This way callers doing cache-blocked kernels can use `l3`
 /// without special-casing missing levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CacheSizes {
@@ -39,7 +38,7 @@ pub struct CacheSizes {
     pub l1_data: usize,
     /// L2 cache (unified on all mainstream CPUs).
     pub l2: usize,
-    /// L3 cache, or L2 size if there is no L3.
+    /// L3 cache.
     pub l3: usize,
 }
 

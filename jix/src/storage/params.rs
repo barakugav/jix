@@ -13,11 +13,8 @@ use crate::{
 
 const ELEMENT_COST_MAX: f32 = u64::MAX as f32; // 2^64
 
-/// Target byte range for a single read region.
-///
-/// Stores a `(min, max)` range in bytes.
-/// Used as a per-spec tuning hint that controls how much data a single read pass
-/// pulls through memory.
+/// Target byte range `(min, max)` for a single read region: a per-spec hint for how much data a
+/// read pass pulls through memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ReadSize {
     pub(crate) min: u64,
@@ -44,41 +41,33 @@ impl ReadSize {
 ///
 /// `ArrayParams` groups two independent sets of configuration:
 ///
-/// - **Codec** - the compression configuration (codec, level, filter pipeline) applied when
-///   encoding blocks for a new array, set via [`codec`](Self::codec), [`level`](Self::level), and
-///   [`filters`](Self::filters). These affect the compression ratio and CPU usage of the codec, but
-///   not the block layout.
-///
-/// - **Block layout** - the nd-block shape used to divide the array into blocks, each compressed
-///   independently, and other related hints that are propagated through lazy view storage
-///   operations. A good block layout is critical for performance, and should match the access
-///   pattern of your workload.
+/// - **Codec** - the compression configuration applied when encoding blocks for a new array, set
+///   via [`codec`](Self::codec), [`level`](Self::level) and [`filters`](Self::filters). It affects
+///   the compression ratio and CPU cost, not the block layout.
+/// - **Block layout** - the nd-block shape the array is divided into, each block compressed
+///   independently, plus related hints propagated through lazy views. It is critical for
+///   performance and should match the access pattern of your workload.
 ///
 /// # When are params applied?
 ///
-/// - When a new array is constructed, such as via [`Array::compact_ndarray`]: the data is split into
-///   blocks according to the block layout params, and each block is compressed using the encoder
-///   params before being written to storage.
-/// - When an array is accessed for read, such as via [`Array::to_ndarray`]: each compressed block
-///   is decompressed using the decoder params. Sometimes readers of an array might want to read
-///   smaller chunks of data, that is aligned to the block shape (or preferred read shape) to avoid
-///   decompressing more data than necessary.
-/// - When an array is copied, such as via [`Array::compact`] or [`Array::compact_with`]: a new compressed
-///   array is constructed, inheriting any unset params from the source array's storage spec. When
-///   the copied array is a compressed array (i.e. not a lazy view), the block shape and codec
-///   params are preserved identically by default. Arrays with lazy view storage
-///   (e.g. from `Add`, `Reshape`, etc.) may modify the params as best as it can, trying to preserve
-///   user-specified params where possible, but it is an approximate heuristic.
-///   Shape modifying operations (e.g. `Reshape`, `PermuteDims`, etc.) are especially likely to
-///   change the block layout params - consider passing explicit params to `compact_with` after these
-///   ops, or verifying the resulting block layout is reasonable for your access pattern.
+/// - When a new array is constructed, such as via [`Array::compact_ndarray`]: the data is split
+///   into blocks per the block layout, and each block is compressed with the encoder params.
+/// - When an array is read, such as via [`Array::to_ndarray`]: each block is decompressed with the
+///   decoder params. Readers may read smaller pieces aligned to the block shape (or preferred read
+///   shape) to avoid decompressing more data than necessary.
+/// - When an array is copied, such as via [`Array::compact`] or [`Array::compact_with`]: unset
+///   params are inherited from the source array's storage spec. A compact source (not a lazy view)
+///   keeps its block shape and codec params by default. A lazy view (e.g. from `Add`, `Reshape`)
+///   adjusts them by an approximate heuristic that tries to keep user-set params. Shape ops (e.g.
+///   `Reshape`, `PermuteDims`) are especially likely to change the block layout - consider passing
+///   explicit params to `compact_with` after them, or checking that the resulting block layout
+///   suits your access pattern.
 ///
 /// # Recommended usage
 ///
-/// Use `ArrayParams::new()` (equivalent to `ArrayParams::default()`) for most cases - the
-/// defaults select a block shape automatically according to the CPU cache sizes using Zstd level 3
-/// with byte shuffling. For latency-sensitive workloads where you know the access pattern, set `block_shape`
-/// explicitly and call `compact_with` instead of `compact` after shape-changing ops.
+/// Use `ArrayParams::new()` (equivalent to `ArrayParams::default()`) for most cases: the defaults
+/// select a block shape according to the CPU cache sizes and use Zstd level 3 with byte shuffling.
+/// For latency-sensitive workloads with a known access pattern, set `block_shape` explicitly.
 ///
 /// ```
 /// use jix::{Array, ArrayParams};
@@ -118,9 +107,8 @@ impl ArrayParams {
     /// larger than the array is clamped to the array's length in that dim. This overrides any
     /// auto-computed shape.
     ///
-    /// Setting the block shape also marks every dimension as fixed unless
-    /// [`block_shape_fixed_dims`](Self::block_shape_fixed_dims) is also used, meaning the shape will
-    /// be preserved as-is if this `ArrayParams` is later used as a propagation source.
+    /// Unless [`block_shape_fixed_dims`](Self::block_shape_fixed_dims) is also set, every dimension
+    /// is marked fixed, so the shape is preserved as-is when it is later propagated.
     ///
     /// Fails with `TooManyDimensions` if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries.
     pub fn block_shape(mut self, block_shape: &[BlockSize]) -> Result<Self> {
@@ -132,16 +120,13 @@ impl ArrayParams {
     /// Sets, per dimension, whether that dimension of [`block_shape`](Self::block_shape) is
     /// fixed.
     ///
-    /// A fixed dimension (`true`) keeps its exact block-shape length during any later
-    /// auto-scaling (e.g. when a downstream operation recomputes the block shape). A dimension that
-    /// is not fixed (`false`) may be freely resized to fit the target block size - it is used when
-    /// an operation makes the original block size irrelevant (e.g. a broadcast or reduced
-    /// dimension).
+    /// A fixed dimension (`true`) keeps its exact block length when the block shape is later
+    /// rescaled. A non-fixed one (`false`) may be resized to fit the target block size, e.g. after
+    /// an operation that makes its original length irrelevant (a broadcast or reduced dimension).
     ///
-    /// `fixed` must have one entry per dimension (the same length as `block_shape`). Requires
-    /// [`block_shape`](Self::block_shape) to also be set. When this is not set, the default depends
-    /// on the block shape: an explicitly-set [`block_shape`](Self::block_shape) is all-fixed
-    /// (preserved exactly), while an auto-computed block shape is all-non-fixed.
+    /// `fixed` must have one entry per dimension. A block shape is required: set with
+    /// [`block_shape`](Self::block_shape) or inherited from the source in [`Array::compact_with`].
+    /// When unset, an explicit block shape is all-fixed and an auto-computed one all-non-fixed.
     ///
     /// Fails with `TooManyDimensions` if given more than [`NDIM_MAX`](crate::NDIM_MAX) entries.
     pub fn block_shape_fixed_dims(mut self, fixed: &[bool]) -> Result<Self> {
@@ -152,37 +137,31 @@ impl ArrayParams {
 
     /// Sets the target block size in bytes, used when auto-computing the block shape.
     ///
-    /// When `block_shape` is not set, or when some dimensions are not fixed, the
-    /// auto-computation scales the block shape so that each block is approximately this many
-    /// bytes.
-    ///
-    /// When not provided, defaults to `block_shape.product() * itemsize` (the block size in
-    /// bytes), or a size chosen automatically according to the CPU cache sizes if no block shape
-    /// is given.
+    /// When `block_shape` is not set, or some of its dimensions are not fixed, the block shape is
+    /// scaled so that each block is approximately this many bytes. The default is then a size
+    /// chosen according to the CPU cache sizes; for a fully fixed block shape it is the shape's
+    /// size in bytes.
     #[must_use]
     pub fn block_size(mut self, size_hint: u64) -> Self {
         self.block_size = Some(size_hint);
         self
     }
 
-    /// Sets the target byte range for a single preferred read region as `(min, max)`.
+    /// Sets the target byte range `(min, max)` for a single read region.
     ///
     /// A read region is the rectangular slab the engine pulls and decompresses in one pass
     /// when materializing a lazy pipeline or a sub-region read. Its shape is derived by
-    /// scaling the storage block shape toward this byte budget. The two bounds steer that
-    /// scaling differently:
+    /// scaling the storage block shape toward this byte budget:
     ///
-    /// - `max` is the *scale-down ceiling*: an oversized read shape is shrunk only until it
-    ///   fits within `max`. Keeping `max` large lets reads stay big.
-    /// - `min` is the *scale-up floor*: an undersized read shape is grown only up to `min`.
-    ///   Reads already at or above `min` are left as the scale-down step produced them.
+    /// - `max` is the *scale-down ceiling*: an oversized read shape is shrunk until it fits
+    ///   within `max`.
+    /// - `min` is the *scale-up floor*: a read shape is then grown up to `min`, or up to
+    ///   `2 * max` along a dimension the data is duplicated along (e.g. a broadcast one).
     ///
-    /// The motivation is block-grid misalignment. When the source array's block shape differs
-    /// from the output's, a read that straddles source-block boundaries forces whole-block
-    /// decompression for a partial slice, and neighboring reads re-decompress the same block.
-    /// Larger read regions span more blocks per call and dilute that wasted work (no alignment
-    /// guarantee, but the waste shrinks as the region grows); the counter-pressure is cache
-    /// residency, which the `max` ceiling bounds.
+    /// When the source array's block grid differs from the output's, a read that straddles
+    /// source blocks decompresses whole blocks for a partial slice, and neighboring reads
+    /// decompress the same block again. Larger regions span more blocks per call and dilute that
+    /// waste; `max` bounds their cache footprint.
     ///
     /// When unset, the range is chosen automatically according to the CPU cache sizes.
     #[must_use]
@@ -289,35 +268,28 @@ impl ArrayParams {
         self.read_size.get_or_insert(spec.read_size());
     }
 
-    /// Compute and validate the block geometry for an array.
+    /// Resolve and validate the block geometry of `self` for an array of `shape` and `dtype`.
     ///
-    /// Both the storage block shape and the preferred read block shape are resolved here;
-    /// either can be supplied explicitly or left as `None` to be auto-computed from a
-    /// target byte size.
+    /// Fields left `None` are auto-computed:
     ///
-    /// # Arguments
-    ///
-    /// - `block_shape` - shape of one storage block in items per dimension.
-    ///   When `None`, a shape is chosen automatically so that each block is approximately
-    ///   `block_size` bytes.
-    /// - `block_shape_fixed_dims` - per-dimension bitmap of which block-shape dimensions are fixed
-    ///   (must not be scaled); requires `block_shape` to also be provided. When `None`, an explicit
-    ///   `block_shape` defaults to all-fixed (preserved exactly) and an auto-computed one to
-    ///   all-non-fixed. See [`DimBitmap`].
-    /// - `block_size` - target block size in bytes used when auto-computing or scaling
-    ///   the block shape. Defaults to a size chosen automatically according to the CPU cache
-    ///   sizes when the shape is not fully fixed.
-    /// - `read_size` - target size for the preferred read region in bytes.
-    ///   Defaults to a range chosen automatically according to the CPU cache sizes.
-    /// - `shape` - the array shape, used to clamp block dimensions that would exceed the array.
-    /// - `itemsize` - bytes per array element.
+    /// - `block_shape` - chosen so that each block is approximately `block_size` bytes. Block dims
+    ///   longer than the array are clamped to it in any case.
+    /// - `block_shape_fixed_dims` - requires `block_shape`. Defaults to all-fixed for an explicit
+    ///   `block_shape` and all-non-fixed for an auto-computed one. Non-fixed dims are rescaled
+    ///   toward `block_size`. See [`DimBitmap`].
+    /// - `block_size` - the L1 data cache size when the block shape is not fully fixed, else the
+    ///   block shape's size in bytes. Capped at `BLOCK_SIZE_BYTES_MAX`.
+    /// - `read_size` - a range derived from the L1 and L2 cache sizes.
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArgument` if:
-    /// - `block_shape_fixed_dims` is provided without `block_shape`
-    /// - the length of `block_shape_fixed_dims` does not match `ndim`
-    /// - `ndim` exceeds [`NDIM_MAX`](crate::NDIM_MAX)
+    /// - `TooManyDimensions` if `shape` has more than [`NDIM_MAX`](crate::NDIM_MAX) dims.
+    /// - `UnsupportedDtype` if `dtype` has itemsize 0.
+    /// - `InvalidArgument` if `block_shape_fixed_dims` is set without `block_shape`, if either
+    ///   does not have one entry per dim, if a block dim is 0, or if a block is larger than
+    ///   `BLOCK_SIZE_BYTES_MAX` bytes.
+    /// - `InvalidShapeOperation` if `shape` overflows, or `shape` padded to the block shape has too
+    ///   many items.
     pub(crate) fn tune(&mut self, shape: &[u64], dtype: &Dtype) -> Result<()> {
         let block_shape = self.block_shape.clone();
         let block_shape_fixed_dims = self.block_shape_fixed_dims;
@@ -561,12 +533,11 @@ pub struct ArraySpec<'a> {
 }
 /// Owned version of [`ArraySpec`].
 ///
-/// The struct holds two sets of parameters:
-/// - "shared" parameters: these are parameters that are rarely modified by view operations. They
-///   live behind an [`Arc`], so cloning an owned spec (see [`ArraySpec::to_owned`]) does not copy
-///   them.
-/// - "dynamic" parameters: these are parameters that are stored directly in the array struct. With
-///   the intention that these parameters are more likely to be modified by view operations.
+/// It holds two sets of parameters:
+/// - "shared" parameters, rarely modified by view operations. They live behind an [`Arc`], so
+///   cloning an owned spec (see [`ArraySpec::to_owned`]) does not copy them.
+/// - "dynamic" parameters, more likely to be modified by view operations, stored directly in the
+///   array struct.
 ///
 /// Views that only modify the dynamic parameters hold just an [`ArraySpecDynamic`], and borrow the
 /// shared parameters from their input with [`ArraySpec::with_dynamic_spec`].
@@ -607,7 +578,7 @@ pub(crate) struct ArraySpecDynamic {
     pub(crate) block_shape_fixed_dims: DimBitmap,
 
     /// Estimated cost of reading a single element from this array, ignoring any broadcasting or
-    /// duplication (see [`combine_elementwise_hints`] and the read-hint design).
+    /// duplication (see [`combine_elementwise_hints`]).
     pub(crate) element_cost: f32,
 
     /// Per-dimension coverage weight: the fraction of this array's per-element read cost that is
@@ -634,10 +605,9 @@ pub(crate) struct ArraySpecDynamic {
     /// dim first.
     ///
     /// It is [`read_shape_scale_weight`](Self::read_shape_scale_weight) sorted ascending, with
-    /// [`read_layout_order`](Self::read_layout_order) as the (stable) tie-break - so it runs in the
-    /// same direction as the layout order, and for an array with no duplication at all (every
-    /// weight [`NONE`](ScaleWeight::NONE)) the two are equal. Cached here so a read does not have
-    /// to sort.
+    /// [`read_layout_order`](Self::read_layout_order) as the (stable) tie-break, so for an array
+    /// with no duplication at all (every weight [`NONE`](ScaleWeight::NONE)) the two are equal.
+    /// Cached here so a read does not have to sort.
     pub(crate) read_shape_scale_order: DimArray<DimIdx>,
 
     /// The memory layout that is cheapest to read this array into: a permutation of `0..ndim`,
@@ -651,11 +621,11 @@ pub(crate) struct ArraySpecDynamic {
     /// changes which values a read produces, only the strides of a freshly allocated destination.
     pub(crate) read_layout_order: DimArray<DimIdx>,
 
-    /// The set of arrays IDs reachable more than once from this array, that are accessed with the
+    /// The set of array IDs reachable more than once from this array, that are accessed with the
     /// same index as this array, e.g. `x` in `x + x`.
     pub(crate) arrays_to_cache: Option<Arc<ArrayCacheIdSet>>,
 
-    /// The set of arrays IDs reachable from this array that are accessed with the
+    /// The set of array IDs reachable from this array that are accessed with the
     /// same index as this array, e.g. `x` and `y` in `x + y`.
     pub(crate) arrays_to_cache_potentially: Option<Arc<ArrayCacheIdSet>>,
 }
@@ -935,13 +905,12 @@ impl ArraySpecDynamic {
         }
     }
 
-    /// Create a cache scope for operations that use a modified index access to their inner storages.
+    /// Create a cache scope for a storage that reads its inner storages at other regions than the
+    /// one it is read at (shape ops other than broadcasts, reductions).
     ///
-    /// For a storage that reads its inner storages at other regions than the one it is read at
-    /// (shape ops other than broadcasts, reductions), after the cache ids of its inner storages were
-    /// merged into this spec with [`add_cache_ids_from`](Self::add_cache_ids_from):
-    /// reads outside of the storage do not read the same regions of the storages it reaches,
-    /// so their ids are cleared.
+    /// Call it after merging the inner cache ids into this spec with
+    /// [`add_cache_ids_from`](Self::add_cache_ids_from). Reads from outside the storage do not read
+    /// the same regions of the storages it reaches, so their ids are cleared from this spec.
     #[inline(never)]
     pub(crate) fn with_cache_scope(&mut self) -> CacheScope {
         self.arrays_to_cache_potentially = None;
