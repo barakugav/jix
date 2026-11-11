@@ -2,8 +2,7 @@
 Multi-dimensional array library with block-compressed storage and lazy-evaluated operations.
 
 The package provides Python bindings for the core `jix` library, which is implemented in Rust.
-`jix` is a multi-dimensional array library that stores data in **block-compressed format**
-and evaluates operations **lazily**. It is designed around two ideas:
+It is designed around two ideas:
 
 **Block-based compression.** An array is split into a grid of fixed-size nd-blocks, each compressed independently.
 Only the blocks that overlap a read request are decompressed, so random access into large arrays is relatively cheap.
@@ -77,16 +76,14 @@ can be used independently, and each fits a different scenario.
 
 # Array
 
-The central type. Wraps compressed array data together with any pending lazy operations.
-Every operation returns a new [`Array`][jix.Array]; no data is copied or computed until you ask for
-output.
+The central type. Wraps array data together with any pending lazy operations.
 
 **Creating an `Array`:**
 
 | Function | Description |
 |---|---|
 | `jix.compact(...)` | Compress any array-like (NumPy array, list, scalar) into a new jix array. This is the primary constructor. |
-| `jix.asarray(...)` | Wrap any array-like as a zero-copy jix view without compressing. Useful for mixing plain NumPy data with jix arrays in operations. |
+| `jix.asarray(...)` | Wrap any array-like as an uncompressed jix view, copying only when needed (e.g. from a list). Useful for mixing plain NumPy data with jix arrays in operations. |
 | `jix.read_array(...)` | Load a `.jix` file from disk. |
 
 **Reading data from an `Array`:**
@@ -107,8 +104,7 @@ a[..., -1]           # last column of any-rank array
 
 ## Block shape
 
-Every jix array stores its data in a grid of fixed-size nd-blocks, each compressed
-independently. The block shape has a large impact on both read performance and compression
+The block shape has a large impact on both read performance and compression
 ratio: only the blocks that overlap a read request are decompressed, so a block shape that
 matches your access pattern avoids wasteful work. For example, a `[1, ncols]` block shape
 means reading a single row decompresses exactly one block; a `[nrows, 1]` shape is
@@ -129,13 +125,9 @@ re-encode with a layout suited to the new shape.
 
 # Operations
 
-Every operation - arithmetic, comparisons, reductions, shape changes, type casts - returns
-a new `Array` **view** that wraps the input(s) and records the transformation. No data is read or
-computed at call time. The deferred work only runs when you ask for output (`.numpy()`, `[...]`,
-`.write_to()`, `jix.compact()`, etc.).
-
-Chains compose without intermediate allocations: the full pipeline is executed in a single
-pass over the compressed source data, block by block.
+Operations are lazy: the deferred work runs only when you ask for output (`.numpy()`, `[...]`,
+`.write_to()`, `jix.compact()`, etc.), in a single pass over the source data, block by block,
+without intermediate allocations.
 
 <!-- fmt:off -->
 ```python
@@ -177,8 +169,7 @@ object.
 
 A key property: **a lazy array can be written directly without fully materializing it in
 memory**. The write path compresses block by block, pulling data from the lazy chain on
-demand. For example, the result of a large matrix operation can be streamed straight to
-disk.
+demand.
 
 
 # Limits
