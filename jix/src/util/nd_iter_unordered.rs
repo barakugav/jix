@@ -23,13 +23,12 @@ use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimens
 ///   3. split into an outer walk (via [`NdIter`] with a stride-offset extension) over all-but-inner
 ///      dims plus a flat inner 1-d run.
 ///
-/// [`new`](Self::new) performs steps (1) and (2) and computes the innermost-run description; the
-/// caller inspects it via [`inner_len`](Self::inner_len), [`is_strides_aligned`](Self::is_strides_aligned) and
-/// [`is_contiguous`](Self::is_contiguous) - each operand's inner stride equals `size` / every stride
-/// is a multiple of `alignment` - to pick a specialized inner loop, then calls
-/// [`foreach_inner_1d`](Self::foreach_inner_1d) to drive that loop once per outer position as
-/// `inner_loop(offsets, inner_len, inner_strides)`, where `offsets`/`inner_strides` are
-/// `[_; N_OPERANDS]` indexed like the input `strides`/`layouts`.
+/// [`new`](Self::new) performs steps (1) and (2). The caller picks a specialized inner loop from
+/// [`inner_len`](Self::inner_len), [`is_contiguous`](Self::is_contiguous) (each operand's inner
+/// stride equals its `size`) and [`is_strides_aligned`](Self::is_strides_aligned) (every stride
+/// is a multiple of its `alignment`), then calls [`foreach_inner_1d`](Self::foreach_inner_1d),
+/// which runs `inner_loop(offsets, inner_len, inner_strides)` once per outer position, with
+/// `offsets` and `inner_strides` as `[_; N_OPERANDS]` indexed like the input `strides`.
 ///
 /// `I` is the integer type of the shape, the strides and the yielded offsets (`usize` or `u64`).
 pub(crate) struct NdIterUnordered<I: Idx, const N_OPERANDS: usize> {
@@ -58,9 +57,8 @@ impl<I: Idx, const N_OPERANDS: usize> NdIterUnordered<I, N_OPERANDS> {
 
     /// Like [`new`](Self::new), with control over which operands take part in the dim ordering.
     ///
-    /// An operand whose `affects_dim_order` entry is `false` is skipped by the sort.
-    /// This lets the caller add an extra bookkeeping operand along without letting it perturb
-    /// the memory-access order.
+    /// An operand whose `affects_dim_order` entry is `false` is skipped by the sort, so a
+    /// bookkeeping operand can ride along without perturbing the memory-access order.
     #[inline(never)]
     pub(crate) fn new_with(
         shape: &[I],
@@ -209,7 +207,7 @@ impl<I: Idx, const N_OPERANDS: usize> NdIterUnordered<I, N_OPERANDS> {
         array_from_fn_inline(|i| self.strides[i][inner])
     }
 
-    /// Drive `inner_loop` once per outer position, as `inner_loop(offsets, inner_len, inner_strides)`
+    /// Runs `inner_loop(offsets, inner_len, inner_strides)` once per outer position.
     #[inline]
     pub(crate) fn foreach_inner_1d(
         &self,
@@ -440,7 +438,7 @@ mod tests {
         }
     }
 
-    /// Assert the offsets visited by `nd_iter_unordered` are a permutation of the row-major
+    /// Assert the offsets visited by [`NdIterUnordered`] are a permutation of the row-major
     /// reference (same tuples, same multiplicities), then hand back the [`Run`] so callers can make
     /// additional assertions about the reported flags / run count.
     #[track_caller]

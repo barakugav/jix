@@ -6,11 +6,11 @@ use crate::{dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
 /// [`NdIterUnordered`](crate::NdIterUnordered) with the operand count known only at runtime.
 ///
-/// Same walk, same flags, same caller contract - see [`NdIterUnordered`](crate::NdIterUnordered) for
-/// all of it. Two differences: the per-operand tables are heap-allocated rather than inline, and
+/// Same walk, flags and caller contract, except that the per-operand tables are heap-allocated,
 /// [`foreach_inner_1d`](Self::foreach_inner_1d) lends the offsets and inner strides out as slices
-/// instead of yielding `[I; N_OPERANDS]`. In exchange any number of operands is allowed, and the
-/// sort and coalesce are compiled once for the whole crate rather than once per count.
+/// instead of `[I; N_OPERANDS]`, and there is no `new_with`: every operand takes part in the dim
+/// ordering. In exchange any number of operands is allowed, and the sort and coalesce are compiled
+/// once per `I` rather than once per operand count.
 ///
 /// `I` is the integer type of the shape, the strides and the yielded offsets (`usize` or `u64`).
 pub(crate) struct NdIterUnorderedDyn<I: Idx> {

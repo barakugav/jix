@@ -5,8 +5,7 @@ use crate::{default_logical_strides_slice, DimVec};
 
 /// An nd-iterator extension that tracks an offset into a strided array.
 ///
-/// On each dimension change the offset is adjusted by the difference in element counts:
-/// `offset += (after - before) * stride[dim]`.
+/// On each dim change, `offset += (after - before) * strides[dim]`.
 pub(crate) struct NdIterExtStridesOffset<D: Dimension, S> {
     strides: D::Vec<S>,
     offset: S,

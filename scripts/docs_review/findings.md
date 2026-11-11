@@ -124,3 +124,15 @@ Docs, not fixed:
 Needs the maintainer:
 
 - `jix/src/util/aligned_vec/mod.rs:187` `reserve`/`reserve_exact` say they panic if the new capacity exceeds `isize::MAX` bytes; the actual limit is `isize::MAX - (align - 1)` (`jix/src/util/aligned_vec/raw.rs:256`). Minor; left as is.
+
+## util-b
+
+Needs the maintainer:
+
+- `jix/src/util/test_util.rs:67` The `op_safe_positive_strategy` doc says "Overridden for the floats, which have no other use for it." Its meaning is unclear. The default delegates to `op_safe_non_negative_strategy`, so for non-float types it can yield zero, which is not positive.
+
+Docs, not fixed:
+
+- `jix/src/util/nd_copy.rs:453-454` and `:799` These plain comments name `create_scalar_fn` and a field-by-field `copy_struct` route. Neither exists: a 12/4 struct goes through `copy_untyped`.
+- `jix/src/util/nd_iter_unordered.rs:276-277`, `jix/src/util/nd_iter_unordered_dyn.rs:220-221` These plain comments repeat "and" across the line break.
+- `jix/src/util/nd_copy.rs:71` This plain comment names `nd_iter_unordered` instead of `NdIterUnordered`.

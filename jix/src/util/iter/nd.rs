@@ -8,9 +8,7 @@ use crate::{DimVec, Dimension};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
 ///
-/// Extensions are supported via the generic parameter `E`, see [`NdIterExtension`].
-/// The iterator notifies the extension on each index change, allowing extensions to track derived
-/// state (e.g. a pointer into a strided buffer) without recomputing it from scratch.
+/// The extension `E` (see [`NdIterExtension`]) is notified of each index change.
 #[derive(Clone)]
 pub(crate) struct NdIter<D: Dimension, E> {
     shape: D::Vec<u64>,
@@ -186,7 +184,7 @@ where
 /// [`on_decrease`](NdIterExtension::on_decrease) notifications and
 /// return the current derived value via [`value`](NdIterExtension::value).
 pub(crate) trait NdIterExtension {
-    /// The derived value produced at each iteration step, borrows from the extension.
+    /// The derived value produced at each iteration step; it may borrow from the extension.
     type Item<'a>
     where
         Self: 'a;
@@ -210,7 +208,8 @@ pub(crate) trait NdIterExtension {
     /// A merge is performed like appending to a list:
     /// - `()` is the identity of append: `() + E = E`
     /// - A concrete extension `X` behaves as a one-element list: `X + E = (X, E)`
-    /// - An `n`-tuple appends to become an `(n + 1)`-tuple: `(X1, X2, ..., Xn) + E = (X1, X2, ..., Xn, E)`
+    /// - An `n`-tuple with `n < 3` appends: `(X1, ..., Xn) + E = (X1, ..., Xn, E)`. A 3-tuple
+    ///   cannot be merged: its `MergeExtension` is `()` and `merge_extension` panics.
     type MergeExtension<E: NdIterExtension>: NdIterExtension;
 
     /// Merge `self` with another extension `other`, producing a new extension that tracks both.
@@ -393,7 +392,7 @@ pub(crate) use impl_merge_extension;
 /// A builder for [`NdIter`] that accumulates extensions one at a time.
 ///
 /// Start from [`NdIter::builder`] (or [`NdIter::builder_with_begin`]) with an empty extension list
-/// (`E = ()`), chain any number of `with_*_ext` calls - each appends one extension and advances the
+/// (`E = ()`), chain up to three `with_*_ext` calls - each appends one extension and advances the
 /// `E` type via [`NdIterExtension::MergeExtension`] - then call [`build`](NdIterBuilder::build).
 pub(crate) struct NdIterBuilder<D: Dimension, E: NdIterExtension> {
     begin: D::Vec<u64>,
