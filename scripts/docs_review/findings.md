@@ -234,3 +234,15 @@ Docs, not fixed:
 
 - `jix/src/storage/params.rs:187` doc lines over 100 columns (also `params.rs:564,565,568,1020`), and `jix/src/codec/mod.rs:68`, `jix/src/array/compact.rs:63`.
 - `jix/src/storage/params.rs:233` `inherit_unset_from_array` is `pub(crate)` and `#[allow(unused)]` but carries an `ignore` example written as public API usage; it never runs.
+
+## array
+
+Needs the maintainer:
+
+- `jix/src/array/mod.rs:243` `read_ctx` panics ("failed to create read context") if `ReadContext::new` fails, and has no `# Panics` section.
+- `jix/src/array/construct.rs:37` the `compact_ndarray` example duplicates the first half of the second `Array` example (`jix/src/array/mod.rs:85-103`); consider dropping one.
+
+Docs, not fixed:
+
+- `jix/src/array/mod.rs:51` doc line is 111 columns, over the 100-column limit.
+- `jix/src/array/read.rs:250,322` `to_buf_slice` and `to_buf_strided` Errors omit `InvalidShapeOperation`, raised by `check_region_size` on 32-bit targets when the region does not fit in memory (`jix/src/error.rs:286-300`).
