@@ -14,12 +14,8 @@ use crate::ops::prelude::*;
 /// [`Array::transmute_elements()`](crate::Array::transmute_elements) and
 /// [`Array::transmute_elements_dyn()`](crate::Array::transmute_elements_dyn).
 ///
-/// # Safety
-///
-/// Constructing a `Transmute` is `unsafe`: the stored bytes are later read back as the new dtype,
-/// so every element must be a valid bit pattern for it. This holds for any integer or float type
-/// (all bit patterns are valid), but not for types with restricted representations such as
-/// `bool`.
+/// Reinterpreting is safe, as every bit pattern is a valid value of every dtype (see
+/// [`Dtyped`](crate::dtype::Dtyped)).
 ///
 /// # Examples
 /// ```
@@ -28,7 +24,7 @@ use crate::ops::prelude::*;
 ///
 /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, -0.5])?;
 /// // View the f32 bits as u32 (both 4-byte elements) - no conversion.
-/// let bits = unsafe { a.transmute_elements::<u32>() };
+/// let bits = a.transmute_elements::<u32>();
 /// assert_eq!(
 ///     bits.to_ndarray()?,
 ///     array![1.0f32.to_bits(), 2.0f32.to_bits(), (-0.5f32).to_bits()]
@@ -47,11 +43,7 @@ where
     /// Constructs a [`Transmute`] storage. See the struct docs for semantics and examples.
     ///
     /// Errors if `new_type`'s itemsize differs from `array`'s dtype itemsize.
-    ///
-    /// # Safety
-    ///
-    /// Every element of `array` must be a valid bit pattern for `new_type` (see [`Transmute`]).
-    pub unsafe fn new(array: S, new_type: ET) -> Result<Self> {
+    pub fn new(array: S, new_type: ET) -> Result<Self> {
         let src_dtype = array.dtype();
         let dst_dtype = new_type.dtype();
         ensure!(
@@ -67,12 +59,8 @@ where
 
     /// Constructs an array with [`Transmute`] storage. See the storage struct docs for
     /// semantics and examples.
-    ///
-    /// # Safety
-    ///
-    /// Every element of `array` must be a valid bit pattern for `new_type` (see [`Transmute`]).
-    pub unsafe fn new_array(array: Array<S>, new_type: ET) -> Result<Array<Self>> {
-        unsafe { Self::new(array.into_storage(), new_type).map(Array::from_storage) }
+    pub fn new_array(array: Array<S>, new_type: ET) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), new_type).map(Array::from_storage)
     }
 }
 impl<S, ET> crate::storage::ArrayStorageImpl for Transmute<S, ET> {}
@@ -126,36 +114,28 @@ where
     /// Reinterprets each element as the type `T` without converting the bytes. See [`Transmute`]
     /// for details and examples.
     ///
-    /// # Safety
-    ///
-    /// Every element must be a valid bit pattern for `T` (see [`Transmute`]).
-    ///
     /// # Panics
     ///
     /// Panics if the itemsize of `T` differs from the array's dtype itemsize. Use
     /// [`Transmute::new_array`] for a fallible version.
     #[track_caller]
-    pub unsafe fn transmute_elements<T>(self) -> Array<Transmute<S, Ty<T>>>
+    pub fn transmute_elements<T>(self) -> Array<Transmute<S, Ty<T>>>
     where
         T: Dtyped,
     {
-        unsafe { Transmute::new_array(self, Ty::new()).unwrap() }
+        Transmute::new_array(self, Ty::new()).unwrap()
     }
 
     /// Reinterprets each element as the runtime dtype `dtype` without converting the bytes;
     /// recover a typed array with [`into_typed`](Array::into_typed). See [`Transmute`] for details.
-    ///
-    /// # Safety
-    ///
-    /// Every element must be a valid bit pattern for `dtype` (see [`Transmute`]).
     ///
     /// # Panics
     ///
     /// Panics if the itemsize of `dtype` differs from the array's dtype itemsize. Use
     /// [`Transmute::new_array`] for a fallible version.
     #[track_caller]
-    pub unsafe fn transmute_elements_dyn(self, dtype: Dtype) -> Array<Transmute<S, TypeDyn>> {
-        unsafe { Transmute::new_array(self, TypeDyn::new(dtype)).unwrap() }
+    pub fn transmute_elements_dyn(self, dtype: Dtype) -> Array<Transmute<S, TypeDyn>> {
+        Transmute::new_array(self, TypeDyn::new(dtype)).unwrap()
     }
 }
 
@@ -191,7 +171,7 @@ mod tests {
     fn new_rejects_a_different_itemsize() {
         let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
         // u32 is 4 bytes, u16 is 2.
-        assert!(unsafe { Transmute::new(arr.into_storage(), Ty::<u16>::new()) }.is_err());
+        assert!(Transmute::new(arr.into_storage(), Ty::<u16>::new()).is_err());
     }
 
     /// Equal itemsize is the only requirement - the kinds may differ freely, and so may the
@@ -199,9 +179,9 @@ mod tests {
     #[test]
     fn new_accepts_any_dtype_of_the_same_itemsize() {
         let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
-        assert!(unsafe { Transmute::new(arr.view().into_storage(), Ty::<i32>::new()) }.is_ok());
-        assert!(unsafe { Transmute::new(arr.view().into_storage(), Ty::<f32>::new()) }.is_ok());
-        assert!(unsafe { Transmute::new(arr.view().into_storage(), Ty::<[u8; 4]>::new()) }.is_ok());
+        assert!(Transmute::new(arr.view().into_storage(), Ty::<i32>::new()).is_ok());
+        assert!(Transmute::new(arr.view().into_storage(), Ty::<f32>::new()).is_ok());
+        assert!(Transmute::new(arr.view().into_storage(), Ty::<[u8; 4]>::new()).is_ok());
     }
 
     // -----------------------------------------------------------------------
@@ -214,7 +194,7 @@ mod tests {
     fn float_elements_read_back_as_their_bit_patterns() {
         let src = ndarray::array![1.0f32, -2.0, 0.5, f32::INFINITY, f32::NAN];
         let arr = Array::compact_ndarray(&src).unwrap();
-        let bits = unsafe { arr.transmute_elements::<u32>() };
+        let bits = arr.transmute_elements::<u32>();
 
         let expected = src.mapv(f32::to_bits);
         assert_array_matches(&bits, &expected);
@@ -225,7 +205,7 @@ mod tests {
     fn negative_integers_keep_their_two_s_complement_bits() {
         let src = ndarray::array![-1i32, i32::MIN, 0, 7];
         let arr = Array::compact_ndarray(&src).unwrap();
-        let bits = unsafe { arr.transmute_elements::<u32>() };
+        let bits = arr.transmute_elements::<u32>();
 
         assert_array_matches(&bits, &ndarray::array![u32::MAX, 1 << 31, 0, 7]);
     }
@@ -236,7 +216,7 @@ mod tests {
     fn struct_elements_view_as_their_layout_bytes() {
         let src = ndarray::array![Pair { x: 1, y: 2 }, Pair { x: -1, y: 256 }];
         let arr = Array::compact_ndarray(&src).unwrap();
-        let bytes = unsafe { arr.transmute_elements::<[u8; 8]>() };
+        let bytes = arr.transmute_elements::<[u8; 8]>();
 
         assert_array_matches(
             &bytes,
@@ -253,10 +233,9 @@ mod tests {
     fn transmuting_back_restores_the_original_values() {
         let src = ndarray::array![[1.5f64, -0.25], [1e300, 0.0]];
         let arr = Array::compact_ndarray(&src).unwrap();
-        let there_and_back = unsafe {
-            arr.transmute_elements::<[u8; 8]>()
-                .transmute_elements::<f64>()
-        };
+        let there_and_back = arr
+            .transmute_elements::<[u8; 8]>()
+            .transmute_elements::<f64>();
 
         assert_array_matches(&there_and_back, &src);
     }
@@ -269,7 +248,7 @@ mod tests {
     #[test]
     fn shape_is_untouched_and_dtype_is_the_new_one() {
         let arr = Array::compact_ndarray(&ndarray::Array3::<f32>::zeros((2, 3, 4))).unwrap();
-        let t = unsafe { arr.transmute_elements::<u32>() };
+        let t = arr.transmute_elements::<u32>();
 
         assert_eq!(t.shape(), &[2, 3, 4]);
         assert_eq!(t.ndim(), 3);
@@ -282,7 +261,7 @@ mod tests {
     #[test]
     fn dyn_variant_sets_the_runtime_dtype() {
         let arr = Array::compact_ndarray(&ndarray::array![1i32, 2, 3]).unwrap();
-        let t = unsafe { arr.transmute_elements_dyn(u32::DTYPE) };
+        let t = arr.transmute_elements_dyn(u32::DTYPE);
         assert_eq!(t.dtype(), &u32::DTYPE);
 
         // Recovering it as the wrong type is refused, as the right one succeeds.
@@ -304,7 +283,7 @@ mod tests {
     fn pull_read_lends_the_inner_bytes() {
         let src = ndarray::array![1.0f32, 2.0, 3.0];
         let arr = Array::plain_ndarray_ref(&src).unwrap();
-        let t = unsafe { arr.transmute_elements::<u32>() };
+        let t = arr.transmute_elements::<u32>();
         let ctx = ReadContext::default();
 
         let view = t.storage().read_data(&[0..3], &ctx, None).unwrap();
@@ -319,7 +298,7 @@ mod tests {
     fn push_read_honors_the_destination_strides() {
         let arr =
             Array::compact_ndarray(&ndarray::array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]]).unwrap();
-        let t = unsafe { arr.transmute_elements::<u32>() };
+        let t = arr.transmute_elements::<u32>();
         let ctx = t.read_ctx();
 
         // 4 bytes down a column, 8 bytes across a row, plus one slot of slack to catch a write
@@ -354,7 +333,7 @@ mod tests {
     fn sub_region_reads_map_one_to_one() {
         let src = ndarray::Array2::from_shape_fn((4, 5), |(r, c)| (r * 5 + c) as i32);
         let arr = Array::compact_ndarray(&src).unwrap();
-        let t = unsafe { arr.transmute_elements::<u32>() };
+        let t = arr.transmute_elements::<u32>();
         let ctx = t.read_ctx();
 
         let window = t.to_ndarray_sub(&[1..3, 2..5], &ctx).unwrap();
@@ -375,7 +354,7 @@ mod tests {
     fn composes_with_element_wise_ops() {
         let src = ndarray::array![1.0f32, -1.0, 2.0, -2.0];
         let arr = Array::compact_ndarray(&src).unwrap();
-        let sign_bits = unsafe { arr.transmute_elements::<u32>() }.map(|bits| bits >> 31);
+        let sign_bits = arr.transmute_elements::<u32>().map(|bits| bits >> 31);
 
         assert_array_matches(&sign_bits, &ndarray::array![0u32, 1, 0, 1]);
     }
@@ -387,7 +366,7 @@ mod tests {
         let src = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
         let arr = Array::compact_ndarray(&src).unwrap();
         let column = arr.slice((.., 1..2));
-        let bits = unsafe { column.transmute_elements::<u32>() };
+        let bits = column.transmute_elements::<u32>();
 
         assert_array_matches(&bits, &ndarray::array![[2u32], [5]]);
     }
@@ -397,7 +376,7 @@ mod tests {
     #[allow(clippy::single_range_in_vec_init)]
     fn empty_reads_are_fine() {
         let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
-        let t = unsafe { arr.transmute_elements::<f32>() };
+        let t = arr.transmute_elements::<f32>();
         let ctx = t.read_ctx();
 
         assert_eq!(t.to_ndarray_sub::<Ix1>(&[1..1], &ctx).unwrap().len(), 0);

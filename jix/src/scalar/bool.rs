@@ -110,18 +110,18 @@ mod tests {
     fn any_non_zero_byte_is_true() {
         // Bytes other than 0 and 1, as may be read from a file or a NumPy buffer.
         let bytes = Array::compact_ndarray(&array![0u8, 1, 2, 255]).unwrap();
-        let a = unsafe { bytes.transmute_elements::<bool8>() };
+        let a = bytes.transmute_elements::<bool8>();
         assert_eq!(
             a.to_ndarray::<Ix1>().unwrap(),
             array![bool8::FALSE, bool8::TRUE, bool8::TRUE, bool8::TRUE]
         );
 
-        let not = unsafe { (!a.view()).transmute_elements::<u8>() };
+        let not = (!a.view()).transmute_elements::<u8>();
         assert_eq!(not.to_ndarray::<Ix1>().unwrap(), array![1, 0, 0, 0]);
         let trues =
             Array::compact_ndarray(&array![bool8::TRUE, bool8::TRUE, bool8::TRUE, bool8::TRUE])
                 .unwrap();
-        let eq = unsafe { a.view().equal(trues).transmute_elements::<u8>() };
+        let eq = a.view().equal(trues).transmute_elements::<u8>();
         assert_eq!(eq.to_ndarray::<Ix1>().unwrap(), array![0, 1, 1, 1]);
         assert_eq!(
             a.view().cast::<u8>().to_ndarray::<Ix1>().unwrap(),
