@@ -99,6 +99,14 @@ can be used independently, and each fits a different scenario.
     are dtype aware, so you may want to test the compression ratio and speed for your specific
     data.
 
+## Benchmarks
+
+[![Reading a random region](scripts/bench/report/plots/read.png)](scripts/bench/report/report.md)
+
+jix against NumPy, Blosc2 and Zarr in Python and `ndarray` in Rust, on reads, compression,
+elementwise operations, reductions and lazy chains - including the cases where jix comes out
+behind. See the [benchmark report](scripts/bench/report/report.md).
+
 ## Thanks
 
 This project would not exist without the work of several upstream

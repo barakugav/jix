@@ -20,3 +20,4 @@
 - f64 -> f16 cast round twice
 - every op copies the cache-ids of everything below it, so a deep chain of n ops holds n^2/2 ids
 - provide ops on dyn arrays in core, not just in jix-py
+- make Python Array support un/pickle

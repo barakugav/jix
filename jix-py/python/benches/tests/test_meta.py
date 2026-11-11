@@ -5,6 +5,7 @@ from benches import meta
 
 def _patch_env(monkeypatch):
     monkeypatch.setattr(meta, "_cpu_model", lambda: "Test CPU")
+    monkeypatch.setattr(meta, "_os_version", lambda: "Test OS 1.0")
     monkeypatch.setattr(meta, "_cpu_cores", lambda: 4)
     monkeypatch.setattr(meta, "_ram_bytes", lambda: 8 * 1024**3)
     monkeypatch.setattr(meta, "_rustc", lambda: "rustc 1.89.0")
@@ -17,6 +18,7 @@ def test_collect(monkeypatch):
     assert m["sha"] == "abcdef123456"
     assert m["ref"] == "main"
     assert m["platform"]["cpu_model"] == "Test CPU"
+    assert m["platform"]["os_version"] == "Test OS 1.0"
     assert set(m["libs"]) == {"numpy", "blosc2", "zarr", "jix"}
     # workflow-run identifiers are dropped (available via gh instead)
     assert "workflow_run_id" not in m

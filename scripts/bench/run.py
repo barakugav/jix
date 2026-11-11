@@ -20,15 +20,29 @@ def run_suite(
     py_args: list[str],
     dst: Path,
     env: dict[str, str] | None = None,
+    report_only: bool = True,
 ):
     """Run the selected suites in `repo` with interpreter `python`, staging raw output under dst."""
     if dst.exists():
         shutil.rmtree(dst)  # a rerun must start clean (shutil.copytree below refuses an existing dir)
     dst.mkdir(parents=True)
     if suites in ("both", "rust"):
+        # Criterion keeps results from previous runs, and the cached `target` dir on CI can carry
+        # them across commits. A benchmark that failed to run would otherwise be reported with
+        # whatever it measured last time.
+        shutil.rmtree(repo / "jix" / "target" / "criterion", ignore_errors=True)
         (dst / "rust").mkdir(parents=True, exist_ok=True)
         subprocess.check_call(
-            [python, "jix/benches/run.py", "--out", str(dst / "rust" / "plots"), *fast, "--", *rust_args],
+            [
+                python,
+                "jix/benches/run.py",
+                "--out",
+                str(dst / "rust" / "plots"),
+                *(["--report"] if report_only else []),
+                *fast,
+                "--",
+                *rust_args,
+            ],
             cwd=repo,
             env=env,
         )
@@ -48,6 +62,11 @@ def main():
     parser.add_argument("--py-args", default="", help="extra args forwarded after `--` to run_all.py")
     parser.add_argument("--gitsha", default="", help="bench this sha in an isolated worktree (default: HEAD in place)")
     parser.add_argument("--fast", action="store_true", help="quick, low-fidelity run")
+    parser.add_argument(
+        "--all-rust-benches",
+        action="store_true",
+        help="run the whole Criterion suite, not just the vs_ndarray target the report uses",
+    )
     args = parser.parse_args()
 
     suites = args.suites
@@ -61,7 +80,7 @@ def main():
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
         ref = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=REPO, text=True).strip()
         dst = RESULTS / sha[:8]
-        run_suite(REPO, sys.executable, suites, fast, rust_args, py_args, dst)
+        run_suite(REPO, sys.executable, suites, fast, rust_args, py_args, dst, report_only=not args.all_rust_benches)
         subprocess.check_call(
             [
                 sys.executable,
@@ -72,6 +91,7 @@ def main():
                 sha,
                 "--ref",
                 ref,
+                *fast,
             ],
             cwd=REPO,
         )
@@ -101,7 +121,17 @@ def main():
             env=env,
         )
         subprocess.check_call(["maturin", "develop", "--release", "--uv"], cwd=worktree / "jix-py", env=env)
-        run_suite(worktree, str(venv / "bin" / "python"), suites, fast, rust_args, py_args, dst, env=env)
+        run_suite(
+            worktree,
+            str(venv / "bin" / "python"),
+            suites,
+            fast,
+            rust_args,
+            py_args,
+            dst,
+            env=env,
+            report_only=not args.all_rust_benches,
+        )
         subprocess.check_call(
             [
                 str(venv / "bin" / "python"),
@@ -112,6 +142,7 @@ def main():
                 sha,
                 "--ref",
                 gitsha,
+                *fast,
             ],
             cwd=worktree,
             env=env,
