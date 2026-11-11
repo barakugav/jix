@@ -93,3 +93,9 @@ Needs the maintainer:
 Needs the maintainer:
 
 - `jix/src/ops/elementwise/map.rs:43`, `map.rs:110`, `jix/src/ops/elementwise/pipeline.rs:23` hand-written doc lines run past 100 columns, as do the matching macro-generated docs in `op1.rs` and `op2.rs`; left as is, since a rewrap fixes no fact and the macro text is out of scope.
+
+## ops-reduction-engine
+
+Docs, not fixed:
+
+- `jix/src/ops/reduction/common.rs:2051` the `//` comments of the `sum_multi_bulk_multi_tile_2d_reduce_outer` / `_reduce_inner` / `_3d_reduce_middle` tests describe the old layout ("bulks split the reduced dim ...; tiles split the non-reduced dim"). The current engine does the reverse: a bulk holds the full reduced extent (`common.rs:450-473`).

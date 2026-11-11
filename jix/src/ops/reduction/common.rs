@@ -28,8 +28,8 @@ pub(crate) trait ReductionOpKernel<T> {
     /// `false` may unwrap `init_item` - the caller guarantees it is `Some` for those kernels.
     ///
     /// The bundled index is not always `0`: a lane accumulator is seeded from an interior
-    /// item, and a cell can be re-seeded partway through the stream when the reduced dim
-    /// spans several bulks. It is `Some` exactly for the kernels that
+    /// item, and a cell is re-seeded partway through its stream when the stream spans several
+    /// tiles or inner runs. It is `Some` exactly for the kernels that
     /// [`NEEDS_INDICES`](Self::NEEDS_INDICES) (argmax/argmin), which record it.
     fn init_state(&self, init_item: Option<(T, Option<u64>)>) -> Self::State;
 
@@ -74,44 +74,38 @@ pub(crate) trait ReductionOpKernel<T> {
     ///
     /// MUST be associative and commutative with respect to the folded result (up to float
     /// accuracy): it collapses the interleaved lane accumulators of a single cell, and continues
-    /// a cell's accumulator across the bulks of a large reduced dim. The two subsets never
-    /// overlap and together cover the folded elements exactly once.
+    /// a cell's accumulator across the tiles of a large reduced extent.
     fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State;
 
-    /// Produce the final result. `nitems` is the total number of stream elements that
-    /// were folded into `state`, so `nitems == 0` exactly when the reduction was empty.
+    /// Produce the final result from `state`, folded from `nitems` stream elements (`0` exactly
+    /// when the reduction is empty).
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output;
 
     /// Whether the kernel can produce a result for an empty stream - see
     /// [`init_state`](Self::init_state), which receives `None` exactly then.
     const SUPPORTS_EMPTY: bool;
 
-    /// Whether [`finalize_state`](Self::finalize_state) does any actual work.
-    ///
-    /// `false` lets the caller skip the whole finalization pass and treat the state bytes as the
-    /// output bytes.
+    /// Whether [`finalize_state`](Self::finalize_state) does any actual work. `false` lets the
+    /// caller skip the finalization pass and use the state bytes as the output bytes.
     ///
     /// # Safety
     ///
-    /// Setting this to `false` is an unsafe promise. `false` asserts that
-    /// `finalize_state(state, nitems)` is the identity for every `state` and `nitems`:
-    /// [`Output`](Self::Output) must have the same layout as [`State`](Self::State), and the
-    /// returned value must be bit-identical to `state`. The caller relies on this to reinterpret
-    /// one buffer as the other without touching it.
+    /// `false` is an unsafe promise that `finalize_state(state, nitems)` is the identity for
+    /// every `state` and `nitems`: [`Output`](Self::Output) must have the same layout as
+    /// [`State`](Self::State), and the returned value must be bit-identical to `state`.
     const NEEDS_FINALIZE: bool = true;
 
     /// Whether a balanced merge tree is worth building for this kernel.
     ///
-    /// `true` asks the fold to split a long run in half recursively, so that
-    /// [`merge_states`](Self::merge_states) combines partials of similar size and the result is
-    /// reached through a `log(n)`-deep tree rather than one linear chain. That is what floating
-    /// point accumulation wants. `false` says the kernel's result does not depend on how the
-    /// stream is grouped - exact integer or comparison folds - so the whole run is folded in one
-    /// pass and the tree is skipped entirely.
+    /// `true` splits a long run in half recursively, so that
+    /// [`merge_states`](Self::merge_states) combines partials of similar size through a
+    /// `log(n)`-deep tree rather than one linear chain, as float accumulation wants. `false`, for
+    /// kernels whose result does not depend on grouping (exact integer or comparison folds),
+    /// folds the whole run in one pass.
     const PREFER_TREE_MERGE: bool;
 
-    /// The lane accumulators of the one-cell fold over contiguous items, if fixed: by default
-    /// they are sized by the SIMD level's vectors.
+    /// The number of lane accumulators of the one-cell fold over contiguous items, or `None` to
+    /// size them by the SIMD level's vectors.
     const ONE_CELL_LANES: Option<usize> = None;
 
     /// Whether the kernel reads the items' stream positions: the indices passed to it are `Some`
@@ -1299,17 +1293,17 @@ where
     }
 }
 
-/// Emits the wrapper storage struct (`$Op<S>`), its `ArrayStorage` impl,
-/// and the kernel struct declaration (`pub(crate) struct $Kernel;` - with fields if
-/// `extra_args` were declared). The `ReductionOpKernel` impl for the kernel is still
-/// written by hand next to the macro invocation.
+/// Emits the wrapper storage struct `$Op<S>` with its `new` / `new_array` constructors and
+/// `ArrayStorage` impl, and the private kernel struct `$Kernel` (with the `extra_arg` fields,
+/// if any). The `ReductionOpKernel` impl for the kernel is written by hand next to the macro
+/// invocation.
 ///
 /// Invocation shape:
 /// ```ignore
 /// define_reduction_op!(
 ///     /// docs...
 ///     Op, Kernel { extra_arg: Type, ... },           // `{ ... }` is optional
-///     where { S: ArrayStorageTyped, S::Item: ... },  // full where-clause, must end with `,`
+///     where { S: ArrayStorageTyped, S::Item: ... }   // full where-clause, no `,` after `}`
 ///     output = <S::Item as Trait>::Output,
 ///     single_dim,                                 // optional; omit for multi-dim
 /// );
@@ -1418,7 +1412,7 @@ macro_rules! define_reduction_op {
 
 /// Emits an `Array::$method(...)` helper that forwards to `$Op::new_array(...)`. The full
 /// where-clause on `S` (and its `Item`) is supplied verbatim by the caller so each op can
-/// pick its own bound (`ArgMax`, `Maximum`, `Sum`, `Item = bool`, ...).
+/// pick its own bound (`ArgMax`, `Maximum`, `Sum`, `Item = bool8`, ...).
 macro_rules! define_array_reduction_method {
     // single-dim variant
     (
@@ -1928,8 +1922,7 @@ pub(crate) mod tests {
     /// equals one block and the read-shape heuristic snaps the tile to it - never subdividing
     /// the non-reduced dim. Handing `read_data` the whole non-reduced extent at once makes it
     /// split that dim into several tiles per bulk. Correctness is exact: the i64 sum of small
-    /// signed values can't reassociate or overflow. During development, path coverage is
-    /// confirmed with the temporary debug print in `ReductionOp::read_data`.
+    /// signed values can't reassociate or overflow.
     fn check_sum_divided(
         shape: &[usize],
         block_shape: &[u32],

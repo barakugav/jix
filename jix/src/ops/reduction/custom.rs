@@ -23,13 +23,11 @@ use crate::ops::reduction::common::{ReductionOp, ReductionOpKernel};
 /// is an implementation detail that shifts with the array shape, the block shape, the read
 /// window size, and the library version.
 ///
-/// So `f` must be associative *and* commutative for the result to be well-defined - `min`,
-/// `max`, `+`, `*`, `&`, `|`, `^`, `gcd` all qualify. A non-commutative closure such as
+/// `min`, `max`, `+`, `*`, `&`, `|`, `^`, `gcd` all qualify. A non-commutative closure such as
 /// `|a, b| a - b` compiles and runs but yields an arbitrary value.
 ///
-/// Float `+` / `*` are only associative up to rounding. That is fine and expected: the
-/// built-in [`Sum`](crate::ops::Sum) / [`Product`](crate::ops::Product) reductions
-/// reassociate exactly the same way.
+/// Float `+` / `*` are only associative up to rounding. That is fine: the built-in
+/// [`Sum`](crate::ops::Sum) / [`Product`](crate::ops::Product) reductions reassociate too.
 ///
 /// # Empty reductions
 ///
