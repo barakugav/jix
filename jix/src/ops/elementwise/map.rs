@@ -164,8 +164,7 @@ where
 /// `F: Fn(ArraysT::ItemSequence<'_>) -> O`. This generalizes [`Map`] (one input) and [`Map2`] (two
 /// inputs) to an arbitrary number of arrays.
 ///
-/// The shape of the value handed to `map_fn` depends on the [`ArraySequence`](crate::util::ArraySequence)
-/// type:
+/// The type of the value passed to `map_fn` depends on the [`ArraySequence`] type:
 ///
 /// | Sequence type | `ItemSequence` passed to `map_fn` |
 /// |---------------|-----------------------------------|
@@ -411,7 +410,8 @@ where
 ///
 /// # Panics
 ///
-/// Panics if there are no input arrays or they do not all have the same shape.
+/// Panics if there are no input arrays, their shapes differ, `O` is zero-sized, or the output
+/// size in bytes overflows.
 #[track_caller]
 pub fn map_multiple<ArraysT, O, F>(arrays: ArraysT, map_fn: F) -> Array<MapMultiple<ArraysT, F>>
 where

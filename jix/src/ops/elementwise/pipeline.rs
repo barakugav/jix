@@ -21,7 +21,7 @@ use crate::{
 /// A lazy pipeline of element-wise operations over a rectangular region.
 ///
 /// Returned by [`ArrayStorage::read_as_elementwise_pipeline`](crate::ArrayStorage::read_as_elementwise_pipeline).
-/// Used internally, rarely should be touched by a user.
+/// Used internally; users rarely need it.
 #[allow(private_bounds)]
 pub trait ElementwisePipeline<T>: ElementwisePipelineImpl<T> {}
 
@@ -45,15 +45,15 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// `CONTIGUOUS` promises `inner_stride == dtype.itemsize()` for every operand the pipeline
     /// reads, letting the step fold into a compile-time constant.
     ///
-    /// A kernel that hits an [`ArithmeticErrorKind`](crate::error::ArithmeticErrorKind) writes its fallback value for
-    /// the element and ORs the error's flag into `status`; it never panics or returns early. Nodes
-    /// pass `status` down to their children as is.
+    /// A kernel that hits an [`ArithmeticErrorKind`](crate::error::ArithmeticErrorKind) returns a
+    /// fallback value for the element and ORs the error's flag into `status`; it never panics or
+    /// returns early. Nodes pass `status` down to their children as is.
     ///
     /// # Safety
     ///
     /// Every operand's `current_ptr` must be aligned for its dtype when [`REQUIRE_ALIGNED`] is
-    /// set, and elements `offset..offset + N` at `inner_stride` must be in bounds of its
-    /// `original_data`.
+    /// set, and elements `offset..offset + N` at `inner_stride` must be in bounds of the buffer
+    /// it points into.
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool, S: Simd>(
         &self,
         offset: usize,
@@ -502,7 +502,7 @@ fn compute_need_staging(
     }
 }
 
-/// A temporary buffer used to stage a chunk of an operand data during a pipeline run.
+/// A temporary buffer used to stage a chunk of an operand's data during a pipeline run.
 struct Staging<'a> {
     buf: PoolBuf<'a>,
     copier: NdCopier,
@@ -736,13 +736,13 @@ type InnerLoop<'a> =
 /// An operand holds the whole region it covers but never decides *where* in it to read:
 /// [`to_buf`](ElementwisePipelineImpl::to_buf) owns the iteration order. Before each run of
 /// [`read_bulk`](ElementwisePipelineImpl::read_bulk) calls it points `current_ptr` at the run's
-/// first element and sets `inner_stride` to the byte step between consecutive elements; the operand
-/// then reads straight off those two fields, advancing the cursor as it goes.
+/// first element and sets `inner_stride` to the byte step between consecutive elements;
+/// `read_bulk` then reads element `offset` at `offset * inner_stride` bytes past `current_ptr`.
 pub(crate) struct Operand<'a> {
     data: OperandData<'a>,
     dtype: &'a Dtype,
 
-    /// The next element to read: null until `to_buf` positions it, then advanced by `read_bulk`.
+    /// The first element of the current run: null until `to_buf` positions it.
     pub(crate) current_ptr: Cell<*const u8>,
     /// Byte step between consecutive elements of the current run.
     pub(crate) inner_stride: Cell<usize>,
@@ -950,7 +950,7 @@ fn pick_output_layout<'s>(
     (strides, real_dims)
 }
 
-/// A pull buffer has stride 0 on the dims it collapsed, so its elements alias
+/// Makes a pull buffer read-only if a stride-0 dim of length > 1 makes its elements alias.
 #[inline(never)]
 fn make_readonly_if_aliasing(index: &[Range<u64>], out: &mut StridedBuf<'_>) {
     if (index.iter().zip(out.strides())).any(|(r, &s)| s == 0 && r.end - r.start > 1) {
@@ -1594,8 +1594,7 @@ mod tests {
     }
 
     /// What the pipeline built for `storage` declares as its operand count, and how many operands
-    /// it actually walks - one per leaf that stayed separate, so the latter is the direct measure of
-    /// how far the chain fused.
+    /// it actually walks: one per separate leaf, a direct measure of how far the chain fused.
     fn operand_counts<S, T>(storage: &S, index: &[Range<u64>]) -> (Option<usize>, usize)
     where
         S: ArrayStorage,

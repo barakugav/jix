@@ -87,3 +87,9 @@ Needs the maintainer:
 Needs the maintainer:
 
 - `jix-py/src/ops/elementwise/casting.rs:21` "any cast involving struct dtypes is not supported" is too broad: a cast to the identical struct dtype is accepted as a no-op (`casting.rs:55-56`). Unsupported casts raise `TypeError` (`casting.rs:133-137`), which no `Raises:` section documents.
+
+## ops-elementwise-engine
+
+Needs the maintainer:
+
+- `jix/src/ops/elementwise/map.rs:43`, `map.rs:110`, `jix/src/ops/elementwise/pipeline.rs:23` hand-written doc lines run past 100 columns, as do the matching macro-generated docs in `op1.rs` and `op2.rs`; left as is, since a rewrap fixes no fact and the macro text is out of scope.
