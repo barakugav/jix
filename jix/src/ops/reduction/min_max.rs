@@ -242,12 +242,9 @@ where
 define_reduction_op!(
     /// Reduces a single dim by returning the index of the maximum element.
     ///
-    /// Output dtype is `u64`.
-    ///
-    /// Unlike [`Max`], this op accepts only a single dim. If multiple elements share
-    /// the maximum value, the index of the *first* such element is returned, matching
-    /// `numpy.argmax`. For **float** types, `NaN` propagates: if any element along the
-    /// reduced dim is `NaN`, the index of the first `NaN` is returned, as in `numpy.argmax`.
+    /// Output dtype is `u64`. As in `numpy.argmax`, ties return the *first* index, and for
+    /// **float** types `NaN` propagates: if any element along the reduced dim is `NaN`, the
+    /// index of the first `NaN` is returned.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -324,12 +321,9 @@ where
 define_reduction_op!(
     /// Reduces a single dim by returning the index of the minimum element.
     ///
-    /// Output dtype is `u64`.
-    ///
-    /// Unlike [`Min`], this op accepts only a single dim. If multiple elements share
-    /// the minimum value, the index of the *first* such element is returned, matching
-    /// `numpy.argmin`. For **float** types, `NaN` propagates: if any element along the
-    /// reduced dim is `NaN`, the index of the first `NaN` is returned, as in `numpy.argmin`.
+    /// Output dtype is `u64`. As in `numpy.argmin`, ties return the *first* index, and for
+    /// **float** types `NaN` propagates: if any element along the reduced dim is `NaN`, the
+    /// index of the first `NaN` is returned.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
