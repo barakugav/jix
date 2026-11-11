@@ -28,7 +28,7 @@ A name that the docs mention and this index lacks is either private or stale.
 `ops::Transmute`, `ops::Variance`, `ops::Xor`, `scalar::Complex`, `scalar::VarianceState`,
 `scalar::bool8`, `scalar::f16`, `storage::ArrayStorageAny`, `storage::ArrayStorageInfo`,
 `storage::Compact`, `storage::CompactBorrowed`, `storage::CompactMmap`, `storage::Plain`,
-`storage::StridedBuf`, `storage::View`
+`storage::StridedBuf`
 
 ### Enums
 

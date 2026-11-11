@@ -98,6 +98,7 @@ From the git history. A doc still using a name on the left is stale. Confirm wit
 | `is_nan`, `is_finite`, `is_infinite` | `isnan`, `isfinite`, `isinf` | Python only; the Rust methods still exist |
 | `errstate` | removed; integer errors always raise, floats never | Python |
 | `D: Dimension` generic on storages and ops | removed; ndim is a runtime property | Rust |
+| `storage::View<S>`, `Array<View<S>>` | removed; `Array::view()` returns `Array<&S>`, and `&S` is itself a storage | Rust |
 
 Files under `jix/src/ops/` and `jix/src/` were also moved around recently, so a doc that names a
 source file or module path may be stale.

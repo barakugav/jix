@@ -5,8 +5,11 @@ The prompt is short: it names the unit's files and points the agent at its brief
 
 Usage (from the repo root):
     python scripts/docs_review/unit_prompt.py --list
-    python scripts/docs_review/unit_prompt.py scanner UNIT --workdir DIR
-    python scripts/docs_review/unit_prompt.py verifier UNIT --workdir DIR --report FILE
+    python scripts/docs_review/unit_prompt.py scanner UNIT --workdir DIR --reports DIR
+    python scripts/docs_review/unit_prompt.py verifier UNIT --workdir DIR --reports DIR
+
+The agents write their output under the reports directory: `UNIT.scanner.md` (scanner report),
+`UNIT.verifier.md` (verifier report), `UNIT.findings.md` and `UNIT.commit.md`.
 """
 
 import argparse
@@ -27,7 +30,7 @@ full brief.
 
 {unit}
 
-End with the report the brief asks for.
+Write your report to `{reports}/{id}.scanner.md`.
 """
 
 VERIFIER = """\
@@ -35,19 +38,17 @@ You are the docs verifier for unit `{id}` of the jix repository.
 
 Work in `{workdir}`, a checkout that holds the scanner's uncommitted edits. Use that path for every
 command and file access (for example `git -C {workdir} diff`); the paths below are relative to it.
+Do not touch any other checkout.
 
 Read `{workdir}/scripts/docs_review/prompts/verifier.md` first and follow it exactly: it is your
 full brief.
 
 {unit}
 
-The scanner's report:
-
-<scanner_report>
-{report}
-</scanner_report>
-
-End with the report the brief asks for.
+- The scanner's report: `{reports}/{id}.scanner.md`
+- Write your report to `{reports}/{id}.verifier.md`
+- Write the findings to `{reports}/{id}.findings.md`
+- Write the commit summary to `{reports}/{id}.commit.md`
 """
 
 
@@ -77,8 +78,8 @@ def main() -> int:
     parser.add_argument("role", nargs="?", choices=["scanner", "verifier"])
     parser.add_argument("unit", nargs="?")
     parser.add_argument("--list", action="store_true", help="list the units and exit")
-    parser.add_argument("--workdir", required=False, help="the agent's checkout: a worktree of the branch")
-    parser.add_argument("--report", help="verifier: file holding the scanner's report")
+    parser.add_argument("--workdir", help="the agent's checkout: a worktree of the branch")
+    parser.add_argument("--reports", help="directory the agents write their reports to")
     args = parser.parse_args()
 
     units = load_units()
@@ -90,16 +91,11 @@ def main() -> int:
     if args.role is None or args.unit not in units:
         parser.error("give a role and a unit id from units.toml")
 
-    if not args.workdir:
-        parser.error("give the agent's checkout with --workdir")
+    if not (args.workdir and args.reports):
+        parser.error("give the agent's checkout with --workdir and the reports directory with --reports")
     unit = units[args.unit]
-    if args.role == "scanner":
-        print(SCANNER.format(id=unit["id"], unit=describe(unit), workdir=args.workdir))
-    else:
-        if not args.report:
-            parser.error("the verifier prompt needs --report")
-        report = Path(args.report).read_text(encoding="utf-8").strip()
-        print(VERIFIER.format(id=unit["id"], unit=describe(unit), workdir=args.workdir, report=report))
+    template = SCANNER if args.role == "scanner" else VERIFIER
+    print(template.format(id=unit["id"], unit=describe(unit), workdir=args.workdir, reports=args.reports))
     return 0
 
 
