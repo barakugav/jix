@@ -3,9 +3,8 @@ use crate::ops::prelude::*;
 /// Reverses the order of elements along one or more dims, returned by
 /// [`Array::flip`](crate::Array::flip).
 ///
-/// Output shape and dtype equal the input. Dims not listed in `dims` are passed through
-/// unchanged. `dims` may be empty (no-op), and dims of size 0 or 1 do not require any
-/// data motion.
+/// Output shape and dtype equal the input. `dim` may be empty (a no-op); dims of size 0 or 1
+/// need no data motion.
 ///
 /// See also [`Roll`](crate::ops::Roll), which cyclically shifts elements along a dim
 /// without reversing them.
