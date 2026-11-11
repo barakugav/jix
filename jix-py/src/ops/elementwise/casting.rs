@@ -59,7 +59,7 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
 
         if src.is_integer() && dst.is_integer() && src.itemsize() == dst.itemsize() {
             // SAFETY: both are ints of the same size, and every bit pattern is valid for both
-            let array = unsafe { array.transmute_elements_dyn(dtype.clone()) };
+            let array = array.transmute_elements_dyn(dtype.clone());
             return Ok(array.into_any());
         }
 
