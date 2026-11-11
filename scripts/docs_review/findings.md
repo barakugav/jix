@@ -153,3 +153,10 @@ Needs the maintainer:
 Docs, not fixed:
 
 - `jix/src/storage/core_trait.rs:63` Pre-existing doc/comment lines over 100 columns: `core_trait.rs:63,71,78,80,81`, `buf.rs:19,266,294`, `cache_id.rs:97,158`, `mod.rs:235`.
+
+## ops-shape-a
+
+Docs, not fixed:
+
+- `jix/src/ops/shape_ops/broadcast.rs:3` "Expands an array to a larger shape": a length-1 dim may also be broadcast to length 0 (`broadcast.rs:66-67`), so the result is not always larger. Minor.
+- Pre-existing doc lines over 100 columns in the shape ops: `reshape.rs:145`, `reshape.rs:424`, `slice.rs:114`, `slice.rs:321`, `slice.rs:323`, `slice.rs:330`, `broadcast.rs:109`, `permute_dims.rs:107`, `insert_dim.rs:138`, `remove_dim.rs:132` (all under `jix/src/ops/shape_ops/`).
