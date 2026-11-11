@@ -378,7 +378,8 @@ impl Array {
         Ok(self.arr.shape().iter().product::<u64>())
     }
 
-    /// The length of the array along the first dim (dim 0).
+    /// The length of the array along the first dim (dim 0). Raises `ValueError` on a
+    /// zero-dimensional array.
     ///
     /// ```python
     /// import jix
@@ -513,7 +514,8 @@ impl Array {
     ///         `start > stop`, more index items than array dimensions, or more than one ellipsis.
     ///     ValueError: Slice step other than 1. Or `out` has the wrong dtype or shape, is not
     ///         writeable, is not aligned to the dtype, has a negative or zero stride on a dim
-    ///         longer than 1, or has overlapping elements.
+    ///         longer than 1, has non-C-contiguous inner (dtype) dims, or has overlapping
+    ///         elements.
     ///     TypeError: Unsupported index item type (anything other than an integer, slice, `...`,
     ///         or tuple of these). Or `out` is not a NumPy array.
     ///
@@ -1226,7 +1228,8 @@ impl Array {
         binary_op_builtin(other, || crate::ops::greater(slf, other))
     }
 
-    /// Element-wise greater-than-or-equal test (`a >= b`). See [`jix.greater_equal()`][jix.greater_equal].
+    /// Element-wise greater-than-or-equal test (`a >= b`). See
+    /// [`jix.greater_equal()`][jix.greater_equal].
     pub fn __ge__<'py>(
         slf: &Bound<'py, Self>,
         other: &Bound<'py, PyAny>,

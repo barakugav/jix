@@ -67,7 +67,8 @@ where
         })
     }
 
-    /// Constructs an array with [`SubDtype`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`SubDtype`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>, sub_field: &str) -> Result<Array<Self>> {
         Self::new(array.into_storage(), sub_field).map(Array::from_storage)
     }

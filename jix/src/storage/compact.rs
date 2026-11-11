@@ -34,8 +34,9 @@ use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dim
 /// Arrays built from typed sources carry `Ty<_>`; arrays loaded from disk carry `TypeDyn`. Use
 /// [`Array::into_typed`](crate::Array::into_typed) to go from `TypeDyn` to `Ty<T>`.
 ///
-/// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray), [`Array::compact`](crate::Array::compact)
-/// and their variants or by deserializing an archive file. The memory-mapped equivalent is [`CompactMmap`].
+/// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray),
+/// [`Array::compact`](crate::Array::compact) and their variants or by deserializing an archive
+/// file. The memory-mapped equivalent is [`CompactMmap`].
 ///
 /// # Block codec pipeline
 ///
@@ -259,7 +260,8 @@ where
     ///    two flags across all dimensions:
     ///    `b_begin[d] = index[d].start / block_shape[d]`,
     ///    `b_end[d]   = ceil(index[d].end / block_shape[d])`;
-    ///    `is_single_block` - every dimension touches exactly one block (`b_begin[d] + 1 == b_end[d]`);
+    ///    `is_single_block` - every dimension touches exactly one block
+    ///    (`b_begin[d] + 1 == b_end[d]`);
     ///    `is_aligned` - `index[d]` starts and ends on block boundaries in every dimension.
     ///
     /// 2. **Fast path (aligned single block)** - if `is_single_block && is_aligned` and `buf` is

@@ -635,7 +635,8 @@ where
         Ok(Self(Op2::new(a, b, ApproxEqKernel { rtol, atol }, false)?))
     }
 
-    /// Constructs an array with [`ApproxEq`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`ApproxEq`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(
         a: Array<S1>,
         b: Array<S2>,

@@ -142,7 +142,8 @@ impl<S> Reshape<S> {
         })
     }
 
-    /// Constructs an array with [`Reshape`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Reshape`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>, shape: &[u64]) -> Result<Array<Self>>
     where
         S: ArrayStorage,
@@ -421,7 +422,8 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
+    /// Panics if the total number of elements differs or the new ndim exceeds
+    /// [`NDIM_MAX`](crate::NDIM_MAX).
     #[track_caller]
     pub fn reshape(self, shape: &[u64]) -> Array<Reshape<S>> {
         Reshape::new_array(self, shape).unwrap()

@@ -48,9 +48,9 @@ mod read;
 /// ```
 ///
 /// Data is never copied or computed at construction time. An operation only runs when the result
-/// is materialized via [`to_ndarray()`](Array::to_ndarray), [`compact()`](Array::compact), and their variants.
-/// At that point the read request propagates inward through the storage
-/// chain, and only the minimum required data is read from the innermost backend.
+/// is materialized via [`to_ndarray()`](Array::to_ndarray), [`compact()`](Array::compact), and
+/// their variants. At that point the read request propagates inward through the storage chain, and
+/// only the minimum required data is read from the innermost backend.
 ///
 /// Because `Array<S>` is monomorphized over `S` at compile time, chains of operations incur zero
 /// virtual dispatch overhead. The full static type of an expression -

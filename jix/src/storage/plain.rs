@@ -28,7 +28,8 @@ use crate::{
 /// The type parameter `A` is the *owner* of the underlying memory and can be any type; keeping it
 /// alongside the pointer keeps the data valid. Two concrete owners are provided:
 ///
-/// * `Plain<Vec<T>, ...>` - owns the data, `Vec<T>` is the data allocation (see [`Array::plain_ndarray`]).
+/// * `Plain<Vec<T>, ...>` - owns the data, `Vec<T>` is the data allocation (see
+///   [`Array::plain_ndarray`]).
 /// * `Plain<&'a (), ...>` - borrows the data, `&'a ()` is a marker for the borrowed allocation
 ///   (see [`Array::plain_ndarray_ref`]).
 ///
@@ -84,10 +85,10 @@ impl<A> Plain<A, TypeDyn> {
     ///   The block shape is ignored, as a plain view has no blocks: pass it to
     ///   [`Array::compact_with`] instead.
     ///
-    /// `data` and `strides` need not be aligned to `dtype.alignment()`: a `Plain` read lends a view
-    /// of the caller's own bytes, and per the [`read_data`](ArrayStorage::read_data) contract a lent
-    /// view is only as aligned as the bytes behind it. Consumers that need alignment stage the
-    /// region themselves.
+    /// `data` and `strides` need not be aligned to `dtype.alignment()`: a `Plain` read lends a
+    /// view of the caller's own bytes, and per the [`read_data`](ArrayStorage::read_data)
+    /// contract a lent view is only as aligned as the bytes behind it. Consumers that need
+    /// alignment stage the region themselves.
     ///
     /// # Errors
     ///
@@ -311,7 +312,8 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
 
     /// Create a [`Plain`] array that borrows from an ndarray, with explicit params.
     ///
-    /// Same as [`plain_ndarray_ref`](Self::plain_ndarray_ref) but takes an explicit [`ArrayParams`].
+    /// Same as [`plain_ndarray_ref`](Self::plain_ndarray_ref) but takes an explicit
+    /// [`ArrayParams`].
     ///
     /// The `params` never change how the data is stored: a `Plain` array is always an
     /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the
@@ -794,10 +796,11 @@ mod tests {
     // Under-aligned views
     // -----------------------------------------------------------------------
 
-    /// A `Plain` view may start off its dtype's alignment: a read lends the caller's own bytes, and
-    /// every consumer either re-strides the view without reading it or copies it through `NdCopier`,
-    /// which handles unaligned source and destination. This walks a deliberately 1-byte-offset
-    /// `i32` view through each of those consumers - Miri checks the alignment of every access.
+    /// A `Plain` view may start off its dtype's alignment: a read lends the caller's own bytes,
+    /// and every consumer either re-strides the view without reading it or copies it through
+    /// `NdCopier`, which handles unaligned source and destination. This walks a deliberately
+    /// 1-byte-offset `i32` view through each of those consumers - Miri checks the alignment of
+    /// every access.
     #[test]
     fn misaligned_view_reads_through_every_consumer() {
         let (rows, cols) = (4usize, 5);

@@ -60,26 +60,27 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// (only available at runtime via [`dtype()`](ArrayStorage::dtype)).
     ///
     /// Operations that require knowing the element type (arithmetic, comparisons, reductions,
-    /// cast) are bounded on [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), a shorthand for
-    /// `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
+    /// cast) are bounded on [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), a shorthand
+    /// for `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
     /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
     /// type and re-enable those operations.
     type ElementType: ElementType
     where
         Self: Sized;
 
-    /// Read a sub-region of the array and return it as a [`StridedBuf`](crate::storage::StridedBuf).
+    /// Read a sub-region of the array and return it as a
+    /// [`StridedBuf`](crate::storage::StridedBuf).
     ///
     /// The single I/O method of a storage: all higher-level reads (`to_ndarray`,
     /// `to_ndarray_sub`, etc.) bottom out here.
     ///
     /// The two modes mirror NumPy's `out=`:
     /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
-    ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized one -
-    ///   and picks the strides. The bytes are only contiguous if the strides say so.
-    /// - **push** (`out` is `Some(dst)`): the region must be written into `dst` at `dst`'s own strides,
-    ///   and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have one stride
-    ///   per array dimension.
+    ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized
+    ///   one - and picks the strides. The bytes are only contiguous if the strides say so.
+    /// - **push** (`out` is `Some(dst)`): the region must be written into `dst` at `dst`'s own
+    ///   strides, and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have
+    ///   one stride per array dimension.
     ///
     /// # Arguments
     ///

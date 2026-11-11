@@ -14,8 +14,6 @@ Nothing here was changed in the code or the docs.
 
 Docs, not fixed:
 
-- `jix/src/storage/plain.rs:19` says "non-compressed data"; the docs otherwise say "uncompressed".
-  Left for the `storage-backends` unit.
 - `CLAUDE.md` (Architecture, `read_data`) gives `materialize_out_buf(out, ctx, out_shape, dtype)`;
   the function also takes a `layout_order` argument (`jix/src/storage/buf.rs:428`). `CLAUDE.md` is
   out of scope for the review.
@@ -36,33 +34,11 @@ Needs the maintainer:
 
 - `jix-py/src/ops/elementwise/div_rem.rs:163` `remainder` (and `Array.remainder`, `jix-py/src/array.rs:1026`) annotates `rounding_mode` with a string `"Literal['trunc', 'floor', 'euclid']"` in `#[pyo3(signature = ...)]`, which CLAUDE.md says to avoid (emitted as a quoted string without imports). `divide` instead takes `RoundingMode`, whose `INPUT_TYPE` is a proper `typing.Literal`; `remainder` could do the same with a `RoundingMode::Floor` default.
 
-## ops-rounding-exp-log
-
-Docs, not fixed:
-
-- `jix-py/src/ops/elementwise/trig.rs:8`, `:40`, `:72` and the other trig functions: "Supported dtypes: `f16`, `f32`, `f64`" omits that integer and bool inputs are accepted and cast to a float first (the dispatch uses `Safe`, e.g. `trig.rs:33`).
-- `jix/src/ops/elementwise/exp_log.rs:130` the `Ln` doc example line is about 120 columns, over the 100-column limit.
-
-## ops-trig-float-special
-
-Needs the maintainer:
-
-- `jix-py/src/ops/elementwise/trig.rs:8` (and :40, :72, :104, :136, :169) "Supported dtypes: `f16`, `f32`, `f64`" is incomplete: the dispatch is `[f16, f32, f64], Safe`, and `CastKind::Safe` (`jix-py/src/ops/common/dtype_promote.rs:81-125`) also accepts bool and integer inputs, cast to float. Same in `jix-py/src/ops/elementwise/exp_log.rs:15,50,84`; wants one family-wide wording.
-
-Docs, not fixed:
-
-- `jix/src/ops/elementwise/float_special.rs:112,144,149` doc example lines are 101-104 columns, over the 100-column limit.
-
 ## ops-cmp
 
 Needs the maintainer:
 
 - `jix-py/src/ops/elementwise/cmp.rs:273` `jix.isclose` is called "analogous to `numpy.isclose`", but its formula `|a - b| <= max(atol, rtol * max(|a|, |b|))` differs from NumPy's `atol + rtol * |b|`; the core `ops::ApproxEq` doc warns about this, the Python doc does not.
-
-Docs, not fixed:
-
-- `jix/src/ops/elementwise/cmp.rs:634` `ApproxEq::new_array` doc line is over 100 columns (as are the macro-generated constructor docs in the same file).
-- `jix-py/src/array.rs:1269` `__ge__` one-line doc is 107 columns.
 
 ## ops-bitwise
 
@@ -113,12 +89,6 @@ Needs the maintainer:
 - `jix/src/ops/transmute.rs:17` The Safety section names `bool` as a type with invalid bit patterns, but `bool` is not `Dtyped` and the `Dtyped` contract (`jix/src/dtype.rs:1179-1180`) requires every bit pattern to be valid, so the example is stale. Should the section name a real case, or should `Transmute` stop being `unsafe`?
 - `jix/src/ops/sub_dtype.rs:192` `dtype_sub_field_dyn` panics (it unwraps `SubDtype::new_array`) on a non-struct dtype, an inner shape, a missing field or a zero-sized field, but has no Panics section.
 
-Docs, not fixed:
-
-- `jix/src/ops/transmute.rs:67`, `jix/src/ops/sub_dtype.rs:70`, `jix/src/ops/into_type.rs:65`, `jix/src/ops/maybe_compact.rs:43` `new_array` doc lines exceed 100 columns.
-- `jix/src/ops/transmute.rs:19`, `jix/src/ops/transmute.rs:124`, `jix/src/ops/transmute.rs:143` doc lines exceed 100 columns.
-- `jix/src/ops/shape_ops/insert_dim.rs:26`, `jix/src/ops/shape_ops/remove_dim.rs:24` (and `insert_dim.rs:139`, `remove_dim.rs:133`) doc lines exceed 100 columns.
-
 ## util-a
 
 Needs the maintainer:
@@ -152,14 +122,7 @@ Needs the maintainer:
 
 Docs, not fixed:
 
-- `jix/src/storage/core_trait.rs:63` Pre-existing doc/comment lines over 100 columns: `core_trait.rs:63,71,78,80,81`, `buf.rs:19,266,294`, `cache_id.rs:97,158`, `mod.rs:235`.
-
-## ops-shape-a
-
-Docs, not fixed:
-
-- `jix/src/ops/shape_ops/broadcast.rs:3` "Expands an array to a larger shape": a length-1 dim may also be broadcast to length 0 (`broadcast.rs:66-67`), so the result is not always larger. Minor.
-- Pre-existing doc lines over 100 columns in the shape ops: `reshape.rs:145`, `reshape.rs:424`, `slice.rs:114`, `slice.rs:321`, `slice.rs:323`, `slice.rs:330`, `broadcast.rs:109`, `permute_dims.rs:107`, `insert_dim.rs:138`, `remove_dim.rs:132` (all under `jix/src/ops/shape_ops/`).
+- Plain `//` comment and code lines over 100 columns: `jix/src/storage/cache_id.rs:97,158`, `jix/src/storage/mod.rs:235`.
 
 ## ops-shape-b
 
@@ -168,12 +131,6 @@ Needs the maintainer:
 - `jix/src/ops/shape_ops/{concatenate,stack,flip,roll,tile,repeat}.rs` The hand-written `new_array` doc line ("Constructs an array with [`X`] storage. See the storage struct docs ...") is over 100 columns in all six files (e.g. `concatenate.rs:174`).
 - `jix/src/util/arr_sequence.rs:22-25` The `ArraySequence` table rows exceed 100 columns (tuple row pre-existing; the fixed-length row is now 105). Markdown table rows cannot be wrapped.
 
-Docs, not fixed:
-
-- `jix/src/ops/shape_ops/concatenate.rs:10` The `concatenate` Panics list does not mention overflow of the concatenated length or byte size (`concatenate.rs:111-119`).
-- `jix/src/ops/shape_ops/stack.rs:10` The `stack` Panics list does not mention the output shape/byte-size overflow check (`stack.rs:96`).
-- `jix/src/ops/shape_ops/roll.rs:215` `Array::roll` repeats the struct doc's paragraph on modulo reduction and shift direction (`roll.rs:6-8`).
-
 ## py-array
 
 Needs the maintainer:
@@ -181,32 +138,17 @@ Needs the maintainer:
 - `jix-py/src/array.rs:85` The `Array` class doc says reshape/flatten are "uniquely prone" to read amplification, but the `jix.compact` doc (`jix-py/src/array.rs:1596`) lists `broadcast` and `permute_dims` as causing the same block misalignment. One of them should give way.
 - `jix-py/src/array.rs:703` `plain` recommends `compact()` when the intermediate "will be read many times", but the same doc says a plain result is cheaper to read back. Maybe it means "kept around for a long time".
 
-Docs, not fixed:
-
-- `jix-py/src/array.rs:392` `__len__` raises ValueError on a zero-dimensional array (`jix-py/src/array.rs:395-397`) but has no `Raises:` section.
-- `jix-py/src/array.rs:512` `numpy` Raises ValueError omits the error for an `out` whose inner (dtype) dims are not C-contiguous (`jix-py/src/array.rs:281-290`).
-- `jix/src/storage/params.rs:159` The `block_size` setter doc says an unset block size defaults to `block_shape.product() * itemsize` when a block shape is given; the code does that only when all dims are fixed and otherwise uses the L1 cache size (`jix/src/storage/params.rs:348-350`).
-
 ## py-archive-misc
 
 Needs the maintainer:
 
 - `jix-py/src/archive.rs:35` `read_array` `params` says arrays later created from the result "(e.g. via `compact()` or `write_array()`)" inherit the codec settings, but `write_array` on the loaded compact array itself streams its blocks and ignores params (`jix/src/archive/array.rs` `write_to`); only lazy views of it inherit. Consider dropping `write_array()` from the example.
 
-Docs, not fixed:
-
-- `jix/src/archive/mod.rs:23` doc line is 131 columns (over the 100-column limit).
-- `jix/src/storage/params.rs:59,66,73,80,122,208,593,594,597,938,941,1051` doc lines over 100 columns.
-
 ## dtype
 
 Needs the maintainer:
 
 - `jix/src/scalar/mod.rs:9` the module doc says each trait has a scalar fn (`add`) and a bulk one (`add_bulk`); reduction traits such as `Sum` use `update`/`update_bulk` instead (`jix/src/ops/reduction/arith.rs:66-71`). The pattern holds, only the names differ; left as is.
-
-Docs, not fixed:
-
-- `jix/src/ops/elementwise/cast.rs:15,19` the `Cast` trait doc lines exceed 100 columns.
 
 ## storage-backends
 
@@ -217,10 +159,6 @@ Needs the maintainer:
 
 Docs, not fixed:
 
-- `jix/src/storage/compact.rs:37-38` doc lines over 100 columns (115, 108).
-- `jix/src/storage/compact.rs:262` doc line over 100 columns (104).
-- `jix/src/storage/block.rs:67` doc line over 100 columns (102).
-- `jix/src/storage/plain.rs:31,88,314,798` doc lines over 100 columns (101-107).
 - `jix/src/storage/compact.rs:456` plain `//` comment still says "`nd_copy` scatter"; the copy is now done by `NdCopier`.
 
 ## storage-params
@@ -232,8 +170,7 @@ Needs the maintainer:
 
 Docs, not fixed:
 
-- `jix/src/storage/params.rs:187` doc lines over 100 columns (also `params.rs:564,565,568,1020`), and `jix/src/codec/mod.rs:68`, `jix/src/array/compact.rs:63`.
-- `jix/src/storage/params.rs:233` `inherit_unset_from_array` is `pub(crate)` and `#[allow(unused)]` but carries an `ignore` example written as public API usage; it never runs.
+- `jix/src/array/compact.rs:109,115` doc lines over 100 columns (101).
 
 ## array
 
@@ -242,22 +179,11 @@ Needs the maintainer:
 - `jix/src/array/mod.rs:243` `read_ctx` panics ("failed to create read context") if `ReadContext::new` fails, and has no `# Panics` section.
 - `jix/src/array/construct.rs:37` the `compact_ndarray` example duplicates the first half of the second `Array` example (`jix/src/array/mod.rs:85-103`); consider dropping one.
 
-Docs, not fixed:
-
-- `jix/src/array/mod.rs:51` doc line is 111 columns, over the 100-column limit.
-- `jix/src/array/read.rs:250,322` `to_buf_slice` and `to_buf_strided` Errors omit `InvalidShapeOperation`, raised by `check_region_size` on 32-bit targets when the region does not fit in memory (`jix/src/error.rs:286-300`).
-
 ## core-misc
 
 Needs the maintainer:
 
 - `jix/src/context.rs:23` The `ReadContext` doc (and its example comment) says `Array::read_ctx()` picks up the decoder parameters stored with the array, and `ReadContext::new` (`jix/src/context.rs:66-69`) says it uses the matching decoder params; but `DecoderParams` is an empty placeholder (`jix/src/codec/mod.rs:225`) and `ReadContext::new` ignores it, so `read_ctx()` is currently identical to `ReadContext::default()`. Left as stated design intent.
-
-## archive
-
-Docs, not fixed:
-
-- `jix/src/archive/block.rs:303` `BlockTable::read_content` error list omits the `InvalidArchive` raised when a section size is not a multiple of the item size (`read_section`, `jix/src/archive/block.rs:438-442`).
 
 ## codec
 
@@ -266,6 +192,14 @@ Needs the maintainer:
 - `jix/src/codec/mod.rs:66` `EncoderParams::level` returns `InvalidArgument` for a level outside the `i8` range, but has no `# Errors` section (unlike `filters`).
 - `jix/src/storage/params.rs:206` `ArrayParams::level` has the same undocumented `InvalidArgument` error.
 
+## cross-cutting
+
+Needs the maintainer:
+
+- `jix-py/src/ops/elementwise/div_rem.rs:26,129` `divide` with a `rounding_mode` and `remainder` also accept `bool` (Safe cast to `u8`, the first table entry at `div_rem.rs:92,174`), which "Supported dtypes" does not list. Is `bool // bool` intended?
+
 Docs, not fixed:
 
-- `jix/src/storage/params.rs:208` the `ArrayParams::level` doc line is 101 columns (outside the codec unit's edit list).
+- `jix/src/array/read.rs:303,306` The pull/push list of `to_buf_strided` is over 100 columns (102). `core_trait.rs` has the same list, already rewrapped.
+- `jix/src/ops/elementwise/cast.rs:447` The hand-written `Cast::new_array` doc line is 106 columns. The same line was wrapped in 11 other op files.
+- `jix-py/src/ops/elementwise/div_rem.rs:26` "Supported dtypes" for true division does not say that integers and `bool` are cast to a float first (`Safe` dispatch at `div_rem.rs:87`). Sibling functions say it.

@@ -212,10 +212,6 @@ where
     /// Returns a lazy view of the array with elements rolled along the given dim.
     /// See [`Roll`] for details and examples.
     ///
-    /// `shift` is reduced modulo `shape[dim]`. Positive shifts move elements toward
-    /// larger indices (wrapping around at the end); negative shifts move them the other
-    /// way.
-    ///
     /// # Panics
     ///
     /// Panics if `dim >= self.ndim()`.

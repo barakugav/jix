@@ -135,7 +135,8 @@ where
         })
     }
 
-    /// Constructs an array with [`InsertDim`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`InsertDim`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>, dim: impl DimsArg) -> Result<Array<Self>> {
         Self::new(array.into_storage(), dim).map(Array::from_storage)
     }

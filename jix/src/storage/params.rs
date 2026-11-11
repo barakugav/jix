@@ -184,7 +184,8 @@ impl ArrayParams {
 
     /// Set the compression level.
     ///
-    /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the default.
+    /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the
+    /// default.
     pub fn level(mut self, level: i32) -> Result<Self> {
         self.encoder_params
             .get_or_insert_with(EncoderParams::default)
@@ -214,22 +215,6 @@ impl ArrayParams {
     /// Fields that are already set in `self` are not overwritten. This mirrors what
     /// [`Array::compact_with`] does internally, and is useful when building params that should
     /// inherit most settings from an existing array while overriding specific ones.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use jix::{Array, ArrayParams};
-    /// use ndarray::array;
-    ///
-    /// let source = Array::compact_ndarray(&array![1i32, 2, 3, 4, 5, 6, 7, 8])?;
-    ///
-    /// // Override just the block shape; inherit codec params from `source`.
-    /// let mut params = ArrayParams::new().block_shape(&[4])?;
-    /// params.inherit_unset_from_array(&source);
-    ///
-    /// let copy = source.compact_with(params, &source.read_ctx())?;
-    /// # Ok::<(), jix::Error>(())
-    /// ```
     #[allow(unused)]
     pub(crate) fn inherit_unset_from_array<S>(&mut self, array: &Array<S>)
     where
@@ -561,12 +546,12 @@ pub(crate) struct ArraySpecDynamic {
     /// Per-dimension block length, in items.
     ///
     /// For **Compact**/**CompactMmap** storage this is the literal storage block shape (blocks are
-    /// compressed independently at this granularity). For **every other** storage or lazy view it is
-    /// the *minimum read shape that doesn't waste work*: the smallest per-dim read tile below which a
-    /// read would redundantly re-read or recompute underlying data (e.g. a broadcast dim's whole
-    /// length, so the single source element is read once rather than once per tile). It seeds
-    /// [`scale_read_shape`](crate::util::scale_read_shape), which scales the read region down/up from
-    /// it.
+    /// compressed independently at this granularity). For **every other** storage or lazy view it
+    /// is the *minimum read shape that doesn't waste work*: the smallest per-dim read tile below
+    /// which a read would redundantly re-read or recompute underlying data (e.g. a broadcast dim's
+    /// whole length, so the single source element is read once rather than once per tile). It
+    /// seeds [`scale_read_shape`](crate::util::scale_read_shape), which scales the read region
+    /// down/up from it.
     pub(crate) block_shape: DimArray<BlockSize>,
 
     /// Per-dimension "fixed" flags for [`block_shape`](Self::block_shape).
@@ -1017,7 +1002,8 @@ pub(crate) mod flags {
     #[derive(Clone, Copy, Default)]
     pub struct ArraySpecFlags(u8);
 
-    /// The array is stored in a compact layout, divided into nd-blocks, each compressed independently.
+    /// The array is stored in a compact layout, divided into nd-blocks, each compressed
+    /// independently.
     const IS_COMPACT: u8 = 0b0000_0001;
     /// The array read operation is a simple strided copy.
     ///

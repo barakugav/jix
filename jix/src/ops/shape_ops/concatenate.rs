@@ -7,8 +7,8 @@ use crate::ArraySequenceElementType;
 ///
 /// # Panics
 ///
-/// Panics if `arrays` is empty, `dim` is out of bounds, dtypes differ, or shapes differ on any
-/// dim other than `dim`.
+/// Panics if `arrays` is empty, `dim` is out of bounds, dtypes differ, shapes differ on any dim
+/// other than `dim`, or the output shape overflows.
 #[track_caller]
 pub fn concatenate<ArraysT>(arrays: ArraysT, dim: usize) -> Array<Concatenate<ArraysT>>
 where

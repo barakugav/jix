@@ -1,6 +1,6 @@
 use crate::ops::prelude::*;
 
-/// Expands an array to a larger shape by repeating elements along length-1 dimensions,
+/// Expands an array to a new shape by repeating elements along length-1 dimensions,
 /// returned by [`Array::broadcast`](crate::Array::broadcast).
 ///
 /// `shape` must have as many dims as the input. For each dim `d`, either
@@ -106,7 +106,8 @@ where
         })
     }
 
-    /// Constructs an array with [`Broadcast`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Broadcast`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>, shape: &[u64]) -> Result<Array<Self>> {
         Self::new(array.into_storage(), shape).map(Array::from_storage)
     }

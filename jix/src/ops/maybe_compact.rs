@@ -40,7 +40,8 @@ where
         }))
     }
 
-    /// Constructs an array with [`MaybeCompact`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`MaybeCompact`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(
         array: Array<S>,
         params: ArrayParams,

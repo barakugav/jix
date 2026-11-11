@@ -251,6 +251,7 @@ define_op2!(
     /// For **integer** types the result wraps on overflow (two's complement).
     /// For **complex** types each component is added independently:
     /// `(a + bi) + (c + di) = (a+c) + (b+d)i`.
+    /// Two `bool` operands give `uint8`.
     ///
     /// Available via the `+` operator on arrays.
     ///
@@ -352,6 +353,7 @@ define_op2!(
 /// For **integer** types the result wraps on overflow (two's complement).
 /// For **complex** types this is full complex multiplication:
 /// `(a + bi) * (c + di) = (ac - bd) + (ad + bc)i`.
+/// Two `bool` operands give `uint8`.
 ///
 /// Available via the `*` operator on arrays.
 ///

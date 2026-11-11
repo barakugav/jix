@@ -111,7 +111,8 @@ impl<S: ArrayStorage> Slice<S> {
         })
     }
 
-    /// Constructs an array with [`Slice`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Slice`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>, slice: SliceSpec) -> Result<Array<Self>> {
         Self::new(array.into_storage(), slice).map(Array::from_storage)
     }
@@ -318,16 +319,19 @@ impl_from_tuple_for_slice_spec!(I1, I2, I3, I4, I5, I6, I7, I8 ; 8 ; 0, 1, 2, 3,
 /// A single-dimension slice descriptor: start, end, and step.
 #[derive(Debug, Clone, Copy)]
 pub struct SliceItem {
-    /// First element to include. Negative values count from the end; `None` means the start of the dimension.
+    /// First element to include. Negative values count from the end; `None` means the start of
+    /// the dimension.
     pub start: Option<i64>,
-    /// First element to exclude. Negative values count from the end; `None` means past the end of the dimension.
+    /// First element to exclude. Negative values count from the end; `None` means past the end of
+    /// the dimension.
     pub end: Option<i64>,
     /// Step between selected elements. Must be >= 1.
     pub step: i64,
 }
 
 impl SliceItem {
-    /// Constructs a [`SliceItem`] from explicit `start`, `end`, and `step`. See [`Slice`] for conventions.
+    /// Constructs a [`SliceItem`] from explicit `start`, `end`, and `step`. See [`Slice`] for
+    /// conventions.
     pub fn new(start: Option<i64>, end: Option<i64>, step: i64) -> Self {
         Self { start, end, step }
     }

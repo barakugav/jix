@@ -16,8 +16,8 @@ use crate::{ArrayStorage, DimDyn, DimIdx, NdCopier, PtrMutNoalias, PtrNoalias, R
 /// A `StridedBuf` pairs a block of bytes with one byte stride per dimension. Element
 /// `(i0, i1, ..., in)` of the read region lives at byte offset
 /// `i0*strides[0] + i1*strides[1] + ... + in*strides[n]` from the start of the buffer. The struct
-/// carries no shape, dtype, or length of its own: those come from the read request (the index ranges
-/// and the array's dtype), and it is the caller's job to interpret the bytes accordingly.
+/// carries no shape, dtype, or length of its own: those come from the read request (the index
+/// ranges and the array's dtype), and it is the caller's job to interpret the bytes accordingly.
 ///
 /// The data is NOT guaranteed to be aligned to the element dtype - neither the base pointer nor the
 /// strides - so read and write elements through it with unaligned accesses. No method of this crate
@@ -263,8 +263,8 @@ impl<'a> StridedBuf<'a> {
     ///
     /// # Safety
     ///
-    /// `src_strides` and this buffer's strides must both describe in-bounds `shape`-sized regions of
-    /// `src` and the destination bytes respectively, and both must have length `shape.len()`.
+    /// `src_strides` and this buffer's strides must both describe in-bounds `shape`-sized regions
+    /// of `src` and the destination bytes respectively, and both must have length `shape.len()`.
     #[inline]
     pub(crate) unsafe fn copy_from(
         &mut self,
@@ -291,7 +291,8 @@ impl<'a> StridedBuf<'a> {
     ///
     /// # Safety
     ///
-    /// The caller must ensure that the resulting view is still valid for the same shape and strides.
+    /// The caller must ensure that the resulting view is still valid for the same shape and
+    /// strides.
     #[inline]
     pub(crate) unsafe fn with_offset(self, n: usize) -> Self {
         let StridedBuf { data, strides } = self;

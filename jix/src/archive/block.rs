@@ -302,9 +302,9 @@ where
     ///
     /// Returns `InvalidArchive` if the header is malformed (missing or unknown codec, filter, body
     /// description or dtype, too many filters, bad `block_size` or `nitems`), if a section is out
-    /// of bounds or does not match the block count, or, with [`ArchiveValidation::Strict`], if a
-    /// block location is out of bounds. Propagates I/O errors from `reader` and errors from
-    /// [`BlockTable::new`].
+    /// of bounds, not a multiple of its item size or does not match the block count, or, with
+    /// [`ArchiveValidation::Strict`], if a block location is out of bounds. Propagates I/O errors
+    /// from `reader` and errors from [`BlockTable::new`].
     pub(crate) fn read_content<R>(
         reader: &mut ArchiveReader<R>,
         storage: S,

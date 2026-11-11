@@ -127,7 +127,8 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::{array, Ix1};
     ///
-    /// let a = Array::compact_ndarray(&array![1.0f32, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E])?;
+    /// let e = std::f32::consts::E;
+    /// let a = Array::compact_ndarray(&array![1.0f32, e, e * e])?;
     /// let result = a.ln().to_ndarray::<Ix1>()?;
     /// assert!((result[[0]] - 0.0).abs() < 1e-5);
     /// assert!((result[[1]] - 1.0).abs() < 1e-5);
