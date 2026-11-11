@@ -16,20 +16,17 @@ use crate::{
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
-/// `Plain` is an adapter that allows non-compressed data to be used as the storage of an `Array`,
-/// in contrast to the main library [`Compact`](crate::storage::Compact) block-compressed storage.
-/// This storage is useful when regular ndarray objects need to behave like `Array`, for example
-/// to participate in math operations with compressed arrays.
+/// `Plain` lets uncompressed data be the storage of an `Array`, unlike the block-compressed
+/// [`Compact`](crate::storage::Compact). It is useful when regular ndarrays need to behave like
+/// `Array`, for example to participate in math operations with compressed arrays.
 ///
-/// `Plain<A, ...>` holds a raw `*const u8` pointer into a buffer owned by `A`,
-/// together with a per-dimension shape and byte-stride description. The
-/// buffer may be laid out in any order (C-contiguous, Fortran-contiguous,
-/// transposed, sliced with gaps, etc.) - reads use the strides to copy the
-/// requested sub-region straight into the destination buffer.
+/// `Plain<A, ...>` holds a raw pointer into a buffer owned by `A`, together with a per-dimension
+/// shape and byte strides. The buffer may be laid out in any order (C-contiguous,
+/// Fortran-contiguous, transposed, sliced with gaps, etc.): a pull read lends a view of the
+/// requested sub-region at these strides, and a push read copies it into the destination.
 ///
-/// The type parameter `A` is the *owner* of the underlying memory, and potentially can be any type.
-/// Keeping `A` alive alongside the pointer ensures the data remains valid. Two
-/// concrete owners are provided:
+/// The type parameter `A` is the *owner* of the underlying memory and can be any type; keeping it
+/// alongside the pointer keeps the data valid. Two concrete owners are provided:
 ///
 /// * `Plain<Vec<T>, ...>` - owns the data, `Vec<T>` is the data allocation (see [`Array::plain_ndarray`]).
 /// * `Plain<&'a (), ...>` - borrows the data, `&'a ()` is a marker for the borrowed allocation
@@ -70,25 +67,20 @@ pub struct Plain<A, ET> {
 impl<A> Plain<A, TypeDyn> {
     /// Construct a `Plain` storage from a raw pointer, shape, and byte strides.
     ///
-    /// `allocation` is any value that owns (or keeps alive) the memory pointed to
-    /// by `data`; it is stored alongside the pointer so the borrow checker can
-    /// enforce lifetime constraints through `A`'s type parameter.
-    ///
     /// # Arguments
     ///
-    /// * `allocation` - owner of the underlying allocation.
+    /// * `allocation` - any value that owns (or keeps alive) the memory behind `data`; stored
+    ///   alongside the pointer so the borrow checker enforces its lifetime through `A`.
     /// * `data` - pointer to the first element (i.e. already offset to
     ///   `[0, 0, ..., 0]` of the logical view).
     /// * `shape` - number of elements along each dimension.
     /// * `strides` - byte distance between adjacent elements along each
     ///   dimension. Must have the same length as `shape`.
     /// * `dtype` - element type descriptor; used for itemsize.
-    /// * `params` - this arg never changes how the plain buffer is stored - a `Plain` array is always an
-    ///   uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
-    ///   storage spec, where they (a) seed arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
-    ///   though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
+    /// * `params` - never change how the data is stored: a `Plain` array is always an uncompressed,
+    ///   zero-copy view. They are recorded in the storage spec, where they seed arrays derived from
+    ///   this one (e.g. the codec used by [`Array::compact`]/[`Array::compact_with`]) and steer
+    ///   reads, e.g. [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list.
     ///   The block shape is ignored, as a plain view has no blocks: pass it to
     ///   [`Array::compact_with`] instead.
     ///
@@ -102,6 +94,7 @@ impl<A> Plain<A, TypeDyn> {
     /// Returns an error if:
     /// * `shape.len()` exceeds the maximum supported number of dimensions.
     /// * `strides.len() != shape.len()`.
+    /// * `dtype` has itemsize 0, or the byte size of `shape` overflows.
     ///
     /// # Safety
     ///
@@ -204,8 +197,7 @@ impl<T> PlainArray<T> {
     /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
     /// ndarrays as `Array`, for example to participate in math operations with compressed arrays.
     ///
-    /// Uses default [`ArrayParams`]. To pass explicit params - which affect arrays derived from the
-    /// result and read behavior, but never the plain storage itself - use
+    /// Uses default [`ArrayParams`]. To pass explicit params, use
     /// [`plain_ndarray_with`](Self::plain_ndarray_with).
     ///
     /// # Errors
@@ -224,14 +216,12 @@ impl<T> PlainArray<T> {
     ///
     /// Same as [`plain_ndarray`](Self::plain_ndarray) but takes an explicit [`ArrayParams`].
     ///
-    /// The `params` never change how the plain buffer is stored - a `Plain` array is always an
-    /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
-    /// storage spec, where they (a) seed arrays derived from this one (e.g. the codec used by
-    /// [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
-    /// [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
-    /// though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
-    /// The block shape is ignored, as a plain view has no blocks: pass it to
-    /// [`Array::compact_with`] instead.
+    /// The `params` never change how the data is stored: a `Plain` array is always an
+    /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the
+    /// storage spec, where they seed arrays derived from this one (e.g. the codec used by
+    /// [`Array::compact`]/[`Array::compact_with`]) and steer reads, e.g.
+    /// [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list. The block
+    /// shape is ignored, as a plain view has no blocks: pass it to [`Array::compact_with`] instead.
     ///
     /// # Errors
     ///
@@ -303,8 +293,7 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
     /// ndarrays as `Array`, for example to participate in math operations with compressed arrays.
     ///
-    /// Uses default [`ArrayParams`]. To pass explicit params - which affect arrays derived from the
-    /// result and read behavior, but never the plain storage itself - use
+    /// Uses default [`ArrayParams`]. To pass explicit params, use
     /// [`plain_ndarray_ref_with`](Self::plain_ndarray_ref_with).
     ///
     /// # Errors
@@ -324,14 +313,12 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     ///
     /// Same as [`plain_ndarray_ref`](Self::plain_ndarray_ref) but takes an explicit [`ArrayParams`].
     ///
-    /// The `params` never change how the plain buffer is stored - a `Plain` array is always an
-    /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
-    /// storage spec, where they (a) seed arrays derived from this one (e.g. the codec used by
-    /// [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
-    /// [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
-    /// though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
-    /// The block shape is ignored, as a plain view has no blocks: pass it to
-    /// [`Array::compact_with`] instead.
+    /// The `params` never change how the data is stored: a `Plain` array is always an
+    /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the
+    /// storage spec, where they seed arrays derived from this one (e.g. the codec used by
+    /// [`Array::compact`]/[`Array::compact_with`]) and steer reads, e.g.
+    /// [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list. The block
+    /// shape is ignored, as a plain view has no blocks: pass it to [`Array::compact_with`] instead.
     ///
     /// # Errors
     ///
@@ -355,8 +342,7 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     /// Similar to [`Self::plain_ndarray_ref`] but takes an `ArrayView` instead of an `ArrayBase`.
     /// See `plain_ndarray_ref` for more details.
     ///
-    /// Uses default [`ArrayParams`]. To pass explicit params - which affect arrays derived from the
-    /// result and read behavior, but never the plain storage itself - use
+    /// Uses default [`ArrayParams`]. To pass explicit params, use
     /// [`plain_ndarray_view_with`](Self::plain_ndarray_view_with).
     pub fn plain_ndarray_view<D2>(arr: ndarray::ArrayView<'a, T, D2>) -> Result<Self>
     where
@@ -371,14 +357,12 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     /// Same as [`plain_ndarray_view`](Self::plain_ndarray_view) but takes an explicit
     /// [`ArrayParams`].
     ///
-    /// The `params` never change how the plain buffer is stored - a `Plain` array is always an
-    /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
-    /// storage spec, where they (a) seed arrays derived from this one (e.g. the codec used by
-    /// [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
-    /// [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
-    /// though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
-    /// The block shape is ignored, as a plain view has no blocks: pass it to
-    /// [`Array::compact_with`] instead.
+    /// The `params` never change how the data is stored: a `Plain` array is always an
+    /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the
+    /// storage spec, where they seed arrays derived from this one (e.g. the codec used by
+    /// [`Array::compact`]/[`Array::compact_with`]) and steer reads, e.g.
+    /// [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list. The block
+    /// shape is ignored, as a plain view has no blocks: pass it to [`Array::compact_with`] instead.
     pub fn plain_ndarray_view_with<D2>(
         arr: ndarray::ArrayView<'a, T, D2>,
         params: ArrayParams,
@@ -392,12 +376,13 @@ impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
     }
 }
 impl<ET> Array<Plain<&(), ET>> {
-    /// Create a [`Plain`] array from a raw pointer, shape, and byte strides, borrowing from an external
-    /// allocation.
+    /// Create a [`Plain`] array from a raw pointer, shape, and byte strides, borrowing from an
+    /// external allocation.
     ///
-    /// No element data is copied. The resulting array shares memory with the external allocation and is valid for its
-    /// lifetime `'a`. The buffer may be laid out in any order (C-contiguous, Fortran-contiguous, transposed, sliced
-    /// with gaps, etc.), and neither `data_ptr` nor `strides` need be aligned to `dtype.alignment()`.
+    /// No element data is copied: the resulting array shares memory with the external allocation.
+    /// The buffer may be laid out in any order (C-contiguous, Fortran-contiguous, transposed,
+    /// sliced with gaps, etc.), and neither `data_ptr` nor `strides` need be aligned to
+    /// `dtype.alignment()`.
     ///
     /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
     /// buffers as `Array`, for example to participate in math operations with compressed arrays.
@@ -406,14 +391,12 @@ impl<ET> Array<Plain<&(), ET>> {
     ///
     /// * `data_ptr` - pointer to the first element.
     /// * `shape` - number of elements along each dimension.
-    /// * `strides` - the array element strides in **bytes units**. Must have the same length as `shape`.
+    /// * `strides` - the element strides in bytes. Must have the same length as `shape`.
     /// * `dtype` - element type descriptor; used for itemsize.
-    /// * `params` - this arg never changes how the plain buffer is stored - a `Plain` array is always an
-    ///   uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
-    ///   storage spec, where they (a) seed arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
-    ///   though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
+    /// * `params` - never change how the data is stored: a `Plain` array is always an uncompressed,
+    ///   zero-copy view. They are recorded in the storage spec, where they seed arrays derived from
+    ///   this one (e.g. the codec used by [`Array::compact`]/[`Array::compact_with`]) and steer
+    ///   reads, e.g. [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list.
     ///   The block shape is ignored, as a plain view has no blocks: pass it to
     ///   [`Array::compact_with`] instead.
     ///
@@ -421,8 +404,8 @@ impl<ET> Array<Plain<&(), ET>> {
     ///
     /// The caller must ensure:
     /// * `data_ptr` is a valid, non-dangling pointer for the lifetime of the returned `Array`.
-    /// * The memory region reachable via `data_ptr` and `strides` is valid to read for all index combinations in
-    ///   `0..shape[d]` on each dimension `d`.
+    /// * The memory region reachable via `data_ptr` and `strides` is valid to read for all index
+    ///   combinations in `0..shape[d]` on each dimension `d`.
     /// * Elements accessed by the data pointer must be valid for the specified `dtype`.
     /// * Every byte from the first to the last element (the strided span, gaps between elements
     ///   included) lies in one allocation, and none of it is written, or borrowed through a

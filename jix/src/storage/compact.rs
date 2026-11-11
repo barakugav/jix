@@ -26,22 +26,20 @@ use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dim
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
-/// The array data is divided into fixed-size nd-blocks and each block is independently
-/// compressed. All compressed bytes are held in a heap-allocated buffer owned by
-/// this struct.
+/// The array data is divided into fixed-size nd-blocks, each compressed independently, and the
+/// compressed bytes are held in a heap buffer owned by this struct.
 ///
 /// The type parameter **`ET: ElementType`** is the compile-time element type, either
-/// [`Ty<T>`](crate::Ty) (element type known at compile time) or [`TypeDyn`](crate::TypeDyn)
-/// (runtime only). Arrays constructed from typed sources carry `Ty<_>` automatically; arrays
-/// loaded from disk carry `TypeDyn`. Use [`Array::into_typed`](crate::Array::into_typed) to assert
-/// a concrete element type and go from `TypeDyn` to `Ty<T>`.
+/// [`Ty<T>`](crate::Ty) (known at compile time) or [`TypeDyn`](crate::TypeDyn) (runtime only).
+/// Arrays built from typed sources carry `Ty<_>`; arrays loaded from disk carry `TypeDyn`. Use
+/// [`Array::into_typed`](crate::Array::into_typed) to go from `TypeDyn` to `Ty<T>`.
 ///
 /// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray), [`Array::compact`](crate::Array::compact)
 /// and their variants or by deserializing an archive file. The memory-mapped equivalent is [`CompactMmap`].
 ///
 /// # Block codec pipeline
 ///
-/// Each block of array data is encoded through a two-stage pipeline before being stored:
+/// Each block is encoded through a two-stage pipeline before being stored:
 ///
 /// ```text
 /// raw block bytes
@@ -64,23 +62,20 @@ use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dim
 /// The codec, compression level, and filter pipeline are chosen at write time through
 /// [`ArrayParams`](crate::ArrayParams): [`codec`](crate::ArrayParams::codec),
 /// [`level`](crate::ArrayParams::level), and [`filters`](crate::ArrayParams::filters). They are
-/// stored alongside the data so the correct decoder is reconstructed automatically on read - readers
-/// never need to know the settings in advance.
+/// stored alongside the data, so readers never need to know them in advance.
 ///
 /// ## Filters
 ///
 /// [`Filter`](crate::Filter)s are byte-level transforms that rearrange element data into a layout
-/// that compresses more efficiently, then reverse the transform after decompression. For most
-/// numeric workloads [`Filter::ByteShuffle`](crate::Filter::ByteShuffle) is the right default.
-/// [`Filter::BitShuffle`](crate::Filter::BitShuffle) can squeeze out more compression for
-/// low-entropy data at higher CPU cost.
+/// that compresses better. [`Filter::ByteShuffle`](crate::Filter::ByteShuffle), the default, suits
+/// most numeric data; [`Filter::BitShuffle`](crate::Filter::BitShuffle) can compress low-entropy
+/// data further at higher CPU cost.
 ///
 /// ## Read context
 ///
-/// [`ReadContext`](crate::ReadContext) holds a long-lived decompressor instance and reusable scratch
-/// buffers. Create one per thread and pass it to every read call to amortize initialization overhead
-/// across many block reads. The preferred way to obtain one is
-/// [`Array::read_ctx()`](crate::Array::read_ctx).
+/// [`ReadContext`](crate::ReadContext) holds a long-lived decompressor and reusable scratch
+/// buffers. Create one per thread with [`Array::read_ctx()`](crate::Array::read_ctx) and pass it to
+/// every read, to amortize its setup across many block reads.
 pub struct Compact<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned, ET>);
 
 /// Borrowed, block-compressed nd-array storage.
@@ -94,15 +89,12 @@ pub struct CompactBorrowed<'a, ET>(
 
 /// Memory-mapped, block-compressed nd-array storage.
 ///
-/// Same layout as [`Compact`] but the compressed bytes are served from a memory-mapped file.
-/// The OS pages data into memory on demand, avoiding a full file read at open time.
-/// Arrays loaded via mmap always start as `CompactMmap<TypeDyn>` because the element type is read
-/// from the file header at runtime. The `ET` parameter carries the same semantics as in
-/// [`Compact<ET>`](Compact).
+/// Same layout as [`Compact`] (see there for details) but the compressed bytes are served from a
+/// memory-mapped file. The OS pages data into memory on demand, avoiding a full file read at open
+/// time. Arrays loaded via mmap always start as `CompactMmap<TypeDyn>`, as the element type is read
+/// from the file header at runtime.
 ///
 /// Created by [`Array::read_from_file_mmap`](crate::Array::read_from_file_mmap).
-///
-/// See [`Compact`] for more details.
 pub struct CompactMmap<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, ET>);
 macro_rules! impl_array_storage {
     ($ty:ident < $($lt:lifetime,)? ET >) => {
@@ -168,16 +160,15 @@ impl_array_storage!(CompactMmap<ET>);
 /// Bridges the nd-array world of [`ArrayStorage`] and the 1D block world of [`BlockTable`].
 /// The array's nd-blocks are stored in row-major order in the `BlockTable`: an nd-block at
 /// grid position `(b0, b1, ..., bn)` has 1D index
-/// `b0 * block_grid_shape[1] * ... * block_grid_shape[n-1] * block_grid_shape[n] + ... + bn`.
+/// `b0 * block_grid_shape[1] * ... * block_grid_shape[n] + ... + bn`.
 ///
-/// The block shape is stored in `spec` (items per dimension, not bytes). The number of blocks per
-/// dimension is `block_grid_shape[d] = ceil(shape[d] / block_shape[d])`. All blocks in the
-/// `BlockTable` are full-size: blocks at the array edge are padded, so `shape[d]` need not be a
-/// multiple of `block_shape[d]`.
+/// The number of blocks per dimension is `block_grid_shape[d] = ceil(shape[d] / block_shape[d])`.
+/// All blocks in the `BlockTable` are full-size: blocks at the array edge are padded, so `shape[d]`
+/// need not be a multiple of `block_shape[d]`.
 ///
-/// The block shape and codec params are kept in `spec` - not in `BlockTable` - so that
-/// [`ArrayStorage::spec`] can propagate them through lazy view operations and
-/// [`compact_with`](crate::Array::compact_with).
+/// The block shape (in items, not bytes) and codec params are kept in `spec` - not in
+/// `BlockTable` - so that [`ArrayStorage::spec`] can propagate them through lazy view operations
+/// and [`compact_with`](crate::Array::compact_with).
 pub(crate) struct ArrayBlockTableStorageBase<S, ET>
 where
     S: BlockTableStorage,
@@ -195,7 +186,7 @@ where
     /// Construct the nd-array layer from a pre-built `BlockTable`.
     ///
     /// The block shape resolved from `params` must match the block geometry already encoded in
-    /// `blocks`. `block_grid_shape` is derived from `shape` and the block shape.
+    /// `blocks`.
     pub(crate) fn new(blocks: BlockTable<S, ET>, shape: DimDyn, params: ArrayParams) -> Result<Self>
     where
         ET: ElementType,
@@ -271,14 +262,15 @@ where
     ///    `is_single_block` - every dimension touches exactly one block (`b_begin[d] + 1 == b_end[d]`);
     ///    `is_aligned` - `index[d]` starts and ends on block boundaries in every dimension.
     ///
-    /// 2. **Fast path (aligned single block)** - if `is_single_block && is_aligned`, the requested
-    ///    region *is* one whole block, so compute the 1D block index via row-major flattening and
-    ///    call [`BlockTable::read_block`](crate::storage::block::BlockTable::read_block) directly
-    ///    into `buf`. No temporary buffer and no copy needed.
+    /// 2. **Fast path (aligned single block)** - if `is_single_block && is_aligned` and `buf` is
+    ///    contiguous, the requested region *is* one whole block, so compute the 1D block index via
+    ///    row-major flattening and call
+    ///    [`BlockTable::read_block`](crate::storage::block::BlockTable::read_block) directly into
+    ///    `buf`. No temporary buffer and no copy needed.
     ///
-    /// 3. **Fast path (single block)** - if `is_single_block` but the region is not block-aligned,
-    ///    only one block is touched. Decompress it once into `tmp_buf`, then do a single strided
-    ///    `nd_copy` of the requested sub-region into `buf`, skipping the `NdIter` setup below.
+    /// 3. **Fast path (single block)** - otherwise, if `is_single_block`, decompress the block once
+    ///    into `tmp_buf`, then do a single strided `NdCopier` copy of the requested sub-region into
+    ///    `buf`, skipping the `NdIter` setup below.
     ///
     /// 4. **General path** - iterate over every nd-block in the touched range using `NdIter`,
     ///    extended with two side-cars:
@@ -290,15 +282,17 @@ where
     ///
     ///    \
     ///    For each block:
-    ///    - Decompress the full block into `tmp_buf` (a scratch buffer from `context`,
+    ///    - Compute `out_start`: byte offset into `buf` where this region's first element
+    ///      belongs, using the strides of `buf` and the element-space position of the active
+    ///      region relative to `index`.
+    ///    - If the block is full, `buf` is C-contiguous and the block is one contiguous run in
+    ///      it, decompress the block straight into `buf` at `out_start` and skip the steps below.
+    ///    - Otherwise decompress the full block into `tmp_buf` (a scratch buffer from `context`,
     ///      sized for one full block, reused across iterations).
     ///    - Compute `active_start`: byte offset into `tmp_buf` of the active region's first
     ///      element, using the block's row-major strides and `block_inner_offset`.
-    ///    - Compute `out_start`: byte offset into `buf` where this region's first element
-    ///      belongs, using the output array's row-major strides and the element-space
-    ///      position of the active region relative to `index`.
-    ///    - Call `nd_copy` to scatter the active sub-region from `tmp_buf` into `buf`,
-    ///      respecting both strides.
+    ///    - Copy the active sub-region from `tmp_buf` into `buf` with `NdCopier`, respecting
+    ///      both strides.
     #[inline(always)]
     fn read_data_uncached<'rd>(
         &'rd self,
@@ -656,7 +650,7 @@ mod tests {
     /// Read `index` from a compact `i32` array into a plain *contiguous* destination and compare to
     /// the source values over that range. This drives `read_data_slow`'s direct-into-`buf` path
     /// (for full blocks spanning the full output width in the inner dims) and its `tmp_buf` +
-    /// `nd_copy` fallback (for clipped/boundary blocks) - the result must be identical either way.
+    /// `NdCopier` fallback (for clipped/boundary blocks) - the result must be identical either way.
     fn check_contiguous_read(shape: &[usize], block_shape: &[u32], index: &[Range<u64>]) {
         let n: usize = shape.iter().product();
         let nd = ndarray::ArrayD::from_shape_vec(

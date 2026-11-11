@@ -207,3 +207,18 @@ Needs the maintainer:
 Docs, not fixed:
 
 - `jix/src/ops/elementwise/cast.rs:15,19` the `Cast` trait doc lines exceed 100 columns.
+
+## storage-backends
+
+Needs the maintainer:
+
+- `jix/src/storage/block.rs:337` `build_from_data` `encoder_params` arg doc ends with a bare "TODO"; intent unknown.
+- `jix/src/storage/plain.rs:35` "`ET` is inferred from the dtype argument type" is vague: ndarray constructors give `ET = Ty<T>` from the element type; for `plain_ndarray_ptr` the caller picks `ET` and it is checked at runtime against `dtype`.
+
+Docs, not fixed:
+
+- `jix/src/storage/compact.rs:37-38` doc lines over 100 columns (115, 108).
+- `jix/src/storage/compact.rs:262` doc line over 100 columns (104).
+- `jix/src/storage/block.rs:67` doc line over 100 columns (102).
+- `jix/src/storage/plain.rs:31,88,314,798` doc lines over 100 columns (101-107).
+- `jix/src/storage/compact.rs:456` plain `//` comment still says "`nd_copy` scatter"; the copy is now done by `NdCopier`.

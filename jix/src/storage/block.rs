@@ -56,11 +56,9 @@ impl BlockLocation {
 /// the codec pipeline described by `decoder_config`. All blocks are full - `nitems` must be an
 /// exact multiple of `block_size`.
 ///
-/// Internally the compressed bytes of all blocks live in a single contiguous byte buffer
-/// (`block_data`), but the blocks may be stored in any order within it. A parallel array of
-/// [`BlockLocation`] entries (`blocks_loc`) records where each block's data lives: block `i`
-/// occupies `blocks_loc[i].len` bytes of `block_data` starting at `blocks_loc[i].offset`. This enables O(1) random access to any block without
-/// scanning the compressed data.
+/// The compressed bytes of all blocks live in a single byte buffer (`block_data`), in any order.
+/// A parallel array of [`BlockLocation`] entries (`blocks_loc`) gives O(1) random access: block
+/// `i` occupies `blocks_loc[i].len` bytes of `block_data` starting at `blocks_loc[i].offset`.
 ///
 /// # Storage backends
 ///
@@ -75,7 +73,6 @@ impl BlockLocation {
 /// - `block_size > 0`
 /// - `nitems % block_size == 0`
 /// - `blocks_loc.len() == nblocks`
-/// - every block's location satisfies `offset + len <= block_data.len()`
 pub(crate) struct BlockTable<S, ET>
 where
     S: BlockTableStorage,
@@ -86,8 +83,8 @@ where
     pub(crate) nitems: u64,
     element_type: ET,
 
-    /// The number of items in each block. All blocks are full (nitems is divisible by block_size).
-    /// Note the units are items, not bytes.
+    /// The number of items (not bytes) in each block. All blocks are full (nitems is divisible by
+    /// block_size).
     pub(crate) block_size: BlockSize,
 
     decoder_config: DecoderCodecConfig,
@@ -96,22 +93,22 @@ impl<S, ET> BlockTable<S, ET>
 where
     S: BlockTableStorage,
 {
-    /// Construct a `BlockTable` from pre-encoded data, validating structural invariants.
+    /// Construct a `BlockTable` from pre-encoded data.
     ///
     /// # Arguments
     ///
     /// - `block_data` - concatenated compressed bytes for all blocks.
     /// - `blocks_loc` - one [`BlockLocation`] per block; block `i`'s compressed bytes are the `len`
-    ///   bytes of `block_data` starting at `offset` of entry `i`. Every block must satisfy
-    ///   `offset + len <= block_data.len()`; blocks need not be contiguous or in order.
+    ///   bytes of `block_data` starting at `offset` of entry `i`. Blocks need not be contiguous or
+    ///   in order. Locations are not checked here: an out-of-bounds block fails when read.
     /// - `nblocks` - number of blocks; must equal `blocks_loc.len()`.
     /// - `block_size` - number of items per block (must be `> 0`).
     /// - `decoder_config` - codec and dtype configuration used when decoding blocks.
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArgument` if:
-    /// - `block_size == 0`
+    /// Returns `InvalidArgument` if `block_size == 0`, and an error if `decoder_config.dtype` does
+    /// not match `ET`.
     pub(crate) fn new(
         block_data: S::Data<u8>,
         blocks_loc: S::Data<BlockLocation>,
@@ -184,8 +181,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns `InvalidBufferSize` if `buf` has the wrong length.
-    /// Propagates any codec error.
+    /// Returns `InvalidBufferSize` if `buf` has the wrong length, and `InvalidArchive` if the
+    /// block lies outside `block_data`. Propagates any codec error.
     #[inline]
     pub(crate) fn read_block(
         &self,
@@ -250,11 +247,11 @@ where
 }
 
 /// A sink that consumes a block table's compressed blocks one at a time and finalizes into some
-/// output - either an in-memory [`BlockTable`] ([`OwnedBlockTableBuilder`]) or bytes streamed to an
-/// archive (`BlockArchiveWriter`).
+/// output - either in memory ([`OwnedBlockTableBuilder`], turned into a [`BlockTable`] by
+/// [`into_table`](OwnedBlockTableBuilder::into_table)) or as bytes streamed to an archive
+/// (`BlockArchiveWriter`).
 pub(crate) trait BlockTableBuilder {
-    /// What [`finalize`](Self::finalize) yields. For example the built [`BlockTable`] for an
-    /// in-memory builder.
+    /// What [`finalize`](Self::finalize) yields.
     type Output;
 
     /// Append one block's compressed bytes and record its `[offset, length]` pair at logical index
@@ -268,7 +265,9 @@ pub(crate) trait BlockTableBuilder {
 
 /// In-memory implementor of [`BlockTableBuilder`].
 ///
-/// Accumulates compressed blocks into heap `Vec`s and produces a [`BlockTable<Owned>`].
+/// Accumulates compressed blocks into heap `Vec`s. [`finalize`](BlockTableBuilder::finalize)
+/// returns the builder itself; [`into_table`](Self::into_table) makes it a
+/// [`BlockTable<Owned>`].
 pub(crate) struct OwnedBlockTableBuilder {
     block_data: Vec<u8>,
     blocks_loc: Vec<BlockLocation>,
@@ -309,9 +308,8 @@ impl OwnedBlockTableBuilder {
 impl BlockTableBuilder for OwnedBlockTableBuilder {
     type Output = Self;
 
-    /// Append one compressed block's bytes - in call order, contiguously - and record its
-    /// `(offset, len)` location at `block_index`. The offset is the current end of the data buffer
-    /// and the length is `compressed.len()`.
+    /// Append `compressed` to the end of the data buffer and record its `(offset, len)` location
+    /// at `block_index`.
     fn write_compressed_block(&mut self, block_index: u64, compressed: &[u8]) -> Result<()> {
         let offset = self.block_data.len() as u64;
         self.block_data.extend_from_slice(compressed);
@@ -327,17 +325,16 @@ impl BlockTableBuilder for OwnedBlockTableBuilder {
 impl<ET> BlockTable<Owned, ET> {
     /// Build a `BlockTable` by encoding raw item bytes in one shot.
     ///
-    /// Splits `data` into chunks of `block_size * dtype.itemsize()` bytes, compresses each
-    /// chunk with `encoder`, and returns the fully constructed table.
-    /// This is the single-call alternative to the incremental [`OwnedBlockTableBuilder`].
+    /// Splits `data` into blocks of `block_size * dtype.itemsize()` bytes and compresses each with
+    /// `encoder_params`. This is the single-call alternative to the incremental
+    /// [`OwnedBlockTableBuilder`].
     ///
     /// # Arguments
     ///
-    /// - `data` - contiguous raw (uncompressed) item bytes; length must equal
-    ///   `nitems * dtype.itemsize()`.
+    /// - `data` - contiguous raw (uncompressed) item bytes.
     /// - `dtype` - element type of the stored items.
     /// - `block_size` - number of items per block (must be `> 0`).
-    /// - `encoder` - codec pipeline (filters + compressor) applied to each block. TODO
+    /// - `encoder_params` - codec pipeline (filters + compressor) applied to each block. TODO
     ///
     /// # Errors
     ///
@@ -415,10 +412,9 @@ impl<ET> BlockTable<Owned, ET> {
     }
 }
 
-/// Abstraction over the backing storage of a [`BlockTable`]'s byte arrays.
+/// Abstraction over the backing storage of a [`BlockTable`]'s arrays (`block_data`, `blocks_loc`).
 ///
-/// The associated type `Data<T>` determines how a typed array is held in memory.
-/// Three implementations are provided:
+/// The associated type `Data<T>` determines how a typed array is held in memory:
 /// - [`Owned`] - heap-allocated `Vec<T>`; owns its data.
 /// - [`Borrowed<'a>`] - a borrowed slice `&'a [T]`; zero-copy view into existing memory.
 /// - [`Mmap`] - memory-mapped file via [`MmapData<T>`]; the `Arc<Mmap>` keeps the mapping
