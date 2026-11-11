@@ -100,11 +100,8 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
         unsafe { self.set_len(len + 1) };
     }
 
-    /// Shortens the vector, keeping the first `len` elements and dropping
-    /// the rest.
-    ///
-    /// If `len` is greater than the vector's current length this has no
-    /// effect.
+    /// Shortens the vector, keeping the first `new_len` elements and dropping
+    /// the rest. No effect if `new_len` is not less than the current length.
     #[inline]
     pub fn truncate(&mut self, new_len: usize) {
         let len = self.len();
@@ -129,14 +126,9 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
         unsafe { self.as_mut_ptr().add(index) }
     }
 
-    /// Insert `element` at position `index`.
+    /// Insert `element` at position `index`, shifting up all elements after it.
     ///
-    /// Shift up all elements after `index`.
-    ///
-    /// It is an error if the index is greater than the length or if the
-    /// arrayvec is full.
-    ///
-    /// ***Panics*** if the array is full or the `index` is out of bounds.
+    /// ***Panics*** if the vector is full or `index` is greater than the length.
     #[inline]
     #[track_caller]
     pub fn insert(&mut self, index: usize, element: T) {
@@ -360,9 +352,6 @@ where
     }
 }
 
-/// Extend the `ArrayVec` with an iterator.
-///
-/// ***Panics*** if extending the vector exceeds its capacity.
 impl<T, const CAP: usize> Extend<T> for ArrayVec<T, CAP> {
     /// Extend the `ArrayVec` with an iterator.
     ///
@@ -384,10 +373,10 @@ fn extend_panic() -> ! {
 impl<T, const CAP: usize> ArrayVec<T, CAP> {
     /// Extend the arrayvec from the iterable.
     ///
-    /// ## Safety
+    /// # Safety
     ///
-    /// Unsafe because if CHECK is false, the length of the input is not checked.
-    /// The caller must ensure the length of the input fits in the capacity.
+    /// If `CHECK` is false, the length of the input is not checked: the caller must ensure
+    /// it fits in the remaining capacity.
     #[inline]
     #[track_caller]
     pub(super) unsafe fn extend_from_iter<I, const CHECK: bool>(&mut self, iterable: I)
@@ -465,9 +454,6 @@ unsafe fn raw_ptr_add<T>(ptr: *mut T, offset: usize) -> *mut T {
     }
 }
 
-/// Create an `ArrayVec` from an iterator.
-///
-/// ***Panics*** if the number of elements in the iterator exceeds the arrayvec's capacity.
 impl<T, const CAP: usize> iter::FromIterator<T> for ArrayVec<T, CAP> {
     /// Create an `ArrayVec` from an iterator.
     ///
@@ -613,7 +599,7 @@ where
 }
 
 impl<T, const CAP: usize> Default for ArrayVec<T, CAP> {
-    /// Return an empty array
+    /// Return an empty vector
     #[inline]
     fn default() -> ArrayVec<T, CAP> {
         ArrayVec::new()

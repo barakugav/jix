@@ -6,20 +6,19 @@ use crate::cpu_cache::CACHE_LINE_SIZE;
 use crate::dtype::Alignment;
 use crate::RawAlignedBytes;
 
-/// A pool of aligned bytes buffers.
+/// A pool of aligned byte buffers.
 ///
-/// Many components of a storage system (byte shuffle, bit shuffle, arithmetic lazy ops storage views, etc.)
-/// need temporary working memory. Allocating fresh buffers on every block is expensive, so
-/// `BufferPool` keeps a small free list per alignment class and returns previously allocated
-/// buffers when possible.
+/// Byte shuffle, bit shuffle, lazy op storages and others need temporary working memory.
+/// Allocating fresh buffers on every block is expensive, so `BufferPool` keeps a small free list
+/// per alignment class and returns previously allocated buffers when possible.
 ///
-/// Buffers are vended as [`PoolBuf`] RAII guards. When a `PoolBuf` is dropped, its underlying
-/// allocation is pushed back into the pool for reuse. The pool keeps bare allocations (pointer and
-/// capacity): the contents are scratch, so there is no length to track or bytes to preserve.
+/// Buffers are vended as [`PoolBuf`] RAII guards, which push their allocation back into the pool
+/// on drop. The pool keeps bare allocations (pointer and capacity): the contents are scratch, so
+/// there is no length to track or bytes to preserve.
 ///
-/// The pool is not thread-safe, it is intended to be owned and used by a single thread.
+/// The pool is not thread-safe: it is owned and used by a single thread.
 pub(crate) struct BufferPool {
-    /// Free list for alignments <= CACHE_LINE_SIZE; all buffers are allocated at CACHE_LINE_SIZE-byte alignment.
+    /// Free list for alignments <= CACHE_LINE_SIZE, all allocated at CACHE_LINE_SIZE alignment.
     align_standard: UnsafeCell<Vec<RawAlignedBytes>>,
     /// Free lists for alignments > CACHE_LINE_SIZE, sorted by alignment value.
     align_other: UnsafeCell<Vec<(Alignment, Vec<RawAlignedBytes>)>>,
@@ -32,12 +31,11 @@ impl BufferPool {
         }
     }
 
-    /// Borrows a buffer of `size` bytes with at least `alignment` byte alignment.
+    /// Borrows a buffer of at least `size` uninitialized bytes, aligned to at least `alignment`.
     ///
-    /// Returns a [`PoolBuf`] guard over at least `size` uninitialized bytes. The buffer is popped
-    /// from the free list when one is available and large enough; otherwise a fresh allocation is
-    /// made (a popped buffer that is too small is freed, not grown, so its stale bytes are never
-    /// copied). The allocation is returned to the pool when the `PoolBuf` is dropped.
+    /// The buffer is popped from the free list when one is available and large enough; otherwise
+    /// a fresh allocation is made (a popped buffer that is too small is freed, not grown, so its
+    /// stale bytes are never copied).
     pub(crate) fn get(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
         let (pool, pool_align) = self.get_pool(alignment);
         let pool = unsafe { &mut *pool };

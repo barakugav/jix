@@ -118,3 +118,9 @@ Docs, not fixed:
 - `jix/src/ops/transmute.rs:67`, `jix/src/ops/sub_dtype.rs:70`, `jix/src/ops/into_type.rs:65`, `jix/src/ops/maybe_compact.rs:43` `new_array` doc lines exceed 100 columns.
 - `jix/src/ops/transmute.rs:19`, `jix/src/ops/transmute.rs:124`, `jix/src/ops/transmute.rs:143` doc lines exceed 100 columns.
 - `jix/src/ops/shape_ops/insert_dim.rs:26`, `jix/src/ops/shape_ops/remove_dim.rs:24` (and `insert_dim.rs:139`, `remove_dim.rs:133`) doc lines exceed 100 columns.
+
+## util-a
+
+Needs the maintainer:
+
+- `jix/src/util/aligned_vec/mod.rs:187` `reserve`/`reserve_exact` say they panic if the new capacity exceeds `isize::MAX` bytes; the actual limit is `isize::MAX - (align - 1)` (`jix/src/util/aligned_vec/raw.rs:256`). Minor; left as is.
