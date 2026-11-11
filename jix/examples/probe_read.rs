@@ -146,6 +146,22 @@ impl Elem for f64 {
     const IS_FLOAT: bool = true;
 }
 
+/// A 16-byte element: sixteen byte-shuffle planes.
+impl Elem for jix::scalar::Complex<f64> {
+    #[inline(always)]
+    fn from_bits(bits: u64) -> Self {
+        Self::new(
+            f64::from_bits(bits),
+            f64::from_bits(bits.rotate_left(29) ^ 0x9E3779B97F4A7C15),
+        )
+    }
+    #[inline(always)]
+    fn from_f64(x: f64) -> Self {
+        Self::new(x, -x)
+    }
+    const IS_FLOAT: bool = true;
+}
+
 fn gen_data<T: Elem>(profile: &str, n: usize, seed: u64) -> Vec<T> {
     let mut rng = Rng(seed | 1);
     let mut out = Vec::with_capacity(n);
@@ -192,6 +208,13 @@ fn gen_data<T: Elem>(profile: &str, n: usize, seed: u64) -> Vec<T> {
         other => panic!("unknown profile {other}"),
     }
     out
+}
+
+/// Bitwise equality: random bit patterns include NaNs, which `==` calls different.
+fn same_bits<T>(a: &[T], b: &[T]) -> bool {
+    let bytes =
+        |v: &[T]| unsafe { std::slice::from_raw_parts(v.as_ptr().cast::<u8>(), size_of_val(v)) };
+    bytes(a) == bytes(b)
 }
 
 fn as_bytes_mut<T>(v: &mut [T]) -> &mut [u8] {
@@ -264,7 +287,7 @@ macro_rules! run_body {
     let (out_items, times): (usize, Vec<Duration>) = match args.read.as_str() {
         "full" => {
             let times = measure(args.secs, || read_region(&ctx, &full, &mut buf));
-            assert_eq!(&buf[..], nd.as_slice().unwrap(), "full read mismatch");
+            assert!(same_bits(&buf[..], nd.as_slice().unwrap()), "full read mismatch");
             (nitems, times)
         }
         "nd" => {
@@ -287,7 +310,7 @@ macro_rules! run_body {
                 .collect::<Vec<_>>();
             let expected = nd.slice(slice_info.as_slice());
             assert!(
-                expected.iter().zip(&buf[..n]).all(|(a, b)| a == b),
+                expected.iter().zip(&buf[..n]).all(|(a, b)| same_bits(std::slice::from_ref(a), std::slice::from_ref(b))),
                 "sub read mismatch"
             );
             (n, times)
@@ -301,7 +324,7 @@ macro_rules! run_body {
             let times = measure(args.secs, || read_region(&ctx, &region, &mut buf));
             let expected = nd.index_axis(ndarray::Axis(dim), k as usize);
             assert!(
-                expected.iter().zip(&buf[..n]).all(|(a, b)| a == b),
+                expected.iter().zip(&buf[..n]).all(|(a, b)| same_bits(std::slice::from_ref(a), std::slice::from_ref(b))),
                 "{} read mismatch",
                 args.read
             );
@@ -358,7 +381,7 @@ macro_rules! run_body {
             });
             let expected = nd.view().reversed_axes();
             assert!(
-                expected.iter().zip(&buf[..]).all(|(a, b)| a == b),
+                expected.iter().zip(&buf[..]).all(|(a, b)| same_bits(std::slice::from_ref(a), std::slice::from_ref(b))),
                 "transposed read mismatch"
             );
             (nitems, times)
@@ -383,7 +406,7 @@ macro_rules! run_body {
                     .to_buf_slice(&full, as_bytes_mut(&mut buf[..]), &mctx)
                     .unwrap();
             });
-            assert_eq!(&buf[..], nd.as_slice().unwrap(), "mmap read mismatch");
+            assert!(same_bits(&buf[..], nd.as_slice().unwrap()), "mmap read mismatch");
             (nitems, times)
         }
         other => panic!("unknown read kind {other}"),
@@ -430,6 +453,7 @@ define_run!(run_i32, i32);
 define_run!(run_i64, i64);
 define_run!(run_f32, f32);
 define_run!(run_f64, f64);
+define_run!(run_c128, jix::scalar::Complex<f64>);
 
 fn main() {
     let args = parse_args();
@@ -439,6 +463,7 @@ fn main() {
         "i64" => run_i64(&args),
         "f32" => run_f32(&args),
         "f64" => run_f64(&args),
+        "c128" => run_c128(&args),
         other => panic!("unsupported dtype {other}"),
     }
 }
