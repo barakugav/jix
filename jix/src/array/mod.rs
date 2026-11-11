@@ -1,6 +1,6 @@
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::{ArrayStorageAny, View};
+use crate::storage::ArrayStorageAny;
 use crate::ReadContext;
 use crate::{ArrayAny, ArrayStorage, ElementType};
 
@@ -257,7 +257,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// Almost all ops on arrays accept ownership of an `Array<S>` rather than a reference, for
     /// example `a + b` for two arrays consumes `a` and `b`. To reuse an array without cloning its
-    /// storage, call `view` to get an `Array<View<S>>`, which doesn't own the storage but can
+    /// storage, call `view` to get an `Array<&S>`, which doesn't own the storage but can
     /// be used in any API that accepts an owned `Array<S>`.
     ///
     /// # Examples
@@ -267,14 +267,14 @@ impl<S: ArrayStorage> Array<S> {
     /// use ndarray::{array, Ix2};
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
-    /// let b = a.view().map(|x| x + 1.0f32); // Array<Map<View<Compact>>>
+    /// let b = a.view().map(|x| x + 1.0f32); // Array<Map<&Compact>>
     /// let c = a.view() * b; // we can use `a` again here because we called view()
     /// assert_eq!(c.to_ndarray::<Ix2>()?[[1, 1]], 6.17 * (6.17 + 1.0));
     /// # Ok::<(), jix::Error>(())
     /// ```
     #[inline]
-    pub fn view(&self) -> Array<View<'_, S>> {
-        Array::from_storage(View::new(self.storage()))
+    pub fn view(&self) -> Array<&S> {
+        Array::from_storage(self.storage())
     }
 
     /// Convert this array into a type-erased [`ArrayAny`](crate::ArrayAny).
