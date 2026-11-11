@@ -3,21 +3,17 @@ use crate::ops::prelude::*;
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
 ///
-/// The total number of elements must be the same: the product of the new shape must equal the
-/// product of the original shape. Output dtype equals the input dtype.
+/// The new shape must have the same total number of elements. Output dtype equals the input dtype.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Performance
 ///
-/// When the new shape is not aligned with the underlying block layout, a single read request may
-/// span many blocks that were not contiguous in the original array, causing significant
-/// read-amplification. In the worst case every element access decompresses a different block.
-///
-/// Reshape is a lazy view like every other shape operation, so a single read before discarding
-/// the result pays this cost only once. When the result will be read more than once, call
-/// [`.compact()`](Array::compact) as soon as possible to materialize a compactly-stored array
-/// with a block layout matched to the new shape.
+/// When the new shape is not aligned with the block layout, a single read may span many blocks
+/// that were not contiguous in the original array: in the worst case every element decompresses
+/// a different block. Each read of the view pays this cost again, so when the result will be read
+/// more than once, call [`.compact()`](Array::compact) first to materialize it with a block layout
+/// matched to the new shape.
 ///
 /// # Examples
 ///
@@ -419,12 +415,9 @@ where
     /// Returns a lazy view of the array with a new shape. See [`Reshape`] for details and
     /// examples.
     ///
-    /// Like the other shape operations, reshape is lazy: no data is copied at construction time.
-    /// Reshape is uniquely prone to read-amplification, though - when the new shape crosses block
-    /// boundaries of the original layout, a single read may decompress many more blocks than it
-    /// appears to touch. When the result will be read more than once, call
-    /// [`.compact()`](Array::compact) to materialize it with a block layout matched to the new
-    /// shape.
+    /// When the new shape crosses block boundaries of the original layout, a single read may
+    /// decompress many more blocks than it appears to touch. When the result will be read more
+    /// than once, call [`.compact()`](Array::compact) on it.
     ///
     /// # Panics
     ///

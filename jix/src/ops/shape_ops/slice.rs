@@ -25,9 +25,6 @@ use crate::ops::prelude::*;
 /// * `end`   - first element to exclude (negative: counted from the end; `None`: past the end).
 /// * `step`  - step between selected elements (must be >= 1).
 ///
-/// Standard Rust ranges convert to [`SliceItem`] automatically; negative-integer range
-/// literals work for Python-style end-relative indexing.
-///
 /// Slicing does not change the number of dims.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
@@ -319,10 +316,6 @@ impl_from_tuple_for_slice_spec!(I1, I2, I3, I4, I5, I6, I7 ; 7 ; 0, 1, 2, 3, 4, 
 impl_from_tuple_for_slice_spec!(I1, I2, I3, I4, I5, I6, I7, I8 ; 8 ; 0, 1, 2, 3, 4, 5, 6, 7);
 
 /// A single-dimension slice descriptor: start, end, and step.
-///
-/// `start` and `end` may be negative (Python-style: `-1` means last element).
-/// `None` means "use the natural boundary" (0 for start, dim length for end).
-/// `step` must be >= 1 (negative steps are currently not supported).
 #[derive(Debug, Clone, Copy)]
 pub struct SliceItem {
     /// First element to include. Negative values count from the end; `None` means the start of the dimension.
@@ -451,7 +444,8 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the number of items != `self.ndim()` or any `step < 1`.
+    /// Panics if the number of items != `self.ndim()`, a `start` or `end` is out of bounds,
+    /// `start` is past `end`, or any `step < 1`.
     #[track_caller]
     pub fn slice(self, slice: impl Into<SliceSpec>) -> Array<Slice<S>> {
         Slice::new_array(self, slice.into()).unwrap()
