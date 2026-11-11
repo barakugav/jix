@@ -252,3 +252,9 @@ Docs, not fixed:
 Needs the maintainer:
 
 - `jix/src/context.rs:23` The `ReadContext` doc (and its example comment) says `Array::read_ctx()` picks up the decoder parameters stored with the array, and `ReadContext::new` (`jix/src/context.rs:66-69`) says it uses the matching decoder params; but `DecoderParams` is an empty placeholder (`jix/src/codec/mod.rs:225`) and `ReadContext::new` ignores it, so `read_ctx()` is currently identical to `ReadContext::default()`. Left as stated design intent.
+
+## archive
+
+Docs, not fixed:
+
+- `jix/src/archive/block.rs:303` `BlockTable::read_content` error list omits the `InvalidArchive` raised when a section size is not a multiple of the item size (`read_section`, `jix/src/archive/block.rs:438-442`).
