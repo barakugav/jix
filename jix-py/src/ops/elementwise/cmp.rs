@@ -18,11 +18,11 @@ define_op2!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, `bool`.
     ///
-    /// For **float** types, `NaN != NaN` per IEEE 754: comparing two `NaN` values returns
-    /// `False`. For **complex** types, both the real and imaginary components must be equal.
+    /// For **float** types, `NaN == NaN` is `False` (IEEE 754). For **complex** types, both the
+    /// real and imaginary components must be equal.
     ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
+    /// **Type promotion**: operands of different dtypes are cast to a common type (Safe
+    /// casting rules), except that `u64` and signed integer dtypes are compared exactly.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
@@ -31,8 +31,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -71,8 +71,8 @@ define_op2!(
     /// For **float** types, `NaN != NaN` returns `True` per IEEE 754.
     /// For **complex** types, returns `True` if either the real or imaginary component differs.
     ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
+    /// **Type promotion**: operands of different dtypes are cast to a common type (Safe
+    /// casting rules), except that `u64` and signed integer dtypes are compared exactly.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
@@ -81,8 +81,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -115,8 +115,8 @@ define_op2!(
     /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
     /// For **bool**: `True > False`.
     ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
+    /// **Type promotion**: operands of different dtypes are cast to a common type (Safe
+    /// casting rules), except that `u64` and signed integer dtypes are compared exactly.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
@@ -125,8 +125,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -154,10 +154,10 @@ define_op2!(
     /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
     ///
     /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
-    /// For **bool**: `True >= False`, and both `True >= True` and `False >= False` hold.
+    /// For **bool**: `True > False`.
     ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
+    /// **Type promotion**: operands of different dtypes are cast to a common type (Safe
+    /// casting rules), except that `u64` and signed integer dtypes are compared exactly.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
@@ -166,8 +166,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -197,8 +197,8 @@ define_op2!(
     /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
     /// For **bool**: `False < True`.
     ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
+    /// **Type promotion**: operands of different dtypes are cast to a common type (Safe
+    /// casting rules), except that `u64` and signed integer dtypes are compared exactly.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
@@ -207,8 +207,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -236,10 +236,10 @@ define_op2!(
     /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
     ///
     /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
-    /// For **bool**: `False <= True`, and both `False <= False` and `True <= True` hold.
+    /// For **bool**: `False < True`.
     ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules) before comparison.
+    /// **Type promotion**: operands of different dtypes are cast to a common type (Safe
+    /// casting rules), except that `u64` and signed integer dtypes are compared exactly.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
@@ -248,8 +248,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///         until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -276,14 +276,10 @@ define_op2!(
 /// of `a` and `b` are within tolerance:
 /// `|a - b| <= max(atol, rtol * max(|a|, |b|))`
 ///
-/// `NaN` inputs always produce `False` because `NaN != NaN`.
+/// `NaN` is close to nothing, and an infinity only to the same infinity. For complex arrays,
+/// both the real and the imaginary parts must pass the check.
 ///
 /// Supported dtypes: `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
-///
-/// For complex arrays `rtol` must be a real scalar (applied per-component).
-/// `atol` may be either a real scalar (the same absolute tolerance is applied to both the
-/// real and imaginary components) or a complex scalar whose real and imaginary parts set
-/// independent per-component absolute tolerances.
 ///
 /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a common type
 /// (Safe casting rules) before comparison.
@@ -293,9 +289,10 @@ define_op2!(
 /// Args:
 ///     a: First operand.
 ///     b: Second operand.
-///     rtol: Relative tolerance. A real Python or NumPy scalar.
-///     atol: Absolute tolerance. A real Python or NumPy scalar, or - for complex arrays only -
-///         a complex scalar whose real/imaginary parts set the per-component tolerances.
+///     rtol: Relative tolerance, a real Python or NumPy scalar, shared by both parts of a
+///         complex value.
+///     atol: Absolute tolerance, a real Python or NumPy scalar. For complex arrays it applies
+///         to both parts, or may be a complex scalar setting one tolerance per part.
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation

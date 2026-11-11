@@ -52,3 +52,14 @@ Needs the maintainer:
 Docs, not fixed:
 
 - `jix/src/ops/elementwise/float_special.rs:112,144,149` doc example lines are 101-104 columns, over the 100-column limit.
+
+## ops-cmp
+
+Needs the maintainer:
+
+- `jix-py/src/ops/elementwise/cmp.rs:273` `jix.isclose` is called "analogous to `numpy.isclose`", but its formula `|a - b| <= max(atol, rtol * max(|a|, |b|))` differs from NumPy's `atol + rtol * |b|`; the core `ops::ApproxEq` doc warns about this, the Python doc does not.
+
+Docs, not fixed:
+
+- `jix/src/ops/elementwise/cmp.rs:634` `ApproxEq::new_array` doc line is over 100 columns (as are the macro-generated constructor docs in the same file).
+- `jix-py/src/array.rs:1269` `__ge__` one-line doc is 107 columns.
