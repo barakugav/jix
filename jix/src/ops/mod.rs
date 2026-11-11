@@ -38,9 +38,9 @@
 //!   [`ArrayParams`](crate::ArrayParams), giving full control over the new block shape. Use this
 //!   to guarantee your access pattern is well-aligned.
 //!
-//! Like every other operation, [`Array::reshape`](crate::Array::reshape) is a lazy view, so this
-//! cost is paid only when the view is read. Reshape is the operation most prone to it - call
-//! `.compact()` on the result when it will be read more than once.
+//! [`Array::reshape`](crate::Array::reshape) is the operation most prone to this cost. Being a
+//! lazy view, it pays the cost on every read, so call `.compact()` on the result when it will be
+//! read more than once.
 //!
 //! # Typed element requirements
 //!
@@ -73,7 +73,7 @@
 //! use jix::Array;
 //!
 //! let src = Array::read_from_file(Path::new("data.jix"))?;
-//! // src is Array<Compact<TypeDyn>> - ops not yet available
+//! // src is Array<Compact<TypeDyn>> - element-wise ops not yet available
 //!
 //! // validates the dtype at runtime
 //! let typed = src.into_typed::<f32>()?;
@@ -82,9 +82,11 @@
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
-//! Each op additionally requires the input element type to implement the relevant scalar trait,
-//! of [`jix::scalar`](crate::scalar). For example, `a + b` requires [`jix::scalar::Add`](crate::scalar::Add), `exp()`
-//! requires [`jix::scalar::Exp`](crate::scalar::Exp), and `sum()` requires [`jix::scalar::Sum`](crate::scalar::Sum).
+//! Each op additionally requires the input element type to implement the relevant scalar trait
+//! of [`jix::scalar`](crate::scalar). For example, `a + b` requires
+//! [`jix::scalar::Add`](crate::scalar::Add), `exp()` requires
+//! [`jix::scalar::Exp`](crate::scalar::Exp), and `sum()` requires
+//! [`jix::scalar::Sum`](crate::scalar::Sum).
 //!
 //! # Multi-array operations
 //!

@@ -125,12 +125,12 @@
 //!
 //! All operations live in [`ops`], and most are also available as methods on [`Array<S>`](Array);
 //! the multi-array ones such as [`concatenate`](ops::concatenate) and [`stack`](ops::stack) are
-//! free functions. The supported list of operations is still growing, but includes:
+//! free functions. They include:
 //!
 //! **Element-wise unary** - `neg`, `abs`, `exp`, `ln`, `sqrt`, `floor`, `ceil`,
 //! `round`, `sign`, `sin`, `cos`, `tan`, ...
 //!
-//! **Element-wise binary** (array op array, via `+`, `-`, `*`, `/`,
+//! **Element-wise binary** (array op array, via `+`, `-`, `*`, `/`, `%`,
 //! operator overloads and named methods) - `add`, `sub`, `mul`, `div`, `pow`, `minimum`,
 //! `maximum`, ...
 //!
@@ -237,8 +237,8 @@
 //! raw element bytes  ->  filters  ->  codec compress  ->  stored bytes
 //! ```
 //!
-//! On read, the pipeline is reversed. Filters include the byte-shuffle filter (enabled by default),
-//! and bit shuffle, improving the codec's ratio on numerical data.
+//! On read, the pipeline is reversed. The filters, byte shuffle (the default) and bit shuffle,
+//! improve the codec's ratio on numeric data.
 //!
 //! Codec settings are controlled via [`ArrayParams`]:
 //!
@@ -261,7 +261,7 @@
 //! cache sizes.
 //!
 //! [`ArrayParams`] groups all layout and codec settings. Unset fields are inherited from the
-//! source array when copying.
+//! source array when compacting or writing.
 //!
 //! For tile-at-a-time access patterns:
 //!
@@ -312,9 +312,8 @@
 //!
 //! # Serialization (`.jix` files)
 //!
-//! Arrays are serialized to a binary archive format (`.jix`). The format is defined with a mix of
-//! protobuf for metadata such as the array shape, block shape, codec configuration, and a raw binary
-//! format for the compressed block data.
+//! Arrays are serialized to a binary archive format (`.jix`): protobuf metadata (such as the
+//! array shape, block shape and codec configuration) followed by the raw compressed block data.
 //! Multiple arrays can be packed into a single file back-to-back; each is read back
 //! independently using a byte offset and length.
 //!
