@@ -19,10 +19,9 @@ where
 
 /// Joins a sequence of arrays along an existing dim, returned by [`concatenate`].
 ///
-/// All input arrays must have the same number of dimensions and the same size on every dim
-/// *except* the concatenation dim, along which their sizes may differ. All arrays must share the
-/// same [`Dtype`]. The output has the same number of dimensions as the inputs - unlike
-/// [`Stack`](crate::ops::Stack), which introduces a new dim.
+/// All inputs must have the same [`Dtype`], the same number of dims, and the same size on every
+/// dim except `dim`. The output has as many dims as the inputs - unlike
+/// [`Stack`](crate::ops::Stack), which adds a new dim.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -38,7 +37,7 @@ where
 /// let c = jix::ops::concatenate((a, b), 0);
 /// assert_eq!(c.shape(), &[5]);
 ///
-/// // 2-D: stack rows (dim 0)
+/// // 2-D: append rows (dim 0)
 /// let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]])?;
 /// let b = Array::compact_ndarray(&array![[5i32, 6]])?;
 /// let c = jix::ops::concatenate((a, b), 0);
@@ -187,22 +186,19 @@ where
 {
     type ElementType = ArraysT::ElementType;
 
-    /// Fills `buf` with the slice of the concatenated array described by `index`.
+    /// Reads the region `index` of the concatenated array.
     ///
-    /// `borders` stores the cumulative end positions of each sub-array along `concat_dim`, so
-    /// sub-array `i` owns the range `[borders[i-1], borders[i])` (with `borders[-1] == 0`).
-    /// Only the sub-arrays that overlap with `index[concat_dim]` are read.
+    /// `borders` holds the cumulative end of each sub-array along `concat_dim`, so sub-array `i`
+    /// owns `[borders[i-1], borders[i])` (with `borders[-1] == 0`). Only the sub-arrays that
+    /// overlap `index[concat_dim]` are read: the first is found by a linear scan for small
+    /// `borders` or a binary search otherwise, and the loop stops at the first sub-array past the
+    /// requested range. A request inside a single sub-array is forwarded to it as is.
     ///
-    /// To skip leading non-overlapping arrays efficiently, the first overlapping sub-array is
-    /// located with a linear scan for small `borders` slices or a binary search otherwise.
-    /// The loop then runs forward and breaks as soon as an array starts past the requested range.
-    /// A request that lies inside a single sub-array is forwarded to it as is.
-    ///
-    /// Each overlapping sub-array is read with a local (array-relative) index on the concat dim,
-    /// straight into its sub-region of `buf` at the right byte offset using the destination's own
-    /// strides - no temporary buffer. When `buf` is contiguous and all dimensions before `concat_dim`
-    /// have size <= 1, each sub-array's region is itself contiguous and is read into a plain contiguous
-    /// slice (the `inner_contiguous` fast path).
+    /// Each overlapping sub-array is read, with an index local to it on the concat dim, straight
+    /// into its sub-region of the output at the output's own strides - no temporary buffer. When
+    /// the output is contiguous and all requested dims before `concat_dim` have size <= 1, that
+    /// sub-region is itself contiguous and is read as a packed slice (the `inner_contiguous` fast
+    /// path).
     fn read_data<'a>(
         &'a self,
         index: &[Range<u64>],

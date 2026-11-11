@@ -295,7 +295,7 @@ where
     /// # Panics
     ///
     /// Panics if `dim >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
-    /// internal dim is required), or if `self.shape()[dim] * repeats` overflows `u64`.
+    /// internal dim is required), or if the output shape overflows.
     #[track_caller]
     pub fn repeat(self, repeats: u64, dim: usize) -> Array<Repeat<S>> {
         Repeat::new_array(self, repeats, dim).unwrap()

@@ -4,9 +4,8 @@ use crate::ops::prelude::*;
 /// [`Array::roll`](crate::Array::roll).
 ///
 /// `output[..., i, ...] = input[..., (i - shift) mod L, ...]` on the rolled dim, where
-/// `L = shape[dim]`. A positive `shift` moves elements toward larger indices (elements
-/// that fall off the end re-enter at the beginning); a negative `shift` moves them toward
-/// smaller indices. `shift` is reduced modulo `L`, so any signed integer is accepted.
+/// `L = shape[dim]`. A positive `shift` moves elements toward larger indices, a negative one
+/// toward smaller indices; any `shift` is accepted, as it is reduced modulo `L`.
 ///
 /// See also [`Flip`](crate::ops::Flip), which reverses element order along a dim
 /// without wrapping.

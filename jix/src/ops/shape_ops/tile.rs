@@ -5,9 +5,9 @@ use crate::ops::prelude::*;
 /// Replicates the array along one dim by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
 ///
-/// Output shape equals the input except `shape[dim]` becomes `shape[dim] * repeats`. The
-/// ndim is *not* extended: `dim` must satisfy `dim < ndim`. Element `i` along the
-/// output dim comes from input element `i mod L`, where `L = input.shape()[dim]`.
+/// Output shape equals the input except `shape[dim]` becomes `shape[dim] * repeats`. Element `i`
+/// along the output dim comes from input element `i mod shape[dim]`. Unlike NumPy's `tile`, no
+/// dims are added: `dim` must satisfy `dim < ndim`.
 ///
 /// This differs from [`Repeat`](crate::ops::Repeat): `tile` repeats the whole sequence
 /// `(a, b, c, ...) -> (a, b, c, a, b, c, ...)` whereas `repeat` repeats each element in
@@ -351,13 +351,10 @@ where
     /// Returns a lazy view of the array replicated `repeats` times along `dim`.
     /// See [`Tile`] for details and examples.
     ///
-    /// Unlike NumPy's `tile`, `dim` must satisfy `dim < self.ndim()`; the array is
-    /// not extended with new leading dimensions.
-    ///
     /// # Panics
     ///
     /// Panics if `dim >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
-    /// internal dim is required), or if `self.shape()[dim] * repeats` overflows `u64`.
+    /// internal dim is required), or if the output shape overflows.
     #[track_caller]
     pub fn tile(self, repeats: u64, dim: usize) -> Array<Tile<S>> {
         Tile::new_array(self, repeats, dim).unwrap()

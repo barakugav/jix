@@ -12,16 +12,14 @@ use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, ElementType};
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
 /// and [`concatenate`](crate::ops::concatenate).
 ///
-/// Arrays in the sequence may have different element types, both runtime and compile-time.
-/// The sub trait [`ArraySequenceElementType`] is used to constrain operations to sequences where
-/// all arrays share the same element type.
+/// Arrays in the sequence may have different element types, both runtime and compile-time;
+/// the subtrait [`ArraySequenceElementType`] requires a single element type.
 ///
-/// This is a sealed trait - it cannot be implemented outside this crate. It is implemented for the
-/// following collection types, covering both homogeneous and heterogeneous cases:
+/// This trait is sealed. It is implemented for:
 ///
 /// | Type | Notes |
 /// |------|-------|
-/// | `[Array<S>; N]` | Fixed-length array; all elements share the same storage type. |
+/// | `[Array<S>; N]`, `&[Array<S>; N]` | Fixed-length array; all elements share the same storage type. |
 /// | `Vec<Array<S>>` | Dynamic-length list; all elements share the same storage type. |
 /// | `&[Array<S>]` | Borrowed slice; all elements share the same storage type. |
 /// | `(Array<S0>, Array<S1>, ...)` | Tuple of up to 10 arrays; each element may have a different storage type. |
@@ -84,19 +82,16 @@ impl<T: ArraySequenceImpl> ArraySequence for T {}
 /// the element type of the result.
 pub trait ArraySequenceElementType: ArraySequence {
     /// The element type of all arrays in the sequence.
-    ///
-    /// Used in operations like `stack` and `concatenate` to ensure all arrays have the same
-    /// element type, and to determine the output element type of the result.
     type ElementType: ElementType;
 }
 
 /// Subtrait of [`ArraySequence`] for sequences whose arrays all have a statically-known element
 /// type (`Ty<T>`), so their elements can be read back as concrete Rust values.
 ///
-/// This is the bound required by element-wise multi-array operations such as
+/// Required by element-wise multi-array operations such as
 /// [`map_multiple`](crate::ops::map_multiple). Unlike [`ArraySequenceElementType`] it does *not*
-/// require every array to share the same element type, which is what allows heterogeneous tuples
-/// like `(Array<..i32..>, Array<..f32..>)` to be combined.
+/// require every array to share the same element type, so heterogeneous tuples like
+/// `(Array<..i32..>, Array<..f32..>)` can be combined.
 #[allow(private_bounds)]
 pub trait ArraySequenceTyped: ArraySequence + ArraySequenceTypedImpl<Self> {
     /// The value handed to a per-element closure: one element drawn from each array in the
@@ -119,7 +114,8 @@ pub(crate) trait ArraySequenceTypedImpl<ArraysT: ArraySequenceTyped + ?Sized = S
     ) -> Result<impl ElementwisePipelineTuple<ArraysT> + use<'a, ArraysT, Self>>;
 }
 
-/// One element drawn from each array of the sequence, grouped by position.
+/// The element-wise pipelines of a sequence's arrays, read together as one
+/// [`ItemSequence`](ArraySequenceTyped::ItemSequence) per position.
 pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> {
     /// How many operands [`operands`](Self::operands) yields across the whole sequence, if that is
     /// known at compile time.

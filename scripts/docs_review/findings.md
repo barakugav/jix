@@ -160,3 +160,16 @@ Docs, not fixed:
 
 - `jix/src/ops/shape_ops/broadcast.rs:3` "Expands an array to a larger shape": a length-1 dim may also be broadcast to length 0 (`broadcast.rs:66-67`), so the result is not always larger. Minor.
 - Pre-existing doc lines over 100 columns in the shape ops: `reshape.rs:145`, `reshape.rs:424`, `slice.rs:114`, `slice.rs:321`, `slice.rs:323`, `slice.rs:330`, `broadcast.rs:109`, `permute_dims.rs:107`, `insert_dim.rs:138`, `remove_dim.rs:132` (all under `jix/src/ops/shape_ops/`).
+
+## ops-shape-b
+
+Needs the maintainer:
+
+- `jix/src/ops/shape_ops/{concatenate,stack,flip,roll,tile,repeat}.rs` The hand-written `new_array` doc line ("Constructs an array with [`X`] storage. See the storage struct docs ...") is over 100 columns in all six files (e.g. `concatenate.rs:174`).
+- `jix/src/util/arr_sequence.rs:22-25` The `ArraySequence` table rows exceed 100 columns (tuple row pre-existing; the fixed-length row is now 105). Markdown table rows cannot be wrapped.
+
+Docs, not fixed:
+
+- `jix/src/ops/shape_ops/concatenate.rs:10` The `concatenate` Panics list does not mention overflow of the concatenated length or byte size (`concatenate.rs:111-119`).
+- `jix/src/ops/shape_ops/stack.rs:10` The `stack` Panics list does not mention the output shape/byte-size overflow check (`stack.rs:96`).
+- `jix/src/ops/shape_ops/roll.rs:215` `Array::roll` repeats the struct doc's paragraph on modulo reduction and shift direction (`roll.rs:6-8`).
