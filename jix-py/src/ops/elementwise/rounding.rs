@@ -78,9 +78,8 @@ pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///
 /// Supported dtypes: `f16`, `f32`, `f64`, and integers, which are returned as is.
 ///
-/// Ties (values exactly halfway between two integers) are broken by rounding away from
-/// zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from "round-half-to-even"
-/// (banker's rounding) used by Python's built-in `round()` and `numpy.round`.
+/// Ties round away from zero (`round(0.5) = 1.0`, `round(-0.5) = -1.0`), unlike the
+/// round-half-to-even of Python's built-in `round()` and `numpy.round`.
 ///
 /// Args:
 ///     array: Input array.

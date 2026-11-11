@@ -12,7 +12,7 @@ use crate::Array;
 define_op1!(
     /// Computes the square root of each element.
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
+    /// Supported dtypes: `f16`, `f32`, `f64`; integers and `bool` are cast to a float first.
     ///
     /// A negative input produces `NaN`.
     ///
@@ -47,7 +47,7 @@ define_op1!(
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
+    /// Supported dtypes: `f16`, `f32`, `f64`; integers and `bool` are cast to a float first.
     ///
     /// A result too large for the dtype is `inf`.
     ///
@@ -76,19 +76,15 @@ define_op1!(
     }
 );
 
-/// Computes the logarithm of each element.
+/// Computes the logarithm of each element: `ln x` by default, `ln(x) / ln(base)` with `base`.
 ///
-/// When `base` is `None` (the default), computes the natural logarithm (`ln x`).
-/// When `base` is provided, computes `log_base(x) = ln(x) / ln(base)`.
-///
-/// Supported dtypes: `f16`, `f32`, `f64`.
+/// Supported dtypes: `f16`, `f32`, `f64`; integers and `bool` are cast to a float first.
 ///
 /// Zero produces `-inf` and a negative input `NaN`.
 ///
 /// Args:
 ///     array: Input array.
-///     base: Optional logarithm base. When omitted or `None`, the natural logarithm is computed.
-///         Must be a positive number other than 1.
+///     base: Logarithm base, a positive number other than 1. `None` (the default) means `e`.
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until

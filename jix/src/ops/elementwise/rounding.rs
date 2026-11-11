@@ -23,9 +23,7 @@ pub(crate) mod traits {
     float_op1!(
         /// Rounding operation, as [`f32::round`].
         ///
-        /// Ties (values exactly halfway between two integers) are broken by rounding
-        /// away from zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from
-        /// "round-half-to-even" (banker's rounding) used in some other libraries.
+        /// Ties round away from zero (`round(0.5) = 1.0`, `round(-0.5) = -1.0`), not to even.
         Round,
         /// Round to the nearest integer.
         round,
