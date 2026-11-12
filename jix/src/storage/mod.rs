@@ -167,6 +167,7 @@ macro_rules! impl_array_storage_smart_ptr {
     };
 }
 impl_array_storage_smart_ptr!(<'s, S>, &'s S);
+impl_array_storage_smart_ptr!(<'s, S>, &'s mut S);
 impl_array_storage_smart_ptr!(<S>, Box<S>, {
     type ElementTypeChange<NewET: ElementType> = Box<S::ElementTypeChange<NewET>>;
 
