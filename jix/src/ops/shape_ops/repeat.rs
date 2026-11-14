@@ -104,7 +104,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -116,43 +116,35 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         )?;
         let _cache_scope = self.cache_scope.enter(context);
 
-        let ndim = self.new_shape.ndim();
+        let ndim = index.ndim();
         let dtype = self.dtype();
-        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
-
-        // Empty output (any zero-length range, including repeats == 0) is a no-op.
-        if out_shape.as_ref().contains(&0) {
-            return Ok(materialize_out_buf(
-                out,
-                context,
-                out_shape.as_ref(),
-                dtype,
-                self.spec().read_layout_order(),
-            ));
-        }
+        let out_shape = index.size();
+        debug_assert!(!out_shape.contains(&0));
 
         let k = self.dim as usize;
         let n = self.repeats; // n > 0
-        let s = index[k].start;
-        let e = index[k].end;
+        let s = index.start()[k];
+        let e = index.end(k);
         let g_start = s / n;
         let g_end = calc_block_end(s, e, n);
 
         // Read the inner sub-region with dim k collapsed to [g_start..g_end) as a view.
-        let inner_index = dim_arr(ndim, |d| {
+        let inner_start = dim_arr(ndim, |d| if d == k { g_start } else { index.start()[d] });
+        let inner_size = dim_arr(ndim, |d| {
             if d == k {
-                g_start..g_end
+                (g_end - g_start) as usize
             } else {
-                index[d].clone()
+                index.size()[d]
             }
         });
-        let inner_buf = self.array.read_data(inner_index.as_ref(), context, None)?;
+        let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
+        let inner_buf = self.array.read_data(&inner_index, context, None)?;
         let (inner_buf, inner_strides) = inner_buf.data();
 
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape.as_ref(),
+            out_shape,
             dtype,
             self.spec().read_layout_order(),
         );

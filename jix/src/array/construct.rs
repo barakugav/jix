@@ -1,9 +1,9 @@
-use std::ops::Range;
-
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{check_out_buf, materialize_out_buf, ArrayStorageInfo, Compact, StridedBuf};
+use crate::storage::{
+    check_out_buf, materialize_out_buf, ArrayStorageInfo, Compact, Index, StridedBuf,
+};
 use crate::util::dim_arr;
 use crate::util::iter::NdIter;
 use crate::ReadContext;
@@ -248,7 +248,7 @@ impl<T> CompactArray<T> {
             #[inline]
             fn read_data<'a>(
                 &'a self,
-                index: &[Range<u64>],
+                index: &Index<'_>,
                 context: &'a ReadContext,
                 out: Option<&'a mut StridedBuf<'_>>,
             ) -> Result<StridedBuf<'a>> {
@@ -258,13 +258,12 @@ impl<T> CompactArray<T> {
                     index,
                     self.dtype().itemsize() as usize,
                 )?;
-                let ndim = self.shape().len();
-                let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-                let read_shape_usize = dim_arr(ndim, |dim| read_shape[dim] as usize);
+                let ndim = index.ndim();
+                let read_shape = index.size();
                 let mut out = materialize_out_buf(
                     out,
                     context,
-                    read_shape_usize.as_ref(),
+                    read_shape,
                     self.dtype(),
                     self.spec().read_layout_order(),
                 );
@@ -274,11 +273,11 @@ impl<T> CompactArray<T> {
                 let dst_aligned = (out_buf.as_ptr() as usize).is_multiple_of(alignment)
                     && (out_strides.iter().all(|s| s.is_multiple_of(alignment)));
 
-                let begin = dim_arr(ndim, |dim| index[dim].start);
-                let end = dim_arr(ndim, |dim| index[dim].end);
+                let begin = index.start().to_dim_vec::<DimDyn>();
+                let end = dim_arr(ndim, |dim| index.end(dim));
                 let base = out_buf.as_mut_ptr();
                 let iter = NdIter::builder_with_begin(begin, end)
-                    .with_strides_offset_ext(out_strides.to_dim_vec::<DimDyn>(), 0)
+                    .with_strides_offset_ext(Clone::clone(out_strides), 0)
                     .build();
                 if dst_aligned {
                     iter.for_each(|idx, dst_offset| {

@@ -1,11 +1,10 @@
 use std::cell::UnsafeCell;
-use std::ops::Range;
 
 use crate::array::Array;
 use crate::dtype::Dtype;
 use crate::error::{ArithmeticStatus, Result};
 use crate::ops::{max_itemsize, n_operands_mul, n_operands_sum, ElementwisePipelineImpl, Operand};
-use crate::storage::{ArraySpec, ArrayStorageTyped, StridedBuf};
+use crate::storage::{ArraySpec, ArrayStorageTyped, Index, StridedBuf};
 use crate::ReadContext;
 use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, ElementType};
 
@@ -65,7 +64,7 @@ pub(crate) trait ArraySequenceImpl {
     fn read_data<'a>(
         &'a self,
         arr: usize,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>>;
@@ -114,7 +113,7 @@ pub(crate) trait ArraySequenceTypedImpl<ArraysT: ArraySequenceTyped + ?Sized = S
     /// sequence is walked in one pass.
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<impl ElementwisePipelineTuple<ArraysT> + use<'a, ArraysT, Self>>;
 }
@@ -167,7 +166,7 @@ where
     fn read_data<'a>(
         &'a self,
         arr: usize,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -205,7 +204,7 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>;
     #[inline]
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, S, N>> {
         let inners = self.each_ref().try_map_inline(|arr| {
@@ -265,7 +264,7 @@ where
     fn read_data<'a>(
         &'a self,
         arr: usize,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -302,7 +301,7 @@ impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [A
     #[inline]
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, 'b, S, N>> {
         let inners = self.each_ref().try_map_inline(|arr| {
@@ -362,7 +361,7 @@ where
     fn read_data<'a>(
         &'a self,
         arr: usize,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -398,7 +397,7 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
     #[inline]
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, S>> {
         let inners = self
@@ -484,7 +483,7 @@ where
     fn read_data<'a>(
         &'a self,
         arr: usize,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -520,7 +519,7 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
     #[inline]
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, 'b, S>> {
         let inners = self
@@ -608,7 +607,7 @@ macro_rules! impl_array_sequence_for_tuple {
             fn read_data<'read>(
                 &'read self,
                 arr: usize,
-                index: &[Range<u64>],
+                index: &Index<'_>,
                 context: &'read ReadContext,
                 out: Option<&'read mut StridedBuf<'_>>,
             ) -> Result<StridedBuf<'read>> {
@@ -670,7 +669,7 @@ macro_rules! impl_array_sequence_for_tuple {
             #[inline]
             fn read_as_elementwise_pipeline<'a>(
                 &'a self,
-                index: &[Range<u64>],
+                index: &Index<'_>,
                 context: &'a ReadContext,
             ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, $($S),+>> {
                 struct PipelineTupleImpl<$($D),+>($($D),+);

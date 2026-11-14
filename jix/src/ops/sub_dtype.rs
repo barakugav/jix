@@ -84,7 +84,7 @@ where
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -97,27 +97,20 @@ where
         let dst_dtype = self.dtype();
 
         let tmp = self.array.read_data(index, context, None)?;
-        let ndim = index.len();
-        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
+        let out_shape = index.size();
 
-        let empty_read = out_shape.as_ref().contains(&0);
+        debug_assert!(!out_shape.contains(&0));
         if out.is_none() {
-            if empty_read {
-                return Ok(tmp);
-            }
             return Ok(unsafe { tmp.with_offset(self.sub_field_offset as usize) });
         }
 
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape.as_ref(),
+            out_shape,
             dst_dtype,
             self.spec().read_layout_order(),
         );
-        if empty_read {
-            return Ok(out);
-        }
         let (tmp_buf, src_strides) = tmp.data();
         let src = unsafe { tmp_buf.get_unchecked(self.sub_field_offset as usize..) };
 
@@ -127,7 +120,7 @@ where
             copier.copy(
                 PtrNoalias::from_slice(src),
                 PtrMutNoalias::from_slice(out_buf),
-                out_shape.as_ref(),
+                out_shape,
                 src_strides,
                 out_strides,
                 dst_dtype,
@@ -202,6 +195,7 @@ mod tests {
     use ndarray::array;
 
     use crate::dtype::Dtyped;
+    use crate::storage::Index;
     use crate::{Array, TypeDyn};
 
     #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
@@ -257,7 +251,10 @@ mod tests {
         let ctx = ReadContext::default();
 
         // Pull path (out = None) must return a strided view of the parent buffer, not a copy.
-        let view = field.storage().read_data(&[0..3], &ctx, None).unwrap();
+        let view = field
+            .storage()
+            .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, None)
+            .unwrap();
         // The give-away that it is zero-copy: the stride is the parent struct's stride (8 bytes),
         // not the field-packed stride (4) that a materialized copy would carry.
         assert_eq!(view.strides(), &[std::mem::size_of::<Pair>()]);
@@ -271,7 +268,7 @@ mod tests {
         assert_eq!(ys, vec![10, 20, 30]);
 
         // An empty pull must not panic on the sub-field shift.
-        let empty = field.storage().read_data(&[0..0], &ctx, None).unwrap();
+        let empty = field.to_buf_strided(&[0..0], &ctx, None).unwrap();
         assert_eq!(empty.strides().len(), 1);
     }
 

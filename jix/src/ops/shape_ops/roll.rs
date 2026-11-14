@@ -83,7 +83,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
 
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -101,24 +101,19 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         let k = self.dim as usize;
         let shift = self.shift;
 
-        let ndim = index.len();
+        let ndim = index.ndim();
         let dtype = self.dtype();
         let l = self.shape()[k];
-        let s = index[k].start;
-        let e = index[k].end;
+        let s = index.start()[k];
+        let e = index.end(k);
 
         // Non-wrap: the rolled output sub-range on dim k maps to a single contiguous input
         // range. The shape of that read is exactly `out_shape`, so we read straight into buf.
         if s >= shift || e <= shift {
             let j_start = if s >= shift { s - shift } else { s + l - shift };
-            let inner_index = dim_arr(ndim, |d| {
-                if d == k {
-                    j_start..(j_start + (e - s))
-                } else {
-                    index[d].clone()
-                }
-            });
-            return self.array.read_data(inner_index.as_ref(), context, out);
+            let inner_start = dim_arr(ndim, |d| if d == k { j_start } else { index.start()[d] });
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
+            return self.array.read_data(&inner_index, context, out);
         }
 
         // Wrap: split the output along dim k into two regions and gather each into the destination.
@@ -126,37 +121,40 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         //   Region 2 (output dim-k [len1, end)): input dim-k [0, e - shift),     length len2.
         let len1 = shift - s;
         let len2 = e - shift;
-        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
+        let out_shape = index.size();
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape.as_ref(),
+            out_shape,
             dtype,
             self.spec().read_layout_order(),
         );
-        if out_shape.as_ref().contains(&0) {
-            return Ok(out);
-        }
+        debug_assert!(!out_shape.contains(&0));
         let (out_buf, out_strides) = out.data_mut();
-        let mut read_region = |inner_index: &[Range<u64>], dst_dim_k_offset: u64| -> Result<()> {
+        let mut read_region = |start_k: u64, size_k: u64, dst_dim_k_offset: u64| -> Result<()> {
+            let ndim = index.ndim();
+            let inner_start = dim_arr(ndim, |d| if d == k { start_k } else { index.start()[d] });
+            let inner_size = dim_arr(ndim, |d| {
+                if d == k {
+                    size_k as usize
+                } else {
+                    index.size()[d]
+                }
+            });
             let dst_byte_offset = dst_dim_k_offset as usize * out_strides[k];
-            let mut sub =
-                unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides) };
-            self.array.read_data(inner_index, context, Some(&mut sub))?;
+            let mut sub = unsafe {
+                StridedBuf::from_slice_mut(
+                    &mut out_buf[dst_byte_offset..],
+                    Clone::clone(out_strides),
+                )
+            };
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
+            self.array
+                .read_data(&inner_index, context, Some(&mut sub))?;
             Ok(())
         };
-
-        let inner_index_r1 = dim_arr(ndim, |d| {
-            if d == k {
-                (s + l - shift)..l
-            } else {
-                index[d].clone()
-            }
-        });
-        read_region(inner_index_r1.as_ref(), 0)?;
-
-        let inner_index_r2 = dim_arr(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
-        read_region(inner_index_r2.as_ref(), len1)?;
+        read_region(s + l - shift, len1, 0)?;
+        read_region(0, len2, len1)?;
 
         Ok(out)
     }

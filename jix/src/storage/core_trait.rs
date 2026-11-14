@@ -1,9 +1,7 @@
-use std::ops::Range;
-
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 use crate::ops::{ElementwisePipeline, OperandTyped};
-use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, StridedBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, StridedBuf};
 use crate::ReadContext;
 use crate::{ElementType, TypeDyn};
 
@@ -89,9 +87,8 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     ///
     /// # Arguments
     ///
-    /// - `index` - one half-open range per dimension (`start..end`).
-    ///   The number of ranges must equal `self.shape().len()`.
-    ///   Ranges must be within the array shape bounds; empty ranges are allowed.
+    /// - `index` - a start and a size per dimension, one per dimension of `self.shape()`.
+    ///   The region must be within the array shape bounds; an [`Index`] is never empty.
     /// - `context` - read context carrying reusable buffers and decoder state.
     /// - `out` - optional destination, as described above.
     ///
@@ -106,7 +103,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// unaligned reads, or stage the region through a buffer of your own.
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>>;
@@ -121,13 +118,13 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     ///
     /// # Arguments
     ///
-    /// Same as [`read_data`](Self::read_data): one half-open range per dimension, and the read
+    /// Same as [`read_data`](Self::read_data): the region to read, and the read
     /// context.
     #[doc(hidden)]
     #[inline]
     fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<impl ElementwisePipeline<T> + use<'a, T, Self>>
     where

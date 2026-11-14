@@ -59,14 +59,39 @@ impl NdCopier {
         &self,
         src: PtrNoalias<'_, u8>,
         dst: PtrMutNoalias<'_, u8>,
-        shape: &[usize],
-        src_strides: &[usize],
-        dst_strides: &[usize],
+        mut shape: &[usize],
+        mut src_strides: &[usize],
+        mut dst_strides: &[usize],
         dtype: &Dtype,
     ) {
-        if shape.contains(&0) {
-            return;
+        // Count the dims longer than 1, and return early for an empty region.
+        let (mut long_dims_count, mut long_dim) = (0, 0);
+        for (d, &len) in shape.iter().enumerate() {
+            match len {
+                0 => return,
+                1 => {}
+                _ => {
+                    long_dims_count += 1;
+                    long_dim = d;
+                }
+            }
         }
+        match long_dims_count {
+            0 => {
+                shape = &[1];
+                src_strides = &[0];
+                dst_strides = &[0];
+            }
+            // fast path for a single long dimension, treat as 1D
+            1 => {
+                let d = long_dim;
+                shape = &shape[d..d + 1];
+                src_strides = &src_strides[d..d + 1];
+                dst_strides = &dst_strides[d..d + 1];
+            }
+            _ => {}
+        };
+
         // Dim ordering, size-1-dim dropping and contiguous-run coalescing all happen inside
         // `nd_iter_unordered` (see `scalar_fn` / `copy_untyped`); here we just dispatch by dtype.
         let args = NdCopyArgs {

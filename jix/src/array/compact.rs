@@ -1,9 +1,11 @@
 use crate::codec::{DecoderCodecConfig, Encoder};
 use crate::error::Result;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
-use crate::storage::{ArrayBlockTableStorageBase, BlockSize, Compact, StridedBuf};
+use crate::storage::{ArrayBlockTableStorageBase, BlockSize, Compact, Index, StridedBuf};
 use crate::util::iter::NdIter;
-use crate::util::{scale_read_shape, AlignedBytes, IterExt, NdCopier, PtrMutNoalias, PtrNoalias};
+use crate::util::{
+    scale_read_shape, AlignedBytes, IterExt, NdCopier, PtrMutNoalias, PtrNoalias, SliceExt,
+};
 use crate::{
     default_logical_strides, default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec,
     Dimension, ReadContext,
@@ -258,20 +260,21 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
         .build();
     for (chunk_idx, (chunk_inner_offset, chunk_size)) in chunk_iter {
         debug_assert!(chunk_inner_offset.as_ref().iter().all(|&off| off == 0));
-        let read_range = D::vec(ndim, |dim| {
-            let start = chunk_idx[dim] * chunk_shape[dim];
-            start..start + chunk_size[dim]
-        });
+        let chunk_start = D::vec(ndim, |dim| chunk_idx[dim] * chunk_shape[dim]);
+        let chunk_size_usize = D::vec(ndim, |dim| chunk_size[dim] as usize);
         let chunk_bytes = chunk_size.as_ref().iter().product::<u64>() as usize * itemsize;
         chunk_buf.clear();
         chunk_buf.reserve(chunk_bytes);
         unsafe { chunk_buf.set_len(chunk_bytes) };
         let chunk_strides = default_strides(&chunk_size, itemsize);
         storage.read_data(
-            read_range.as_ref(),
+            &unsafe { Index::new_unchecked(chunk_start.as_ref(), chunk_size_usize.as_ref()) },
             context,
             Some(&mut unsafe {
-                StridedBuf::from_slice_mut(chunk_buf.as_mut_slice(), chunk_strides.as_ref())
+                StridedBuf::from_slice_mut(
+                    chunk_buf.as_mut_slice(),
+                    chunk_strides.as_ref().to_dim_vec::<DimDyn>(),
+                )
             }),
         )?;
         let chunk_offset_base = (0..ndim)

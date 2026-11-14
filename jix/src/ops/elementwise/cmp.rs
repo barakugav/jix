@@ -369,7 +369,7 @@ macro_rules! define_swapped_cmp {
             #[inline(always)]
             fn read_data<'a>(
                 &'a self,
-                index: &[Range<u64>],
+                index: &Index<'_>,
                 context: &'a ReadContext,
                 out: Option<&'a mut StridedBuf<'_>>,
             ) -> Result<StridedBuf<'a>> {
@@ -380,7 +380,7 @@ macro_rules! define_swapped_cmp {
             #[inline(always)]
             fn read_as_elementwise_pipeline<'a, T>(
                 &'a self,
-                index: &[Range<u64>],
+                index: &Index<'_>,
                 context: &'a ReadContext,
             ) -> Result<impl ElementwisePipeline<T> + use<'a, T, S1, S2>>
             where

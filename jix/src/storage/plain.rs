@@ -1,18 +1,14 @@
-use std::ops::Range;
-
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, ensure, error, Result};
 use crate::storage::params::{
     read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned,
 };
 use crate::storage::{
-    check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
+    check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, Index, StridedBuf, Ty, TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
 use crate::ReadContext;
-use crate::{
-    strided_span_bytes_from_iter, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, PlainArray,
-};
+use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, PlainArray};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -453,10 +449,10 @@ where
 {
     type ElementType = ET;
 
-    #[inline]
+    #[inline(always)]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         _context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -468,28 +464,24 @@ where
             self.dtype().itemsize() as usize,
         )?;
 
-        let ndim = self.shape.ndim();
-        let out_shape = (0..ndim).map(|dim| (index[dim].end - index[dim].start) as usize);
-
-        let itemsize = dtype.itemsize() as usize;
-        let src_span =
-            strided_span_bytes_from_iter(out_shape.clone(), self.strides.as_ref(), itemsize);
-
-        let src_ptr = if src_span == 0 {
-            self.data.as_ptr()
-        } else {
-            let in_offset = (0..ndim)
-                .map(|dim| index[dim].start as usize * self.strides[dim])
-                .sum::<usize>();
-            unsafe { self.data.as_ptr().add(in_offset) }
-        };
-        let src = unsafe { std::slice::from_raw_parts(src_ptr, src_span) };
+        let mut offset = 0;
+        let mut span = dtype.itemsize() as usize;
+        let dims = index
+            .start()
+            .iter()
+            .zip(index.size())
+            .zip(self.strides.as_ref());
+        for ((&start, &size), &stride) in dims {
+            debug_assert!(size != 0);
+            offset += start as usize * stride;
+            span += (size - 1) * stride;
+        }
+        let src = unsafe { std::slice::from_raw_parts(self.data.as_ptr().add(offset), span) };
 
         match out {
-            None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.as_ref()) }),
+            None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.clone()) }),
             Some(out) => {
-                let out_shape = out_shape.collect::<DimArray<_>>();
-                unsafe { out.copy_from(src, self.strides.as_ref(), out_shape.as_ref(), dtype) };
+                unsafe { out.copy_from(src, self.strides.as_ref(), index.size(), dtype) };
                 Ok(out.view_mut())
             }
         }

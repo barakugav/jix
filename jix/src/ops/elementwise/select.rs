@@ -129,7 +129,7 @@ where
     #[inline]
     fn read_data_uncached<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -144,11 +144,11 @@ where
 
         let condition_view = self.condition.read_data(index, context, None)?;
         let y_view = self.y.read_data(index, context, None)?;
-        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let out_shape = index.size();
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape.as_ref(),
+            out_shape,
             dtype,
             self.spec().read_layout_order(),
         );
@@ -160,7 +160,7 @@ where
 
         // Operand 0 is the output buffer, `x`, operand 1 `y` and operand 2 the condition mask.
         let iter = NdIterUnordered::new(
-            out_shape.as_ref(),
+            out_shape,
             // order (x, y, condition), to give priority in dims sort for x and y over condition
             [out_strides, y_strides, condition_strides],
             [
@@ -333,7 +333,7 @@ where
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -345,7 +345,7 @@ where
     #[inline]
     fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<impl ElementwisePipeline<T> + use<'a, T, SC, SX, SY>>
     where
@@ -478,7 +478,8 @@ mod tests {
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::util::ScalarStrategy;
+    use crate::storage::{split_ranges, Index};
+    use crate::util::{DimArray, ScalarStrategy};
 
     #[test]
     fn rejects_invalid_index() {
@@ -910,8 +911,13 @@ mod tests {
         bytes.fill(SENTINEL);
         {
             let dst = &mut bytes[base_offset..];
-            let mut out = unsafe { StridedBuf::from_slice_mut(dst, &byte_strides) };
-            storage.read_data(&index, &ctx, Some(&mut out)).unwrap();
+            let mut out = unsafe {
+                StridedBuf::from_slice_mut(dst, DimArray::from_slice(&byte_strides).unwrap())
+            };
+            let (start, size) = split_ranges(&index);
+            storage
+                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .unwrap();
         }
 
         // Every logical element must sit in its slot, and every byte outside a slot must still hold

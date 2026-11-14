@@ -87,7 +87,7 @@ where
     #[inline(always)]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -167,7 +167,7 @@ mod tests {
 
     use super::Transmute;
     use crate::dtype::Dtyped;
-    use crate::storage::StridedBuf;
+    use crate::storage::{Index, StridedBuf};
     use crate::util::assert_array_matches;
     use crate::ReadContext;
     use crate::{Array, ArrayStorage, Ty};
@@ -308,7 +308,10 @@ mod tests {
         let t = unsafe { arr.transmute_elements::<u32>() };
         let ctx = ReadContext::default();
 
-        let view = t.storage().read_data(&[0..3], &ctx, None).unwrap();
+        let view = t
+            .storage()
+            .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, None)
+            .unwrap();
         assert_eq!(view.data_ptr(), src.as_ptr().cast::<u8>());
         assert_eq!(view.strides(), &[size_of::<f32>()]);
     }
@@ -338,7 +341,7 @@ mod tests {
                 )
             };
             t.storage()
-                .read_data(&[0..2, 0..3], &ctx, Some(&mut out))
+                .read_data(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
         assert_eq!(

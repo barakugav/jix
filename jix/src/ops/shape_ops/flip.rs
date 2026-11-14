@@ -87,7 +87,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -102,34 +102,33 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         )?;
         let _cache_scope = self.cache_scope.enter(context);
 
-        let ndim = index.len();
+        let ndim = index.ndim();
         let dtype = self.dtype();
-        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
+        let out_shape = index.size();
 
         let shape = self.shape();
         // For each flipped dim d with requested output range [s, e), the inner range is
-        // [shape[d]-e, shape[d]-s) (same length, reversed position). Non-flipped dims pass through.
-        let inner_index = dim_arr(ndim, |d| {
+        // [shape[d]-e, shape[d]-s) (same size, reversed position). Non-flipped dims pass through.
+        let inner_start = dim_arr(ndim, |d| {
             if self.is_flipped[d] {
-                (shape[d] - index[d].end)..(shape[d] - index[d].start)
+                shape[d] - index.end(d)
             } else {
-                index[d].clone()
+                index.start()[d]
             }
         });
 
         // Read the (unreversed) inner region as a view, then mirror-copy slabs into the destination.
-        let tmp = self.array.read_data(inner_index.as_ref(), context, None)?;
+        let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
+        let tmp = self.array.read_data(&inner_index, context, None)?;
         let (tmp_buf, src_strides) = tmp.data();
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape.as_ref(),
+            out_shape,
             dtype,
             self.spec().read_layout_order(),
         );
-        if out_shape.as_ref().contains(&0) {
-            return Ok(out);
-        }
+        debug_assert!(!out_shape.contains(&0));
         let (out_buf, out_strides) = out.data_mut();
 
         // Iterate one slab at a time. Each slab is a single combination of indices on the

@@ -163,7 +163,7 @@ where
 
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -231,22 +231,23 @@ where
         //
         // For each iteration step `idx`:
         //
-        //   1. BUILD `read_range` for the underlying storage (length orig_ndim):
-        //      - Matched orig dim i  -> forward index[matched_new_dim].
+        //   1. BUILD `read_start` for the underlying storage (length orig_ndim):
+        //      - Matched orig dim i  -> forward index.start()[matched_new_dim].
         //      - Unmatched orig dim i -> convert the current unmatched-dim position
         //        to a flat element index and decompose it back into orig coords:
         //
-        //          flat = sum_{unmatched new dim d} (index[d].start + idx[d])
+        //          flat = sum_{unmatched new dim d} (index.start()[d] + idx[d])
         //                                         * new_logical_strides[d]
         //
         //          orig_coord[i] = (flat / orig_logical_strides[i]) % orig_shape[i]
-        //          read_range[i] = orig_coord[i]..(orig_coord[i] + 1)
+        //          read_start[i] = orig_coord[i]
         //
         //        This is safe because the set of unmatched new dims covers the set
         //        of unmatched orig dims in the flat index space, so `flat`
         //        decomposes cleanly using the original strides.
         //
-        //   2. READ the matched-dims block (using `read_range`) straight into `buf`
+        //   2. READ the matched-dims block (at `read_start`, of `read_size`: the requested size on
+        //      matched dims and 1 on unmatched ones) straight into `buf`
         //      at the unmatched dims' byte offset:
         //
         //          dst_byte_offset = sum_{unmatched new dim d} idx[d] * dst_strides[d]
@@ -264,17 +265,15 @@ where
         )?;
         let _cache_scope = self.cache_scope.enter(context);
         let dtype = self.dtype();
-        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let out_shape = index.size();
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape.as_ref(),
+            out_shape,
             dtype,
             self.spec().read_layout_order(),
         );
-        if out_shape.as_ref().contains(&0) {
-            return Ok(out);
-        }
+        debug_assert!(!out_shape.contains(&0));
         // Gather each matched-dims block into its unmatched-dims byte offset in the destination.
         let (out_buf, out_strides) = out.data_mut();
 
@@ -345,22 +344,25 @@ where
             if same_logical_stride[dim].is_some() {
                 1
             } else {
-                index[dim].end - index[dim].start
+                index.size()[dim] as u64
             }
+        });
+        let read_size = dim_arr(orig_ndim, |dim| match same_logical_stride_inv[dim] {
+            Some(new_dim) => index.size()[new_dim as usize],
+            None => 1,
         });
         let iter = NdIter::builder(iteration_shape).build();
         for (idx, ()) in iter {
-            let read_range = dim_arr(orig_ndim, |dim| {
+            let read_start = dim_arr(orig_ndim, |dim| {
                 if let Some(new_dim) = same_logical_stride_inv[dim] {
                     debug_assert_eq!(idx[new_dim as usize], 0);
-                    index[new_dim as usize].clone()
+                    index.start()[new_dim as usize]
                 } else {
                     let flat: u64 = (0..ndim)
                         .filter(|&dim| same_logical_stride[dim].is_none())
-                        .map(|dim| (index[dim].start + idx[dim]) * new_logical_strides[dim])
+                        .map(|dim| (index.start()[dim] + idx[dim]) * new_logical_strides[dim])
                         .sum();
-                    let orig_coord = (flat / orig_logical_strides[dim]) % orig_shape[dim];
-                    orig_coord..(orig_coord + 1)
+                    (flat / orig_logical_strides[dim]) % orig_shape[dim]
                 }
             });
 
@@ -371,10 +373,13 @@ where
                 .map(|dim| idx[dim] as usize * out_strides[dim])
                 .sum();
             let mut sub = unsafe {
-                StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], orig_strides.as_ref())
+                StridedBuf::from_slice_mut(
+                    &mut out_buf[dst_byte_offset..],
+                    Clone::clone(&orig_strides),
+                )
             };
-            self.array
-                .read_data(read_range.as_ref(), context, Some(&mut sub))?;
+            let read_index = unsafe { Index::new_unchecked(&read_start, &read_size) };
+            self.array.read_data(&read_index, context, Some(&mut sub))?;
         }
         Ok(out)
     }

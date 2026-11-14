@@ -5,8 +5,8 @@ use ndarray::IxDyn;
 
 use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
-use crate::storage::Compact;
-use crate::util::AlignedBytes;
+use crate::storage::{Compact, Index};
+use crate::util::{AlignedBytes, DimArray};
 use crate::{Array, ArrayParams, ArrayStorage, CompactArray, Ty, TypeDyn};
 
 // ---------------------------------------------------------------------------
@@ -1407,10 +1407,7 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
     let shape = storage.shape().to_vec();
     let ndim = shape.len();
     let full = shape.iter().map(|&len| 0..len).collect::<Vec<_>>();
-    let mut invalid = vec![
-        full.iter().cloned().chain([0..1]).collect::<Vec<_>>(),
-        vec![0..1; crate::NDIM_MAX + 1],
-    ];
+    let mut invalid = vec![full.iter().cloned().chain([0..1]).collect::<Vec<_>>()];
     if ndim > 0 {
         invalid.push(full[..ndim - 1].to_vec());
     }
@@ -1451,7 +1448,21 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
 
     let ctx = ReadContext::default();
     for index in invalid {
-        let err = storage.read_data(&index, &ctx, None).err();
+        // A reversed range or an empty region cannot be an `Index`; the storage must reject the rest
+        let read = |out: Option<&mut StridedBuf>| {
+            if index.iter().any(|r| r.start > r.end) {
+                crate::error::bail!(InvalidIndex, "reversed range");
+            }
+            let start = index.iter().map(|r| r.start).collect::<Vec<_>>();
+            let size = index
+                .iter()
+                .map(|r| (r.end - r.start) as usize)
+                .collect::<Vec<_>>();
+            storage
+                .read_data(&Index::new(&start, &size)?, &ctx, out)
+                .map(drop)
+        };
+        let err = read(None).err();
         let err = err.unwrap_or_else(|| panic!("pull read of {index:?} for {shape:?} succeeded"));
         assert_eq!(
             err.kind(),
@@ -1459,8 +1470,10 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
             "pull {index:?} for {shape:?}: {err}"
         );
 
-        let mut out = unsafe { StridedBuf::from_slice_mut(&mut dst, &dst_strides) };
-        let err = storage.read_data(&index, &ctx, Some(&mut out)).err();
+        let mut out = unsafe {
+            StridedBuf::from_slice_mut(&mut dst, DimArray::from_slice(&dst_strides).unwrap())
+        };
+        let err = read(Some(&mut out)).err();
         let err = err.unwrap_or_else(|| panic!("push read of {index:?} for {shape:?} succeeded"));
         assert_eq!(
             err.kind(),

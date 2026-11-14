@@ -121,7 +121,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -132,11 +132,13 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
             self.dtype().itemsize() as usize,
         )?;
         let ndim = self.dims.as_ref().len();
+        let inner_start = dim_arr(ndim, |d| index.start()[self.inv_dims[d] as usize]);
+        let inner_size = dim_arr(ndim, |d| index.size()[self.inv_dims[d] as usize]);
         let _cache_scope = self.cache_scope.enter(context);
         unsafe {
             read_data_and_map_strides(
                 &self.array,
-                dim_arr(ndim, |d| index[self.inv_dims[d] as usize].clone()).as_ref(),
+                &Index::new_unchecked(&inner_start, &inner_size),
                 context,
                 out,
                 |inner_strides| dim_arr(ndim, |i| inner_strides[self.dims[i] as usize]),

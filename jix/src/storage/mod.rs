@@ -44,7 +44,6 @@
 //! - [`Compact`] - the main block-compressed storage backend.
 //! - [`Plain`] - adapter for non-compressed data.
 
-use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -76,6 +75,10 @@ pub(crate) mod scalar;
 
 mod buf;
 pub use buf::*;
+
+mod index;
+pub(crate) use index::split_ranges;
+pub use index::Index;
 
 mod info;
 pub use info::*;
@@ -115,7 +118,7 @@ macro_rules! impl_array_storage_smart_ptr {
             #[inline(always)]
             fn read_data<'a>(
                 &'a self,
-                index: &[Range<u64>],
+                index: &crate::storage::Index<'_>,
                 context: &'a crate::ReadContext,
                 out: Option<&'a mut StridedBuf<'_>>,
             ) -> crate::error::Result<StridedBuf<'a>> {
@@ -126,7 +129,7 @@ macro_rules! impl_array_storage_smart_ptr {
             #[inline(always)]
             fn read_as_elementwise_pipeline<'a, T>(
                 &'a self,
-                index: &[Range<u64>],
+                index: &crate::storage::Index<'_>,
                 context: &'a crate::ReadContext,
             ) -> crate::error::Result<impl ElementwisePipeline<T> + use<'a, T, S>>
             where
@@ -164,6 +167,7 @@ macro_rules! impl_array_storage_smart_ptr {
     };
 }
 impl_array_storage_smart_ptr!(<'s, S>, &'s S);
+impl_array_storage_smart_ptr!(<'s, S>, &'s mut S);
 impl_array_storage_smart_ptr!(<S>, Box<S>, {
     type ElementTypeChange<NewET: ElementType> = Box<S::ElementTypeChange<NewET>>;
 
@@ -184,7 +188,7 @@ impl ArrayStorage for &dyn ArrayStorage {
     #[inline(always)]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &crate::storage::Index<'_>,
         context: &'a crate::ReadContext,
         out: Option<&'a mut crate::storage::StridedBuf<'_>>,
     ) -> crate::error::Result<crate::storage::StridedBuf<'a>> {
@@ -227,7 +231,7 @@ macro_rules! impl_array_storage_forward {
         #[inline(always)]
         fn read_data<'rd>(
             &'rd self,
-            index: &[::core::ops::Range<u64>],
+            index: &crate::storage::Index<'_>,
             context: &'rd crate::ReadContext,
             out: Option<&'rd mut crate::storage::StridedBuf<'_>>,
         ) -> crate::error::Result<crate::storage::StridedBuf<'rd>> {
@@ -238,7 +242,7 @@ macro_rules! impl_array_storage_forward {
         #[inline(always)]
         fn read_as_elementwise_pipeline<$lifetime, $generic>(
             &$lifetime self,
-            index: &[::core::ops::Range<u64>],
+            index: &crate::storage::Index<'_>,
             context: &$lifetime crate::ReadContext,
         ) -> crate::error::Result<impl crate::ops::ElementwisePipeline<$generic> + use<$lifetime, $generic, $($generics),*>>
         where

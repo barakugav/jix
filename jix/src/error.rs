@@ -9,6 +9,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use crate::dtype::Dtype;
+use crate::storage::Index;
 use crate::{Dimension, IterExt, NDIM_MAX};
 
 /// Error type for all operations in this crate.
@@ -221,44 +222,62 @@ fn get_range_fail_ndim(shape_ndim: usize, index_ndim: usize) -> Result<()> {
     )
 }
 
+#[cold]
+#[inline(never)]
+fn check_range_fail(dim: usize, range: Range<u64>, dim_size: u64) -> Result<()> {
+    bail!(
+        InvalidIndex,
+        "Index range {range:?} out of bounds for shape dimension {dim} with size {dim_size}"
+    )
+}
+
 #[inline]
-pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()> {
-    if shape.len() != index.len() {
-        return get_range_fail_ndim(shape.len(), index.len());
+pub(crate) fn check_ranges(shape: &[u64], ranges: &[Range<u64>]) -> Result<()> {
+    check_ndim(ranges.len())?;
+    if shape.len() != ranges.len() {
+        return get_range_fail_ndim(shape.len(), ranges.len());
     }
-    for (dim, (&dim_size, range)) in shape.iter().zip(index).enumerate() {
-        #[cold]
-        #[inline(never)]
-        fn check_range_fail(dim: usize, range: &Range<u64>, dim_size: u64) -> Result<()> {
-            bail!(
-                InvalidIndex,
-                "Index range {range:?} out of bounds for shape dimension {dim} with size {dim_size}"
-            )
-        }
+    for (dim, (range, &dim_size)) in ranges.iter().zip(shape).enumerate() {
         if range.start > range.end || range.end > dim_size {
-            return check_range_fail(dim, range, dim_size);
+            return check_range_fail(dim, range.clone(), dim_size);
+        }
+    }
+    ensure!(
+        ranges
+            .iter()
+            .all(|r| usize::try_from(r.end - r.start).is_ok()),
+        InvalidShapeOperation,
+        "read region {ranges:?} does not fit in memory"
+    );
+    Ok(())
+}
+
+#[inline]
+pub(crate) fn check_get_range(shape: &[u64], index: &Index<'_>) -> Result<()> {
+    if shape.len() != index.ndim() {
+        return get_range_fail_ndim(shape.len(), index.ndim());
+    }
+    for (dim, &dim_size) in shape.iter().enumerate() {
+        if index.end(dim) > dim_size {
+            return check_range_fail(dim, index.start()[dim]..index.end(dim), dim_size);
         }
     }
     Ok(())
 }
 
 #[inline]
-pub(crate) fn check_get_range_ndim(shape: &[u64], index: &[Range<u64>]) -> Result<()> {
-    if shape.len() != index.len() {
-        return get_range_fail_ndim(shape.len(), index.len());
+pub(crate) fn check_get_range_ndim(shape: &[u64], index: &Index<'_>) -> Result<()> {
+    if shape.len() != index.ndim() {
+        return get_range_fail_ndim(shape.len(), index.ndim());
     }
     Ok(())
 }
 
 #[inline]
-pub(crate) fn check_get_buffer_size(
-    index: &[Range<u64>],
-    dtype: &Dtype,
-    buf: &mut [u8],
-) -> Result<()> {
-    let required_size = index
+pub(crate) fn check_get_buffer_size(size: &[usize], dtype: &Dtype, buf: &mut [u8]) -> Result<()> {
+    let required_size = size
         .iter()
-        .map(|r| r.end - r.start)
+        .map(|&n| n as u64)
         .chain([dtype.itemsize() as u64])
         .try_shape_product();
     let buf_len = buf.len();
@@ -269,31 +288,31 @@ pub(crate) fn check_get_buffer_size(
         fn buffer_size_fail(
             buf_len: usize,
             required_size: u64,
-            index: &[Range<u64>],
+            size: &[usize],
             dtype: &Dtype,
         ) -> Result<()> {
             bail!(
                 InvalidBufferSize,
-                "Unexpected buffer size {buf_len} requested index {index:?} with dtype {dtype} (required size: {required_size})"
+                "Unexpected buffer size {buf_len} for a region of size {size:?} with dtype {dtype} (required size: {required_size})"
             );
         }
-        return buffer_size_fail(buf_len, required_size.unwrap_or(u64::MAX), index, dtype);
+        return buffer_size_fail(buf_len, required_size.unwrap_or(u64::MAX), size, dtype);
     }
     Ok(())
 }
 
 #[inline]
-pub(crate) fn check_region_size(index: &[Range<u64>], itemsize: usize) -> Result<()> {
+pub(crate) fn check_region_size(size: &[usize], itemsize: usize) -> Result<()> {
     if cfg!(target_pointer_width = "32") {
-        let bytes = index
+        let bytes = size
             .iter()
-            .map(|r| (r.end - r.start).max(1))
+            .map(|&n| n.max(1) as u64)
             .chain([itemsize as u64])
             .try_shape_product();
         ensure!(
             bytes.is_some_and(|b| b <= isize::MAX as u64),
             InvalidShapeOperation,
-            "read region {index:?} with itemsize {itemsize} does not fit in memory"
+            "read region of size {size:?} with itemsize {itemsize} does not fit in memory"
         );
     }
     Ok(())
@@ -431,12 +450,19 @@ mod tests {
     #[test]
     #[allow(clippy::reversed_empty_ranges)]
     fn check_get_range_validates_ndim_and_bounds() {
-        assert!(check_get_range(&[2, 3], &[0..2, 0..3]).is_ok());
-        for bad in [&[0..2][..], &[0..2, 0..4], &[2..0, 0..3]] {
+        assert!(check_ranges(&[2, 3], &[0..2, 0..3]).is_ok());
+        for bad in [&[0..2][..], &[0..2, 0..4], &[2..1, 0..3]] {
+            let kind = check_ranges(&[2, 3], bad).unwrap_err().kind();
+            assert_eq!(kind, ErrorKind::InvalidIndex, "{bad:?}");
+        }
+
+        let check = |start, size| check_get_range(&[2, 3], &Index::new(start, size).unwrap());
+        assert!(check(&[0, 0], &[2, 3]).is_ok());
+        for (start, size) in [(&[0][..], &[2][..]), (&[0, 0], &[2, 4]), (&[0, 1], &[2, 3])] {
             assert_eq!(
-                check_get_range(&[2, 3], bad).unwrap_err().kind(),
+                check(start, size).unwrap_err().kind(),
                 ErrorKind::InvalidIndex,
-                "{bad:?}"
+                "{start:?} {size:?}"
             );
         }
     }
@@ -444,20 +470,18 @@ mod tests {
     #[test]
     #[cfg(target_pointer_width = "32")]
     fn read_region_must_fit_in_memory_on_32_bit() {
-        assert!(check_region_size(&[0..1 << 30, 0..1], 1).is_ok());
-        assert!(check_region_size(&[0..1 << 30, 0..2], 1).is_err());
-        let mut buf = [];
-        assert!(check_get_buffer_size(&[0..1 << 32], &u8::DTYPE, &mut buf).is_err());
+        assert!(check_region_size(&[1 << 30, 1], 1).is_ok());
+        assert!(check_region_size(&[1 << 30, 2], 1).is_err());
+        assert!(check_ranges(&[1 << 33], &[0..1 << 32]).is_err());
     }
 
     #[test]
     fn check_get_buffer_size_requires_the_exact_size() {
         let dtype = i32::DTYPE;
-        let index = [0..2, 0..3];
         let mut exact = [0u8; 24];
-        assert!(check_get_buffer_size(&index, &dtype, &mut exact).is_ok());
+        assert!(check_get_buffer_size(&[2, 3], &dtype, &mut exact).is_ok());
         let mut short = [0u8; 8];
-        let err = check_get_buffer_size(&index, &dtype, &mut short).unwrap_err();
+        let err = check_get_buffer_size(&[2, 3], &dtype, &mut short).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidBufferSize);
     }
 }

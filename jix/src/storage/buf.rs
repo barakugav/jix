@@ -1,9 +1,9 @@
-use std::ops::Range;
 use std::sync::Arc;
 
 use crate::buf_pool::{PoolBuf, PoolBufShared};
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_region_size, ensure, Result};
+use crate::storage::Index;
 use crate::util::{
     default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
     RawAlignedBytes, SliceExt,
@@ -83,7 +83,7 @@ impl<'a> StridedBuf<'a> {
     ) -> Self {
         let span = strided_span_bytes(shape, strides, itemsize);
         let slice = unsafe { std::slice::from_raw_parts(data, span) };
-        unsafe { Self::from_slice(slice, strides) }
+        unsafe { Self::from_slice(slice, strides.to_dim_vec::<DimDyn>()) }
     }
 
     /// Build a writable [`StridedBuf`] from a raw base pointer and byte `strides`.
@@ -106,7 +106,7 @@ impl<'a> StridedBuf<'a> {
     ) -> Self {
         let span = strided_span_bytes(shape, strides, itemsize);
         let slice = unsafe { std::slice::from_raw_parts_mut(data, span) };
-        unsafe { Self::from_slice_mut(slice, strides) }
+        unsafe { Self::from_slice_mut(slice, strides.to_dim_vec::<DimDyn>()) }
     }
 
     /// Create a read-only view into `data` with the given (byte) `strides`.
@@ -116,10 +116,10 @@ impl<'a> StridedBuf<'a> {
     /// The caller must ensure every strided access implied by `strides` (and the read shape it will
     /// be used with) stays in bounds of `data`.
     #[inline]
-    pub(crate) unsafe fn from_slice(data: &'a [u8], strides: &[usize]) -> Self {
+    pub(crate) unsafe fn from_slice(data: &'a [u8], strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::Slice(data),
-            strides: strides.to_dim_vec::<DimDyn>(),
+            strides,
         }
     }
 
@@ -132,10 +132,10 @@ impl<'a> StridedBuf<'a> {
     /// The caller should ensure there are no two different indices that result in the same byte
     /// offset (i.e. the strides must not alias, broadcasted dimensions are not allowed).
     #[inline]
-    pub(crate) unsafe fn from_slice_mut(data: &'a mut [u8], strides: &[usize]) -> Self {
+    pub(crate) unsafe fn from_slice_mut(data: &'a mut [u8], strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::SliceMut(data),
-            strides: strides.to_dim_vec::<DimDyn>(),
+            strides,
         }
     }
 
@@ -145,10 +145,10 @@ impl<'a> StridedBuf<'a> {
     ///
     /// Same contract as [`from_slice_mut`](Self::from_slice_mut).
     #[inline]
-    pub(crate) unsafe fn from_pool(buf: PoolBuf<'a>, strides: &[usize]) -> Self {
+    pub(crate) unsafe fn from_pool(buf: PoolBuf<'a>, strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::PoolBufMut { buf, offset: 0 },
-            strides: strides.to_dim_vec::<DimDyn>(),
+            strides,
         }
     }
 
@@ -158,10 +158,10 @@ impl<'a> StridedBuf<'a> {
     ///
     /// Same contract as [`from_slice`](Self::from_slice).
     #[inline]
-    pub(crate) unsafe fn from_shared(buf: PoolBufShared<'a>, strides: &[usize]) -> Self {
+    pub(crate) unsafe fn from_shared(buf: PoolBufShared<'a>, strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::Shared { buf, offset: 0 },
-            strides: strides.to_dim_vec::<DimDyn>(),
+            strides,
         }
     }
 
@@ -205,7 +205,7 @@ impl<'a> StridedBuf<'a> {
     }
 
     #[inline]
-    pub(crate) fn data(&self) -> (&[u8], &[usize]) {
+    pub(crate) fn data(&self) -> (&[u8], &DimArray<usize>) {
         let data = match &self.data {
             StridedBufData::Slice(s) => *s,
             StridedBufData::SliceMut(s) => &**s,
@@ -213,12 +213,12 @@ impl<'a> StridedBuf<'a> {
             | StridedBufData::PoolBufMut { buf, offset } => &buf.as_slice()[*offset..],
             StridedBufData::Shared { buf, offset } => &buf.as_slice()[*offset..],
         };
-        (data, self.strides.as_ref())
+        (data, &self.strides)
     }
 
     #[inline]
-    pub(crate) fn data_mut(&mut self) -> (&mut [u8], &[usize]) {
-        let strides = self.strides.as_ref();
+    pub(crate) fn data_mut(&mut self) -> (&mut [u8], &DimArray<usize>) {
+        let strides = &self.strides;
         let data = match &mut self.data {
             StridedBufData::SliceMut(s) => &mut **s,
             StridedBufData::PoolBufMut { buf, offset } => &mut buf.as_mut_slice()[*offset..],
@@ -254,8 +254,8 @@ impl<'a> StridedBuf<'a> {
     /// Same contract as [`from_slice_mut`](Self::from_slice_mut) for a writable buffer. Call
     /// [`make_readonly`](Self::make_readonly) first to relabel with aliasing strides.
     #[inline]
-    pub(crate) unsafe fn with_strides(mut self, strides: &[usize]) -> Self {
-        self.strides = strides.to_dim_vec::<DimDyn>();
+    pub(crate) unsafe fn with_strides(mut self, strides: DimArray<usize>) -> Self {
+        self.strides = strides;
         self
     }
 
@@ -349,78 +349,85 @@ impl<'a> StridedBuf<'a> {
     }
 }
 
+#[inline(always)]
 pub(crate) fn check_out_buf(
     out: Option<&StridedBuf>,
     array_shape: &[u64],
-    index: &[Range<u64>],
+    index: &Index<'_>,
     itemsize: usize,
 ) -> Result<()> {
     check_get_range(array_shape, index)?;
-    check_region_size(index, itemsize)?;
+    check_region_size(index.size(), itemsize)?;
     match out {
         Some(out) => check_out_buf_impl(out, index, itemsize),
         None => Ok(()),
     }
 }
 
-pub(crate) fn check_out_buf_impl(
-    out: &StridedBuf,
-    index: &[Range<u64>],
-    itemsize: usize,
-) -> Result<()> {
+#[inline]
+pub(crate) fn check_out_buf_dims(out: &StridedBuf, ndim: usize) -> Result<()> {
     ensure!(
-        out.strides().len() == index.len(),
+        out.strides().len() == ndim,
         InvalidArgument,
         "out buffer has {} strides but array has {} dimensions",
         out.strides().len(),
-        index.len()
+        ndim
     );
     ensure!(
         out.is_writable(),
         InvalidArgument,
         "out buffer must be a writable destination, not a read-only view"
     );
-    if index.iter().all(|r| r.end > r.start) {
-        let strides = out.strides();
-        let d_len_stride = |d: usize| (index[d].end - index[d].start, strides[d] as u64);
+    Ok(())
+}
 
-        /// The span in bytes of a region with `(len, stride)` dims.
-        ///
-        /// If every dim steps past the span of the previous dims, meaning no two elements overlap,
-        /// returns Some(span), otherwise None.
-        fn disjoint_span(dims: impl Iterator<Item = (u64, u64)>, itemsize: usize) -> Option<u64> {
-            dims.filter(|&(len, _)| len > 1)
-                .try_fold(itemsize as u64, |span, (len, stride)| {
-                    (stride >= span).then(|| stride.saturating_mul(len - 1).saturating_add(span))
-                })
-        }
+#[inline(never)]
+pub(crate) fn check_out_buf_impl(
+    out: &StridedBuf,
+    index: &Index<'_>,
+    itemsize: usize,
+) -> Result<()> {
+    check_out_buf_dims(out, index.ndim())?;
+    let size = index.size();
+    let strides = out.strides();
+    let d_len_stride = |d: usize| (size[d] as u64, strides[d] as u64);
 
-        let mut span = None;
-        if span.is_none() {
-            // common fast path, strides decrease with the dim
-            span = disjoint_span((0..index.len()).rev().map(d_len_stride), itemsize);
-        }
-        if span.is_none() {
-            // general path, sort dims by stride
-            let mut dims = dim_arr(index.len(), d_len_stride);
-            dims.sort_unstable_by_key(|&(_len, stride)| stride);
-            span = disjoint_span(dims.into_iter(), itemsize);
-        }
-
-        let Some(span) = span else {
-            bail!(
-                InvalidArgument,
-                "out buffer strides {:?} overlap over the region {index:?}",
-                out.strides()
-            );
-        };
-        let len = out.data().0.len();
-        ensure!(
-            span <= len as u64,
-            InvalidArgument,
-            "out buffer of {len} bytes is too small for the region {index:?}"
-        );
+    /// The span in bytes of a region with `(len, stride)` dims.
+    ///
+    /// If every dim steps past the span of the previous dims, meaning no two elements overlap,
+    /// returns Some(span), otherwise None.
+    fn disjoint_span(dims: impl Iterator<Item = (u64, u64)>, itemsize: usize) -> Option<u64> {
+        dims.filter(|&(len, _)| len > 1)
+            .try_fold(itemsize as u64, |span, (len, stride)| {
+                (stride >= span).then(|| stride.saturating_mul(len - 1).saturating_add(span))
+            })
     }
+
+    let mut span = None;
+    if span.is_none() {
+        // common fast path, strides decrease with the dim
+        span = disjoint_span((0..size.len()).rev().map(d_len_stride), itemsize);
+    }
+    if span.is_none() {
+        // general path, sort dims by stride
+        let mut dims = dim_arr(size.len(), d_len_stride);
+        dims.sort_unstable_by_key(|&(_len, stride)| stride);
+        span = disjoint_span(dims.into_iter(), itemsize);
+    }
+
+    let Some(span) = span else {
+        bail!(
+            InvalidArgument,
+            "out buffer strides {:?} overlap over the region {index:?}",
+            out.strides()
+        );
+    };
+    let len = out.data().0.len();
+    ensure!(
+        span <= len as u64,
+        InvalidArgument,
+        "out buffer of {len} bytes is too small for the region {index:?}"
+    );
     Ok(())
 }
 
@@ -441,7 +448,7 @@ pub(crate) fn materialize_out_buf<'a>(
                 dtype.alignment(),
             );
             let strides = strides_for_layout_order(out_shape, itemsize, layout_order);
-            unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
+            unsafe { StridedBuf::from_pool(buf, strides) }
         }
     }
 }
@@ -463,7 +470,7 @@ pub(crate) fn materialize_out_buf<'a>(
 #[inline]
 pub(crate) unsafe fn read_data_and_map_strides<'a>(
     inner: &'a impl ArrayStorage,
-    inner_index: &[Range<u64>],
+    inner_index: &Index<'_>,
     context: &'a ReadContext,
     mut out: Option<&'a mut StridedBuf<'_>>,
     inner2outer_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
@@ -476,7 +483,7 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
     let mut inner_out = out.as_deref_mut().map(|o| {
         let (data, strides) = o.data_mut();
         let inner_strides = outer2inner_strides_fn(strides);
-        unsafe { StridedBuf::from_slice_mut(data, inner_strides.as_ref()) }
+        unsafe { StridedBuf::from_slice_mut(data, inner_strides) }
     });
 
     let inner_buf = inner.read_data(inner_index, context, inner_out.as_mut())?;
@@ -491,7 +498,7 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
         // lives for 'a - so extending its lifetime to 'a is sound.
         let inner_buf = unsafe { std::mem::transmute::<StridedBuf<'_>, StridedBuf<'a>>(inner_buf) };
         let out_strides = inner2outer_strides_fn(inner_buf.strides());
-        Ok(unsafe { inner_buf.with_strides(out_strides.as_ref()) })
+        Ok(unsafe { inner_buf.with_strides(out_strides) })
     }
 }
 
@@ -560,29 +567,5 @@ mod tests {
                 .to_buf_strided(&[0..2, 0..4], &ctx2, Some(&mut out))
                 .is_err());
         }
-    }
-
-    #[test]
-    #[allow(clippy::reversed_empty_ranges)]
-    fn reversed_index_is_invalid_index() {
-        let ctx = ReadContext::default();
-        let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]]).unwrap();
-        let kind = |s: &dyn crate::ArrayStorage| {
-            s.read_data(&[0..2, 2..1], &ctx, None)
-                .err()
-                .map(|e| e.kind())
-        };
-        assert_eq!(
-            kind((-a.view()).storage()),
-            Some(crate::error::ErrorKind::InvalidIndex)
-        );
-        assert_eq!(
-            kind((a.view() + a.view()).storage()),
-            Some(crate::error::ErrorKind::InvalidIndex)
-        );
-        assert_eq!(
-            kind(a.view().permute_dims(&[1, 0]).storage()),
-            Some(crate::error::ErrorKind::InvalidIndex)
-        );
     }
 }

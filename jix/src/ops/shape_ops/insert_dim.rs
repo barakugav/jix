@@ -142,17 +142,13 @@ where
     }
 
     #[inline(always)]
-    fn transform_index(&self, index: &[Range<u64>]) -> Result<Option<DimArray<Range<u64>>>> {
+    fn transform_index(&self, index: &Index<'_>) -> Result<(DimArray<u64>, DimArray<usize>)> {
         check_get_range(self.shape(), index)?;
-
-        for index in index.iter() {
-            if index.start == index.end {
-                return Ok(None);
-            }
-        }
-        Ok(Some(dim_arr(self.original_dims.as_ref().len(), |dim| {
-            index[self.original_dims[dim] as usize].clone()
-        })))
+        debug_assert!(!index.size().contains(&0));
+        let dims = self.original_dims.as_ref();
+        let start = dim_arr(dims.len(), |d| index.start()[dims[d] as usize]);
+        let size = dim_arr(dims.len(), |d| index.size()[dims[d] as usize]);
+        Ok((start, size))
     }
 }
 
@@ -166,7 +162,7 @@ where
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -176,27 +172,16 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let dtype = self.dtype();
-        let Some(inner_index) = self.transform_index(index)? else {
-            // Empty read
-            let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
-            return Ok(materialize_out_buf(
-                out,
-                context,
-                out_shape.as_ref(),
-                dtype,
-                self.spec().read_layout_order(),
-            ));
-        };
+        let (inner_start, inner_size) = self.transform_index(index)?;
         let _cache_scope = self.cache_scope.as_ref().map(|s| s.enter(context));
         unsafe {
             read_data_and_map_strides(
                 &self.array,
-                inner_index.as_ref(),
+                &Index::new_unchecked(&inner_start, &inner_size),
                 context,
                 out,
                 |inner_strides| {
-                    let mut s = dim_arr(index.len(), |_| 0usize);
+                    let mut s = dim_arr(index.ndim(), |_| 0usize);
                     for (d, &o) in self.original_dims.as_ref().iter().enumerate() {
                         s[o as usize] = inner_strides[d];
                     }
