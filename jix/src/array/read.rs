@@ -3,8 +3,8 @@ use std::ops::Range;
 
 use crate::error::{check_get_buffer_size, check_ranges, check_region_size, ensure, Result};
 use crate::storage::{
-    check_out_buf_dims, check_out_buf_impl, materialize_out_buf, split_ranges, ArrayStorageTyped,
-    Index, StridedBuf,
+    alloc_out_buf, check_out_buf_dims, check_out_buf_impl, split_ranges, ArrayStorageExt,
+    ArrayStorageTyped, Index, OutBuf, StridedBuf,
 };
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, cast_slice_mut, default_strides_slice, dim_arr, IterExt};
@@ -36,8 +36,8 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The returned array is not necessarily C-contiguous. The implementation is free to
     /// choose any memory layout it prefers, mostly for performance reasons.
-    /// If you need a specific memory layout, use [`to_buf_strided`](Array::to_buf_strided) and
-    /// pass a pre-allocated buffer with your specified strides.
+    /// If you need a specific memory layout, use [`to_buf_strided_into`](Array::to_buf_strided_into)
+    /// and pass a pre-allocated buffer with your specified strides.
     ///
     /// # Errors
     ///
@@ -95,8 +95,8 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The returned array is not necessarily C-contiguous. The implementation is free to
     /// choose any memory layout it prefers, mostly for performance reasons.
-    /// If you need a specific memory layout, use [`to_buf_strided`](Array::to_buf_strided) and
-    /// pass a pre-allocated buffer with your specified strides.
+    /// If you need a specific memory layout, use [`to_buf_strided_into`](Array::to_buf_strided_into)
+    /// and pass a pre-allocated buffer with your specified strides.
     ///
     /// # When to use this over [`to_ndarray`](Array::to_ndarray)
     ///
@@ -262,7 +262,7 @@ impl<S: ArrayStorage> Array<S> {
                 ))
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides) };
-            self.to_buf_strided_checked(&index, context, Some(&mut out))?;
+            self.to_buf_strided_checked(&index, context, OutBuf::push(&mut out))?;
         }
         Ok(unsafe { array.assume_init() })
     }
@@ -271,13 +271,13 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
     /// [`to_ndarray_sub`](Array::to_ndarray_sub), and the contiguous-destination shorthand for
-    /// [`to_buf_strided`](Array::to_buf_strided). `buf` must be exactly
+    /// [`to_buf_strided_into`](Array::to_buf_strided_into). `buf` must be exactly
     /// `index.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes; it needs no
     /// particular alignment. Elements are written in row-major (C-contiguous) order.
     ///
-    /// Use [`to_buf_strided`](Array::to_buf_strided) instead when the destination is strided rather
-    /// than packed, or when you would rather let the array hand back a buffer of its own than
-    /// allocate one up front.
+    /// Use [`to_buf_strided_into`](Array::to_buf_strided_into) instead when the destination is
+    /// strided rather than packed, or [`to_buf_strided`](Array::to_buf_strided) when you would rather
+    /// let the array hand back a buffer of its own than allocate one up front.
     ///
     /// # Errors
     ///
@@ -321,49 +321,39 @@ impl<S: ArrayStorage> Array<S> {
         let index = unsafe { Index::new_unchecked(&start, &size) };
         check_region_size(&size, dtype.itemsize() as usize)?;
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides) };
-        self.to_buf_strided_checked(&index, context, Some(&mut out))?;
+        self.to_buf_strided_checked(&index, context, OutBuf::push(&mut out))?;
         Ok(())
     }
 
-    /// Read a rectangular sub-region and return it as a [`StridedBuf`].
+    /// Read a rectangular sub-region into a buffer of the array's choosing.
     ///
-    /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub), and [`to_buf_slice`](Array::to_buf_slice).
+    /// The array returns the cheapest buffer it can - a borrowed view into its own memory (possibly
+    /// with broadcast/stride-0 dims), or a freshly materialized one - and picks the strides. The
+    /// bytes are only contiguous if the strides say so.
     ///
-    /// The two modes mirror NumPy's `out=`:
-    /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
-    ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized one -
-    ///   and picks the strides. The bytes are only contiguous if the strides say so.
-    /// - **push** (`out` is `Some(dst)`): the region must be written into `dst` at `dst`'s own strides,
-    ///   and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have one stride
-    ///   per array dimension.
-    ///
-    /// For the common case of pushing into a packed row-major buffer, use
-    /// [`to_buf_slice`](Array::to_buf_slice), which builds the `StridedBuf` for you.
+    /// Use [`to_buf_strided_into`](Array::to_buf_strided_into) instead to write the region into a
+    /// destination of your own.
     ///
     /// # Arguments
     ///
     /// - `index` - one half-open range (`start..end`) per dimension, within the array bounds.
     /// - `context` - read context carrying reusable buffers and decoder state.
-    /// - `out` - optional destination, as described above.
     ///
     /// # Alignment
     ///
-    /// No alignment is required of `out`, and none is promised of the returned buffer: it is only
-    /// as aligned as its backing bytes happen to be. Reinterpret the bytes as typed values with
-    /// unaligned reads, or stage the region through a buffer of your own.
+    /// No alignment is promised of the returned buffer: it is only as aligned as its backing bytes
+    /// happen to be. Reinterpret the bytes as typed values with unaligned reads, or stage the region
+    /// through a buffer of your own.
     ///
     /// # Errors
     ///
     /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` has the wrong number
     ///   of ranges, or a range starts after it ends or reaches past the array shape.
-    /// - [`InvalidArgument`](crate::error::ErrorKind::InvalidArgument) - `out` is a read-only
-    ///   view, or has a number of strides that does not match the array's dimensions.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
     ///
-    /// Pull mode - the array hands back a buffer, and the strides say where each element lives:
+    /// The array hands back a buffer, and the strides say where each element lives:
     ///
     /// ```
     /// use jix::Array;
@@ -372,7 +362,7 @@ impl<S: ArrayStorage> Array<S> {
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
     /// let context = a.read_ctx();
     ///
-    /// let buf = a.to_buf_strided(&[1..3, 1..3], &context, None)?;
+    /// let buf = a.to_buf_strided(&[1..3, 1..3], &context)?;
     /// let (base, strides) = (buf.data_ptr(), buf.strides());
     /// let mut values = Vec::new();
     /// for i in 0..2 {
@@ -384,8 +374,49 @@ impl<S: ArrayStorage> Array<S> {
     /// assert_eq!(values, vec![5, 6, 8, 9]);
     /// # Ok::<(), jix::Error>(())
     /// ```
+    #[inline]
+    pub fn to_buf_strided<'a>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<StridedBuf<'a>> {
+        check_ranges(self.shape(), index)?;
+        let (start, size) = split_ranges(index);
+        check_region_size(&size, self.dtype().itemsize() as usize)?;
+        if size.contains(&0) {
+            return Ok(self.alloc_empty(&size, context));
+        }
+        let index = unsafe { Index::new_unchecked(&start, &size) };
+        let mut slot = None;
+        self.to_buf_strided_checked(&index, context, OutBuf::pull(&mut slot))?;
+        Ok(slot.expect("a pull read puts its buffer in the slot"))
+    }
+
+    /// Read a rectangular sub-region into `out`, at `out`'s own strides.
     ///
-    /// Push mode - write the region into a column-major destination of your own:
+    /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray),
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub), and [`to_buf_slice`](Array::to_buf_slice), the
+    /// shorthand for a packed row-major `out`.
+    ///
+    /// # Arguments
+    ///
+    /// - `index` - one half-open range (`start..end`) per dimension, within the array bounds.
+    /// - `out` - the destination: writable, with one stride per array dimension, and holding the
+    ///   region at its strides without overlap. No alignment is required of it.
+    /// - `context` - read context carrying reusable buffers and decoder state.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` has the wrong number
+    ///   of ranges, or a range starts after it ends or reaches past the array shape.
+    /// - [`InvalidArgument`](crate::error::ErrorKind::InvalidArgument) - `out` is a read-only
+    ///   view, has a number of strides that does not match the array's dimensions, or does not
+    ///   hold the region.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
+    ///
+    /// # Examples
+    ///
+    /// Write the region into a column-major destination:
     ///
     /// ```
     /// use jix::storage::StridedBuf;
@@ -401,63 +432,45 @@ impl<S: ArrayStorage> Array<S> {
     ///     let mut out = unsafe {
     ///         StridedBuf::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), &[2, 2], &[4, 8], 4)
     ///     };
-    ///     a.to_buf_strided(&[1..3, 1..3], &context, Some(&mut out))?;
+    ///     a.to_buf_strided_into(&[1..3, 1..3], &mut out, &context)?;
     /// }
     /// assert_eq!(dst, [5, 8, 6, 9]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     #[inline]
-    pub fn to_buf_strided<'a>(
-        &'a self,
+    pub fn to_buf_strided_into(
+        &self,
         index: &[Range<u64>],
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: &mut StridedBuf<'_>,
+        context: &ReadContext,
+    ) -> Result<()> {
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
+        let itemsize = self.dtype().itemsize() as usize;
+        check_region_size(&size, itemsize)?;
         if size.contains(&0) {
-            return self.read_empty(&size, context, out);
+            return check_out_buf_dims(out, size.len());
         }
         let index = unsafe { Index::new_unchecked(&start, &size) };
-        let itemsize = self.dtype().itemsize() as usize;
-        check_region_size(index.size(), itemsize)?;
-        if let Some(out) = out.as_deref() {
-            check_out_buf_impl(out, &index, itemsize)?;
-        }
-        self.to_buf_strided_checked(&index, context, out)
+        check_out_buf_impl(out, &index, itemsize)?;
+        self.to_buf_strided_checked(&index, context, OutBuf::push(&mut out.view_mut()))
     }
 
     #[cold]
-    fn read_empty<'a>(
-        &'a self,
-        size: &[usize],
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_region_size(size, self.dtype().itemsize() as usize)?;
-        if let Some(out) = out.as_deref() {
-            check_out_buf_dims(out, size.len())?;
-        }
+    fn alloc_empty<'a>(&'a self, size: &[usize], context: &'a ReadContext) -> StridedBuf<'a> {
         let spec = self.storage.spec();
-        let layout = spec.read_layout_order();
-        Ok(materialize_out_buf(
-            out,
-            context,
-            size,
-            self.dtype(),
-            layout,
-        ))
+        alloc_out_buf(context, size, self.dtype(), spec.read_layout_order())
     }
 
-    // Like `to_buf_strided`, for an `index` the caller checked against the shape and the region
-    // size, and an `out` that passes `check_out_buf_impl`.
-    #[inline]
+    // Like `to_buf_strided` / `to_buf_strided_into`, for an `index` the caller checked against the
+    // shape and the region size, and an `out` that passes `check_out_buf_impl`.
+    #[inline(always)]
     fn to_buf_strided_checked<'a>(
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         let dtype = self.dtype();
         let spec = self.storage.spec();
         let small_read = spec.flags().plain_read() || {
@@ -480,8 +493,8 @@ fn to_buf_strided_slow<'a, S: ArrayStorage>(
     storage: &'a S,
     index: &Index<'_>,
     context: &'a ReadContext,
-    out: Option<&'a mut StridedBuf<'_>>,
-) -> Result<StridedBuf<'a>> {
+    out: OutBuf<'_, 'a>,
+) -> Result<()> {
     // Erase the storage so the body is monomorphized once
     let storage: &dyn ArrayStorage = storage;
     to_buf_strided_slow_dyn_dispatch(storage, index, context, out)
@@ -492,8 +505,8 @@ fn to_buf_strided_slow_dyn_dispatch<'a>(
     storage: &'a dyn ArrayStorage,
     index: &Index<'_>,
     context: &'a ReadContext,
-    out: Option<&'a mut StridedBuf<'_>>,
-) -> Result<StridedBuf<'a>> {
+    out: OutBuf<'_, 'a>,
+) -> Result<()> {
     let to_ndarray_fn = match storage.shape().len() {
         0 => to_buf_strided_slow_dyn::<Dim<0>>,
         1 => to_buf_strided_slow_dyn::<Dim<1>>,
@@ -515,15 +528,15 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     storage: &'a dyn ArrayStorage,
     index: &Index<'_>,
     context: &'a ReadContext,
-    out: Option<&'a mut StridedBuf<'_>>,
-) -> Result<StridedBuf<'a>> {
+    out: OutBuf<'_, 'a>,
+) -> Result<()> {
     let shape = storage.shape();
     let ndim = index.ndim();
     let dtype = storage.dtype();
 
     let spec = storage.spec();
     let out_shape = index.size();
-    let mut out = materialize_out_buf(out, context, out_shape, dtype, spec.read_layout_order());
+    let out = out.materialize(context, out_shape, dtype, spec.read_layout_order());
     debug_assert!(!out_shape.contains(&0));
     let max_shape = D::vec(ndim, |dim| out_shape[dim] as u64);
     let read_shape = spec.read_shape_heuristic::<D>(max_shape.as_ref(), shape, dtype.itemsize());
@@ -557,9 +570,9 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
         let block_size = D::vec(ndim, |dim| block_size[dim] as usize);
         let block_index =
             unsafe { Index::new_unchecked(block_start.as_ref(), block_size.as_ref()) };
-        storage.read_data(&block_index, context, Some(&mut block_out))?;
+        storage.read_data_push(&block_index, context, &mut block_out)?;
     }
-    Ok(out)
+    Ok(())
 }
 
 impl<S: ArrayStorage> Array<S> {
@@ -767,7 +780,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // to_buf_strided - pull and push modes, over the block-splitting slow path
+    // to_buf_strided / to_buf_strided_into, over the block-splitting slow path
     // -----------------------------------------------------------------------
 
     #[test]
@@ -830,7 +843,7 @@ mod tests {
         // pull-mode buffer, which must follow it: dim 1 outermost, dim 0 contiguous.
         let f = a.view().permute_dims(&[1, 0]).flip(0);
         let ctx = f.read_ctx();
-        let buf = f.to_buf_strided(&[0..5, 0..4], &ctx, None).unwrap();
+        let buf = f.to_buf_strided(&[0..5, 0..4], &ctx).unwrap();
         assert_eq!(buf.strides(), &[4, 20]);
     }
 
@@ -852,7 +865,7 @@ mod tests {
 
         // Pull mode: the array hands back a buffer, and its strides say where each element sits.
         {
-            let buf = a.to_buf_strided(&index, &ctx, None).unwrap();
+            let buf = a.to_buf_strided(&index, &ctx).unwrap();
             let (base, strides) = (buf.data_ptr(), buf.strides());
             for r in 0..rows {
                 for c in 0..cols {
@@ -879,7 +892,7 @@ mod tests {
                     itemsize,
                 )
             };
-            a.to_buf_strided(&index, &ctx, Some(&mut out)).unwrap();
+            a.to_buf_strided_into(&index, &mut out, &ctx).unwrap();
         }
         for r in 0..rows {
             for c in 0..cols {
@@ -905,7 +918,7 @@ mod tests {
     fn to_buf_strided_empty_range() {
         let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
         let ctx = a.read_ctx();
-        let buf = a.to_buf_strided(&[1..1, 0..3], &ctx, None).unwrap();
+        let buf = a.to_buf_strided(&[1..1, 0..3], &ctx).unwrap();
         assert_eq!(buf.strides().len(), 2);
     }
 
@@ -917,14 +930,14 @@ mod tests {
         for (index, shape) in [([1..1, 0..3], [0, 3]), ([0..2, 3..3], [2, 0])] {
             let read = sum.to_ndarray_sub::<ndarray::Ix2>(&index, &ctx).unwrap();
             assert_eq!(read.shape(), shape);
-            assert!(sum.to_buf_strided(&index, &ctx, None).is_ok());
+            assert!(sum.to_buf_strided(&index, &ctx).is_ok());
             sum.to_buf_slice(&index, &mut [], &ctx).unwrap();
 
             let mut dst = [7i32; 6];
             let mut out = unsafe {
                 StridedBuf::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), &[2, 3], &[12, 4], 4)
             };
-            sum.to_buf_strided(&index, &ctx, Some(&mut out)).unwrap();
+            sum.to_buf_strided_into(&index, &mut out, &ctx).unwrap();
             assert_eq!(dst, [7; 6]);
         }
     }
@@ -946,8 +959,7 @@ mod tests {
             )
         };
         let err = a
-            .to_buf_strided(&[0..2, 0..2], &ctx, Some(&mut out))
-            .map(|_| ())
+            .to_buf_strided_into(&[0..2, 0..2], &mut out, &ctx)
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
 
@@ -961,8 +973,7 @@ mod tests {
             )
         };
         let err = a
-            .to_buf_strided(&[0..2, 0..2], &ctx, Some(&mut out))
-            .map(|_| ())
+            .to_buf_strided_into(&[0..2, 0..2], &mut out, &ctx)
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
     }
@@ -989,8 +1000,7 @@ mod tests {
             )
         };
         let err = a
-            .to_buf_strided(&[0..8, 0..8], &ctx, Some(&mut out))
-            .map(|_| ())
+            .to_buf_strided_into(&[0..8, 0..8], &mut out, &ctx)
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
         assert_eq!(dst, [0; 32]);

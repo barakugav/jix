@@ -87,8 +87,8 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         if let Some(dtype) = ET::DTYPE {
             debug_assert_eq!(self.inner.dtype(), &dtype);
         }

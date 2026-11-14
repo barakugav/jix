@@ -4,7 +4,7 @@ use crate::array::Array;
 use crate::dtype::Dtype;
 use crate::error::{ArithmeticStatus, Result};
 use crate::ops::{max_itemsize, n_operands_mul, n_operands_sum, ElementwisePipelineImpl, Operand};
-use crate::storage::{ArraySpec, ArrayStorageTyped, Index, StridedBuf};
+use crate::storage::{ArraySpec, ArrayStorageTyped, Index, OutBuf};
 use crate::ReadContext;
 use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, ElementType};
 
@@ -66,8 +66,8 @@ pub(crate) trait ArraySequenceImpl {
         arr: usize,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>>;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()>;
     fn shape(&self, arr: usize) -> &[u64];
     fn dtype(&self, arr: usize) -> &Dtype;
     fn spec(&self, arr: usize) -> ArraySpec<'_>;
@@ -168,8 +168,8 @@ where
         arr: usize,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         self[arr].storage.read_data(index, context, out)
     }
 
@@ -266,8 +266,8 @@ where
         arr: usize,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         self[arr].storage.read_data(index, context, out)
     }
 
@@ -363,8 +363,8 @@ where
         arr: usize,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         self[arr].storage.read_data(index, context, out)
     }
 
@@ -485,8 +485,8 @@ where
         arr: usize,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         self[arr].storage.read_data(index, context, out)
     }
 
@@ -609,8 +609,8 @@ macro_rules! impl_array_sequence_for_tuple {
                 arr: usize,
                 index: &Index<'_>,
                 context: &'read ReadContext,
-                out: Option<&'read mut StridedBuf<'_>>,
-            ) -> Result<StridedBuf<'read>> {
+                out: OutBuf<'_, 'read>,
+            ) -> Result<()> {
                 match arr {
                     $($idx => self.$idx.storage.read_data(index, context, out),)+
                     _ => out_of_bounds_array_index(arr),

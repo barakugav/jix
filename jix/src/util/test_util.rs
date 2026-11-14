@@ -5,7 +5,7 @@ use ndarray::IxDyn;
 
 use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
-use crate::storage::{Compact, Index};
+use crate::storage::{ArrayStorageExt, Compact, Index};
 use crate::util::{AlignedBytes, DimArray};
 use crate::{Array, ArrayParams, ArrayStorage, CompactArray, Ty, TypeDyn};
 
@@ -1458,9 +1458,11 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
                 .iter()
                 .map(|r| (r.end - r.start) as usize)
                 .collect::<Vec<_>>();
-            storage
-                .read_data(&Index::new(&start, &size)?, &ctx, out)
-                .map(drop)
+            let index = Index::new(&start, &size)?;
+            match out {
+                None => storage.read_data_pull(&index, &ctx).map(drop),
+                Some(out) => storage.read_data_push(&index, &ctx, &mut out.view_mut()),
+            }
         };
         let err = read(None).err();
         let err = err.unwrap_or_else(|| panic!("pull read of {index:?} for {shape:?} succeeded"));

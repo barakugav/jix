@@ -1,7 +1,9 @@
 use crate::codec::{DecoderCodecConfig, Encoder};
 use crate::error::Result;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
-use crate::storage::{ArrayBlockTableStorageBase, BlockSize, Compact, Index, StridedBuf};
+use crate::storage::{
+    ArrayBlockTableStorageBase, ArrayStorageExt, BlockSize, Compact, Index, StridedBuf,
+};
 use crate::util::iter::NdIter;
 use crate::util::{
     scale_read_shape, AlignedBytes, IterExt, NdCopier, PtrMutNoalias, PtrNoalias, SliceExt,
@@ -267,15 +269,15 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
         chunk_buf.reserve(chunk_bytes);
         unsafe { chunk_buf.set_len(chunk_bytes) };
         let chunk_strides = default_strides(&chunk_size, itemsize);
-        storage.read_data(
+        storage.read_data_push(
             &unsafe { Index::new_unchecked(chunk_start.as_ref(), chunk_size_usize.as_ref()) },
             context,
-            Some(&mut unsafe {
+            &mut unsafe {
                 StridedBuf::from_slice_mut(
                     chunk_buf.as_mut_slice(),
                     chunk_strides.as_ref().to_dim_vec::<DimDyn>(),
                 )
-            }),
+            },
         )?;
         let chunk_offset_base = (0..ndim)
             .map(|dim| chunk_idx[dim] * chunk_shape_in_blocks[dim] * block_grid_lstrides[dim])

@@ -608,9 +608,9 @@ impl Array {
             return Ok(NumpyArray(np_arr));
         }
 
-        // `to_buf_strided` wants one stride per *array* dimension, but an integer index item drops
-        // its dim from `np_arr`. Put a stride back for each dropped dim. Reading them back off
-        // `np_arr` keeps one source of truth, whether it is the caller's `out=` or our own
+        // `to_buf_strided_into` wants one stride per *array* dimension, but an integer index item
+        // drops its dim from `np_arr`. Put a stride back for each dropped dim. Reading them back
+        // off `np_arr` keeps one source of truth, whether it is the caller's `out=` or our own
         // allocation above.
         let strides = {
             let mut np_strides = np_arr.strides()[..out_shape.len()].iter().rev();
@@ -669,8 +669,7 @@ impl Array {
                 )
             };
             self.arr
-                .to_buf_strided(&index, context, Some(&mut out))
-                .map(drop)
+                .to_buf_strided_into(&index, &mut out, context)
                 .into_py_result()
         })?;
 

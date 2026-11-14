@@ -89,8 +89,8 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         self.array.read_data(index, context, out)
     }
 
@@ -163,6 +163,7 @@ where
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
+    use crate::storage::ArrayStorageExt;
     use ndarray::Ix1;
 
     use super::Transmute;
@@ -170,7 +171,7 @@ mod tests {
     use crate::storage::{Index, StridedBuf};
     use crate::util::assert_array_matches;
     use crate::ReadContext;
-    use crate::{Array, ArrayStorage, Ty};
+    use crate::{Array, Ty};
 
     /// An 8-byte struct dtype, to check that a transmute handles a composite element type and not
     /// just scalars.
@@ -310,7 +311,7 @@ mod tests {
 
         let view = t
             .storage()
-            .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, None)
+            .read_data_pull(&Index::new(&[0], &[3]).unwrap(), &ctx)
             .unwrap();
         assert_eq!(view.data_ptr(), src.as_ptr().cast::<u8>());
         assert_eq!(view.strides(), &[size_of::<f32>()]);
@@ -341,7 +342,7 @@ mod tests {
                 )
             };
             t.storage()
-                .read_data(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, Some(&mut out))
+                .read_data_push(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
         assert_eq!(

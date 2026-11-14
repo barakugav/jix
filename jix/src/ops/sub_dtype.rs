@@ -86,47 +86,39 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let dst_dtype = self.dtype();
+        let tmp = self.array.read_data_pull(index, context)?;
 
-        let tmp = self.array.read_data(index, context, None)?;
-        let out_shape = index.size();
+        match out.0 {
+            OutBufInner::Pull(slot) => {
+                write_out_buf_slot(slot, unsafe {
+                    tmp.with_offset(self.sub_field_offset as usize)
+                });
+            }
+            OutBufInner::Push(out) => {
+                let out_shape = index.size();
+                debug_assert!(!out_shape.contains(&0));
+                let (tmp_buf, src_strides) = tmp.data();
+                let src = unsafe { tmp_buf.get_unchecked(self.sub_field_offset as usize..) };
 
-        debug_assert!(!out_shape.contains(&0));
-        if out.is_none() {
-            return Ok(unsafe { tmp.with_offset(self.sub_field_offset as usize) });
+                let (out_buf, out_strides) = out.data_mut();
+                let copier = NdCopier::new(dst_dtype);
+                unsafe {
+                    copier.copy(
+                        PtrNoalias::from_slice(src),
+                        PtrMutNoalias::from_slice(out_buf),
+                        out_shape,
+                        src_strides,
+                        out_strides,
+                        dst_dtype,
+                    )
+                };
+            }
         }
-
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dst_dtype,
-            self.spec().read_layout_order(),
-        );
-        let (tmp_buf, src_strides) = tmp.data();
-        let src = unsafe { tmp_buf.get_unchecked(self.sub_field_offset as usize..) };
-
-        let (out_buf, out_strides) = out.data_mut();
-        let copier = NdCopier::new(dst_dtype);
-        unsafe {
-            copier.copy(
-                PtrNoalias::from_slice(src),
-                PtrMutNoalias::from_slice(out_buf),
-                out_shape,
-                src_strides,
-                out_strides,
-                dst_dtype,
-            )
-        };
-        Ok(out)
+        Ok(())
     }
 
     #[inline(always)]
@@ -192,6 +184,7 @@ where
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
+    use crate::storage::ArrayStorageExt;
     use ndarray::array;
 
     use crate::dtype::Dtyped;
@@ -238,7 +231,6 @@ mod tests {
 
     #[test]
     fn pull_returns_zero_copy_field_view() {
-        use crate::ArrayStorage;
         use crate::ReadContext;
 
         let pts = ndarray::array![
@@ -253,7 +245,7 @@ mod tests {
         // Pull path (out = None) must return a strided view of the parent buffer, not a copy.
         let view = field
             .storage()
-            .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, None)
+            .read_data_pull(&Index::new(&[0], &[3]).unwrap(), &ctx)
             .unwrap();
         // The give-away that it is zero-copy: the stride is the parent struct's stride (8 bytes),
         // not the field-packed stride (4) that a materialized copy would carry.
@@ -268,7 +260,7 @@ mod tests {
         assert_eq!(ys, vec![10, 20, 30]);
 
         // An empty pull must not panic on the sub-field shift.
-        let empty = field.to_buf_strided(&[0..0], &ctx, None).unwrap();
+        let empty = field.to_buf_strided(&[0..0], &ctx).unwrap();
         assert_eq!(empty.strides().len(), 1);
     }
 
