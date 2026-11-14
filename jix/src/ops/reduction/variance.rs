@@ -13,7 +13,7 @@ pub(crate) mod traits {
     use crate::scalar::Complex;
     use crate::util::{array2_map_inline, ArrayExt};
 
-    /// Welford accumulator used by [`Variance`]
+    /// Welford accumulator used by [`Variance`].
     #[derive(Clone, Copy)]
     pub struct VarianceState<M> {
         /// Running mean in the type-specific accumulator domain.
@@ -294,12 +294,11 @@ define_reduction_op!(
     /// The variance is real-valued and its dtype matches NumPy: integer and `bool8` inputs
     /// promote to `f64`, real floats keep their width (`f16 -> f16`, `f32 -> f32`, `f64 ->
     /// f64`), and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
-    /// `Complex<f64> -> f64`), computing `E[|x - mean|^2]`.
+    /// `Complex<f64> -> f64`).
     ///
-    /// The `ddof` parameter (delta degrees of freedom) adjusts the divisor: the variance
-    /// is computed as `sum((x - mean)^2) / (n - ddof)`. Use `ddof=0` for the population
-    /// variance and `ddof=1` for the sample variance (Bessel's correction). If
-    /// `n - ddof <= 0`, the result is `NaN`.
+    /// The `ddof` parameter (delta degrees of freedom) adjusts the divisor: the variance is
+    /// `sum(|x - mean|^2) / (n - ddof)`. Use `ddof=0` for the population variance and `ddof=1`
+    /// for the sample variance (Bessel's correction). If `n - ddof <= 0`, the result is `NaN`.
     ///
     /// Uses Welford's online algorithm for numerical stability.
     ///
@@ -393,13 +392,9 @@ where
 define_reduction_op!(
     /// Reduces one or more dims by computing the standard deviation.
     ///
-    /// The standard deviation is real-valued and follows the same dtype rules as [`Variance`]:
-    /// integer and `bool8` inputs promote to `f64`, real floats keep their width, and complex
-    /// inputs reduce to their real component type (`Complex<f32> -> f32`, `Complex<f64> ->
-    /// f64`), computing `sqrt(E[|x - mean|^2])`.
-    ///
-    /// Equivalent to `sqrt(variance)`. The `ddof` parameter has the same meaning as in
-    /// [`Variance`]: use `ddof=0` for population std and `ddof=1` for sample std.
+    /// Equivalent to `sqrt(variance)`, with the same real-valued output dtypes and the same
+    /// `ddof` parameter as [`Variance`]: use `ddof=0` for population std and `ddof=1` for
+    /// sample std.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
