@@ -378,8 +378,9 @@ pub(crate) mod traits {
 /// Supported casts:
 /// - Between any two integer or floating-point types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`,
 ///   `u32`, `u64`, `f16` (requires the `half` feature), `f32`, `f64`.
-/// - From any of these or a complex type to a complex type: `Complex<f32>`, `Complex<f64>`. A
-///   complex value cannot be cast to a real integer or floating-point type.
+/// - From any of these or a complex type to a complex type: `Complex<f16>` (requires the `half`
+///   feature), `Complex<f32>`, `Complex<f64>`. A complex value cannot be cast to a real integer or
+///   floating-point type.
 /// - Between `bool8` and any scalar: zero -> `bool8::FALSE`, non-zero -> `bool8::TRUE`.
 ///
 /// The [`Cast<T>`](crate::scalar::Cast) bound on the source element type rejects unsupported
