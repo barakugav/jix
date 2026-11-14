@@ -2,12 +2,8 @@ use crate::ops::prelude::*;
 
 /// Reorders the dims of an array, returned by [`Array::permute_dims`](crate::Array::permute_dims).
 ///
-/// The `i`-th output dim corresponds to dim `dims[i]` of the input - identical to the
-/// convention used by NumPy's `numpy.transpose`. No data is copied at construction time;
-/// elements are rearranged on demand when the result is read.
-///
-/// `dims` must be a permutation of `0..ndim`: correct length, all values in range, no
-/// duplicates.
+/// Output dim `i` is input dim `dims[i]`, as in `numpy.transpose`. `dims` must be a permutation
+/// of `0..ndim`: correct length, all values in range, no duplicates.
 ///
 /// Output dtype equals the input dtype, and the number of dims is unchanged.
 ///
