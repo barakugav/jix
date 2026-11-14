@@ -458,7 +458,7 @@ impl<S: ArrayStorage> Array<S> {
 
     // Like `to_buf_strided`, for an `index` the caller checked against the shape and the region
     // size, and an `out` that passes `check_out_buf_impl`.
-    #[inline]
+    #[inline(always)]
     fn to_buf_strided_checked<'a>(
         &'a self,
         index: &Index<'_>,
