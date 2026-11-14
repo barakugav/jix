@@ -67,8 +67,7 @@ pub(crate) mod traits {
         /// | `Complex<f64>` | `f64` |
         ///
         /// For **complex** types the result is the modulus `sqrt(re^2 + im^2)`, computed
-        /// via `hypot` for numerical stability. The output dtype is the real component type
-        /// (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
+        /// via `hypot` for numerical stability.
         ///
         /// For **signed integer** types `MIN.abs()` wraps back to `MIN`: `(-128i8).abs()` is
         /// `-128`.
@@ -230,7 +229,7 @@ pub(crate) mod traits {
     define_scalar_op2_trait!(
         /// Subtraction operation, like [`core::ops::Sub`].
         ///
-        /// For **integer** types the result wraps on underflow (two's complement).
+        /// For **integer** types the result wraps on overflow (two's complement).
         /// For **complex** types each component is subtracted independently:
         /// `(a + bi) - (c + di) = (a-c) + (b-d)i`.
         Sub,
