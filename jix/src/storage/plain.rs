@@ -466,17 +466,18 @@ where
             self.dtype().itemsize() as usize,
         )?;
 
-        let out_shape = index.iter().map(|r| (r.end - r.start) as usize);
-
         let itemsize = dtype.itemsize() as usize;
-        let src_span =
-            strided_span_bytes_from_iter(out_shape.clone(), self.strides.as_ref(), itemsize);
+        let src_span = strided_span_bytes_from_iter(
+            index.size().iter().copied(),
+            self.strides.as_ref(),
+            itemsize,
+        );
 
         let src_ptr = if src_span == 0 {
             self.data.as_ptr()
         } else {
-            let in_offset = (index.iter().zip(self.strides.as_ref()))
-                .map(|(r, &stride)| r.start as usize * stride)
+            let in_offset = (index.start().iter().zip(self.strides.as_ref()))
+                .map(|(&start, &stride)| start as usize * stride)
                 .sum::<usize>();
             unsafe { self.data.as_ptr().add(in_offset) }
         };
@@ -485,8 +486,7 @@ where
         match out {
             None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.as_ref()) }),
             Some(out) => {
-                let out_shape = out_shape.collect::<DimArray<_>>();
-                unsafe { out.copy_from(src, self.strides.as_ref(), out_shape.as_ref(), dtype) };
+                unsafe { out.copy_from(src, self.strides.as_ref(), index.size(), dtype) };
                 Ok(out.view_mut())
             }
         }

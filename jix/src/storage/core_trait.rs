@@ -87,9 +87,8 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     ///
     /// # Arguments
     ///
-    /// - `index` - one half-open range per dimension (`start..end`).
-    ///   The number of ranges must equal `self.shape().len()`.
-    ///   Ranges must be within the array shape bounds; empty ranges are allowed.
+    /// - `index` - a start and a size per dimension, one per dimension of `self.shape()`.
+    ///   The region must be within the array shape bounds; zero sizes are allowed.
     /// - `context` - read context carrying reusable buffers and decoder state.
     /// - `out` - optional destination, as described above.
     ///
@@ -119,7 +118,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     ///
     /// # Arguments
     ///
-    /// Same as [`read_data`](Self::read_data): one half-open range per dimension, and the read
+    /// Same as [`read_data`](Self::read_data): the region to read, and the read
     /// context.
     #[doc(hidden)]
     #[inline]

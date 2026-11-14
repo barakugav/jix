@@ -1,50 +1,124 @@
 use std::hint::assert_unchecked;
-use std::ops::{Deref, Range};
+use std::ops::Range;
 
-use crate::error::{check_ndim, Result};
+use crate::error::{bail, check_ndim, Result};
+use crate::util::{dim_arr, DimArray};
 use crate::NDIM_MAX;
 
-/// The region [`read_data`](crate::ArrayStorage::read_data) reads: one half-open range
-/// (`start..end`) per dimension, at most [`NDIM_MAX`] of them.
+/// The region [`read_data`](crate::ArrayStorage::read_data) reads: a start and a size per
+/// dimension, covering `start[d]..start[d] + size[d]`.
 ///
-/// Dereferences to the `&[Range<u64>]` slice it wraps.
+/// There are as many sizes as starts, at most [`NDIM_MAX`] of each, and no `start + size`
+/// overflows.
 #[derive(Clone, Copy, Debug)]
-pub struct Index<'a>(&'a [Range<u64>]);
+pub struct Index<'a> {
+    start: &'a [u64],
+    size: &'a [usize],
+}
 
 impl<'a> Index<'a> {
-    /// Wraps `ranges`, failing with
+    /// Wraps `start` and `size`, failing with
     /// [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) if there are more than
-    /// [`NDIM_MAX`].
+    /// [`NDIM_MAX`] dims, or with [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) if
+    /// their lengths differ or a `start + size` overflows.
     #[inline(always)]
-    pub fn new(ranges: &'a [Range<u64>]) -> Result<Self> {
-        Self::check(ranges)?;
+    pub fn new(start: &'a [u64], size: &'a [usize]) -> Result<Self> {
+        Self::check(start, size)?;
         // SAFETY: just checked.
-        Ok(unsafe { Self::new_unchecked(ranges) })
+        Ok(unsafe { Self::new_unchecked(start, size) })
     }
 
-    /// Wraps `ranges` without checking them.
+    /// Wraps `start` and `size` without checking them.
     ///
     /// # Safety
     ///
-    /// `ranges` must pass the checks of [`Index::new`], as an index derived from a valid one does.
+    /// `start` and `size` must pass the checks of [`Index::new`], as an index derived from a valid
+    /// one does.
     #[inline(always)]
-    pub(crate) unsafe fn new_unchecked(ranges: &'a [Range<u64>]) -> Self {
-        debug_assert!(Self::check(ranges).is_ok());
-        Self(ranges)
+    pub(crate) unsafe fn new_unchecked(start: &'a [u64], size: &'a [usize]) -> Self {
+        debug_assert!(Self::check(start, size).is_ok());
+        Self { start, size }
     }
 
     #[inline(always)]
-    fn check(ranges: &[Range<u64>]) -> Result<()> {
-        check_ndim(ranges.len())
+    fn check(start: &[u64], size: &[usize]) -> Result<()> {
+        check_ndim(start.len())?;
+        if start.len() != size.len()
+            || start
+                .iter()
+                .zip(size)
+                .any(|(&s, &n)| s.checked_add(n as u64).is_none())
+        {
+            return invalid_index_fail(start, size);
+        }
+        Ok(())
+    }
+
+    /// The first position read in each dimension.
+    #[inline(always)]
+    pub fn start(&self) -> &'a [u64] {
+        self.assume_invariants();
+        self.start
+    }
+
+    /// The number of positions read in each dimension.
+    #[inline(always)]
+    pub fn size(&self) -> &'a [usize] {
+        self.assume_invariants();
+        self.size
+    }
+
+    /// The number of dimensions.
+    #[inline(always)]
+    pub fn ndim(&self) -> usize {
+        self.size().len()
+    }
+
+    /// One past the last position read in dimension `dim`.
+    #[inline(always)]
+    pub fn end(&self, dim: usize) -> u64 {
+        self.start()[dim] + self.size()[dim] as u64
+    }
+
+    #[inline(always)]
+    fn assume_invariants(&self) {
+        unsafe {
+            assert_unchecked(self.start.len() == self.size.len() && self.size.len() <= NDIM_MAX)
+        };
     }
 }
 
-impl Deref for Index<'_> {
-    type Target = [Range<u64>];
+/// The starts and sizes of `ranges`, which passed [`check_ranges`](crate::error::check_ranges).
+#[inline(always)]
+pub(crate) fn split_ranges(ranges: &[Range<u64>]) -> (DimArray<u64>, DimArray<usize>) {
+    let start = dim_arr(ranges.len(), |d| ranges[d].start);
+    let size = dim_arr(ranges.len(), |d| (ranges[d].end - ranges[d].start) as usize);
+    (start, size)
+}
 
-    #[inline(always)]
-    fn deref(&self) -> &[Range<u64>] {
-        unsafe { assert_unchecked(self.0.len() <= NDIM_MAX) };
-        self.0
+#[cold]
+#[inline(never)]
+fn invalid_index_fail<T>(start: &[u64], size: &[usize]) -> Result<T> {
+    bail!(
+        InvalidIndex,
+        "Invalid index start {start:?} and size {size:?}"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::ErrorKind;
+
+    #[test]
+    fn invalid_indices_are_rejected() {
+        assert!(Index::new(&[0, 2], &[2, 0]).is_ok());
+        let kind = |start: &[u64], size: &[usize]| Index::new(start, size).unwrap_err().kind();
+        assert_eq!(kind(&[0, 2], &[2]), ErrorKind::InvalidIndex);
+        assert_eq!(kind(&[u64::MAX], &[1]), ErrorKind::InvalidIndex);
+        assert_eq!(
+            kind(&[0; NDIM_MAX + 1], &[1; NDIM_MAX + 1]),
+            ErrorKind::TooManyDimensions
+        );
     }
 }

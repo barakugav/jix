@@ -360,14 +360,8 @@ where
         index,
         output_dtype.itemsize() as usize,
     )?;
-    let out_shape_usize = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
-    let mut out = materialize_out_buf(
-        out,
-        context,
-        out_shape_usize.as_ref(),
-        output_dtype,
-        read_layout_order,
-    );
+    let out_shape = index.size();
+    let mut out = materialize_out_buf(out, context, out_shape, output_dtype, read_layout_order);
     let (out_buf, out_strides) = out.data_mut();
 
     // Streams the reduction over a two-level chunking of the inner array so peak scratch
@@ -385,8 +379,8 @@ where
     //
     // # Two-level chunking: bulks and tiles
     //
-    // The inner index range `inner_range_full` (reduced dims spanning the full source
-    // extent, non-reduced dims forwarded from `index`) is partitioned at two granularities:
+    // The inner region `inner_start_full`, `inner_size_full` (reduced dims spanning the full
+    // source extent, non-reduced dims forwarded from `index`) is partitioned at two granularities:
     //
     //   * **bulk** - the outer chunk. Splits *non-reduced* (output) dims only.
     //     `bulk_shape[d] = inner_shape[d]` for reduced dims (the full reduced extent sits
@@ -405,7 +399,7 @@ where
     // # Per-tile processing
     //
     // ```text
-    // full_reduction_size = product(inner_range_full[d] len for d in reduced dims)
+    // full_reduction_size = product(inner_size_full[d] for d in reduced dims)
     // for each bulk:                      // a disjoint block of outputs
     //   bulk_base_item_idx = 0            // reduced-stream position within this bulk
     //   bulk_initialized   = false
@@ -420,7 +414,7 @@ where
     //     bulk_initialized = true
     // ```
 
-    let out_nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+    let out_nitems = index.size().iter().product::<usize>();
     if out_nitems == 0 {
         return Ok(out);
     }
@@ -429,26 +423,21 @@ where
     let inner_ndim = inner_shape.len();
     let item_dtype = inner_array.dtype();
 
-    let inner_range_full = {
-        let mut out_dim = 0;
-        InnerD::vec(inner_ndim, |dim| {
-            if is_reduced[dim] {
-                0..inner_shape[dim]
-            } else {
-                let r = index[out_dim].clone();
-                out_dim += 1;
-                r
-            }
-        })
+    let (inner_start_full, inner_size_full) = {
+        let mut start = InnerD::vec(inner_ndim, |_| 0);
+        let mut size = InnerD::vec(inner_ndim, |dim| inner_shape[dim]);
+        for (out_dim, dim) in (0..inner_ndim).filter(|&dim| !is_reduced[dim]).enumerate() {
+            start[dim] = index.start()[out_dim];
+            size[dim] = index.size()[out_dim] as u64;
+        }
+        (start, size)
     };
-
-    let out_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
-
-    let tile_max_shape = InnerD::vec(inner_ndim, |dim| {
-        inner_range_full[dim].end - inner_range_full[dim].start
+    let inner_end_full = InnerD::vec(inner_ndim, |dim| {
+        inner_start_full[dim] + inner_size_full[dim]
     });
+
     let tile_shape = inner_array.spec().read_shape_heuristic::<InnerD>(
-        tile_max_shape.as_ref(),
+        inner_size_full.as_ref(),
         inner_shape,
         item_dtype.itemsize(),
     );
@@ -464,33 +453,23 @@ where
             tile_shape[dim]
         }
     });
-    let bulk_grid_begin = InnerD::vec(inner_ndim, |dim| {
-        inner_range_full[dim].start / bulk_shape[dim]
-    });
+    let bulk_grid_begin = InnerD::vec(inner_ndim, |dim| inner_start_full[dim] / bulk_shape[dim]);
     let bulk_grid_end = InnerD::vec(inner_ndim, |dim| {
-        calc_block_end(
-            inner_range_full[dim].start,
-            inner_range_full[dim].end,
-            bulk_shape[dim],
-        )
+        calc_block_end(inner_start_full[dim], inner_end_full[dim], bulk_shape[dim])
     });
     debug_assert!(
         (0..inner_ndim).all(|d| !is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
         "reduced dim must produce at most one bulk-block",
     );
     let bulk_iter = NdIter::builder_with_begin(bulk_grid_begin, bulk_grid_end)
-        .with_block_offset_size_ext(
-            &InnerD::vec(inner_ndim, |dim| inner_range_full[dim].start),
-            &InnerD::vec(inner_ndim, |dim| inner_range_full[dim].end),
-            bulk_shape.clone(),
-        )
+        .with_block_offset_size_ext(&inner_start_full, &inner_end_full, bulk_shape.clone())
         .build();
 
     // Every output is fully reduced within its own bulk, so this is the stream length
     // folded into each output cell - and the `nitems` passed to `finalize_state`.
     let full_reduction_size = (0..inner_ndim)
         .filter(|&d| is_reduced[d])
-        .map(|d| inner_range_full[d].end - inner_range_full[d].start)
+        .map(|d| inner_size_full[d])
         .product::<u64>();
 
     // Row-major strides over the reduced sub-shape, so an element's position in the reduced
@@ -502,7 +481,7 @@ where
         for d in (0..inner_ndim).rev() {
             if is_reduced[d] {
                 reduced_shape_logical_strides[d] = logical_stride;
-                logical_stride *= inner_range_full[d].end - inner_range_full[d].start;
+                logical_stride *= inner_size_full[d];
             }
         }
         debug_assert_eq!(logical_stride, full_reduction_size);
@@ -531,7 +510,7 @@ where
         tmp_state_buf = context.allocate_buf(state_buf_len, kernel_state_alignof);
         (
             &mut tmp_state_buf.as_mut_slice()[..state_buf_len],
-            default_strides(&out_shape, kernel_state_sizeof),
+            crate::util::default_strides_slice(out_shape, kernel_state_sizeof),
         )
     };
     debug_assert!(state_strides
@@ -580,41 +559,34 @@ where
             .build();
 
         for (tile_idx, (tile_inner_offset, tile_size)) in tile_iter {
-            let tile = InnerD::vec(inner_ndim, |dim| {
-                let start = tile_idx[dim] * tile_shape[dim] + tile_inner_offset[dim];
-                start..start + tile_size[dim]
+            let tile_start = InnerD::vec(inner_ndim, |dim| {
+                tile_idx[dim] * tile_shape[dim] + tile_inner_offset[dim]
             });
             debug_assert!(
                 (0..inner_ndim).all(|d| {
-                    inner_range_full[d].start <= tile[d].start
-                        && tile[d].end <= inner_range_full[d].end
+                    inner_start_full[d] <= tile_start[d]
+                        && tile_start[d] + tile_size[d] <= inner_end_full[d]
                 }),
-                "tile not contained in inner_range_full",
+                "tile not contained in the inner region",
             );
 
-            let items = inner_array.read_data(
-                &unsafe { Index::new_unchecked(tile.as_ref()) },
-                context,
-                None,
-            )?;
+            let tile_size = InnerD::vec(inner_ndim, |d| tile_size[d] as usize);
+            let tile_index =
+                unsafe { Index::new_unchecked(tile_start.as_ref(), tile_size.as_ref()) };
+            let items = inner_array.read_data(&tile_index, context, None)?;
 
             let state_offset = (0..inner_ndim)
-                .map(|d| {
-                    ((tile[d].start - inner_range_full[d].start) as usize) * state_strides_inner[d]
-                })
+                .map(|d| ((tile_start[d] - inner_start_full[d]) as usize) * state_strides_inner[d])
                 .sum::<usize>();
             let tile_base_reduced_idx = (0..inner_ndim)
-                .map(|d| {
-                    (tile[d].start - inner_range_full[d].start) * reduced_shape_logical_strides[d]
-                })
+                .map(|d| (tile_start[d] - inner_start_full[d]) * reduced_shape_logical_strides[d])
                 .sum::<u64>();
 
-            let tile_shape = InnerD::vec(inner_ndim, |d| tile_size[d] as usize);
             let tile_state_base =
                 unsafe { PtrMutNoalias::from_slice(state_buf.get_unchecked_mut(state_offset..)) };
 
             reduce_tile_fn(ReduceTileArgs {
-                tile_shape: tile_shape.as_ref(),
+                tile_shape: tile_size.as_ref(),
                 items: &items,
                 states_buf: tile_state_base,
                 state_strides: state_strides_inner.as_ref(),
@@ -630,7 +602,7 @@ where
     // `out_ptr`. Dont use `state_buf`.
     finalize_states(
         FinalizeStateArgs {
-            out_shape: out_shape_usize.as_ref(),
+            out_shape,
             state_buf: state_ptr,
             state_buf_strides: state_strides.as_ref(),
             out_buf: out_ptr,
@@ -1466,7 +1438,7 @@ pub(crate) mod tests {
     use std::rc::Rc;
 
     use crate::scalar::bool8;
-    use crate::storage::Index;
+    use crate::storage::{split_ranges, Index};
     use crate::ArrayParams;
 
     use ndarray::{array, ArrayD, Ix0, Ix1};
@@ -1979,8 +1951,9 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>();
             let c = crate::util::default_strides_slice(&sh, size_of::<i64>());
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            let (start, size) = split_ranges(&full_index);
             storage
-                .read_data(&Index::new(&full_index).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 
@@ -2013,7 +1986,7 @@ pub(crate) mod tests {
             let bytes = &mut backing[off..off + 2 * stride + size_of::<i64>()];
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, &[stride]) };
             storage
-                .read_data(&Index::new(&[0..3]).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 
@@ -2186,8 +2159,9 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>();
             let c = crate::util::default_strides_slice(&sh, size_of::<i64>());
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            let (start, size) = split_ranges(&index);
             storage
-                .read_data(&Index::new(&index).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 
@@ -2203,8 +2177,9 @@ pub(crate) mod tests {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 32 * 8)
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            let (start, size) = split_ranges(&index);
             storage
-                .read_data(&Index::new(&index).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 
@@ -2245,7 +2220,7 @@ pub(crate) mod tests {
             let c = crate::util::default_strides_slice(&[3usize], size_of::<f64>());
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
             storage
-                .read_data(&Index::new(&[0..3]).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 
@@ -2259,7 +2234,7 @@ pub(crate) mod tests {
                 unsafe { std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 6 * 8) };
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
             storage
-                .read_data(&Index::new(&[0..3]).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 

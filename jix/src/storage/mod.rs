@@ -77,6 +77,7 @@ mod buf;
 pub use buf::*;
 
 mod index;
+pub(crate) use index::split_ranges;
 pub use index::Index;
 
 mod info;

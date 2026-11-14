@@ -145,35 +145,27 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
 
         // Fast path: all dims have step == 1. Map index [a, b) to inner [start + a, start + b) and forward.
         if self.no_steps {
-            let inner_index = dim_arr(ndim, |dim| {
-                let offset = self.slice[dim].start;
-                (index[dim].start + offset)..(index[dim].end + offset)
-            });
-            return self.array.read_data(
-                &unsafe { Index::new_unchecked(&inner_index) },
-                context,
-                out,
-            );
+            let inner_start = dim_arr(ndim, |dim| index.start()[dim] + self.slice[dim].start);
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
+            return self.array.read_data(&inner_index, context, out);
         }
 
-        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let out_shape = index.size();
 
         // Fast path: inner array is plain, read a contiguous bounding box and create a strided view over it.
         if out.is_none()
             && self.array.spec().flags().plain_read()
             && !out_shape.as_ref().contains(&0)
         {
-            let inner_box = dim_arr(ndim, |dim| {
+            let box_start = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
-                let first = ds.start + index[dim].start * ds.step;
-                let last = ds.start + (index[dim].end - 1) * ds.step;
-                first..(last + 1)
+                ds.start + index.start()[dim] * ds.step
             });
-            let inner = self.array.read_data(
-                &unsafe { Index::new_unchecked(&inner_box) },
-                context,
-                None,
-            )?;
+            let box_size = dim_arr(ndim, |dim| {
+                (out_shape[dim] - 1) * self.slice[dim].step as usize + 1
+            });
+            let inner_box = unsafe { Index::new_unchecked(&box_start, &box_size) };
+            let inner = self.array.read_data(&inner_box, context, None)?;
             let itemsize = self.dtype().itemsize() as usize;
             let out_strides = dim_arr(ndim, |dim| {
                 if out_shape[dim] <= 1 {
@@ -188,11 +180,10 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // General path: one or more dims have step > 1. nd-iter over the strided dims, and read
         // each sub-region from the inner array.
         let dtype = self.dtype();
-        let out_shape_usize = dim_arr(ndim, |dim| out_shape[dim] as usize);
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape_usize.as_ref(),
+            out_shape,
             dtype,
             self.spec().read_layout_order(),
         );
@@ -204,29 +195,29 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             if self.slice[dim].step == 1 {
                 1
             } else {
-                out_shape[dim]
+                out_shape[dim] as u64
             }
         });
         let iter = NdIter::builder(iter_shape)
             .with_strides_offset_ext(out_strides.to_dim_vec::<DimDyn>(), 0)
             .build();
+        let inner_size = dim_arr(ndim, |dim| {
+            if self.slice[dim].step == 1 {
+                out_shape[dim]
+            } else {
+                1
+            }
+        });
         for (idx, dst_byte_offset) in iter {
-            let inner_index = dim_arr(ndim, |dim| {
+            let inner_start = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
-                if ds.step == 1 {
-                    (ds.start + index[dim].start)..(ds.start + index[dim].end)
-                } else {
-                    let pos = ds.start + (index[dim].start + idx[dim]) * ds.step;
-                    pos..(pos + 1)
-                }
+                ds.start + (index.start()[dim] + idx[dim]) * ds.step
             });
             let mut sub =
                 unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides) };
-            self.array.read_data(
-                &unsafe { Index::new_unchecked(&inner_index) },
-                context,
-                Some(&mut sub),
-            )?;
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
+            self.array
+                .read_data(&inner_index, context, Some(&mut sub))?;
         }
         Ok(out)
     }
@@ -618,7 +609,7 @@ mod tests {
         let ctx = s.read_ctx();
         let view = s
             .storage()
-            .read_data(&Index::new(&[0..3, 0..4]).unwrap(), &ctx, None)
+            .read_data(&Index::new(&[0, 0], &[3, 4]).unwrap(), &ctx, None)
             .unwrap();
         // Zero-copy: dim-0 stride is 2 * row-stride (2*16), not the packed 16 a copy would carry.
         assert_eq!(view.strides(), &[2 * 16, 4]);
@@ -647,7 +638,7 @@ mod tests {
         // Output sub-region [1..3, 1..3] -> orig rows 2 & 4, cols 1 & 2.
         let view = s
             .storage()
-            .read_data(&Index::new(&[1..3, 1..3]).unwrap(), &ctx, None)
+            .read_data(&Index::new(&[1, 1], &[2, 2]).unwrap(), &ctx, None)
             .unwrap();
         assert_eq!(view.strides(), &[2 * 16, 4]);
 

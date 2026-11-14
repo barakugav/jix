@@ -219,8 +219,8 @@ where
         let _cache_scope = self.cache_scope.enter(context);
 
         let concat_dim = self.concat_dim as usize;
-        let req_start = index[concat_dim].start;
-        let req_end = index[concat_dim].end;
+        let req_start = index.start()[concat_dim];
+        let req_end = index.end(concat_dim);
 
         // Find the first sub-array whose end exceeds req_start (the first that may overlap).
         const BINARY_SEARCH_THRESHOLD: usize = 32;
@@ -239,29 +239,23 @@ where
             } else {
                 self.borders[first_arr - 1]
             };
-            let sub_index = dim_arr(index.len(), |dim| {
+            let sub_start = dim_arr(index.ndim(), |dim| {
                 if dim == concat_dim {
-                    (req_start - arr_start)..(req_end - arr_start)
+                    req_start - arr_start
                 } else {
-                    index[dim].clone()
+                    index.start()[dim]
                 }
             });
-            return self.arrays.read_data(
-                first_arr,
-                &unsafe { Index::new_unchecked(&sub_index) },
-                context,
-                out,
-            );
+            let sub_index = unsafe { Index::new_unchecked(&sub_start, index.size()) };
+            return self.arrays.read_data(first_arr, &sub_index, context, out);
         }
 
         let itemsize = dtype.itemsize() as usize;
-        let output_shape = dim_arr(index.len(), |dim| {
-            (index[dim].end - index[dim].start) as usize
-        });
+        let output_shape = index.size();
         let mut out = materialize_out_buf(
             out,
             context,
-            output_shape.as_ref(),
+            output_shape,
             dtype,
             self.spec().read_layout_order(),
         );
@@ -271,7 +265,7 @@ where
 
         // When the destination is contiguous and all dims before concat_dim have size <=1, each
         // array's data is a contiguous run in the destination.
-        let inner_contiguous = out.is_contiguous(output_shape.as_ref(), dtype)
+        let inner_contiguous = out.is_contiguous(output_shape, dtype)
             && output_shape
                 .as_ref()
                 .iter()
@@ -294,21 +288,25 @@ where
             let buf_concat_offset = (overlap_start - req_start) as usize;
 
             // Sub-index into array `arr`: same as `index` but concat dim uses local coords.
-            let sub_index = dim_arr(index.len(), |dim| {
+            let sub_start = dim_arr(index.ndim(), |dim| {
                 if dim == concat_dim {
-                    local_start..local_end
+                    local_start
                 } else {
-                    index[dim].clone()
+                    index.start()[dim]
                 }
             });
-            let sub_shape = dim_arr(index.len(), |dim| {
-                (sub_index[dim].end - sub_index[dim].start) as usize
+            let sub_size = dim_arr(index.ndim(), |dim| {
+                if dim == concat_dim {
+                    (local_end - local_start) as usize
+                } else {
+                    index.size()[dim]
+                }
             });
             let buf_offset = buf_concat_offset * concat_stride;
 
             let mut sub = if inner_contiguous {
-                let sub_c = default_strides(&sub_shape, itemsize);
-                let sub_size_bytes = sub_shape.as_ref().iter().product::<usize>() * itemsize;
+                let sub_c = default_strides(&sub_size, itemsize);
+                let sub_size_bytes = sub_size.iter().product::<usize>() * itemsize;
                 // SAFETY: contiguous destination; array `arr`'s bytes pack into this slot.
                 unsafe {
                     StridedBuf::from_slice_mut(
@@ -320,12 +318,9 @@ where
                 // SAFETY: `output_strides` describe `dest`; the slot at `buf_offset` is within it.
                 unsafe { StridedBuf::from_slice_mut(&mut out_buf[buf_offset..], output_strides) }
             };
-            self.arrays.read_data(
-                arr,
-                &unsafe { Index::new_unchecked(&sub_index) },
-                context,
-                Some(&mut sub),
-            )?;
+            let sub_index = unsafe { Index::new_unchecked(&sub_start, &sub_size) };
+            self.arrays
+                .read_data(arr, &sub_index, context, Some(&mut sub))?;
         }
         Ok(out)
     }

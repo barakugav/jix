@@ -10,8 +10,6 @@
 //! All three are thin wrappers around [`ArrayBlockTableStorageBase`], which contains the
 //! actual nd-array logic and delegates 1D block I/O to [`BlockTable`](crate::storage::block::BlockTable).
 
-use std::ops::Range;
-
 use crate::dimension::dim_arr;
 use crate::dtype::Dtype;
 use crate::error::Result;
@@ -268,8 +266,8 @@ where
     ///
     /// 1. For each dimension, compute the range of block indices that overlap `index`, and track
     ///    two flags across all dimensions:
-    ///    `b_begin[d] = index[d].start / block_shape[d]`,
-    ///    `b_end[d]   = ceil(index[d].end / block_shape[d])`;
+    ///    `b_begin[d] = index.start()[d] / block_shape[d]`,
+    ///    `b_end[d]   = ceil(index.end(d) / block_shape[d])`;
     ///    `is_single_block` - every dimension touches exactly one block (`b_begin[d] + 1 == b_end[d]`);
     ///    `is_aligned` - `index[d]` starts and ends on block boundaries in every dimension.
     ///
@@ -314,21 +312,21 @@ where
         let shape = self.shape();
         let dtype = self.blocks.dtype();
         check_out_buf(out.as_deref(), shape, index, dtype.itemsize() as usize)?;
-        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let out_shape = index.size();
         let nitems = out_shape.as_ref().iter().product::<usize>();
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape.as_ref(),
+            out_shape,
             dtype,
             self.spec.as_ref().read_layout_order(),
         );
         if nitems == 0 {
             return Ok(out);
         }
-        let is_contiguous = out.is_contiguous(out_shape.as_ref(), dtype);
+        let is_contiguous = out.is_contiguous(out_shape, dtype);
 
-        let ndim = index.len();
+        let ndim = index.ndim();
         let block_shape = self.block_shape();
         assert!(shape.len() == ndim && block_shape.len() == ndim);
 
@@ -337,7 +335,7 @@ where
         let mut is_block_aligned = true; // the requested region starts and ends on block boundaries in every dimension.
         for dim in 0..ndim {
             let b = block_shape[dim] as u64;
-            let (i_start, i_end) = (index[dim].start, index[dim].end);
+            let (i_start, i_end) = (index.start()[dim], index.end(dim));
             let (b_begin, b_end) = (i_start / b, calc_block_end(i_start, i_end, b));
             b_range[dim] = b_begin..b_end;
             is_single_block &= b_begin + 1 == b_end;
@@ -411,7 +409,7 @@ struct DynStorage<'a> {
 #[inline(never)]
 fn read_data_slow<ActualD: Dimension>(
     storage: &DynStorage<'_>,
-    index: &[Range<u64>],
+    index: &Index<'_>,
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
     single_block_idx: Option<u64>,
@@ -420,10 +418,10 @@ fn read_data_slow<ActualD: Dimension>(
     let dtype = storage.dtype;
     let block_shape = storage.block_shape;
     let (buf, out_strides) = out.data_mut();
-    let ndim = index.len();
+    let ndim = index.ndim();
     assert!(shape.len() == ndim && block_shape.len() == ndim);
     let itemsize = dtype.itemsize() as usize;
-    let out_shape = ActualD::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+    let out_shape = ActualD::vec(ndim, |dim| index.size()[dim]);
     let block_shape_u64 = ActualD::vec(ndim, |dim| block_shape[dim] as u64);
     let block_strides = default_strides(&block_shape_u64, itemsize);
     let copier = NdCopier::new(dtype);
@@ -441,7 +439,7 @@ fn read_data_slow<ActualD: Dimension>(
         // Byte offset into `tmp_buf` of the requested region's first element.
         let active_start = (0..ndim)
             .map(|dim| {
-                let inner_offset = index[dim].start % block_shape_u64[dim];
+                let inner_offset = index.start()[dim] % block_shape_u64[dim];
                 inner_offset as usize * block_strides[dim]
             })
             .sum::<usize>();
@@ -474,17 +472,17 @@ fn read_data_slow<ActualD: Dimension>(
     };
 
     // Block-space begin/end for NdIter.
-    let block_begin = ActualD::vec(ndim, |dim| index[dim].start / block_shape_u64[dim]);
+    let block_begin = ActualD::vec(ndim, |dim| index.start()[dim] / block_shape_u64[dim]);
     let block_end = ActualD::vec(ndim, |dim| {
-        calc_block_end(index[dim].start, index[dim].end, block_shape_u64[dim])
+        calc_block_end(index.start()[dim], index.end(dim), block_shape_u64[dim])
     });
     let block_grid_shape = ActualD::vec(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
 
     let block_iter = NdIter::builder_with_begin(block_begin, block_end)
         .with_logical_global_index_ext(block_grid_shape.as_ref())
         .with_block_offset_size_ext(
-            &ActualD::vec(ndim, |dim| index[dim].start),
-            &ActualD::vec(ndim, |dim| index[dim].end),
+            &ActualD::vec(ndim, |dim| index.start()[dim]),
+            &ActualD::vec(ndim, |dim| index.end(dim)),
             block_shape_u64.clone(),
         )
         .build();
@@ -493,7 +491,7 @@ fn read_data_slow<ActualD: Dimension>(
         let out_start = (0..ndim)
             .map(|dim| {
                 let full_idx = block_idx[dim] * block_shape_u64[dim] + block_inner_offset[dim];
-                let out_idx = full_idx - index[dim].start;
+                let out_idx = full_idx - index.start()[dim];
                 out_idx as usize * out_strides[dim]
             })
             .sum::<usize>();
@@ -542,7 +540,7 @@ mod tests {
     use crate::scalar::bool8;
     use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
     use crate::storage::ArrayStorageTyped;
-    use crate::storage::{ArraySpec, Index, StridedBuf};
+    use crate::storage::{split_ranges, ArraySpec, Index, StridedBuf};
     use crate::{Array, ArrayParams, ArrayStorage};
 
     /// Read `index` from a compact `i32` array both into a plain contiguous buffer and into a
@@ -582,8 +580,9 @@ mod tests {
             };
             let c = crate::util::default_strides_slice(&out_shape, 4);
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            let (start, size) = split_ranges(index);
             storage
-                .read_data(&Index::new(index).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 
@@ -608,8 +607,9 @@ mod tests {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), backing.len() * 4)
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            let (start, size) = split_ranges(index);
             storage
-                .read_data(&Index::new(index).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 
@@ -689,8 +689,9 @@ mod tests {
             };
             let c = crate::util::default_strides_slice(&out_shape, 4);
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            let (start, size) = split_ranges(index);
             storage
-                .read_data(&Index::new(index).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 
@@ -789,7 +790,7 @@ mod tests {
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
             storage
                 .read_data(
-                    &Index::new(&[0..1, 0..8, 0..4]).unwrap(),
+                    &Index::new(&[0, 0, 0], &[1, 8, 4]).unwrap(),
                     &ctx,
                     Some(&mut out),
                 )
@@ -821,7 +822,7 @@ mod tests {
             let bytes = &mut backing[off..off + 6 * 4];
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &[12, 4]) };
             storage
-                .read_data(&Index::new(&[0..2, 0..3]).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
         let got = (0..6)
@@ -863,7 +864,7 @@ mod tests {
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
             storage
-                .read_data(&Index::new(&[0..2, 0..3]).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
         assert_eq!(&backing[..6], &[1, 2, 3, 4, 5, 6]);
@@ -891,6 +892,7 @@ mod tests {
 
     #[test]
     fn read_cache_reuses_repeated_pull_reads() {
+        let index = Index::new(&[4], &[16]).unwrap();
         let za = arange64();
         let ctx = za.read_ctx();
         // `x` is reached twice from `x + x`, so it is cached.
@@ -899,12 +901,8 @@ mod tests {
 
         {
             let _scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
-            let a = storage
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-                .unwrap();
-            let b = storage
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-                .unwrap();
+            let a = storage.read_data(&index, &ctx, None).unwrap();
+            let b = storage.read_data(&index, &ctx, None).unwrap();
             assert_eq!(
                 a.data_ptr(),
                 b.data_ptr(),
@@ -913,7 +911,7 @@ mod tests {
 
             // Reading another region evicts the entry, but must leave the live views intact.
             let c = storage
-                .read_data(&Index::new(&[20..36]).unwrap(), &ctx, None)
+                .read_data(&Index::new(&[20], &[16]).unwrap(), &ctx, None)
                 .unwrap();
             assert_eq!(read_i32s(&a, 16), (4..20).collect::<Vec<_>>());
             assert_eq!(read_i32s(&b, 16), (4..20).collect::<Vec<_>>());
@@ -921,12 +919,8 @@ mod tests {
         }
 
         // Outside of a top level read nothing is cached.
-        let a = storage
-            .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-            .unwrap();
-        let b = storage
-            .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-            .unwrap();
+        let a = storage.read_data(&index, &ctx, None).unwrap();
+        let b = storage.read_data(&index, &ctx, None).unwrap();
         assert_ne!(a.data_ptr(), b.data_ptr());
     }
 
@@ -1017,20 +1011,15 @@ mod tests {
 
     #[test]
     fn read_cache_reuses_repeated_op_reads() {
+        let index = Index::new(&[4], &[16]).unwrap();
         let (x, y) = (arange64(), arange64());
         let xy = x.view() + y.view();
         let sq = xy.view() * xy.view();
         let ctx = x.read_ctx();
         {
             let _scope = ctx.cache_scope(&sq.storage().spec().dynamic().arrays_to_cache);
-            let a = xy
-                .storage()
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-                .unwrap();
-            let b = xy
-                .storage()
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-                .unwrap();
+            let a = xy.storage().read_data(&index, &ctx, None).unwrap();
+            let b = xy.storage().read_data(&index, &ctx, None).unwrap();
             assert_eq!(a.data_ptr(), b.data_ptr());
             assert_eq!(
                 read_i32s(&b, 16),
@@ -1044,6 +1033,7 @@ mod tests {
 
     #[test]
     fn reduction_reads_do_not_evict_other_entries() {
+        let index = Index::new(&[4], &[16]).unwrap();
         let x = arange64();
         let max = x.view().max(0);
         // `x` is reached twice, but not from the reduction.
@@ -1051,17 +1041,11 @@ mod tests {
         let ctx = x.read_ctx();
         {
             let _scope = ctx.cache_scope(&expr.storage().spec().dynamic().arrays_to_cache);
-            let a = x
-                .storage()
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-                .unwrap();
+            let a = x.storage().read_data(&index, &ctx, None).unwrap();
             max.storage()
-                .read_data(&Index::new(&[]).unwrap(), &ctx, None)
+                .read_data(&Index::new(&[], &[]).unwrap(), &ctx, None)
                 .unwrap();
-            let b = x
-                .storage()
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-                .unwrap();
+            let b = x.storage().read_data(&index, &ctx, None).unwrap();
             assert_eq!(a.data_ptr(), b.data_ptr());
         }
         let expected = (0..64).map(|i| (i + 63) * i).collect::<Vec<_>>();
@@ -1080,7 +1064,7 @@ mod tests {
             let _scope = ctx.cache_scope(&max.storage().spec().dynamic().arrays_to_cache);
             let max = max
                 .storage()
-                .read_data(&Index::new(&[]).unwrap(), &ctx, None)
+                .read_data(&Index::new(&[], &[]).unwrap(), &ctx, None)
                 .unwrap();
             assert_eq!(
                 unsafe { max.data_ptr().cast::<i32>().read_unaligned() },
@@ -1093,6 +1077,7 @@ mod tests {
 
     #[test]
     fn shape_op_reads_do_not_evict_other_entries() {
+        let index = Index::new(&[4], &[16]).unwrap();
         let x = arange64();
         // `x` is reached twice outside of the flip, which reads it at another region.
         let flipped = x.view().flip(0);
@@ -1100,19 +1085,10 @@ mod tests {
         let ctx = x.read_ctx();
         {
             let _scope = ctx.cache_scope(&expr.storage().spec().dynamic().arrays_to_cache);
-            let a = x
-                .storage()
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-                .unwrap();
-            let f = flipped
-                .storage()
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-                .unwrap();
+            let a = x.storage().read_data(&index, &ctx, None).unwrap();
+            let f = flipped.storage().read_data(&index, &ctx, None).unwrap();
             assert_eq!(read_i32s(&f, 16), (44..60).rev().collect::<Vec<_>>());
-            let b = x
-                .storage()
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-                .unwrap();
+            let b = x.storage().read_data(&index, &ctx, None).unwrap();
             assert_eq!(a.data_ptr(), b.data_ptr());
         }
         let expected = (0..64).map(|i| (i + 63 - i) * i).collect::<Vec<_>>();
@@ -1124,22 +1100,17 @@ mod tests {
 
     #[test]
     fn nested_top_level_read_restores_the_cache() {
+        let index = Index::new(&[4], &[16]).unwrap();
         let x = arange64();
         let xx = x.view() + x.view();
         let ctx = x.read_ctx();
         let scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
-        let a = x
-            .storage()
-            .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-            .unwrap();
+        let a = x.storage().read_data(&index, &ctx, None).unwrap();
         // The nested read caches `x` at another region, replacing the entry until it ends.
         let sq = x.view() * x.view();
         let nested = sq.to_ndarray_sub::<ndarray::Ix1>(&[20..36], &ctx).unwrap();
         assert_eq!(nested.to_vec(), (20..36).map(|i| i * i).collect::<Vec<_>>());
-        let b = x
-            .storage()
-            .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-            .unwrap();
+        let b = x.storage().read_data(&index, &ctx, None).unwrap();
         assert_eq!(a.data_ptr(), b.data_ptr());
         assert_eq!(context_read_cache_len(&ctx), 1);
         drop(scope);
@@ -1155,7 +1126,7 @@ mod tests {
         let _scope = ctx.cache_scope(to_cache);
         let read = || {
             x.storage()
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
+                .read_data(&Index::new(&[4], &[16]).unwrap(), &ctx, None)
                 .unwrap()
         };
         let a = read();
@@ -1171,6 +1142,7 @@ mod tests {
 
     #[test]
     fn read_cache_shares_views_of_cached_reads() {
+        let index = Index::new(&[4], &[16]).unwrap();
         let x = arange64();
         let ctx = x.read_ctx();
         // A storage whose read passes the read of `x` through, as a shape op would.
@@ -1179,22 +1151,10 @@ mod tests {
         ids.insert(x.storage().0.cache_id);
         ids.insert(pass_id);
         let _scope = ctx.cache_scope(&Some(Arc::new(ids)));
-        let a = x
-            .storage()
-            .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-            .unwrap();
-        let pass = |out| {
-            x.storage()
-                .read_data(&Index::new(&[4..20]).unwrap(), &ctx, out)
-        };
+        let a = x.storage().read_data(&index, &ctx, None).unwrap();
+        let pass = |out| x.storage().read_data(&index, &ctx, out);
         let b = ctx
-            .read_cached(
-                pass_id,
-                &Index::new(&[4..20]).unwrap(),
-                x.dtype(),
-                None,
-                pass,
-            )
+            .read_cached(pass_id, &index, x.dtype(), None, pass)
             .unwrap();
         // The read of `x` is a view of its cached buffer, which is cached for the storage too.
         assert_eq!(b.data_ptr(), a.data_ptr());
@@ -1240,6 +1200,7 @@ mod tests {
     #[test]
     fn read_cache_serves_push_reads() {
         static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let index = Index::new(&[2], &[4]).unwrap();
         let (max, per_read) = counted_row_max(&CALLS);
         let twice = max.view() + max.view();
         let ctx = max.read_ctx();
@@ -1247,16 +1208,14 @@ mod tests {
         let mut backing = [SENTINEL; 16];
         {
             let _scope = ctx.cache_scope(&twice.storage().spec().dynamic().arrays_to_cache);
-            max.storage()
-                .read_data(&Index::new(&[2..6]).unwrap(), &ctx, None)
-                .unwrap();
+            max.storage().read_data(&index, &ctx, None).unwrap();
             assert_eq!(CALLS.load(Ordering::Relaxed), per_read / 2);
             // A push read of the cached region copies it into `out`, at the strides of `out`.
             let mut out = unsafe {
                 StridedBuf::from_raw_parts_mut(backing.as_mut_ptr().cast(), &[4], &[8], 4)
             };
             max.storage()
-                .read_data(&Index::new(&[2..6]).unwrap(), &ctx, Some(&mut out))
+                .read_data(&index, &ctx, Some(&mut out))
                 .unwrap();
             assert_eq!(CALLS.load(Ordering::Relaxed), per_read / 2);
             // A push read is not added to the cache: the entry is still the pull read.
@@ -1269,20 +1228,17 @@ mod tests {
 
     #[test]
     fn read_cache_checks_push_reads() {
+        let index = Index::new(&[4], &[16]).unwrap();
         let x = arange64();
         let xx = x.view() + x.view();
         let ctx = x.read_ctx();
         let _scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
-        x.storage()
-            .read_data(&Index::new(&[4..20]).unwrap(), &ctx, None)
-            .unwrap();
+        x.storage().read_data(&index, &ctx, None).unwrap();
         // A push read of the cached region into a too small `out` fails, as an uncached one does.
         let mut backing = [0i32; 16];
         let mut out =
             unsafe { StridedBuf::from_raw_parts_mut(backing.as_mut_ptr().cast(), &[8], &[4], 4) };
-        let res = x
-            .storage()
-            .read_data(&Index::new(&[4..20]).unwrap(), &ctx, Some(&mut out));
+        let res = x.storage().read_data(&index, &ctx, Some(&mut out));
         assert!(res.is_err());
     }
 

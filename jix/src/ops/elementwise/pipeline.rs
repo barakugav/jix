@@ -4,12 +4,11 @@ use std::ptr::NonNull;
 use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 use std::cmp::Reverse;
 use std::marker::PhantomData;
-use std::ops::Range;
 
 use crate::buf_pool::PoolBuf;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{ArithmeticStatus, Result};
-use crate::storage::StridedBuf;
+use crate::storage::{Index, StridedBuf};
 use crate::util::default_strides_slice;
 use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
 use crate::ReadContext;
@@ -63,7 +62,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
 
     fn to_buf<'b>(
         &mut self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'b ReadContext,
         out: Option<&'b mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'b>>
@@ -83,7 +82,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         let to_buf_fn = const {
             #[allow(clippy::type_complexity)]
             let mut to_buf_fn: Option<
-                fn(&Self, &[Range<u64>], &mut StridedBuf<'_>, &ReadContext) -> Result<()>,
+                fn(&Self, &Index<'_>, &mut StridedBuf<'_>, &ReadContext) -> Result<()>,
             > = None;
 
             if let Some(n_operands) = Self::N_OPERANDS {
@@ -127,7 +126,7 @@ impl<P, T> ElementwisePipeline<T> for P where P: ElementwisePipelineImpl<T> {}
 
 fn to_buf_impl<T, const N_OPERANDS: usize>(
     pipeline: &impl ElementwisePipelineImpl<T>,
-    index: &[Range<u64>],
+    index: &Index<'_>,
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
 ) -> Result<()>
@@ -162,7 +161,7 @@ where
 // like `to_buf_impl`, but the number of operands is not known at compile time.
 fn to_buf_impl_dyn<T>(
     pipeline: &impl ElementwisePipelineImpl<T>,
-    index: &[Range<u64>],
+    index: &Index<'_>,
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
 ) -> Result<()>
@@ -194,13 +193,13 @@ where
 #[inline(never)]
 fn to_buf_type_erased<const N_OPERANDS: usize>(
     operands: [&Operand<'_>; N_OPERANDS],
-    index: &[Range<u64>],
+    index: &Index<'_>,
     context: &ReadContext,
     inner_loop: &InnerLoop<'_>,
 ) -> Result<()> {
     let strides = operands.map_inline_ref(|operand| operand.strides());
-    let shape = dim_arr(index.len(), |d| {
-        let len = (index[d].end - index[d].start) as usize;
+    let shape = dim_arr(index.ndim(), |d| {
+        let len = index.size()[d];
         let is_real_dim = strides.iter().any(|s| s[d] != 0);
         if is_real_dim || len == 0 {
             len
@@ -317,7 +316,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
 #[inline(never)]
 fn to_buf_type_erased_dyn(
     operands: &[&Operand<'_>],
-    index: &[Range<u64>],
+    index: &Index<'_>,
     context: &ReadContext,
     inner_loop: &InnerLoop<'_>,
 ) -> Result<()> {
@@ -325,8 +324,8 @@ fn to_buf_type_erased_dyn(
         .iter()
         .map(|operand| operand.strides())
         .collect::<Vec<_>>();
-    let shape = dim_arr(index.len(), |d| {
-        let len = (index[d].end - index[d].start) as usize;
+    let shape = dim_arr(index.ndim(), |d| {
+        let len = index.size()[d];
         let is_real_dim = strides.iter().any(|s| s[d] != 0);
         if is_real_dim || len == 0 {
             len
@@ -870,18 +869,18 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
 
 #[inline(never)]
 fn materialize_pipeline_out_buf<'b, 's>(
-    index: &[Range<u64>],
+    index: &Index<'_>,
     operands: &mut dyn Iterator<Item = &'s Operand<'s>>,
     output_dtype: &Dtype,
     context: &'b ReadContext,
     out: Option<&'b mut StridedBuf<'_>>,
 ) -> StridedBuf<'b> {
-    let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+    let shape = index.size();
     match out {
         Some(out) => out.view_mut(),
         None => {
             let itemsize = output_dtype.itemsize() as usize;
-            let (strides, real_dims) = pick_output_layout(operands, shape.as_ref(), itemsize);
+            let (strides, real_dims) = pick_output_layout(operands, shape, itemsize);
             let nitems = (0..shape.len())
                 .map(|d| if real_dims.get(d) { shape[d] } else { 1 })
                 .product::<usize>();
@@ -952,8 +951,8 @@ fn pick_output_layout<'s>(
 
 /// A pull buffer has stride 0 on the dims it collapsed, so its elements alias
 #[inline(never)]
-fn make_readonly_if_aliasing(index: &[Range<u64>], out: &mut StridedBuf<'_>) {
-    if (index.iter().zip(out.strides())).any(|(r, &s)| s == 0 && r.end - r.start > 1) {
+fn make_readonly_if_aliasing(index: &Index<'_>, out: &mut StridedBuf<'_>) {
+    if (index.size().iter().zip(out.strides())).any(|(&n, &s)| s == 0 && n > 1) {
         out.make_readonly();
     }
 }
@@ -994,7 +993,9 @@ pub(crate) const fn n_operands_mul(count: Option<usize>, n: usize) -> Option<usi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::Index;
+    use std::ops::Range;
+
+    use crate::storage::{split_ranges, Index};
     use crate::{array_from_fn_inline, strided_span_bytes, Array, ArrayStorage, CompactArray, Ty};
 
     // ---------------------------------------------------------------------------
@@ -1126,15 +1127,16 @@ mod tests {
         };
 
         let context = ReadContext::default();
-        let index = shape.iter().map(|&s| 0..s as u64).collect::<Vec<_>>();
+        let start = vec![0; shape.len()];
+        let index = Index::new(&start, shape).unwrap();
 
         let lhs_pipeline = lhs_array
             .storage
-            .read_as_elementwise_pipeline::<T>(&Index::new(&index).unwrap(), &context)
+            .read_as_elementwise_pipeline::<T>(&index, &context)
             .unwrap();
         let rhs_pipeline = rhs_array
             .storage
-            .read_as_elementwise_pipeline::<T>(&Index::new(&index).unwrap(), &context)
+            .read_as_elementwise_pipeline::<T>(&index, &context)
             .unwrap();
 
         // ---------------------------------------------------------------------------
@@ -1531,14 +1533,16 @@ mod tests {
             .collect::<Vec<_>>();
         let nitems = shape.iter().product::<usize>();
         let itemsize = size_of::<T>();
+        let (start, size) = split_ranges(index);
+        let index = Index::new(&start, &size).unwrap();
 
         // Pull mode picks its own layout - and collapses any dim no operand walks to a single
         // element with a zero stride - so read the result back through the strides it hands out.
         let pulled = {
             let buf = storage
-                .read_as_elementwise_pipeline::<T>(&Index::new(index).unwrap(), &context)
+                .read_as_elementwise_pipeline::<T>(&index, &context)
                 .unwrap()
-                .to_buf(index, &context, None)
+                .to_buf(&index, &context, None)
                 .unwrap();
             offsets(&shape, buf.strides())
                 .into_iter()
@@ -1556,9 +1560,9 @@ mod tests {
                 StridedBuf::from_raw_parts_mut(dst.ptr_mut(), &shape, &dst_strides, itemsize)
             };
             storage
-                .read_as_elementwise_pipeline::<T>(&Index::new(index).unwrap(), &context)
+                .read_as_elementwise_pipeline::<T>(&index, &context)
                 .unwrap()
-                .to_buf(index, &context, Some(&mut out))
+                .to_buf(&index, &context, Some(&mut out))
                 .unwrap();
         }
         let pushed = offsets(&shape, &dst_strides)
@@ -1583,8 +1587,9 @@ mod tests {
             .iter()
             .map(|r| (r.end - r.start) as usize)
             .collect::<Vec<_>>();
+        let (start, size) = split_ranges(index);
         let buf = storage
-            .read_data(&Index::new(index).unwrap(), &context, None)
+            .read_data(&Index::new(&start, &size).unwrap(), &context, None)
             .unwrap();
         offsets(&shape, buf.strides())
             .into_iter()
@@ -1608,8 +1613,9 @@ mod tests {
             P::N_OPERANDS
         }
         let context = ReadContext::default();
+        let (start, size) = split_ranges(index);
         let pipeline = storage
-            .read_as_elementwise_pipeline::<T>(&Index::new(index).unwrap(), &context)
+            .read_as_elementwise_pipeline::<T>(&Index::new(&start, &size).unwrap(), &context)
             .unwrap();
         (declared::<T, _>(&pipeline), pipeline.operands().count())
     }
@@ -1710,9 +1716,10 @@ mod tests {
         // Both operands point straight into the two ndarrays: nothing was copied, and the
         // permuted one contributes its remapped strides rather than a repacked buffer.
         let context = ReadContext::default();
+        let (start, size) = split_ranges(&index);
         let pipeline = sum
             .storage
-            .read_as_elementwise_pipeline::<i32>(&Index::new(&index).unwrap(), &context)
+            .read_as_elementwise_pipeline::<i32>(&Index::new(&start, &size).unwrap(), &context)
             .unwrap();
         let sources = [
             nd_a.as_ptr().cast::<u8>() as usize,
@@ -1742,9 +1749,10 @@ mod tests {
             .add(Array::compact_ndarray(&nd).unwrap());
         let index = full_index(sum.storage.shape());
         let context = ReadContext::default();
+        let (start, size) = split_ranges(&index);
         assert!(sum
             .storage
-            .read_as_elementwise_pipeline::<i64>(&Index::new(&index).unwrap(), &context)
+            .read_as_elementwise_pipeline::<i64>(&Index::new(&start, &size).unwrap(), &context)
             .is_err());
     }
 
@@ -1790,8 +1798,9 @@ mod tests {
             .iter()
             .map(|r| (r.end - r.start) as usize)
             .collect::<Vec<_>>();
+        let (start, size) = split_ranges(index);
         let buf = storage
-            .read_data(&Index::new(index).unwrap(), &context, None)
+            .read_data(&Index::new(&start, &size).unwrap(), &context, None)
             .unwrap();
         let elements = offsets(&shape, buf.strides())
             .into_iter()
@@ -1889,9 +1898,10 @@ mod tests {
             let mut out = unsafe {
                 StridedBuf::from_raw_parts_mut(dst.ptr_mut(), &shape, strides.as_ref(), itemsize)
             };
+            let (start, size) = split_ranges(&index);
             neg.storage
                 .read_data(
-                    &Index::new(&index).unwrap(),
+                    &Index::new(&start, &size).unwrap(),
                     &ReadContext::default(),
                     Some(&mut out),
                 )
@@ -2065,8 +2075,9 @@ mod tests {
             P::MAX_ITEMSIZE
         }
         let context = ReadContext::default();
+        let (start, size) = split_ranges(index);
         let pipeline = storage
-            .read_as_elementwise_pipeline::<T>(&Index::new(index).unwrap(), &context)
+            .read_as_elementwise_pipeline::<T>(&Index::new(&start, &size).unwrap(), &context)
             .unwrap();
         declared::<T, _>(&pipeline)
     }

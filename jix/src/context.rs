@@ -1,5 +1,4 @@
 use std::cell::{Cell, RefCell, UnsafeCell};
-use std::ops::Range;
 use std::sync::Arc;
 
 use crate::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
@@ -8,7 +7,7 @@ use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
 use crate::storage::{check_out_buf_impl, Index, StridedBuf};
-use crate::util::{dim_arr, DimArray, RawAlignedBytes, SliceExt};
+use crate::util::{DimArray, RawAlignedBytes, SliceExt};
 use crate::DimDyn;
 
 /// A context with reusable buffers and a long-lived decoder instance.
@@ -115,7 +114,8 @@ struct Cache {
 }
 type CacheMap = ArrayCacheIdMap<CacheEntry>;
 struct CacheEntry {
-    index: DimArray<Range<u64>>,
+    start: DimArray<u64>,
+    size: DimArray<usize>,
 
     data: Arc<RawAlignedBytes>,
     offset: usize,
@@ -187,7 +187,7 @@ impl ReadContext {
         };
         // Search for a matching cache entry for this array ID and index
         if let Some(entry) = cache.map.get(id) {
-            if entry.index.as_slice() == &**index {
+            if entry.start.as_slice() == index.start() && entry.size.as_slice() == index.size() {
                 let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
                 let buf = unsafe {
                     StridedBuf::from_shared(buf, &entry.strides).with_offset(entry.offset)
@@ -201,12 +201,11 @@ impl ReadContext {
                     Some(out) => {
                         check_out_buf_impl(out, index, dtype.itemsize() as usize)?;
 
-                        let shape =
-                            dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+                        let shape = index.size();
                         let (src, src_strides) = buf.data();
                         // SAFETY: the cached buffer holds the region at `src_strides`, and `out`
                         // was checked to hold it at its own strides.
-                        unsafe { out.copy_from(src, src_strides, &shape, dtype) };
+                        unsafe { out.copy_from(src, src_strides, shape, dtype) };
                         out.view_mut()
                     }
                 });
@@ -230,7 +229,8 @@ impl ReadContext {
         let buf = PoolBufShared::new(data.clone(), &self.buffer_pool);
         let buf = unsafe { StridedBuf::from_shared(buf, &strides).with_offset(offset) };
         let entry = CacheEntry {
-            index: index.to_dim_vec::<DimDyn>(),
+            start: index.start().to_dim_vec::<DimDyn>(),
+            size: index.size().to_dim_vec::<DimDyn>(),
             data,
             offset,
             strides,

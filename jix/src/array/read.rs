@@ -1,8 +1,10 @@
 use std::mem::MaybeUninit;
 use std::ops::Range;
 
-use crate::error::{check_get_buffer_size, check_get_range, check_region_size, ensure, Result};
-use crate::storage::{check_out_buf, materialize_out_buf, ArrayStorageTyped, Index, StridedBuf};
+use crate::error::{check_get_buffer_size, check_ranges, check_region_size, ensure, Result};
+use crate::storage::{
+    check_out_buf, materialize_out_buf, split_ranges, ArrayStorageTyped, Index, StridedBuf,
+};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, cast_slice_mut, dim_arr, IterExt};
 use crate::ReadContext;
@@ -200,7 +202,9 @@ impl<S: ArrayStorage> Array<S> {
         S: ArrayStorageTyped,
         D: ndarray::Dimension,
     {
-        check_get_range(self.shape(), index)?;
+        check_ranges(self.shape(), index)?;
+        let (start, size) = split_ranges(index);
+        let index = unsafe { Index::new_unchecked(&start, &size) };
         let ndim = self.ndim();
         if let Some(expected) = D::NDIM {
             ensure!(
@@ -211,8 +215,9 @@ impl<S: ArrayStorage> Array<S> {
         }
         let itemsize = self.dtype().itemsize() as usize;
         let alloc_bytes = index
+            .size()
             .iter()
-            .map(|r| (r.end - r.start).max(1))
+            .map(|&n| n.max(1) as u64)
             .chain([itemsize as u64])
             .try_shape_product();
         ensure!(
@@ -222,7 +227,7 @@ impl<S: ArrayStorage> Array<S> {
         );
         let mut out_shape = D::zeros(ndim);
         for dim in 0..ndim {
-            out_shape[dim] = (index[dim].end - index[dim].start) as usize;
+            out_shape[dim] = index.size()[dim];
         }
 
         let mut array = {
@@ -256,7 +261,7 @@ impl<S: ArrayStorage> Array<S> {
                 ))
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides.as_ref()) };
-            self.to_buf_strided_checked(index, context, Some(&mut out))?;
+            self.to_buf_strided_checked(&index, context, Some(&mut out))?;
         }
         Ok(unsafe { array.assume_init() })
     }
@@ -305,13 +310,15 @@ impl<S: ArrayStorage> Array<S> {
         context: &ReadContext,
     ) -> Result<()> {
         let dtype = self.dtype();
-        check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, dtype, buf)?;
-        check_region_size(index, dtype.itemsize() as usize)?;
-        let read_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
+        check_ranges(self.shape(), index)?;
+        let (start, size) = split_ranges(index);
+        let index = unsafe { Index::new_unchecked(&start, &size) };
+        check_get_buffer_size(&index, dtype, buf)?;
+        check_region_size(&index, dtype.itemsize() as usize)?;
+        let read_shape = dim_arr(index.ndim(), |dim| index.size()[dim]);
         let strides = default_strides(&read_shape, dtype.itemsize() as usize);
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides.as_ref()) };
-        self.to_buf_strided_checked(index, context, Some(&mut out))?;
+        self.to_buf_strided_checked(&index, context, Some(&mut out))?;
         Ok(())
     }
 
@@ -403,28 +410,29 @@ impl<S: ArrayStorage> Array<S> {
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_get_range(self.shape(), index)?;
-        self.to_buf_strided_checked(index, context, out)
+        check_ranges(self.shape(), index)?;
+        let (start, size) = split_ranges(index);
+        let index = unsafe { Index::new_unchecked(&start, &size) };
+        self.to_buf_strided_checked(&index, context, out)
     }
 
     // like `to_buf_strided` for an `index` the caller already validated against
     #[inline]
     fn to_buf_strided_checked<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         let shape = self.shape();
         let dtype = self.dtype();
-        let index = Index::new(index)?;
         check_out_buf(
             out.as_deref(),
             shape,
-            &index,
+            index,
             self.dtype().itemsize() as usize,
         )?;
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        let nitems = index.size().iter().product::<usize>();
 
         let spec = self.storage.spec();
         let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
@@ -432,9 +440,9 @@ impl<S: ArrayStorage> Array<S> {
         let _cache_scope = context.cache_scope(&spec.dynamic().arrays_to_cache);
         if small_read {
             // Fast path for small reads
-            self.storage.read_data(&index, context, out)
+            self.storage.read_data(index, context, out)
         } else {
-            to_buf_strided_slow(&self.storage, &index, context, out)
+            to_buf_strided_slow(&self.storage, index, context, out)
         }
     }
 }
@@ -442,7 +450,7 @@ impl<S: ArrayStorage> Array<S> {
 #[inline(never)]
 fn to_buf_strided_slow<'a, S: ArrayStorage>(
     storage: &'a S,
-    index: &[Range<u64>],
+    index: &Index<'_>,
     context: &'a ReadContext,
     out: Option<&'a mut StridedBuf<'_>>,
 ) -> Result<StridedBuf<'a>> {
@@ -454,7 +462,7 @@ fn to_buf_strided_slow<'a, S: ArrayStorage>(
 #[inline(never)]
 fn to_buf_strided_slow_dyn_dispatch<'a>(
     storage: &'a dyn ArrayStorage,
-    index: &[Range<u64>],
+    index: &Index<'_>,
     context: &'a ReadContext,
     out: Option<&'a mut StridedBuf<'_>>,
 ) -> Result<StridedBuf<'a>> {
@@ -477,38 +485,32 @@ fn to_buf_strided_slow_dyn_dispatch<'a>(
 #[inline(never)]
 fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     storage: &'a dyn ArrayStorage,
-    index: &[Range<u64>],
+    index: &Index<'_>,
     context: &'a ReadContext,
     out: Option<&'a mut StridedBuf<'_>>,
 ) -> Result<StridedBuf<'a>> {
     let shape = storage.shape();
-    let ndim = index.len();
+    let ndim = index.ndim();
     let dtype = storage.dtype();
 
     let spec = storage.spec();
-    let out_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
-    let out_shape_usize = D::vec(ndim, |dim| out_shape[dim] as usize);
-    let mut out = materialize_out_buf(
-        out,
-        context,
-        out_shape_usize.as_ref(),
-        dtype,
-        spec.read_layout_order(),
-    );
-    if out_shape.as_ref().contains(&0) {
+    let out_shape = index.size();
+    let mut out = materialize_out_buf(out, context, out_shape, dtype, spec.read_layout_order());
+    if out_shape.contains(&0) {
         return Ok(out);
     }
-    let read_shape = spec.read_shape_heuristic::<D>(out_shape.as_ref(), shape, dtype.itemsize());
+    let max_shape = D::vec(ndim, |dim| out_shape[dim] as u64);
+    let read_shape = spec.read_shape_heuristic::<D>(max_shape.as_ref(), shape, dtype.itemsize());
     // Block-space begin/end for NdIter.
-    let block_begin = D::vec(ndim, |dim| index[dim].start / read_shape[dim]);
+    let block_begin = D::vec(ndim, |dim| index.start()[dim] / read_shape[dim]);
     let block_end = D::vec(ndim, |dim| {
-        calc_block_end(index[dim].start, index[dim].end, read_shape[dim])
+        calc_block_end(index.start()[dim], index.end(dim), read_shape[dim])
     });
     // NdIter that yields blocks of size <= read_shape
     let block_iter = NdIter::builder_with_begin(block_begin, block_end)
         .with_block_offset_size_ext(
-            &D::vec(ndim, |dim| index[dim].start),
-            &D::vec(ndim, |dim| index[dim].end),
+            &D::vec(ndim, |dim| index.start()[dim]),
+            &D::vec(ndim, |dim| index.end(dim)),
             D::vec(ndim, |dim| read_shape[dim]),
         )
         .build();
@@ -516,23 +518,20 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     let (out_buf, out_strides) = out.data_mut();
 
     for (block_idx, (block_inner_offset, block_size)) in block_iter {
-        let inner_index = D::vec(ndim, |dim| {
-            let start = block_idx[dim] * read_shape[dim] + block_inner_offset[dim];
-            let end = start + block_size[dim];
-            start..end
+        let block_start = D::vec(ndim, |dim| {
+            block_idx[dim] * read_shape[dim] + block_inner_offset[dim]
         });
 
         let out_offset = (0..ndim)
-            .map(|dim| (inner_index[dim].start - index[dim].start) as usize * out_strides[dim])
+            .map(|dim| (block_start[dim] - index.start()[dim]) as usize * out_strides[dim])
             .sum::<usize>();
 
         let mut block_out =
             unsafe { StridedBuf::from_slice_mut(&mut out_buf[out_offset..], out_strides) };
-        storage.read_data(
-            &unsafe { Index::new_unchecked(inner_index.as_ref()) },
-            context,
-            Some(&mut block_out),
-        )?;
+        let block_size = D::vec(ndim, |dim| block_size[dim] as usize);
+        let block_index =
+            unsafe { Index::new_unchecked(block_start.as_ref(), block_size.as_ref()) };
+        storage.read_data(&block_index, context, Some(&mut block_out))?;
     }
     Ok(out)
 }

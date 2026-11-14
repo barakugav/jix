@@ -97,8 +97,7 @@ where
         let dst_dtype = self.dtype();
 
         let tmp = self.array.read_data(index, context, None)?;
-        let ndim = index.len();
-        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
+        let out_shape = index.size();
 
         let empty_read = out_shape.as_ref().contains(&0);
         if out.is_none() {
@@ -111,7 +110,7 @@ where
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape.as_ref(),
+            out_shape,
             dst_dtype,
             self.spec().read_layout_order(),
         );
@@ -127,7 +126,7 @@ where
             copier.copy(
                 PtrNoalias::from_slice(src),
                 PtrMutNoalias::from_slice(out_buf),
-                out_shape.as_ref(),
+                out_shape,
                 src_strides,
                 out_strides,
                 dst_dtype,
@@ -260,7 +259,7 @@ mod tests {
         // Pull path (out = None) must return a strided view of the parent buffer, not a copy.
         let view = field
             .storage()
-            .read_data(&Index::new(&[0..3]).unwrap(), &ctx, None)
+            .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, None)
             .unwrap();
         // The give-away that it is zero-copy: the stride is the parent struct's stride (8 bytes),
         // not the field-packed stride (4) that a materialized copy would carry.
@@ -277,7 +276,7 @@ mod tests {
         // An empty pull must not panic on the sub-field shift.
         let empty = field
             .storage()
-            .read_data(&Index::new(&[0..0]).unwrap(), &ctx, None)
+            .read_data(&Index::new(&[0], &[0]).unwrap(), &ctx, None)
             .unwrap();
         assert_eq!(empty.strides().len(), 1);
     }

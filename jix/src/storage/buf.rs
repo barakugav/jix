@@ -1,4 +1,3 @@
-use std::ops::Range;
 use std::sync::Arc;
 
 use crate::buf_pool::{PoolBuf, PoolBufShared};
@@ -370,20 +369,21 @@ pub(crate) fn check_out_buf_impl(
     itemsize: usize,
 ) -> Result<()> {
     ensure!(
-        out.strides().len() == index.len(),
+        out.strides().len() == index.ndim(),
         InvalidArgument,
         "out buffer has {} strides but array has {} dimensions",
         out.strides().len(),
-        index.len()
+        index.ndim()
     );
     ensure!(
         out.is_writable(),
         InvalidArgument,
         "out buffer must be a writable destination, not a read-only view"
     );
-    if index.iter().all(|r| r.end > r.start) {
+    let size = index.size();
+    if size.iter().all(|&n| n > 0) {
         let strides = out.strides();
-        let d_len_stride = |d: usize| (index[d].end - index[d].start, strides[d] as u64);
+        let d_len_stride = |d: usize| (size[d] as u64, strides[d] as u64);
 
         /// The span in bytes of a region with `(len, stride)` dims.
         ///
@@ -399,11 +399,11 @@ pub(crate) fn check_out_buf_impl(
         let mut span = None;
         if span.is_none() {
             // common fast path, strides decrease with the dim
-            span = disjoint_span((0..index.len()).rev().map(d_len_stride), itemsize);
+            span = disjoint_span((0..size.len()).rev().map(d_len_stride), itemsize);
         }
         if span.is_none() {
             // general path, sort dims by stride
-            let mut dims = dim_arr(index.len(), d_len_stride);
+            let mut dims = dim_arr(size.len(), d_len_stride);
             dims.sort_unstable_by_key(|&(_len, stride)| stride);
             span = disjoint_span(dims.into_iter(), itemsize);
         }
@@ -464,7 +464,7 @@ pub(crate) fn materialize_out_buf<'a>(
 #[inline]
 pub(crate) unsafe fn read_data_and_map_strides<'a>(
     inner: &'a impl ArrayStorage,
-    inner_index: &[Range<u64>],
+    inner_index: &Index<'_>,
     context: &'a ReadContext,
     mut out: Option<&'a mut StridedBuf<'_>>,
     inner2outer_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
@@ -480,11 +480,7 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
         unsafe { StridedBuf::from_slice_mut(data, inner_strides.as_ref()) }
     });
 
-    let inner_buf = inner.read_data(
-        &unsafe { Index::new_unchecked(inner_index) },
-        context,
-        inner_out.as_mut(),
-    )?;
+    let inner_buf = inner.read_data(inner_index, context, inner_out.as_mut())?;
 
     if is_push {
         // The inner storage wrote into `out` through `inner_out`
@@ -505,7 +501,6 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
 mod tests {
     use ndarray::array;
 
-    use crate::storage::Index;
     use crate::Array;
     use crate::ReadContext;
 
@@ -566,29 +561,5 @@ mod tests {
                 .to_buf_strided(&[0..2, 0..4], &ctx2, Some(&mut out))
                 .is_err());
         }
-    }
-
-    #[test]
-    #[allow(clippy::reversed_empty_ranges)]
-    fn reversed_index_is_invalid_index() {
-        let ctx = ReadContext::default();
-        let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]]).unwrap();
-        let kind = |s: &dyn crate::ArrayStorage| {
-            s.read_data(&Index::new(&[0..2, 2..1]).unwrap(), &ctx, None)
-                .err()
-                .map(|e| e.kind())
-        };
-        assert_eq!(
-            kind((-a.view()).storage()),
-            Some(crate::error::ErrorKind::InvalidIndex)
-        );
-        assert_eq!(
-            kind((a.view() + a.view()).storage()),
-            Some(crate::error::ErrorKind::InvalidIndex)
-        );
-        assert_eq!(
-            kind(a.view().permute_dims(&[1, 0]).storage()),
-            Some(crate::error::ErrorKind::InvalidIndex)
-        );
     }
 }

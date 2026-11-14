@@ -1448,9 +1448,21 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
 
     let ctx = ReadContext::default();
     for index in invalid {
-        let err = storage
-            .read_data(&Index::new(&index).unwrap(), &ctx, None)
-            .err();
+        // Only a reversed range cannot be an `Index`; the storage must reject the rest
+        let read = |out: Option<&mut StridedBuf>| {
+            if index.iter().any(|r| r.start > r.end) {
+                crate::error::bail!(InvalidIndex, "reversed range");
+            }
+            let start = index.iter().map(|r| r.start).collect::<Vec<_>>();
+            let size = index
+                .iter()
+                .map(|r| (r.end - r.start) as usize)
+                .collect::<Vec<_>>();
+            storage
+                .read_data(&Index::new(&start, &size)?, &ctx, out)
+                .map(drop)
+        };
+        let err = read(None).err();
         let err = err.unwrap_or_else(|| panic!("pull read of {index:?} for {shape:?} succeeded"));
         assert_eq!(
             err.kind(),
@@ -1459,9 +1471,7 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
         );
 
         let mut out = unsafe { StridedBuf::from_slice_mut(&mut dst, &dst_strides) };
-        let err = storage
-            .read_data(&Index::new(&index).unwrap(), &ctx, Some(&mut out))
-            .err();
+        let err = read(Some(&mut out)).err();
         let err = err.unwrap_or_else(|| panic!("push read of {index:?} for {shape:?} succeeded"));
         assert_eq!(
             err.kind(),

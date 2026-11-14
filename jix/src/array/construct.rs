@@ -258,13 +258,12 @@ impl<T> CompactArray<T> {
                     index,
                     self.dtype().itemsize() as usize,
                 )?;
-                let ndim = index.len();
-                let read_shape_usize =
-                    dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+                let ndim = index.ndim();
+                let read_shape = index.size();
                 let mut out = materialize_out_buf(
                     out,
                     context,
-                    read_shape_usize.as_ref(),
+                    read_shape,
                     self.dtype(),
                     self.spec().read_layout_order(),
                 );
@@ -274,8 +273,8 @@ impl<T> CompactArray<T> {
                 let dst_aligned = (out_buf.as_ptr() as usize).is_multiple_of(alignment)
                     && (out_strides.iter().all(|s| s.is_multiple_of(alignment)));
 
-                let begin = dim_arr(ndim, |dim| index[dim].start);
-                let end = dim_arr(ndim, |dim| index[dim].end);
+                let begin = index.start().to_dim_vec::<DimDyn>();
+                let end = dim_arr(ndim, |dim| index.end(dim));
                 let base = out_buf.as_mut_ptr();
                 let iter = NdIter::builder_with_begin(begin, end)
                     .with_strides_offset_ext(out_strides.to_dim_vec::<DimDyn>(), 0)

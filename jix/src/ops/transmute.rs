@@ -310,7 +310,7 @@ mod tests {
 
         let view = t
             .storage()
-            .read_data(&Index::new(&[0..3]).unwrap(), &ctx, None)
+            .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, None)
             .unwrap();
         assert_eq!(view.data_ptr(), src.as_ptr().cast::<u8>());
         assert_eq!(view.strides(), &[size_of::<f32>()]);
@@ -341,7 +341,7 @@ mod tests {
                 )
             };
             t.storage()
-                .read_data(&Index::new(&[0..2, 0..3]).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
         assert_eq!(

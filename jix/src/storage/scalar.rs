@@ -99,7 +99,7 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let ndim = index.len();
+        let ndim = index.ndim();
         let dtype = T::DTYPE;
 
         match out {
@@ -109,10 +109,10 @@ where
                 Ok(unsafe { StridedBuf::from_slice(src, dim_arr(ndim, |_| 0usize).as_ref()) })
             }
             Some(out) => {
-                let read_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
-                if out.is_contiguous_aligned(read_shape.as_ref(), &dtype) {
+                let read_shape = index.size();
+                if out.is_contiguous_aligned(read_shape, &dtype) {
                     // Fill the region in one tight loop.
-                    let region_len = read_shape.as_ref().iter().product::<usize>() * size_of::<T>();
+                    let region_len = read_shape.iter().product::<usize>() * size_of::<T>();
                     let (out_buf, _) = out.data_mut();
                     for item in unsafe { cast_slice_mut::<u8, T>(&mut out_buf[..region_len]) } {
                         *item = self.data;
@@ -121,9 +121,7 @@ where
                     // Write the scalar to each strided output position
                     let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
                     let src_strides = dim_arr(ndim, |_| 0usize);
-                    unsafe {
-                        out.copy_from(src, src_strides.as_ref(), read_shape.as_ref(), &dtype)
-                    };
+                    unsafe { out.copy_from(src, src_strides.as_ref(), read_shape, &dtype) };
                 }
                 Ok(out.view_mut())
             }
@@ -226,7 +224,7 @@ mod tests {
             let mut out = unsafe { StridedBuf::from_slice_mut(&mut bytes[16..], &[16, 4]) };
             a.storage()
                 .read_data(
-                    &Index::new(&[0..2, 0..4]).unwrap(),
+                    &Index::new(&[0, 0], &[2, 4]).unwrap(),
                     &ReadContext::default(),
                     Some(&mut out),
                 )
@@ -241,7 +239,7 @@ mod tests {
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &[16, 4]) };
             a.storage()
                 .read_data(
-                    &Index::new(&[0..1, 0..4]).unwrap(),
+                    &Index::new(&[0, 0], &[1, 4]).unwrap(),
                     &ReadContext::default(),
                     Some(&mut out),
                 )

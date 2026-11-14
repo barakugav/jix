@@ -136,29 +136,33 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         let ndim = self.is_broadcast.as_ref().len();
 
         // empty read
-        if index.iter().any(|r| r.is_empty()) {
-            let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        if index.size().contains(&0) {
+            let out_shape = index.size();
             return Ok(materialize_out_buf(
                 out,
                 context,
-                out_shape.as_ref(),
+                out_shape,
                 self.dtype(),
                 self.spec().read_layout_order(),
             ));
         }
 
-        let inner_index = dim_arr(ndim, |dim| {
-            if self.is_broadcast[dim] {
-                0..1
+        let inner_start = dim_arr(ndim, |d| {
+            if self.is_broadcast[d] {
+                0
             } else {
-                index[dim].clone()
+                index.start()[d]
             }
         });
-        let mut inner = self.array.read_data(
-            &unsafe { Index::new_unchecked(&inner_index) },
-            context,
-            None,
-        )?;
+        let inner_size = dim_arr(ndim, |d| {
+            if self.is_broadcast[d] {
+                1
+            } else {
+                index.size()[d]
+            }
+        });
+        let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
+        let mut inner = self.array.read_data(&inner_index, context, None)?;
 
         let inner_strides = inner.strides();
         let broadcasted_strides = dim_arr(ndim, |dim| {
@@ -175,16 +179,11 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
                 Ok(unsafe { inner.with_strides(broadcasted_strides.as_ref()) })
             }
             Some(out) => {
-                let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+                let out_shape = index.size();
                 let (src, _) = inner.data();
                 // SAFETY: `src_strides` are the inner view's strides with broadcast dims zeroed
                 unsafe {
-                    out.copy_from(
-                        src,
-                        broadcasted_strides.as_ref(),
-                        out_shape.as_ref(),
-                        self.dtype(),
-                    )
+                    out.copy_from(src, broadcasted_strides.as_ref(), out_shape, self.dtype())
                 };
                 Ok(out.view_mut())
             }

@@ -133,14 +133,14 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         )?;
         let _cache_scope = self.cache_scope.enter(context);
 
-        let ndim = index.len();
-        let out_shape_usize = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
+        let ndim = index.ndim();
+        let out_shape = index.size();
         let dtype = self.dtype();
-        if out_shape_usize.as_ref().contains(&0) {
+        if out_shape.contains(&0) {
             return Ok(materialize_out_buf(
                 out,
                 context,
-                out_shape_usize.as_ref(),
+                out_shape,
                 dtype,
                 self.spec().read_layout_order(),
             ));
@@ -148,8 +148,8 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
         let k = self.dim as usize;
         let l = self.array.shape()[k];
-        let s = index[k].start;
-        let e = index[k].end;
+        let s = index.start()[k];
+        let e = index.end(k);
         let total = e - s;
         // L > 0 here because output dim k has length L * repeats > 0 (any zero-length range
         // was already short-circuited above).
@@ -158,26 +158,16 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         // Case A - single read, no wrap: the requested output range maps to one contiguous
         // input range along dim k. Forward directly.
         if s_in + total <= l {
-            let inner_index = dim_arr(ndim, |d| {
-                if d == k {
-                    s_in..s_in + total
-                } else {
-                    index[d].clone()
-                }
-            });
-            return self.array.read_data(
-                &unsafe { Index::new_unchecked(&inner_index) },
-                context,
-                out,
-            );
+            let inner_start = dim_arr(ndim, |d| if d == k { s_in } else { index.start()[d] });
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
+            return self.array.read_data(&inner_index, context, out);
         }
 
         // Cases B and C gather/replicate into a destination.
-        let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape_usize.as_ref(),
+            out_shape,
             dtype,
             self.spec().read_layout_order(),
         );
@@ -191,23 +181,27 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             let len2 = total - len1;
 
             let mut read_region =
-                |inner_index: &[Range<u64>], dst_dim_k_offset: u64| -> Result<()> {
+                |start_k: u64, size_k: u64, dst_dim_k_offset: u64| -> Result<()> {
+                    let inner_start =
+                        dim_arr(ndim, |d| if d == k { start_k } else { index.start()[d] });
+                    let inner_size = dim_arr(ndim, |d| {
+                        if d == k {
+                            size_k as usize
+                        } else {
+                            index.size()[d]
+                        }
+                    });
                     let dst_byte_offset = dst_dim_k_offset as usize * out_strides[k];
                     let mut sub = unsafe {
                         StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides)
                     };
-                    self.array.read_data(
-                        &unsafe { Index::new_unchecked(inner_index) },
-                        context,
-                        Some(&mut sub),
-                    )?;
+                    let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
+                    self.array
+                        .read_data(&inner_index, context, Some(&mut sub))?;
                     Ok(())
                 };
-            let inner_r1 = dim_arr(ndim, |d| if d == k { s_in..l } else { index[d].clone() });
-            read_region(inner_r1.as_ref(), 0)?;
-
-            let inner_r2 = dim_arr(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
-            read_region(inner_r2.as_ref(), len1)?;
+            read_region(s_in, len1, 0)?;
+            read_region(0, len2, len1)?;
             return Ok(out);
         }
         // Case C - span > L: read the full period [0, L) along dim k once, then memcpy
@@ -215,10 +209,10 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         //   head:   tmp[s_in..L]     -> dst[0..head_len)
         //   middle: tmp[0..L] x F    -> dst[head_len..head_len + F*L)   (F = num_full)
         //   tail:   tmp[0..tail_len] -> dst[head_len + F*L..total)
-        let inner_full = dim_arr(ndim, |d| if d == k { 0..l } else { index[d].clone() });
-        let tmp =
-            self.array
-                .read_data(&unsafe { Index::new_unchecked(&inner_full) }, context, None)?;
+        let inner_start = dim_arr(ndim, |d| if d == k { 0 } else { index.start()[d] });
+        let inner_size = dim_arr(ndim, |d| if d == k { l as usize } else { index.size()[d] });
+        let inner_full = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
+        let tmp = self.array.read_data(&inner_full, context, None)?;
         // Use the period view's own strides - it may be a lent (strided) view, not contiguous.
         let (tmp, src_strides) = tmp.data();
 
@@ -232,7 +226,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             if d == k {
                 head_len as usize
             } else {
-                out_shape[d] as usize
+                out_shape[d]
             }
         });
         let src_off = s_in as usize * src_strides[k];
@@ -256,16 +250,13 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             // dim back to its pre-split source dim.
             let src_dim = |i: usize| if i < k { i } else { i - 1 };
             let copy_shape = dim_arr(ndim + 1, |i| {
-                let s = if i < k {
-                    out_shape[src_dim(i)]
-                } else if i == k {
-                    num_full
+                if i == k {
+                    num_full as usize
                 } else if i == k + 1 {
-                    l
+                    l as usize
                 } else {
                     out_shape[src_dim(i)]
-                };
-                s as usize
+                }
             });
             // Stride 0 on the synthesized dim (position k) replicates the period.
             let src_strides_split = dim_arr(ndim + 1, |i| match i.cmp(&k) {
@@ -298,7 +289,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 if d == k {
                     tail_len as usize
                 } else {
-                    out_shape[d] as usize
+                    out_shape[d]
                 }
             });
             let dst_off = (head_len + num_full * l) as usize * out_strides[k];

@@ -136,15 +136,17 @@ where
     }
 
     #[inline(always)]
-    fn transform_index(&self, index: &[Range<u64>]) -> Result<DimArray<Range<u64>>> {
+    fn transform_index(&self, index: &Index<'_>) -> Result<(DimArray<u64>, DimArray<usize>)> {
         check_get_range_ndim(self.shape(), index)?;
 
         let inner_ndim = self.array.shape().len();
-        let mut inner_index = dim_arr(inner_ndim, |_| 0..1);
-        for (index, &dim) in index.iter().zip(self.dims_mapping.as_ref()) {
-            inner_index[dim as usize] = index.clone();
+        let mut start = dim_arr(inner_ndim, |_| 0);
+        let mut size = dim_arr(inner_ndim, |_| 1);
+        for (d, &dim) in self.dims_mapping.as_ref().iter().enumerate() {
+            start[dim as usize] = index.start()[d];
+            size[dim as usize] = index.size()[d];
         }
-        Ok(inner_index)
+        Ok((start, size))
     }
 }
 
@@ -168,15 +170,16 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
+        let (inner_start, inner_size) = self.transform_index(index)?;
         let _cache_scope = self.cache_scope.enter(context);
         unsafe {
             read_data_and_map_strides(
                 &self.array,
-                self.transform_index(index)?.as_ref(),
+                &Index::new_unchecked(&inner_start, &inner_size),
                 context,
                 out,
                 |inner_strides| {
-                    dim_arr(index.len(), |i| {
+                    dim_arr(index.ndim(), |i| {
                         inner_strides[self.dims_mapping[i] as usize]
                     })
                 },

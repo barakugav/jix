@@ -144,11 +144,11 @@ where
 
         let condition_view = self.condition.read_data(index, context, None)?;
         let y_view = self.y.read_data(index, context, None)?;
-        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let out_shape = index.size();
         let mut out = materialize_out_buf(
             out,
             context,
-            out_shape.as_ref(),
+            out_shape,
             dtype,
             self.spec().read_layout_order(),
         );
@@ -160,7 +160,7 @@ where
 
         // Operand 0 is the output buffer, `x`, operand 1 `y` and operand 2 the condition mask.
         let iter = NdIterUnordered::new(
-            out_shape.as_ref(),
+            out_shape,
             // order (x, y, condition), to give priority in dims sort for x and y over condition
             [out_strides, y_strides, condition_strides],
             [
@@ -478,7 +478,7 @@ mod tests {
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::storage::Index;
+    use crate::storage::{split_ranges, Index};
     use crate::util::ScalarStrategy;
 
     #[test]
@@ -912,8 +912,9 @@ mod tests {
         {
             let dst = &mut bytes[base_offset..];
             let mut out = unsafe { StridedBuf::from_slice_mut(dst, &byte_strides) };
+            let (start, size) = split_ranges(&index);
             storage
-                .read_data(&Index::new(&index).unwrap(), &ctx, Some(&mut out))
+                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 

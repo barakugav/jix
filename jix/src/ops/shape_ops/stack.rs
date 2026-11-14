@@ -178,11 +178,11 @@ where
             self.dtype().itemsize() as usize,
         )?;
         let _cache_scope = self.cache_scope.enter(context);
-        let output_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let output_shape = index.size();
         let mut out = materialize_out_buf(
             out,
             context,
-            output_shape.as_ref(),
+            output_shape,
             dtype,
             self.spec().read_layout_order(),
         );
@@ -192,22 +192,23 @@ where
 
         let stack_dim = self.stack_dim as usize;
         let arr_ndim = shape.len() - 1;
-        let arr_range = index[..stack_dim]
-            .iter()
-            .chain(index[stack_dim + 1..].iter())
-            .cloned()
-            .collect_dim_vec::<DimDyn>(arr_ndim);
-        let arr_range_shape = dim_arr(arr_ndim, |dim| {
-            (arr_range[dim].end - arr_range[dim].start) as usize
-        });
+        fn without_dim<T: Copy>(v: &[T], dim: usize) -> DimArray<T> {
+            v[..dim]
+                .iter()
+                .chain(&v[dim + 1..])
+                .copied()
+                .collect_dim_vec::<DimDyn>(v.len() - 1)
+        }
+        let arr_start = without_dim(index.start(), stack_dim);
+        let arr_size = without_dim(index.size(), stack_dim);
         let itemsize = dtype.itemsize() as usize;
-        let arr_size_bytes = arr_range_shape.as_ref().iter().product::<usize>() * itemsize;
-        let n_stack = (index[stack_dim].end - index[stack_dim].start) as usize;
+        let arr_size_bytes = arr_size.as_ref().iter().product::<usize>() * itemsize;
+        let n_stack = index.size()[stack_dim];
 
         // In-place fast path (each sub-array a contiguous chunk) is valid only when the destination
         // is contiguous and all dims before stack_dim have size <=1; else scatter.
-        let in_place = out.is_contiguous(output_shape.as_ref(), dtype)
-            && shape.iter().take(stack_dim).all(|&s| s <= 1);
+        let in_place =
+            out.is_contiguous(output_shape, dtype) && shape.iter().take(stack_dim).all(|&s| s <= 1);
         let (out_buf, out_strides) = out.data_mut();
         // Stride of the stack dim in the output (offset between consecutive sub-arrays).
         let stack_dim_stride = out_strides[stack_dim];
@@ -222,11 +223,12 @@ where
             })
         });
 
+        let arr_index = unsafe { Index::new_unchecked(&arr_start, &arr_size) };
         for arr_idx in 0..n_stack {
             let buf_offset = arr_idx * stack_dim_stride;
-            let arr = index[stack_dim].start as usize + arr_idx;
+            let arr = index.start()[stack_dim] as usize + arr_idx;
             let mut sub = if in_place {
-                let sub_c = default_strides(&arr_range_shape, itemsize);
+                let sub_c = default_strides(&arr_size, itemsize);
                 // SAFETY: contiguous destination; array `arr` packs into this contiguous chunk.
                 unsafe {
                     StridedBuf::from_slice_mut(
@@ -240,12 +242,8 @@ where
                 // at `buf_offset` is within `dest`.
                 unsafe { StridedBuf::from_slice_mut(&mut out_buf[buf_offset..], strides) }
             };
-            self.arrays.read_data(
-                arr,
-                &unsafe { Index::new_unchecked(&arr_range) },
-                context,
-                Some(&mut sub),
-            )?;
+            self.arrays
+                .read_data(arr, &arr_index, context, Some(&mut sub))?;
         }
         Ok(out)
     }
