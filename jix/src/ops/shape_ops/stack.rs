@@ -7,7 +7,8 @@ use crate::util::{ArraySequence, ArraySequenceElementType};
 ///
 /// # Panics
 ///
-/// Panics if `arrays` is empty, `dim` is out of bounds, dtypes differ, or shapes differ.
+/// Panics if `arrays` is empty, `dim` is out of bounds, dtypes differ, shapes differ, or the
+/// output would have more than [`NDIM_MAX`](crate::NDIM_MAX) dims.
 #[track_caller]
 pub fn stack<ArraysT>(arrays: ArraysT, dim: usize) -> Array<Stack<ArraysT>>
 where
@@ -18,10 +19,9 @@ where
 
 /// Joins a sequence of arrays along a new dim, returned by [`stack`].
 ///
-/// All input arrays must have identical shapes and the same [`Dtype`]. A new dim of size equal to
-/// the number of input arrays is inserted at position `dim` in the output. The output has one more
-/// dimension than the inputs - unlike
-/// [`Concatenate`](crate::ops::Concatenate), which joins along an existing dim.
+/// All inputs must have the same shape and [`Dtype`]. The output has a new dim, of size the number
+/// of inputs, at position `dim` - unlike [`Concatenate`](crate::ops::Concatenate), which joins
+/// along an existing dim.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
