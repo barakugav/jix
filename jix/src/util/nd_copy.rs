@@ -65,18 +65,18 @@ impl NdCopier {
         dtype: &Dtype,
     ) {
         // Count the dims longer than 1, and return early for an empty region.
-        let (mut long_dims, mut long_dim_len) = (0, 0);
+        let (mut long_dims_count, mut long_dim) = (0, 0);
         for (d, &len) in shape.iter().enumerate() {
             match len {
                 0 => return,
                 1 => {}
                 _ => {
-                    long_dims += 1;
-                    long_dim_len = d;
+                    long_dims_count += 1;
+                    long_dim = d;
                 }
             }
         }
-        match long_dims {
+        match long_dims_count {
             0 => {
                 shape = &[1];
                 src_strides = &[0];
@@ -84,7 +84,7 @@ impl NdCopier {
             }
             // fast path for a single long dimension, treat as 1D
             1 => {
-                let d = long_dim_len;
+                let d = long_dim;
                 shape = &shape[d..d + 1];
                 src_strides = &src_strides[d..d + 1];
                 dst_strides = &dst_strides[d..d + 1];

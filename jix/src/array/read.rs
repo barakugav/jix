@@ -228,6 +228,7 @@ impl<S: ArrayStorage> Array<S> {
         for dim in 0..ndim {
             out_shape[dim] = size[dim];
         }
+        let is_empty = size.contains(&0);
 
         let mut array = {
             let spec = self.storage.spec();
@@ -251,7 +252,7 @@ impl<S: ArrayStorage> Array<S> {
             }
         };
 
-        if !size.contains(&0) {
+        if !is_empty {
             let index = unsafe { Index::new_unchecked(&start, &size) };
             let buf_strides = dim_arr(ndim, |dim| array.strides()[dim] as usize * itemsize);
             let buf = unsafe {
@@ -312,13 +313,13 @@ impl<S: ArrayStorage> Array<S> {
         let dtype = self.dtype();
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
+        let strides = default_strides_slice(&size, dtype.itemsize() as usize);
         check_get_buffer_size(&size, dtype, buf)?;
         if size.contains(&0) {
             return Ok(());
         }
         let index = unsafe { Index::new_unchecked(&start, &size) };
         check_region_size(&size, dtype.itemsize() as usize)?;
-        let strides = default_strides_slice(&size, dtype.itemsize() as usize);
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides) };
         self.to_buf_strided_checked(&index, context, Some(&mut out))?;
         Ok(())

@@ -174,6 +174,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
             let mut read_region =
                 |start_k: u64, size_k: u64, dst_dim_k_offset: u64| -> Result<()> {
+                    let ndim = index.ndim();
                     let inner_start =
                         dim_arr(ndim, |d| if d == k { start_k } else { index.start()[d] });
                     let inner_size = dim_arr(ndim, |d| {

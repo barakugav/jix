@@ -449,7 +449,7 @@ where
 {
     type ElementType = ET;
 
-    #[inline]
+    #[inline(always)]
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,

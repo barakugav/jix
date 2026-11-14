@@ -349,6 +349,7 @@ impl<'a> StridedBuf<'a> {
     }
 }
 
+#[inline(always)]
 pub(crate) fn check_out_buf(
     out: Option<&StridedBuf>,
     array_shape: &[u64],
@@ -382,6 +383,7 @@ pub(crate) fn check_out_buf_dims(out: &StridedBuf, ndim: usize) -> Result<()> {
     Ok(())
 }
 
+#[inline(never)]
 pub(crate) fn check_out_buf_impl(
     out: &StridedBuf,
     index: &Index<'_>,
