@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::buf_pool::{PoolBuf, PoolBufShared};
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_region_size, ensure, Result};
-use crate::storage::Index;
+use crate::storage::{ArrayStorageExt, Index};
 use crate::util::{
     default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
     RawAlignedBytes, SliceExt,
@@ -247,16 +247,15 @@ impl<'a> StridedBuf<'a> {
             && (data.as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize())
     }
 
-    /// Consume and re-label with `strides`, keeping the same backing bytes.
+    /// Re-label with `strides` in place, keeping the same backing bytes.
     ///
     /// # Safety
     ///
     /// Same contract as [`from_slice_mut`](Self::from_slice_mut) for a writable buffer. Call
     /// [`make_readonly`](Self::make_readonly) first to relabel with aliasing strides.
     #[inline]
-    pub(crate) unsafe fn with_strides(mut self, strides: DimArray<usize>) -> Self {
+    pub(crate) unsafe fn set_strides(&mut self, strides: DimArray<usize>) {
         self.strides = strides;
-        self
     }
 
     /// Copy `src` - laid out at `src_strides` over `shape` - into this destination, honoring this
@@ -351,16 +350,16 @@ impl<'a> StridedBuf<'a> {
 
 #[inline(always)]
 pub(crate) fn check_out_buf(
-    out: Option<&StridedBuf>,
+    out: &OutBuf<'_, '_>,
     array_shape: &[u64],
     index: &Index<'_>,
     itemsize: usize,
 ) -> Result<()> {
     check_get_range(array_shape, index)?;
     check_region_size(index.size(), itemsize)?;
-    match out {
-        Some(out) => check_out_buf_impl(out, index, itemsize),
-        None => Ok(()),
+    match &out.0 {
+        OutBufInner::Push(out) => check_out_buf_impl(out, index, itemsize),
+        OutBufInner::Pull(_) => Ok(()),
     }
 }
 
@@ -432,35 +431,97 @@ pub(crate) fn check_out_buf_impl(
 }
 
 #[inline]
-pub(crate) fn materialize_out_buf<'a>(
-    out: Option<&'a mut StridedBuf<'_>>,
+pub(crate) fn alloc_out_buf<'a>(
     context: &'a ReadContext,
-    out_shape: &[usize],
+    shape: &[usize],
     dtype: &Dtype,
     layout_order: &[DimIdx],
 ) -> StridedBuf<'a> {
-    match out {
-        Some(out) => out.view_mut(),
-        None => {
-            let itemsize = dtype.itemsize() as usize;
-            let buf = context.allocate_buf(
-                out_shape.iter().product::<usize>() * itemsize,
-                dtype.alignment(),
-            );
-            let strides = strides_for_layout_order(out_shape, itemsize, layout_order);
-            unsafe { StridedBuf::from_pool(buf, strides) }
+    let itemsize = dtype.itemsize() as usize;
+    let buf = context.allocate_buf(
+        shape.iter().product::<usize>() * itemsize,
+        dtype.alignment(),
+    );
+    let strides = strides_for_layout_order(shape, itemsize, layout_order);
+    unsafe { StridedBuf::from_pool(buf, strides) }
+}
+
+/// The destination of an [`ArrayStorage::read_data`](crate::ArrayStorage::read_data).
+pub struct OutBuf<'s, 'a>(pub(crate) OutBufInner<'s, 'a>);
+
+pub(crate) enum OutBufInner<'s, 'a> {
+    Push(&'s mut StridedBuf<'a>),
+    Pull(&'s mut Option<StridedBuf<'a>>),
+}
+
+impl<'s, 'a> OutBuf<'s, 'a> {
+    #[inline(always)]
+    pub(crate) fn push(out: &'s mut StridedBuf<'a>) -> Self {
+        Self(OutBufInner::Push(out))
+    }
+
+    #[inline(always)]
+    pub(crate) fn pull(slot: &'s mut Option<StridedBuf<'a>>) -> Self {
+        debug_assert!(slot.is_none());
+        Self(OutBufInner::Pull(slot))
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_pull(&self) -> bool {
+        matches!(self.0, OutBufInner::Pull(_))
+    }
+
+    #[inline]
+    pub(crate) fn materialize(
+        self,
+        context: &'a ReadContext,
+        shape: &[usize],
+        dtype: &Dtype,
+        layout_order: &[DimIdx],
+    ) -> &'s mut StridedBuf<'a> {
+        match self.0 {
+            OutBufInner::Push(out) => out,
+            OutBufInner::Pull(slot) => {
+                write_out_buf_slot(slot, alloc_out_buf(context, shape, dtype, layout_order))
+            }
+        }
+    }
+
+    #[inline]
+    pub(crate) fn set(self, data: StridedBuf<'a>, shape: &[usize], dtype: &Dtype) {
+        match self.0 {
+            OutBufInner::Pull(slot) => _ = write_out_buf_slot(slot, data),
+            OutBufInner::Push(out) => {
+                let (src, src_strides) = data.data();
+                // SAFETY: `view` holds the region at its strides, and the caller checked `out`.
+                unsafe { out.copy_from(src, src_strides, shape, dtype) };
+            }
         }
     }
 }
 
-/// Read a stride-remapping forwarder's inner region once, honoring the caller's `out=` mode.
+/// Puts `value` in `slot`, which must be empty, and returns it.
+#[inline(always)]
+pub(crate) fn write_out_buf_slot<'a, 'b>(
+    slot: &'a mut Option<StridedBuf<'b>>,
+    value: StridedBuf<'b>,
+) -> &'a mut StridedBuf<'b> {
+    let old = slot.replace(value);
+    // Checked after `old` is forgotten: alive into the panic, it would be saved whole.
+    let was_none = old.is_none();
+    std::mem::forget(old);
+    assert!(was_none);
+    slot.as_mut().unwrap()
+}
+
+/// Read a stride-remapping forwarder's inner region once, honoring the mode of `out`.
 ///
 /// A forwarder like `PermuteDims`/`InsertDim`/`RemoveDim` relates its output dims to its inner
 /// dims by a fixed per-dim correspondence. The inner read is the same either way; only the
 /// direction of the stride remap differs:
-/// - pull (`out=None`): read the inner as a view and relabel its strides into output order with
-///   `inner2outer_strides_fn(inner_strides) -> output_strides`.
-/// - push (`out=Some`): re-stride the destination into inner order with
+/// - pull: read the inner region into the slot and relabel its strides into output order, in
+///   place, with `inner2outer_strides_fn(inner_strides) -> output_strides`.
+/// - push: re-stride the destination into inner order with
 ///   `outer2inner_strides_fn(output_strides) -> inner_strides` and forward it down, so the inner
 ///   storage writes in place.
 ///
@@ -472,33 +533,23 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
     inner: &'a impl ArrayStorage,
     inner_index: &Index<'_>,
     context: &'a ReadContext,
-    mut out: Option<&'a mut StridedBuf<'_>>,
+    out: OutBuf<'_, 'a>,
     inner2outer_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
     outer2inner_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
-) -> Result<StridedBuf<'a>> {
-    // This function does an unsafe dance of extending lifetimes, with the goal to have a single
-    // call to inner.read_data() for better inlining of ops pipelines.
-
-    let is_push = out.is_some();
-    let mut inner_out = out.as_deref_mut().map(|o| {
-        let (data, strides) = o.data_mut();
-        let inner_strides = outer2inner_strides_fn(strides);
-        unsafe { StridedBuf::from_slice_mut(data, inner_strides) }
-    });
-
-    let inner_buf = inner.read_data(inner_index, context, inner_out.as_mut())?;
-
-    if is_push {
-        // The inner storage wrote into `out` through `inner_out`
-        drop(inner_buf);
-        drop(inner_out);
-        Ok(out.unwrap().view_mut())
-    } else {
-        // SAFETY: `inner_buf` does not borrow the local `inner_out` (which was `None`) - its data
-        // lives for 'a - so extending its lifetime to 'a is sound.
-        let inner_buf = unsafe { std::mem::transmute::<StridedBuf<'_>, StridedBuf<'a>>(inner_buf) };
-        let out_strides = inner2outer_strides_fn(inner_buf.strides());
-        Ok(unsafe { inner_buf.with_strides(out_strides) })
+) -> Result<()> {
+    match out.0 {
+        OutBufInner::Pull(slot) => {
+            let buf = inner.read_data_pull_in(inner_index, context, slot)?;
+            let strides = inner2outer_strides_fn(buf.strides());
+            unsafe { buf.set_strides(strides) };
+            Ok(())
+        }
+        OutBufInner::Push(out) => {
+            let (data, strides) = out.data_mut();
+            let inner_strides = outer2inner_strides_fn(strides);
+            let mut inner_out = unsafe { StridedBuf::from_slice_mut(data, inner_strides) };
+            inner.read_data(inner_index, context, OutBuf::push(&mut inner_out))
+        }
     }
 }
 

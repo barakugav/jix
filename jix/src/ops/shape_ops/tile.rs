@@ -123,14 +123,9 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let _cache_scope = self.cache_scope.enter(context);
 
         let ndim = index.ndim();
@@ -156,13 +151,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         }
 
         // Cases B and C gather/replicate into a destination.
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
+        let out = out.materialize(context, out_shape, dtype, self.spec().read_layout_order());
         let (out_buf, out_strides) = out.data_mut();
         let copier = NdCopier::new(dtype);
 
@@ -192,13 +181,12 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                         )
                     };
                     let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-                    self.array
-                        .read_data(&inner_index, context, Some(&mut sub))?;
+                    self.array.read_data_push(&inner_index, context, &mut sub)?;
                     Ok(())
                 };
             read_region(s_in, len1, 0)?;
             read_region(0, len2, len1)?;
-            return Ok(out);
+            return Ok(());
         }
         // Case C - span > L: read the full period [0, L) along dim k once, then memcpy
         // chunks into the destination. Layout along dim k:
@@ -208,7 +196,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         let inner_start = dim_arr(ndim, |d| if d == k { 0 } else { index.start()[d] });
         let inner_size = dim_arr(ndim, |d| if d == k { l as usize } else { index.size()[d] });
         let inner_full = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-        let tmp = self.array.read_data(&inner_full, context, None)?;
+        let tmp = self.array.read_data_pull(&inner_full, context)?;
         // Use the period view's own strides - it may be a lent (strided) view, not contiguous.
         let (tmp, src_strides) = tmp.data();
 
@@ -301,7 +289,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 )
             };
         }
-        Ok(out)
+        Ok(())
     }
 
     #[inline(always)]

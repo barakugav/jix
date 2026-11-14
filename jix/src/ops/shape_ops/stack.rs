@@ -167,20 +167,14 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         let shape = self.shape();
         let dtype = self.dtype();
-        check_out_buf(
-            out.as_deref(),
-            shape,
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        check_out_buf(&out, shape, index, self.dtype().itemsize() as usize)?;
         let _cache_scope = self.cache_scope.enter(context);
         let output_shape = index.size();
-        let mut out = materialize_out_buf(
-            out,
+        let out = out.materialize(
             context,
             output_shape,
             dtype,
@@ -243,9 +237,9 @@ where
                 }
             };
             self.arrays
-                .read_data(arr, &arr_index, context, Some(&mut sub))?;
+                .read_data(arr, &arr_index, context, OutBuf::push(&mut sub))?;
         }
-        Ok(out)
+        Ok(())
     }
 
     #[inline(always)]

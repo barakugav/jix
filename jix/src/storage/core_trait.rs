@@ -1,7 +1,7 @@
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 use crate::ops::{ElementwisePipeline, OperandTyped};
-use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, StridedBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, OutBuf, StridedBuf};
 use crate::ReadContext;
 use crate::{ElementType, TypeDyn};
 
@@ -77,36 +77,31 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// All higher-level read operations (`to_ndarray`, `to_ndarray_sub`, etc.) bottom
     /// out here.
     ///
-    /// The two modes mirror NumPy's `out=`:
-    /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
-    ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized one -
-    ///   and picks the strides. The bytes are only contiguous if the strides say so.
-    /// - **push** (`out` is `Some(dst)`): the region must be written into `dst` at `dst`'s own strides,
-    ///   and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have one stride
-    ///   per array dimension.
+    /// The two modes mirror NumPy's `out=`, and are picked by `out` (see [`OutBuf`]):
+    /// - **pull**: the impl puts the cheapest buffer it can in the slot of `out` - a borrowed view
+    ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized
+    ///   one - and picks the strides. The bytes are only contiguous if the strides say so.
+    /// - **push**: the region must be written into the buffer of `out` at its own strides. It must
+    ///   be writable and have one stride per array dimension.
     ///
     /// # Arguments
     ///
     /// - `index` - a start and a size per dimension, one per dimension of `self.shape()`.
     ///   The region must be within the array shape bounds; an [`Index`] is never empty.
     /// - `context` - read context carrying reusable buffers and decoder state.
-    /// - `out` - optional destination, as described above.
-    ///
-    /// # Returns
-    ///
-    /// A [`StridedBuf`](crate::storage::StridedBuf) with the region's bytes.
+    /// - `out` - the destination, as described above.
     ///
     /// # Alignment
     ///
-    /// No alignment is required of `out`, and none is promised of the returned buffer: it is only
-    /// as aligned as its backing bytes happen to be. Reinterpret the bytes as typed values with
-    /// unaligned reads, or stage the region through a buffer of your own.
+    /// No alignment is required of a push destination, and none is promised of a pulled buffer:
+    /// it is only as aligned as its backing bytes happen to be. Reinterpret the bytes as typed
+    /// values with unaligned reads, or stage the region through a buffer of your own.
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>>;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()>;
 
     /// Read a sub-region as an element-wise pipeline over `T`.
     ///
@@ -132,7 +127,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
         Self: Sized,
     {
         check_dtype(Dtype::new_ref::<T>(), self.dtype())?;
-        let data = self.read_data(index, context, None)?;
+        let data = self.read_data_pull(index, context)?;
         Ok(unsafe { OperandTyped::new_input(data, Dtype::new_ref::<T>()) })
     }
 
@@ -173,3 +168,40 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     where
         Self: Sized;
 }
+
+pub(crate) trait ArrayStorageExt: ArrayStorage {
+    #[inline(always)]
+    fn read_data_pull<'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+    ) -> Result<StridedBuf<'a>> {
+        let mut slot = None;
+        self.read_data_pull_in(index, context, &mut slot)?;
+        Ok(slot.unwrap())
+    }
+
+    #[inline(always)]
+    fn read_data_pull_in<'s, 'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+        slot: &'s mut Option<StridedBuf<'a>>,
+    ) -> Result<&'s mut StridedBuf<'a>> {
+        self.read_data(index, context, OutBuf::pull(slot))?;
+        Ok(slot
+            .as_mut()
+            .expect("a pull read puts its buffer in the slot"))
+    }
+
+    #[inline(always)]
+    fn read_data_push<'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+        out: &mut StridedBuf<'a>,
+    ) -> Result<()> {
+        self.read_data(index, context, OutBuf::push(out))
+    }
+}
+impl<S: ArrayStorage + ?Sized> ArrayStorageExt for S {}

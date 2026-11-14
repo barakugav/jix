@@ -131,28 +131,17 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let dtype = self.dtype();
         let (itemsize, alignment) = (dtype.itemsize() as usize, dtype.alignment().as_usize());
 
-        let condition_view = self.condition.read_data(index, context, None)?;
-        let y_view = self.y.read_data(index, context, None)?;
+        let condition_view = self.condition.read_data_pull(index, context)?;
+        let y_view = self.y.read_data_pull(index, context)?;
         let out_shape = index.size();
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
-        self.x.read_data(index, context, Some(&mut out))?;
+        let out = out.materialize(context, out_shape, dtype, self.spec().read_layout_order());
+        self.x.read_data_push(index, context, out)?;
 
         let (out_buf, out_strides) = out.data_mut();
         let (condition, condition_strides) = condition_view.data();
@@ -318,7 +307,7 @@ where
             }
         }
 
-        Ok(out)
+        Ok(())
     }
 }
 impl<SC, SX, SY> crate::storage::ArrayStorageImpl for Select<SC, SX, SY> {}
@@ -335,8 +324,8 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
             self.read_data_uncached(index, context, out)
         })
@@ -467,6 +456,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::storage::ArrayStorageExt;
     use std::fmt::Debug;
 
     use ndarray::{array, Ix1};
@@ -872,7 +862,6 @@ mod tests {
         InD: ndarray::Dimension,
     {
         use crate::storage::StridedBuf;
-        use crate::ArrayStorage;
 
         const SENTINEL: u8 = 0xA5;
         let itemsize = size_of::<T>();
@@ -916,7 +905,7 @@ mod tests {
             };
             let (start, size) = split_ranges(&index);
             storage
-                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .read_data_push(&Index::new(&start, &size).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 
