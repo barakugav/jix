@@ -68,9 +68,10 @@ pub enum ErrorKind {
     /// I/O error while reading/writing archive file, or invalid file path, etc
     Io,
     /// Archive file (serialized array) is invalid or corrupted
-    /// (e.g. missing required metadata, invalid metadata values, invalid layout, etc)
+    /// (e.g. missing required metadata, invalid metadata values, invalid layout, truncated file,
+    /// a block that fails to decompress, etc)
     InvalidArchive,
-    /// Compression/decompression failure, or invalid compression params/metadata
+    /// Compression failure, or invalid compression params
     CodecError,
     /// An integer element-wise operation hit a result it can't represent (e.g. division by zero,
     /// or an integer raised to a negative integer power).

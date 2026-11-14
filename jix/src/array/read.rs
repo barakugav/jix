@@ -33,7 +33,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - `D` has a
     ///   different ndim than the array, or the result does not fit in memory.
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
     ///
     /// # Examples
     ///
@@ -120,7 +120,7 @@ impl<S: ArrayStorage> Array<S> {
     ///   has a different number of dimensions than the array.
     /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - `D` has a
     ///   different ndim than the array, or the result does not fit in memory.
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
     ///
     /// # Examples
     ///
@@ -261,7 +261,7 @@ impl<S: ArrayStorage> Array<S> {
     ///   length for the requested range and dtype.
     /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - on a 32-bit
     ///   target, the region does not fit in memory.
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
     ///
     /// # Examples
     ///
@@ -329,7 +329,7 @@ impl<S: ArrayStorage> Array<S> {
     ///   of ranges, or a range starts after it ends or reaches past the array shape.
     /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - on a 32-bit
     ///   target, the region does not fit in memory.
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
     ///
     /// # Examples
     ///
@@ -394,7 +394,7 @@ impl<S: ArrayStorage> Array<S> {
     ///   hold the region.
     /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - on a 32-bit
     ///   target, the region does not fit in memory.
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
     ///
     /// # Examples
     ///
@@ -579,7 +579,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - the result
     ///   does not fit in memory.
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
     ///
     /// # Examples
     ///

@@ -2,7 +2,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
-use crate::archive::common::{ArchiveReader, ArchiveWriter, Section};
+use crate::archive::common::{map_read_error, ArchiveReader, ArchiveWriter, Section};
 use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter, MAX_FILTERS};
 use crate::dtype::{Dtype, DTYPE_NESTING_MAX};
@@ -345,7 +345,7 @@ where
         let (block_data, blocks_loc) = match header.body_description {
             Some(schema::block_table_header::BodyDescription::ContiguousV1(())) => {
                 let [blocks_loc_section, block_data_section] = unsafe {
-                    value_from_io::<[Section; 2]>(reader.reader_mut()).map_err(Error::io)?
+                    value_from_io::<[Section; 2]>(reader.reader_mut()).map_err(map_read_error)?
                 };
 
                 let block_data = storage.read_section(reader, block_data_section)?;
@@ -457,7 +457,10 @@ impl BlockTableStorageRead for Owned {
             let start = data.len();
             data.resize((start * 2).max(4096).min(len), MaybeUninit::zeroed());
             let chunk = unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(&mut data[start..]) };
-            reader.reader_mut().read_exact(chunk).map_err(Error::io)?;
+            reader
+                .reader_mut()
+                .read_exact(chunk)
+                .map_err(map_read_error)?;
         }
         let mut data = std::mem::ManuallyDrop::new(data);
         Ok(unsafe {
