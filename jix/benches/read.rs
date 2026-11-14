@@ -242,7 +242,7 @@ fn bench_plain_read(c: &mut Criterion) {
                 b.iter(|| {
                     let region = &regions[i % regions.len()];
                     i += 1;
-                    array.to_buf_strided(region, &ctx, None).unwrap()
+                    array.to_buf_strided(region, &ctx).unwrap()
                 });
             });
         }
