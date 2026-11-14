@@ -28,13 +28,14 @@ pub(crate) trait BlockTableStorageRead: BlockTableStorage {
     ///
     /// # Arguments
     ///
-    /// - `reader` - the open archive reader; the section is located via `section.offset`.
+    /// - `reader` - the open archive reader.
     /// - `section` - byte offset and length of the section within the archive.
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArchive` if the section size is not a multiple of `size_of::<T>()` or if
-    /// the data pointer is not properly aligned (mmap only). Propagates I/O errors.
+    /// Returns `InvalidArchive` if the section is out of bounds, its size is not a multiple of
+    /// `size_of::<T>()`, or the data pointer is not properly aligned (mmap only). Propagates I/O
+    /// errors.
     fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
@@ -67,10 +68,9 @@ where
 
     /// Write this `BlockTable`'s content into an already-opened [`ArchiveWriter`].
     ///
-    /// Drives a [`BlockArchiveWriter`] with an explicit loop, feeding it one block at a time by
-    /// slicing directly into `self.block_data` at each block's recorded location (zero-copy - no
-    /// re-compression). Use this when embedding into a larger archive that already has an open
-    /// writer; use [`write_to`](Self::write_to) for standalone files.
+    /// Feeds a [`BlockArchiveWriter`] each block's compressed bytes, sliced from
+    /// `self.block_data` without re-compression. Use this when embedding into a larger archive;
+    /// use [`write_to`](Self::write_to) for standalone files.
     pub(crate) fn write_content<W>(&self, writer: &mut ArchiveWriter<W>) -> Result<()>
     where
         W: Write + Seek,
@@ -122,8 +122,8 @@ impl<'w, W> BlockArchiveWriter<'w, W>
 where
     W: Write + Seek,
 {
-    /// Write the header and TOC placeholder, reserve the offsets section, and seek to the data
-    /// section. On return the stream is positioned at `block_data_offset`, ready for the loop.
+    /// Write the header and TOC placeholder, reserve the `blocks_loc` section, and seek to
+    /// `block_data_offset`, ready for the block loop.
     pub(crate) fn start(
         writer: &'w mut ArchiveWriter<W>,
         nblocks: u64,
@@ -193,10 +193,9 @@ where
 {
     type Output = ();
 
-    /// Write one compressed block's bytes at the current data-section position (no seek), in call
-    /// order, and record its `(offset, len)` location at logical index `block_index`: the offset is
-    /// the running data-section total before the write and the length is `compressed.len()`. The
-    /// locations are buffered in memory and written out in [`finalize`](Self::finalize).
+    /// Append `compressed` to the data section (no seek) and record its `(offset, len)` at index
+    /// `block_index`, with the offset relative to the data section start. The locations are
+    /// buffered in memory and written out in [`finalize`](Self::finalize).
     fn write_compressed_block(&mut self, block_index: u64, compressed: &[u8]) -> Result<()> {
         let offset = self.block_data_total_len;
         self.writer.write_all(compressed).map_err(Error::io)?;
@@ -207,8 +206,8 @@ where
     }
 
     /// Write the accumulated locations section, overwrite the placeholder TOC with the real section
-    /// positions/sizes, then restore the stream to the end of the data section. Consumes `self`,
-    /// releasing the writer borrow.
+    /// positions/sizes, then restore the stream to the end of the data section. Fails with
+    /// `InvalidArgument` if the writer is in append mode.
     fn finalize(self) -> Result<()> {
         // The block data was written sequentially; now persist the full locations section.
         self.writer
@@ -261,8 +260,7 @@ impl BlockTable<Owned, TypeDyn> {
     /// # Arguments
     ///
     /// - `reader` - the source; must be positioned at the start of the archive.
-    /// - `len` - total byte length of the archive section passed to `ArchiveReader` for bounds
-    ///   checking.
+    /// - `len` - total byte length of the archive section, for bounds checking.
     ///
     /// # Errors
     ///
@@ -296,17 +294,17 @@ where
 {
     /// Deserialize a `BlockTable` from an already-opened [`ArchiveReader`].
     ///
-    /// Reads the protobuf `BlockTableHeader`, resolves the codec and filters, validates the TOC,
-    /// then dispatches to `storage.read_section()` for the raw block-data and block-locations
-    /// sections. The `storage` parameter determines how those sections are held in memory:
-    /// [`Owned`] copies them into heap `Vec`s; [`Mmap`] returns zero-copy pointers into the
-    /// mapping.
+    /// Reads the protobuf `BlockTableHeader` and the TOC, then dispatches to
+    /// `storage.read_section()` for the block-data and block-locations sections: [`Owned`] copies
+    /// them into heap `Vec`s; [`Mmap`] returns zero-copy pointers into the mapping.
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArchive` if the header is malformed (missing codec, unknown filter, wrong
-    /// TOC section count, missing required sections, or bad dtype). Propagates I/O errors from
-    /// `reader` and errors from [`BlockTable::new`].
+    /// Returns `InvalidArchive` if the header is malformed (missing or unknown codec, filter, body
+    /// description or dtype, too many filters, bad `block_size` or `nitems`), if a section is out
+    /// of bounds or does not match the block count, or, with [`ArchiveValidation::Strict`], if a
+    /// block location is out of bounds. Propagates I/O errors from `reader` and errors from
+    /// [`BlockTable::new`].
     pub(crate) fn read_content<R>(
         reader: &mut ArchiveReader<R>,
         storage: S,
@@ -473,9 +471,9 @@ impl BlockTableStorageRead for Owned {
 impl BlockTableStorageRead for Mmap {
     /// Return a zero-copy [`MmapData<T>`] pointing into the memory-mapped region.
     ///
-    /// No bytes are copied; `mmap` is cloned (an `Arc` bump) to keep the mapping alive for the
-    /// lifetime of the returned `MmapData`. Fails if the section's byte offset within the mapping
-    /// is not aligned to `T`.
+    /// `mmap` is cloned (an `Arc` bump) to keep the mapping alive for the lifetime of the returned
+    /// `MmapData`. Fails if the section is out of bounds or its byte offset within the mapping is
+    /// not aligned to `T`.
     fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
