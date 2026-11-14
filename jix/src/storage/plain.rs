@@ -466,8 +466,7 @@ where
             self.dtype().itemsize() as usize,
         )?;
 
-        let ndim = self.shape.ndim();
-        let out_shape = (0..ndim).map(|dim| (index[dim].end - index[dim].start) as usize);
+        let out_shape = index.iter().map(|r| (r.end - r.start) as usize);
 
         let itemsize = dtype.itemsize() as usize;
         let src_span =
@@ -476,8 +475,8 @@ where
         let src_ptr = if src_span == 0 {
             self.data.as_ptr()
         } else {
-            let in_offset = (0..ndim)
-                .map(|dim| index[dim].start as usize * self.strides[dim])
+            let in_offset = (index.iter().zip(self.strides.as_ref()))
+                .map(|(r, &stride)| r.start as usize * stride)
                 .sum::<usize>();
             unsafe { self.data.as_ptr().add(in_offset) }
         };

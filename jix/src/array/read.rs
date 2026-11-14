@@ -482,7 +482,7 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     out: Option<&'a mut StridedBuf<'_>>,
 ) -> Result<StridedBuf<'a>> {
     let shape = storage.shape();
-    let ndim = shape.len();
+    let ndim = index.len();
     let dtype = storage.dtype();
 
     let spec = storage.spec();

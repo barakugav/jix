@@ -137,7 +137,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
 
         // empty read
         if index.iter().any(|r| r.is_empty()) {
-            let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+            let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
             return Ok(materialize_out_buf(
                 out,
                 context,
@@ -175,7 +175,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
                 Ok(unsafe { inner.with_strides(broadcasted_strides.as_ref()) })
             }
             Some(out) => {
-                let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+                let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
                 let (src, _) = inner.data();
                 // SAFETY: `src_strides` are the inner view's strides with broadcast dims zeroed
                 unsafe {

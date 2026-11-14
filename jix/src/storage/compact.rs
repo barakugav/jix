@@ -314,7 +314,7 @@ where
         let shape = self.shape();
         let dtype = self.blocks.dtype();
         check_out_buf(out.as_deref(), shape, index, dtype.itemsize() as usize)?;
-        let out_shape = dim_arr(shape.len(), |d| (index[d].end - index[d].start) as usize);
+        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let nitems = out_shape.as_ref().iter().product::<usize>();
         let mut out = materialize_out_buf(
             out,
@@ -328,9 +328,9 @@ where
         }
         let is_contiguous = out.is_contiguous(out_shape.as_ref(), dtype);
 
-        let ndim = shape.len();
+        let ndim = index.len();
         let block_shape = self.block_shape();
-        assert_eq!(ndim, block_shape.len());
+        assert!(shape.len() == ndim && block_shape.len() == ndim);
 
         let mut b_range = dim_arr(ndim, |_| 0..0);
         let mut is_single_block = true; // every dimension touches exactly one block.
@@ -420,8 +420,8 @@ fn read_data_slow<ActualD: Dimension>(
     let dtype = storage.dtype;
     let block_shape = storage.block_shape;
     let (buf, out_strides) = out.data_mut();
-    let ndim = shape.len();
-    assert_eq!(ndim, storage.block_shape.len());
+    let ndim = index.len();
+    assert!(shape.len() == ndim && block_shape.len() == ndim);
     let itemsize = dtype.itemsize() as usize;
     let out_shape = ActualD::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
     let block_shape_u64 = ActualD::vec(ndim, |dim| block_shape[dim] as u64);

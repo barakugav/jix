@@ -258,9 +258,9 @@ impl<T> CompactArray<T> {
                     index,
                     self.dtype().itemsize() as usize,
                 )?;
-                let ndim = self.shape().len();
-                let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-                let read_shape_usize = dim_arr(ndim, |dim| read_shape[dim] as usize);
+                let ndim = index.len();
+                let read_shape_usize =
+                    dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
                 let mut out = materialize_out_buf(
                     out,
                     context,

@@ -116,7 +116,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         )?;
         let _cache_scope = self.cache_scope.enter(context);
 
-        let ndim = self.new_shape.ndim();
+        let ndim = index.len();
         let dtype = self.dtype();
         let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
 
