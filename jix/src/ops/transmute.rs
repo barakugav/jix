@@ -16,9 +16,10 @@ use crate::ops::prelude::*;
 ///
 /// # Safety
 ///
-/// Constructing a `Transmute` is `unsafe`: the stored bytes are later read back as the new dtype, so
-/// every element must be a valid bit pattern for it. This holds for any integer or float type (all
-/// bit patterns are valid), but not for types with restricted representations such as `bool`.
+/// Constructing a `Transmute` is `unsafe`: the stored bytes are later read back as the new dtype,
+/// so every element must be a valid bit pattern for it. This holds for any integer or float type
+/// (all bit patterns are valid), but not for types with restricted representations such as
+/// `bool`.
 ///
 /// # Examples
 /// ```
@@ -64,7 +65,8 @@ where
         })
     }
 
-    /// Constructs an array with [`Transmute`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Transmute`] storage. See the storage struct docs for
+    /// semantics and examples.
     ///
     /// # Safety
     ///
@@ -121,8 +123,8 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    /// Reinterprets each element as the type `T` without converting the bytes. See [`Transmute`] for
-    /// details and examples.
+    /// Reinterprets each element as the type `T` without converting the bytes. See [`Transmute`]
+    /// for details and examples.
     ///
     /// # Safety
     ///
@@ -140,8 +142,8 @@ where
         unsafe { Transmute::new_array(self, Ty::new()).unwrap() }
     }
 
-    /// Reinterprets each element as the runtime dtype `dtype` without converting the bytes; recover a
-    /// typed array with [`into_typed`](Array::into_typed). See [`Transmute`] for details.
+    /// Reinterprets each element as the runtime dtype `dtype` without converting the bytes;
+    /// recover a typed array with [`into_typed`](Array::into_typed). See [`Transmute`] for details.
     ///
     /// # Safety
     ///

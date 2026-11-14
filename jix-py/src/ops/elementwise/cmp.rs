@@ -279,7 +279,8 @@ define_op2!(
 /// `NaN` is close to nothing, and an infinity only to the same infinity. For complex arrays,
 /// both the real and the imaginary parts must pass the check.
 ///
-/// Supported dtypes: `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
+/// Supported dtypes: `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`; integers and `bool` are
+/// cast to a float first.
 ///
 /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a common type
 /// (Safe casting rules) before comparison.

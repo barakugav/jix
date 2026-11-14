@@ -104,7 +104,8 @@ impl<S: ArrayStorage> PermuteDims<S> {
         })
     }
 
-    /// Constructs an array with [`PermuteDims`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`PermuteDims`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>, dims: &[usize]) -> Result<Array<Self>> {
         Self::new(array.into_storage(), dims).map(Array::from_storage)
     }

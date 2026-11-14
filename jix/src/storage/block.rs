@@ -64,7 +64,8 @@ impl BlockLocation {
 ///
 /// The generic parameter `S: `[`BlockTableStorage`] determines how `block_data` and `blocks_loc`
 /// are held in memory:
-/// - [`Owned`] - heap-allocated; produced by [`OwnedBlockTableBuilder`] or [`Self::build_from_data`].
+/// - [`Owned`] - heap-allocated; produced by [`OwnedBlockTableBuilder`] or
+///   [`Self::build_from_data`].
 /// - [`Borrowed<'a>`] - borrowed slice; zero-copy view into an existing byte buffer.
 /// - [`Mmap`] - memory-mapped file; data is read from disk on demand by the OS.
 ///

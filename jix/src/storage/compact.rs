@@ -32,8 +32,9 @@ use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dim
 /// Arrays built from typed sources carry `Ty<_>`; arrays loaded from disk carry `TypeDyn`. Use
 /// [`Array::into_typed`](crate::Array::into_typed) to go from `TypeDyn` to `Ty<T>`.
 ///
-/// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray), [`Array::compact`](crate::Array::compact)
-/// and their variants or by deserializing an archive file. The memory-mapped equivalent is [`CompactMmap`].
+/// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray),
+/// [`Array::compact`](crate::Array::compact) and their variants or by deserializing an archive
+/// file. The memory-mapped equivalent is [`CompactMmap`].
 ///
 /// # Block codec pipeline
 ///

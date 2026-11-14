@@ -58,15 +58,16 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// (only available at runtime via [`dtype()`](ArrayStorage::dtype)).
     ///
     /// Operations that require knowing the element type (arithmetic, comparisons, reductions,
-    /// cast) are bounded on [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), a shorthand for
-    /// `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
+    /// cast) are bounded on [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), a shorthand
+    /// for `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
     /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
     /// type and re-enable those operations.
     type ElementType: ElementType
     where
         Self: Sized;
 
-    /// Read a sub-region of the array and return it as a [`StridedBuf`](crate::storage::StridedBuf).
+    /// Read a sub-region of the array and return it as a
+    /// [`StridedBuf`](crate::storage::StridedBuf).
     ///
     /// The single I/O method of a storage: all higher-level reads (`to_ndarray`,
     /// `to_ndarray_sub`, etc.) bottom out here.

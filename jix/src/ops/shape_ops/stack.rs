@@ -7,8 +7,8 @@ use crate::util::{ArraySequence, ArraySequenceElementType};
 ///
 /// # Panics
 ///
-/// Panics if `arrays` is empty, `dim` is out of bounds, dtypes differ, shapes differ, or the
-/// output would have more than [`NDIM_MAX`](crate::NDIM_MAX) dims.
+/// Panics if `arrays` is empty, `dim` is out of bounds, dtypes differ, shapes differ, the output
+/// would have more than [`NDIM_MAX`](crate::NDIM_MAX) dims, or the output shape overflows.
 #[track_caller]
 pub fn stack<ArraysT>(arrays: ArraysT, dim: usize) -> Array<Stack<ArraysT>>
 where

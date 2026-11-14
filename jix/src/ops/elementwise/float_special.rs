@@ -109,7 +109,8 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_ndarray(&array![1.0f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY])?;
+    /// let a =
+    ///     Array::compact_ndarray(&array![1.0f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY])?;
     /// let result = a.is_finite().to_ndarray()?;
     /// assert_eq!(result, array![bool8::TRUE, bool8::FALSE, bool8::FALSE, bool8::FALSE]);
     ///
@@ -141,12 +142,14 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_ndarray(&array![f32::INFINITY, f32::NEG_INFINITY, f32::NAN, 1.0f32])?;
+    /// let a =
+    ///     Array::compact_ndarray(&array![f32::INFINITY, f32::NEG_INFINITY, f32::NAN, 1.0f32])?;
     /// let result = a.is_infinite().to_ndarray()?;
     /// assert_eq!(result, array![bool8::TRUE, bool8::TRUE, bool8::FALSE, bool8::FALSE]);
     ///
     /// // Shape is preserved for 2-D input.
-    /// let b = Array::compact_ndarray(&array![[f32::INFINITY, 0.0f32], [-1.0f32, f32::NEG_INFINITY]])?;
+    /// let b =
+    ///     Array::compact_ndarray(&array![[f32::INFINITY, 0.0f32], [-1.0f32, f32::NEG_INFINITY]])?;
     /// let result = b.is_infinite().to_ndarray()?;
     /// assert_eq!(result, array![[bool8::TRUE, bool8::FALSE], [bool8::FALSE, bool8::TRUE]]);
     /// # Ok::<(), jix::Error>(())

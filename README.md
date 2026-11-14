@@ -31,7 +31,8 @@ let a = Array::compact_ndarray(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
 let result = a.exp().sum(0).map(|x| x - 1.0);
 
 // Materialize and persist. Blocks are decompressed, transformed,
-// and re-compressed one at a time - no full copy in memory.
+// and re-compressed one at a time - no full copy in memory,
+// not even the compressed form of the full result.
 result.write_to_file(Path::new("result.jix"))?;
 ```
 
