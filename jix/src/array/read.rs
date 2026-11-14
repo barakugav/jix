@@ -432,11 +432,12 @@ impl<S: ArrayStorage> Array<S> {
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let nitems = index.size().iter().product::<usize>();
-
         let spec = self.storage.spec();
-        let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
-        let small_read = spec.flags().plain_read() || nitems as u64 <= min_nitems;
+        let small_read = spec.flags().plain_read() || {
+            let nitems = index.size().iter().product::<usize>();
+            let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
+            nitems as u64 <= min_nitems
+        };
         let _cache_scope = context.cache_scope(&spec.dynamic().arrays_to_cache);
         if small_read {
             // Fast path for small reads
