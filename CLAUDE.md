@@ -104,8 +104,9 @@ inner read, or call `out.materialize(ctx, out_shape, dtype, layout)`, which reso
 into a single writable buffer - the caller's in push mode, a pooled allocation put in the slot in
 pull mode - or end with `out.put(view, ...)`, which hands a view back or copies it into `dst`.
 
-`Array::to_buf_strided(index, ctx, out)` is the array-level entry point: same two modes, plus a
-heuristic that cuts an oversized request into cache-sized pieces read one at a time.
+`Array::to_buf_strided(index, ctx)` (pull) and `Array::to_buf_strided_into(index, out, ctx)`
+(push) are the array-level entry points: the same two modes, plus a heuristic that cuts an
+oversized request into cache-sized pieces read one at a time.
 `Array::to_buf_slice(index, buf, ctx)` is the shorthand for a packed row-major destination.
 
 Storage carries one piece of compile-time info as an associated type, **`ElementType`** - either

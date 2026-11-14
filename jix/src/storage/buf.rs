@@ -619,17 +619,15 @@ mod tests {
         let ctx = ReadContext::default();
         // A 1-byte writable pull result, reused as `out` of a 4-byte read.
         let small = Array::plain_ndarray(array![1u8, 2]).unwrap().flip(0);
-        let mut out = small.to_buf_strided(&[0..1], &ctx, None).unwrap();
+        let mut out = small.to_buf_strided(&[0..1], &ctx).unwrap();
         let big = || Array::plain_ndarray(array![1u8, 2, 3, 4]).unwrap();
         let ctx2 = ReadContext::default();
-        assert!(big()
-            .to_buf_strided(&[0..4], &ctx2, Some(&mut out))
-            .is_err());
+        assert!(big().to_buf_strided_into(&[0..4], &mut out, &ctx2).is_err());
         assert!(big()
             .flip(0)
-            .to_buf_strided(&[0..4], &ctx2, Some(&mut out))
+            .to_buf_strided_into(&[0..4], &mut out, &ctx2)
             .is_err());
-        assert!(big().to_buf_strided(&[1..2], &ctx2, Some(&mut out)).is_ok());
+        assert!(big().to_buf_strided_into(&[1..2], &mut out, &ctx2).is_ok());
     }
 
     #[test]
@@ -638,14 +636,14 @@ mod tests {
         // A writable pull result with strides [0, 4], reused as `out` of a 3-row read.
         let a = Array::plain_ndarray(array![1i32, 2, 3, 4]).unwrap();
         let a = a.flip(0).insert_dim(0);
-        let mut out = a.to_buf_strided(&[0..1, 0..4], &ctx, None).unwrap();
+        let mut out = a.to_buf_strided(&[0..1, 0..4], &ctx).unwrap();
         let big = Array::plain_ndarray(array![[10i32, 11, 12, 13], [20, 21, 22, 23]]).unwrap();
         let ctx2 = ReadContext::default();
         assert!(big
-            .to_buf_strided(&[0..2, 0..4], &ctx2, Some(&mut out))
+            .to_buf_strided_into(&[0..2, 0..4], &mut out, &ctx2)
             .is_err());
         assert!(big
-            .to_buf_strided(&[1..2, 0..4], &ctx2, Some(&mut out))
+            .to_buf_strided_into(&[1..2, 0..4], &mut out, &ctx2)
             .is_ok());
     }
 
@@ -661,14 +659,14 @@ mod tests {
             .broadcast(&[2, 4]);
         let x = Array::plain_ndarray(array![[1.0f32, 2., 3., 4.], [5., 6., 7., 8.]]).unwrap();
         for mut out in [
-            b.to_buf_strided(&[0..2, 0..4], &ctx, None).unwrap(),
-            n.to_buf_strided(&[0..2, 0..4], &ctx, None).unwrap(),
+            b.to_buf_strided(&[0..2, 0..4], &ctx).unwrap(),
+            n.to_buf_strided(&[0..2, 0..4], &ctx).unwrap(),
         ] {
             assert!(out.data_ptr_mut().is_none());
             let ctx2 = ReadContext::default();
             assert!(x
                 .view()
-                .to_buf_strided(&[0..2, 0..4], &ctx2, Some(&mut out))
+                .to_buf_strided_into(&[0..2, 0..4], &mut out, &ctx2)
                 .is_err());
         }
     }

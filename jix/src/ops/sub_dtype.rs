@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(ys, vec![10, 20, 30]);
 
         // An empty pull must not panic on the sub-field shift.
-        let empty = field.to_buf_strided(&[0..0], &ctx, None).unwrap();
+        let empty = field.to_buf_strided(&[0..0], &ctx).unwrap();
         assert_eq!(empty.strides().len(), 1);
     }
 

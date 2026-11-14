@@ -13,7 +13,9 @@ mod read;
 /// `Array<S>` is the central type in jix. It behaves like a regular n-dimensional array, but
 /// its data is stored in a compressed format and decoded on demand. Its core functionality is
 /// provided by [`shape()`](Array::shape), [`dtype()`](Array::dtype),
-/// and [`to_buf_strided()`](Array::to_buf_strided), all other functions are built on top of those.
+/// [`to_buf_strided()`](Array::to_buf_strided) and
+/// [`to_buf_strided_into()`](Array::to_buf_strided_into), all other functions are built on top of
+/// those.
 ///
 /// An array is generic over `S: ArrayStorage`, which provides the implementation of the three core
 /// methods. The main concrete storage backend is the block-compressed

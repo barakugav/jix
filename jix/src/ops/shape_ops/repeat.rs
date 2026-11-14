@@ -312,7 +312,7 @@ mod tests {
                 1,
             )
         };
-        r.to_buf_strided(&[5..6, 0..4], &ctx, Some(&mut out))
+        r.to_buf_strided_into(&[5..6, 0..4], &mut out, &ctx)
             .unwrap();
         assert_eq!(&backing[..4], &[1, 2, 3, 4]);
     }
