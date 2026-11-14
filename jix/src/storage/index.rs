@@ -1,4 +1,6 @@
 use std::hint::assert_unchecked;
+use std::mem::transmute;
+use std::num::NonZeroUsize;
 use std::ops::Range;
 
 use crate::error::{bail, check_ndim, Result};
@@ -13,7 +15,7 @@ use crate::NDIM_MAX;
 #[derive(Clone, Copy, Debug)]
 pub struct Index<'a> {
     start: &'a [u64],
-    size: &'a [usize],
+    size: &'a [NonZeroUsize],
 }
 
 impl<'a> Index<'a> {
@@ -37,6 +39,8 @@ impl<'a> Index<'a> {
     #[inline(always)]
     pub(crate) unsafe fn new_unchecked(start: &'a [u64], size: &'a [usize]) -> Self {
         debug_assert!(Self::check(start, size).is_ok());
+        // SAFETY: the caller guarantees that no size is zero.
+        let size = unsafe { transmute::<&[usize], &[NonZeroUsize]>(size) };
         Self { start, size }
     }
 
@@ -65,7 +69,8 @@ impl<'a> Index<'a> {
     #[inline(always)]
     pub fn size(&self) -> &'a [usize] {
         self.assume_invariants();
-        self.size
+        // SAFETY: `NonZeroUsize` has the layout of `usize`.
+        unsafe { transmute::<&[NonZeroUsize], &[usize]>(self.size) }
     }
 
     /// The number of dimensions.
