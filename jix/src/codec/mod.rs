@@ -29,18 +29,14 @@ pub enum Codec {
     Zstd,
 }
 
-/// Compression configuration used when encoding array blocks.
+/// Compression configuration used when encoding array blocks: codec, compression level, and
+/// filter pipeline.
 ///
-/// Controls the codec, compression level, and the pre-compression filter pipeline. Filters
-/// are applied to the raw element bytes **before** compression and reversed **after**
-/// decompression. For numeric data, filters significantly improve the compression ratio by
-/// rearranging bytes or bits into a more compressible layout.
+/// Filters rearrange the raw element bytes or bits into a more compressible layout before
+/// compression, and are reversed after decompression.
 ///
-/// # Defaults
-///
-/// [`EncoderParams::default()`] uses Zstd level 3 with [`Filter::ByteShuffle`], which is a
-/// good baseline for most numeric workloads: fast encoding, reasonable ratio, and effective
-/// at exploiting the byte-level regularity of uniform-dtype arrays.
+/// [`EncoderParams::default()`] is Zstd level 3 with [`Filter::ByteShuffle`], a fast and good
+/// baseline for numeric data.
 #[derive(Debug, Clone)]
 pub(crate) struct EncoderParams {
     pub(crate) codec: Codec,
@@ -65,7 +61,8 @@ impl EncoderParams {
 
     /// Set the compression level.
     ///
-    /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the default.
+    /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the
+    /// default.
     pub fn level(&mut self, level: i32) -> Result<&mut Self> {
         self.level = level.try_into().map_err(|_| {
             error!(
@@ -79,15 +76,12 @@ impl EncoderParams {
     /// Set the pre-compression filter pipeline (up to 4 filters).
     ///
     /// Filters are applied in order before compression and reversed after decompression.
-    /// For most numeric dtypes, [`Filter::ByteShuffle`] (the default) provides a good
-    /// compression ratio improvement with low overhead. [`Filter::BitShuffle`] can yield
-    /// better ratios for low-entropy data at the cost of higher CPU usage. Pass an empty
-    /// slice to disable filtering entirely.
+    /// For most numeric dtypes [`Filter::ByteShuffle`] (the default) gives a good ratio
+    /// improvement at low cost; [`Filter::BitShuffle`] can do better on low-entropy data at
+    /// higher CPU cost. Pass an empty slice to disable filtering.
     ///
-    /// Not all combinations of filters make sense; for example, a byte shuffle followed by a bit
-    /// shuffle doesn't make sense because the bit shuffle will operate on the byte-shuffled data,
-    /// and the bit shuffle filter will incorrectly assume the data is in the original byte order -
-    /// it will not yield incorrect results, but it probably won't improve the compression ratio.
+    /// Not every combination helps: a bit shuffle after a byte shuffle still round-trips, but it
+    /// works on the already shuffled bytes and is unlikely to improve the ratio.
     ///
     /// # Errors
     ///
@@ -207,20 +201,12 @@ impl Encoder {
     }
 }
 
-/// Decoder configuration supplied by the caller at read time.
+/// Decoder settings that can be chosen freely at read time, independent of the codec, filters
+/// and dtype the data was written with (those are in [`DecoderCodecConfig`]).
 ///
-/// Unlike the codec type, filters, and dtype of a compressed block, which are determined by how the
-/// data was written and cannot be changed, `DecoderParams` holds settings that the caller can
-/// freely choose for each read session. These parameters apply regardless of the codec stored in
-/// the data.
-///
-/// Currently no configuration options are exposed, but future versions may add settings such
-/// as:
-/// - Number of threads to use for parallel block decompression.
-/// - Memory budget for the block cache.
-///
-/// Use [`DecoderParams::default()`] in the meantime. Pass an explicit instance to
-/// [`ReadContext::new`] if you want forward-compatible control over these settings.
+/// There are no options yet; future versions may add e.g. the number of block decompression
+/// threads or a memory budget for the block cache. [`ReadContext::new`] takes one; use
+/// [`DecoderParams::default()`].
 #[derive(Clone, Debug, Default)]
 pub(crate) struct DecoderParams {
     _phantom: PhantomData<()>,
@@ -228,14 +214,11 @@ pub(crate) struct DecoderParams {
 
 pub(crate) const MAX_FILTERS: usize = 4;
 
-/// The codec configuration encoded alongside the array data, required to decode it.
+/// The codec configuration stored alongside the array data and required to decode it.
 ///
-/// Every field in `DecoderCodecConfig` is fixed at write time and must match exactly what was
-/// used when the data was encoded - none of it can be chosen or overridden at read time.
-///
-/// This struct is populated from the stored array metadata and passed to [`Decoder`] internally.
-/// Users do not construct it directly; it is derived from the array's on-disk representation
-/// when a compressed array is read back from an archive.
+/// Every field is fixed at write time and must match what the data was encoded with; none can be
+/// chosen at read time. The writer builds it from its [`EncoderParams`], an archive reader from
+/// the stored metadata, and [`Decoder`] uses it.
 #[derive(Debug, Clone)]
 pub(crate) struct DecoderCodecConfig {
     pub(crate) codec: Codec,
