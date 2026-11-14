@@ -160,9 +160,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 (out_shape[dim] - 1) * self.slice[dim].step as usize + 1
             });
             let inner_box = unsafe { Index::new_unchecked(&box_start, &box_size) };
-            self.array
-                .read_data(&inner_box, context, OutBuf::pull(slot))?;
-            let inner = pulled(slot);
+            let inner = self.array.read_data_pull_in(&inner_box, context, slot)?;
             let itemsize = self.dtype().itemsize() as usize;
             let out_strides = dim_arr(ndim, |dim| {
                 if out_shape[dim] <= 1 {

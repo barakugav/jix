@@ -158,9 +158,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         };
         match out.0 {
             OutBufInner::Pull(slot) => {
-                self.array
-                    .read_data(&inner_index, context, OutBuf::pull(slot))?;
-                let inner = pulled(slot);
+                let inner = self.array.read_data_pull_in(&inner_index, context, slot)?;
                 let strides = broadcast_strides(inner.strides());
                 inner.make_readonly();
                 unsafe { inner.set_strides(strides) };

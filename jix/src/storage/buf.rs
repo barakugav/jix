@@ -466,9 +466,10 @@ impl<'s, 'a> OutBuf<'s, 'a> {
         Self(OutBufInner::Push(out))
     }
 
+    /// A pull destination: the read puts its buffer in `slot`, which must be empty.
     #[inline(always)]
     pub(crate) fn pull(slot: &'s mut Option<StridedBuf<'a>>) -> Self {
-        debug_assert!(slot.is_none());
+        assert!(slot.is_none());
         Self(OutBufInner::Pull(slot))
     }
 
@@ -510,25 +511,14 @@ impl<'s, 'a> OutBuf<'s, 'a> {
     }
 }
 
-/// Puts `buf` in the `slot` of a pull read, which is empty, and returns it.
+/// Puts `value` in `slot`, which is empty, and returns it.
+///
+/// The slot is not checked here but in [`OutBuf::pull`], before `value` is built, which lets
+/// `value` be built in place. A value already in the slot would leak, not drop.
 #[inline(always)]
-pub(crate) fn fill_slot<'s, 'a>(
-    slot: &'s mut Option<StridedBuf<'a>>,
-    buf: StridedBuf<'a>,
-) -> &'s mut StridedBuf<'a> {
-    debug_assert!(slot.is_none());
-    // SAFETY: the slot is a valid place; overwriting it drops nothing, as it is empty (and were it
-    // not, its buffer would only leak).
-    unsafe { std::ptr::write(slot, Some(buf)) };
-    // SAFETY: just written.
-    unsafe { slot.as_mut().unwrap_unchecked() }
-}
-
-/// The buffer a pull read put in `slot`.
-#[inline(always)]
-pub(crate) fn pulled<'s, 'a>(slot: &'s mut Option<StridedBuf<'a>>) -> &'s mut StridedBuf<'a> {
-    slot.as_mut()
-        .expect("a pull read puts its buffer in the slot")
+pub(crate) fn fill_slot<T>(slot: &mut Option<T>, value: T) -> &mut T {
+    std::mem::forget(slot.take());
+    slot.insert(value)
 }
 
 /// Reads of an [`ArrayStorage`] in each mode.
@@ -540,9 +530,24 @@ pub(crate) trait ArrayStorageExt: ArrayStorage {
         index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<StridedBuf<'a>> {
-        let mut out = None;
-        self.read_data(index, context, OutBuf::pull(&mut out))?;
-        Ok(out.expect("a pull read puts its buffer in the slot"))
+        let mut slot = None;
+        self.read_data_pull_in(index, context, &mut slot)?;
+        Ok(slot.unwrap()) // filled by `read_data_pull_in`
+    }
+
+    /// Like [`read_data_pull`](Self::read_data_pull), putting the buffer in `slot`, which must be
+    /// empty.
+    #[inline(always)]
+    fn read_data_pull_in<'s, 'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+        slot: &'s mut Option<StridedBuf<'a>>,
+    ) -> Result<&'s mut StridedBuf<'a>> {
+        self.read_data(index, context, OutBuf::pull(slot))?;
+        Ok(slot
+            .as_mut()
+            .expect("a pull read puts its buffer in the slot"))
     }
 
     /// Reads the region `index` into `out`, at its strides.
@@ -586,8 +591,7 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
 ) -> Result<()> {
     match out.0 {
         OutBufInner::Pull(slot) => {
-            inner.read_data(inner_index, context, OutBuf::pull(slot))?;
-            let buf = pulled(slot);
+            let buf = inner.read_data_pull_in(inner_index, context, slot)?;
             let strides = inner2outer_strides_fn(buf.strides());
             unsafe { buf.set_strides(strides) };
             Ok(())

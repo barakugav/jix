@@ -93,10 +93,7 @@ where
 
         let out = match out.0 {
             OutBufInner::Pull(slot) => {
-                self.array.read_data(index, context, OutBuf::pull(slot))?;
-                let tmp = slot
-                    .take()
-                    .expect("a pull read puts its buffer in the slot");
+                let tmp = self.array.read_data_pull(index, context)?;
                 fill_slot(slot, unsafe {
                     tmp.with_offset(self.sub_field_offset as usize)
                 });
