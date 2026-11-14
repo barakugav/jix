@@ -259,8 +259,9 @@ where
     ///    two flags across all dimensions:
     ///    `b_begin[d] = index.start()[d] / block_shape[d]`,
     ///    `b_end[d]   = ceil(index.end(d) / block_shape[d])`;
-    ///    `is_single_block` - every dimension touches exactly one block (`b_begin[d] + 1 == b_end[d]`);
-    ///    `is_aligned` - `index[d]` starts and ends on block boundaries in every dimension.
+    ///    `is_single_block` - every dimension touches exactly one block
+    ///    (`b_begin[d] + 1 == b_end[d]`);
+    ///    `is_aligned` - the region starts and ends on block boundaries in every dimension.
     ///
     /// 2. **Fast path (aligned single block)** - if `is_single_block && is_aligned` and `buf` is
     ///    contiguous, the requested region *is* one whole block, so compute the 1D block index via

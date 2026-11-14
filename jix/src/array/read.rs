@@ -25,16 +25,9 @@ impl<S: ArrayStorage> Array<S> {
     /// [`to_ndarray_sub`](Array::to_ndarray_sub) with a context from [`read_ctx`](Array::read_ctx),
     /// which shares the decompressor and scratch buffers across calls.
     ///
-    /// `to_ndarray` allocates a fresh [`ReadContext`] internally, so callers don't need to
-    /// manage one. For repeated reads (e.g. iterating tiles over a large array) prefer
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub) with an explicit context obtained from
-    /// [`read_ctx`](Array::read_ctx) - that way the codec scratch buffers and decompressor
-    /// instance are shared across calls.
-    ///
-    /// The returned array is not necessarily C-contiguous. The implementation is free to
-    /// choose any memory layout it prefers, mostly for performance reasons.
-    /// If you need a specific memory layout, use [`to_buf_strided_into`](Array::to_buf_strided_into)
-    /// and pass a pre-allocated buffer with your specified strides.
+    /// The returned array is not necessarily C-contiguous: the implementation picks the memory
+    /// layout. For a specific layout, use [`to_buf_strided_into`](Array::to_buf_strided_into) with
+    /// a destination of your own strides.
     ///
     /// # Errors
     ///
@@ -90,17 +83,9 @@ impl<S: ArrayStorage> Array<S> {
     /// and contains the corresponding elements from the source. Use it to read a window of a
     /// large array, or to stream over it tile by tile without holding all of it in memory.
     ///
-    /// The returned array is not necessarily C-contiguous. The implementation is free to
-    /// choose any memory layout it prefers, mostly for performance reasons.
-    /// If you need a specific memory layout, use [`to_buf_strided_into`](Array::to_buf_strided_into)
-    /// and pass a pre-allocated buffer with your specified strides.
-    ///
-    /// # When to use this over [`to_ndarray`](Array::to_ndarray)
-    ///
-    /// Use `to_ndarray_sub` when you only need a window of a large array, or when you want
-    /// to stream over an array tile-by-tile without ever materializing the whole thing in
-    /// memory. Use `to_ndarray` when you need the entire array at once and don't plan to
-    /// issue further reads.
+    /// The returned array is not necessarily C-contiguous: the implementation picks the memory
+    /// layout. For a specific layout, use [`to_buf_strided_into`](Array::to_buf_strided_into) with
+    /// a destination of your own strides.
     ///
     /// # What gets decompressed
     ///
@@ -260,15 +245,13 @@ impl<S: ArrayStorage> Array<S> {
 
     /// Read a rectangular sub-region into a caller-supplied byte buffer.
     ///
-    /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub), and the contiguous-destination shorthand for
-    /// [`to_buf_strided_into`](Array::to_buf_strided_into). `buf` must be exactly
-    /// `index.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes; it needs no
-    /// particular alignment. Elements are written in row-major (C-contiguous) order.
+    /// The packed-destination shorthand for [`to_buf_strided_into`](Array::to_buf_strided_into).
+    /// `buf` must be exactly `index.iter().map(|r| r.len()).product() * self.dtype().itemsize()`
+    /// bytes; it needs no particular alignment. Elements are written in row-major (C-contiguous)
+    /// order.
     ///
-    /// Use [`to_buf_strided_into`](Array::to_buf_strided_into) instead when the destination is
-    /// strided rather than packed, or [`to_buf_strided`](Array::to_buf_strided) when you would rather
-    /// let the array hand back a buffer of its own than allocate one up front.
+    /// Use [`to_buf_strided_into`](Array::to_buf_strided_into) for a strided destination, or
+    /// [`to_buf_strided`](Array::to_buf_strided) to let the array hand back a buffer of its own.
     ///
     /// # Errors
     ///
@@ -337,13 +320,15 @@ impl<S: ArrayStorage> Array<S> {
     /// # Alignment
     ///
     /// No alignment is promised of the returned buffer: it is only as aligned as its backing bytes
-    /// happen to be. Reinterpret the bytes as typed values with unaligned reads, or stage the region
-    /// through a buffer of your own.
+    /// happen to be. Reinterpret the bytes as typed values with unaligned reads, or stage the
+    /// region through a buffer of your own.
     ///
     /// # Errors
     ///
     /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` has the wrong number
     ///   of ranges, or a range starts after it ends or reaches past the array shape.
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - on a 32-bit
+    ///   target, the region does not fit in memory.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
@@ -407,6 +392,8 @@ impl<S: ArrayStorage> Array<S> {
     /// - [`InvalidArgument`](crate::error::ErrorKind::InvalidArgument) - `out` is a read-only
     ///   view, has a number of strides that does not match the array's dimensions, or does not
     ///   hold the region.
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - on a 32-bit
+    ///   target, the region does not fit in memory.
     /// - [`CodecError`](crate::error::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples

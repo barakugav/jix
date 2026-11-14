@@ -66,8 +66,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     where
         Self: Sized;
 
-    /// Read a sub-region of the array and return it as a
-    /// [`StridedBuf`](crate::storage::StridedBuf).
+    /// Read a sub-region of the array into `out`, as a [`StridedBuf`](crate::storage::StridedBuf).
     ///
     /// The single I/O method of a storage: all higher-level reads (`to_ndarray`,
     /// `to_ndarray_sub`, etc.) bottom out here.
