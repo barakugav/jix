@@ -4,6 +4,7 @@ use std::ops::{Deref, DerefMut};
 use prost::Message;
 
 use crate::archive::schema::{self, ArchiveType};
+use crate::archive::util::stream_len;
 use crate::archive::version::VERSION_U64;
 use crate::error::{bail, ensure, error, Error, Result};
 use crate::util::{value_as_bytes, value_from_io};
@@ -112,11 +113,19 @@ pub(crate) struct ArchiveReader<R> {
     tmp_buf: Vec<u8>,
 }
 impl<R> ArchiveReader<R> {
-    pub(crate) fn new(reader: R, length: Option<u64>) -> Result<Self>
+    pub(crate) fn new(mut reader: R, length: Option<u64>) -> Result<Self>
     where
         R: Read + Seek,
     {
-        let total_size = length.unwrap_or(u64::MAX);
+        let total_size = match length {
+            Some(length) => length,
+            None => {
+                let pos = reader.stream_position().map_err(Error::io)?;
+                stream_len(&mut reader)
+                    .map_err(Error::io)?
+                    .saturating_sub(pos)
+            }
+        };
         let mut reader = reader.take(total_size);
         ensure!(
             reader.limit() >= size_of::<Header>() as u64,
