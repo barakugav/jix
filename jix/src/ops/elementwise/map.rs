@@ -7,7 +7,7 @@ use crate::{ArraySequence, ArraySequenceTyped, ElementwisePipelineTuple};
 /// The output array has the same shape as the input, and dtype determined by the output of
 /// `F: Fn(S::Item) -> O`.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::map()`](crate::Array::map).
@@ -40,7 +40,8 @@ impl<S, F> Map<S, F> {
         Ok(Self(Op1::new(array, map_fn)?))
     }
 
-    /// Constructs an array with [`Map`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Map`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array<O>(array: Array<S>, map_fn: F) -> Result<Array<Self>>
     where
         S: ArrayStorageTyped,
@@ -78,7 +79,7 @@ where
 /// The two input arrays must have the same shape. The output array has the same shape, and dtype
 /// determined by the output of `F: Fn(S1::Item, S2::Item) -> O`.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as [`map2`].
 ///
@@ -107,7 +108,8 @@ impl<S1, S2, F> Map2<S1, S2, F> {
         Ok(Self(Op2::new(a, b, map_fn, false)?))
     }
 
-    /// Constructs an array with [`Map2`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Map2`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array<O>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Result<Array<Self>>
     where
         S1: ArrayStorageTyped,
@@ -164,8 +166,7 @@ where
 /// `F: Fn(ArraysT::ItemSequence<'_>) -> O`. This generalizes [`Map`] (one input) and [`Map2`] (two
 /// inputs) to an arbitrary number of arrays.
 ///
-/// The shape of the value handed to `map_fn` depends on the [`ArraySequence`](crate::util::ArraySequence)
-/// type:
+/// The type of the value passed to `map_fn` depends on the [`ArraySequence`] type:
 ///
 /// | Sequence type | `ItemSequence` passed to `map_fn` |
 /// |---------------|-----------------------------------|
@@ -176,7 +177,7 @@ where
 /// Use a tuple when the inputs have different element types; use a fixed-length array, slice, or
 /// `Vec` when they are homogeneous.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`map_multiple`].
@@ -406,7 +407,8 @@ where
 ///
 /// # Panics
 ///
-/// Panics if there are no input arrays or they do not all have the same shape.
+/// Panics if there are no input arrays, their shapes differ, `O` is zero-sized, or the output
+/// size in bytes overflows.
 #[track_caller]
 pub fn map_multiple<ArraysT, O, F>(arrays: ArraysT, map_fn: F) -> Array<MapMultiple<ArraysT, F>>
 where

@@ -9,10 +9,11 @@ use crate::ops::common::{
 };
 use crate::Array;
 
-/// Arithmetic negation applied element-wise (`-array`).
+/// Arithmetic negation applied element-wise.
 ///
 /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`,
-/// `Complex<f32>`, `Complex<f64>`.
+/// `Complex<f32>`, `Complex<f64>`. Unsigned integers and `bool` are also accepted, as described
+/// under `array`.
 ///
 /// For **integer** types the result is the two's-complement negation. Negating the
 /// minimum representable value (e.g. `int8` `-128`) overflows and wraps.
@@ -27,8 +28,7 @@ use crate::Array;
 ///         A `bool` input is cast to `i8` (False -> 0, True -> -1).
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-///         the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
 ///
 /// Examples:
 ///     ```python
@@ -78,21 +78,19 @@ pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<Array> {
 /// | `Complex<f32>` | `f32` |
 /// | `Complex<f64>` | `f64` |
 ///
-/// For **unsigned integer** and **bool** types this is a no-op: a [`jix.Array`][jix.Array]
-/// input is returned as is (the same object), not wrapped in a new view.
+/// For **unsigned integer** and **bool** types a [`jix.Array`][jix.Array] input is returned as
+/// is (the same object), not wrapped in a new view.
 ///
 /// For **complex** types the result is the modulus `sqrt(re^2 + im^2)` computed via
-/// `hypot` for numerical stability. The output dtype is the real component type.
+/// `hypot` for numerical stability.
 ///
-/// For **signed integer** types, the minimum value overflows: `abs(-128)` on `int8`
-/// wraps back to `-128`.
+/// For **signed integer** types the minimum value wraps: `abs(-128)` on `int8` is `-128`.
 ///
 /// Args:
 ///     array: Input array.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-///         the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
 ///
 /// Examples:
 ///     ```python
@@ -146,25 +144,18 @@ define_op1!(
     /// Returns the sign of each element.
     ///
     /// Supported dtypes: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`,
-    /// `uint64`, `float16`, `float32`, `float64`.
-    ///
-    /// For **signed integer** types: returns `-1`, `0`, or `+1` of the same dtype.
-    ///
-    /// For **unsigned integer** types: returns `0` or `1` of the same dtype (unsigned values
-    /// cannot be negative).
-    ///
-    /// For **float** types: returns `+1.0` for positive values, `-1.0` for negative values,
-    /// `0.0` for `+0.0` and `-0.0`, and `NaN` for `NaN`.
-    ///
-    /// The input is never cast, so the output dtype always equals the input dtype; `bool` is not
+    /// `uint64`, `float16`, `float32`, `float64`. The input is never cast, and `bool` is not
     /// supported (as in numpy).
+    ///
+    /// - **signed integers**: `-1`, `0` or `+1`.
+    /// - **unsigned integers**: `0` or `1`.
+    /// - **floats**: `+1.0`, `-1.0`, `0.0` for `+-0.0`, and `NaN` for `NaN`.
     ///
     /// Args:
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`.
     ///
     /// Examples:
     ///     ```python
@@ -196,17 +187,15 @@ define_op1!(
     /// Squares each element (`x * x`).
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`, `f64`,
-    /// `Complex<f32>`, `Complex<f64>`. The output dtype always matches the input dtype.
+    /// `Complex<f32>`, `Complex<f64>`.
     ///
-    /// For **integer** types squaring can overflow, following two's-complement `*` semantics
-    /// (the result wraps).
+    /// For **integer** types the result wraps on overflow (two's complement).
     ///
     /// Args:
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`.
     ///
     /// Examples:
     ///     ```python
@@ -259,6 +248,7 @@ define_op2!(
     /// For **integer** types the result wraps on overflow (two's complement).
     /// For **complex** types each component is added independently:
     /// `(a + bi) + (c + di) = (a+c) + (b+d)i`.
+    /// Two `bool` operands give `uint8`.
     ///
     /// Available via the `+` operator on arrays.
     ///
@@ -267,16 +257,15 @@ define_op2!(
     /// rules). For example `u8 + i32 -> i32`, `i32 + f32 -> f64`. This is similar to
     /// numpy's type promotion but may pick a different common type.
     ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
-    /// exactly (prepend missing leading dimensions as 1, then expand size-1 dims).
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
     ///     a: First operand.
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-    ///         No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
+    ///         broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -312,7 +301,7 @@ define_op2!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
     ///
-    /// For **integer** types the result wraps on underflow (two's complement).
+    /// For **integer** types the result wraps on overflow (two's complement).
     /// For **complex** types each component is subtracted independently:
     /// `(a + bi) - (c + di) = (a-c) + (b-d)i`.
     /// Two `bool` operands give `int8`: `True - False` is `1`, `False - True` is `-1` (numpy
@@ -331,8 +320,8 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-    ///         No computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
+    ///         broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -361,6 +350,7 @@ define_op2!(
 /// For **integer** types the result wraps on overflow (two's complement).
 /// For **complex** types this is full complex multiplication:
 /// `(a + bi) * (c + di) = (ac - bd) + (ad + bc)i`.
+/// Two `bool` operands give `uint8`.
 ///
 /// Available via the `*` operator on arrays.
 ///
@@ -375,8 +365,8 @@ define_op2!(
 ///     b: Second operand.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-///         No computation occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
+///         broadcast shape.
 ///
 /// Examples:
 ///     ```python
@@ -422,8 +412,9 @@ pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<A
 /// Element-wise exponentiation (`a` raised to the power `b`).
 ///
 /// Supported base dtypes: `u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`,
-/// `f16`, `f32`, `f64`. For an **integer** base the exponent must be an integer; for a
-/// **float** base it may be an integer or a float. Complex dtypes are not supported yet.
+/// `f16`, `f32`, `f64`. An **integer** base takes an integer exponent, and is promoted to a
+/// float with a float exponent; a **float** base takes an integer or a float exponent. Complex
+/// dtypes are not supported yet.
 ///
 /// For a directly supported `(base, exponent)` pair the output dtype equals the
 /// base dtype - e.g. `u8 ** u8 -> u8`, `i32 ** i32 -> i32`, `f32 ** i32 -> f32`,
@@ -435,8 +426,8 @@ pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<A
 ///
 /// **Type promotion**: when `a` and `b` do not directly match a supported pair,
 /// both operands are cast under Safe casting rules and the first matching pair
-/// is used, e.g. `u8 ** i8 -> i16`. A `u64` base or exponent with a signed one
-/// promotes to float: `u64 ** i64 -> f64`.
+/// is used, e.g. `u8 ** i8 -> i16`. A `u64` exponent, or a `u64` base with a signed
+/// exponent, promotes to float: `u64 ** i64 -> f64`.
 ///
 /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
 ///
@@ -445,8 +436,8 @@ pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<A
 ///     b: Second operand (the exponent).
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast
-///         shape. No computation occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
+///         broadcast shape.
 ///
 /// Examples:
 ///     ```python

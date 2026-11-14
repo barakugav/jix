@@ -6,9 +6,8 @@ use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// byte slices under independent source and destination strides.
 ///
-/// [`new`](Self::new) inspects the dtype once and picks the cheapest copy routine up front: a
-/// monomorphized scalar copy for the common power-of-two `(itemsize, alignment)` pairs, a
-/// field-by-field copy for structs that decompose into at most four scalar fields, or a generic
+/// [`new`](Self::new) inspects the dtype once and picks the copy routine up front: a monomorphized
+/// copy for the common power-of-two `(itemsize, alignment)` pairs, whatever the dtype kind, or a
 /// byte-wise fallback for everything else. Each [`copy`](Self::copy) then moves one region by
 /// driving an [`NdIterUnordered`] over `shape` (which sorts, coalesces and walks the dims) and
 /// copying one contiguous-or-strided inner loop at each visited position.
@@ -93,7 +92,7 @@ impl NdCopier {
         };
 
         // Dim ordering, size-1-dim dropping and contiguous-run coalescing all happen inside
-        // `nd_iter_unordered` (see `scalar_fn` / `copy_untyped`); here we just dispatch by dtype.
+        // `NdIterUnordered` (see `scalar_fn` / `copy_untyped`); here we just dispatch by dtype.
         let args = NdCopyArgs {
             src,
             dst,
@@ -476,10 +475,9 @@ mod tests {
     use crate::dtype::Dtyped;
 
     // A struct dtype with no padding (itemsize 12, alignment 4). It misses every
-    // specialized (itemsize, alignment) case in `create_scalar_fn`, so `NdCopier`
-    // takes the `copy_struct` route. Because there is no padding between or after
-    // fields, copying each field is equivalent to copying the whole element - which
-    // is exactly what the byte-level `reference_copy` does, so the two agree.
+    // specialized (itemsize, alignment) case in `NdCopier::new`, so `NdCopier`
+    // takes the byte-wise `copy_untyped` route, as the byte-level `reference_copy`
+    // does, so the two agree.
     #[derive(Copy, Clone, crate::dtype::Dtyped)]
     #[dtyped(crate = "crate")]
     #[repr(C)]
@@ -822,10 +820,9 @@ mod tests {
         check_1d_sides::<u64>(3);
     }
 
-    // Struct dtype (the `copy_struct` field-by-field route) and non-scalar array dtypes (the
-    // `copy_untyped` byte-wise fallback): array-of-scalar dtypes carry an inner shape, so they miss
-    // every specialized `(itemsize, alignment)` case and are not decomposed as structs - `[i32; 3]`
-    // gives itemsize 12, `[u8; 3]` an odd itemsize (3) with no power-of-two run.
+    // Struct and non-scalar array dtypes, which miss every specialized `(itemsize, alignment)`
+    // case and take the `copy_untyped` byte-wise fallback - `StructNoPad` and `[i32; 3]` give
+    // itemsize 12, `[u8; 3]` an odd itemsize (3) with no power-of-two run.
     #[test]
     fn copy_struct() {
         check_all_dims::<StructNoPad>();

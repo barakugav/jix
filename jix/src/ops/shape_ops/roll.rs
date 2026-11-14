@@ -4,15 +4,13 @@ use crate::ops::prelude::*;
 /// [`Array::roll`](crate::Array::roll).
 ///
 /// `output[..., i, ...] = input[..., (i - shift) mod L, ...]` on the rolled dim, where
-/// `L = shape[dim]`. A positive `shift` moves elements toward larger indices (elements
-/// that fall off the end re-enter at the beginning); a negative `shift` moves them toward
-/// smaller indices. `shift` is reduced modulo `L`, so any signed integer is accepted.
+/// `L = shape[dim]`. A positive `shift` moves elements toward larger indices, a negative one
+/// toward smaller indices; any `shift` is accepted, as it is reduced modulo `L`.
 ///
 /// See also [`Flip`](crate::ops::Flip), which reverses element order along a dim
 /// without wrapping.
 ///
-/// Output shape and dtype equal the input. The result is a lazy view; no computation
-/// occurs until the array is read.
+/// Output shape and dtype equal the input. The result is a lazy view.
 ///
 /// # Examples
 ///
@@ -67,7 +65,8 @@ impl<S: ArrayStorage> Roll<S> {
         })
     }
 
-    /// Constructs an array with [`Roll`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Roll`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(array: Array<S>, shift: i64, dim: usize) -> Result<Array<Self>> {
         Self::new(array.into_storage(), shift, dim).map(Array::from_storage)
     }
@@ -198,10 +197,6 @@ where
 {
     /// Returns a lazy view of the array with elements rolled along the given dim.
     /// See [`Roll`] for details and examples.
-    ///
-    /// `shift` is reduced modulo `shape[dim]`. Positive shifts move elements toward
-    /// larger indices (wrapping around at the end); negative shifts move them the other
-    /// way.
     ///
     /// # Panics
     ///

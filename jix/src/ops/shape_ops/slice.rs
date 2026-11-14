@@ -25,12 +25,9 @@ use crate::ops::prelude::*;
 /// * `end`   - first element to exclude (negative: counted from the end; `None`: past the end).
 /// * `step`  - step between selected elements (must be >= 1).
 ///
-/// Standard Rust ranges convert to [`SliceItem`] automatically; negative-integer range
-/// literals work for Python-style end-relative indexing.
-///
 /// Slicing does not change the number of dims.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///
@@ -114,7 +111,8 @@ impl<S: ArrayStorage> Slice<S> {
         })
     }
 
-    /// Constructs an array with [`Slice`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Slice`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>, slice: SliceSpec) -> Result<Array<Self>> {
         Self::new(array.into_storage(), slice).map(Array::from_storage)
     }
@@ -311,22 +309,21 @@ impl_from_tuple_for_slice_spec!(I1, I2, I3, I4, I5, I6, I7 ; 7 ; 0, 1, 2, 3, 4, 
 impl_from_tuple_for_slice_spec!(I1, I2, I3, I4, I5, I6, I7, I8 ; 8 ; 0, 1, 2, 3, 4, 5, 6, 7);
 
 /// A single-dimension slice descriptor: start, end, and step.
-///
-/// `start` and `end` may be negative (Python-style: `-1` means last element).
-/// `None` means "use the natural boundary" (0 for start, dim length for end).
-/// `step` must be >= 1 (negative steps are currently not supported).
 #[derive(Debug, Clone, Copy)]
 pub struct SliceItem {
-    /// First element to include. Negative values count from the end; `None` means the start of the dimension.
+    /// First element to include. Negative values count from the end; `None` means the start of
+    /// the dimension.
     pub start: Option<i64>,
-    /// First element to exclude. Negative values count from the end; `None` means past the end of the dimension.
+    /// First element to exclude. Negative values count from the end; `None` means past the end of
+    /// the dimension.
     pub end: Option<i64>,
     /// Step between selected elements. Must be >= 1.
     pub step: i64,
 }
 
 impl SliceItem {
-    /// Constructs a [`SliceItem`] from explicit `start`, `end`, and `step`. See [`Slice`] for conventions.
+    /// Constructs a [`SliceItem`] from explicit `start`, `end`, and `step`. See [`Slice`] for
+    /// conventions.
     pub fn new(start: Option<i64>, end: Option<i64>, step: i64) -> Self {
         Self { start, end, step }
     }
@@ -443,7 +440,8 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the number of items != `self.ndim()` or any `step < 1`.
+    /// Panics if the number of items != `self.ndim()`, a `start` or `end` is out of bounds,
+    /// `start` is past `end`, or any `step < 1`.
     #[track_caller]
     pub fn slice(self, slice: impl Into<SliceSpec>) -> Array<Slice<S>> {
         Slice::new_array(self, slice.into()).unwrap()

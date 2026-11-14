@@ -17,24 +17,19 @@ use crate::util::IntoPyResult;
 ///   `bool`.
 ///
 /// `bool` conversions follow C semantics: zero -> `False`, any non-zero value -> `True`.
-/// Casting from a complex type to a real numeric type (int, uint, or float), or any cast
-/// involving struct dtypes, is not supported.
-///
-/// Output dtype is the target dtype. Output shape equals the input shape.
-///
-/// `dtype` may be a numpy dtype object, a dtype string (e.g. `'float32'`), or a Python
-/// type like `np.float32`.
-///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// Casting from a complex type to a real numeric type (int, uint, or float) is not supported,
+/// and a struct dtype can only be cast to itself.
 ///
 /// Args:
 ///     array: Array to cast.
 ///     dtype: The target dtype. Accepts a numpy dtype object, a dtype string (e.g.
 ///         `'float32'`), or a Python type like `np.float32`.
 ///
+/// Raises:
+///     TypeError: If the cast is not supported.
+///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the new dtype. No computation occurs until the result
-///         is read.
+///     A lazy [`jix.Array`][jix.Array] view with the new dtype.
 ///
 /// Examples:
 ///     ```python
@@ -66,8 +61,7 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
         use jix_core::scalar::{f16, Complex};
 
         if src.is_integer() && dst.is_integer() && src.itemsize() == dst.itemsize() {
-            // SAFETY: both are ints of the same size, and every bit pattern is valid for both
-            let array = unsafe { array.transmute_elements_dyn(dtype.clone()) };
+            let array = array.transmute_elements_dyn(dtype.clone());
             return Ok(array.into_any());
         }
 

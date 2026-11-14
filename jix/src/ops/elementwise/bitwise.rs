@@ -11,8 +11,7 @@ pub(crate) mod traits {
     define_scalar_op2_trait!(
         /// Bitwise AND operation, like [`core::ops::BitAnd`].
         ///
-        /// Applies the bitwise AND to each pair of corresponding bits. For `bool8` this is
-        /// equivalent to logical AND (`&&`).
+        /// For `bool8` this is logical AND (`&&`).
         BitAnd,
         /// Bitwise AND with another value.
         bitand,
@@ -21,8 +20,7 @@ pub(crate) mod traits {
     define_scalar_op2_trait!(
         /// Bitwise OR operation, like [`core::ops::BitOr`].
         ///
-        /// Applies the bitwise OR to each pair of corresponding bits. For `bool8` this is
-        /// equivalent to logical OR (`||`).
+        /// For `bool8` this is logical OR (`||`).
         BitOr,
         /// Bitwise OR with another value.
         bitor,
@@ -31,8 +29,7 @@ pub(crate) mod traits {
     define_scalar_op2_trait!(
         /// Bitwise XOR operation, like [`core::ops::BitXor`].
         ///
-        /// Applies the bitwise XOR to each pair of corresponding bits. For `bool8` this is
-        /// equivalent to logical XOR.
+        /// For `bool8` this is logical XOR.
         BitXor,
         /// Bitwise XOR with another value.
         bitxor,
@@ -41,7 +38,7 @@ pub(crate) mod traits {
     define_scalar_op1_trait!(
         /// Bitwise NOT operation, like [`core::ops::Not`].
         ///
-        /// Flips every bit. For `bool8` this is equivalent to logical NOT.
+        /// Flips every bit. For `bool8` this is logical NOT.
         Not,
         /// Bitwise NOT of the value.
         not,
@@ -84,7 +81,7 @@ pub(crate) mod traits {
         ///
         /// For **unsigned** types this is a logical shift: vacated bits are filled with zeros.
         /// For **signed** types this is an arithmetic shift: vacated bits are filled with the
-        /// sign bit (the result preserves the sign of the value).
+        /// sign bit.
         ///
         /// A shift by the bit width of the type or more, or by a negative value,
         /// shifts all the bits out: `0`, or `-1` for a negative signed value. See
@@ -127,9 +124,8 @@ pub(crate) mod traits {
     define_scalar_op2_trait!(
         /// Left rotation operation, as [`u32::rotate_left`].
         ///
-        /// Rotates the bits left by `rhs`. Unlike a left shift, bits shifted out of the
-        /// most-significant position wrap around to the least-significant position, so no bits
-        /// are lost. The rotation amount is taken modulo the bit width of the type.
+        /// Bits shifted out of the most-significant end wrap around to the least-significant
+        /// end. The rotation amount is taken modulo the bit width of the type.
         RotateLeft<Rhs = u32>,
         /// Rotate the bits left by another value.
         rotate_left,
@@ -138,9 +134,8 @@ pub(crate) mod traits {
     define_scalar_op2_trait!(
         /// Right rotation operation, as [`u32::rotate_right`].
         ///
-        /// Rotates the bits right by `rhs`. Unlike a right shift, bits shifted out of the
-        /// least-significant position wrap around to the most-significant position, so no bits
-        /// are lost. The rotation amount is taken modulo the bit width of the type.
+        /// Bits shifted out of the least-significant end wrap around to the most-significant
+        /// end. The rotation amount is taken modulo the bit width of the type.
         RotateRight<Rhs = u32>,
         /// Rotate the bits right by another value.
         rotate_right,
@@ -160,9 +155,8 @@ pub(crate) mod traits {
     define_scalar_op2_trait!(
         /// Left shift operation, like [`core::ops::Shl`].
         ///
-        /// Shifts the bits left by `rhs`. Vacated bits are filled with zeros. A shift by the
-        /// bit width of the type or more, or by a negative value, gives `0`. See
-        /// [`i32::unbounded_shl`].
+        /// Vacated bits are filled with zeros. A shift by the bit width of the type or more,
+        /// or by a negative value, gives `0`. See [`i32::unbounded_shl`].
         Shl,
         /// Shift the bits left by another value.
         shl,
@@ -203,7 +197,7 @@ define_op2!(
     /// See [`jix::scalar::BitAnd`](crate::scalar::BitAnd) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// the `&` operator or [`Array::bitand()`](core::ops::BitAnd::bitand).
@@ -236,7 +230,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::BitOr`](crate::scalar::BitOr) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// the `|` operator or [`Array::bitor()`](core::ops::BitOr::bitor).
@@ -270,7 +264,7 @@ define_op2!(
     /// See [`jix::scalar::BitXor`](crate::scalar::BitXor) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// the `^` operator or [`Array::bitxor()`](core::ops::BitXor::bitxor).
@@ -304,7 +298,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Not`](crate::scalar::Not) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// the `!` operator or [`Array::not()`](core::ops::Not::not).
@@ -319,7 +313,7 @@ define_op1!(
     /// let result = (!a).to_ndarray()?;
     /// assert_eq!(result, array![0b11110000, 0b00001111, 0xFF]);
     ///
-    /// // For bool arrays, bitwise NOT is equivalent to logical NOT.
+    /// // For `bool8`, bitwise NOT is logical NOT.
     /// let b = Array::compact_ndarray(&array![bool8::TRUE, bool8::FALSE])?;
     /// let result = (!b).to_ndarray()?;
     /// assert_eq!(result, array![bool8::FALSE, bool8::TRUE]);
@@ -337,7 +331,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Shl`](crate::scalar::Shl) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::bitwise_shift_left()`](crate::Array::bitwise_shift_left).
@@ -370,7 +364,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Shr`](crate::scalar::Shr) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::bitwise_shift_right()`](crate::Array::bitwise_shift_right).
@@ -398,12 +392,12 @@ define_op2!(
     simd: shr_bulk,
 );
 define_op2!(
-    /// Element-wise bitwise left rotation (`a.rotate_left(b as u32)`).
+    /// Element-wise bitwise left rotation (`a.rotate_left(b)`).
     ///
     /// See [`jix::scalar::RotateLeft`](crate::scalar::RotateLeft) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::bitwise_rotate_left()`](crate::Array::bitwise_rotate_left).
@@ -432,12 +426,12 @@ define_op2!(
 );
 
 define_op2!(
-    /// Element-wise bitwise right rotation (`a.rotate_right(b as u32)`).
+    /// Element-wise bitwise right rotation (`a.rotate_right(b)`).
     ///
     /// See [`jix::scalar::RotateRight`](crate::scalar::RotateRight) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::bitwise_rotate_right()`](crate::Array::bitwise_rotate_right).
@@ -471,8 +465,8 @@ where
 {
     define_array_op2_method!(bitwise_shift_left: BitwiseShiftLeft, crate::scalar::Shl);
     define_array_op2_method!(bitwise_shift_right: BitwiseShiftRight, crate::scalar::Shr);
-    define_array_op2_method!(bitwise_rotate_left: BitwiseRotateLeft, crate::scalar::RotateLeft, fixed_lhs_type = u32);
-    define_array_op2_method!(bitwise_rotate_right: BitwiseRotateRight, crate::scalar::RotateRight, fixed_lhs_type = u32);
+    define_array_op2_method!(bitwise_rotate_left: BitwiseRotateLeft, crate::scalar::RotateLeft, fixed_rhs_type = u32);
+    define_array_op2_method!(bitwise_rotate_right: BitwiseRotateRight, crate::scalar::RotateRight, fixed_rhs_type = u32);
 }
 
 #[cfg(test)]

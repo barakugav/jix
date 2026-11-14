@@ -23,12 +23,12 @@ use crate::Array;
 /// A rounded quotient pairs with the [`jix.remainder()`][jix.remainder] of the same
 /// `rounding_mode`: `a == divide(a, b) * b + remainder(a, b)`.
 ///
-/// Supported dtypes: `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>` for true division, and
-/// `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`, `f64` with a
-/// `rounding_mode`.
+/// Supported dtypes: `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>` for true division
+/// (integers and `bool` are cast to a float first), and `i8`, `i16`, `i32`, `i64`, `u8`, `u16`,
+/// `u32`, `u64`, `f16`, `f32`, `f64` with a `rounding_mode` (`bool` is cast to `u8`).
 ///
 /// For true division of **float** types the results are the IEEE 754 ones, and division by zero
-/// produces `+/-inf` or `NaN`. For **complex** types this is full complex division.
+/// produces `+-inf` or `NaN`. For **complex** types this is full complex division.
 ///
 /// With a `rounding_mode`, for **integer** dtypes a zero divisor raises an `ArithmeticError` when
 /// the result is read, and the minimum signed value by `-1` wraps to itself.
@@ -54,8 +54,8 @@ use crate::Array;
 ///         `"floor"` or `"euclid"`.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-///         No computation occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
+///         broadcast shape.
 ///
 /// Examples:
 ///     ```python
@@ -127,7 +127,7 @@ pub fn divide<'py>(
 /// `a == divide(a, b) * b + remainder(a, b)`.
 ///
 /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`,
-/// `f64`.
+/// `f64`; `bool` is cast to `u8`.
 ///
 /// For **integer** dtypes a zero divisor raises an `ArithmeticError` when the result is read.
 /// For **float** dtypes it produces `NaN`.
@@ -144,8 +144,8 @@ pub fn divide<'py>(
 ///     rounding_mode: How to round the quotient: `"floor"`, `"trunc"` or `"euclid"`.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-///         No computation occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and
+///         broadcast shape.
 ///
 /// Examples:
 ///     ```python

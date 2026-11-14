@@ -4,7 +4,7 @@ Mirrors the test block in jix/src/ops/elementwise/bitwise.rs.
 
 Auto-cast section verifies that Safe/Unsafe dispatch rules work for non-matching inputs:
 - bitwise_and/or/xor use CastKind::Safe, so e.g. u8+u16 -> u16.
-- logical_and/or/xor use CastKind::Unsafe, so any non-complex input casts to bool.
+- logical_and/or/xor use CastKind::Unsafe, so any input, complex included, casts to bool.
 """
 
 import numpy as np
@@ -243,6 +243,26 @@ def test_bitwise_rotate_right_concrete():
         zb = jix.compact(np_b)
         expected = np.array([_rotate_right_int(v, s, bits) for v, s in zip(vals, amounts)], dtype=dtype)
         assert_array_matches(jix.bitwise_rotate_right(za, zb), expected)
+
+
+# rotate ops never cast the value: it keeps its dtype. The amount is Safe-cast to u32.
+@pytest.mark.parametrize("op", [jix.bitwise_rotate_left, jix.bitwise_rotate_right])
+def test_bitwise_rotate_casting(op):
+    za = jix.compact(np.array([1, 2, 3], dtype=np.uint8))
+    assert op(za, 1).dtype == np.uint8
+    for amount_dtype in (np.uint8, np.uint16, np.uint32, np.bool_):
+        assert op(za, jix.compact(np.ones(3, dtype=amount_dtype))).dtype == np.uint8
+    # an untyped Python int value is taken as i64, an untyped amount as u32
+    assert op(1, jix.compact(np.array([1, 2, 3], dtype=np.uint32))).dtype == np.int64
+    assert op(-1, 5).dtype == np.int64
+    assert op(-1, 5).numpy() == -1
+    with pytest.raises(OverflowError):
+        op(za, -1)
+    for amount_dtype in (np.int32, np.uint64):
+        with pytest.raises(TypeError):
+            op(za, jix.compact(np.ones(3, dtype=amount_dtype)))
+    with pytest.raises(TypeError):
+        op(jix.compact(np.array([True, False, True])), 1)
 
 
 # ---------------------------------------------------------------------------

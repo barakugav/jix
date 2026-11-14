@@ -23,9 +23,7 @@ pub(crate) mod traits {
     float_op1!(
         /// Rounding operation, as [`f32::round`].
         ///
-        /// Ties (values exactly halfway between two integers) are broken by rounding
-        /// away from zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from
-        /// "round-half-to-even" (banker's rounding) used in some other libraries.
+        /// Ties round away from zero (`round(0.5) = 1.0`, `round(-0.5) = -1.0`), not to even.
         Round,
         /// Round to the nearest integer.
         round,
@@ -38,7 +36,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Floor`](crate::scalar::Floor) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::floor()`](crate::Array::floor).
@@ -68,7 +66,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Ceil`](crate::scalar::Ceil) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::ceil()`](crate::Array::ceil).
@@ -98,7 +96,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Round`](crate::scalar::Round) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::round()`](crate::Array::round).

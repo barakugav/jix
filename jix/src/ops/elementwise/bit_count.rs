@@ -100,9 +100,8 @@ pub(crate) mod traits {
     int_op1!(
         /// Byte-order reversal operation, as [`u32::swap_bytes`].
         ///
-        /// Swaps the bytes of the value (e.g. converts between big-endian and little-endian
-        /// representation). Single-byte types (`i8`, `u8`) are not supported since swapping one
-        /// byte is a no-op.
+        /// Converts between big-endian and little-endian representation. A no-op for the
+        /// single-byte `i8` and `u8`.
         SwapBytes,
         /// Reverse the byte order.
         swap_bytes,
@@ -127,7 +126,7 @@ define_op1!(
     /// See [`jix::scalar::CountOnes`](crate::scalar::CountOnes) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::count_ones()`](crate::Array::count_ones).
@@ -158,7 +157,7 @@ define_op1!(
     /// See [`jix::scalar::CountZeros`](crate::scalar::CountZeros) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::count_zeros()`](crate::Array::count_zeros).
@@ -189,7 +188,7 @@ define_op1!(
     /// See [`jix::scalar::LeadingZeros`](crate::scalar::LeadingZeros) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::leading_zeros()`](crate::Array::leading_zeros).
@@ -220,7 +219,7 @@ define_op1!(
     /// See [`jix::scalar::TrailingZeros`](crate::scalar::TrailingZeros) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::trailing_zeros()`](crate::Array::trailing_zeros).
@@ -251,7 +250,7 @@ define_op1!(
     /// See [`jix::scalar::SwapBytes`](crate::scalar::SwapBytes) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::swap_bytes()`](crate::Array::swap_bytes).
@@ -282,7 +281,7 @@ define_op1!(
     /// See [`jix::scalar::ReverseBits`](crate::scalar::ReverseBits) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::reverse_bits()`](crate::Array::reverse_bits).
@@ -414,8 +413,7 @@ mod tests {
         [EDGE_U8, EDGE_U16, EDGE_U32, EDGE_U64]
     );
 
-    // No u8 case: single-byte types don't support swap_bytes (swapping one byte is a no-op),
-    // see the doc comment on `SwapBytes` above.
+    // No u8 case: swapping the bytes of a single-byte type is a no-op.
     concrete_op1!(
         swap_bytes_concrete,
         swap_bytes,

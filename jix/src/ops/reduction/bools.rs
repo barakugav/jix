@@ -6,10 +6,9 @@ use crate::ops::reduction::common::{
 define_reduction_op!(
     /// Reduces one or more dims by testing whether all elements are `true`.
     ///
-    /// The input array must contain `bool8` elements. Output dtype is `bool8`.
-    /// Returns `true` only when every element is `true`. An empty reduction returns `true`.
+    /// Input and output dtype are `bool8`. An empty reduction returns `true`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::all()`](crate::Array::all).
@@ -73,10 +72,9 @@ impl ReductionOpKernel<bool8> for AllKernel {
 define_reduction_op!(
     /// Reduces one or more dims by testing whether any element is `true`.
     ///
-    /// The input array must contain `bool8` elements. Output dtype is `bool8`.
-    /// Returns `true` when at least one element is `true`. An empty reduction returns `false`.
+    /// Input and output dtype are `bool8`. An empty reduction returns `false`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::any()`](crate::Array::any).

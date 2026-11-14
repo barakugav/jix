@@ -16,8 +16,8 @@ use crate::{ArrayStorage, DimDyn, DimIdx, NdCopier, PtrMutNoalias, PtrNoalias, R
 /// A `StridedBuf` pairs a block of bytes with one byte stride per dimension. Element
 /// `(i0, i1, ..., in)` of the read region lives at byte offset
 /// `i0*strides[0] + i1*strides[1] + ... + in*strides[n]` from the start of the buffer. The struct
-/// carries no shape, dtype, or length of its own: those come from the read request (the index ranges
-/// and the array's dtype), and it is the caller's job to interpret the bytes accordingly.
+/// carries no shape, dtype, or length of its own: those come from the read request (the index
+/// ranges and the array's dtype), and it is the caller's job to interpret the bytes accordingly.
 ///
 /// The data is NOT guaranteed to be aligned to the element dtype - neither the base pointer nor the
 /// strides - so read and write elements through it with unaligned accesses. No method of this crate
@@ -95,8 +95,8 @@ impl<'a> StridedBuf<'a> {
     /// through any other pointer during `'a`: when used as the `out` of a read, it must not overlap
     /// memory read by any array in the lazy chain (e.g. a [`Plain`](crate::storage::Plain) over the
     /// same buffer). `data` must be non-null even for an empty region, e.g. `NonNull::dangling()`.
-    /// The caller should ensure there are no two different indices that result in the same byte
-    /// offset (i.e. the strides must not alias, broadcasted dimensions are not allowed).
+    /// No two different indices may map to the same byte offset (the strides must not alias, so
+    /// no broadcast dims).
     #[inline]
     pub unsafe fn from_raw_parts_mut(
         data: *mut u8,
@@ -128,9 +128,8 @@ impl<'a> StridedBuf<'a> {
     /// # Safety
     ///
     /// The caller must ensure every strided access implied by `strides` (and the read shape it will
-    /// be used with) stays in bounds of `data`.
-    /// The caller should ensure there are no two different indices that result in the same byte
-    /// offset (i.e. the strides must not alias, broadcasted dimensions are not allowed).
+    /// be used with) stays in bounds of `data`. No two different indices may map to the same byte
+    /// offset (the strides must not alias, so no broadcast dims).
     #[inline]
     pub(crate) unsafe fn from_slice_mut(data: &'a mut [u8], strides: DimArray<usize>) -> Self {
         Self {
@@ -239,7 +238,7 @@ impl<'a> StridedBuf<'a> {
     }
 
     /// Whether the strides are exactly row-major packed for `shape` and `dtype`'s itemsize, and
-    /// the base pointer is aligned to `dtype`'s alignment (and the strides).
+    /// the base pointer is aligned to `dtype`'s alignment.
     #[inline]
     pub(crate) fn is_contiguous_aligned(&self, shape: &[usize], dtype: &Dtype) -> bool {
         let (data, _strides) = self.data();
@@ -263,8 +262,8 @@ impl<'a> StridedBuf<'a> {
     ///
     /// # Safety
     ///
-    /// `src_strides` and this buffer's strides must both describe in-bounds `shape`-sized regions of
-    /// `src` and the destination bytes respectively, and both must have length `shape.len()`.
+    /// `src_strides` and this buffer's strides must both describe in-bounds `shape`-sized regions
+    /// of `src` and the destination bytes respectively, and both must have length `shape.len()`.
     #[inline]
     pub(crate) unsafe fn copy_from(
         &mut self,
@@ -291,7 +290,8 @@ impl<'a> StridedBuf<'a> {
     ///
     /// # Safety
     ///
-    /// The caller must ensure that the resulting view is still valid for the same shape and strides.
+    /// The caller must ensure that the resulting view is still valid for the same shape and
+    /// strides.
     #[inline]
     pub(crate) unsafe fn with_offset(self, n: usize) -> Self {
         let StridedBuf { data, strides } = self;
@@ -493,7 +493,7 @@ impl<'s, 'a> OutBuf<'s, 'a> {
             OutBufInner::Pull(slot) => _ = write_out_buf_slot(slot, data),
             OutBufInner::Push(out) => {
                 let (src, src_strides) = data.data();
-                // SAFETY: `view` holds the region at its strides, and the caller checked `out`.
+                // SAFETY: `data` holds the region at its strides, and the caller checked `out`.
                 unsafe { out.copy_from(src, src_strides, shape, dtype) };
             }
         }

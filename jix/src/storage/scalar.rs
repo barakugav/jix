@@ -10,11 +10,8 @@ use crate::util::dim_arr;
 use crate::ReadContext;
 use crate::{cast_slice, cast_slice_mut, ArrayParams, DimDyn, Dimension, ElementType};
 
-/// Storage type that broadcasts a single scalar value across an arbitrary shape.
-///
-/// Every element read from a `Scalar<T>` array returns the same value regardless
-/// of position, making it a zero-copy way to represent constant or filled arrays.
-/// A 0-D `Scalar` (empty `shape`) represents a plain scalar value.
+/// Storage that broadcasts a single scalar value across an arbitrary shape: a zero-copy
+/// constant array. A 0-D `Scalar` (empty `shape`) is a plain scalar value.
 ///
 /// # Examples
 ///
@@ -37,15 +34,13 @@ pub struct Scalar<T> {
     spec: ArraySpecOwned,
 }
 impl<T> Scalar<T> {
-    /// Create a `Scalar` storage that broadcasts `data` across `shape`.
-    ///
-    /// `shape` may be empty (producing a 0-D scalar) or any non-empty slice
-    /// (producing a constant array of that shape).
+    /// Create a `Scalar` storage that broadcasts `data` across `shape`, which may be empty (0-D).
     ///
     /// # Errors
     ///
     /// Returns an error if `shape.len()` exceeds the maximum supported number
-    /// of dimensions.
+    /// of dimensions, if a dim of `shape` exceeds `i64::MAX` or its byte size
+    /// overflows `u64`, or if `T` has a zero itemsize.
     pub fn new(data: T, shape: &[u64], mut params: ArrayParams) -> Result<Self>
     where
         T: Dtyped,

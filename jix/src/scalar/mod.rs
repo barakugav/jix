@@ -4,16 +4,14 @@
 //!
 //! Each element-wise [`Array`](crate::Array) operation is bounded by a *scalar-level* trait of
 //! this module, implemented for each supported element type: for example [`crate::ops::Add`]
-//! requires [`Add`], and [`crate::ops::Exp`] requires [`Exp`].
-//! In addition to element-wise trait, this module also contains reduction traits such as [`Sum`]
-//! and [`Mean`].
-//! Each such trait has the scalar
-//! function (`add`) and a bulk one on `N` elements (`add_bulk`), which the ops call, vectorized
-//! with SIMD for the types with SIMD support (the default computes element by element).
+//! requires [`Add`], and [`crate::ops::Exp`] requires [`Exp`]. The module also holds reduction
+//! traits such as [`Sum`] and [`Mean`]. Each trait has a scalar function (`add`) and a bulk one
+//! on `N` elements (`add_bulk`), which the ops call, vectorized with SIMD for the types with SIMD
+//! support (the default computes element by element).
 //!
 //! ## `f16` and `Complex<T>` coverage
 //!
-//! The [`struct@f16`] and [`Complex<T>`] types are available under the  **`half`** and
+//! The [`struct@f16`] and [`Complex<T>`] types are available under the **`half`** and
 //! **`num-complex`** crate features, respectively.
 
 mod bool;

@@ -79,24 +79,23 @@
 //!   by an mmap'd file, without using the compact format.
 //! - **Long and/or complex pipelines of operations.**
 //!   Plain iterators over regular ndarrays already
-//!   give you lazy element-wise evaluation for free (although naive use of the `ndarray` crate may still
-//!   produce NumPy-style intermediates), so for simple `map`/`zip`-style pipelines
-//!   jix offers little over hand-written iterator code.
-//!   The advantage shows up once the pipeline includes
-//!   operations that change the shape or the access pattern - reductions, broadcasts,
-//!   dim permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on.
-//!   These are awkward or impractical to express as plain iterator chains,
-//!   especially when combined with element-wise operations.
-//!   Jix composes element-wise and shape-changing operations uniformly in the same operation chain,
-//!   all as lazy views, and because the full chain is encoded in the static type the compiler is able to
-//!   inline the whole pipeline into a single read loop - no virtual dispatch, no runtime scheduler,
-//!   no (large) intermediate allocations beyond the final output.
+//!   give you lazy element-wise evaluation for free (although naive use of the `ndarray` crate may
+//!   still produce NumPy-style intermediates), so for simple `map`/`zip`-style pipelines jix offers
+//!   little over hand-written iterator code. The advantage shows up once the pipeline includes
+//!   operations that change the shape or the access pattern - reductions, broadcasts, dim
+//!   permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on. These are
+//!   awkward or impractical to express as plain iterator chains, especially when combined with
+//!   element-wise operations. Jix composes element-wise and shape-changing operations uniformly in
+//!   the same operation chain, all as lazy views, and because the full chain is encoded in the
+//!   static type the compiler is able to inline the whole pipeline into a single read loop - no
+//!   virtual dispatch, no runtime scheduler, no (large) intermediate allocations beyond the final
+//!   output.
 //!
 //! # Core type: `Array<S>`
 //!
 //! [`Array<S>`](Array) is generic over its storage backend [`S: ArrayStorage`](ArrayStorage). The
-//! storage trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else - slicing,
-//! arithmetic, reductions, serialization - is implemented on top of those three.
+//! storage trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else -
+//! slicing, arithmetic, reductions, serialization - is implemented on top of those three.
 //!
 //! The type parameter `S` carries the full operation chain at compile time:
 //!
@@ -125,12 +124,12 @@
 //!
 //! All operations live in [`ops`], and most are also available as methods on [`Array<S>`](Array);
 //! the multi-array ones such as [`concatenate`](ops::concatenate) and [`stack`](ops::stack) are
-//! free functions. The supported list of operations is still growing, but includes:
+//! free functions. They include:
 //!
 //! **Element-wise unary** - `neg`, `abs`, `exp`, `ln`, `sqrt`, `floor`, `ceil`,
 //! `round`, `sign`, `sin`, `cos`, `tan`, ...
 //!
-//! **Element-wise binary** (array op array, via `+`, `-`, `*`, `/`,
+//! **Element-wise binary** (array op array, via `+`, `-`, `*`, `/`, `%`,
 //! operator overloads and named methods) - `add`, `sub`, `mul`, `div`, `pow`, `minimum`,
 //! `maximum`, ...
 //!
@@ -237,8 +236,8 @@
 //! raw element bytes  ->  filters  ->  codec compress  ->  stored bytes
 //! ```
 //!
-//! On read, the pipeline is reversed. Filters include the byte-shuffle filter (enabled by default),
-//! and bit shuffle, improving the codec's ratio on numerical data.
+//! On read, the pipeline is reversed. The filters, byte shuffle (the default) and bit shuffle,
+//! improve the codec's ratio on numeric data.
 //!
 //! Codec settings are controlled via [`ArrayParams`]:
 //!
@@ -261,7 +260,7 @@
 //! cache sizes.
 //!
 //! [`ArrayParams`] groups all layout and codec settings. Unset fields are inherited from the
-//! source array when copying.
+//! source array when compacting or writing.
 //!
 //! For tile-at-a-time access patterns:
 //!
@@ -312,9 +311,8 @@
 //!
 //! # Serialization (`.jix` files)
 //!
-//! Arrays are serialized to a binary archive format (`.jix`). The format is defined with a mix of
-//! protobuf for metadata such as the array shape, block shape, codec configuration, and a raw binary
-//! format for the compressed block data.
+//! Arrays are serialized to a binary archive format (`.jix`): protobuf metadata (such as the
+//! array shape, block shape and codec configuration) followed by the raw compressed block data.
 //! Multiple arrays can be packed into a single file back-to-back; each is read back
 //! independently using a byte offset and length.
 //!
@@ -373,10 +371,11 @@
 //! # Acknowledgements
 //!
 //! This project would not exist without the work of several upstream authors and communities.
-//! Specifically, this project was greatly inspired by the [C-Blosc2](https://github.com/Blosc/c-blosc2) library.
-//! This crate can almost be seen as a port of ideas and natural Rust evolution of C-Blosc2.
-//! See the `THANKS.md` at the repository root for a more complete list of contributors and inspirations,
-//! and the `NOTICE` file for full attribution and license text.
+//! Specifically, this project was greatly inspired by the
+//! [C-Blosc2](https://github.com/Blosc/c-blosc2) library. This crate can almost be seen as a port
+//! of ideas and natural Rust evolution of C-Blosc2. See the `THANKS.md` at the repository root for
+//! a more complete list of contributors and inspirations, and the `NOTICE` file for full
+//! attribution and license text.
 
 mod array;
 pub use array::Array;
@@ -414,10 +413,10 @@ pub use error::Error;
 /// Compact (compressed) owned array of type `T` (type alias).
 pub type CompactArray<T> = Array<storage::Compact<Ty<T>>>;
 
-/// Plain (not-compressed) owned array (type alias).
+/// Plain (uncompressed) owned array (type alias).
 pub type PlainArray<T> = Array<storage::Plain<Vec<T>, Ty<T>>>;
 
-/// Plain (not-compressed) borrowed array (type alias).
+/// Plain (uncompressed) borrowed array (type alias).
 pub type PlainArrayRef<'a, T> = Array<storage::Plain<&'a (), Ty<T>>>;
 
 /// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn ArrayStorage>`.

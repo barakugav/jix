@@ -13,19 +13,14 @@ pub(crate) mod traits {
     use crate::scalar::Complex;
 
     define_scalar_op1_trait!(
-        /// Sign operation: as [`i32::signum`] for signed integers, `0` or `1` for unsigned
-        /// integers, and as `numpy.sign` for floats.
+        /// Sign operation. The output dtype is the input dtype.
         ///
         /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
         /// `f16`, `f32`, `f64`.
         ///
-        /// For **signed integer** types: returns `-1`, `0`, or `+1` of the same type.
-        ///
-        /// For **unsigned integer** types: returns `0` or `1` of the same type (since
-        /// unsigned values cannot be negative).
-        ///
-        /// For **float** types: returns `+1.0` for positive values, `-1.0` for negative values,
-        /// `0.0` for `+0.0` and `-0.0`, and `NaN` for `NaN`, like `numpy.sign`.
+        /// - **signed integers**: `-1`, `0` or `+1`, as [`i32::signum`].
+        /// - **unsigned integers**: `0` or `1`.
+        /// - **floats**: `+1.0`, `-1.0`, `0.0` for `+-0.0`, and `NaN` for `NaN`, as `numpy.sign`.
         Sign,
         /// Compute the sign of the value.
         sign,
@@ -55,7 +50,7 @@ pub(crate) mod traits {
         }
     );
     define_scalar_op1_trait!(
-        /// Absolute value operation: the magnitude for complex types.
+        /// Absolute value operation.
         ///
         /// Supported dtypes and output dtype:
         ///
@@ -67,8 +62,7 @@ pub(crate) mod traits {
         /// | `Complex<f64>` | `f64` |
         ///
         /// For **complex** types the result is the modulus `sqrt(re^2 + im^2)`, computed
-        /// via `hypot` for numerical stability. The output dtype is the real component type
-        /// (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
+        /// via `hypot` for numerical stability.
         ///
         /// For **signed integer** types `MIN.abs()` wraps back to `MIN`: `(-128i8).abs()` is
         /// `-128`.
@@ -230,7 +224,7 @@ pub(crate) mod traits {
     define_scalar_op2_trait!(
         /// Subtraction operation, like [`core::ops::Sub`].
         ///
-        /// For **integer** types the result wraps on underflow (two's complement).
+        /// For **integer** types the result wraps on overflow (two's complement).
         /// For **complex** types each component is subtracted independently:
         /// `(a + bi) - (c + di) = (a-c) + (b-d)i`.
         Sub,
@@ -313,14 +307,11 @@ pub(crate) mod traits {
         simd: mul_bulk, [i16, i32, i64, u8, u16, u32, u64]
     );
     define_scalar_op2_trait!(
-        /// Exponentiation operation: as [`i32::wrapping_pow`] for integers, [`f32::powf`] for
-        /// floats.
+        /// Exponentiation operation: as [`i32::wrapping_pow`] for integers (wrapping on
+        /// overflow), [`f32::powf`] for floats (`+-inf` and `NaN` included, no error reported).
         ///
-        /// Integer results wrap on overflow. A negative exponent of an integer base gives `0`
-        /// and reports an arithmetic error to `status`.
-        ///
-        /// Float values follow [`f32::powf`] (`+-inf` and `NaN` included), and no error is
-        /// reported.
+        /// A negative exponent of an integer base gives `0` and reports an arithmetic error to
+        /// `status`.
         Pow,
         /// Raise to the power of another value, reporting an arithmetic error to `status`.
         pow(status),
@@ -408,7 +399,7 @@ define_op1!(
     ///
     /// Available via the unary `-` operator on [`Array`](crate::Array): `-arr`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::neg()`](core::ops::Neg::neg).
@@ -439,7 +430,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Sign`](crate::scalar::Sign) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::sign()`](crate::Array::sign).
@@ -473,7 +464,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Abs`](crate::scalar::Abs) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::abs()`](crate::Array::abs).
@@ -515,7 +506,7 @@ define_op1!(
     /// See [`jix::scalar::Square`](crate::scalar::Square) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::square()`](crate::Array::square).
@@ -548,7 +539,7 @@ define_op2!(
     /// Available via the `+` operator on arrays. For adding a constant to every element, use
     /// [`Array::map`]: `a.map(|x| x + 1i32)`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -575,7 +566,7 @@ define_op2!(
     /// Available via the `-` operator on arrays. For subtracting a constant from every element,
     /// use [`Array::map`]: `a.map(|x| x - 1i32)`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -602,7 +593,7 @@ define_op2!(
     /// Available via the `*` operator on arrays. For scaling every element by a constant, use
     /// [`Array::map`]: `a.map(|x| x * 2i32)`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -627,7 +618,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Pow`](crate::scalar::Pow) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::pow()`](crate::Array::pow).

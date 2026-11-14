@@ -11,21 +11,18 @@ use crate::util::numpy_items;
 
 /// Convert any array-like object to a [`jix.Array`][jix.Array].
 ///
-/// This function differs from [`jix.compact()`][jix.compact] in that it does not compress the data -
-/// it always produces a view of the input data. In some cases a copy may be necessary, for example
-/// to convert from a raw python list to a typed buffer, but in general this function tries to avoid
-/// copying data when possible, and it never compresses the data.
+/// Unlike [`jix.compact()`][jix.compact], it never compresses the data: it produces a view of the
+/// input, copying only when necessary (e.g. to convert a Python list to a typed buffer).
 ///
 /// Accepts Python scalars, lists, tuples, NumPy arrays, and any other object accepted by
 /// [`numpy.asarray`](https://numpy.org/doc/stable/reference/generated/numpy.asarray.html).
 ///
 /// Args:
-///     value: The array-like to convert. Accepts Python scalars, lists, tuples, NumPy arrays,
-///         or any object accepted by `numpy.asarray`.
+///     value: The array-like to convert.
 ///     dtype: Optional dtype to cast the array to. Accepts a numpy dtype object, a dtype string
 ///         (e.g. `'float32'`), or a Python type like `np.float32` - anything `numpy.dtype()`
-///         accepts. When omitted, the input dtype is preserved. The cast is a lazy view, so no
-///         computation happens until the result is read (see [`jix.cast()`][jix.cast]).
+///         accepts. When omitted, the input dtype is preserved. The cast is a lazy view (see
+///         [`jix.cast()`][jix.cast]).
 ///     params: Block layout and codec configuration. See [`jix.compact()`][jix.compact] for
 ///         details. The returned array is never compressed, so these mostly affect only arrays
 ///         later created from it (e.g. via `compact()` or `write_array()`), which inherit them.
@@ -37,19 +34,17 @@ use crate::util::numpy_items;
 ///     - If `value` is already an `Array` and `dtype` is `None`, it is returned as-is with no copy.
 ///       When `dtype` is given, the result is a lazy cast view over the input instead.
 ///     - 0-dimensional inputs produce a scalar array backed by a single value (no buffer).
-///     - All other inputs share the underlying buffer with the intermediate NumPy array (zero-copy);
-///       the NumPy array is kept alive for as long as the returned `Array` is alive.
+///     - All other inputs share the underlying buffer with the intermediate NumPy array
+///       (zero-copy); the NumPy array is kept alive for as long as the returned `Array` is alive.
 ///
 /// Raises:
-///     ValueError: If the input cannot be converted by `numpy.asarray`.
-///     ValueError: If the array has more dimensions than jix supports.
-///     ValueError: If the array has negative strides (e.g. a reversed slice `a[::-1]`).
+///     ValueError: If the input cannot be converted by `numpy.asarray`, has more dimensions than
+///         jix supports, or has negative strides (e.g. a reversed slice `a[::-1]`).
 ///     TypeError: If `dtype` requests an unsupported cast (e.g. from a complex type to an int or
 ///         float type, or a cast involving struct dtypes).
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] view of the input. If `value` is already a [`jix.Array`][jix.Array]
-///         and no `dtype` is given, it is returned unchanged with no copy.
+///     A [`jix.Array`][jix.Array] view of the input.
 #[pyfunction]
 #[pyo3(signature = (value, *, dtype=None, params=None))]
 #[inline]

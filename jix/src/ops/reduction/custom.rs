@@ -23,13 +23,11 @@ use crate::ops::reduction::common::{ReductionOp, ReductionOpKernel};
 /// is an implementation detail that shifts with the array shape, the block shape, the read
 /// window size, and the library version.
 ///
-/// So `f` must be associative *and* commutative for the result to be well-defined - `min`,
-/// `max`, `+`, `*`, `&`, `|`, `^`, `gcd` all qualify. A non-commutative closure such as
+/// `min`, `max`, `+`, `*`, `&`, `|`, `^`, `gcd` all qualify. A non-commutative closure such as
 /// `|a, b| a - b` compiles and runs but yields an arbitrary value.
 ///
-/// Float `+` / `*` are only associative up to rounding. That is fine and expected: the
-/// built-in [`Sum`](crate::ops::Sum) / [`Product`](crate::ops::Product) reductions
-/// reassociate exactly the same way.
+/// Float `+` / `*` are only associative up to rounding. That is fine: the built-in
+/// [`Sum`](crate::ops::Sum) / [`Product`](crate::ops::Product) reductions reassociate too.
 ///
 /// # Empty reductions
 ///
@@ -37,7 +35,7 @@ use crate::ops::reduction::common::{ReductionOp, ReductionOpKernel};
 /// value and no first element there is nothing to return. [`Reduce::new`] returns an
 /// `Err`, and [`Array::reduce_unordered`] panics at construction time.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation; the operation is also available as
 /// [`Array::reduce_unordered()`](crate::Array::reduce_unordered).
@@ -80,7 +78,8 @@ impl<S: ArrayStorage, F> Reduce<S, F> {
         Ok(Self(ReductionOp::new(array, ReduceKernel(f), dims)?))
     }
 
-    /// Constructs an array with [`Reduce`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Reduce`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(array: Array<S>, dims: impl DimsArg, f: F) -> Result<Array<Reduce<S, F>>>
     where
         S: ArrayStorageTyped,
@@ -167,7 +166,7 @@ where
 /// Unlike [`Reduce`], `Fold` supports empty reductions: when a reduced dim has length
 /// `0`, every output cell receives `init` unchanged (the closure is never invoked).
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation; the operation is also available as
 /// [`Array::fold()`](crate::Array::fold).
@@ -231,7 +230,8 @@ impl<S: ArrayStorage, B, F> Fold<S, B, F> {
         )?))
     }
 
-    /// Constructs an array with [`Fold`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Fold`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(
         array: Array<S>,
         dims: impl DimsArg,

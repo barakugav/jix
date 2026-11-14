@@ -3,10 +3,10 @@ use crate::scalar::Complex;
 
 /// Extracts the real part of each complex element.
 ///
-/// Supported input dtypes: `Complex<f32>`, `Complex<f64>`. Output dtype is the
-/// corresponding real component type (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
+/// Supported dtypes: `Complex<f32>`, `Complex<f64>`; the output dtype is `f32` or `f64`
+/// respectively.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::real()`](crate::Array::real).
@@ -47,7 +47,8 @@ where
         Ok(Self(crate::ops::elementwise::op1::Op1::new(array, kernel)?))
     }
 
-    /// Constructs an array with [`Real`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Real`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(array: Array<S>) -> crate::error::Result<Array<Self>> {
         Self::new(array.into_storage()).map(Array::from_storage)
     }
@@ -71,10 +72,10 @@ where
 
 /// Extracts the imaginary part of each complex element.
 ///
-/// Supported input dtypes: `Complex<f32>`, `Complex<f64>`. Output dtype is the
-/// corresponding real component type (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
+/// Supported dtypes: `Complex<f32>`, `Complex<f64>`; the output dtype is `f32` or `f64`
+/// respectively.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::imag()`](crate::Array::imag).
@@ -109,13 +110,14 @@ where
     Complex<T>: Dtyped,
     T: Dtyped,
 {
-    /// Constructs a [`Imaginary`] storage. See the struct docs for semantics and examples.
+    /// Constructs an [`Imaginary`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S) -> crate::error::Result<Self> {
         let kernel = ImaginaryKernel(std::marker::PhantomData);
         Ok(Self(crate::ops::elementwise::op1::Op1::new(array, kernel)?))
     }
 
-    /// Constructs an array with [`Imaginary`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Imaginary`] storage. See the storage struct docs for semantics
+    /// and examples.
     pub fn new_array(array: Array<S>) -> crate::error::Result<Array<Self>> {
         Self::new(array.into_storage()).map(Array::from_storage)
     }
@@ -149,7 +151,8 @@ where
         Real::new_array(self).unwrap()
     }
 
-    /// Extracts the imaginary part of each complex element. See [`Imaginary`] for details and examples.
+    /// Extracts the imaginary part of each complex element. See [`Imaginary`] for details and
+    /// examples.
     #[track_caller]
     pub fn imag(self) -> Array<Imaginary<S, T>> {
         Imaginary::new_array(self).unwrap()

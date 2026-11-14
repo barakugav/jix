@@ -37,33 +37,23 @@ pub(crate) mod traits {
         };
     }
     classify_op1!(
-        /// NaN test operation, as [`f32::is_nan`].
-        ///
-        /// Output dtype is `bool8`.
-        ///
-        /// Returns `true` if the element is `NaN`, `false` otherwise.
+        /// NaN test operation, as [`f32::is_nan`]. The output dtype is `bool8`.
         IsNan,
         /// Test whether the value is `NaN` (not a number).
         is_nan,
         is_nan_bulk
     );
     classify_op1!(
-        /// Finiteness test operation, as [`f32::is_finite`].
-        ///
-        /// Output dtype is `bool8`.
-        ///
-        /// Returns `true` if the element is a finite number, `false` for `+/-inf` and `NaN`.
+        /// Finiteness test operation, as [`f32::is_finite`]: `false` for `+/-inf` and `NaN`. The
+        /// output dtype is `bool8`.
         IsFinite,
         /// Test whether the value is finite (not `+/-inf` and not `NaN`).
         is_finite,
         is_finite_bulk
     );
     classify_op1!(
-        /// Infinity test operation, as [`f32::is_infinite`].
-        ///
-        /// Output dtype is `bool8`.
-        ///
-        /// Returns `true` only for `+inf` and `-inf`; returns `false` for finite values and `NaN`.
+        /// Infinity test operation, as [`f32::is_infinite`]: `true` only for `+inf` and `-inf`. The
+        /// output dtype is `bool8`.
         IsInfinite,
         /// Test whether the value is infinite (`+inf` or `-inf`).
         is_infinite,
@@ -76,7 +66,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::IsNan`](crate::scalar::IsNan) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::is_nan()`](crate::Array::is_nan).
@@ -108,7 +98,7 @@ define_op1!(
     /// See [`jix::scalar::IsFinite`](crate::scalar::IsFinite) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::is_finite()`](crate::Array::is_finite).
@@ -119,7 +109,8 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_ndarray(&array![1.0f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY])?;
+    /// let a =
+    ///     Array::compact_ndarray(&array![1.0f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY])?;
     /// let result = a.is_finite().to_ndarray()?;
     /// assert_eq!(result, array![bool8::TRUE, bool8::FALSE, bool8::FALSE, bool8::FALSE]);
     ///
@@ -140,7 +131,7 @@ define_op1!(
     /// See [`jix::scalar::IsInfinite`](crate::scalar::IsInfinite) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::is_infinite()`](crate::Array::is_infinite).
@@ -151,12 +142,14 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_ndarray(&array![f32::INFINITY, f32::NEG_INFINITY, f32::NAN, 1.0f32])?;
+    /// let a =
+    ///     Array::compact_ndarray(&array![f32::INFINITY, f32::NEG_INFINITY, f32::NAN, 1.0f32])?;
     /// let result = a.is_infinite().to_ndarray()?;
     /// assert_eq!(result, array![bool8::TRUE, bool8::TRUE, bool8::FALSE, bool8::FALSE]);
     ///
     /// // Shape is preserved for 2-D input.
-    /// let b = Array::compact_ndarray(&array![[f32::INFINITY, 0.0f32], [-1.0f32, f32::NEG_INFINITY]])?;
+    /// let b =
+    ///     Array::compact_ndarray(&array![[f32::INFINITY, 0.0f32], [-1.0f32, f32::NEG_INFINITY]])?;
     /// let result = b.is_infinite().to_ndarray()?;
     /// assert_eq!(result, array![[bool8::TRUE, bool8::FALSE], [bool8::FALSE, bool8::TRUE]]);
     /// # Ok::<(), jix::Error>(())

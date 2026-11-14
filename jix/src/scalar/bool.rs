@@ -3,11 +3,11 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{BitAnd, BitOr, BitXor, Not};
 
-/// A one-byte boolean, the boolean element type of jix arrays. `0` is `false`, any other value is `true`.
+/// A one-byte boolean, the boolean element type of jix arrays. `0` is `false`, any other value
+/// is `true`.
 ///
-/// An std rust `bool` must be exactly `0` or `1`, so we cant interpret bytes from a file or
-/// other external sources as `bool` as it is undefined behavior for any other value.
-/// For `bool8`, any byte value is valid. `0` is `false`, any other value is `true`.
+/// Every byte is a valid `bool8`, unlike a Rust `bool`, for which any byte other than `0` or `1`
+/// is undefined behavior; so bytes from a file or other external source can be read as `bool8`.
 ///
 /// ```
 /// use jix::scalar::bool8;
@@ -110,18 +110,18 @@ mod tests {
     fn any_non_zero_byte_is_true() {
         // Bytes other than 0 and 1, as may be read from a file or a NumPy buffer.
         let bytes = Array::compact_ndarray(&array![0u8, 1, 2, 255]).unwrap();
-        let a = unsafe { bytes.transmute_elements::<bool8>() };
+        let a = bytes.transmute_elements::<bool8>();
         assert_eq!(
             a.to_ndarray::<Ix1>().unwrap(),
             array![bool8::FALSE, bool8::TRUE, bool8::TRUE, bool8::TRUE]
         );
 
-        let not = unsafe { (!a.view()).transmute_elements::<u8>() };
+        let not = (!a.view()).transmute_elements::<u8>();
         assert_eq!(not.to_ndarray::<Ix1>().unwrap(), array![1, 0, 0, 0]);
         let trues =
             Array::compact_ndarray(&array![bool8::TRUE, bool8::TRUE, bool8::TRUE, bool8::TRUE])
                 .unwrap();
-        let eq = unsafe { a.view().equal(trues).transmute_elements::<u8>() };
+        let eq = a.view().equal(trues).transmute_elements::<u8>();
         assert_eq!(eq.to_ndarray::<Ix1>().unwrap(), array![0, 1, 1, 1]);
         assert_eq!(
             a.view().cast::<u8>().to_ndarray::<Ix1>().unwrap(),

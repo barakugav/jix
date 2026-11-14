@@ -131,6 +131,8 @@ define_reduction_op!(
     /// For **float** types, `NaN` is propagated: if any element is `NaN`, the result is
     /// `NaN`. This matches `numpy.max` (not `numpy.nanmax`, which would ignore `NaN`).
     ///
+    /// An empty reduction raises `RuntimeError`.
+    ///
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
@@ -138,8 +140,7 @@ define_reduction_op!(
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
-    ///         are kept with size 1.
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced.
     ///
     /// Examples:
     ///     ```python
@@ -170,6 +171,8 @@ define_reduction_op!(
     /// For **float** types, `NaN` is propagated: if any element is `NaN`, the result is
     /// `NaN`. This matches `numpy.min` (not `numpy.nanmin`, which would ignore `NaN`).
     ///
+    /// An empty reduction raises `RuntimeError`.
+    ///
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
@@ -177,8 +180,7 @@ define_reduction_op!(
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
-    ///         are kept with size 1.
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced.
     ///
     /// Examples:
     ///     ```python
@@ -208,15 +210,16 @@ define_reduction_op!(
     /// returned. For **float** types, `NaN` propagates: if any element along the reduced dim
     /// is `NaN`, the index of the first `NaN` is returned, as in `numpy.argmax`.
     ///
+    /// An empty reduction raises `RuntimeError`.
+    ///
     /// Args:
     ///     array: Input array.
-    ///     dim: Single dim to reduce along. Accepts negative values. For 1-D arrays,
-    ///         `None` is equivalent to `dim=0`.
+    ///     dim: Single dim to reduce along. Accepts negative values. `None` is allowed only
+    ///         for 1-D arrays, where it means `dim=0`.
     ///     keepdim: If `True`, the reduced dim is kept as a length-1 dimension. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max element. When `dim` is
-    ///         `None`, returns a 0-d array. When `keepdim=True`, the reduced dim is kept with size 1.
+    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max element.
     ///
     /// Examples:
     ///     ```python
@@ -247,15 +250,16 @@ define_reduction_op!(
     /// returned. For **float** types, `NaN` propagates: if any element along the reduced dim
     /// is `NaN`, the index of the first `NaN` is returned, as in `numpy.argmin`.
     ///
+    /// An empty reduction raises `RuntimeError`.
+    ///
     /// Args:
     ///     array: Input array.
-    ///     dim: Single dim to reduce along. Accepts negative values. For 1-D arrays,
-    ///         `None` is equivalent to `dim=0`.
+    ///     dim: Single dim to reduce along. Accepts negative values. `None` is allowed only
+    ///         for 1-D arrays, where it means `dim=0`.
     ///     keepdim: If `True`, the reduced dim is kept as a length-1 dimension. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the min element. When `dim` is
-    ///         `None`, returns a 0-d array. When `keepdim=True`, the reduced dim is kept with size 1.
+    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the min element.
     ///
     /// Examples:
     ///     ```python
@@ -280,11 +284,9 @@ define_reduction_op!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
     ///
-    /// The output dtype matches NumPy: signed integers accumulate into `i64`, unsigned
-    /// integers into `u64`, and float/complex inputs keep their input width (`f16 -> f16`,
-    /// `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...). `bool` sums into `u64` (NumPy uses
-    /// `int64`). A 64-bit integer accumulator can still wrap on a sufficiently large sum. An
-    /// empty reduction returns `0`.
+    /// Signed integers accumulate into `i64`, unsigned integers and `bool` into `u64`, and
+    /// float/complex inputs keep their dtype. This matches NumPy, except that NumPy sums `bool`
+    /// into `int64`. Integer sums wrap on overflow. An empty reduction returns `0`.
     ///
     /// Args:
     ///     array: Input array.
@@ -293,8 +295,7 @@ define_reduction_op!(
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
-    ///         are kept with size 1.
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced.
     ///
     /// Examples:
     ///     ```python
@@ -319,10 +320,8 @@ define_reduction_op!(
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
     ///
     /// The output dtype matches NumPy: signed integers accumulate into `i64`, unsigned
-    /// integers into `u64`, and float/complex inputs keep their input width (`f16 -> f16`,
-    /// `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...). `bool` is not supported. A 64-bit
-    /// integer accumulator can still wrap on a sufficiently large product. An empty reduction
-    /// returns `1`.
+    /// integers into `u64`, and float/complex inputs keep their dtype. `bool` is not
+    /// supported. Integer products wrap on overflow. An empty reduction returns `1`.
     ///
     /// Args:
     ///     array: Input array.
@@ -331,8 +330,7 @@ define_reduction_op!(
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
-    ///         are kept with size 1.
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced.
     ///
     /// Examples:
     ///     ```python
@@ -359,6 +357,8 @@ define_reduction_op!(
     /// and complex inputs keep their input width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> ->
     /// Complex<f32>`, ...).
     ///
+    /// An empty reduction raises `RuntimeError`.
+    ///
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
@@ -366,8 +366,7 @@ define_reduction_op!(
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
-    ///         are kept with size 1.
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced.
     ///
     /// Examples:
     ///     ```python
@@ -395,6 +394,8 @@ define_reduction_op!(
     /// f64`), and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
     /// `Complex<f64> -> f64`).
     ///
+    /// An empty reduction raises `RuntimeError`.
+    ///
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values. When `None`, reduces over
@@ -404,8 +405,7 @@ define_reduction_op!(
     ///         (Bessel-corrected).
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
-    ///         are kept with size 1.
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced.
     ///
     /// Examples:
     ///     ```python
@@ -434,6 +434,8 @@ define_reduction_op!(
     /// and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
     /// `Complex<f64> -> f64`).
     ///
+    /// An empty reduction raises `RuntimeError`.
+    ///
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values. When `None`, reduces over
@@ -443,8 +445,7 @@ define_reduction_op!(
     ///         (Bessel-corrected).
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
-    ///         are kept with size 1.
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced.
     ///
     /// Examples:
     ///     ```python
@@ -465,11 +466,8 @@ define_reduction_op!(
 define_reduction_op!(
     /// Reduces one or more dims with logical AND: returns `True` if all elements are truthy.
     ///
-    /// Supported dtypes: `bool`.
-    ///
-    /// Each element is first cast to `bool` (zero -> `False`, non-zero -> `True`), then the
-    /// AND reduction is applied. Returns `True` only if every element in the reduced
-    /// dimensions is truthy; returns `True` for empty reductions.
+    /// Supported dtypes: all integers, floats, complex types, and `bool`. Elements are first
+    /// cast to `bool` (zero -> `False`, non-zero -> `True`). An empty reduction returns `True`.
     ///
     /// Args:
     ///     array: Input array.
@@ -478,8 +476,7 @@ define_reduction_op!(
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
-    ///         are kept with size 1.
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced.
     ///
     /// Examples:
     ///     ```python
@@ -500,11 +497,8 @@ define_reduction_op!(
 define_reduction_op!(
     /// Reduces one or more dims with logical OR: returns `True` if any element is truthy.
     ///
-    /// Supported dtypes: `bool`.
-    ///
-    /// Each element is first cast to `bool` (zero -> `False`, non-zero -> `True`), then the
-    /// OR reduction is applied. Returns `True` if at least one element in the reduced
-    /// dimensions is truthy; returns `False` for empty reductions.
+    /// Supported dtypes: all integers, floats, complex types, and `bool`. Elements are first
+    /// cast to `bool` (zero -> `False`, non-zero -> `True`). An empty reduction returns `False`.
     ///
     /// Args:
     ///     array: Input array.
@@ -513,8 +507,7 @@ define_reduction_op!(
     ///     keepdim: If `True`, reduced dims are kept as length-1 dimensions. Default `False`.
     ///
     /// Returns:
-    ///     A [`jix.Array`][jix.Array] with the specified dims reduced. When `keepdim=True`, reduced dims
-    ///         are kept with size 1.
+    ///     A [`jix.Array`][jix.Array] with the specified dims reduced.
     ///
     /// Examples:
     ///     ```python

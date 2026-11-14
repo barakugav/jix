@@ -7,7 +7,7 @@ use crate::ops::prelude::*;
 /// `(a, b, c, ...) -> (a, a, b, b, c, c, ...)` whereas `tile` repeats the whole sequence
 /// `(a, b, c, ...) -> (a, b, c, a, b, c, ...)`.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///
@@ -92,7 +92,8 @@ impl<S: ArrayStorage> Repeat<S> {
         })
     }
 
-    /// Constructs an array with [`Repeat`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Repeat`] storage. See the storage struct docs for semantics and
+    /// examples.
     pub fn new_array(array: Array<S>, repeats: u64, dim: usize) -> Result<Array<Self>> {
         Self::new(array.into_storage(), repeats, dim).map(Array::from_storage)
     }
@@ -276,7 +277,7 @@ where
     /// # Panics
     ///
     /// Panics if `dim >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
-    /// internal dim is required), or if `self.shape()[dim] * repeats` overflows `u64`.
+    /// internal dim is required), or if the output shape overflows.
     #[track_caller]
     pub fn repeat(self, repeats: u64, dim: usize) -> Array<Repeat<S>> {
         Repeat::new_array(self, repeats, dim).unwrap()

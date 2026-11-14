@@ -13,24 +13,20 @@ pub(crate) use sealed::ArrayStorageImpl;
 
 /// The backing data source of an [`Array<S>`](crate::Array).
 ///
-/// `Array<S>` is generic over its storage `S: ArrayStorage`, which provides three pieces
-/// of information: the array's shape, its element type, and the ability to read any
-/// rectangular sub-region into a byte buffer. Everything else - slicing, reshaping,
-/// arithmetic, reductions - is built on top of these three methods.
+/// `Array<S>` is generic over its storage `S: ArrayStorage`, which provides three things: the
+/// array's shape, its element type, and reading any rectangular sub-region into a byte buffer.
+/// Everything else - slicing, reshaping, arithmetic, reductions - is built on these three methods.
 ///
 /// # Primary storage backends
 ///
-/// The main concrete storages are the block-compressed backends:
-/// [`Compact`](crate::storage::Compact) (heap-allocated) and
-/// [`CompactMmap`](crate::storage::CompactMmap) (memory-mapped file).
-/// These store the array as independently
-/// compressed nd-blocks and are the primary on-disk format.
+/// The block-compressed backends [`Compact`](crate::storage::Compact) (heap-allocated) and
+/// [`CompactMmap`](crate::storage::CompactMmap) (memory-mapped file) store the array as
+/// independently compressed nd-blocks, the primary on-disk format.
 ///
 /// # Adapter
 ///
-/// An adapter lets plain data participate in the same `Array<S>` world:
-/// - [`Plain`](crate::storage::Plain) - wraps a contiguous or strided in-memory ndarray, used when
-///   operating on regular Rust/ndarray data alongside compressed arrays.
+/// [`Plain`](crate::storage::Plain) wraps a contiguous or strided in-memory buffer, so regular
+/// Rust/ndarray data can be combined with compact arrays.
 ///
 /// # Lazy operation views
 ///
@@ -42,40 +38,38 @@ pub(crate) use sealed::ArrayStorageImpl;
 /// arr.reshape(new_shape)     -> Array<Reshape<S>>
 /// arr.permute_dims(dims)     -> Array<PermuteDims<S>>
 /// arr1.add(arr2)             -> Array<Add<S1, S2>>
-/// arr.sum(dim)              -> Array<Sum<S>>
-/// arr.cast::<f32>()          -> Array<Cast<S>>
+/// arr.sum(dim)               -> Array<Sum<S>>
+/// arr.cast::<f32>()          -> Array<Cast<S, f32>>
 /// ```
 ///
 /// No data is copied or computed until `read_data` is called. At that point the index
 /// transformation propagates inward through the storage chain and only the minimum
 /// required data is read from the innermost backend.
 ///
-/// # Flexibility
+/// # Static dispatch
 ///
 /// Because `Array<S>` is monomorphized over `S` at compile time, chains of operations
 /// carry zero heap allocation or virtual dispatch overhead. The full static type of an
-/// expression - e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` - is resolved by the compiler,
-/// and only the final `read_data` call touches actual bytes.
+/// expression - e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` - is resolved by the compiler.
 pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// The compile-time element type of arrays backed by this storage.
     ///
-    /// Either [`Ty<T>`](crate::Ty) - element type `T` is known at compile time - or [`TypeDyn`](crate::TypeDyn) - element
-    /// type is only available at runtime via [`dtype()`](ArrayStorage::dtype).
+    /// Either [`Ty<T>`](crate::Ty) (`T` known at compile time) or [`TypeDyn`](crate::TypeDyn)
+    /// (only available at runtime via [`dtype()`](ArrayStorage::dtype)).
     ///
     /// Operations that require knowing the element type (arithmetic, comparisons, reductions,
-    /// cast) are bounded on [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), a shorthand for
-    /// `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
+    /// cast) are bounded on [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), a shorthand
+    /// for `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
     /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
     /// type and re-enable those operations.
     type ElementType: ElementType
     where
         Self: Sized;
 
-    /// Read a sub-region of the array and return it as a [`StridedBuf`](crate::storage::StridedBuf).
+    /// Read a sub-region of the array into `out`, as a [`StridedBuf`](crate::storage::StridedBuf).
     ///
-    /// This is the single I/O method that every storage backend must implement.
-    /// All higher-level read operations (`to_ndarray`, `to_ndarray_sub`, etc.) bottom
-    /// out here.
+    /// The single I/O method of a storage: all higher-level reads (`to_ndarray`,
+    /// `to_ndarray_sub`, etc.) bottom out here.
     ///
     /// The two modes mirror NumPy's `out=`, and are picked by `out` (see [`OutBuf`]):
     /// - **pull**: the impl puts the cheapest buffer it can in the slot of `out` - a borrowed view
@@ -105,11 +99,10 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
 
     /// Read a sub-region as an element-wise pipeline over `T`.
     ///
-    /// Compared to [`read_data`](Self::read_data), which materializes the region into a single
-    /// buffer, this method hands back a pipeline that builds a tree of operations in which the
-    /// leaves are operands and inner nodes are ops. The default implementation of this method
-    /// reads the region in a leaf buffer, but ops override it to build a tree recursively from
-    /// their inner storage dependencies.
+    /// Where [`read_data`](Self::read_data) materializes the region into a single buffer, this
+    /// returns a tree of operations with operands at the leaves and ops at the inner nodes. The
+    /// default implementation reads the region into a leaf buffer; ops override it to build the
+    /// tree recursively from their inner storages.
     ///
     /// # Arguments
     ///

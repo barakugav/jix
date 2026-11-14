@@ -1,20 +1,16 @@
 use crate::ops::prelude::*;
 
-/// Expands an array to a larger shape by repeating elements along length-1 dimensions,
+/// Expands an array to a new shape by repeating elements along length-1 dimensions,
 /// returned by [`Array::broadcast`](crate::Array::broadcast).
 ///
-/// The new shape (`shape`) must have the same number of dimensions as the input. For each dimension `d`,
-/// either `shape[d] == input_shape[d]` (kept as-is) or `input_shape[d] == 1` (broadcast:
-/// the single element is repeated `shape[d]` times). Any other combination is an error.
+/// `shape` must have as many dims as the input. For each dim `d`, either
+/// `shape[d] == input_shape[d]`, or `input_shape[d] == 1` and the single element is repeated
+/// `shape[d]` times. Any other combination is an error. Output dtype equals the input dtype.
 ///
-/// Output dtype equals the input dtype. Output shape equals `shape`.
+/// To replicate along a dim of any length, use [`Repeat`](crate::ops::Repeat) (each element
+/// duplicated in place) or [`Tile`](crate::ops::Tile) (the whole sequence duplicated).
 ///
-/// `Broadcast` is the lazy zero-cost case of replication restricted to length-1 dims; for
-/// general element replication along a dim of any length use [`Repeat`](crate::ops::Repeat)
-/// (each element duplicated in place) or [`Tile`](crate::ops::Tile) (the whole sequence
-/// duplicated).
-///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///
@@ -110,7 +106,8 @@ where
         })
     }
 
-    /// Constructs an array with [`Broadcast`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`Broadcast`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>, shape: &[u64]) -> Result<Array<Self>> {
         Self::new(array.into_storage(), shape).map(Array::from_storage)
     }
@@ -215,7 +212,7 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if `shape.len() != self.ndim()` or any dimension with size > 1 is expanded.
+    /// Panics if `shape.len() != self.ndim()` or a dim whose length is not 1 changes length.
     #[track_caller]
     pub fn broadcast(self, shape: &[u64]) -> Array<Broadcast<S>> {
         Broadcast::new_array(self, shape).unwrap()

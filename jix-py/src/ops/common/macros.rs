@@ -96,26 +96,47 @@ macro_rules! define_op2_desc {
     (
         $core_op:ident,
         [$($items:tt)*],
-        $cast_kind:ident
+        ($a_cast:ident, $b_cast:ident)
     ) => {{
         let mut descs = Vec::new();
-        crate::ops::common::define_op2_desc!(@push descs, $core_op, $cast_kind, $($items)*);
+        crate::ops::common::define_op2_desc!(@push descs, $core_op, $a_cast, $b_cast, $($items)*);
         descs
     }};
-
-    (@push $descs:ident, $core_op:ident, $cast_kind:ident, ($a_ty:ty, $b_ty:ty) $(, $($rest:tt)*)?) => {
-        $descs.push(crate::ops::common::define_op2_desc!(@desc $core_op, $a_ty, $b_ty, $cast_kind));
-        crate::ops::common::define_op2_desc!(@push $descs, $core_op, $cast_kind, $($($rest)*)?);
+    (
+        $core_op:ident,
+        [$($items:tt)*],
+        $cast_kind:ident
+    ) => {
+        crate::ops::common::define_op2_desc!($core_op, [$($items)*], ($cast_kind, $cast_kind))
     };
-    (@push $descs:ident, $core_op:ident, $cast_kind:ident, $ty:ty $(, $($rest:tt)*)?) => {
-        $descs.push(crate::ops::common::define_op2_desc!(@desc $core_op, $ty, $ty, $cast_kind));
-        crate::ops::common::define_op2_desc!(@push $descs, $core_op, $cast_kind, $($($rest)*)?);
-    };
-    (@push $descs:ident, $core_op:ident, $cast_kind:ident,) => {};
 
-    (@desc $core_op:ident, $a_ty:ty, $b_ty:ty, $cast_kind:ident) => {
+    (
+        @push $descs:ident, $core_op:ident, $a_cast:ident, $b_cast:ident,
+        ($a_ty:ty, $b_ty:ty) $(, $($rest:tt)*)?
+    ) => {
+        $descs.push(crate::ops::common::define_op2_desc!(
+            @desc $core_op, $a_ty, $b_ty, $a_cast, $b_cast
+        ));
+        crate::ops::common::define_op2_desc!(
+            @push $descs, $core_op, $a_cast, $b_cast, $($($rest)*)?
+        );
+    };
+    (
+        @push $descs:ident, $core_op:ident, $a_cast:ident, $b_cast:ident,
+        $ty:ty $(, $($rest:tt)*)?
+    ) => {
+        $descs.push(crate::ops::common::define_op2_desc!(
+            @desc $core_op, $ty, $ty, $a_cast, $b_cast
+        ));
+        crate::ops::common::define_op2_desc!(
+            @push $descs, $core_op, $a_cast, $b_cast, $($($rest)*)?
+        );
+    };
+    (@push $descs:ident, $core_op:ident, $a_cast:ident, $b_cast:ident,) => {};
+
+    (@desc $core_op:ident, $a_ty:ty, $b_ty:ty, $a_cast:ident, $b_cast:ident) => {
         crate::ops::common::OpFnDescriptor::new2::<$a_ty, $b_ty>(
-            [crate::ops::common::CastKind::$cast_kind, crate::ops::common::CastKind::$cast_kind],
+            [crate::ops::common::CastKind::$a_cast, crate::ops::common::CastKind::$b_cast],
             |a, b| {
                 let res = jix_core::ops::$core_op::new_array(a, b).map(|res| res.into_any());
                 <_ as crate::util::IntoPyResult<_>>::into_py_result(res)

@@ -57,7 +57,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Sqrt`](crate::scalar::Sqrt) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::sqrt()`](crate::Array::sqrt).
@@ -86,7 +86,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Exp`](crate::scalar::Exp) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::exp()`](crate::Array::exp).
@@ -117,7 +117,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Ln`](crate::scalar::Ln) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::ln()`](crate::Array::ln).
@@ -127,7 +127,8 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::{array, Ix1};
     ///
-    /// let a = Array::compact_ndarray(&array![1.0f32, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E])?;
+    /// let e = std::f32::consts::E;
+    /// let a = Array::compact_ndarray(&array![1.0f32, e, e * e])?;
     /// let result = a.ln().to_ndarray::<Ix1>()?;
     /// assert!((result[[0]] - 0.0).abs() < 1e-5);
     /// assert!((result[[1]] - 1.0).abs() < 1e-5);
@@ -149,7 +150,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Log2`](crate::scalar::Log2) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::log2()`](crate::Array::log2).
@@ -173,7 +174,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Log10`](crate::scalar::Log10) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::log10()`](crate::Array::log10).

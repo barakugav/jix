@@ -4,13 +4,12 @@ use crate::ops::prelude::*;
 /// returned by [`Array::remove_dim`](crate::Array::remove_dim). The inverse operation
 /// is [`InsertDim`](crate::ops::InsertDim).
 ///
-/// `dim` is a set of dim indices in the *input* shape (0-based). Each named dimension must have
-/// length exactly 1 and is dropped from the output shape. Duplicate dim indices are not allowed.
-/// The order of values in `dim` does not matter. Valid dim indices are `0..input_ndim`.
+/// Each value in `dim` is the index, in `0..input_ndim`, of an input dim of length 1, which is
+/// dropped from the output. Values must be distinct, in any order.
 ///
 /// Output dtype equals the input dtype.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///
@@ -21,8 +20,8 @@ use crate::ops::prelude::*;
 /// [1, N, 1, M, 1] dim: [0, 2, 4] -> [N, M]
 /// ```
 ///
-/// The dims can be given as any [`DimsArg`](crate::ops::DimsArg): a single `usize`, an array or tuple of `usize`, or a
-/// slice:
+/// The dims can be given as any [`DimsArg`](crate::ops::DimsArg): a single `usize`, an array or
+/// tuple of `usize`, a slice or a `Vec`:
 ///
 /// ```
 /// use jix::Array;
@@ -130,7 +129,8 @@ where
         })
     }
 
-    /// Constructs an array with [`RemoveDim`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`RemoveDim`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>, dim: impl DimsArg) -> Result<Array<Self>> {
         Self::new(array.into_storage(), dim).map(Array::from_storage)
     }
@@ -229,8 +229,6 @@ where
 {
     /// Returns a lazy view of the array with the specified length-1 dimensions removed.
     /// See [`RemoveDim`] for details and examples.
-    ///
-    /// Each dim in `dim` must have length 1.
     ///
     /// # Panics
     ///

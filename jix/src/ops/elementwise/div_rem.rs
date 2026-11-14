@@ -11,8 +11,7 @@ pub(crate) mod traits {
     use fearless_simd::ExtractToken;
 
     define_scalar_op2_trait!(
-        /// Division operation, like [`core::ops::Div`], reporting an integer division by zero to
-        /// an [`ArithmeticStatus`] instead of panicking.
+        /// Division operation, like [`core::ops::Div`] but without panicking.
         ///
         /// For **integer** types the result is truncating (rounds towards zero). Dividing by zero
         /// gives `0` and reports a division by zero to `status`, and `MIN / -1` wraps to `MIN`.
@@ -384,8 +383,7 @@ pub(crate) mod traits {
                 type V<S> = <S as Simd>::$v;
                 const EXACT_LIMIT: T = $exact_limit;
 
-                /// The exact `trunc(a / b)` and its residual `a - q * b`, which below `EXACT_LIMIT`
-                /// is `a % b` (`fmod`), exactly.
+                /// The exact `trunc(a / b)` and its residual `a - q * b`.
                 ///
                 /// The quotient is `div_trunc` of rust-lang/rust#134062, a proposed fix to
                 /// `f64::div_euclid`:
@@ -395,8 +393,8 @@ pub(crate) mod traits {
                 /// `EXACT_LIMIT`, where #134062 returns NaN, within one ulp. As in numpy's
                 /// `floor_divide`, an infinite dividend gives NaN.
                 ///
-                /// The residual of the exact quotient is the remainder, as in the docs there
-                /// (L222-L223), exact as `fmod` is:
+                /// Below `EXACT_LIMIT` the residual is exactly `a % b`, as in the docs there
+                /// (L222-L223), since `fmod` is exact:
                 /// <https://en.cppreference.com/w/c/numeric/math/fmod>
                 #[inline(always)]
                 fn div_rem_trunc(a: T, b: T) -> (T, T) {
@@ -621,7 +619,7 @@ define_op2!(
     /// Available via the `/` operator on arrays. For dividing every element by a constant, use
     /// [`Array::map`]: `a.map(|x| x / 2i32)`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -646,7 +644,7 @@ define_op2!(
     /// See [`jix::scalar::DivideTrunc`](crate::scalar::DivideTrunc) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -676,7 +674,7 @@ define_op2!(
     /// See [`jix::scalar::DivideFloor`](crate::scalar::DivideFloor) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -706,7 +704,7 @@ define_op2!(
     /// See [`jix::scalar::DivideEuclid`](crate::scalar::DivideEuclid) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -736,11 +734,10 @@ define_op2!(
     /// See [`jix::scalar::RemainderTrunc`](crate::scalar::RemainderTrunc) scalar trait for the
     /// per-element semantics.
     ///
-    /// Available via the `%` operator on arrays, with the semantics of Rust's `%`, and as
-    /// [`Array::remainder_trunc`]. For the remainder of every element by a constant, use
-    /// [`Array::map`]: `a.map(|x| x % 3i32)`.
+    /// Available via the `%` operator on arrays and as [`Array::remainder_trunc`]. For the
+    /// remainder of every element by a constant, use [`Array::map`]: `a.map(|x| x % 3i32)`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -765,7 +762,7 @@ define_op2!(
     /// See [`jix::scalar::RemainderFloor`](crate::scalar::RemainderFloor) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -789,7 +786,7 @@ define_op2!(
     /// See [`jix::scalar::RemainderEuclid`](crate::scalar::RemainderEuclid) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```

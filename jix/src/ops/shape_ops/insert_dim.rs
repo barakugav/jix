@@ -4,14 +4,13 @@ use crate::ops::prelude::*;
 /// returned by [`Array::insert_dim`](crate::Array::insert_dim). The inverse operation
 /// is [`RemoveDim`](crate::ops::RemoveDim).
 ///
-/// Like `numpy.expand_dims`, each element of `dim` is a dim index in the *output* shape, whose
-/// ndim is `orig_ndim + dim.len()`. Each named output dim is a new length-1 dim; the input dims
-/// fill the remaining positions in order. Valid indices are `0..orig_ndim + dim.len()`.
-/// Duplicates are not allowed. The order of values in `dim` does not matter.
+/// Like `numpy.expand_dims`, each value in `dim` is the index of a new length-1 dim in the
+/// *output* shape, of ndim `orig_ndim + dim.len()`, so it must be in `0..orig_ndim + dim.len()`;
+/// the input dims fill the remaining positions in order. Values must be distinct, in any order.
 ///
 /// Output dtype equals the input dtype.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///
@@ -23,8 +22,8 @@ use crate::ops::prelude::*;
 /// [N, M]    dim: [0, 1]  -> [1, 1, N, M]
 /// ```
 ///
-/// The dims can be given as any [`DimsArg`](crate::ops::DimsArg): a single `usize`, an array or tuple of `usize`, or a
-/// slice:
+/// The dims can be given as any [`DimsArg`](crate::ops::DimsArg): a single `usize`, an array or
+/// tuple of `usize`, a slice or a `Vec`:
 ///
 /// ```
 /// use jix::Array;
@@ -136,7 +135,8 @@ where
         })
     }
 
-    /// Constructs an array with [`InsertDim`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`InsertDim`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(array: Array<S>, dim: impl DimsArg) -> Result<Array<Self>> {
         Self::new(array.into_storage(), dim).map(Array::from_storage)
     }

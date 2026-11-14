@@ -87,8 +87,7 @@ pub(crate) mod traits {
         ///
         /// Output dtype is `bool8`.
         ///
-        /// For **float** types, `NaN != NaN` per IEEE 754: comparing two `NaN` values
-        /// returns `false`.
+        /// For **float** types, `NaN == NaN` is `false` (IEEE 754).
         /// For **complex** types, both the real and imaginary components must be equal.
         impl Equal {
             /// Test whether the value equals another value.
@@ -110,7 +109,8 @@ pub(crate) mod traits {
         /// Output dtype is `bool8`.
         ///
         /// For **float** types, `NaN != NaN` returns `true` per IEEE 754.
-        /// For **complex** types, returns `true` if either the real or imaginary component differs.
+        /// For **complex** types, returns `true` if either the real or imaginary component
+        /// differs.
         impl NotEqual {
             /// Test whether the value differs from another value.
             fn not_equal = !=,
@@ -147,7 +147,7 @@ pub(crate) mod traits {
         /// Complex types are not supported as they have no total ordering. Output dtype is `bool8`.
         ///
         /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
-        /// For **bool8**: `bool8::FALSE <= bool8::TRUE`, and both `bool8::FALSE <= bool8::FALSE` and `bool8::TRUE <= bool8::TRUE` hold.
+        /// For **bool8**: `bool8::FALSE < bool8::TRUE`.
         impl LessEqual {
             /// Test whether the value is less than or equal to another value.
             fn less_equal = <=,
@@ -158,19 +158,16 @@ pub(crate) mod traits {
         }
     );
 
-    /// Approximate equality check of two scalar values.
+    /// Approximate equality of two scalar values:
+    /// `|self - other| <= max(atol, rtol * max(|self|, |other|))`.
     ///
-    /// Returns `true` when two values are *close enough* under absolute and/or relative
-    /// tolerance. Namely if `|self - other| <= max(atol, rtol * max(|self|, |other|))`
-    /// returns `true`, otherwise `false`.
-    ///
-    /// `NaN` inputs always return `false` because `NaN != NaN`.
+    /// `NaN` is close to nothing, and an infinity only to the same infinity.
     ///
     /// Implemented for `f32`, `f64`, `f16` (feature `half`), and
     /// [`Complex<F>`](crate::scalar::Complex) (feature `num-complex`).
-    /// For [`Complex<F>`](crate::scalar::Complex) the check is applied independently to the
-    /// real and imaginary parts: `atol` is `Complex<F>` (separate per-component absolute
-    /// tolerances) and `rtol` is `F` (a shared relative tolerance applied per component).
+    /// For [`Complex<F>`](crate::scalar::Complex) both the real and the imaginary parts must pass
+    /// the check: `atol` is `Complex<F>` (one absolute tolerance per part) and `rtol` is `F`
+    /// (shared by both parts).
     pub trait ApproxEq {
         /// The type used for the absolute tolerance parameter (`atol`).
         type AbsoluteTolerance;
@@ -178,7 +175,7 @@ pub(crate) mod traits {
         type RelativeTolerance;
 
         /// Returns `true` if `self` and `other` are approximately equal under the given
-        /// tolerances, `|self - other| <= max(atol, rtol * max(|self|, |other|))`.
+        /// tolerances.
         fn approx_eq(
             &self,
             other: &Self,
@@ -267,7 +264,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Equal`](crate::scalar::Equal) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::equal()`](crate::Array::equal).
@@ -301,7 +298,7 @@ define_op2!(
     /// See [`jix::scalar::NotEqual`](crate::scalar::NotEqual) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::not_equal()`](crate::Array::not_equal).
@@ -421,10 +418,9 @@ macro_rules! define_swapped_cmp {
 define_swapped_cmp!(
     /// Element-wise greater-than test (`a > b`).
     ///
-    /// Evaluated as `b < a`: this storage wraps a [`Less`] with the operands swapped,
-    /// see it for more detailed semantics.
+    /// Evaluated as `b < a` by a [`Less`] with the operands swapped; see it for the semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::greater()`](crate::Array::greater).
@@ -452,10 +448,10 @@ define_swapped_cmp!(
 define_swapped_cmp!(
     /// Element-wise greater-than-or-equal test (`a >= b`).
     ///
-    /// Evaluated as `b <= a`: this storage wraps a [`LessEqual`] with the operands swapped,
-    /// see it for more detailed semantics.
+    /// Evaluated as `b <= a` by a [`LessEqual`] with the operands swapped; see it for the
+    /// semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::greater_equal()`](crate::Array::greater_equal).
@@ -485,7 +481,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Less`](crate::scalar::Less) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::less()`](crate::Array::less).
@@ -519,7 +515,7 @@ define_op2!(
     /// See [`jix::scalar::LessEqual`](crate::scalar::LessEqual) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::less_equal()`](crate::Array::less_equal).
@@ -550,16 +546,15 @@ define_op2!(
 
 /// Element-wise approximate equality test.
 ///
-/// Produces a `bool8` array that is `true` at each position where the corresponding elements of
-/// the two input arrays are within the specified tolerances:
-/// `|a - b| <= max(atol, rtol * max(|a|, |b|))`.
+/// The `bool8` result is `true` where `|a - b| <= max(atol, rtol * max(|a|, |b|))`. `NaN` is
+/// close to nothing, and an infinity only to the same infinity.
 ///
 /// **Not equivalent to `numpy.isclose`.** NumPy uses `|a - b| <= atol + rtol * |b|`: the
 /// tolerances are combined additively and the relative term is asymmetric (scaled by `|b|` only).
 /// Jix treats `atol` and `rtol` as independent thresholds and uses the symmetric
 /// `max(|a|, |b|)` as the scale.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation; the operation is also available as
 /// [`Array::approx_equal()`](crate::Array::approx_equal).
@@ -640,7 +635,8 @@ where
         Ok(Self(Op2::new(a, b, ApproxEqKernel { rtol, atol }, false)?))
     }
 
-    /// Constructs an array with [`ApproxEq`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`ApproxEq`] storage. See the storage struct docs for
+    /// semantics and examples.
     pub fn new_array(
         a: Array<S1>,
         b: Array<S2>,
