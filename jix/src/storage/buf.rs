@@ -469,7 +469,7 @@ impl<'s, 'a> OutBuf<'s, 'a> {
     /// A pull destination: the read puts its buffer in `slot`, which must be empty.
     #[inline(always)]
     pub(crate) fn pull(slot: &'s mut Option<StridedBuf<'a>>) -> Self {
-        assert!(slot.is_none());
+        debug_assert!(slot.is_none());
         Self(OutBufInner::Pull(slot))
     }
 
@@ -511,14 +511,15 @@ impl<'s, 'a> OutBuf<'s, 'a> {
     }
 }
 
-/// Puts `value` in `slot`, which is empty, and returns it.
-///
-/// The slot is not checked here but in [`OutBuf::pull`], before `value` is built, which lets
-/// `value` be built in place. A value already in the slot would leak, not drop.
+/// Puts `value` in `slot`, which must be empty, and returns it.
 #[inline(always)]
 pub(crate) fn fill_slot<T>(slot: &mut Option<T>, value: T) -> &mut T {
-    std::mem::forget(slot.take());
-    slot.insert(value)
+    let old = slot.replace(value);
+    // Checked after `old` is forgotten: alive into the panic, it would be saved whole.
+    let was_none = old.is_none();
+    std::mem::forget(old);
+    assert!(was_none);
+    slot.as_mut().unwrap()
 }
 
 /// Reads of an [`ArrayStorage`] in each mode.
