@@ -364,8 +364,6 @@ pub(crate) fn check_out_buf(
     }
 }
 
-/// Checks that `out` can be the destination of a read of `ndim` dims: one stride per dim, and
-/// writable.
 #[inline]
 pub(crate) fn check_out_buf_dims(out: &StridedBuf, ndim: usize) -> Result<()> {
     ensure!(

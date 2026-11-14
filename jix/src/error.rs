@@ -231,8 +231,6 @@ fn check_range_fail(dim: usize, range: Range<u64>, dim_size: u64) -> Result<()> 
     )
 }
 
-/// Checks `ranges`, read from an array of `shape`, before splitting them into an [`Index`]: one
-/// range per dimension, within it and not starting after it ends, of a size that fits in `usize`.
 #[inline]
 pub(crate) fn check_ranges(shape: &[u64], ranges: &[Range<u64>]) -> Result<()> {
     check_ndim(ranges.len())?;

@@ -19,10 +19,14 @@ pub struct Index<'a> {
 }
 
 impl<'a> Index<'a> {
-    /// Wraps `start` and `size`, failing with
-    /// [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) if there are more than
-    /// [`NDIM_MAX`] dims, or with [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) if
-    /// their lengths differ, a size is zero or a `start + size` overflows.
+    /// Create a new index from the given `start` and `size` slices.
+    ///
+    /// # Errors
+    ///
+    /// - [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) if there are more than
+    ///   [`NDIM_MAX`] dims.
+    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) if the lengths of `start` and `size`
+    ///   differ, a size is zero, or a `start + size` overflows.
     #[inline(always)]
     pub fn new(start: &'a [u64], size: &'a [usize]) -> Result<Self> {
         Self::check(start, size)?;
@@ -30,7 +34,7 @@ impl<'a> Index<'a> {
         Ok(unsafe { Self::new_unchecked(start, size) })
     }
 
-    /// Wraps `start` and `size` without checking them.
+    /// Create a new index from the given `start` and `size` slices without checking them.
     ///
     /// # Safety
     ///
@@ -58,14 +62,14 @@ impl<'a> Index<'a> {
         Ok(())
     }
 
-    /// The first position read in each dimension.
+    /// The start of the read range in each dimension.
     #[inline(always)]
     pub fn start(&self) -> &'a [u64] {
         self.assume_invariants();
         self.start
     }
 
-    /// The number of positions read in each dimension.
+    /// The size of the read range in each dimension.
     #[inline(always)]
     pub fn size(&self) -> &'a [usize] {
         self.assume_invariants();
@@ -73,15 +77,13 @@ impl<'a> Index<'a> {
         unsafe { transmute::<&[NonZeroUsize], &[usize]>(self.size) }
     }
 
-    /// The number of dimensions.
     #[inline(always)]
-    pub fn ndim(&self) -> usize {
+    pub(crate) fn ndim(&self) -> usize {
         self.size().len()
     }
 
-    /// One past the last position read in dimension `dim`.
     #[inline(always)]
-    pub fn end(&self, dim: usize) -> u64 {
+    pub(crate) fn end(&self, dim: usize) -> u64 {
         self.start()[dim] + self.size()[dim] as u64
     }
 
@@ -93,7 +95,6 @@ impl<'a> Index<'a> {
     }
 }
 
-/// The starts and sizes of `ranges`, which passed [`check_ranges`](crate::error::check_ranges).
 #[inline(always)]
 pub(crate) fn split_ranges(ranges: &[Range<u64>]) -> (DimArray<u64>, DimArray<usize>) {
     let start = dim_arr(ranges.len(), |d| ranges[d].start);

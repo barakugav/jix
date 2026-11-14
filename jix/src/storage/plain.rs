@@ -464,8 +464,8 @@ where
             self.dtype().itemsize() as usize,
         )?;
 
-        // The offset of the region's first element and the span of the region, in bytes.
-        let (mut offset, mut span) = (0, dtype.itemsize() as usize);
+        let mut offset = 0;
+        let mut span = dtype.itemsize() as usize;
         let dims = index
             .start()
             .iter()

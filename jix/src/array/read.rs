@@ -427,7 +427,6 @@ impl<S: ArrayStorage> Array<S> {
         self.to_buf_strided_checked(&index, context, out)
     }
 
-    /// Like `to_buf_strided`, for an empty region of `size`: `out`, or an empty buffer.
     #[cold]
     fn read_empty<'a>(
         &'a self,
@@ -450,8 +449,8 @@ impl<S: ArrayStorage> Array<S> {
         ))
     }
 
-    /// Like `to_buf_strided`, for an `index` the caller checked against the shape and the region
-    /// size, and an `out` that passes `check_out_buf_impl`.
+    // Like `to_buf_strided`, for an `index` the caller checked against the shape and the region
+    // size, and an `out` that passes `check_out_buf_impl`.
     #[inline]
     fn to_buf_strided_checked<'a>(
         &'a self,
