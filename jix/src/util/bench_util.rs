@@ -2,7 +2,7 @@ use crate::{dtype::Dtype, NdCopier, PtrMutNoalias, PtrNoalias};
 
 /// Copy `shape` elements from `src` to `dst`, using the given strides and data type.
 ///
-/// # SAFETY
+/// # Safety
 ///
 /// The caller must ensure that `src`/`dst` are byte slices covering every byte the copy touches for
 /// the given shape and strides (the region spans `strided_span_bytes` bytes forward from each slice

@@ -41,9 +41,9 @@ impl RuntimeAlign {
     }
 }
 
-/// Aligned vector. See [`Vec`] for more info.
+/// Aligned byte vector. See [`Vec`] for more info.
 ///
-/// Note: the alignment must be a power of two; constructors panic otherwise.
+/// The alignment must be a power of two; constructors panic otherwise.
 pub struct AlignedBytes {
     buf: RawAlignedBytes,
     len: usize,
@@ -100,7 +100,7 @@ impl AlignedBytes {
         }
     }
 
-    /// Returns a new [`AlignedBytes`] with the provided alignment or a larger alignment matching the cache line size.
+    /// Returns a new [`AlignedBytes`] with alignment `max(align, CACHE_LINE_SIZE)`.
     #[inline]
     #[must_use]
     #[track_caller]
@@ -124,8 +124,8 @@ impl AlignedBytes {
         }
     }
 
-    /// Creates a new empty vector with the provided capacity and alignment or a larger alignment matching
-    /// the cache line size.
+    /// Creates a new empty vector with the provided capacity and alignment
+    /// `max(align, CACHE_LINE_SIZE)`.
     #[inline]
     #[must_use]
     #[track_caller]
@@ -166,7 +166,7 @@ impl AlignedBytes {
         self.len
     }
 
-    /// Returns `true` if the vector's length is equal to `0`, and false otherwise.
+    /// Returns `true` if the vector's length is `0`.
     #[inline]
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -180,9 +180,8 @@ impl AlignedBytes {
         self.buf.capacity()
     }
 
-    /// Reserves enough capacity for at least `additional` more elements to be inserted in the
-    /// vector. After this call to `reserve`, capacity will be greater than or equal to `self.len()
-    /// + additional`. Does nothing if the capacity is already sufficient.
+    /// Reserves capacity for at least `additional` more elements, so that afterwards
+    /// `capacity() >= len() + additional`. Does nothing if the capacity is already sufficient.
     ///
     /// # Panics
     ///
@@ -194,9 +193,8 @@ impl AlignedBytes {
         }
     }
 
-    /// Reserves enough capacity for exactly `additional` more elements to be inserted in the
-    /// vector. After this call to `reserve`, capacity will be greater than or equal to `self.len()
-    /// + additional`. Does nothing if the capacity is already sufficient.
+    /// Reserves capacity for exactly `additional` more elements, so that afterwards
+    /// `capacity() >= len() + additional`. Does nothing if the capacity is already sufficient.
     ///
     /// # Panics
     ///
@@ -268,9 +266,8 @@ impl AlignedBytes {
         }
     }
 
-    /// Shrinks the capacity of the vector with a lower bound.
-    /// The capacity will remain at least as large as both the length and the supplied value.
-    /// If the current capacity is less than the lower limit, this is a no-op.
+    /// Shrinks the capacity to `max(min_capacity, len())`.
+    /// If the current capacity is not above that, this is a no-op.
     #[inline]
     pub fn shrink_to(&mut self, min_capacity: usize) {
         let min_capacity = min_capacity.max(self.len());
@@ -301,7 +298,7 @@ impl AlignedBytes {
         }
     }
 
-    /// Drops the all the elements of the vector, setting its length to `0`.
+    /// Drops all the elements of the vector, setting its length to `0`.
     #[inline]
     pub fn clear(&mut self) {
         let old_len = self.len;
@@ -384,11 +381,8 @@ impl AlignedBytes {
         }
     }
 
-    /// Resizes the `Vec` in-place so that `len` is equal to `new_len`.
-    ///
-    /// If `new_len` is greater than `len`, the `Vec` is extended by the
-    /// difference, with each additional slot filled with `value`.
-    /// If `new_len` is less than `len`, the `Vec` is simply truncated.
+    /// Resizes the vector in place to `new_len`: new slots are filled with `value`, and a
+    /// shorter `new_len` truncates.
     pub fn resize(&mut self, new_len: usize, value: u8) {
         // Copied somewhat from the standard library
         let len = self.len();
@@ -424,7 +418,7 @@ impl AlignedBytes {
         }
     }
 
-    /// Clones and appends all elements in a slice to the `Vec`.
+    /// Appends all elements of `other` to the vector.
     pub fn extend_from_slice(&mut self, other: &[u8]) {
         // Copied somewhat from the standard library
         let count = other.len();
