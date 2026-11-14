@@ -143,8 +143,12 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
                 }
             });
             let dst_byte_offset = dst_dim_k_offset as usize * out_strides[k];
-            let mut sub =
-                unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides) };
+            let mut sub = unsafe {
+                StridedBuf::from_slice_mut(
+                    &mut out_buf[dst_byte_offset..],
+                    Clone::clone(out_strides),
+                )
+            };
             let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
             self.array
                 .read_data(&inner_index, context, Some(&mut sub))?;

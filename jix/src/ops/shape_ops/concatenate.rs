@@ -311,12 +311,17 @@ where
                 unsafe {
                     StridedBuf::from_slice_mut(
                         &mut out_buf[buf_offset..buf_offset + sub_size_bytes],
-                        sub_c.as_ref(),
+                        sub_c,
                     )
                 }
             } else {
                 // SAFETY: `output_strides` describe `dest`; the slot at `buf_offset` is within it.
-                unsafe { StridedBuf::from_slice_mut(&mut out_buf[buf_offset..], output_strides) }
+                unsafe {
+                    StridedBuf::from_slice_mut(
+                        &mut out_buf[buf_offset..],
+                        Clone::clone(output_strides),
+                    )
+                }
             };
             let sub_index = unsafe { Index::new_unchecked(&sub_start, &sub_size) };
             self.arrays

@@ -484,7 +484,7 @@ where
         let src = unsafe { std::slice::from_raw_parts(src_ptr, src_span) };
 
         match out {
-            None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.as_ref()) }),
+            None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.clone()) }),
             Some(out) => {
                 unsafe { out.copy_from(src, self.strides.as_ref(), index.size(), dtype) };
                 Ok(out.view_mut())

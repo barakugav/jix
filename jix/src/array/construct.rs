@@ -277,7 +277,7 @@ impl<T> CompactArray<T> {
                 let end = dim_arr(ndim, |dim| index.end(dim));
                 let base = out_buf.as_mut_ptr();
                 let iter = NdIter::builder_with_begin(begin, end)
-                    .with_strides_offset_ext(out_strides.to_dim_vec::<DimDyn>(), 0)
+                    .with_strides_offset_ext(Clone::clone(out_strides), 0)
                     .build();
                 if dst_aligned {
                     iter.for_each(|idx, dst_offset| {

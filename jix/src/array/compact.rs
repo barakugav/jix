@@ -3,7 +3,9 @@ use crate::error::Result;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::{ArrayBlockTableStorageBase, BlockSize, Compact, Index, StridedBuf};
 use crate::util::iter::NdIter;
-use crate::util::{scale_read_shape, AlignedBytes, IterExt, NdCopier, PtrMutNoalias, PtrNoalias};
+use crate::util::{
+    scale_read_shape, AlignedBytes, IterExt, NdCopier, PtrMutNoalias, PtrNoalias, SliceExt,
+};
 use crate::{
     default_logical_strides, default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec,
     Dimension, ReadContext,
@@ -269,7 +271,10 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
             &unsafe { Index::new_unchecked(chunk_start.as_ref(), chunk_size_usize.as_ref()) },
             context,
             Some(&mut unsafe {
-                StridedBuf::from_slice_mut(chunk_buf.as_mut_slice(), chunk_strides.as_ref())
+                StridedBuf::from_slice_mut(
+                    chunk_buf.as_mut_slice(),
+                    chunk_strides.as_ref().to_dim_vec::<DimDyn>(),
+                )
             }),
         )?;
         let chunk_offset_base = (0..ndim)

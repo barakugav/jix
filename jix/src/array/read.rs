@@ -260,7 +260,7 @@ impl<S: ArrayStorage> Array<S> {
                     array.len(),
                 ))
             };
-            let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides.as_ref()) };
+            let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides) };
             self.to_buf_strided_checked(&index, context, Some(&mut out))?;
         }
         Ok(unsafe { array.assume_init() })
@@ -317,7 +317,7 @@ impl<S: ArrayStorage> Array<S> {
         check_region_size(&index, dtype.itemsize() as usize)?;
         let read_shape = dim_arr(index.ndim(), |dim| index.size()[dim]);
         let strides = default_strides(&read_shape, dtype.itemsize() as usize);
-        let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides.as_ref()) };
+        let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides) };
         self.to_buf_strided_checked(&index, context, Some(&mut out))?;
         Ok(())
     }
@@ -527,7 +527,7 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
             .sum::<usize>();
 
         let mut block_out =
-            unsafe { StridedBuf::from_slice_mut(&mut out_buf[out_offset..], out_strides) };
+            unsafe { StridedBuf::from_slice_mut(&mut out_buf[out_offset..], out_strides.clone()) };
         let block_size = D::vec(ndim, |dim| block_size[dim] as usize);
         let block_index =
             unsafe { Index::new_unchecked(block_start.as_ref(), block_size.as_ref()) };

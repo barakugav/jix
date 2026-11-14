@@ -190,7 +190,7 @@ impl ReadContext {
             if entry.start.as_slice() == index.start() && entry.size.as_slice() == index.size() {
                 let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
                 let buf = unsafe {
-                    StridedBuf::from_shared(buf, &entry.strides).with_offset(entry.offset)
+                    StridedBuf::from_shared(buf, entry.strides.clone()).with_offset(entry.offset)
                 };
                 drop(cache_guard);
 
@@ -227,7 +227,7 @@ impl ReadContext {
             Err(buf) => return Ok(buf), // A view of memory outside the pool is not cached.
         };
         let buf = PoolBufShared::new(data.clone(), &self.buffer_pool);
-        let buf = unsafe { StridedBuf::from_shared(buf, &strides).with_offset(offset) };
+        let buf = unsafe { StridedBuf::from_shared(buf, strides.clone()).with_offset(offset) };
         let entry = CacheEntry {
             start: index.start().to_dim_vec::<DimDyn>(),
             size: index.size().to_dim_vec::<DimDyn>(),

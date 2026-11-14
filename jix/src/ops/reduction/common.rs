@@ -503,7 +503,7 @@ where
     let (state_buf, state_strides) = if state_in_out_buf {
         // Reuse the output bytes as the state buffer
         let state_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_buf_len) };
-        (state_buf, DimArray::from_slice(out_strides).unwrap())
+        (state_buf, Clone::clone(out_strides))
     } else {
         check_region_size(index, kernel_state_sizeof)?; // states may be bigger than the output
         let state_buf_len = out_nitems * kernel_state_sizeof;
@@ -1439,6 +1439,7 @@ pub(crate) mod tests {
 
     use crate::scalar::bool8;
     use crate::storage::{split_ranges, Index};
+    use crate::util::DimArray;
     use crate::ArrayParams;
 
     use ndarray::{array, ArrayD, Ix0, Ix1};
@@ -1950,7 +1951,7 @@ pub(crate) mod tests {
                 .map(|r| (r.end - r.start) as usize)
                 .collect::<Vec<_>>();
             let c = crate::util::default_strides_slice(&sh, size_of::<i64>());
-            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c) };
             let (start, size) = split_ranges(&full_index);
             storage
                 .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
@@ -1984,7 +1985,12 @@ pub(crate) mod tests {
         let off = backing.as_ptr().align_offset(8) + misalign;
         {
             let bytes = &mut backing[off..off + 2 * stride + size_of::<i64>()];
-            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, &[stride]) };
+            let mut out = unsafe {
+                crate::storage::StridedBuf::from_slice_mut(
+                    bytes,
+                    DimArray::from_slice(&[stride]).unwrap(),
+                )
+            };
             storage
                 .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
@@ -2158,7 +2164,7 @@ pub(crate) mod tests {
                 .map(|r| (r.end - r.start) as usize)
                 .collect::<Vec<_>>();
             let c = crate::util::default_strides_slice(&sh, size_of::<i64>());
-            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c) };
             let (start, size) = split_ranges(&index);
             storage
                 .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
@@ -2176,7 +2182,9 @@ pub(crate) mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 32 * 8)
             };
-            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            let mut out = unsafe {
+                StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&byte_strides).unwrap())
+            };
             let (start, size) = split_ranges(&index);
             storage
                 .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
@@ -2218,7 +2226,7 @@ pub(crate) mod tests {
                 std::slice::from_raw_parts_mut(expected.as_mut_ptr().cast::<u8>(), 3 * 8)
             };
             let c = crate::util::default_strides_slice(&[3usize], size_of::<f64>());
-            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c) };
             storage
                 .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
@@ -2232,7 +2240,9 @@ pub(crate) mod tests {
         {
             let bytes =
                 unsafe { std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 6 * 8) };
-            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            let mut out = unsafe {
+                StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&byte_strides).unwrap())
+            };
             storage
                 .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();

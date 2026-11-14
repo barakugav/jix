@@ -83,7 +83,7 @@ impl<'a> StridedBuf<'a> {
     ) -> Self {
         let span = strided_span_bytes(shape, strides, itemsize);
         let slice = unsafe { std::slice::from_raw_parts(data, span) };
-        unsafe { Self::from_slice(slice, strides) }
+        unsafe { Self::from_slice(slice, strides.to_dim_vec::<DimDyn>()) }
     }
 
     /// Build a writable [`StridedBuf`] from a raw base pointer and byte `strides`.
@@ -106,7 +106,7 @@ impl<'a> StridedBuf<'a> {
     ) -> Self {
         let span = strided_span_bytes(shape, strides, itemsize);
         let slice = unsafe { std::slice::from_raw_parts_mut(data, span) };
-        unsafe { Self::from_slice_mut(slice, strides) }
+        unsafe { Self::from_slice_mut(slice, strides.to_dim_vec::<DimDyn>()) }
     }
 
     /// Create a read-only view into `data` with the given (byte) `strides`.
@@ -116,10 +116,10 @@ impl<'a> StridedBuf<'a> {
     /// The caller must ensure every strided access implied by `strides` (and the read shape it will
     /// be used with) stays in bounds of `data`.
     #[inline]
-    pub(crate) unsafe fn from_slice(data: &'a [u8], strides: &[usize]) -> Self {
+    pub(crate) unsafe fn from_slice(data: &'a [u8], strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::Slice(data),
-            strides: strides.to_dim_vec::<DimDyn>(),
+            strides,
         }
     }
 
@@ -132,10 +132,10 @@ impl<'a> StridedBuf<'a> {
     /// The caller should ensure there are no two different indices that result in the same byte
     /// offset (i.e. the strides must not alias, broadcasted dimensions are not allowed).
     #[inline]
-    pub(crate) unsafe fn from_slice_mut(data: &'a mut [u8], strides: &[usize]) -> Self {
+    pub(crate) unsafe fn from_slice_mut(data: &'a mut [u8], strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::SliceMut(data),
-            strides: strides.to_dim_vec::<DimDyn>(),
+            strides,
         }
     }
 
@@ -145,10 +145,10 @@ impl<'a> StridedBuf<'a> {
     ///
     /// Same contract as [`from_slice_mut`](Self::from_slice_mut).
     #[inline]
-    pub(crate) unsafe fn from_pool(buf: PoolBuf<'a>, strides: &[usize]) -> Self {
+    pub(crate) unsafe fn from_pool(buf: PoolBuf<'a>, strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::PoolBufMut { buf, offset: 0 },
-            strides: strides.to_dim_vec::<DimDyn>(),
+            strides,
         }
     }
 
@@ -158,10 +158,10 @@ impl<'a> StridedBuf<'a> {
     ///
     /// Same contract as [`from_slice`](Self::from_slice).
     #[inline]
-    pub(crate) unsafe fn from_shared(buf: PoolBufShared<'a>, strides: &[usize]) -> Self {
+    pub(crate) unsafe fn from_shared(buf: PoolBufShared<'a>, strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::Shared { buf, offset: 0 },
-            strides: strides.to_dim_vec::<DimDyn>(),
+            strides,
         }
     }
 
@@ -205,7 +205,7 @@ impl<'a> StridedBuf<'a> {
     }
 
     #[inline]
-    pub(crate) fn data(&self) -> (&[u8], &[usize]) {
+    pub(crate) fn data(&self) -> (&[u8], &DimArray<usize>) {
         let data = match &self.data {
             StridedBufData::Slice(s) => *s,
             StridedBufData::SliceMut(s) => &**s,
@@ -213,12 +213,12 @@ impl<'a> StridedBuf<'a> {
             | StridedBufData::PoolBufMut { buf, offset } => &buf.as_slice()[*offset..],
             StridedBufData::Shared { buf, offset } => &buf.as_slice()[*offset..],
         };
-        (data, self.strides.as_ref())
+        (data, &self.strides)
     }
 
     #[inline]
-    pub(crate) fn data_mut(&mut self) -> (&mut [u8], &[usize]) {
-        let strides = self.strides.as_ref();
+    pub(crate) fn data_mut(&mut self) -> (&mut [u8], &DimArray<usize>) {
+        let strides = &self.strides;
         let data = match &mut self.data {
             StridedBufData::SliceMut(s) => &mut **s,
             StridedBufData::PoolBufMut { buf, offset } => &mut buf.as_mut_slice()[*offset..],
@@ -254,8 +254,8 @@ impl<'a> StridedBuf<'a> {
     /// Same contract as [`from_slice_mut`](Self::from_slice_mut) for a writable buffer. Call
     /// [`make_readonly`](Self::make_readonly) first to relabel with aliasing strides.
     #[inline]
-    pub(crate) unsafe fn with_strides(mut self, strides: &[usize]) -> Self {
-        self.strides = strides.to_dim_vec::<DimDyn>();
+    pub(crate) unsafe fn with_strides(mut self, strides: DimArray<usize>) -> Self {
+        self.strides = strides;
         self
     }
 
@@ -442,7 +442,7 @@ pub(crate) fn materialize_out_buf<'a>(
                 dtype.alignment(),
             );
             let strides = strides_for_layout_order(out_shape, itemsize, layout_order);
-            unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
+            unsafe { StridedBuf::from_pool(buf, strides) }
         }
     }
 }
@@ -477,7 +477,7 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
     let mut inner_out = out.as_deref_mut().map(|o| {
         let (data, strides) = o.data_mut();
         let inner_strides = outer2inner_strides_fn(strides);
-        unsafe { StridedBuf::from_slice_mut(data, inner_strides.as_ref()) }
+        unsafe { StridedBuf::from_slice_mut(data, inner_strides) }
     });
 
     let inner_buf = inner.read_data(inner_index, context, inner_out.as_mut())?;
@@ -492,7 +492,7 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
         // lives for 'a - so extending its lifetime to 'a is sound.
         let inner_buf = unsafe { std::mem::transmute::<StridedBuf<'_>, StridedBuf<'a>>(inner_buf) };
         let out_strides = inner2outer_strides_fn(inner_buf.strides());
-        Ok(unsafe { inner_buf.with_strides(out_strides.as_ref()) })
+        Ok(unsafe { inner_buf.with_strides(out_strides) })
     }
 }
 

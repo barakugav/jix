@@ -233,14 +233,16 @@ where
                 unsafe {
                     StridedBuf::from_slice_mut(
                         &mut out_buf[buf_offset..buf_offset + arr_size_bytes],
-                        sub_c.as_ref(),
+                        sub_c,
                     )
                 }
             } else {
-                let strides = out_of_place_strides.as_ref().unwrap().as_ref();
+                let strides = out_of_place_strides.as_ref().unwrap();
                 // SAFETY: `strides` are the output strides minus the stack dim; the sub-region
                 // at `buf_offset` is within `dest`.
-                unsafe { StridedBuf::from_slice_mut(&mut out_buf[buf_offset..], strides) }
+                unsafe {
+                    StridedBuf::from_slice_mut(&mut out_buf[buf_offset..], Clone::clone(strides))
+                }
             };
             self.arrays
                 .read_data(arr, &arr_index, context, Some(&mut sub))?;

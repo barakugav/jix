@@ -375,7 +375,10 @@ where
                 .map(|dim| idx[dim] as usize * out_strides[dim])
                 .sum();
             let mut sub = unsafe {
-                StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], orig_strides.as_ref())
+                StridedBuf::from_slice_mut(
+                    &mut out_buf[dst_byte_offset..],
+                    Clone::clone(&orig_strides),
+                )
             };
             let read_index = unsafe { Index::new_unchecked(&read_start, &read_size) };
             self.array.read_data(&read_index, context, Some(&mut sub))?;

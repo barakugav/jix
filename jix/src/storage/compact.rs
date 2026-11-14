@@ -541,6 +541,7 @@ mod tests {
     use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
     use crate::storage::ArrayStorageTyped;
     use crate::storage::{split_ranges, ArraySpec, Index, StridedBuf};
+    use crate::util::DimArray;
     use crate::{Array, ArrayParams, ArrayStorage};
 
     /// Read `index` from a compact `i32` array both into a plain contiguous buffer and into a
@@ -579,7 +580,7 @@ mod tests {
                 std::slice::from_raw_parts_mut(expected.as_mut_ptr().cast::<u8>(), nitems * 4)
             };
             let c = crate::util::default_strides_slice(&out_shape, 4);
-            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, c) };
             let (start, size) = split_ranges(index);
             storage
                 .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
@@ -606,7 +607,9 @@ mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), backing.len() * 4)
             };
-            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            let mut out = unsafe {
+                StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&byte_strides).unwrap())
+            };
             let (start, size) = split_ranges(index);
             storage
                 .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
@@ -688,7 +691,7 @@ mod tests {
                 std::slice::from_raw_parts_mut(got.as_mut_ptr().cast::<u8>(), nitems * 4)
             };
             let c = crate::util::default_strides_slice(&out_shape, 4);
-            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, c) };
             let (start, size) = split_ranges(index);
             storage
                 .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
@@ -787,7 +790,9 @@ mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 32 * 4)
             };
-            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            let mut out = unsafe {
+                StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&byte_strides).unwrap())
+            };
             storage
                 .read_data(
                     &Index::new(&[0, 0, 0], &[1, 8, 4]).unwrap(),
@@ -820,7 +825,9 @@ mod tests {
         let off = backing.as_ptr().align_offset(4) + 1;
         {
             let bytes = &mut backing[off..off + 6 * 4];
-            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &[12, 4]) };
+            let mut out = unsafe {
+                StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&[12, 4]).unwrap())
+            };
             storage
                 .read_data(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
@@ -862,7 +869,9 @@ mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), backing.len() * 4)
             };
-            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            let mut out = unsafe {
+                StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&byte_strides).unwrap())
+            };
             storage
                 .read_data(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, Some(&mut out))
                 .unwrap();

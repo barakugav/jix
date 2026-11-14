@@ -885,7 +885,7 @@ fn materialize_pipeline_out_buf<'b, 's>(
                 .map(|d| if real_dims.get(d) { shape[d] } else { 1 })
                 .product::<usize>();
             let buf = context.allocate_buf(nitems * itemsize, output_dtype.alignment());
-            unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
+            unsafe { StridedBuf::from_pool(buf, strides) }
         }
     }
 }

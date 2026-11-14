@@ -106,7 +106,7 @@ where
             // Lend a single-element view with all-zero strides: every position reads the same byte.
             None => {
                 let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
-                Ok(unsafe { StridedBuf::from_slice(src, dim_arr(ndim, |_| 0usize).as_ref()) })
+                Ok(unsafe { StridedBuf::from_slice(src, dim_arr(ndim, |_| 0usize)) })
             }
             Some(out) => {
                 let read_shape = index.size();
@@ -195,6 +195,7 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::error::Result;
     use crate::storage::Index;
+    use crate::util::DimArray;
     use crate::ReadContext;
     use crate::{Array, ArrayParams};
 
@@ -221,7 +222,12 @@ mod tests {
         {
             let bytes = unsafe { crate::cast_slice_mut::<i32, u8>(&mut dst) };
             // Rows 1..3 of a 3x4 row-major buffer, starting at row 1.
-            let mut out = unsafe { StridedBuf::from_slice_mut(&mut bytes[16..], &[16, 4]) };
+            let mut out = unsafe {
+                StridedBuf::from_slice_mut(
+                    &mut bytes[16..],
+                    DimArray::from_slice(&[16, 4]).unwrap(),
+                )
+            };
             a.storage()
                 .read_data(
                     &Index::new(&[0, 0], &[2, 4]).unwrap(),
@@ -236,7 +242,9 @@ mod tests {
         {
             let bytes = unsafe { crate::cast_slice_mut::<i32, u8>(&mut dst) };
             // Row 0 only, in a destination spanning all three rows.
-            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &[16, 4]) };
+            let mut out = unsafe {
+                StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&[16, 4]).unwrap())
+            };
             a.storage()
                 .read_data(
                     &Index::new(&[0, 0], &[1, 4]).unwrap(),

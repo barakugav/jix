@@ -6,7 +6,7 @@ use ndarray::IxDyn;
 use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
 use crate::storage::{Compact, Index};
-use crate::util::AlignedBytes;
+use crate::util::{AlignedBytes, DimArray};
 use crate::{Array, ArrayParams, ArrayStorage, CompactArray, Ty, TypeDyn};
 
 // ---------------------------------------------------------------------------
@@ -1470,7 +1470,9 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
             "pull {index:?} for {shape:?}: {err}"
         );
 
-        let mut out = unsafe { StridedBuf::from_slice_mut(&mut dst, &dst_strides) };
+        let mut out = unsafe {
+            StridedBuf::from_slice_mut(&mut dst, DimArray::from_slice(&dst_strides).unwrap())
+        };
         let err = read(Some(&mut out)).err();
         let err = err.unwrap_or_else(|| panic!("push read of {index:?} for {shape:?} succeeded"));
         assert_eq!(

@@ -193,7 +193,10 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                     });
                     let dst_byte_offset = dst_dim_k_offset as usize * out_strides[k];
                     let mut sub = unsafe {
-                        StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides)
+                        StridedBuf::from_slice_mut(
+                            &mut out_buf[dst_byte_offset..],
+                            Clone::clone(out_strides),
+                        )
                     };
                     let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
                     self.array

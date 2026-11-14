@@ -174,7 +174,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                     inner.strides()[dim] * self.slice[dim].step as usize
                 }
             });
-            return Ok(unsafe { inner.with_strides(out_strides.as_ref()) });
+            return Ok(unsafe { inner.with_strides(out_strides) });
         }
 
         // General path: one or more dims have step > 1. nd-iter over the strided dims, and read
@@ -199,7 +199,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             }
         });
         let iter = NdIter::builder(iter_shape)
-            .with_strides_offset_ext(out_strides.to_dim_vec::<DimDyn>(), 0)
+            .with_strides_offset_ext(Clone::clone(out_strides), 0)
             .build();
         let inner_size = dim_arr(ndim, |dim| {
             if self.slice[dim].step == 1 {
@@ -213,8 +213,12 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 let ds = &self.slice[dim];
                 ds.start + (index.start()[dim] + idx[dim]) * ds.step
             });
-            let mut sub =
-                unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides) };
+            let mut sub = unsafe {
+                StridedBuf::from_slice_mut(
+                    &mut out_buf[dst_byte_offset..],
+                    Clone::clone(out_strides),
+                )
+            };
             let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
             self.array
                 .read_data(&inner_index, context, Some(&mut sub))?;

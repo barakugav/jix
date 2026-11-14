@@ -176,7 +176,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         match out {
             None => {
                 inner.make_readonly();
-                Ok(unsafe { inner.with_strides(broadcasted_strides.as_ref()) })
+                Ok(unsafe { inner.with_strides(broadcasted_strides) })
             }
             Some(out) => {
                 let out_shape = index.size();

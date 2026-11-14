@@ -479,7 +479,7 @@ mod tests {
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::storage::{split_ranges, Index};
-    use crate::util::ScalarStrategy;
+    use crate::util::{DimArray, ScalarStrategy};
 
     #[test]
     fn rejects_invalid_index() {
@@ -911,7 +911,9 @@ mod tests {
         bytes.fill(SENTINEL);
         {
             let dst = &mut bytes[base_offset..];
-            let mut out = unsafe { StridedBuf::from_slice_mut(dst, &byte_strides) };
+            let mut out = unsafe {
+                StridedBuf::from_slice_mut(dst, DimArray::from_slice(&byte_strides).unwrap())
+            };
             let (start, size) = split_ranges(&index);
             storage
                 .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))

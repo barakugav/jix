@@ -605,9 +605,8 @@ mod tests {
                 .map(|r| (r.end - r.start) as usize)
                 .collect::<Vec<_>>();
             let c = crate::util::default_strides_slice(&sh, size_of::<u8>());
-            let mut out = unsafe {
-                crate::storage::StridedBuf::from_slice_mut(&mut buf[..n_out], c.as_ref())
-            };
+            let mut out =
+                unsafe { crate::storage::StridedBuf::from_slice_mut(&mut buf[..n_out], c) };
             let (start, size) = split_ranges(&full_index);
             storage
                 .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
