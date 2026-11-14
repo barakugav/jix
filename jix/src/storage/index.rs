@@ -25,8 +25,8 @@ impl<'a> Index<'a> {
     ///
     /// - [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) if there are more than
     ///   [`NDIM_MAX`] dims.
-    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) if the lengths of `start` and `size`
-    ///   differ, a size is zero, or a `start + size` overflows.
+    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) if the lengths of `start` and
+    ///   `size` differ, a size is zero, or a `start + size` overflows.
     #[inline(always)]
     pub fn new(start: &'a [u64], size: &'a [usize]) -> Result<Self> {
         Self::check(start, size)?;

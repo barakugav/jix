@@ -493,7 +493,7 @@ impl<'s, 'a> OutBuf<'s, 'a> {
             OutBufInner::Pull(slot) => _ = write_out_buf_slot(slot, data),
             OutBufInner::Push(out) => {
                 let (src, src_strides) = data.data();
-                // SAFETY: `view` holds the region at its strides, and the caller checked `out`.
+                // SAFETY: `data` holds the region at its strides, and the caller checked `out`.
                 unsafe { out.copy_from(src, src_strides, shape, dtype) };
             }
         }

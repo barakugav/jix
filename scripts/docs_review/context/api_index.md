@@ -27,8 +27,8 @@ A name that the docs mention and this index lacks is either private or stale.
 `ops::SubDtype`, `ops::Sum`, `ops::SwapBytes`, `ops::Tan`, `ops::Tile`, `ops::TrailingZeros`,
 `ops::Transmute`, `ops::Variance`, `ops::Xor`, `scalar::Complex`, `scalar::VarianceState`,
 `scalar::bool8`, `scalar::f16`, `storage::ArrayStorageAny`, `storage::ArrayStorageInfo`,
-`storage::Compact`, `storage::CompactBorrowed`, `storage::CompactMmap`, `storage::Plain`,
-`storage::StridedBuf`
+`storage::Compact`, `storage::CompactBorrowed`, `storage::CompactMmap`, `storage::Index`,
+`storage::OutBuf`, `storage::Plain`, `storage::StridedBuf`
 
 ### Enums
 
@@ -85,9 +85,9 @@ A name that the docs mention and this index lacks is either private or stale.
 `read_from_file_with`, `real`, `reduce_unordered`, `rem`, `remainder_euclid`, `remainder_floor`,
 `remainder_trunc`, `remove_dim`, `repeat`, `reshape`, `reverse_bits`, `roll`, `round`, `select`,
 `shape`, `sign`, `sin`, `slice`, `sqrt`, `square`, `std`, `storage`, `sub`, `sum`, `swap_bytes`,
-`tan`, `tile`, `to_buf_slice`, `to_buf_strided`, `to_ndarray`, `to_ndarray_sub`, `to_plain`,
-`trailing_zeros`, `transmute_elements`, `transmute_elements_dyn`, `transpose`, `var`, `view`,
-`write_to`, `write_to_file`
+`tan`, `tile`, `to_buf_slice`, `to_buf_strided`, `to_buf_strided_into`, `to_ndarray`,
+`to_ndarray_sub`, `to_plain`, `trailing_zeros`, `transmute_elements`, `transmute_elements_dyn`,
+`transpose`, `var`, `view`, `write_to`, `write_to_file`
 
 ### Methods of `ArrayParams`
 

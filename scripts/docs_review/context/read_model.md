@@ -8,24 +8,24 @@ Read `general.md` first. This is orientation written from the item signatures; t
 ```rust
 fn read_data<'a>(
     &'a self,
-    index: &[Range<u64>],
+    index: &Index<'_>,
     context: &'a ReadContext,
-    out: Option<&'a mut StridedBuf<'_>>,
-) -> Result<StridedBuf<'a>>;
+    out: OutBuf<'_, 'a>,
+) -> Result<()>;
 ```
 
-`StridedBuf` (`storage/buf.rs`) is a block of bytes plus one byte stride per dim. `read_data` has
-two modes:
+`Index` (`storage/index.rs`) is the region to read: a start and a non-zero size per dim.
+`StridedBuf` (`storage/buf.rs`) is a block of bytes plus one byte stride per dim. `OutBuf` is the
+destination, and picks one of two modes:
 
-- **pull** (`out` is `None`) - the storage returns the cheapest buffer it can and picks the
+- **pull** - the storage puts the cheapest buffer it can in the slot of `out` and picks the
   strides: a borrowed view into its own memory, possibly with stride-0 (broadcast) dims, or a
   freshly materialized buffer.
-- **push** (`out` is `Some(dst)`) - the region is written into `dst` at `dst`'s strides, and the
-  returned buffer is a view of `dst`.
+- **push** - the region is written into the buffer of `out` at that buffer's strides.
 
-`Array::to_buf_strided` is the array-level entry point with the same two modes;
-`Array::to_buf_slice` is the shorthand for a packed row-major destination. `to_ndarray` and
-`to_ndarray_sub` are built on them.
+The array-level entry points take `&[Range<u64>]`: `Array::to_buf_strided` pulls,
+`Array::to_buf_strided_into` pushes, and `Array::to_buf_slice` is the shorthand for a packed
+row-major destination. `to_ndarray` and `to_ndarray_sub` are pushes into a new ndarray.
 
 ## Pieces
 

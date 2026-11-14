@@ -43,8 +43,8 @@ only re-exports and defines aliases (`jix.pow`, `jix.abs`, `jix.concat`, ...).
   `ElementType`, either `Ty<T>` or `TypeDyn`. Element-wise ops need `Ty<T>`
   (`ArrayStorageTyped`); arrays read from a file are `TypeDyn` until `Array::into_typed::<T>()`.
 - The number of dims is a runtime property. Shapes are `&[u64]`.
-- Materializing: `to_ndarray`, `to_ndarray_sub`, `to_buf_slice`, `to_buf_strided`, `to_plain`,
-  `compact`, `compact_with`, `write_to`, `write_to_file`.
+- Materializing: `to_ndarray`, `to_ndarray_sub`, `to_buf_slice`, `to_buf_strided`,
+  `to_buf_strided_into`, `to_plain`, `compact`, `compact_with`, `write_to`, `write_to_file`.
 - Dtypes: scalars (`i8..i64`, `u8..u64`, `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`,
   `bool8`), structs (named fields with byte offsets), and an optional inner shape per element.
   `f16` needs the `half` feature and `Complex` the `num-complex` feature.
@@ -98,6 +98,8 @@ From the git history. A doc still using a name on the left is stale. Confirm wit
 | `is_nan`, `is_finite`, `is_infinite` | `isnan`, `isfinite`, `isinf` | Python only; the Rust methods still exist |
 | `errstate` | removed; integer errors always raise, floats never | Python |
 | `D: Dimension` generic on storages and ops | removed; ndim is a runtime property | Rust |
+| `to_buf_strided(index, ctx, out)` with an optional `out` | `to_buf_strided(index, ctx)` to pull, `to_buf_strided_into(index, out, ctx)` to push | Rust |
+| `read_data` taking `&[Range<u64>]` and `Option<&mut StridedBuf>`, returning a `StridedBuf` | takes `&Index` and `OutBuf`, returns `()` | Rust |
 | `storage::View<S>`, `Array<View<S>>` | removed; `Array::view()` returns `Array<&S>`, and `&S` is itself a storage | Rust |
 
 Files under `jix/src/ops/` and `jix/src/` were also moved around recently, so a doc that names a
