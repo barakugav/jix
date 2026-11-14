@@ -15,26 +15,23 @@ use crate::Array;
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions.
 ///
-/// `shape` may have more dimensions than the input, which is then treated as if it had leading
-/// length-1 dimensions, as numpy. For each dimension `d`, either `shape[d] == input_shape[d]`
-/// (kept as-is) or `input_shape[d] == 1` (broadcast: the single element is repeated `shape[d]`
-/// times). Any other combination raises an error. `shape[d]` may be `-1` as a shorthand for
-/// `input_shape[d]` (keeps the dimension size unchanged regardless of whether that dimension is 1
-/// or larger), but not on a new leading dimension, as torch.
+/// As in numpy, `shape` may have more dims than the input, which is then treated as if it had
+/// leading length-1 dims. For each dim `d`, either `shape[d] == input_shape[d]` or
+/// `input_shape[d] == 1` (the single element is repeated `shape[d]` times); any other combination
+/// raises an error. As in torch, `shape[d]` may be `-1` to keep `input_shape[d]`, but not on a
+/// new leading dim.
 ///
-/// `broadcast` is the lazy zero-cost case of replication restricted to length-1 dims. For
-/// general element replication along a dim of any length use [`jix.repeat()`][jix.repeat]
-/// (each element duplicated in place) or [`jix.tile()`][jix.tile] (the whole sequence
-/// duplicated).
+/// `broadcast` is the zero-cost case of replication, restricted to length-1 dims. To replicate
+/// along a dim of any length use [`jix.repeat()`][jix.repeat] (each element duplicated in place)
+/// or [`jix.tile()`][jix.tile] (the whole sequence duplicated).
 ///
-/// Output dtype equals the input dtype. Output shape equals `shape`.
+/// Output dtype equals the input dtype.
 ///
 /// The result is a lazy view; no data is copied until the array is read.
 ///
 /// Args:
 ///     array: Array to broadcast.
-///     shape: Target shape, with at least as many dimensions as the input. Use `-1` to keep a
-///         dimension unchanged.
+///     shape: Target shape, with at least as many dims as the input.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with the requested broadcast shape.
@@ -144,28 +141,25 @@ pub(crate) fn broadcast_array_impl(
 /// | `...` | `jix.slice(a, ...)` | fill all remaining dims with full slices |
 /// | tuple | `jix.slice(a, (0, slice(1, 3), ...))` | index each dim independently |
 ///
-/// **Integers** select one position and drop the corresponding dim. Negative indices
-/// are supported. **Slices** select a contiguous range and keep the dim. The
-/// **step must be 1**; non-unit steps raise `ValueError`. Bounds are checked
-/// strictly (no numpy-style clamping). At most one ellipsis is allowed; missing
-/// trailing dims receive implicit full-range slices.
+/// Negative indices are supported. The slice **step must be 1**, and bounds are checked strictly
+/// (no numpy-style clamping). At most one ellipsis is allowed; missing trailing dims get full
+/// slices.
 ///
 /// Output dtype equals the input dtype.
 ///
-/// The result is a lazy [`jix.Array`][jix.Array] view; no decompression occurs until the result is
-/// read. Unlike `arr[...]` / `arr.numpy(...)`, this does **not** materialize the
-/// selection into a NumPy array - use `.numpy()` afterward when you want the data.
+/// The result is a lazy view; no decompression occurs until it is read. Unlike `arr[...]` /
+/// `arr.numpy(...)`, it is not a NumPy array.
 ///
 /// Args:
 ///     array: Array to slice.
-///     index: See the table above. Same syntax as `__getitem__` / `numpy(index=...)`.
+///     index: See the table above.
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] view of the selected sub-region.
 ///
 /// Raises:
-///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds,
-///         more index items than array dimensions, or more than one ellipsis.
+///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds or
+///         `start > stop`, more index items than array dimensions, or more than one ellipsis.
 ///     ValueError: Slice step other than 1.
 ///     TypeError: Unsupported index item type.
 ///
@@ -399,14 +393,10 @@ pub(crate) struct ParsedBasicIndex {
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape.
 ///
-/// This matches `numpy.expand_dims`: each value in `dim` refers to a position in the
-/// **output** (larger) shape, not the input shape. With `n = len(dim)` insertions the output
-/// has `ndim + n` dimensions, and the new length-1 dims end up at exactly the requested output
-/// positions while the original dimensions fill the rest in order. Negative values are
-/// supported and are resolved against the output ndim (`ndim + n`).
-///
-/// Repeated output dims are rejected, exactly as in `numpy.expand_dims`. The inverse operation
-/// is [`jix.remove_dim()`][jix.remove_dim] (see also [`jix.squeeze()`][jix.squeeze]).
+/// As in `numpy.expand_dims`, each value in `dim` is a position in the **output** shape, which
+/// has `ndim + len(dim)` dims; the input dims fill the remaining positions in order. Negative
+/// values are resolved against the output ndim. Repeated values are rejected. The inverse is
+/// [`jix.remove_dim()`][jix.remove_dim] (see also [`jix.squeeze()`][jix.squeeze]).
 ///
 /// Output dtype and total number of elements equal the input.
 ///
@@ -414,8 +404,7 @@ pub(crate) struct ParsedBasicIndex {
 ///
 /// Args:
 ///     array: Input array.
-///     dim: Output-shape index or tuple of indices at which to place new length-1
-///         dimensions. Negative values are resolved against the output ndim (`ndim + len(dim)`).
+///     dim: Output-shape index or tuple of indices of the new length-1 dims.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with new length-1 dims inserted at the specified positions.
@@ -462,7 +451,8 @@ pub fn insert_dim<'py>(
         Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }
-/// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for [`jix.insert_dim()`][jix.insert_dim].
+/// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for
+/// [`jix.insert_dim()`][jix.insert_dim].
 ///
 /// Like `numpy.expand_dims`, each value in `dim` indexes the output (larger) shape.
 ///
@@ -483,13 +473,12 @@ pub fn unsqueeze<'py>(
 
 /// Removes length-1 dimensions from an array's shape.
 ///
-/// `dim` is a set of dim indices in the *input* shape (0-based). Each named dimension must
-/// have size exactly 1 and is dropped from the output. Duplicate dim indices are not allowed.
-/// Negative values are supported and are resolved against `ndim`. Removed dims must have size 1.
+/// `dim` names dims of the *input* shape; each must have size 1 and is dropped from the output.
+/// Negative values are resolved against `ndim`. Duplicates are not allowed.
 ///
-/// The inverse operation is [`jix.insert_dim()`][jix.insert_dim] (also available as
-/// [`jix.unsqueeze()`][jix.unsqueeze]). [`jix.squeeze()`][jix.squeeze] is a related variant
-/// whose `dim` defaults to "every length-1 dimension".
+/// The inverse is [`jix.insert_dim()`][jix.insert_dim] (also available as
+/// [`jix.unsqueeze()`][jix.unsqueeze]). [`jix.squeeze()`][jix.squeeze] is a variant whose `dim`
+/// defaults to every length-1 dim.
 ///
 /// Output dtype and total number of elements equal the input.
 ///
@@ -497,8 +486,7 @@ pub fn unsqueeze<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     dim: Dim index or tuple of dim indices to remove. Each must have size 1.
-///         Negative values are supported.
+///     dim: Dim index or tuple of dim indices to remove.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with the specified length-1 dims removed.
@@ -537,17 +525,13 @@ pub fn remove_dim<'py>(
 
 /// Removes length-1 dimensions from an array's shape.
 ///
-/// When `dim=None` (the default), all size-1 dimensions are removed. When `dim` is given,
-/// only the specified dims are removed; each named dimension must have size exactly 1.
-/// Negative dim values are supported and are resolved against `ndim`.
-///
 /// Output dtype and total number of elements equal the input. The result is a lazy view; no
 /// computation occurs until the array is read.
 ///
 /// Args:
 ///     array: Input array.
-///     dim: Dim or dims to remove. When `None` (default), all size-1 dimensions are
-///         removed. Each named dimension must have size exactly 1.
+///     dim: Dim or tuple of dims to remove; each must have size 1. Negative values are resolved
+///         against `ndim`. When `None` (default), all size-1 dimensions are removed.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with length-1 dims removed.
@@ -586,12 +570,9 @@ pub fn squeeze<'py>(
 
 /// Reorders the dims of an array (generalized transpose).
 ///
-/// The `i`-th output dim corresponds to dim `dims[i]` of the input - identical to
-/// `numpy.transpose`. `dims` must be a permutation of `0..ndim`: correct length, all values
-/// in range, no duplicates. Negative values count from the last dim, so `-1` is `ndim - 1`.
-///
-/// When `dims=None` (the default), all dims are reversed: output dim `i` maps to input dim
-/// `ndim - 1 - i`. For 2-D arrays this is the standard matrix transpose.
+/// Output dim `i` is input dim `dims[i]`, as in `numpy.transpose`. `dims` must be a permutation
+/// of `0..ndim`; negative values count from the last dim. When `dims=None` (the default), all
+/// dims are reversed, which for 2-D arrays is the matrix transpose.
 ///
 /// Output dtype equals the input dtype.
 ///
@@ -599,8 +580,7 @@ pub fn squeeze<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     dims: Permutation of dim indices. Supports negative values. When `None` (default),
-///         reverses all dims.
+///     dims: Permutation of dim indices, or `None`.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with dims reordered as specified.
@@ -652,9 +632,8 @@ pub fn permute_dims<'py>(
 
 /// Swaps two dims of an array.
 ///
-/// Output dim `dim0` corresponds to input dim `dim1` and vice versa; all other dims keep their
-/// position. Same as `torch.swapdims` (`torch.transpose`) and `numpy.swapaxes`. This is a
-/// special case of [`jix.permute_dims()`][jix.permute_dims], which takes a full permutation.
+/// Same as `torch.swapdims` (`torch.transpose`) and `numpy.swapaxes`. A special case of
+/// [`jix.permute_dims()`][jix.permute_dims], which takes a full permutation.
 ///
 /// Output dtype equals the input dtype.
 ///
@@ -698,22 +677,19 @@ pub fn swapdims<'py>(
 
 /// Reinterprets an array with a different shape.
 ///
-/// The total number of elements must be preserved: the product of `shape` must equal the
-/// product of the original shape. Exactly one dimension in `shape` may be `-1`; that
-/// dimension is inferred from the others and the total element count.
+/// The product of `shape` must equal the number of elements of the input. At most one entry of
+/// `shape` may be `-1`; its size is inferred.
 ///
 /// Output dtype equals the input dtype.
 ///
-/// Like the other shape operations, the result is a lazy view; no data is copied until the array
-/// is read. Reshape is uniquely prone to read-amplification, though: when the new shape is not
-/// aligned with the original block boundaries, reading the view may decompress many more blocks
-/// than the request appears to touch. When the result will be read more than once, materialize it
-/// with [`jix.compact()`][jix.compact] to realign the block layout to `shape`.
+/// The result is a lazy view; no data is copied until the array is read. When the new shape does
+/// not align with the input's block boundaries, reading the view may decompress many more blocks
+/// than the request touches. To read the result more than once, materialize it with
+/// [`jix.compact()`][jix.compact], which realigns the block layout to `shape`.
 ///
 /// Args:
 ///     array: Array to reshape.
-///     shape: New shape. Exactly one dimension may be `-1` (inferred). Product must equal
-///         the total element count.
+///     shape: New shape.
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] view with the new shape.
@@ -796,12 +772,11 @@ pub fn reshape<'py>(
 /// Collapses an array into a single dimension.
 ///
 /// Equivalent to [`jix.reshape(array, n)`][jix.reshape] where `n` is the total number of
-/// elements. Output dtype equals the input dtype. Output shape is `[n]`.
+/// elements. Output dtype equals the input dtype.
 ///
-/// Like the other shape operations, the result is a lazy view; no data is copied until the array
-/// is read. Reading the view may decompress many blocks if the original storage is block-based
-/// and the flattened layout crosses block boundaries. When the result will be read more than
-/// once, materialize it with [`jix.compact()`][jix.compact].
+/// The result is a lazy view; no data is copied until the array is read. As with
+/// [`jix.reshape()`][jix.reshape], reading it may decompress many more blocks than the request
+/// touches; to read it more than once, materialize it with [`jix.compact()`][jix.compact].
 ///
 /// Args:
 ///     array: Array to flatten.
@@ -833,13 +808,10 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///
 /// **Type promotion**: if the arrays have different dtypes, they are cast to a common dtype.
 ///
-/// This function deviates from numpy: all arrays must have the same number of dimensions (numpy
-/// will expand dims if they differ).
-///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
-///     arrays: Sequence of arrays to concatenate. All must have the same number of dimensions.
+///     arrays: Sequence of arrays to concatenate.
 ///     dim: Dim along which to concatenate. Supports negative values.
 ///
 /// Returns:
@@ -915,15 +887,15 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Bo
 /// Joins a sequence of arrays along a **new** dim.
 ///
 /// All input arrays must have identical shapes. A new dim of size equal to the number of arrays
-/// is inserted at position `dim` in the output. The output has one more dimension than the
-/// inputs - unlike [`jix.concatenate()`][jix.concatenate], which joins along an existing dim.
+/// is inserted at position `dim` in the output - unlike [`jix.concatenate()`][jix.concatenate],
+/// which joins along an existing dim.
 ///
 /// **Type promotion**: if the arrays have different dtypes, they are cast to a common dtype.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
-///     arrays: Sequence of arrays to stack. All must have identical shapes.
+///     arrays: Sequence of arrays to stack.
 ///     dim: Position of the new dim in the output. Supports negative values.
 ///
 /// Returns:
@@ -996,10 +968,8 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Array> {
 
 /// Repeats each element along the given dim.
 ///
-/// Every element along `dim` is replicated `repeats` times. The output has the
-/// same number of dimensions as the input; only `shape[dim]` changes, from `n` to
-/// `n * repeats`. `repeats == 0` produces an empty output (matches numpy). `repeats == 1`
-/// is the identity.
+/// Only `shape[dim]` changes, from `n` to `n * repeats`; `repeats == 0` produces an empty
+/// output, as in numpy.
 ///
 /// This differs from [`jix.tile()`][jix.tile]: `repeat` duplicates each element in place
 /// `(a, b, c) -> (a, a, b, b, c, c)`, whereas `tile` duplicates the whole sequence
@@ -1011,8 +981,8 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Array> {
 /// Args:
 ///     array: Input array.
 ///     repeats: Number of times to repeat each element along `dim`. Must be non-negative.
-///     dim: Dim along which to repeat. Supports negative values. `None` (default) is equivalent
-///         to `dim=0` for 1-D arrays, unsupported for higher dimensions (deviates from numpy).
+///     dim: Dim along which to repeat. Supports negative values. When `None` (default), the
+///         input must be 1-D (deviates from numpy).
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with `shape[dim]` multiplied by `repeats`.
@@ -1065,12 +1035,9 @@ pub fn repeat<'py>(
     )
 }
 
-/// Reverses the order of elements along the given dim.
+/// Reverses the order of elements along the given dims.
 ///
-/// Each named dim is independently reversed; non-named dims are left untouched. The shape
-/// and dtype of the output equal the input. `dim` accepts an integer, a tuple of
-/// integers, or `None` (the default) which reverses every dim. Negative indices are
-/// supported. Duplicate dims are not allowed.
+/// The shape and dtype of the output equal the input. Duplicate dims are not allowed.
 ///
 /// See also [`jix.roll()`][jix.roll], which cyclically shifts elements along a dim
 /// without reversing them.
@@ -1133,9 +1100,8 @@ pub fn flip<'py>(
 
 /// Rolls elements along a dim, wrapping around at the boundary.
 ///
-/// Elements pushed off the end of a dim re-enter at the beginning, so the shape and dtype
-/// of the output equal the input. `shift` is taken modulo `shape[dim]`; positive shifts
-/// move elements toward larger indices, negative shifts toward smaller indices.
+/// `shift` is taken modulo `shape[dim]`; positive shifts move elements toward larger indices,
+/// negative shifts toward smaller indices.
 ///
 /// See also [`jix.flip()`][jix.flip], which reverses element order along a dim without
 /// wrapping.
@@ -1146,8 +1112,7 @@ pub fn flip<'py>(
 ///     array: Input array.
 ///     shift: Number of places to shift.
 ///     dim: Dim to roll. Negative indices are supported. When `None` (the default), the
-///         input must be 1-D and the only dim is rolled. Unlike `numpy.roll`, this
-///         function does not flatten higher-dimensional inputs when `dim` is omitted.
+///         input must be 1-D; unlike `numpy.roll`, other inputs are not flattened.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with the same shape and dtype as the input.
@@ -1193,15 +1158,12 @@ pub fn roll<'py>(
 
 /// Replicates the array along a single dim.
 ///
-/// The output shape matches the input except `shape[dim]` is multiplied by `repeats`. Element
-/// `i` along the output dim comes from input element `i mod shape[dim]`, so the whole
-/// sequence is repeated rather than each element in place. This differs from
-/// [`jix.repeat()`][jix.repeat], which repeats each element. When the input dim already
-/// has length 1, [`jix.broadcast()`][jix.broadcast] is a zero-cost alternative.
+/// Element `i` along the output dim is input element `i mod shape[dim]`: the whole sequence is
+/// repeated, whereas [`jix.repeat()`][jix.repeat] repeats each element in place. When the input
+/// dim has length 1, [`jix.broadcast()`][jix.broadcast] is a zero-cost alternative.
 ///
-/// Unlike `numpy.tile`, this function only accepts a single integer `repeats` along a single
-/// `dim`, and does not extend the array with new leading dims. `dim` must satisfy
-/// `-ndim <= dim < ndim`.
+/// Unlike `numpy.tile`, this takes a single integer `repeats` along a single `dim`, and adds no
+/// leading dims. `dim` must satisfy `-ndim <= dim < ndim`.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
