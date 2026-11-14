@@ -121,7 +121,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {

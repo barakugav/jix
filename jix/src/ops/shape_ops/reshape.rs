@@ -163,7 +163,7 @@ where
 
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -373,8 +373,11 @@ where
             let mut sub = unsafe {
                 StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], orig_strides.as_ref())
             };
-            self.array
-                .read_data(read_range.as_ref(), context, Some(&mut sub))?;
+            self.array.read_data(
+                &unsafe { Index::new_unchecked(&read_range) },
+                context,
+                Some(&mut sub),
+            )?;
         }
         Ok(out)
     }

@@ -994,6 +994,7 @@ pub(crate) const fn n_operands_mul(count: Option<usize>, n: usize) -> Option<usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::Index;
     use crate::{array_from_fn_inline, strided_span_bytes, Array, ArrayStorage, CompactArray, Ty};
 
     // ---------------------------------------------------------------------------
@@ -1129,11 +1130,11 @@ mod tests {
 
         let lhs_pipeline = lhs_array
             .storage
-            .read_as_elementwise_pipeline::<T>(&index, &context)
+            .read_as_elementwise_pipeline::<T>(&Index::new(&index).unwrap(), &context)
             .unwrap();
         let rhs_pipeline = rhs_array
             .storage
-            .read_as_elementwise_pipeline::<T>(&index, &context)
+            .read_as_elementwise_pipeline::<T>(&Index::new(&index).unwrap(), &context)
             .unwrap();
 
         // ---------------------------------------------------------------------------
@@ -1535,7 +1536,7 @@ mod tests {
         // element with a zero stride - so read the result back through the strides it hands out.
         let pulled = {
             let buf = storage
-                .read_as_elementwise_pipeline::<T>(index, &context)
+                .read_as_elementwise_pipeline::<T>(&Index::new(index).unwrap(), &context)
                 .unwrap()
                 .to_buf(index, &context, None)
                 .unwrap();
@@ -1555,7 +1556,7 @@ mod tests {
                 StridedBuf::from_raw_parts_mut(dst.ptr_mut(), &shape, &dst_strides, itemsize)
             };
             storage
-                .read_as_elementwise_pipeline::<T>(index, &context)
+                .read_as_elementwise_pipeline::<T>(&Index::new(index).unwrap(), &context)
                 .unwrap()
                 .to_buf(index, &context, Some(&mut out))
                 .unwrap();
@@ -1582,7 +1583,9 @@ mod tests {
             .iter()
             .map(|r| (r.end - r.start) as usize)
             .collect::<Vec<_>>();
-        let buf = storage.read_data(index, &context, None).unwrap();
+        let buf = storage
+            .read_data(&Index::new(index).unwrap(), &context, None)
+            .unwrap();
         offsets(&shape, buf.strides())
             .into_iter()
             .map(|off| unsafe { buf.data_ptr().add(off).cast::<T>().read_unaligned() })
@@ -1606,7 +1609,7 @@ mod tests {
         }
         let context = ReadContext::default();
         let pipeline = storage
-            .read_as_elementwise_pipeline::<T>(index, &context)
+            .read_as_elementwise_pipeline::<T>(&Index::new(index).unwrap(), &context)
             .unwrap();
         (declared::<T, _>(&pipeline), pipeline.operands().count())
     }
@@ -1709,7 +1712,7 @@ mod tests {
         let context = ReadContext::default();
         let pipeline = sum
             .storage
-            .read_as_elementwise_pipeline::<i32>(&index, &context)
+            .read_as_elementwise_pipeline::<i32>(&Index::new(&index).unwrap(), &context)
             .unwrap();
         let sources = [
             nd_a.as_ptr().cast::<u8>() as usize,
@@ -1741,7 +1744,7 @@ mod tests {
         let context = ReadContext::default();
         assert!(sum
             .storage
-            .read_as_elementwise_pipeline::<i64>(&index, &context)
+            .read_as_elementwise_pipeline::<i64>(&Index::new(&index).unwrap(), &context)
             .is_err());
     }
 
@@ -1787,7 +1790,9 @@ mod tests {
             .iter()
             .map(|r| (r.end - r.start) as usize)
             .collect::<Vec<_>>();
-        let buf = storage.read_data(index, &context, None).unwrap();
+        let buf = storage
+            .read_data(&Index::new(index).unwrap(), &context, None)
+            .unwrap();
         let elements = offsets(&shape, buf.strides())
             .into_iter()
             .map(|off| unsafe { buf.data_ptr().add(off).cast::<T>().read_unaligned() })
@@ -1885,7 +1890,11 @@ mod tests {
                 StridedBuf::from_raw_parts_mut(dst.ptr_mut(), &shape, strides.as_ref(), itemsize)
             };
             neg.storage
-                .read_data(&index, &ReadContext::default(), Some(&mut out))
+                .read_data(
+                    &Index::new(&index).unwrap(),
+                    &ReadContext::default(),
+                    Some(&mut out),
+                )
                 .unwrap();
         }
         let written = (0..20)
@@ -2057,7 +2066,7 @@ mod tests {
         }
         let context = ReadContext::default();
         let pipeline = storage
-            .read_as_elementwise_pipeline::<T>(index, &context)
+            .read_as_elementwise_pipeline::<T>(&Index::new(index).unwrap(), &context)
             .unwrap();
         declared::<T, _>(&pipeline)
     }

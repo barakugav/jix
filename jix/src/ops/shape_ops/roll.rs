@@ -83,7 +83,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
 
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -118,7 +118,11 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
                     index[d].clone()
                 }
             });
-            return self.array.read_data(inner_index.as_ref(), context, out);
+            return self.array.read_data(
+                &unsafe { Index::new_unchecked(&inner_index) },
+                context,
+                out,
+            );
         }
 
         // Wrap: split the output along dim k into two regions and gather each into the destination.
@@ -142,7 +146,11 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             let dst_byte_offset = dst_dim_k_offset as usize * out_strides[k];
             let mut sub =
                 unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides) };
-            self.array.read_data(inner_index, context, Some(&mut sub))?;
+            self.array.read_data(
+                &unsafe { Index::new_unchecked(inner_index) },
+                context,
+                Some(&mut sub),
+            )?;
             Ok(())
         };
 

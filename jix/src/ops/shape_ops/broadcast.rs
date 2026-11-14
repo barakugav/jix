@@ -123,7 +123,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -154,7 +154,11 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
                 index[dim].clone()
             }
         });
-        let mut inner = self.array.read_data(inner_index.as_ref(), context, None)?;
+        let mut inner = self.array.read_data(
+            &unsafe { Index::new_unchecked(&inner_index) },
+            context,
+            None,
+        )?;
 
         let inner_strides = inner.strides();
         let broadcasted_strides = dim_arr(ndim, |dim| {

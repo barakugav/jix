@@ -129,7 +129,7 @@ where
     #[inline]
     fn read_data_uncached<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -333,7 +333,7 @@ where
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -345,7 +345,7 @@ where
     #[inline]
     fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<impl ElementwisePipeline<T> + use<'a, T, SC, SX, SY>>
     where
@@ -478,6 +478,7 @@ mod tests {
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
+    use crate::storage::Index;
     use crate::util::ScalarStrategy;
 
     #[test]
@@ -911,7 +912,9 @@ mod tests {
         {
             let dst = &mut bytes[base_offset..];
             let mut out = unsafe { StridedBuf::from_slice_mut(dst, &byte_strides) };
-            storage.read_data(&index, &ctx, Some(&mut out)).unwrap();
+            storage
+                .read_data(&Index::new(&index).unwrap(), &ctx, Some(&mut out))
+                .unwrap();
         }
 
         // Every logical element must sit in its slot, and every byte outside a slot must still hold

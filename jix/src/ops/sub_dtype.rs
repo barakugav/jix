@@ -84,7 +84,7 @@ where
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -202,6 +202,7 @@ mod tests {
     use ndarray::array;
 
     use crate::dtype::Dtyped;
+    use crate::storage::Index;
     use crate::{Array, TypeDyn};
 
     #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
@@ -257,7 +258,10 @@ mod tests {
         let ctx = ReadContext::default();
 
         // Pull path (out = None) must return a strided view of the parent buffer, not a copy.
-        let view = field.storage().read_data(&[0..3], &ctx, None).unwrap();
+        let view = field
+            .storage()
+            .read_data(&Index::new(&[0..3]).unwrap(), &ctx, None)
+            .unwrap();
         // The give-away that it is zero-copy: the stride is the parent struct's stride (8 bytes),
         // not the field-packed stride (4) that a materialized copy would carry.
         assert_eq!(view.strides(), &[std::mem::size_of::<Pair>()]);
@@ -271,7 +275,10 @@ mod tests {
         assert_eq!(ys, vec![10, 20, 30]);
 
         // An empty pull must not panic on the sub-field shift.
-        let empty = field.storage().read_data(&[0..0], &ctx, None).unwrap();
+        let empty = field
+            .storage()
+            .read_data(&Index::new(&[0..0]).unwrap(), &ctx, None)
+            .unwrap();
         assert_eq!(empty.strides().len(), 1);
     }
 

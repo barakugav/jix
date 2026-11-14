@@ -239,7 +239,7 @@ where
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -301,7 +301,7 @@ fn read_data_dispatch<'a>(
     reduce_tile_fn: &dyn Fn(ReduceTileArgs<'_>),
     finalize_state_fn: &dyn Fn(Finalize1DArgs),
     finalize_state_empty_fn: &dyn Fn(*mut u8, usize, usize),
-    index: &[Range<u64>],
+    index: &Index<'_>,
     context: &'a ReadContext,
     out: Option<&'a mut StridedBuf<'_>>,
     read_layout_order: &[DimIdx],
@@ -344,7 +344,7 @@ fn read_data_impl<'a, InnerD>(
     reduce_tile_fn: &dyn Fn(ReduceTileArgs<'_>),
     finalize_state_fn: &dyn Fn(Finalize1DArgs),
     finalize_state_empty_fn: &dyn Fn(*mut u8, usize, usize),
-    index: &[Range<u64>],
+    index: &Index<'_>,
     context: &'a ReadContext,
     out: Option<&'a mut StridedBuf<'_>>,
     read_layout_order: &[DimIdx],
@@ -592,7 +592,11 @@ where
                 "tile not contained in inner_range_full",
             );
 
-            let items = inner_array.read_data(tile.as_ref(), context, None)?;
+            let items = inner_array.read_data(
+                &unsafe { Index::new_unchecked(tile.as_ref()) },
+                context,
+                None,
+            )?;
 
             let state_offset = (0..inner_ndim)
                 .map(|d| {
@@ -1462,6 +1466,7 @@ pub(crate) mod tests {
     use std::rc::Rc;
 
     use crate::scalar::bool8;
+    use crate::storage::Index;
     use crate::ArrayParams;
 
     use ndarray::{array, ArrayD, Ix0, Ix1};
@@ -1975,7 +1980,7 @@ pub(crate) mod tests {
             let c = crate::util::default_strides_slice(&sh, size_of::<i64>());
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
             storage
-                .read_data(&full_index, &ctx, Some(&mut out))
+                .read_data(&Index::new(&full_index).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 
@@ -2007,7 +2012,9 @@ pub(crate) mod tests {
         {
             let bytes = &mut backing[off..off + 2 * stride + size_of::<i64>()];
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, &[stride]) };
-            storage.read_data(&[0..3], &ctx, Some(&mut out)).unwrap();
+            storage
+                .read_data(&Index::new(&[0..3]).unwrap(), &ctx, Some(&mut out))
+                .unwrap();
         }
 
         let got = (0..3)
@@ -2179,7 +2186,9 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>();
             let c = crate::util::default_strides_slice(&sh, size_of::<i64>());
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
-            storage.read_data(&index, &ctx, Some(&mut out)).unwrap();
+            storage
+                .read_data(&Index::new(&index).unwrap(), &ctx, Some(&mut out))
+                .unwrap();
         }
 
         // Strided destination: element strides [8, 2] (bytes [64, 16]), so slot (r, c) lands at
@@ -2194,7 +2203,9 @@ pub(crate) mod tests {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 32 * 8)
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
-            storage.read_data(&index, &ctx, Some(&mut out)).unwrap();
+            storage
+                .read_data(&Index::new(&index).unwrap(), &ctx, Some(&mut out))
+                .unwrap();
         }
 
         let mut is_slot = [false; 32];
@@ -2233,7 +2244,9 @@ pub(crate) mod tests {
             };
             let c = crate::util::default_strides_slice(&[3usize], size_of::<f64>());
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
-            storage.read_data(&[0..3], &ctx, Some(&mut out)).unwrap();
+            storage
+                .read_data(&Index::new(&[0..3]).unwrap(), &ctx, Some(&mut out))
+                .unwrap();
         }
 
         // Strided destination: byte stride 16 (element stride 2), so slot i is at element 2*i and
@@ -2245,7 +2258,9 @@ pub(crate) mod tests {
             let bytes =
                 unsafe { std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 6 * 8) };
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
-            storage.read_data(&[0..3], &ctx, Some(&mut out)).unwrap();
+            storage
+                .read_data(&Index::new(&[0..3]).unwrap(), &ctx, Some(&mut out))
+                .unwrap();
         }
 
         for i in 0..3 {

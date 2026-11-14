@@ -130,7 +130,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
 
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -149,7 +149,11 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 let offset = self.slice[dim].start;
                 (index[dim].start + offset)..(index[dim].end + offset)
             });
-            return self.array.read_data(inner_index.as_ref(), context, out);
+            return self.array.read_data(
+                &unsafe { Index::new_unchecked(&inner_index) },
+                context,
+                out,
+            );
         }
 
         let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
@@ -165,7 +169,11 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 let last = ds.start + (index[dim].end - 1) * ds.step;
                 first..(last + 1)
             });
-            let inner = self.array.read_data(inner_box.as_ref(), context, None)?;
+            let inner = self.array.read_data(
+                &unsafe { Index::new_unchecked(&inner_box) },
+                context,
+                None,
+            )?;
             let itemsize = self.dtype().itemsize() as usize;
             let out_strides = dim_arr(ndim, |dim| {
                 if out_shape[dim] <= 1 {
@@ -214,8 +222,11 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             });
             let mut sub =
                 unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides) };
-            self.array
-                .read_data(inner_index.as_ref(), context, Some(&mut sub))?;
+            self.array.read_data(
+                &unsafe { Index::new_unchecked(&inner_index) },
+                context,
+                Some(&mut sub),
+            )?;
         }
         Ok(out)
     }
@@ -465,6 +476,7 @@ mod tests {
 
     use super::SliceItem;
     use crate::array::Array;
+    use crate::storage::Index;
     use crate::ReadContext;
 
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
@@ -604,7 +616,10 @@ mod tests {
         // Plain-backed inner (`plain_read`), so a stepped slice lends a strided view.
         let s = plain6x4().slice((SliceItem::new(None, None, 2), ..)); // rows 0, 2, 4
         let ctx = s.read_ctx();
-        let view = s.storage().read_data(&[0..3, 0..4], &ctx, None).unwrap();
+        let view = s
+            .storage()
+            .read_data(&Index::new(&[0..3, 0..4]).unwrap(), &ctx, None)
+            .unwrap();
         // Zero-copy: dim-0 stride is 2 * row-stride (2*16), not the packed 16 a copy would carry.
         assert_eq!(view.strides(), &[2 * 16, 4]);
 
@@ -630,7 +645,10 @@ mod tests {
         let s = plain6x4().slice((SliceItem::new(None, None, 2), ..)); // rows 0, 2, 4
         let ctx = s.read_ctx();
         // Output sub-region [1..3, 1..3] -> orig rows 2 & 4, cols 1 & 2.
-        let view = s.storage().read_data(&[1..3, 1..3], &ctx, None).unwrap();
+        let view = s
+            .storage()
+            .read_data(&Index::new(&[1..3, 1..3]).unwrap(), &ctx, None)
+            .unwrap();
         assert_eq!(view.strides(), &[2 * 16, 4]);
 
         let base = view.data_ptr();

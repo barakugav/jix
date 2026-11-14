@@ -1,10 +1,10 @@
-use std::ops::Range;
-
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, StridedBuf, Ty};
+use crate::storage::{
+    check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, Index, StridedBuf, Ty,
+};
 use crate::util::dim_arr;
 use crate::ReadContext;
 use crate::{cast_slice, cast_slice_mut, ArrayParams, DimDyn, Dimension, ElementType};
@@ -89,7 +89,7 @@ where
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         _context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -133,7 +133,7 @@ where
     #[inline]
     fn read_as_elementwise_pipeline<'a, T2>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         _context: &'a ReadContext,
     ) -> Result<impl ElementwisePipeline<T2> + use<'a, T2, T>>
     where
@@ -196,6 +196,7 @@ mod tests {
     use crate::__private::Scalar;
     use crate::dtype::Dtyped;
     use crate::error::Result;
+    use crate::storage::Index;
     use crate::ReadContext;
     use crate::{Array, ArrayParams};
 
@@ -224,7 +225,11 @@ mod tests {
             // Rows 1..3 of a 3x4 row-major buffer, starting at row 1.
             let mut out = unsafe { StridedBuf::from_slice_mut(&mut bytes[16..], &[16, 4]) };
             a.storage()
-                .read_data(&[0..2, 0..4], &ReadContext::default(), Some(&mut out))
+                .read_data(
+                    &Index::new(&[0..2, 0..4]).unwrap(),
+                    &ReadContext::default(),
+                    Some(&mut out),
+                )
                 .unwrap();
         }
         assert_eq!(dst, [-1, -1, -1, -1, 5, 5, 5, 5, 5, 5, 5, 5]);
@@ -235,7 +240,11 @@ mod tests {
             // Row 0 only, in a destination spanning all three rows.
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &[16, 4]) };
             a.storage()
-                .read_data(&[0..1, 0..4], &ReadContext::default(), Some(&mut out))
+                .read_data(
+                    &Index::new(&[0..1, 0..4]).unwrap(),
+                    &ReadContext::default(),
+                    Some(&mut out),
+                )
                 .unwrap();
         }
         assert_eq!(dst, [5, 5, 5, 5, -1, -1, -1, -1, -1, -1, -1, -1]);

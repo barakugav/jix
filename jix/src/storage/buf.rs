@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::buf_pool::{PoolBuf, PoolBufShared};
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_region_size, ensure, Result};
+use crate::storage::Index;
 use crate::util::{
     default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
     RawAlignedBytes, SliceExt,
@@ -352,7 +353,7 @@ impl<'a> StridedBuf<'a> {
 pub(crate) fn check_out_buf(
     out: Option<&StridedBuf>,
     array_shape: &[u64],
-    index: &[Range<u64>],
+    index: &Index<'_>,
     itemsize: usize,
 ) -> Result<()> {
     check_get_range(array_shape, index)?;
@@ -365,7 +366,7 @@ pub(crate) fn check_out_buf(
 
 pub(crate) fn check_out_buf_impl(
     out: &StridedBuf,
-    index: &[Range<u64>],
+    index: &Index<'_>,
     itemsize: usize,
 ) -> Result<()> {
     ensure!(
@@ -479,7 +480,11 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
         unsafe { StridedBuf::from_slice_mut(data, inner_strides.as_ref()) }
     });
 
-    let inner_buf = inner.read_data(inner_index, context, inner_out.as_mut())?;
+    let inner_buf = inner.read_data(
+        &unsafe { Index::new_unchecked(inner_index) },
+        context,
+        inner_out.as_mut(),
+    )?;
 
     if is_push {
         // The inner storage wrote into `out` through `inner_out`
@@ -500,6 +505,7 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
 mod tests {
     use ndarray::array;
 
+    use crate::storage::Index;
     use crate::Array;
     use crate::ReadContext;
 
@@ -568,7 +574,7 @@ mod tests {
         let ctx = ReadContext::default();
         let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]]).unwrap();
         let kind = |s: &dyn crate::ArrayStorage| {
-            s.read_data(&[0..2, 2..1], &ctx, None)
+            s.read_data(&Index::new(&[0..2, 2..1]).unwrap(), &ctx, None)
                 .err()
                 .map(|e| e.kind())
         };

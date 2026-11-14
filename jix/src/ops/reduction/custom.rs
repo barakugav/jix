@@ -339,6 +339,7 @@ where
 mod tests {
 
     use crate::scalar::bool8;
+    use crate::storage::Index;
     use crate::{ArrayParams, ArrayStorage};
 
     use ndarray::{array, Ix0, Ix1};
@@ -608,7 +609,7 @@ mod tests {
                 crate::storage::StridedBuf::from_slice_mut(&mut buf[..n_out], c.as_ref())
             };
             storage
-                .read_data(&full_index, &ctx, Some(&mut out))
+                .read_data(&Index::new(&full_index).unwrap(), &ctx, Some(&mut out))
                 .unwrap();
         }
 

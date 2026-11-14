@@ -285,7 +285,7 @@ where
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -304,7 +304,7 @@ where
     #[inline]
     fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<impl ElementwisePipeline<T> + use<'a, T, S, SMin, SMax>>
     where

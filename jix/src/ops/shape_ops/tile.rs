@@ -121,7 +121,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -165,7 +165,11 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                     index[d].clone()
                 }
             });
-            return self.array.read_data(inner_index.as_ref(), context, out);
+            return self.array.read_data(
+                &unsafe { Index::new_unchecked(&inner_index) },
+                context,
+                out,
+            );
         }
 
         // Cases B and C gather/replicate into a destination.
@@ -192,7 +196,11 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                     let mut sub = unsafe {
                         StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides)
                     };
-                    self.array.read_data(inner_index, context, Some(&mut sub))?;
+                    self.array.read_data(
+                        &unsafe { Index::new_unchecked(inner_index) },
+                        context,
+                        Some(&mut sub),
+                    )?;
                     Ok(())
                 };
             let inner_r1 = dim_arr(ndim, |d| if d == k { s_in..l } else { index[d].clone() });
@@ -208,7 +216,9 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         //   middle: tmp[0..L] x F    -> dst[head_len..head_len + F*L)   (F = num_full)
         //   tail:   tmp[0..tail_len] -> dst[head_len + F*L..total)
         let inner_full = dim_arr(ndim, |d| if d == k { 0..l } else { index[d].clone() });
-        let tmp = self.array.read_data(inner_full.as_ref(), context, None)?;
+        let tmp =
+            self.array
+                .read_data(&unsafe { Index::new_unchecked(&inner_full) }, context, None)?;
         // Use the period view's own strides - it may be a lent (strided) view, not contiguous.
         let (tmp, src_strides) = tmp.data();
 

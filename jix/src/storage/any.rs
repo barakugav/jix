@@ -1,10 +1,9 @@
 use std::hint::assert_unchecked;
-use std::ops::Range;
 use std::sync::Arc;
 
 use crate::dtype::Dtype;
 use crate::storage::params::ArraySpecOwned;
-use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, StridedBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, StridedBuf};
 use crate::ReadContext;
 use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 
@@ -50,7 +49,7 @@ impl ArrayStorage for ArrayStorageAny {
     #[inline(always)]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>, crate::Error> {

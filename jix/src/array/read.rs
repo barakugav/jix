@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 use std::ops::Range;
 
 use crate::error::{check_get_buffer_size, check_get_range, check_region_size, ensure, Result};
-use crate::storage::{check_out_buf, materialize_out_buf, ArrayStorageTyped, StridedBuf};
+use crate::storage::{check_out_buf, materialize_out_buf, ArrayStorageTyped, Index, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, cast_slice_mut, dim_arr, IterExt};
 use crate::ReadContext;
@@ -417,10 +417,11 @@ impl<S: ArrayStorage> Array<S> {
     ) -> Result<StridedBuf<'a>> {
         let shape = self.shape();
         let dtype = self.dtype();
+        let index = Index::new(index)?;
         check_out_buf(
             out.as_deref(),
             shape,
-            index,
+            &index,
             self.dtype().itemsize() as usize,
         )?;
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
@@ -431,9 +432,9 @@ impl<S: ArrayStorage> Array<S> {
         let _cache_scope = context.cache_scope(&spec.dynamic().arrays_to_cache);
         if small_read {
             // Fast path for small reads
-            self.storage.read_data(index, context, out)
+            self.storage.read_data(&index, context, out)
         } else {
-            to_buf_strided_slow(&self.storage, index, context, out)
+            to_buf_strided_slow(&self.storage, &index, context, out)
         }
     }
 }
@@ -527,7 +528,11 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
 
         let mut block_out =
             unsafe { StridedBuf::from_slice_mut(&mut out_buf[out_offset..], out_strides) };
-        storage.read_data(inner_index.as_ref(), context, Some(&mut block_out))?;
+        storage.read_data(
+            &unsafe { Index::new_unchecked(inner_index.as_ref()) },
+            context,
+            Some(&mut block_out),
+        )?;
     }
     Ok(out)
 }

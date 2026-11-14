@@ -1,9 +1,9 @@
-use std::ops::Range;
-
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{check_out_buf, materialize_out_buf, ArrayStorageInfo, Compact, StridedBuf};
+use crate::storage::{
+    check_out_buf, materialize_out_buf, ArrayStorageInfo, Compact, Index, StridedBuf,
+};
 use crate::util::dim_arr;
 use crate::util::iter::NdIter;
 use crate::ReadContext;
@@ -248,7 +248,7 @@ impl<T> CompactArray<T> {
             #[inline]
             fn read_data<'a>(
                 &'a self,
-                index: &[Range<u64>],
+                index: &Index<'_>,
                 context: &'a ReadContext,
                 out: Option<&'a mut StridedBuf<'_>>,
             ) -> Result<StridedBuf<'a>> {

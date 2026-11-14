@@ -7,7 +7,7 @@ use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
-use crate::storage::{check_out_buf_impl, StridedBuf};
+use crate::storage::{check_out_buf_impl, Index, StridedBuf};
 use crate::util::{dim_arr, DimArray, RawAlignedBytes, SliceExt};
 use crate::DimDyn;
 
@@ -155,7 +155,7 @@ impl ReadContext {
     pub(crate) fn read_cached<'a, 'b>(
         &'a self,
         id: ArrayCacheId,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         dtype: &Dtype,
         out: Option<&'a mut StridedBuf<'b>>,
         read: impl Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
@@ -170,7 +170,7 @@ impl ReadContext {
     fn read_cached_impl<'a, 'b>(
         &'a self,
         id: ArrayCacheId,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         dtype: &Dtype,
         out: Option<&'a mut StridedBuf<'b>>,
         read_fn: &dyn CachedReadFn<'a, 'b>,
@@ -187,7 +187,7 @@ impl ReadContext {
         };
         // Search for a matching cache entry for this array ID and index
         if let Some(entry) = cache.map.get(id) {
-            if entry.index.as_slice() == index {
+            if entry.index.as_slice() == &**index {
                 let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
                 let buf = unsafe {
                     StridedBuf::from_shared(buf, &entry.strides).with_offset(entry.offset)

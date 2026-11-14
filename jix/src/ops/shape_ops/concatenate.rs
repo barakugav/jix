@@ -205,7 +205,7 @@ where
     /// slice (the `inner_contiguous` fast path).
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -246,9 +246,12 @@ where
                     index[dim].clone()
                 }
             });
-            return self
-                .arrays
-                .read_data(first_arr, sub_index.as_ref(), context, out);
+            return self.arrays.read_data(
+                first_arr,
+                &unsafe { Index::new_unchecked(&sub_index) },
+                context,
+                out,
+            );
         }
 
         let itemsize = dtype.itemsize() as usize;
@@ -317,8 +320,12 @@ where
                 // SAFETY: `output_strides` describe `dest`; the slot at `buf_offset` is within it.
                 unsafe { StridedBuf::from_slice_mut(&mut out_buf[buf_offset..], output_strides) }
             };
-            self.arrays
-                .read_data(arr, sub_index.as_ref(), context, Some(&mut sub))?;
+            self.arrays.read_data(
+                arr,
+                &unsafe { Index::new_unchecked(&sub_index) },
+                context,
+                Some(&mut sub),
+            )?;
         }
         Ok(out)
     }

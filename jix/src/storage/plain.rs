@@ -1,12 +1,10 @@
-use std::ops::Range;
-
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, ensure, error, Result};
 use crate::storage::params::{
     read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned,
 };
 use crate::storage::{
-    check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
+    check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, Index, StridedBuf, Ty, TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
 use crate::ReadContext;
@@ -456,7 +454,7 @@ where
     #[inline]
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         _context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {

@@ -1,9 +1,7 @@
-use std::ops::Range;
-
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 use crate::ops::{ElementwisePipeline, OperandTyped};
-use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, StridedBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, StridedBuf};
 use crate::ReadContext;
 use crate::{ElementType, TypeDyn};
 
@@ -106,7 +104,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// unaligned reads, or stage the region through a buffer of your own.
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>>;
@@ -127,7 +125,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     #[inline]
     fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
     ) -> Result<impl ElementwisePipeline<T> + use<'a, T, Self>>
     where

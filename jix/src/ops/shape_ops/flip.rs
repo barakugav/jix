@@ -87,7 +87,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -118,7 +118,11 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         });
 
         // Read the (unreversed) inner region as a view, then mirror-copy slabs into the destination.
-        let tmp = self.array.read_data(inner_index.as_ref(), context, None)?;
+        let tmp = self.array.read_data(
+            &unsafe { Index::new_unchecked(&inner_index) },
+            context,
+            None,
+        )?;
         let (tmp_buf, src_strides) = tmp.data();
         let mut out = materialize_out_buf(
             out,

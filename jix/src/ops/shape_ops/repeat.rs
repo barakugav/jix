@@ -104,7 +104,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
     fn read_data<'a>(
         &'a self,
-        index: &[Range<u64>],
+        index: &Index<'_>,
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
@@ -146,7 +146,11 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
                 index[d].clone()
             }
         });
-        let inner_buf = self.array.read_data(inner_index.as_ref(), context, None)?;
+        let inner_buf = self.array.read_data(
+            &unsafe { Index::new_unchecked(&inner_index) },
+            context,
+            None,
+        )?;
         let (inner_buf, inner_strides) = inner_buf.data();
 
         let mut out = materialize_out_buf(
