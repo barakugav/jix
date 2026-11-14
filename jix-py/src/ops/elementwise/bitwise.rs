@@ -1,6 +1,11 @@
+use jix_core::dtype::ScalarKind;
 use jix_core::scalar::bool8;
+use pyo3::prelude::*;
 
-use crate::ops::common::{define_op1, define_op2};
+use crate::ops::common::{
+    broadcast_operands, define_op1, define_op2, define_op2_table, Operand, Scalar,
+};
+use crate::Array;
 
 define_op2!(
     /// Element-wise logical AND of two arrays.
@@ -363,94 +368,121 @@ define_op2!(
     }
 );
 
-define_op2!(
-    /// Element-wise bitwise left rotation.
-    ///
-    /// Supported value dtypes (`a`): `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// The rotation amount (`b`) is cast to `u32`, so it must be `bool`, `u8`, `u16`, `u32` or a
-    /// Python int. Output dtype equals `a`'s dtype.
-    ///
-    /// Bits shifted out of the most-significant end wrap around to the least-significant end.
-    /// The rotation amount is taken modulo the bit width of the type.
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
-    ///
-    /// Args:
-    ///     a: Value to rotate.
-    ///     b: Rotation amount.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([0b10000001, 0b00000001, 0b11110000], dtype=np.uint8)
-    ///     b = jix.compact([1, 3, 4], dtype=np.uint32)
-    ///     result = jix.bitwise_rotate_left(a, b)
-    ///     assert np.array_equal(result.numpy(), [0b00000011, 0b00001000, 0b00001111])
-    ///     ```
-    bitwise_rotate_left,
-    BitwiseRotateLeft,
-    dispatch = {
-        [
-            (i8, u32),
-            (u8, u32),
-            (i16, u32),
-            (u16, u32),
-            (i32, u32),
-            (u32, u32),
-            (i64, u32),
-            (u64, u32)
-        ],
-        Safe
-    }
-);
+/// Element-wise bitwise left rotation.
+///
+/// Supported value dtypes (`a`): `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+/// The rotation amount (`b`) must be `bool`, `u8`, `u16`, `u32` or a Python int, and is cast to
+/// `u32`. `a` is never cast, and the output dtype equals `a`'s dtype; a Python int `a` is
+/// taken as `i64`.
+///
+/// Bits shifted out of the most-significant end wrap around to the least-significant end.
+/// The rotation amount is taken modulo the bit width of the type.
+///
+/// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+///
+/// Args:
+///     a: Value to rotate.
+///     b: Rotation amount.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([0b10000001, 0b00000001, 0b11110000], dtype=np.uint8)
+///     b = jix.compact([1, 3, 4], dtype=np.uint32)
+///     result = jix.bitwise_rotate_left(a, b)
+///     assert np.array_equal(result.numpy(), [0b00000011, 0b00001000, 0b00001111])
+///     ```
+#[pyo3::pyfunction]
+pub fn bitwise_rotate_left<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Array> {
+    let a = Operand::from_any(a)?;
+    let b = rotate_amount(b)?;
+    let [a, b] = broadcast_operands([a, b])?;
+    let dispatch_table = define_op2_table!(
+        bitwise_rotate_left,
+        BitwiseRotateLeft,
+        dispatch = {
+            [
+                (i64, u32),
+                (u64, u32),
+                (i32, u32),
+                (u32, u32),
+                (i16, u32),
+                (u16, u32),
+                (i8, u32),
+                (u8, u32)
+            ],
+            (None, Safe)
+        }
+    );
+    Ok(Array::from_core(dispatch_table.dispatch2(a, b)?))
+}
 
-define_op2!(
-    /// Element-wise bitwise right rotation.
-    ///
-    /// Supported value dtypes (`a`): `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// The rotation amount (`b`) is cast to `u32`, so it must be `bool`, `u8`, `u16`, `u32` or a
-    /// Python int. Output dtype equals `a`'s dtype.
-    ///
-    /// Bits shifted out of the least-significant end wrap around to the most-significant end.
-    /// The rotation amount is taken modulo the bit width of the type.
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
-    ///
-    /// Args:
-    ///     a: Value to rotate.
-    ///     b: Rotation amount.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([0b10000001, 0b00001000, 0b00001111], dtype=np.uint8)
-    ///     b = jix.compact([1, 3, 4], dtype=np.uint32)
-    ///     result = jix.bitwise_rotate_right(a, b)
-    ///     assert np.array_equal(result.numpy(), [0b11000000, 0b00000001, 0b11110000])
-    ///     ```
-    bitwise_rotate_right,
-    BitwiseRotateRight,
-    dispatch = {
-        [
-            (i8, u32),
-            (u8, u32),
-            (i16, u32),
-            (u16, u32),
-            (i32, u32),
-            (u32, u32),
-            (i64, u32),
-            (u64, u32)
-        ],
-        Safe
+/// Element-wise bitwise right rotation.
+///
+/// Supported value dtypes (`a`): `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+/// The rotation amount (`b`) must be `bool`, `u8`, `u16`, `u32` or a Python int, and is cast to
+/// `u32`. `a` is never cast, and the output dtype equals `a`'s dtype; a Python int `a` is
+/// taken as `i64`.
+///
+/// Bits shifted out of the least-significant end wrap around to the most-significant end.
+/// The rotation amount is taken modulo the bit width of the type.
+///
+/// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+///
+/// Args:
+///     a: Value to rotate.
+///     b: Rotation amount.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the broadcast shape.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([0b10000001, 0b00001000, 0b00001111], dtype=np.uint8)
+///     b = jix.compact([1, 3, 4], dtype=np.uint32)
+///     result = jix.bitwise_rotate_right(a, b)
+///     assert np.array_equal(result.numpy(), [0b11000000, 0b00000001, 0b11110000])
+///     ```
+#[pyo3::pyfunction]
+pub fn bitwise_rotate_right<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Array> {
+    let a = Operand::from_any(a)?;
+    let b = rotate_amount(b)?;
+    let [a, b] = broadcast_operands([a, b])?;
+    let dispatch_table = define_op2_table!(
+        bitwise_rotate_right,
+        BitwiseRotateRight,
+        dispatch = {
+            [
+                (i64, u32),
+                (u64, u32),
+                (i32, u32),
+                (u32, u32),
+                (i16, u32),
+                (u16, u32),
+                (i8, u32),
+                (u8, u32)
+            ],
+            (None, Safe)
+        }
+    );
+    Ok(Array::from_core(dispatch_table.dispatch2(a, b)?))
+}
+
+fn rotate_amount(b: &Bound<'_, PyAny>) -> PyResult<Operand> {
+    match Operand::from_any(b)? {
+        b @ Operand::Scalar {
+            value: Scalar::Int(_),
+            precision: None,
+            ..
+        } => b.cast(ScalarKind::U32),
+        b => Ok(b),
     }
-);
+}
