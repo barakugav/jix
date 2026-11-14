@@ -5,7 +5,7 @@ use prost::Message;
 
 use crate::archive::schema::{self, ArchiveType};
 use crate::archive::version::VERSION_U64;
-use crate::error::{ensure, Error, Result};
+use crate::error::{bail, ensure, error, Error, Result};
 use crate::util::{value_as_bytes, value_from_io};
 
 const MAGIC: &[u8; 4] = b"jix1";
@@ -59,7 +59,10 @@ impl<W> ArchiveWriter<W> {
         W: Write,
     {
         self.tmp_buf.clear();
-        message.encode_length_delimited(&mut self.tmp_buf)?;
+        message
+            .encode_length_delimited(&mut self.tmp_buf)
+            // can't fail, vec has unlimited capacity
+            .unwrap();
         let msg_len = self.tmp_buf.len();
         self.writer.write_all(&self.tmp_buf)?;
         self.tmp_buf.clear();
@@ -137,19 +140,19 @@ impl<R> ArchiveReader<R> {
         })
     }
 
-    pub(crate) fn read_message<M>(&mut self) -> io::Result<M>
+    pub(crate) fn read_message<M>(&mut self) -> Result<M>
     where
         R: Read,
         M: Message + Default,
     {
         self.try_read_message::<M>()?.ok_or_else(|| {
-            io::Error::new(
+            Error::io(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "unexpected end of file while reading message",
-            )
+            ))
         })
     }
-    pub(crate) fn try_read_message<M>(&mut self) -> io::Result<Option<M>>
+    pub(crate) fn try_read_message<M>(&mut self) -> Result<Option<M>>
     where
         R: Read,
         M: Message + Default,
@@ -158,34 +161,38 @@ impl<R> ArchiveReader<R> {
             Some(length) => length,
             None => return Ok(None),
         };
-        let msg_bytes = self.read_slice(length)?;
-        Ok(Some(M::decode(msg_bytes)?))
+        let msg_bytes = self.read_slice(length).map_err(Error::io)?;
+        let msg = M::decode(msg_bytes).map_err(|e| {
+            error!(
+                InvalidArchive,
+                "failed to decode {}: {e}",
+                std::any::type_name::<M>()
+            )
+        })?;
+        Ok(Some(msg))
     }
 
-    fn read_uleb128(&mut self) -> std::io::Result<Option<u64>>
+    fn read_uleb128(&mut self) -> Result<Option<u64>>
     where
         R: Read,
     {
         let mut x: u64 = 0;
         for i in 0..10 {
-            let b = match self.read_byte()? {
+            let b = match self.read_byte().map_err(Error::io)? {
                 Some(b) => b,
                 None => {
                     if i == 0 {
                         return Ok(None);
                     } else {
-                        return Err(std::io::Error::new(
+                        return Err(Error::io(std::io::Error::new(
                             std::io::ErrorKind::UnexpectedEof,
                             "unexpected end of file",
-                        ));
+                        )));
                     }
                 }
             };
             if i == 9 && b > 1 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "uleb128 does not fit in u64",
-                ));
+                bail!(InvalidArchive, "uleb128 does not fit in u64");
             }
             x |= u64::from(b & 0x7F) << (i * 7);
             if b < 0x80 {
@@ -245,7 +252,7 @@ impl<R> ArchiveReader<R> {
     //     Ok(buf)
     // }
 
-    pub(crate) fn read_file_meta(&mut self) -> io::Result<schema::FileMetadata>
+    pub(crate) fn read_file_meta(&mut self) -> Result<schema::FileMetadata>
     where
         R: Read,
     {
@@ -290,7 +297,7 @@ mod tests {
 
         let mut reader = reader_after_metadata(&[]);
         let err = reader.read_message::<schema::FileMetadata>().unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert_eq!(err.kind(), crate::error::ErrorKind::Io);
     }
 
     #[test]
@@ -304,7 +311,7 @@ mod tests {
     fn uleb128_that_never_terminates_is_an_error() {
         let mut reader = reader_after_metadata(&[0x80]);
         let err = reader.read_uleb128().unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert_eq!(err.kind(), crate::error::ErrorKind::Io);
     }
 
     #[test]
@@ -318,7 +325,7 @@ mod tests {
         ] {
             let mut reader = reader_after_metadata(bytes);
             let err = reader.read_uleb128().unwrap_err();
-            assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+            assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArchive);
         }
     }
 
@@ -351,7 +358,15 @@ mod tests {
         let mut reader =
             reader_after_metadata(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x40]);
         let err = reader.read_message::<schema::FileMetadata>().unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert_eq!(err.kind(), crate::error::ErrorKind::Io);
+    }
+
+    #[test]
+    fn malformed_message_is_invalid_archive() {
+        // Length 1, then a lone tag byte for field 1 (varint) with no value after it.
+        let mut reader = reader_after_metadata(&[0x01, 0x08]);
+        let err = reader.read_message::<schema::FileMetadata>().unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArchive);
     }
 
     /// A reader positioned just past the file metadata that `ArchiveWriter::new` writes, with

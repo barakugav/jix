@@ -272,7 +272,7 @@ impl BlockTable<Owned, TypeDyn> {
         R: Read + Seek,
     {
         let mut reader = ArchiveReader::new(reader, Some(len))?;
-        let f_meta = reader.read_file_meta().map_err(Error::io)?;
+        let f_meta = reader.read_file_meta()?;
         ensure!(
             f_meta.archive_type == schema::ArchiveType::BlockTable as i32,
             InvalidArchive,
@@ -314,9 +314,7 @@ where
         R: Read + Seek,
         S: BlockTableStorageRead,
     {
-        let header = reader
-            .read_message::<schema::BlockTableHeader>()
-            .map_err(Error::io)?;
+        let header = reader.read_message::<schema::BlockTableHeader>()?;
         let codec = header
             .codec
             .and_then(|c| c.kind)

@@ -453,7 +453,7 @@ where
         S: BlockTableStorageRead,
     {
         let mut reader = ArchiveReader::new(reader, len)?;
-        let f_meta = reader.read_file_meta().map_err(Error::io)?;
+        let f_meta = reader.read_file_meta()?;
         ensure!(
             f_meta.archive_type == schema::ArchiveType::ArrayV1 as i32,
             InvalidArchive,
@@ -462,9 +462,7 @@ where
             schema::ArchiveType::try_from(f_meta.archive_type)
         );
 
-        let header = reader
-            .read_message::<schema::ArrayHeader>()
-            .map_err(Error::io)?;
+        let header = reader.read_message::<schema::ArrayHeader>()?;
         let ndim = header.shape.len();
         check_ndim(ndim)?;
         let shape = DimDyn::from_slice(header.shape.as_slice());
