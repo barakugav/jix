@@ -16,24 +16,21 @@ define_op2!(
     /// Element-wise maximum of two arrays.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype equals the promoted input dtype.
+    /// `f16`, `f32`, `f64`, `bool`.
     ///
-    /// For **integer** and **bool** types the result is `max(a, b)`.
-    /// For **float** types this operation is NaN-propagating: if either operand is `NaN`,
-    /// the result is `NaN`. This matches `numpy.maximum` (not `numpy.fmax`, which ignores NaN).
+    /// For floats, a `NaN` in either operand gives `NaN`, as in `numpy.maximum` (not
+    /// `numpy.fmax`, which ignores NaN).
     ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules).
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+    /// **Type promotion**: operands of different dtypes are cast to a common dtype (Safe casting
+    /// rules), which is the output dtype. **Broadcasting**: shapes broadcast following numpy rules.
     ///
     /// Args:
     ///     a: First operand.
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] with the element-wise maximum and the broadcast shape. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] with the broadcast shape. No computation occurs until
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -64,24 +61,21 @@ define_op2!(
     /// Element-wise minimum of two arrays.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype equals the promoted input dtype.
+    /// `f16`, `f32`, `f64`, `bool`.
     ///
-    /// For **integer** and **bool** types the result is `min(a, b)`.
-    /// For **float** types this operation is NaN-propagating: if either operand is `NaN`,
-    /// the result is `NaN`. This matches `numpy.minimum` (not `numpy.fmin`, which ignores NaN).
+    /// For floats, a `NaN` in either operand gives `NaN`, as in `numpy.minimum` (not
+    /// `numpy.fmin`, which ignores NaN).
     ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common type (Safe casting rules).
-    ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+    /// **Type promotion**: operands of different dtypes are cast to a common dtype (Safe casting
+    /// rules), which is the output dtype. **Broadcasting**: shapes broadcast following numpy rules.
     ///
     /// Args:
     ///     a: First operand.
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] with the element-wise minimum and the broadcast shape. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] with the broadcast shape. No computation occurs until
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -111,10 +105,9 @@ define_op2!(
 /// Clamps each element to the range `[min, max]`.
 ///
 /// Computed as `minimum(maximum(array, min), max)`, like `numpy.clip` and `torch.clamp`: where
-/// `min > max` the result is `max`. `min` and `max` may be scalars or arrays, broadcast with
-/// `array`. With only one bound this is [`jix.maximum()`][jix.maximum] or
-/// [`jix.minimum()`][jix.minimum], and with neither `array` is returned unchanged. For float
-/// dtypes a `NaN` in any operand produces `NaN`.
+/// `min > max` the result is `max`. The bounds broadcast with `array`. With only one bound this
+/// is [`jix.maximum()`][jix.maximum] or [`jix.minimum()`][jix.minimum], and with neither
+/// `array` is returned unchanged. For float dtypes a `NaN` in any operand produces `NaN`.
 ///
 /// Supported dtypes: `bool`, `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
 /// `f16`, `f32`, `f64`.
