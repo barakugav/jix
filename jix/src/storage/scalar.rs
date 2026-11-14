@@ -3,7 +3,8 @@ use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
-    check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, Index, StridedBuf, Ty,
+    check_out_buf, fill_slot, ArraySpec, ArrayStorage, ArrayStorageInfo, Index, OutBuf,
+    OutBufInner, StridedBuf, Ty,
 };
 use crate::util::dim_arr;
 use crate::ReadContext;
@@ -91,24 +92,22 @@ where
         &'a self,
         index: &Index<'_>,
         _context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let ndim = index.ndim();
         let dtype = T::DTYPE;
 
-        match out {
+        match out.0 {
             // Lend a single-element view with all-zero strides: every position reads the same byte.
-            None => {
+            OutBufInner::Pull(slot) => {
                 let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
-                Ok(unsafe { StridedBuf::from_slice(src, dim_arr(ndim, |_| 0usize)) })
+                fill_slot(slot, unsafe {
+                    StridedBuf::from_slice(src, dim_arr(ndim, |_| 0usize))
+                });
+                Ok(())
             }
-            Some(out) => {
+            OutBufInner::Push(out) => {
                 let read_shape = index.size();
                 if out.is_contiguous_aligned(read_shape, &dtype) {
                     // Fill the region in one tight loop.
@@ -123,7 +122,7 @@ where
                     let src_strides = dim_arr(ndim, |_| 0usize);
                     unsafe { out.copy_from(src, src_strides.as_ref(), read_shape, &dtype) };
                 }
-                Ok(out.view_mut())
+                Ok(())
             }
         }
     }
@@ -189,6 +188,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::storage::ArrayStorageExt;
     use ndarray::array;
 
     use crate::__private::Scalar;
@@ -215,9 +215,9 @@ mod tests {
         // A destination whose bytes run past the region (a sub-view of a larger buffer, like the
         // ones ops hand to inner reads): the bytes after the region must stay untouched.
         use crate::storage::StridedBuf;
-        use crate::ArrayStorage;
 
         let a = plain_scalar(5i32, &[3, 4]).unwrap();
+        let ctx = ReadContext::default();
         let mut dst = [-1i32; 12];
         {
             let bytes = unsafe { crate::cast_slice_mut::<i32, u8>(&mut dst) };
@@ -229,11 +229,7 @@ mod tests {
                 )
             };
             a.storage()
-                .read_data(
-                    &Index::new(&[0, 0], &[2, 4]).unwrap(),
-                    &ReadContext::default(),
-                    Some(&mut out),
-                )
+                .read_data_push(&Index::new(&[0, 0], &[2, 4]).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
         assert_eq!(dst, [-1, -1, -1, -1, 5, 5, 5, 5, 5, 5, 5, 5]);
@@ -246,11 +242,7 @@ mod tests {
                 StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&[16, 4]).unwrap())
             };
             a.storage()
-                .read_data(
-                    &Index::new(&[0, 0], &[1, 4]).unwrap(),
-                    &ReadContext::default(),
-                    Some(&mut out),
-                )
+                .read_data_push(&Index::new(&[0, 0], &[1, 4]).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
         assert_eq!(dst, [5, 5, 5, 5, -1, -1, -1, -1, -1, -1, -1, -1]);

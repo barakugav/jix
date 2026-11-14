@@ -4,7 +4,8 @@ use crate::storage::params::{
     read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned,
 };
 use crate::storage::{
-    check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, Index, StridedBuf, Ty, TypeDyn,
+    check_out_buf, fill_slot, ArraySpec, ArrayStorageInfo, ElementType, Index, OutBuf, OutBufInner,
+    StridedBuf, Ty, TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
 use crate::ReadContext;
@@ -454,15 +455,10 @@ where
         &'a self,
         index: &Index<'_>,
         _context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         let dtype = self.dtype();
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
 
         let mut offset = 0;
         let mut span = dtype.itemsize() as usize;
@@ -478,13 +474,17 @@ where
         }
         let src = unsafe { std::slice::from_raw_parts(self.data.as_ptr().add(offset), span) };
 
-        match out {
-            None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.clone()) }),
-            Some(out) => {
-                unsafe { out.copy_from(src, self.strides.as_ref(), index.size(), dtype) };
-                Ok(out.view_mut())
+        match out.0 {
+            OutBufInner::Pull(slot) => {
+                _ = fill_slot(slot, unsafe {
+                    StridedBuf::from_slice(src, self.strides.clone())
+                })
             }
+            OutBufInner::Push(out) => unsafe {
+                out.copy_from(src, self.strides.as_ref(), index.size(), dtype)
+            },
         }
+        Ok(())
     }
 
     #[inline(always)]

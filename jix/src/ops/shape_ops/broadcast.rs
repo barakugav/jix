@@ -125,14 +125,9 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let ndim = self.is_broadcast.as_ref().len();
         debug_assert!(!index.size().contains(&0));
 
@@ -151,32 +146,33 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             }
         });
         let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-        let mut inner = self.array.read_data(&inner_index, context, None)?;
-
-        let inner_strides = inner.strides();
-        let broadcasted_strides = dim_arr(ndim, |dim| {
-            if self.is_broadcast[dim] {
-                0
-            } else {
-                inner_strides[dim]
-            }
-        });
-
-        match out {
-            None => {
+        // The strides of the inner view with the broadcast dims zeroed.
+        let broadcast_strides = |inner_strides: &[usize]| {
+            dim_arr(ndim, |dim| {
+                if self.is_broadcast[dim] {
+                    0
+                } else {
+                    inner_strides[dim]
+                }
+            })
+        };
+        match out.0 {
+            OutBufInner::Pull(slot) => {
+                self.array
+                    .read_data(&inner_index, context, OutBuf::pull(slot))?;
+                let inner = pulled(slot);
+                let strides = broadcast_strides(inner.strides());
                 inner.make_readonly();
-                Ok(unsafe { inner.with_strides(broadcasted_strides) })
+                unsafe { inner.set_strides(strides) };
             }
-            Some(out) => {
-                let out_shape = index.size();
-                let (src, _) = inner.data();
-                // SAFETY: `src_strides` are the inner view's strides with broadcast dims zeroed
-                unsafe {
-                    out.copy_from(src, broadcasted_strides.as_ref(), out_shape, self.dtype())
-                };
-                Ok(out.view_mut())
+            OutBufInner::Push(out) => {
+                let inner = self.array.read_data_pull(&inner_index, context)?;
+                let (src, src_strides) = inner.data();
+                let strides = broadcast_strides(src_strides);
+                unsafe { out.copy_from(src, strides.as_ref(), index.size(), self.dtype()) };
             }
         }
+        Ok(())
     }
 
     #[inline(always)]

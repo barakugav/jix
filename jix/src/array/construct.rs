@@ -1,9 +1,7 @@
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{
-    check_out_buf, materialize_out_buf, ArrayStorageInfo, Compact, Index, StridedBuf,
-};
+use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, Index, OutBuf};
 use crate::util::dim_arr;
 use crate::util::iter::NdIter;
 use crate::ReadContext;
@@ -250,18 +248,12 @@ impl<T> CompactArray<T> {
                 &'a self,
                 index: &Index<'_>,
                 context: &'a ReadContext,
-                out: Option<&'a mut StridedBuf<'_>>,
-            ) -> Result<StridedBuf<'a>> {
-                check_out_buf(
-                    out.as_deref(),
-                    self.shape(),
-                    index,
-                    self.dtype().itemsize() as usize,
-                )?;
+                out: OutBuf<'_, 'a>,
+            ) -> Result<()> {
+                check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
                 let ndim = index.ndim();
                 let read_shape = index.size();
-                let mut out = materialize_out_buf(
-                    out,
+                let out = out.materialize(
                     context,
                     read_shape,
                     self.dtype(),
@@ -290,7 +282,7 @@ impl<T> CompactArray<T> {
                         unsafe { base.add(dst_offset).cast::<T>().write_unaligned(value) };
                     });
                 }
-                Ok(out)
+                Ok(())
             }
 
             #[inline(always)]

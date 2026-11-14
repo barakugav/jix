@@ -85,17 +85,12 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         if self.is_identity() {
             return self.array.read_data(index, context, out);
         }
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let _cache_scope = self.cache_scope.enter(context);
 
         let k = self.dim as usize;
@@ -122,13 +117,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         let len1 = shift - s;
         let len2 = e - shift;
         let out_shape = index.size();
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
+        let out = out.materialize(context, out_shape, dtype, self.spec().read_layout_order());
         debug_assert!(!out_shape.contains(&0));
         let (out_buf, out_strides) = out.data_mut();
         let mut read_region = |start_k: u64, size_k: u64, dst_dim_k_offset: u64| -> Result<()> {
@@ -149,14 +138,13 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
                 )
             };
             let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-            self.array
-                .read_data(&inner_index, context, Some(&mut sub))?;
+            self.array.read_data_push(&inner_index, context, &mut sub)?;
             Ok(())
         };
         read_region(s + l - shift, len1, 0)?;
         read_region(0, len2, len1)?;
 
-        Ok(out)
+        Ok(())
     }
 
     #[inline(always)]

@@ -123,14 +123,9 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let ndim = self.dims.as_ref().len();
         let inner_start = dim_arr(ndim, |d| index.start()[self.inv_dims[d] as usize]);
         let inner_size = dim_arr(ndim, |d| index.size()[self.inv_dims[d] as usize]);

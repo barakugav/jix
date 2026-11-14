@@ -337,10 +337,11 @@ where
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
+    use crate::storage::ArrayStorageExt;
 
     use crate::scalar::bool8;
     use crate::storage::{split_ranges, Index};
-    use crate::{ArrayParams, ArrayStorage};
+    use crate::ArrayParams;
 
     use ndarray::{array, Ix0, Ix1};
 
@@ -609,7 +610,7 @@ mod tests {
                 unsafe { crate::storage::StridedBuf::from_slice_mut(&mut buf[..n_out], c) };
             let (start, size) = split_ranges(&full_index);
             storage
-                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .read_data_push(&Index::new(&start, &size).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 

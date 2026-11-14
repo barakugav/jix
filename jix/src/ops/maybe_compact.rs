@@ -63,8 +63,8 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         match &self.0 {
             ToCompactInner::Original(s) => s.read_data(index, context, out),
             ToCompactInner::Compact(c) => c.read_data(index, context, out),

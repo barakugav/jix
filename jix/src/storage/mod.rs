@@ -120,8 +120,8 @@ macro_rules! impl_array_storage_smart_ptr {
                 &'a self,
                 index: &crate::storage::Index<'_>,
                 context: &'a crate::ReadContext,
-                out: Option<&'a mut StridedBuf<'_>>,
-            ) -> crate::error::Result<StridedBuf<'a>> {
+                out: OutBuf<'_, 'a>,
+            ) -> crate::error::Result<()> {
                 (**self).read_data(index, context, out)
             }
 
@@ -190,8 +190,8 @@ impl ArrayStorage for &dyn ArrayStorage {
         &'a self,
         index: &crate::storage::Index<'_>,
         context: &'a crate::ReadContext,
-        out: Option<&'a mut crate::storage::StridedBuf<'_>>,
-    ) -> crate::error::Result<crate::storage::StridedBuf<'a>> {
+        out: crate::storage::OutBuf<'_, 'a>,
+    ) -> crate::error::Result<()> {
         (**self).read_data(index, context, out)
     }
 
@@ -233,8 +233,8 @@ macro_rules! impl_array_storage_forward {
             &'rd self,
             index: &crate::storage::Index<'_>,
             context: &'rd crate::ReadContext,
-            out: Option<&'rd mut crate::storage::StridedBuf<'_>>,
-        ) -> crate::error::Result<crate::storage::StridedBuf<'rd>> {
+            out: crate::storage::OutBuf<'_, 'rd>,
+        ) -> crate::error::Result<()> {
             self.0.read_data(index, context, out)
         }
 

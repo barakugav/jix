@@ -139,8 +139,8 @@ pub(crate) mod prelude {
         read_layout_order_insert_dont_care_dim, ArraySpecDynamic,
     };
     pub(crate) use crate::storage::{
-        check_out_buf, materialize_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo,
-        ArrayStorageTyped, BlockSize, Index, StridedBuf,
+        check_out_buf, fill_slot, pulled, read_data_and_map_strides, ArraySpec, ArrayStorageExt,
+        ArrayStorageInfo, ArrayStorageTyped, BlockSize, Index, OutBuf, OutBufInner, StridedBuf,
     };
     pub(crate) use crate::util::{
         array_from_fn_inline, calc_block_end, default_logical_strides, default_strides,

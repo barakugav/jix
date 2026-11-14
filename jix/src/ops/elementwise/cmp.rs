@@ -371,8 +371,8 @@ macro_rules! define_swapped_cmp {
                 &'a self,
                 index: &Index<'_>,
                 context: &'a ReadContext,
-                out: Option<&'a mut StridedBuf<'_>>,
-            ) -> Result<StridedBuf<'a>> {
+                out: OutBuf<'_, 'a>,
+            ) -> Result<()> {
                 self.0.read_data(index, context, out)
             }
 

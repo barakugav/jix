@@ -6,7 +6,7 @@ use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
-use crate::storage::{check_out_buf_impl, Index, StridedBuf};
+use crate::storage::{check_out_buf_impl, fill_slot, Index, OutBuf, OutBufInner, StridedBuf};
 use crate::util::{DimArray, RawAlignedBytes, SliceExt};
 use crate::DimDyn;
 
@@ -149,17 +149,17 @@ impl Drop for CacheScopeGuard<'_> {
 }
 
 impl ReadContext {
-    /// Read the region `index` of the storage `id` with `read` (called with `out`), through the
-    /// read cache if `id` is one of the arrays to cache of the current cache scope.
+    /// Read the region `index` of the storage `id` into `out` with `read`, through the read cache
+    /// if `id` is one of the arrays to cache of the current cache scope.
     #[inline(always)]
-    pub(crate) fn read_cached<'a, 'b>(
+    pub(crate) fn read_cached<'a>(
         &'a self,
         id: ArrayCacheId,
         index: &Index<'_>,
         dtype: &Dtype,
-        out: Option<&'a mut StridedBuf<'b>>,
-        read: impl Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+        read: impl Fn(OutBuf<'_, 'a>) -> Result<()>,
+    ) -> Result<()> {
         if !self.is_cache_enabled() {
             return read(out);
         }
@@ -167,15 +167,14 @@ impl ReadContext {
     }
 
     #[inline(never)]
-    fn read_cached_impl<'a, 'b>(
+    fn read_cached_impl<'a>(
         &'a self,
         id: ArrayCacheId,
         index: &Index<'_>,
         dtype: &Dtype,
-        out: Option<&'a mut StridedBuf<'b>>,
-        read_fn: &dyn CachedReadFn<'a, 'b>,
-    ) -> Result<StridedBuf<'a>> {
-        let pull = out.is_none();
+        out: OutBuf<'_, 'a>,
+        read_fn: &dyn CachedReadFn<'a>,
+    ) -> Result<()> {
         let mut cache_guard = self.read_cache.borrow_mut();
         // Check if cache is enabled for this array ID
         let cache = cache_guard
@@ -193,41 +192,43 @@ impl ReadContext {
                     StridedBuf::from_shared(buf, entry.strides.clone()).with_offset(entry.offset)
                 };
                 drop(cache_guard);
-
-                return Ok(match out {
-                    // user didnt provide an output buffer, return the cached buffer as is
-                    None => buf,
-                    // user provided an output buffer, copy the cached data into it
-                    Some(out) => {
-                        check_out_buf_impl(out, index, dtype.itemsize() as usize)?;
-
-                        let shape = index.size();
-                        let (src, src_strides) = buf.data();
-                        // SAFETY: the cached buffer holds the region at `src_strides`, and `out`
-                        // was checked to hold it at its own strides.
-                        unsafe { out.copy_from(src, src_strides, shape, dtype) };
-                        out.view_mut()
-                    }
-                });
+                if let OutBufInner::Push(dst) = &out.0 {
+                    check_out_buf_impl(dst, index, dtype.itemsize() as usize)?;
+                }
+                // The cached buffer itself to a pull read, a copy of it to a push read.
+                out.put(buf, index.size(), dtype);
+                return Ok(());
             } else {
                 // Evict before reading, so the read can reuse the buffer.
-                if pull && let Some(stale) = cache.map.remove(id) {
+                if out.is_pull()
+                    && let Some(stale) = cache.map.remove(id)
+                {
                     self.buffer_pool.return_shared(stale.data);
                 }
             }
         }
 
         drop(cache_guard); // before calling unknown `read()`
-        let buf = read_fn.read(out)?;
-        if !pull {
-            return Ok(buf); // user provided an output buffer, we can't hold a ref to it in cache
-        }
+        let slot = match out.0 {
+            // user provided an output buffer, we can't hold a ref to it in cache
+            OutBufInner::Push(_) => return read_fn.read(out),
+            OutBufInner::Pull(slot) => slot,
+        };
+        read_fn.read(OutBuf::pull(slot))?;
+        let buf = slot
+            .take()
+            .expect("a pull read puts its buffer in the slot");
         let (data, offset, strides) = match buf.into_shared() {
             Ok(parts) => parts,
-            Err(buf) => return Ok(buf), // A view of memory outside the pool is not cached.
+            Err(buf) => {
+                fill_slot(slot, buf); // A view of memory outside the pool is not cached.
+                return Ok(());
+            }
         };
         let buf = PoolBufShared::new(data.clone(), &self.buffer_pool);
-        let buf = unsafe { StridedBuf::from_shared(buf, strides.clone()).with_offset(offset) };
+        fill_slot(slot, unsafe {
+            StridedBuf::from_shared(buf, strides.clone()).with_offset(offset)
+        });
         let entry = CacheEntry {
             start: index.start().to_dim_vec::<DimDyn>(),
             size: index.size().to_dim_vec::<DimDyn>(),
@@ -245,7 +246,7 @@ impl ReadContext {
         if let Some(stale) = stale {
             self.buffer_pool.return_shared(stale.data);
         }
-        Ok(buf)
+        Ok(())
     }
 
     #[inline]
@@ -296,15 +297,15 @@ impl ReadContext {
 }
 
 // could be replaced by `Fn`, but a trait generate less binary
-trait CachedReadFn<'a, 'b: 'a> {
-    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>;
+trait CachedReadFn<'a> {
+    fn read(&self, out: OutBuf<'_, 'a>) -> Result<()>;
 }
-impl<'a, 'b: 'a, F> CachedReadFn<'a, 'b> for F
+impl<'a, F> CachedReadFn<'a> for F
 where
-    F: Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
+    F: Fn(OutBuf<'_, 'a>) -> Result<()>,
 {
     #[inline(always)]
-    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>> {
+    fn read(&self, out: OutBuf<'_, 'a>) -> Result<()> {
         self(out)
     }
 }

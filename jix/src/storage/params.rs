@@ -645,8 +645,8 @@ pub(crate) struct ArraySpecDynamic {
     /// `[ndim-1, .., 0]`.
     ///
     /// A reader that allocates its own destination (e.g.
-    /// [`to_ndarray_sub`](crate::Array::to_ndarray_sub), or pull-mode
-    /// [`materialize_out_buf`](crate::storage::materialize_out_buf)) lays the buffer out in this
+    /// [`to_ndarray_sub`](crate::Array::to_ndarray_sub), or a pull read through
+    /// [`alloc_out_buf`](crate::storage::alloc_out_buf)) lays the buffer out in this
     /// order so the copy runs straight through instead of transposing. It is a pure hint: it never
     /// changes which values a read produces, only the strides of a freshly allocated destination.
     pub(crate) read_layout_order: DimArray<DimIdx>,

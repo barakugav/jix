@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::dtype::Dtype;
 use crate::storage::params::ArraySpecOwned;
-use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, StridedBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, OutBuf};
 use crate::ReadContext;
 use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 
@@ -51,8 +51,8 @@ impl ArrayStorage for ArrayStorageAny {
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>, crate::Error> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<(), crate::Error> {
         self.inner.storage().read_data(index, context, out)
     }
 

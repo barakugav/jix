@@ -106,14 +106,9 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let _cache_scope = self.cache_scope.enter(context);
 
         let ndim = index.ndim();
@@ -138,16 +133,10 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             }
         });
         let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-        let inner_buf = self.array.read_data(&inner_index, context, None)?;
+        let inner_buf = self.array.read_data_pull(&inner_index, context)?;
         let (inner_buf, inner_strides) = inner_buf.data();
 
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
+        let out = out.materialize(context, out_shape, dtype, self.spec().read_layout_order());
         let (out_buf, out_strides) = out.data_mut();
         let copier = NdCopier::new(dtype);
 
@@ -237,7 +226,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
                 copy_region((g_count - 1)..g_count, 0..p_end_tail);
             }
         }
-        Ok(out)
+        Ok(())
     }
 
     #[inline(always)]

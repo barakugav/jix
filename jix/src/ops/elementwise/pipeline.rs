@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use crate::buf_pool::PoolBuf;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{ArithmeticStatus, Result};
-use crate::storage::{Index, StridedBuf};
+use crate::storage::{fill_slot, Index, OutBuf, OutBufInner, StridedBuf};
 use crate::util::default_strides_slice;
 use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
 use crate::ReadContext;
@@ -64,14 +64,14 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         &mut self,
         index: &Index<'_>,
         context: &'b ReadContext,
-        out: Option<&'b mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'b>>
+        out: OutBuf<'_, 'b>,
+    ) -> Result<()>
     where
         T: Dtyped,
         Self: Sized,
     {
-        let is_pull = out.is_none();
-        let mut out = materialize_pipeline_out_buf(
+        let is_pull = out.is_pull();
+        let out = materialize_pipeline_out_buf(
             index,
             &mut self.operands(),
             Dtype::new_ref::<T>(),
@@ -114,12 +114,12 @@ pub(crate) trait ElementwisePipelineImpl<T> {
             }
         };
 
-        to_buf_fn(self, index, &mut out, context)?;
+        to_buf_fn(self, index, out, context)?;
 
         if is_pull {
-            make_readonly_if_aliasing(index, &mut out);
+            make_readonly_if_aliasing(index, out);
         }
-        Ok(out)
+        Ok(())
     }
 }
 impl<P, T> ElementwisePipeline<T> for P where P: ElementwisePipelineImpl<T> {}
@@ -864,26 +864,25 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
 }
 
 #[inline(never)]
-fn materialize_pipeline_out_buf<'b, 's>(
+fn materialize_pipeline_out_buf<'o, 'b, 's>(
     index: &Index<'_>,
     operands: &mut dyn Iterator<Item = &'s Operand<'s>>,
     output_dtype: &Dtype,
     context: &'b ReadContext,
-    out: Option<&'b mut StridedBuf<'_>>,
-) -> StridedBuf<'b> {
+    out: OutBuf<'o, 'b>,
+) -> &'o mut StridedBuf<'b> {
+    let slot = match out.0 {
+        OutBufInner::Push(out) => return out,
+        OutBufInner::Pull(slot) => slot,
+    };
     let shape = index.size();
-    match out {
-        Some(out) => out.view_mut(),
-        None => {
-            let itemsize = output_dtype.itemsize() as usize;
-            let (strides, real_dims) = pick_output_layout(operands, shape, itemsize);
-            let nitems = (0..shape.len())
-                .map(|d| if real_dims.get(d) { shape[d] } else { 1 })
-                .product::<usize>();
-            let buf = context.allocate_buf(nitems * itemsize, output_dtype.alignment());
-            unsafe { StridedBuf::from_pool(buf, strides) }
-        }
-    }
+    let itemsize = output_dtype.itemsize() as usize;
+    let (strides, real_dims) = pick_output_layout(operands, shape, itemsize);
+    let nitems = (0..shape.len())
+        .map(|d| if real_dims.get(d) { shape[d] } else { 1 })
+        .product::<usize>();
+    let buf = context.allocate_buf(nitems * itemsize, output_dtype.alignment());
+    fill_slot(slot, unsafe { StridedBuf::from_pool(buf, strides) })
 }
 
 #[inline(never)]
@@ -989,6 +988,7 @@ pub(crate) const fn n_operands_mul(count: Option<usize>, n: usize) -> Option<usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::ArrayStorageExt;
     use std::ops::Range;
 
     use crate::storage::{split_ranges, Index};
@@ -1177,14 +1177,18 @@ mod tests {
                 let mut out = unsafe {
                     StridedBuf::from_raw_parts_mut(dst.ptr_mut(), shape, &strides[0], itemsize)
                 };
-                node.to_buf(&index, &context, Some(&mut out)).unwrap();
+                node.to_buf(&index, &context, OutBuf::push(&mut out))
+                    .unwrap();
             }
             let got = (0..nitems)
                 .map(|k| dst.get::<T>(offs[0][k]))
                 .collect::<Vec<T>>();
             assert_eq!(got, expected, "shape={shape:?} strides={strides:?}");
         } else {
-            let buf = node.to_buf(&index, &context, None).unwrap();
+            let mut buf = None;
+            node.to_buf(&index, &context, OutBuf::pull(&mut buf))
+                .unwrap();
+            let buf = buf.unwrap();
             // The buffer picks its own layout, so walk it by its own strides.
             let got = offsets(shape, buf.strides())
                 .into_iter()
@@ -1527,11 +1531,13 @@ mod tests {
         // Pull mode picks its own layout - and collapses any dim no operand walks to a single
         // element with a zero stride - so read the result back through the strides it hands out.
         let pulled = {
-            let buf = storage
+            let mut buf = None;
+            storage
                 .read_as_elementwise_pipeline::<T>(&index, &context)
                 .unwrap()
-                .to_buf(&index, &context, None)
+                .to_buf(&index, &context, OutBuf::pull(&mut buf))
                 .unwrap();
+            let buf = buf.unwrap();
             offsets(&shape, buf.strides())
                 .into_iter()
                 .map(|off| unsafe { buf.data_ptr().add(off).cast::<T>().read_unaligned() })
@@ -1550,7 +1556,7 @@ mod tests {
             storage
                 .read_as_elementwise_pipeline::<T>(&index, &context)
                 .unwrap()
-                .to_buf(&index, &context, Some(&mut out))
+                .to_buf(&index, &context, OutBuf::push(&mut out))
                 .unwrap();
         }
         let pushed = offsets(&shape, &dst_strides)
@@ -1577,7 +1583,7 @@ mod tests {
             .collect::<Vec<_>>();
         let (start, size) = split_ranges(index);
         let buf = storage
-            .read_data(&Index::new(&start, &size).unwrap(), &context, None)
+            .read_data_pull(&Index::new(&start, &size).unwrap(), &context)
             .unwrap();
         offsets(&shape, buf.strides())
             .into_iter()
@@ -1788,7 +1794,7 @@ mod tests {
             .collect::<Vec<_>>();
         let (start, size) = split_ranges(index);
         let buf = storage
-            .read_data(&Index::new(&start, &size).unwrap(), &context, None)
+            .read_data_pull(&Index::new(&start, &size).unwrap(), &context)
             .unwrap();
         let elements = offsets(&shape, buf.strides())
             .into_iter()
@@ -1882,17 +1888,14 @@ mod tests {
         let shape = [4usize, 5];
         let strides = crate::util::default_strides_slice(&shape, itemsize);
         let mut dst = Bytes::new(20 * itemsize, 0);
+        let context = ReadContext::default();
         {
             let mut out = unsafe {
                 StridedBuf::from_raw_parts_mut(dst.ptr_mut(), &shape, strides.as_ref(), itemsize)
             };
             let (start, size) = split_ranges(&index);
             neg.storage
-                .read_data(
-                    &Index::new(&start, &size).unwrap(),
-                    &ReadContext::default(),
-                    Some(&mut out),
-                )
+                .read_data_push(&Index::new(&start, &size).unwrap(), &context, &mut out)
                 .unwrap();
         }
         let written = (0..20)

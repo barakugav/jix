@@ -164,14 +164,9 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let (inner_start, inner_size) = self.transform_index(index)?;
         let _cache_scope = self.cache_scope.as_ref().map(|s| s.enter(context));
         unsafe {

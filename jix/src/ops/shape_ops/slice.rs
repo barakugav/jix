@@ -132,14 +132,9 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let _cache_scope = self.cache_scope.enter(context);
         let ndim = self.slice.as_ref().len();
 
@@ -154,7 +149,9 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         debug_assert!(!out_shape.contains(&0));
 
         // Fast path: inner array is plain, read a contiguous bounding box and create a strided view over it.
-        if out.is_none() && self.array.spec().flags().plain_read() {
+        if self.array.spec().flags().plain_read()
+            && let OutBufInner::Pull(slot) = out.0
+        {
             let box_start = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
                 ds.start + index.start()[dim] * ds.step
@@ -163,7 +160,9 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 (out_shape[dim] - 1) * self.slice[dim].step as usize + 1
             });
             let inner_box = unsafe { Index::new_unchecked(&box_start, &box_size) };
-            let inner = self.array.read_data(&inner_box, context, None)?;
+            self.array
+                .read_data(&inner_box, context, OutBuf::pull(slot))?;
+            let inner = pulled(slot);
             let itemsize = self.dtype().itemsize() as usize;
             let out_strides = dim_arr(ndim, |dim| {
                 if out_shape[dim] <= 1 {
@@ -172,19 +171,14 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                     inner.strides()[dim] * self.slice[dim].step as usize
                 }
             });
-            return Ok(unsafe { inner.with_strides(out_strides) });
+            unsafe { inner.set_strides(out_strides) };
+            return Ok(());
         }
 
         // General path: one or more dims have step > 1. nd-iter over the strided dims, and read
         // each sub-region from the inner array.
         let dtype = self.dtype();
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
+        let out = out.materialize(context, out_shape, dtype, self.spec().read_layout_order());
         let (out_buf, out_strides) = out.data_mut();
         let iter_shape = dim_arr(ndim, |dim| {
             if self.slice[dim].step == 1 {
@@ -215,10 +209,9 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 )
             };
             let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-            self.array
-                .read_data(&inner_index, context, Some(&mut sub))?;
+            self.array.read_data_push(&inner_index, context, &mut sub)?;
         }
-        Ok(out)
+        Ok(())
     }
 
     #[inline(always)]
@@ -461,6 +454,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::storage::ArrayStorageExt;
     use ndarray::array;
     use proptest::prelude::*;
 
@@ -601,14 +595,12 @@ mod tests {
 
     #[test]
     fn stepped_slice_pull_returns_strided_view_plain() {
-        use crate::ArrayStorage;
-
         // Plain-backed inner (`plain_read`), so a stepped slice lends a strided view.
         let s = plain6x4().slice((SliceItem::new(None, None, 2), ..)); // rows 0, 2, 4
         let ctx = s.read_ctx();
         let view = s
             .storage()
-            .read_data(&Index::new(&[0, 0], &[3, 4]).unwrap(), &ctx, None)
+            .read_data_pull(&Index::new(&[0, 0], &[3, 4]).unwrap(), &ctx)
             .unwrap();
         // Zero-copy: dim-0 stride is 2 * row-stride (2*16), not the packed 16 a copy would carry.
         assert_eq!(view.strides(), &[2 * 16, 4]);
@@ -630,14 +622,12 @@ mod tests {
 
     #[test]
     fn stepped_slice_pull_subregion_plain() {
-        use crate::ArrayStorage;
-
         let s = plain6x4().slice((SliceItem::new(None, None, 2), ..)); // rows 0, 2, 4
         let ctx = s.read_ctx();
         // Output sub-region [1..3, 1..3] -> orig rows 2 & 4, cols 1 & 2.
         let view = s
             .storage()
-            .read_data(&Index::new(&[1, 1], &[2, 2]).unwrap(), &ctx, None)
+            .read_data_pull(&Index::new(&[1, 1], &[2, 2]).unwrap(), &ctx)
             .unwrap();
         assert_eq!(view.strides(), &[2 * 16, 4]);
 

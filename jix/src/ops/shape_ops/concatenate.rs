@@ -207,15 +207,10 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         let dtype = self.dtype();
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
         let _cache_scope = self.cache_scope.enter(context);
 
         let concat_dim = self.concat_dim as usize;
@@ -252,8 +247,7 @@ where
 
         let itemsize = dtype.itemsize() as usize;
         let output_shape = index.size();
-        let mut out = materialize_out_buf(
-            out,
+        let out = out.materialize(
             context,
             output_shape,
             dtype,
@@ -326,9 +320,9 @@ where
             };
             let sub_index = unsafe { Index::new_unchecked(&sub_start, &sub_size) };
             self.arrays
-                .read_data(arr, &sub_index, context, Some(&mut sub))?;
+                .read_data(arr, &sub_index, context, OutBuf::push(&mut sub))?;
         }
-        Ok(out)
+        Ok(())
     }
 
     #[inline(always)]
