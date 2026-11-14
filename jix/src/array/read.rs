@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use crate::error::{check_get_buffer_size, check_ranges, check_region_size, ensure, Result};
 use crate::storage::{
-    check_out_buf, materialize_out_buf, split_ranges, ArrayStorageTyped, Index, StridedBuf,
+    check_out_buf_impl, materialize_out_buf, split_ranges, ArrayStorageTyped, Index, StridedBuf,
 };
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, cast_slice_mut, dim_arr, IterExt};
@@ -413,10 +413,16 @@ impl<S: ArrayStorage> Array<S> {
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
         let index = unsafe { Index::new_unchecked(&start, &size) };
+        let itemsize = self.dtype().itemsize() as usize;
+        check_region_size(&index, itemsize)?;
+        if let Some(out) = out.as_deref() {
+            check_out_buf_impl(out, &index, itemsize)?;
+        }
         self.to_buf_strided_checked(&index, context, out)
     }
 
-    // like `to_buf_strided` for an `index` the caller already validated against
+    /// Like `to_buf_strided`, for an `index` the caller checked against the shape and the region
+    /// size, and an `out` that passes `check_out_buf_impl`.
     #[inline]
     fn to_buf_strided_checked<'a>(
         &'a self,
@@ -424,14 +430,7 @@ impl<S: ArrayStorage> Array<S> {
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        let shape = self.shape();
         let dtype = self.dtype();
-        check_out_buf(
-            out.as_deref(),
-            shape,
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
         let spec = self.storage.spec();
         let small_read = spec.flags().plain_read() || {
             let nitems = index.size().iter().product::<usize>();
@@ -920,6 +919,35 @@ mod tests {
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
+    }
+
+    #[test]
+    fn to_buf_strided_rejects_a_bad_destination_of_a_split_read() {
+        // A tiny read-size budget cuts the read into pieces, each read into a view of `out`.
+        let params = ArrayParams::new()
+            .block_shape(&[4, 4])
+            .unwrap()
+            .read_size((16, 64));
+        let a = Array::compact_ndarray_with(&ndarray::Array2::<i32>::ones((8, 8)), params).unwrap();
+        let ctx = a.read_ctx();
+        let itemsize = size_of::<i32>();
+        // A 4x8 destination for an 8x8 read: large enough for the first pieces only. It is
+        // rejected before any piece is written.
+        let mut dst = [0i32; 32];
+        let mut out = unsafe {
+            StridedBuf::from_raw_parts_mut(
+                dst.as_mut_ptr().cast::<u8>(),
+                &[4, 8],
+                &[8 * itemsize, itemsize],
+                itemsize,
+            )
+        };
+        let err = a
+            .to_buf_strided(&[0..8, 0..8], &ctx, Some(&mut out))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidArgument);
+        assert_eq!(dst, [0; 32]);
     }
 
     #[test]
