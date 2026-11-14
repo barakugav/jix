@@ -1,9 +1,8 @@
 #![allow(rustdoc::redundant_explicit_links)]
 //! Element type descriptors and related primitives.
 //!
-//! The central type is [`Dtype`] - a runtime descriptor that captures all layout information
-//! needed to interpret the raw bytes of an array element. See its documentation for a full
-//! explanation, including scalar vs. struct dtypes and the inner-shape mechanism.
+//! The central type is [`Dtype`], the runtime descriptor of an array element's layout. Its docs
+//! cover scalar vs. struct dtypes and the inner shape.
 //!
 //! # Key types
 //!
@@ -66,8 +65,8 @@ enum AlignmentInner {
 impl Alignment {
     /// Creates a new `Alignment` from an integer value in bytes.
     ///
-    /// The value must be non-zero, a power of two, and less than the supported maximum
-    /// alignment (currently 32768 bytes, may change in the future).
+    /// Returns `None` unless the value is a non-zero power of two of at most 32768 bytes (the
+    /// current maximum, which may change).
     #[inline(always)]
     pub const fn new(value: usize) -> Option<Self> {
         if 1 <= value && value <= 32768 && value.is_power_of_two() {
@@ -124,9 +123,7 @@ impl TryFrom<usize> for Alignment {
 /// Also used for field offsets in struct dtypes.
 pub type Itemsize = u16;
 
-/// The maximum number of dimensions allowed in a dtype shape.
-///
-/// Note this is not the shape of the array, but rather the inner shape of a dtype.
+/// The maximum number of dimensions of a dtype's inner shape (not of the array shape).
 pub const DTYPE_NDIM_MAX: usize = 4;
 
 pub(crate) const DTYPE_NESTING_MAX: usize = 32;
@@ -138,7 +135,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 /// A `Dtype` answers three questions about every element in an array:
 /// - **What kind** of data is it (signed int, float, struct of named fields, ...)?
 /// - **How many bytes** does one logical element occupy ([`itemsize`](Self::itemsize))?
-/// - **What alignment** is required when placing an element in memory ([`alignment`](Self::alignment))?
+/// - **What alignment** does an element need in memory ([`alignment`](Self::alignment))?
 ///
 /// # Two Flavors
 ///
@@ -250,8 +247,8 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 /// |--------|----------|
 /// | `T::DTYPE` ([`Dtyped`] constant) | Rust type known at compile time |
 /// | [`Dtype::new_scalar`] | Building a scalar dtype from a [`ScalarKind`] at runtime |
-/// | [`Dtype::from_fields`] | Building a struct dtype from field definitions; auto-detects packed vs. aligned |
-/// | [`Dtype::new_struct`] | Building a struct dtype with full explicit control over itemsize and alignment |
+/// | [`Dtype::from_fields`] | Building a struct dtype; auto-detects packed vs. aligned |
+/// | [`Dtype::new_struct`] | Building a struct dtype with explicit shape, itemsize and alignment |
 ///
 /// The [`Dtyped`] derive macro generates the `const DTYPE` for any `#[repr(C)]` or
 /// `#[repr(C, packed)]` struct:
@@ -278,13 +275,10 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 ///
 /// # Constraints
 ///
-/// - **Little-endian only** - jix enforces little-endian at compile time; big-endian targets
-///   will not compile.
+/// - **Little-endian only** - big-endian targets do not compile.
 /// - **Inner shape dimensions** - at most [`DTYPE_NDIM_MAX`] (currently 4).
 /// - **Itemsize limit** - stored as [`Itemsize`] (`u16`); the total bytes per element must not
 ///   exceed `u16::MAX`.
-/// - **No padding** - struct fields must cover every byte of the element; padding has to be an
-///   explicit field.
 /// - **Field offsets** - must conform to either an aligned (`#[repr(C)]`) or packed
 ///   (`#[repr(C, packed)]`) layout; arbitrary custom offsets are rejected.
 #[derive(Clone)]
@@ -350,7 +344,7 @@ pub enum ScalarKind {
     ComplexF32,
     /// [`Complex<f64>`] dtype, as two consecutive `f64` values for the real and imaginary parts.
     ComplexF64,
-    /// [`bool8`](crate::scalar::bool8) dtype, a single byte that is false when zero and true otherwise.
+    /// [`bool8`](crate::scalar::bool8) dtype, one byte: zero is false, any other value true.
     Bool8,
 }
 /// The endianness of a scalar.
@@ -421,8 +415,8 @@ impl Dtype {
     ///
     /// # Arguments
     ///
-    /// * `fields` - A vector of field definitions, where each field is represented as a tuple of
-    ///   (name, offset, dtype). Names must be unique. Offsets are in bytes from the start of the struct.
+    /// * `fields` - The fields as (name, offset, dtype) tuples, offsets in bytes from the start of
+    ///   the struct. Names must be unique.
     ///
     /// The fields must cover every byte of the struct without gaps or overlap; padding is not
     /// supported and has to be given as an explicit field. The itemsize is the end of the last
@@ -511,27 +505,22 @@ impl Dtype {
 
     /// Creates a new struct dtype by specifying all of the parameters explicitly.
     ///
-    /// Most of the time, the simpler [`Self::from_fields`] should be sufficient, and this function
-    /// is only needed in rare cases where the field offsets are valid for both a packed and an
-    /// aligned layout.
+    /// Usually [`Self::from_fields`] is enough; this is needed only when the field offsets are
+    /// valid for both a packed and an aligned layout.
     ///
     /// # Arguments
     ///
-    /// * `fields` - A vector of field definitions, where each field is represented as a tuple of
-    ///   (name, offset, dtype). Names must be unique. Offsets are in bytes from the start of the struct.
-    /// * `shape` - The shape of the dtype, as a slice of dimensions. The total number of elements
-    ///   in the shape must not exceed `Itemsize::MAX`. The shape can be empty, which means a single
-    ///   element of the dtype. The number of dimensions in the shape must not exceed [`DTYPE_NDIM_MAX`].
-    /// * `itemsize` - The itemsize of the dtype in bytes. Must be a multiple of the product of the
-    ///   shape dimensions.
-    /// * `alignment` - The alignment of the dtype in bytes. Must be a power of two and less than
-    ///   or equal to the itemsize.
+    /// * `fields` - The fields as (name, offset, dtype) tuples, offsets in bytes from the start of
+    ///   the struct. Names must be unique.
+    /// * `shape` - The inner shape: at most [`DTYPE_NDIM_MAX`] dims, none of them zero, with a
+    ///   product that fits [`Itemsize`]. Empty means no inner shape.
+    /// * `itemsize` - The itemsize in bytes, a multiple of the shape product.
+    /// * `alignment` - The alignment in bytes.
     ///
-    /// The fields must be given in offset order and cover every byte of an element without gaps
-    /// or overlap: padding is not supported and has to be given as an explicit field. With an
-    /// alignment of 1 the struct is packed, otherwise it must be a valid aligned layout. See
-    /// [`Self::is_aligned`] for details. The shape, itemsize and alignment will be validated
-    /// against the fields.
+    /// The fields must be given in offset order and cover every byte of one element (`itemsize`
+    /// divided by the shape product) without gaps or overlap: padding is not supported and has to
+    /// be given as an explicit field. With an alignment of 1 the struct is packed, otherwise it
+    /// must be a valid aligned layout. See [`Self::is_aligned`] for details.
     ///
     /// ```rust
     /// use jix::dtype::{Dtype, Dtyped, Alignment, Itemsize};
@@ -718,8 +707,8 @@ impl Dtype {
 
     /// Get the scalar kind of the dtype, if it is a scalar dtype.
     ///
-    /// Note that even if the function returns `Some`, the dtype may not be a plain scalar, it just
-    /// means the type has no sub fields, but the dtype can still have non-empty shape.
+    /// A dtype with `Some` scalar kind can still have an inner shape; see
+    /// [`Self::try_to_scalar`].
     #[inline(always)]
     pub const fn scalar_kind(&self) -> Option<ScalarKind> {
         match &self.0 {
@@ -771,7 +760,7 @@ impl Dtype {
 
     /// Get the itemsize of the dtype.
     ///
-    /// If this dtype has a shape, the itemsize is the product of the shape dimensions and the base itemsize.
+    /// With an inner shape, this is the base itemsize times the product of the shape.
     #[inline(always)]
     pub const fn itemsize(&self) -> Itemsize {
         match &self.0 {
@@ -791,9 +780,8 @@ impl Dtype {
 
     /// Get the alignment of the dtype.
     ///
-    /// For scalar dtypes, the alignment is the same as [`ScalarKind::alignment()`].
-    /// For struct dtypes, the alignment is either `1` for packed dtypes, or the maximum alignment of the inner fields
-    /// for aligned structs.
+    /// For scalar dtypes, [`ScalarKind::alignment()`]. For struct dtypes, `1` if packed, or the
+    /// maximum alignment of the fields if aligned.
     #[inline(always)]
     pub const fn alignment(&self) -> Alignment {
         match &self.0 {
@@ -805,10 +793,9 @@ impl Dtype {
 
     /// Returns whether the dtype is aligned (like C structs) or packed.
     ///
-    /// In both layouts the fields are laid out back to back without any padding, so the offset of
-    /// each field is the sum of the itemsize of the previous fields, and the total itemsize of the
-    /// struct is the sum of the itemsize of all fields. Where a C layout needs padding, it must be
-    /// an explicit field.
+    /// In both layouts the fields are back to back with no padding: each offset is the sum of the
+    /// itemsizes of the previous fields, and the itemsize is the sum over all fields. Padding that
+    /// a C layout needs must be an explicit field.
     ///
     /// - Packed struct has alignment 1, and its fields can be at any offset. This matches
     ///   `#[repr(C, packed)]` in Rust, and is compatible with packed structs in C, numpy, etc.
@@ -818,8 +805,7 @@ impl Dtype {
     ///   structs in C, numpy, etc.
     /// - Custom alignment that doesn't match either of the above layouts is not supported.
     ///
-    /// The "packed vs aligned" distinction only applies to struct dtypes, scalar dtypes are always
-    /// considered aligned.
+    /// Scalar dtypes are always aligned.
     #[inline]
     pub fn is_aligned(&self) -> bool {
         match &self.0 {
@@ -829,19 +815,15 @@ impl Dtype {
         }
     }
 
-    /// Try to convert this dtype to a scalar dtype, if it matches the scalar dtype exactly.
+    /// The scalar kind, if this is a scalar dtype with no inner shape.
     #[inline(always)]
     pub fn try_to_scalar(&self) -> Option<ScalarKind> {
         let scalar = self.scalar_kind()?;
         (Self::new_scalar(scalar) == *self).then_some(scalar)
     }
 
-    /// Set the shape of the dtype, updating the itemsize accordingly.
-    ///
-    /// The maximum number of dimensions allowed in the shape is [`DTYPE_NDIM_MAX`].
-    /// The product of the shape dimensions must not exceed [`Itemsize::MAX`].
-    ///
-    /// The itemsize will be updated to `itemsize *= new_shape.product() / old_shape.product()`.
+    /// Set the inner shape of the dtype, updating the itemsize to
+    /// `itemsize * new_shape.product() / old_shape.product()`.
     ///
     /// # Errors
     ///
@@ -1086,8 +1068,8 @@ impl Endianness {
 
 /// The field list of an owned struct dtype.
 ///
-/// The sole purpose of this struct is to create an `inline(never)` of a drop, to avoid recursive
-/// drop of Dtype, allowing inlining of `drop` for T::DTYPE.
+/// It exists only to make the drop `inline(never)`, which breaks the recursive drop of `Dtype`
+/// so that dropping `T::DTYPE` can be inlined.
 #[allow(clippy::type_complexity)]
 struct OwnedFields(ManuallyDrop<Box<[(Cow<'static, str>, Itemsize, Dtype)]>>);
 
@@ -1122,13 +1104,12 @@ impl std::fmt::Debug for OwnedFields {
 
 /// A trait for types that can be represented by a [`Dtype`].
 ///
-/// `jix` maintains the dtype of each array dynamically using a [`Dtype`].
-/// For safe conversions between (type erased) arrays and other typed arrays (for example [`ndarray::ArrayBase`])
-/// the `Dtyped` trait is used to verify type compatibility.
+/// Each array records its element type at runtime as a [`Dtype`]; conversions between
+/// type-erased and typed arrays (such as [`ndarray::ArrayBase`]) check it against `T::DTYPE`.
 ///
-/// The trait also forces `Copy`, and elements in arrays should not implement `Drop`.
+/// The trait requires `Copy`, so element types cannot implement `Drop`.
 ///
-/// Use the derive macro [`Dtyped`] to automatically implement this trait for structs.
+/// The derive macro [`Dtyped`] implements this trait for structs.
 /// ```rust
 /// use jix::dtype::{Dtype, Dtyped};
 ///
@@ -1171,10 +1152,9 @@ impl std::fmt::Debug for OwnedFields {
 ///
 /// # Safety
 ///
-/// This trait is very unsafe, and the caller should implement it carefully, matching the type size,
-/// alignment and inner fields of the type. Types implementing this should most likely be annotated with `#[repr(C)]`
-/// or `#[repr(C, packed)]`, for aligned and packed fields respectively.
-/// The type must not contain any padding bytes.
+/// The dtype must match the size, alignment and fields of the type, which for a struct usually
+/// means `#[repr(C)]` (aligned) or `#[repr(C, packed)]` (packed). The type must not contain any
+/// padding bytes.
 ///
 /// Every bit pattern must be a valid value of the type, as arrays are read from files and foreign
 /// buffers without validation. This is why `bool` is not `Dtyped`; use [`bool8`] instead.
