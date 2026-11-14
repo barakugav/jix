@@ -402,7 +402,6 @@ macro_rules! define_swapped_cmp {
                 let op = &self.0 .0;
                 op.b.spec()
                     .with_dynamic_spec(op.dynamic_spec())
-                    .with_cleared_flags()
             }
 
             fn info(&self) -> ArrayStorageInfo<'_> {

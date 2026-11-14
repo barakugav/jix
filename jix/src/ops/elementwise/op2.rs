@@ -202,10 +202,7 @@ where
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.a
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
+        self.a.spec().with_dynamic_spec(&self.spec)
     }
 
     fn info(&self) -> ArrayStorageInfo<'_> {

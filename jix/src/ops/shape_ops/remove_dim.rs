@@ -118,6 +118,7 @@ where
             read_layout_order,
         );
         spec.add_cache_ids_from([&inner_spec]);
+        spec.flags = inner_spec.flags().clear_compact();
         let cache_scope = spec.with_cache_scope();
 
         Ok(Self {
@@ -199,10 +200,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .map_flags(|flags| flags.clear_compact())
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("RemoveDim", [&self.array])

@@ -518,7 +518,6 @@ impl ArrayParams {
 pub struct ArraySpec<'a> {
     shared: &'a Arc<ArraySpecShared>,
     dynamic: &'a ArraySpecDynamic,
-    flags: ArraySpecFlags,
 }
 /// Owned version of [`ArraySpec`].
 ///
@@ -534,7 +533,6 @@ pub struct ArraySpec<'a> {
 pub(crate) struct ArraySpecOwned {
     shared: Arc<ArraySpecShared>,
     dynamic: ArraySpecDynamic,
-    flags: ArraySpecFlags,
 }
 /// See [`ArraySpecOwned`] docs.
 #[derive(Clone)]
@@ -617,6 +615,8 @@ pub(crate) struct ArraySpecDynamic {
     /// The set of array IDs reachable from this array that are accessed with the
     /// same index as this array, e.g. `x` and `y` in `x + y`.
     pub(crate) arrays_to_cache_potentially: Option<Arc<ArrayCacheIdSet>>,
+
+    pub(crate) flags: ArraySpecFlags,
 }
 impl ArraySpecOwned {
     pub(crate) fn new(
@@ -635,17 +635,17 @@ impl ArraySpecOwned {
             decoder_params,
         };
         let ndim = block_shape.len();
-        let dynamic = ArraySpecDynamic::new(
+        let mut dynamic = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             1.0,
             dim_arr(ndim, |_| ScaleWeight::NONE),
             dim_arr(ndim, |i| i as DimIdx), // default to C-order
         );
+        dynamic.flags = flags;
         Self {
             shared: Arc::new(shared),
             dynamic,
-            flags,
         }
     }
 
@@ -654,7 +654,6 @@ impl ArraySpecOwned {
         ArraySpec {
             shared: &self.shared,
             dynamic: &self.dynamic,
-            flags: self.flags,
         }
     }
 
@@ -668,29 +667,10 @@ impl<'a> ArraySpec<'a> {
         Self { dynamic, ..self }
     }
 
-    // #[inline(always)]
-    // pub(crate) fn with_flags(self, flags: ArraySpecFlags) -> Self {
-    //     Self { flags, ..self }
-    // }
-
-    #[inline(always)]
-    pub(crate) fn map_flags(self, f: impl FnOnce(ArraySpecFlags) -> ArraySpecFlags) -> Self {
-        Self {
-            flags: f(self.flags),
-            ..self
-        }
-    }
-
-    pub(crate) fn with_cleared_flags(mut self) -> Self {
-        self.flags = ArraySpecFlags::default();
-        self
-    }
-
     pub(crate) fn to_owned(&self) -> ArraySpecOwned {
         ArraySpecOwned {
             shared: Arc::clone(self.shared),
             dynamic: self.dynamic.clone(),
-            flags: self.flags,
         }
     }
 
@@ -749,7 +729,7 @@ impl<'a> ArraySpec<'a> {
     #[doc(hidden)]
     #[inline(always)]
     pub fn flags(&self) -> ArraySpecFlags {
-        self.flags
+        self.dynamic().flags
     }
 
     /// Scale a read tile to the preferred read size for `itemsize`. Seeds every dim from
@@ -801,6 +781,8 @@ impl ArraySpecDynamic {
 
             arrays_to_cache: None,
             arrays_to_cache_potentially: None,
+
+            flags: ArraySpecFlags::new(),
         }
     }
 
@@ -1011,7 +993,8 @@ pub(crate) mod flags {
     const IS_COMPACT: u8 = 0b0000_0001;
     /// The array read operation is a simple strided copy.
     ///
-    /// This is a hint to the caller, useful for Plain, Scalar, insert_dim, remove_dim, etc.
+    /// This is a hint to the caller, useful for Plain, Scalar, insert_dim, remove_dim, transmute,
+    /// etc.
     const PLAIN_READ: u8 = 0b0000_0010;
 
     #[allow(dead_code)]

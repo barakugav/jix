@@ -222,10 +222,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         if self.is_identity() {
             return self.array.spec();
         }
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Slice", [&self.array])

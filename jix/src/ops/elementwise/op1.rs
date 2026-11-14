@@ -35,6 +35,7 @@ impl<S, K> Op1<S, K> {
         check_shape_overflow(array.shape(), K::Output::DTYPE.itemsize() as _)?;
         let cache_id = ArrayCacheId::new();
         let mut spec = array.spec().dynamic().clone();
+        spec.flags = ArraySpecFlags::new();
         spec.add_elementwise_cost(1.0);
         spec.add_cache_id(cache_id);
         Ok(Self {
@@ -139,10 +140,7 @@ where
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
 
     fn info(&self) -> ArrayStorageInfo<'_> {

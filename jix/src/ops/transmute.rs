@@ -34,6 +34,7 @@ use crate::ops::prelude::*;
 pub struct Transmute<S, ET> {
     array: S,
     element_type: ET,
+    spec: ArraySpecDynamic,
 }
 impl<S, ET> Transmute<S, ET>
 where
@@ -51,9 +52,19 @@ where
             UnsupportedDtype,
             "Cannot transmute between dtypes with different sizes: {src_dtype} vs {dst_dtype}"
         );
+        let inner_spec = array.spec().dynamic();
+        let mut spec = inner_spec.clone();
+        spec.flags = {
+            let mut flags = ArraySpecFlags::new();
+            if inner_spec.flags.plain_read() {
+                flags = flags.set_plain_read();
+            }
+            flags
+        };
         Ok(Self {
             element_type: new_type,
             array,
+            spec,
         })
     }
 
@@ -91,7 +102,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_cleared_flags()
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Transmute", [&self.array])
@@ -103,6 +114,7 @@ where
         Ok(Transmute {
             array: self.array,
             element_type: NewET::from_dtype(self.element_type.dtype().clone())?,
+            spec: self.spec,
         })
     }
 }
@@ -150,7 +162,7 @@ mod tests {
     use crate::storage::{Index, StridedBuf};
     use crate::util::assert_array_matches;
     use crate::ReadContext;
-    use crate::{Array, Ty};
+    use crate::{Array, ArrayStorage, Ty};
 
     /// An 8-byte struct dtype, to check that a transmute handles a composite element type and not
     /// just scalars.
@@ -183,6 +195,22 @@ mod tests {
         assert!(Transmute::new(arr.view().into_storage(), Ty::<i32>::new()).is_ok());
         assert!(Transmute::new(arr.view().into_storage(), Ty::<f32>::new()).is_ok());
         assert!(Transmute::new(arr.view().into_storage(), Ty::<[u8; 4]>::new()).is_ok());
+    }
+
+    /// A transmute is a lazy view, so it is never compact, but it reads straight through to its
+    /// input, so a plain read stays plain.
+    #[test]
+    fn flags_drop_compact_and_keep_plain_read() {
+        let data = ndarray::array![1u32, 2, 3];
+        let compact = Array::compact_ndarray(&data).unwrap();
+        assert!(compact.storage().spec().flags().is_compact());
+        let t = compact.transmute_elements::<i32>();
+        assert!(!t.storage().spec().flags().is_compact());
+
+        let plain = Array::plain_ndarray_ref(&data).unwrap();
+        assert!(plain.storage().spec().flags().plain_read());
+        let t = plain.transmute_elements::<i32>();
+        assert!(t.storage().spec().flags().plain_read());
     }
 
     // -----------------------------------------------------------------------

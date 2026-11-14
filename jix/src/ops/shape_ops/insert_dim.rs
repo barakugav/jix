@@ -120,6 +120,7 @@ where
             read_layout_order,
         );
         spec.add_cache_ids_from([&orig_spec]);
+        spec.flags = orig_spec.flags().clear_compact();
         // Dims inserted in front keep the inner dims aligned to the last ones, as broadcasting
         // aligns the operands of element-wise ops, so the inner storages are read at the region
         // other paths of element-wise ops, broadcasts and dims inserted in front read them at.
@@ -201,10 +202,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .map_flags(|flags| flags.clear_compact())
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("InsertDim", [&self.array])

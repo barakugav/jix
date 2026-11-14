@@ -33,6 +33,7 @@ pub struct SubDtype<S, ET> {
     array: S,
     dst_type: ET,
     sub_field_offset: Itemsize,
+    spec: ArraySpecDynamic,
 }
 impl<S, ET> SubDtype<S, ET>
 where
@@ -60,10 +61,13 @@ where
         check_dtype_size_nonzero(dtype)?;
 
         let dst_dtype = ET::from_dtype(dtype.clone())?;
+        let mut spec = array.spec().dynamic().clone();
+        spec.flags = ArraySpecFlags::new();
         Ok(Self {
             dst_type: dst_dtype,
             sub_field_offset: offset,
             array,
+            spec,
         })
     }
 
@@ -131,7 +135,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_cleared_flags()
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("SubDtype", [&self.array])
@@ -144,6 +148,7 @@ where
             array: self.array,
             dst_type: NewET::from_dtype(self.dst_type.dtype().clone())?,
             sub_field_offset: self.sub_field_offset,
+            spec: self.spec,
         })
     }
 }

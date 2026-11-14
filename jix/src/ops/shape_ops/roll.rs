@@ -55,6 +55,7 @@ impl<S: ArrayStorage> Roll<S> {
         };
 
         let mut spec = array.spec().dynamic().clone();
+        spec.flags = ArraySpecFlags::new();
         let cache_scope = spec.with_cache_scope();
         Ok(Self {
             array,
@@ -160,10 +161,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         if self.is_identity() {
             return self.array.spec();
         }
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Roll", [&self.array])
