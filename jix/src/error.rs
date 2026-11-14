@@ -276,13 +276,8 @@ pub(crate) fn check_get_range_ndim(shape: &[u64], index: &Index<'_>) -> Result<(
 }
 
 #[inline]
-pub(crate) fn check_get_buffer_size(
-    index: &Index<'_>,
-    dtype: &Dtype,
-    buf: &mut [u8],
-) -> Result<()> {
-    let required_size = index
-        .size()
+pub(crate) fn check_get_buffer_size(size: &[usize], dtype: &Dtype, buf: &mut [u8]) -> Result<()> {
+    let required_size = size
         .iter()
         .map(|&n| n as u64)
         .chain([dtype.itemsize() as u64])
@@ -295,24 +290,23 @@ pub(crate) fn check_get_buffer_size(
         fn buffer_size_fail(
             buf_len: usize,
             required_size: u64,
-            index: &Index<'_>,
+            size: &[usize],
             dtype: &Dtype,
         ) -> Result<()> {
             bail!(
                 InvalidBufferSize,
-                "Unexpected buffer size {buf_len} requested index {index:?} with dtype {dtype} (required size: {required_size})"
+                "Unexpected buffer size {buf_len} for a region of size {size:?} with dtype {dtype} (required size: {required_size})"
             );
         }
-        return buffer_size_fail(buf_len, required_size.unwrap_or(u64::MAX), index, dtype);
+        return buffer_size_fail(buf_len, required_size.unwrap_or(u64::MAX), size, dtype);
     }
     Ok(())
 }
 
 #[inline]
-pub(crate) fn check_region_size(index: &Index<'_>, itemsize: usize) -> Result<()> {
+pub(crate) fn check_region_size(size: &[usize], itemsize: usize) -> Result<()> {
     if cfg!(target_pointer_width = "32") {
-        let bytes = index
-            .size()
+        let bytes = size
             .iter()
             .map(|&n| n.max(1) as u64)
             .chain([itemsize as u64])
@@ -320,7 +314,7 @@ pub(crate) fn check_region_size(index: &Index<'_>, itemsize: usize) -> Result<()
         ensure!(
             bytes.is_some_and(|b| b <= isize::MAX as u64),
             InvalidShapeOperation,
-            "read region {index:?} with itemsize {itemsize} does not fit in memory"
+            "read region of size {size:?} with itemsize {itemsize} does not fit in memory"
         );
     }
     Ok(())
@@ -478,20 +472,18 @@ mod tests {
     #[test]
     #[cfg(target_pointer_width = "32")]
     fn read_region_must_fit_in_memory_on_32_bit() {
-        let index = |size| Index::new(&[0, 0][..size.len()], size).unwrap();
-        assert!(check_region_size(index(&[1 << 30, 1]), 1).is_ok());
-        assert!(check_region_size(index(&[1 << 30, 2]), 1).is_err());
+        assert!(check_region_size(&[1 << 30, 1], 1).is_ok());
+        assert!(check_region_size(&[1 << 30, 2], 1).is_err());
         assert!(check_ranges(&[1 << 33], &[0..1 << 32]).is_err());
     }
 
     #[test]
     fn check_get_buffer_size_requires_the_exact_size() {
         let dtype = i32::DTYPE;
-        let index = Index::new(&[0, 0], &[2, 3]).unwrap();
         let mut exact = [0u8; 24];
-        assert!(check_get_buffer_size(&index, &dtype, &mut exact).is_ok());
+        assert!(check_get_buffer_size(&[2, 3], &dtype, &mut exact).is_ok());
         let mut short = [0u8; 8];
-        let err = check_get_buffer_size(&index, &dtype, &mut short).unwrap_err();
+        let err = check_get_buffer_size(&[2, 3], &dtype, &mut short).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidBufferSize);
     }
 }

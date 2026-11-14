@@ -259,9 +259,7 @@ where
             dtype,
             self.spec().read_layout_order(),
         );
-        if output_shape.as_ref().contains(&0) {
-            return Ok(out);
-        }
+        debug_assert!(!output_shape.contains(&0));
 
         // When the destination is contiguous and all dims before concat_dim have size <=1, each
         // array's data is a contiguous run in the destination.
@@ -279,6 +277,9 @@ where
             let arr_end = self.borders[arr];
             if arr_start >= req_end {
                 break;
+            }
+            if arr_start == arr_end {
+                continue; // an empty array overlaps nothing
             }
 
             let overlap_start = req_start.max(arr_start);

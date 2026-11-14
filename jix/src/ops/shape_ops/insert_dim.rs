@@ -142,18 +142,13 @@ where
     }
 
     #[inline(always)]
-    fn transform_index(
-        &self,
-        index: &Index<'_>,
-    ) -> Result<Option<(DimArray<u64>, DimArray<usize>)>> {
+    fn transform_index(&self, index: &Index<'_>) -> Result<(DimArray<u64>, DimArray<usize>)> {
         check_get_range(self.shape(), index)?;
-        if index.size().contains(&0) {
-            return Ok(None);
-        }
+        debug_assert!(!index.size().contains(&0));
         let dims = self.original_dims.as_ref();
         let start = dim_arr(dims.len(), |d| index.start()[dims[d] as usize]);
         let size = dim_arr(dims.len(), |d| index.size()[dims[d] as usize]);
-        Ok(Some((start, size)))
+        Ok((start, size))
     }
 }
 
@@ -177,18 +172,7 @@ where
             index,
             self.dtype().itemsize() as usize,
         )?;
-        let dtype = self.dtype();
-        let Some((inner_start, inner_size)) = self.transform_index(index)? else {
-            // Empty read
-            let out_shape = index.size();
-            return Ok(materialize_out_buf(
-                out,
-                context,
-                out_shape,
-                dtype,
-                self.spec().read_layout_order(),
-            ));
-        };
+        let (inner_start, inner_size) = self.transform_index(index)?;
         let _cache_scope = self.cache_scope.as_ref().map(|s| s.enter(context));
         unsafe {
             read_data_and_map_strides(

@@ -472,10 +472,7 @@ where
             .zip(index.size())
             .zip(self.strides.as_ref());
         for ((&start, &size), &stride) in dims {
-            if size == 0 {
-                (offset, span) = (0, 0);
-                break;
-            }
+            debug_assert!(size != 0);
             offset += start as usize * stride;
             span += (size - 1) * stride;
         }

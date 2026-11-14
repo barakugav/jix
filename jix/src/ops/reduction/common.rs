@@ -415,9 +415,7 @@ where
     // ```
 
     let out_nitems = index.size().iter().product::<usize>();
-    if out_nitems == 0 {
-        return Ok(out);
-    }
+    debug_assert!(out_nitems != 0);
 
     let inner_shape = inner_array.shape();
     let inner_ndim = inner_shape.len();
@@ -505,7 +503,7 @@ where
         let state_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_buf_len) };
         (state_buf, Clone::clone(out_strides))
     } else {
-        check_region_size(index, kernel_state_sizeof)?; // states may be bigger than the output
+        check_region_size(index.size(), kernel_state_sizeof)?; // states may be bigger than the output
         let state_buf_len = out_nitems * kernel_state_sizeof;
         tmp_state_buf = context.allocate_buf(state_buf_len, kernel_state_alignof);
         (

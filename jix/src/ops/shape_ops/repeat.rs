@@ -119,17 +119,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         let ndim = index.ndim();
         let dtype = self.dtype();
         let out_shape = index.size();
-
-        // Empty output (any zero-length range, including repeats == 0) is a no-op.
-        if out_shape.as_ref().contains(&0) {
-            return Ok(materialize_out_buf(
-                out,
-                context,
-                out_shape,
-                dtype,
-                self.spec().read_layout_order(),
-            ));
-        }
+        debug_assert!(!out_shape.contains(&0));
 
         let k = self.dim as usize;
         let n = self.repeats; // n > 0

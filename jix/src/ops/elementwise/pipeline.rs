@@ -201,16 +201,14 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
     let shape = dim_arr(index.ndim(), |d| {
         let len = index.size()[d];
         let is_real_dim = strides.iter().any(|s| s[d] != 0);
-        if is_real_dim || len == 0 {
+        if is_real_dim {
             len
         } else {
             1 // degenerated dim, all operands have stride zero
         }
     });
     let shape = shape.as_ref();
-    if shape.contains(&0) {
-        return Ok(());
-    }
+    debug_assert!(!shape.contains(&0));
     let out_operand = operands[0];
     let output_dtype = out_operand.dtype;
     let is_output_operand = |op_i: usize| op_i == 0;
@@ -327,16 +325,14 @@ fn to_buf_type_erased_dyn(
     let shape = dim_arr(index.ndim(), |d| {
         let len = index.size()[d];
         let is_real_dim = strides.iter().any(|s| s[d] != 0);
-        if is_real_dim || len == 0 {
+        if is_real_dim {
             len
         } else {
             1 // degenerated dim, all operands have stride zero
         }
     });
     let shape = shape.as_ref();
-    if shape.contains(&0) {
-        return Ok(());
-    }
+    debug_assert!(!shape.contains(&0));
     let out_operand = operands[0];
     let output_dtype = out_operand.dtype;
     let is_output_operand = |op_i: usize| op_i == 0;
@@ -1323,14 +1319,6 @@ mod tests {
             check_add(&[], [&[]; 3], [0; 3], push);
             check_add(&[], [&[]; 3], [1, 1, 1], push);
             check_add(&[1, 5, 1], [&[1, 1, 1]; 3], [0; 3], push);
-        }
-    }
-
-    #[test]
-    fn empty_region_writes_nothing() {
-        for push in [false, true] {
-            check_add(&[0], [&[1]; 3], [0; 3], push);
-            check_add(&[2, 0, 3], [&[1, 1, 1]; 3], [0; 3], push);
         }
     }
 

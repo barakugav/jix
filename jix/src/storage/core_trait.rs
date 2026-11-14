@@ -88,7 +88,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// # Arguments
     ///
     /// - `index` - a start and a size per dimension, one per dimension of `self.shape()`.
-    ///   The region must be within the array shape bounds; zero sizes are allowed.
+    ///   The region must be within the array shape bounds; an [`Index`] is never empty.
     /// - `context` - read context carrying reusable buffers and decoder state.
     /// - `out` - optional destination, as described above.
     ///

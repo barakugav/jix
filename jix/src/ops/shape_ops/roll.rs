@@ -129,9 +129,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             dtype,
             self.spec().read_layout_order(),
         );
-        if out_shape.as_ref().contains(&0) {
-            return Ok(out);
-        }
+        debug_assert!(!out_shape.contains(&0));
         let (out_buf, out_strides) = out.data_mut();
         let mut read_region = |start_k: u64, size_k: u64, dst_dim_k_offset: u64| -> Result<()> {
             let inner_start = dim_arr(ndim, |d| if d == k { start_k } else { index.start()[d] });

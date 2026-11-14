@@ -1448,7 +1448,7 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
 
     let ctx = ReadContext::default();
     for index in invalid {
-        // Only a reversed range cannot be an `Index`; the storage must reject the rest
+        // A reversed range or an empty region cannot be an `Index`; the storage must reject the rest
         let read = |out: Option<&mut StridedBuf>| {
             if index.iter().any(|r| r.start > r.end) {
                 crate::error::bail!(InvalidIndex, "reversed range");

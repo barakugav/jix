@@ -128,9 +128,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
             dtype,
             self.spec().read_layout_order(),
         );
-        if out_shape.as_ref().contains(&0) {
-            return Ok(out);
-        }
+        debug_assert!(!out_shape.contains(&0));
         let (out_buf, out_strides) = out.data_mut();
 
         // Iterate one slab at a time. Each slab is a single combination of indices on the

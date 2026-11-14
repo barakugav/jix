@@ -99,11 +99,8 @@ where
         let tmp = self.array.read_data(index, context, None)?;
         let out_shape = index.size();
 
-        let empty_read = out_shape.as_ref().contains(&0);
+        debug_assert!(!out_shape.contains(&0));
         if out.is_none() {
-            if empty_read {
-                return Ok(tmp);
-            }
             return Ok(unsafe { tmp.with_offset(self.sub_field_offset as usize) });
         }
 
@@ -114,9 +111,6 @@ where
             dst_dtype,
             self.spec().read_layout_order(),
         );
-        if empty_read {
-            return Ok(out);
-        }
         let (tmp_buf, src_strides) = tmp.data();
         let src = unsafe { tmp_buf.get_unchecked(self.sub_field_offset as usize..) };
 
@@ -274,10 +268,7 @@ mod tests {
         assert_eq!(ys, vec![10, 20, 30]);
 
         // An empty pull must not panic on the sub-field shift.
-        let empty = field
-            .storage()
-            .read_data(&Index::new(&[0], &[0]).unwrap(), &ctx, None)
-            .unwrap();
+        let empty = field.to_buf_strided(&[0..0], &ctx, None).unwrap();
         assert_eq!(empty.strides().len(), 1);
     }
 

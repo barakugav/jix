@@ -356,11 +356,30 @@ pub(crate) fn check_out_buf(
     itemsize: usize,
 ) -> Result<()> {
     check_get_range(array_shape, index)?;
-    check_region_size(index, itemsize)?;
+    check_region_size(index.size(), itemsize)?;
     match out {
         Some(out) => check_out_buf_impl(out, index, itemsize),
         None => Ok(()),
     }
+}
+
+/// Checks that `out` can be the destination of a read of `ndim` dims: one stride per dim, and
+/// writable.
+#[inline]
+pub(crate) fn check_out_buf_dims(out: &StridedBuf, ndim: usize) -> Result<()> {
+    ensure!(
+        out.strides().len() == ndim,
+        InvalidArgument,
+        "out buffer has {} strides but array has {} dimensions",
+        out.strides().len(),
+        ndim
+    );
+    ensure!(
+        out.is_writable(),
+        InvalidArgument,
+        "out buffer must be a writable destination, not a read-only view"
+    );
+    Ok(())
 }
 
 pub(crate) fn check_out_buf_impl(
@@ -368,60 +387,47 @@ pub(crate) fn check_out_buf_impl(
     index: &Index<'_>,
     itemsize: usize,
 ) -> Result<()> {
-    ensure!(
-        out.strides().len() == index.ndim(),
-        InvalidArgument,
-        "out buffer has {} strides but array has {} dimensions",
-        out.strides().len(),
-        index.ndim()
-    );
-    ensure!(
-        out.is_writable(),
-        InvalidArgument,
-        "out buffer must be a writable destination, not a read-only view"
-    );
+    check_out_buf_dims(out, index.ndim())?;
     let size = index.size();
-    if size.iter().all(|&n| n > 0) {
-        let strides = out.strides();
-        let d_len_stride = |d: usize| (size[d] as u64, strides[d] as u64);
+    let strides = out.strides();
+    let d_len_stride = |d: usize| (size[d] as u64, strides[d] as u64);
 
-        /// The span in bytes of a region with `(len, stride)` dims.
-        ///
-        /// If every dim steps past the span of the previous dims, meaning no two elements overlap,
-        /// returns Some(span), otherwise None.
-        fn disjoint_span(dims: impl Iterator<Item = (u64, u64)>, itemsize: usize) -> Option<u64> {
-            dims.filter(|&(len, _)| len > 1)
-                .try_fold(itemsize as u64, |span, (len, stride)| {
-                    (stride >= span).then(|| stride.saturating_mul(len - 1).saturating_add(span))
-                })
-        }
-
-        let mut span = None;
-        if span.is_none() {
-            // common fast path, strides decrease with the dim
-            span = disjoint_span((0..size.len()).rev().map(d_len_stride), itemsize);
-        }
-        if span.is_none() {
-            // general path, sort dims by stride
-            let mut dims = dim_arr(size.len(), d_len_stride);
-            dims.sort_unstable_by_key(|&(_len, stride)| stride);
-            span = disjoint_span(dims.into_iter(), itemsize);
-        }
-
-        let Some(span) = span else {
-            bail!(
-                InvalidArgument,
-                "out buffer strides {:?} overlap over the region {index:?}",
-                out.strides()
-            );
-        };
-        let len = out.data().0.len();
-        ensure!(
-            span <= len as u64,
-            InvalidArgument,
-            "out buffer of {len} bytes is too small for the region {index:?}"
-        );
+    /// The span in bytes of a region with `(len, stride)` dims.
+    ///
+    /// If every dim steps past the span of the previous dims, meaning no two elements overlap,
+    /// returns Some(span), otherwise None.
+    fn disjoint_span(dims: impl Iterator<Item = (u64, u64)>, itemsize: usize) -> Option<u64> {
+        dims.filter(|&(len, _)| len > 1)
+            .try_fold(itemsize as u64, |span, (len, stride)| {
+                (stride >= span).then(|| stride.saturating_mul(len - 1).saturating_add(span))
+            })
     }
+
+    let mut span = None;
+    if span.is_none() {
+        // common fast path, strides decrease with the dim
+        span = disjoint_span((0..size.len()).rev().map(d_len_stride), itemsize);
+    }
+    if span.is_none() {
+        // general path, sort dims by stride
+        let mut dims = dim_arr(size.len(), d_len_stride);
+        dims.sort_unstable_by_key(|&(_len, stride)| stride);
+        span = disjoint_span(dims.into_iter(), itemsize);
+    }
+
+    let Some(span) = span else {
+        bail!(
+            InvalidArgument,
+            "out buffer strides {:?} overlap over the region {index:?}",
+            out.strides()
+        );
+    };
+    let len = out.data().0.len();
+    ensure!(
+        span <= len as u64,
+        InvalidArgument,
+        "out buffer of {len} bytes is too small for the region {index:?}"
+    );
     Ok(())
 }
 

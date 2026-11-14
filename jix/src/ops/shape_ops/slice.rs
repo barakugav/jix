@@ -151,12 +151,10 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         }
 
         let out_shape = index.size();
+        debug_assert!(!out_shape.contains(&0));
 
         // Fast path: inner array is plain, read a contiguous bounding box and create a strided view over it.
-        if out.is_none()
-            && self.array.spec().flags().plain_read()
-            && !out_shape.as_ref().contains(&0)
-        {
+        if out.is_none() && self.array.spec().flags().plain_read() {
             let box_start = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
                 ds.start + index.start()[dim] * ds.step
@@ -187,9 +185,6 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             dtype,
             self.spec().read_layout_order(),
         );
-        if out_shape.as_ref().contains(&0) {
-            return Ok(out);
-        }
         let (out_buf, out_strides) = out.data_mut();
         let iter_shape = dim_arr(ndim, |dim| {
             if self.slice[dim].step == 1 {

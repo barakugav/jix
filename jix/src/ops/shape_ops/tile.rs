@@ -136,15 +136,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         let ndim = index.ndim();
         let out_shape = index.size();
         let dtype = self.dtype();
-        if out_shape.contains(&0) {
-            return Ok(materialize_out_buf(
-                out,
-                context,
-                out_shape,
-                dtype,
-                self.spec().read_layout_order(),
-            ));
-        }
+        debug_assert!(!out_shape.contains(&0));
 
         let k = self.dim as usize;
         let l = self.array.shape()[k];

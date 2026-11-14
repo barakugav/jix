@@ -3,12 +3,13 @@ use std::ops::Range;
 
 use crate::error::{check_get_buffer_size, check_ranges, check_region_size, ensure, Result};
 use crate::storage::{
-    check_out_buf_impl, materialize_out_buf, split_ranges, ArrayStorageTyped, Index, StridedBuf,
+    check_out_buf_dims, check_out_buf_impl, materialize_out_buf, split_ranges, ArrayStorageTyped,
+    Index, StridedBuf,
 };
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, cast_slice_mut, dim_arr, IterExt};
+use crate::util::{calc_block_end, cast_slice_mut, default_strides_slice, dim_arr, IterExt};
 use crate::ReadContext;
-use crate::{default_strides, ArrayStorage, Dim, DimDyn, Dimension, PlainArray};
+use crate::{ArrayStorage, Dim, DimDyn, Dimension, PlainArray};
 
 use super::Array;
 
@@ -204,7 +205,6 @@ impl<S: ArrayStorage> Array<S> {
     {
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
-        let index = unsafe { Index::new_unchecked(&start, &size) };
         let ndim = self.ndim();
         if let Some(expected) = D::NDIM {
             ensure!(
@@ -214,8 +214,7 @@ impl<S: ArrayStorage> Array<S> {
             );
         }
         let itemsize = self.dtype().itemsize() as usize;
-        let alloc_bytes = index
-            .size()
+        let alloc_bytes = size
             .iter()
             .map(|&n| n.max(1) as u64)
             .chain([itemsize as u64])
@@ -227,7 +226,7 @@ impl<S: ArrayStorage> Array<S> {
         );
         let mut out_shape = D::zeros(ndim);
         for dim in 0..ndim {
-            out_shape[dim] = index.size()[dim];
+            out_shape[dim] = size[dim];
         }
 
         let mut array = {
@@ -252,7 +251,8 @@ impl<S: ArrayStorage> Array<S> {
             }
         };
 
-        {
+        if !size.contains(&0) {
+            let index = unsafe { Index::new_unchecked(&start, &size) };
             let buf_strides = dim_arr(ndim, |dim| array.strides()[dim] as usize * itemsize);
             let buf = unsafe {
                 cast_slice_mut::<MaybeUninit<S::Item>, u8>(std::slice::from_raw_parts_mut(
@@ -312,11 +312,13 @@ impl<S: ArrayStorage> Array<S> {
         let dtype = self.dtype();
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
+        check_get_buffer_size(&size, dtype, buf)?;
+        if size.contains(&0) {
+            return Ok(());
+        }
         let index = unsafe { Index::new_unchecked(&start, &size) };
-        check_get_buffer_size(&index, dtype, buf)?;
-        check_region_size(&index, dtype.itemsize() as usize)?;
-        let read_shape = dim_arr(index.ndim(), |dim| index.size()[dim]);
-        let strides = default_strides(&read_shape, dtype.itemsize() as usize);
+        check_region_size(&size, dtype.itemsize() as usize)?;
+        let strides = default_strides_slice(&size, dtype.itemsize() as usize);
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides) };
         self.to_buf_strided_checked(&index, context, Some(&mut out))?;
         Ok(())
@@ -412,13 +414,39 @@ impl<S: ArrayStorage> Array<S> {
     ) -> Result<StridedBuf<'a>> {
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
+        if size.contains(&0) {
+            return self.read_empty(&size, context, out);
+        }
         let index = unsafe { Index::new_unchecked(&start, &size) };
         let itemsize = self.dtype().itemsize() as usize;
-        check_region_size(&index, itemsize)?;
+        check_region_size(index.size(), itemsize)?;
         if let Some(out) = out.as_deref() {
             check_out_buf_impl(out, &index, itemsize)?;
         }
         self.to_buf_strided_checked(&index, context, out)
+    }
+
+    /// Like `to_buf_strided`, for an empty region of `size`: `out`, or an empty buffer.
+    #[cold]
+    fn read_empty<'a>(
+        &'a self,
+        size: &[usize],
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        check_region_size(size, self.dtype().itemsize() as usize)?;
+        if let Some(out) = out.as_deref() {
+            check_out_buf_dims(out, size.len())?;
+        }
+        let spec = self.storage.spec();
+        let layout = spec.read_layout_order();
+        Ok(materialize_out_buf(
+            out,
+            context,
+            size,
+            self.dtype(),
+            layout,
+        ))
     }
 
     /// Like `to_buf_strided`, for an `index` the caller checked against the shape and the region
@@ -496,9 +524,7 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     let spec = storage.spec();
     let out_shape = index.size();
     let mut out = materialize_out_buf(out, context, out_shape, dtype, spec.read_layout_order());
-    if out_shape.contains(&0) {
-        return Ok(out);
-    }
+    debug_assert!(!out_shape.contains(&0));
     let max_shape = D::vec(ndim, |dim| out_shape[dim] as u64);
     let read_shape = spec.read_shape_heuristic::<D>(max_shape.as_ref(), shape, dtype.itemsize());
     // Block-space begin/end for NdIter.
@@ -881,6 +907,26 @@ mod tests {
         let ctx = a.read_ctx();
         let buf = a.to_buf_strided(&[1..1, 0..3], &ctx, None).unwrap();
         assert_eq!(buf.strides().len(), 2);
+    }
+
+    #[test]
+    fn empty_reads_write_nothing() {
+        let a = Array::plain_ndarray(array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
+        let sum = a.view() + a.view();
+        let ctx = sum.read_ctx();
+        for (index, shape) in [([1..1, 0..3], [0, 3]), ([0..2, 3..3], [2, 0])] {
+            let read = sum.to_ndarray_sub::<ndarray::Ix2>(&index, &ctx).unwrap();
+            assert_eq!(read.shape(), shape);
+            assert!(sum.to_buf_strided(&index, &ctx, None).is_ok());
+            sum.to_buf_slice(&index, &mut [], &ctx).unwrap();
+
+            let mut dst = [7i32; 6];
+            let mut out = unsafe {
+                StridedBuf::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), &[2, 3], &[12, 4], 4)
+            };
+            sum.to_buf_strided(&index, &ctx, Some(&mut out)).unwrap();
+            assert_eq!(dst, [7; 6]);
+        }
     }
 
     #[test]

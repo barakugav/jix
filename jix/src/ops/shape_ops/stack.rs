@@ -186,9 +186,7 @@ where
             dtype,
             self.spec().read_layout_order(),
         );
-        if output_shape.as_ref().contains(&0) {
-            return Ok(out);
-        }
+        debug_assert!(!output_shape.contains(&0));
 
         let stack_dim = self.stack_dim as usize;
         let arr_ndim = shape.len() - 1;

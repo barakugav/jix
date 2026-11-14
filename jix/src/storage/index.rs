@@ -8,8 +8,8 @@ use crate::NDIM_MAX;
 /// The region [`read_data`](crate::ArrayStorage::read_data) reads: a start and a size per
 /// dimension, covering `start[d]..start[d] + size[d]`.
 ///
-/// There are as many sizes as starts, at most [`NDIM_MAX`] of each, and no `start + size`
-/// overflows.
+/// There are as many sizes as starts, at most [`NDIM_MAX`] of each, no size is zero (the region is
+/// not empty), and no `start + size` overflows.
 #[derive(Clone, Copy, Debug)]
 pub struct Index<'a> {
     start: &'a [u64],
@@ -20,7 +20,7 @@ impl<'a> Index<'a> {
     /// Wraps `start` and `size`, failing with
     /// [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) if there are more than
     /// [`NDIM_MAX`] dims, or with [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) if
-    /// their lengths differ or a `start + size` overflows.
+    /// their lengths differ, a size is zero or a `start + size` overflows.
     #[inline(always)]
     pub fn new(start: &'a [u64], size: &'a [usize]) -> Result<Self> {
         Self::check(start, size)?;
@@ -47,7 +47,7 @@ impl<'a> Index<'a> {
             || start
                 .iter()
                 .zip(size)
-                .any(|(&s, &n)| s.checked_add(n as u64).is_none())
+                .any(|(&s, &n)| n == 0 || s.checked_add(n as u64).is_none())
         {
             return invalid_index_fail(start, size);
         }
@@ -112,9 +112,10 @@ mod tests {
 
     #[test]
     fn invalid_indices_are_rejected() {
-        assert!(Index::new(&[0, 2], &[2, 0]).is_ok());
+        assert!(Index::new(&[0, 2], &[2, 1]).is_ok());
         let kind = |start: &[u64], size: &[usize]| Index::new(start, size).unwrap_err().kind();
         assert_eq!(kind(&[0, 2], &[2]), ErrorKind::InvalidIndex);
+        assert_eq!(kind(&[0, 2], &[2, 0]), ErrorKind::InvalidIndex);
         assert_eq!(kind(&[u64::MAX], &[1]), ErrorKind::InvalidIndex);
         assert_eq!(
             kind(&[0; NDIM_MAX + 1], &[1; NDIM_MAX + 1]),

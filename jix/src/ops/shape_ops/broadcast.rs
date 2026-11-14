@@ -134,18 +134,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             self.dtype().itemsize() as usize,
         )?;
         let ndim = self.is_broadcast.as_ref().len();
-
-        // empty read
-        if index.size().contains(&0) {
-            let out_shape = index.size();
-            return Ok(materialize_out_buf(
-                out,
-                context,
-                out_shape,
-                self.dtype(),
-                self.spec().read_layout_order(),
-            ));
-        }
+        debug_assert!(!index.size().contains(&0));
 
         let inner_start = dim_arr(ndim, |d| {
             if self.is_broadcast[d] {

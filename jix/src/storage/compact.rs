@@ -313,7 +313,7 @@ where
         let dtype = self.blocks.dtype();
         check_out_buf(out.as_deref(), shape, index, dtype.itemsize() as usize)?;
         let out_shape = index.size();
-        let nitems = out_shape.as_ref().iter().product::<usize>();
+        debug_assert!(!out_shape.contains(&0));
         let mut out = materialize_out_buf(
             out,
             context,
@@ -321,9 +321,6 @@ where
             dtype,
             self.spec.as_ref().read_layout_order(),
         );
-        if nitems == 0 {
-            return Ok(out);
-        }
         let is_contiguous = out.is_contiguous(out_shape, dtype);
 
         let ndim = index.ndim();
@@ -355,6 +352,7 @@ where
             && is_block_aligned
             && is_contiguous
         {
+            let nitems = out_shape.iter().product::<usize>();
             let (out_buf, _out_strides) = out.data_mut();
             let buf = &mut out_buf[..nitems * dtype.itemsize() as usize];
             self.blocks.read_block(single_block_idx, buf, context)?;
