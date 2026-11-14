@@ -115,24 +115,29 @@ impl<S: ArrayStorage> Tile<S> {
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Tile<S> {}
-impl<S: ArrayStorage> ArrayStorage for Tile<S> {
-    type ElementType = S::ElementType;
+impl<S: ArrayStorage> Tile<S> {
+    /// Case A - single read, no wrap: the inner start of the region `index` if its output range
+    /// maps to one contiguous input range along dim k, of the same shape.
+    #[inline(always)]
+    fn single_read_start(&self, index: &Index<'_>) -> Option<DimArray<u64>> {
+        let k = self.dim as usize;
+        let l = self.array.shape()[k];
+        let s_in = index.start()[k] % l;
+        (s_in + index.size()[k] as u64 <= l).then(|| {
+            dim_arr(
+                index.ndim(),
+                |d| if d == k { s_in } else { index.start()[d] },
+            )
+        })
+    }
 
-    fn read_data<'a>(
-        &'a self,
+    /// Cases B and C, the regions that wrap around: gather/replicate into `out`.
+    fn read_gather_into(
+        &self,
         index: &Index<'_>,
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
-        let _cache_scope = self.cache_scope.enter(context);
-
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
         let ndim = index.ndim();
         let out_shape = index.size();
         let dtype = self.dtype();
@@ -143,26 +148,9 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         let s = index.start()[k];
         let e = index.end(k);
         let total = e - s;
-        // L > 0 here because output dim k has length L * repeats > 0 (any zero-length range
-        // was already short-circuited above).
+        // L > 0 here because output dim k has length L * repeats > 0.
         let s_in = s % l;
 
-        // Case A - single read, no wrap: the requested output range maps to one contiguous
-        // input range along dim k. Forward directly.
-        if s_in + total <= l {
-            let inner_start = dim_arr(ndim, |d| if d == k { s_in } else { index.start()[d] });
-            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
-            return self.array.read_data(&inner_index, context, out);
-        }
-
-        // Cases B and C gather/replicate into a destination.
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
         let (out_buf, out_strides) = out.data_mut();
         let copier = NdCopier::new(dtype);
 
@@ -192,13 +180,12 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                         )
                     };
                     let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-                    self.array
-                        .read_data(&inner_index, context, Some(&mut sub))?;
+                    self.array.read_data_into(&inner_index, context, &mut sub)?;
                     Ok(())
                 };
             read_region(s_in, len1, 0)?;
             read_region(0, len2, len1)?;
-            return Ok(out);
+            return Ok(());
         }
         // Case C - span > L: read the full period [0, L) along dim k once, then memcpy
         // chunks into the destination. Layout along dim k:
@@ -208,7 +195,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         let inner_start = dim_arr(ndim, |d| if d == k { 0 } else { index.start()[d] });
         let inner_size = dim_arr(ndim, |d| if d == k { l as usize } else { index.size()[d] });
         let inner_full = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-        let tmp = self.array.read_data(&inner_full, context, None)?;
+        let tmp = self.array.read_data(&inner_full, context)?;
         // Use the period view's own strides - it may be a lent (strided) view, not contiguous.
         let (tmp, src_strides) = tmp.data();
 
@@ -301,7 +288,48 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 )
             };
         }
-        Ok(out)
+        Ok(())
+    }
+}
+
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Tile<S> {}
+impl<S: ArrayStorage> ArrayStorage for Tile<S> {
+    type ElementType = S::ElementType;
+
+    fn read_data<'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+    ) -> Result<StridedBuf<'a>> {
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        let _cache_scope = self.cache_scope.enter(context);
+        if let Some(inner_start) = self.single_read_start(index) {
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
+            return self.array.read_data(&inner_index, context);
+        }
+        read_via_push(
+            index,
+            context,
+            self.dtype(),
+            self.spec().read_layout_order(),
+            |out| self.read_gather_into(index, context, out),
+        )
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        let _cache_scope = self.cache_scope.enter(context);
+        if let Some(inner_start) = self.single_read_start(index) {
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
+            return self.array.read_data_into(&inner_index, context, out);
+        }
+        self.read_gather_into(index, context, out)
     }
 
     #[inline(always)]

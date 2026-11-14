@@ -63,11 +63,23 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         match &self.0 {
-            ToCompactInner::Original(s) => s.read_data(index, context, out),
-            ToCompactInner::Compact(c) => c.read_data(index, context, out),
+            ToCompactInner::Original(s) => s.read_data(index, context),
+            ToCompactInner::Compact(c) => c.read_data(index, context),
+        }
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        match &self.0 {
+            ToCompactInner::Original(s) => s.read_data_into(index, context, out),
+            ToCompactInner::Compact(c) => c.read_data_into(index, context, out),
         }
     }
 

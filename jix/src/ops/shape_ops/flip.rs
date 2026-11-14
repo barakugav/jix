@@ -81,25 +81,13 @@ impl<S: ArrayStorage> Flip<S> {
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Flip<S> {}
-impl<S: ArrayStorage> ArrayStorage for Flip<S> {
-    type ElementType = S::ElementType;
-
-    fn read_data<'a>(
-        &'a self,
+impl<S: ArrayStorage> Flip<S> {
+    fn read_into_unchecked(
+        &self,
         index: &Index<'_>,
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        if self.is_identity() {
-            return self.array.read_data(index, context, out);
-        }
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
         let _cache_scope = self.cache_scope.enter(context);
 
         let ndim = index.ndim();
@@ -119,15 +107,8 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
         // Read the (unreversed) inner region as a view, then mirror-copy slabs into the destination.
         let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
-        let tmp = self.array.read_data(&inner_index, context, None)?;
+        let tmp = self.array.read_data(&inner_index, context)?;
         let (tmp_buf, src_strides) = tmp.data();
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
         debug_assert!(!out_shape.contains(&0));
         let (out_buf, out_strides) = out.data_mut();
 
@@ -174,7 +155,44 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
                 )
             };
         }
-        Ok(out)
+        Ok(())
+    }
+}
+
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Flip<S> {}
+impl<S: ArrayStorage> ArrayStorage for Flip<S> {
+    type ElementType = S::ElementType;
+
+    fn read_data<'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+    ) -> Result<StridedBuf<'a>> {
+        if self.is_identity() {
+            return self.array.read_data(index, context);
+        }
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        read_via_push(
+            index,
+            context,
+            self.dtype(),
+            self.spec().read_layout_order(),
+            |out| self.read_into_unchecked(index, context, out),
+        )
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        if self.is_identity() {
+            return self.array.read_data_into(index, context, out);
+        }
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        self.read_into_unchecked(index, context, out)
     }
 
     #[inline(always)]

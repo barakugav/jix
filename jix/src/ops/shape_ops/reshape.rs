@@ -154,19 +154,16 @@ impl<S> Reshape<S> {
         Self::new(array.into_storage(), shape).map(Array::from_storage)
     }
 }
-impl<S> crate::storage::ArrayStorageImpl for Reshape<S> {}
-impl<S> ArrayStorage for Reshape<S>
+impl<S> Reshape<S>
 where
     S: ArrayStorage,
 {
-    type ElementType = S::ElementType;
-
-    fn read_data<'a>(
-        &'a self,
+    fn read_into_unchecked(
+        &self,
         index: &Index<'_>,
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
         // -----------------------------------------------------------------------
         // Core concept
         // -----------------------------------------------------------------------
@@ -257,22 +254,8 @@ where
         //      its C-order position in `dst`, so no temporary buffer or extra copy is
         //      needed.
         // -----------------------------------------------------------------------
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
         let _cache_scope = self.cache_scope.enter(context);
-        let dtype = self.dtype();
         let out_shape = index.size();
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
         debug_assert!(!out_shape.contains(&0));
         // Gather each matched-dims block into its unmatched-dims byte offset in the destination.
         let (out_buf, out_strides) = out.data_mut();
@@ -379,9 +362,43 @@ where
                 )
             };
             let read_index = unsafe { Index::new_unchecked(&read_start, &read_size) };
-            self.array.read_data(&read_index, context, Some(&mut sub))?;
+            self.array.read_data_into(&read_index, context, &mut sub)?;
         }
-        Ok(out)
+        Ok(())
+    }
+}
+
+impl<S> crate::storage::ArrayStorageImpl for Reshape<S> {}
+impl<S> ArrayStorage for Reshape<S>
+where
+    S: ArrayStorage,
+{
+    type ElementType = S::ElementType;
+
+    fn read_data<'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+    ) -> Result<StridedBuf<'a>> {
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        read_via_push(
+            index,
+            context,
+            self.dtype(),
+            self.spec().read_layout_order(),
+            |out| self.read_into_unchecked(index, context, out),
+        )
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        self.read_into_unchecked(index, context, out)
     }
 
     #[inline(always)]

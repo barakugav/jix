@@ -77,59 +77,46 @@ impl<S: ArrayStorage> Roll<S> {
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Roll<S> {}
-impl<S: ArrayStorage> ArrayStorage for Roll<S> {
-    type ElementType = S::ElementType;
+impl<S: ArrayStorage> Roll<S> {
+    /// The inner start of the region `index` if it does not wrap around: the rolled output range
+    /// on dim k then maps to a single contiguous input range, of the same shape.
+    #[inline(always)]
+    fn unwrapped_start(&self, index: &Index<'_>) -> Option<DimArray<u64>> {
+        let (k, shift) = (self.dim as usize, self.shift);
+        let (s, e) = (index.start()[k], index.end(k));
+        if s < shift && e > shift {
+            return None;
+        }
+        let j_start = if s >= shift {
+            s - shift
+        } else {
+            s + self.shape()[k] - shift
+        };
+        Some(dim_arr(index.ndim(), |d| {
+            if d == k {
+                j_start
+            } else {
+                index.start()[d]
+            }
+        }))
+    }
 
-    fn read_data<'a>(
-        &'a self,
+    /// Reads a region that wraps around into `out`: splits the output along dim k into two
+    /// regions and gathers each into the destination.
+    ///   Region 1 (output dim-k [0, len1)):   input dim-k [s + L - shift, L), length len1.
+    ///   Region 2 (output dim-k [len1, end)): input dim-k [0, e - shift),     length len2.
+    fn read_wrapped_into(
+        &self,
         index: &Index<'_>,
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        if self.is_identity() {
-            return self.array.read_data(index, context, out);
-        }
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
-        let _cache_scope = self.cache_scope.enter(context);
-
-        let k = self.dim as usize;
-        let shift = self.shift;
-
-        let ndim = index.ndim();
-        let dtype = self.dtype();
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        let (k, shift) = (self.dim as usize, self.shift);
         let l = self.shape()[k];
-        let s = index.start()[k];
-        let e = index.end(k);
-
-        // Non-wrap: the rolled output sub-range on dim k maps to a single contiguous input
-        // range. The shape of that read is exactly `out_shape`, so we read straight into buf.
-        if s >= shift || e <= shift {
-            let j_start = if s >= shift { s - shift } else { s + l - shift };
-            let inner_start = dim_arr(ndim, |d| if d == k { j_start } else { index.start()[d] });
-            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
-            return self.array.read_data(&inner_index, context, out);
-        }
-
-        // Wrap: split the output along dim k into two regions and gather each into the destination.
-        //   Region 1 (output dim-k [0, len1)):   input dim-k [s + L - shift, L), length len1.
-        //   Region 2 (output dim-k [len1, end)): input dim-k [0, e - shift),     length len2.
+        let (s, e) = (index.start()[k], index.end(k));
         let len1 = shift - s;
         let len2 = e - shift;
-        let out_shape = index.size();
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
-        debug_assert!(!out_shape.contains(&0));
+        debug_assert!(!index.size().contains(&0));
         let (out_buf, out_strides) = out.data_mut();
         let mut read_region = |start_k: u64, size_k: u64, dst_dim_k_offset: u64| -> Result<()> {
             let ndim = index.ndim();
@@ -149,14 +136,57 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
                 )
             };
             let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-            self.array
-                .read_data(&inner_index, context, Some(&mut sub))?;
-            Ok(())
+            self.array.read_data_into(&inner_index, context, &mut sub)
         };
         read_region(s + l - shift, len1, 0)?;
-        read_region(0, len2, len1)?;
+        read_region(0, len2, len1)
+    }
+}
 
-        Ok(out)
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Roll<S> {}
+impl<S: ArrayStorage> ArrayStorage for Roll<S> {
+    type ElementType = S::ElementType;
+
+    fn read_data<'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+    ) -> Result<StridedBuf<'a>> {
+        if self.is_identity() {
+            return self.array.read_data(index, context);
+        }
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        let _cache_scope = self.cache_scope.enter(context);
+        if let Some(inner_start) = self.unwrapped_start(index) {
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
+            return self.array.read_data(&inner_index, context);
+        }
+        read_via_push(
+            index,
+            context,
+            self.dtype(),
+            self.spec().read_layout_order(),
+            |out| self.read_wrapped_into(index, context, out),
+        )
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        if self.is_identity() {
+            return self.array.read_data_into(index, context, out);
+        }
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        let _cache_scope = self.cache_scope.enter(context);
+        if let Some(inner_start) = self.unwrapped_start(index) {
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
+            return self.array.read_data_into(&inner_index, context, out);
+        }
+        self.read_wrapped_into(index, context, out)
     }
 
     #[inline(always)]

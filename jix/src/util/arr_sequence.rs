@@ -66,8 +66,14 @@ pub(crate) trait ArraySequenceImpl {
         arr: usize,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>>;
+    fn read_data_into(
+        &self,
+        arr: usize,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()>;
     fn shape(&self, arr: usize) -> &[u64];
     fn dtype(&self, arr: usize) -> &Dtype;
     fn spec(&self, arr: usize) -> ArraySpec<'_>;
@@ -168,9 +174,19 @@ where
         arr: usize,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        self[arr].storage.read_data(index, context, out)
+        self[arr].storage.read_data(index, context)
+    }
+
+    #[inline(always)]
+    fn read_data_into(
+        &self,
+        arr: usize,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        self[arr].storage.read_data_into(index, context, out)
     }
 
     #[inline(always)]
@@ -266,9 +282,19 @@ where
         arr: usize,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        self[arr].storage.read_data(index, context, out)
+        self[arr].storage.read_data(index, context)
+    }
+
+    #[inline(always)]
+    fn read_data_into(
+        &self,
+        arr: usize,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        self[arr].storage.read_data_into(index, context, out)
     }
 
     #[inline(always)]
@@ -363,9 +389,19 @@ where
         arr: usize,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        self[arr].storage.read_data(index, context, out)
+        self[arr].storage.read_data(index, context)
+    }
+
+    #[inline(always)]
+    fn read_data_into(
+        &self,
+        arr: usize,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        self[arr].storage.read_data_into(index, context, out)
     }
 
     #[inline(always)]
@@ -485,9 +521,19 @@ where
         arr: usize,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        self[arr].storage.read_data(index, context, out)
+        self[arr].storage.read_data(index, context)
+    }
+
+    #[inline(always)]
+    fn read_data_into(
+        &self,
+        arr: usize,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        self[arr].storage.read_data_into(index, context, out)
     }
 
     #[inline(always)]
@@ -609,10 +655,23 @@ macro_rules! impl_array_sequence_for_tuple {
                 arr: usize,
                 index: &Index<'_>,
                 context: &'read ReadContext,
-                out: Option<&'read mut StridedBuf<'_>>,
             ) -> Result<StridedBuf<'read>> {
                 match arr {
-                    $($idx => self.$idx.storage.read_data(index, context, out),)+
+                    $($idx => self.$idx.storage.read_data(index, context),)+
+                    _ => out_of_bounds_array_index(arr),
+                }
+            }
+
+            #[inline(always)]
+            fn read_data_into(
+                &self,
+                arr: usize,
+                index: &Index<'_>,
+                context: &ReadContext,
+                out: &mut StridedBuf<'_>,
+            ) -> Result<()> {
+                match arr {
+                    $($idx => self.$idx.storage.read_data_into(index, context, out),)+
                     _ => out_of_bounds_array_index(arr),
                 }
             }

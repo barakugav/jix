@@ -177,47 +177,14 @@ where
         Self::new(arrays, dim).map(Array::from_storage)
     }
 }
-impl<ArraysT> crate::storage::ArrayStorageImpl for Concatenate<ArraysT> where
-    ArraysT: ArraySequence + ArraySequenceElementType
-{
-}
-impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
+impl<ArraysT> Concatenate<ArraysT>
 where
     ArraysT: ArraySequence + ArraySequenceElementType,
 {
-    type ElementType = ArraysT::ElementType;
-
-    /// Fills `buf` with the slice of the concatenated array described by `index`.
-    ///
-    /// `borders` stores the cumulative end positions of each sub-array along `concat_dim`, so
-    /// sub-array `i` owns the range `[borders[i-1], borders[i])` (with `borders[-1] == 0`).
-    /// Only the sub-arrays that overlap with `index[concat_dim]` are read.
-    ///
-    /// To skip leading non-overlapping arrays efficiently, the first overlapping sub-array is
-    /// located with a linear scan for small `borders` slices or a binary search otherwise.
-    /// The loop then runs forward and breaks as soon as an array starts past the requested range.
-    /// A request that lies inside a single sub-array is forwarded to it as is.
-    ///
-    /// Each overlapping sub-array is read with a local (array-relative) index on the concat dim,
-    /// straight into its sub-region of `buf` at the right byte offset using the destination's own
-    /// strides - no temporary buffer. When `buf` is contiguous and all dimensions before `concat_dim`
-    /// have size <= 1, each sub-array's region is itself contiguous and is read into a plain contiguous
-    /// slice (the `inner_contiguous` fast path).
-    fn read_data<'a>(
-        &'a self,
-        index: &Index<'_>,
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        let dtype = self.dtype();
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
-        let _cache_scope = self.cache_scope.enter(context);
-
+    /// The array holding all of the region `index` along the concat dim, with the start of the
+    /// region in it, or else the first array the region overlaps.
+    #[inline(always)]
+    fn locate(&self, index: &Index<'_>) -> std::result::Result<(usize, DimArray<u64>), usize> {
         let concat_dim = self.concat_dim as usize;
         let req_start = index.start()[concat_dim];
         let req_end = index.end(concat_dim);
@@ -246,29 +213,32 @@ where
                     index.start()[dim]
                 }
             });
-            let sub_index = unsafe { Index::new_unchecked(&sub_start, index.size()) };
-            return self.arrays.read_data(first_arr, &sub_index, context, out);
+            return Ok((first_arr, sub_start));
         }
 
+        Err(first_arr)
+    }
+
+    /// Reads the region `index`, spanning several arrays from `first_arr` on, into `out`.
+    fn read_gather_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+        first_arr: usize,
+    ) -> Result<()> {
+        let dtype = self.dtype();
+        let concat_dim = self.concat_dim as usize;
+        let req_start = index.start()[concat_dim];
+        let req_end = index.end(concat_dim);
         let itemsize = dtype.itemsize() as usize;
         let output_shape = index.size();
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            output_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
         debug_assert!(!output_shape.contains(&0));
 
         // When the destination is contiguous and all dims before concat_dim have size <=1, each
         // array's data is a contiguous run in the destination.
         let inner_contiguous = out.is_contiguous(output_shape, dtype)
-            && output_shape
-                .as_ref()
-                .iter()
-                .take(concat_dim)
-                .all(|&s| s <= 1);
+            && output_shape.iter().take(concat_dim).all(|&s| s <= 1);
         let (out_buf, output_strides) = out.data_mut();
         let concat_stride = output_strides[concat_dim];
 
@@ -326,9 +296,76 @@ where
             };
             let sub_index = unsafe { Index::new_unchecked(&sub_start, &sub_size) };
             self.arrays
-                .read_data(arr, &sub_index, context, Some(&mut sub))?;
+                .read_data_into(arr, &sub_index, context, &mut sub)?;
         }
-        Ok(out)
+        Ok(())
+    }
+}
+
+impl<ArraysT> crate::storage::ArrayStorageImpl for Concatenate<ArraysT> where
+    ArraysT: ArraySequence + ArraySequenceElementType
+{
+}
+impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
+where
+    ArraysT: ArraySequence + ArraySequenceElementType,
+{
+    type ElementType = ArraysT::ElementType;
+
+    /// Fills `buf` with the slice of the concatenated array described by `index`.
+    ///
+    /// `borders` stores the cumulative end positions of each sub-array along `concat_dim`, so
+    /// sub-array `i` owns the range `[borders[i-1], borders[i])` (with `borders[-1] == 0`).
+    /// Only the sub-arrays that overlap with `index[concat_dim]` are read.
+    ///
+    /// To skip leading non-overlapping arrays efficiently, the first overlapping sub-array is
+    /// located with a linear scan for small `borders` slices or a binary search otherwise.
+    /// The loop then runs forward and breaks as soon as an array starts past the requested range.
+    /// A request that lies inside a single sub-array is forwarded to it as is.
+    ///
+    /// Each overlapping sub-array is read with a local (array-relative) index on the concat dim,
+    /// straight into its sub-region of `buf` at the right byte offset using the destination's own
+    /// strides - no temporary buffer. When `buf` is contiguous and all dimensions before `concat_dim`
+    /// have size <= 1, each sub-array's region is itself contiguous and is read into a plain contiguous
+    /// slice (the `inner_contiguous` fast path).
+    fn read_data<'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+    ) -> Result<StridedBuf<'a>> {
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        let _cache_scope = self.cache_scope.enter(context);
+        match self.locate(index) {
+            Ok((arr, sub_start)) => {
+                let sub_index = unsafe { Index::new_unchecked(&sub_start, index.size()) };
+                self.arrays.read_data(arr, &sub_index, context)
+            }
+            Err(first_arr) => read_via_push(
+                index,
+                context,
+                self.dtype(),
+                self.spec().read_layout_order(),
+                |out| self.read_gather_into(index, context, out, first_arr),
+            ),
+        }
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        let _cache_scope = self.cache_scope.enter(context);
+        match self.locate(index) {
+            Ok((arr, sub_start)) => {
+                let sub_index = unsafe { Index::new_unchecked(&sub_start, index.size()) };
+                self.arrays.read_data_into(arr, &sub_index, context, out)
+            }
+            Err(first_arr) => self.read_gather_into(index, context, out, first_arr),
+        }
     }
 
     #[inline(always)]

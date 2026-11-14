@@ -2,7 +2,7 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
-    check_out_buf, materialize_out_buf, ArrayStorageInfo, Compact, Index, StridedBuf,
+    check_read, check_read_into, read_via_push, ArrayStorageInfo, Compact, Index, StridedBuf,
 };
 use crate::util::dim_arr;
 use crate::util::iter::NdIter;
@@ -237,36 +237,10 @@ impl<T> CompactArray<T> {
             f: F,
             spec: ArraySpecOwned,
         }
-        impl<T, F> crate::storage::ArrayStorageImpl for FnStorage<T, F> {}
-        impl<T, F> ArrayStorage for FnStorage<T, F>
-        where
-            T: Dtyped,
-            F: Fn(&[u64]) -> T,
-        {
-            type ElementType = Ty<T>;
-
-            #[inline]
-            fn read_data<'a>(
-                &'a self,
-                index: &Index<'_>,
-                context: &'a ReadContext,
-                out: Option<&'a mut StridedBuf<'_>>,
-            ) -> Result<StridedBuf<'a>> {
-                check_out_buf(
-                    out.as_deref(),
-                    self.shape(),
-                    index,
-                    self.dtype().itemsize() as usize,
-                )?;
+        impl<T: Dtyped, F: Fn(&[u64]) -> T> FnStorage<T, F> {
+            /// Writes `f` of each position of the region `index` into `out`.
+            fn fill(&self, index: &Index<'_>, out: &mut StridedBuf<'_>) {
                 let ndim = index.ndim();
-                let read_shape = index.size();
-                let mut out = materialize_out_buf(
-                    out,
-                    context,
-                    read_shape,
-                    self.dtype(),
-                    self.spec().read_layout_order(),
-                );
                 let (out_buf, out_strides) = out.data_mut();
 
                 let alignment = self.dtype().alignment().as_usize();
@@ -290,7 +264,40 @@ impl<T> CompactArray<T> {
                         unsafe { base.add(dst_offset).cast::<T>().write_unaligned(value) };
                     });
                 }
-                Ok(out)
+            }
+        }
+        impl<T, F> crate::storage::ArrayStorageImpl for FnStorage<T, F> {}
+        impl<T, F> ArrayStorage for FnStorage<T, F>
+        where
+            T: Dtyped,
+            F: Fn(&[u64]) -> T,
+        {
+            type ElementType = Ty<T>;
+
+            #[inline]
+            fn read_data<'a>(
+                &'a self,
+                index: &Index<'_>,
+                context: &'a ReadContext,
+            ) -> Result<StridedBuf<'a>> {
+                check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+                let layout_order = self.spec().read_layout_order();
+                read_via_push(index, context, self.dtype(), layout_order, |out| {
+                    self.fill(index, out);
+                    Ok(())
+                })
+            }
+
+            #[inline]
+            fn read_data_into(
+                &self,
+                index: &Index<'_>,
+                _context: &ReadContext,
+                out: &mut StridedBuf<'_>,
+            ) -> Result<()> {
+                check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+                self.fill(index, out);
+                Ok(())
             }
 
             #[inline(always)]

@@ -83,23 +83,23 @@ uv pip install -r scripts/dev_requirements.txt   # maturin, pytest, pytest-xdist
 ### `Array<S: ArrayStorage>` - the generic core
 
 `ArrayStorage` (`jix/src/storage/core_trait.rs`, sealed: every impl also needs an empty
-`impl crate::storage::ArrayStorageImpl for X {}` marker) exposes exactly three things: `shape()`, `dtype()`,
-and `read_data(index_ranges, ctx, out)` which reads a rectangular sub-region and returns it as a
-`StridedBuf` - a block of bytes plus one byte stride per dimension (`jix/src/storage/buf.rs`).
-**Everything** - arithmetic, slicing, reductions, serialization - is built on top of these three.
+`impl crate::storage::ArrayStorageImpl for X {}` marker) exposes `shape()`, `dtype()`, and two
+reads of a rectangular sub-region (an `Index`: a start and a size per dimension), mirroring
+NumPy's `out=`:
 
-`read_data` has two modes, mirroring NumPy's `out=`:
+- **pull** - `read_data(index, ctx)` returns the cheapest buffer it can as a `StridedBuf` - a block
+  of bytes plus one byte stride per dimension (`jix/src/storage/buf.rs`): a borrowed view into its
+  own memory (possibly with broadcast 0-stride dims) or a freshly materialized one, with strides of
+  its choosing. Shape ops exploit this to hand back a re-strided view instead of copying.
+- **push** - `read_data_into(index, ctx, out)` writes the region into `out` at `out`'s own strides.
+  This is what lets a whole op pipeline write straight into the caller's final destination.
 
-- **pull** (`out` is `None`) - the impl returns the cheapest buffer it can, a borrowed view into its
-  own memory (possibly with broadcast 0-stride dims) or a freshly materialized one, and picks the
-  strides itself. Shape ops exploit this to hand back a re-strided view instead of copying.
-- **push** (`out` is `Some(dst)`) - the region is written into `dst` at `dst`'s own strides, and the
-  returned buffer is a view of `dst`. This is what lets a whole op pipeline write straight into the
-  caller's final destination.
+**Everything** - arithmetic, slicing, reductions, serialization - is built on top of these.
 
-Impls start with `check_out_buf(...)` and then `materialize_out_buf(out, ctx, out_shape, dtype)`,
-which resolves the two modes into a single writable buffer - the caller's in push mode, a pooled
-allocation in pull mode.
+An op that writes its result implements the push read on an unchecked body, and the pull read as
+`read_via_push`, which hands that body a pooled buffer from `alloc_out_buf`; a view-producing op
+implements the pull read, and copies the view into `out` in the push read. Each read first checks
+its arguments: `check_read` (the index against the shape) or `check_read_into` (also `out`).
 
 `Array::to_buf_strided(index, ctx, out)` is the array-level entry point: same two modes, plus a
 heuristic that cuts an oversized request into cache-sized pieces read one at a time.

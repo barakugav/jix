@@ -371,9 +371,18 @@ macro_rules! define_swapped_cmp {
                 &'a self,
                 index: &Index<'_>,
                 context: &'a ReadContext,
-                out: Option<&'a mut StridedBuf<'_>>,
             ) -> Result<StridedBuf<'a>> {
-                self.0.read_data(index, context, out)
+                self.0.read_data(index, context)
+            }
+
+            #[inline(always)]
+            fn read_data_into(
+                &self,
+                index: &Index<'_>,
+                context: &ReadContext,
+                out: &mut StridedBuf<'_>,
+            ) -> Result<()> {
+                self.0.read_data_into(index, context, out)
             }
 
             #[allow(refining_impl_trait)]

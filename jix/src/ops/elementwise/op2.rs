@@ -114,17 +114,25 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
-        context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        context.read_cached(self.cache_id, index, || {
             self.read_as_elementwise_pipeline::<K::Output>(index, context)?
-                .to_buf(index, context, out)
+                .to_buf(index, context)
+        })
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        context.read_cached_into(self.cache_id, index, self.dtype(), out, |out| {
+            self.read_as_elementwise_pipeline::<K::Output>(index, context)?
+                .to_buf_into(index, context, out)
         })
     }
 

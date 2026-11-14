@@ -4,7 +4,8 @@ use crate::storage::params::{
     read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned,
 };
 use crate::storage::{
-    check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, Index, StridedBuf, Ty, TypeDyn,
+    check_read, check_read_into, ArraySpec, ArrayStorageInfo, ElementType, Index, StridedBuf, Ty,
+    TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
 use crate::ReadContext;
@@ -442,6 +443,26 @@ impl<ET> Array<Plain<&(), ET>> {
     }
 }
 
+impl<A, ET: ElementType> Plain<A, ET> {
+    /// The bytes of the region `index`, at the strides of `self`.
+    #[inline(always)]
+    fn region(&self, index: &Index<'_>) -> &[u8] {
+        let mut offset = 0;
+        let mut span = self.dtype().itemsize() as usize;
+        let dims = index
+            .start()
+            .iter()
+            .zip(index.size())
+            .zip(self.strides.as_ref());
+        for ((&start, &size), &stride) in dims {
+            debug_assert!(size != 0);
+            offset += start as usize * stride;
+            span += (size - 1) * stride;
+        }
+        unsafe { std::slice::from_raw_parts(self.data.as_ptr().add(offset), span) }
+    }
+}
+
 impl<A, ET> crate::storage::ArrayStorageImpl for Plain<A, ET> {}
 impl<A, ET> ArrayStorage for Plain<A, ET>
 where
@@ -454,37 +475,23 @@ where
         &'a self,
         index: &Index<'_>,
         _context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        Ok(unsafe { StridedBuf::from_slice(self.region(index), self.strides.clone()) })
+    }
+
+    #[inline(always)]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        _context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
         let dtype = self.dtype();
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
-
-        let mut offset = 0;
-        let mut span = dtype.itemsize() as usize;
-        let dims = index
-            .start()
-            .iter()
-            .zip(index.size())
-            .zip(self.strides.as_ref());
-        for ((&start, &size), &stride) in dims {
-            debug_assert!(size != 0);
-            offset += start as usize * stride;
-            span += (size - 1) * stride;
-        }
-        let src = unsafe { std::slice::from_raw_parts(self.data.as_ptr().add(offset), span) };
-
-        match out {
-            None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.clone()) }),
-            Some(out) => {
-                unsafe { out.copy_from(src, self.strides.as_ref(), index.size(), dtype) };
-                Ok(out.view_mut())
-            }
-        }
+        check_read_into(out, self.shape(), index, dtype.itemsize() as usize)?;
+        let src = self.region(index);
+        unsafe { out.copy_from(src, self.strides.as_ref(), index.size(), dtype) };
+        Ok(())
     }
 
     #[inline(always)]

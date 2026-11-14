@@ -153,39 +153,20 @@ where
         Self::new(arrays, dim).map(Array::from_storage)
     }
 }
-impl<ArraysT> crate::storage::ArrayStorageImpl for Stack<ArraysT> where
-    ArraysT: ArraySequence + ArraySequenceElementType
-{
-}
-impl<ArraysT> ArrayStorage for Stack<ArraysT>
+impl<ArraysT> Stack<ArraysT>
 where
     ArraysT: ArraySequence + ArraySequenceElementType,
 {
-    type ElementType = ArraysT::ElementType;
-
-    fn read_data<'a>(
-        &'a self,
+    fn read_into_unchecked(
+        &self,
         index: &Index<'_>,
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
         let shape = self.shape();
         let dtype = self.dtype();
-        check_out_buf(
-            out.as_deref(),
-            shape,
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
         let _cache_scope = self.cache_scope.enter(context);
         let output_shape = index.size();
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            output_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
         debug_assert!(!output_shape.contains(&0));
 
         let stack_dim = self.stack_dim as usize;
@@ -243,9 +224,46 @@ where
                 }
             };
             self.arrays
-                .read_data(arr, &arr_index, context, Some(&mut sub))?;
+                .read_data_into(arr, &arr_index, context, &mut sub)?;
         }
-        Ok(out)
+        Ok(())
+    }
+}
+
+impl<ArraysT> crate::storage::ArrayStorageImpl for Stack<ArraysT> where
+    ArraysT: ArraySequence + ArraySequenceElementType
+{
+}
+impl<ArraysT> ArrayStorage for Stack<ArraysT>
+where
+    ArraysT: ArraySequence + ArraySequenceElementType,
+{
+    type ElementType = ArraysT::ElementType;
+
+    fn read_data<'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+    ) -> Result<StridedBuf<'a>> {
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        read_via_push(
+            index,
+            context,
+            self.dtype(),
+            self.spec().read_layout_order(),
+            |out| self.read_into_unchecked(index, context, out),
+        )
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        self.read_into_unchecked(index, context, out)
     }
 
     #[inline(always)]

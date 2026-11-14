@@ -86,47 +86,37 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        let tmp = self.array.read_data(index, context)?;
+        Ok(unsafe { tmp.with_offset(self.sub_field_offset as usize) })
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
         let dst_dtype = self.dtype();
-
-        let tmp = self.array.read_data(index, context, None)?;
-        let out_shape = index.size();
-
-        debug_assert!(!out_shape.contains(&0));
-        if out.is_none() {
-            return Ok(unsafe { tmp.with_offset(self.sub_field_offset as usize) });
-        }
-
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dst_dtype,
-            self.spec().read_layout_order(),
-        );
+        check_read_into(out, self.shape(), index, dst_dtype.itemsize() as usize)?;
+        let tmp = self.array.read_data(index, context)?;
         let (tmp_buf, src_strides) = tmp.data();
         let src = unsafe { tmp_buf.get_unchecked(self.sub_field_offset as usize..) };
-
         let (out_buf, out_strides) = out.data_mut();
         let copier = NdCopier::new(dst_dtype);
         unsafe {
             copier.copy(
                 PtrNoalias::from_slice(src),
                 PtrMutNoalias::from_slice(out_buf),
-                out_shape,
+                index.size(),
                 src_strides,
                 out_strides,
                 dst_dtype,
             )
         };
-        Ok(out)
+        Ok(())
     }
 
     #[inline(always)]
@@ -253,7 +243,7 @@ mod tests {
         // Pull path (out = None) must return a strided view of the parent buffer, not a copy.
         let view = field
             .storage()
-            .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, None)
+            .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx)
             .unwrap();
         // The give-away that it is zero-copy: the stride is the parent struct's stride (8 bytes),
         // not the field-packed stride (4) that a materialized copy would carry.

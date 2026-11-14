@@ -116,23 +116,14 @@ where
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Broadcast<S> {}
-impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
-    type ElementType = S::ElementType;
-
-    #[inline]
-    fn read_data<'a>(
+impl<S: ArrayStorage> Broadcast<S> {
+    /// Reads the inner region of `index`, and the strides that broadcast it to `index`.
+    #[inline(always)]
+    fn read_inner<'a>(
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+    ) -> Result<(StridedBuf<'a>, DimArray<usize>)> {
         let ndim = self.is_broadcast.as_ref().len();
         debug_assert!(!index.size().contains(&0));
 
@@ -151,32 +142,49 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             }
         });
         let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-        let mut inner = self.array.read_data(&inner_index, context, None)?;
+        let inner = self.array.read_data(&inner_index, context)?;
 
         let inner_strides = inner.strides();
-        let broadcasted_strides = dim_arr(ndim, |dim| {
+        let strides = dim_arr(ndim, |dim| {
             if self.is_broadcast[dim] {
                 0
             } else {
                 inner_strides[dim]
             }
         });
+        Ok((inner, strides))
+    }
+}
 
-        match out {
-            None => {
-                inner.make_readonly();
-                Ok(unsafe { inner.with_strides(broadcasted_strides) })
-            }
-            Some(out) => {
-                let out_shape = index.size();
-                let (src, _) = inner.data();
-                // SAFETY: `src_strides` are the inner view's strides with broadcast dims zeroed
-                unsafe {
-                    out.copy_from(src, broadcasted_strides.as_ref(), out_shape, self.dtype())
-                };
-                Ok(out.view_mut())
-            }
-        }
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Broadcast<S> {}
+impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
+    type ElementType = S::ElementType;
+
+    #[inline]
+    fn read_data<'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+    ) -> Result<StridedBuf<'a>> {
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        let (mut inner, strides) = self.read_inner(index, context)?;
+        inner.make_readonly();
+        Ok(unsafe { inner.with_strides(strides) })
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        let (inner, strides) = self.read_inner(index, context)?;
+        let (src, _) = inner.data();
+        // SAFETY: `strides` are the inner view's strides with broadcast dims zeroed
+        unsafe { out.copy_from(src, strides.as_ref(), index.size(), self.dtype()) };
+        Ok(())
     }
 
     #[inline(always)]

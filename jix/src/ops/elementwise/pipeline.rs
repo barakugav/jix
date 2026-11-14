@@ -60,25 +60,30 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         simd: S,
     ) -> [T; N];
 
-    fn to_buf<'b>(
-        &mut self,
-        index: &Index<'_>,
-        context: &'b ReadContext,
-        out: Option<&'b mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'b>>
+    /// Pulls the region into a buffer laid out like the operands.
+    fn to_buf<'b>(&mut self, index: &Index<'_>, context: &'b ReadContext) -> Result<StridedBuf<'b>>
     where
         T: Dtyped,
         Self: Sized,
     {
-        let is_pull = out.is_none();
-        let mut out = materialize_pipeline_out_buf(
-            index,
-            &mut self.operands(),
-            Dtype::new_ref::<T>(),
-            context,
-            out,
-        );
+        let mut out =
+            alloc_pipeline_out_buf(index, &mut self.operands(), Dtype::new_ref::<T>(), context);
+        self.to_buf_into(index, context, &mut out)?;
+        make_readonly_if_aliasing(index, &mut out);
+        Ok(out)
+    }
 
+    /// Pushes the region into `out`.
+    fn to_buf_into(
+        &mut self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()>
+    where
+        T: Dtyped,
+        Self: Sized,
+    {
         let to_buf_fn = const {
             #[allow(clippy::type_complexity)]
             let mut to_buf_fn: Option<
@@ -114,12 +119,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
             }
         };
 
-        to_buf_fn(self, index, &mut out, context)?;
-
-        if is_pull {
-            make_readonly_if_aliasing(index, &mut out);
-        }
-        Ok(out)
+        to_buf_fn(self, index, out, context)
     }
 }
 impl<P, T> ElementwisePipeline<T> for P where P: ElementwisePipelineImpl<T> {}
@@ -864,26 +864,20 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
 }
 
 #[inline(never)]
-fn materialize_pipeline_out_buf<'b, 's>(
+fn alloc_pipeline_out_buf<'b, 's>(
     index: &Index<'_>,
     operands: &mut dyn Iterator<Item = &'s Operand<'s>>,
     output_dtype: &Dtype,
     context: &'b ReadContext,
-    out: Option<&'b mut StridedBuf<'_>>,
 ) -> StridedBuf<'b> {
     let shape = index.size();
-    match out {
-        Some(out) => out.view_mut(),
-        None => {
-            let itemsize = output_dtype.itemsize() as usize;
-            let (strides, real_dims) = pick_output_layout(operands, shape, itemsize);
-            let nitems = (0..shape.len())
-                .map(|d| if real_dims.get(d) { shape[d] } else { 1 })
-                .product::<usize>();
-            let buf = context.allocate_buf(nitems * itemsize, output_dtype.alignment());
-            unsafe { StridedBuf::from_pool(buf, strides) }
-        }
-    }
+    let itemsize = output_dtype.itemsize() as usize;
+    let (strides, real_dims) = pick_output_layout(operands, shape, itemsize);
+    let nitems = (0..shape.len())
+        .map(|d| if real_dims.get(d) { shape[d] } else { 1 })
+        .product::<usize>();
+    let buf = context.allocate_buf(nitems * itemsize, output_dtype.alignment());
+    unsafe { StridedBuf::from_pool(buf, strides) }
 }
 
 #[inline(never)]
@@ -1177,14 +1171,14 @@ mod tests {
                 let mut out = unsafe {
                     StridedBuf::from_raw_parts_mut(dst.ptr_mut(), shape, &strides[0], itemsize)
                 };
-                node.to_buf(&index, &context, Some(&mut out)).unwrap();
+                node.to_buf_into(&index, &context, &mut out).unwrap();
             }
             let got = (0..nitems)
                 .map(|k| dst.get::<T>(offs[0][k]))
                 .collect::<Vec<T>>();
             assert_eq!(got, expected, "shape={shape:?} strides={strides:?}");
         } else {
-            let buf = node.to_buf(&index, &context, None).unwrap();
+            let buf = node.to_buf(&index, &context).unwrap();
             // The buffer picks its own layout, so walk it by its own strides.
             let got = offsets(shape, buf.strides())
                 .into_iter()
@@ -1530,7 +1524,7 @@ mod tests {
             let buf = storage
                 .read_as_elementwise_pipeline::<T>(&index, &context)
                 .unwrap()
-                .to_buf(&index, &context, None)
+                .to_buf(&index, &context)
                 .unwrap();
             offsets(&shape, buf.strides())
                 .into_iter()
@@ -1550,7 +1544,7 @@ mod tests {
             storage
                 .read_as_elementwise_pipeline::<T>(&index, &context)
                 .unwrap()
-                .to_buf(&index, &context, Some(&mut out))
+                .to_buf_into(&index, &context, &mut out)
                 .unwrap();
         }
         let pushed = offsets(&shape, &dst_strides)
@@ -1577,7 +1571,7 @@ mod tests {
             .collect::<Vec<_>>();
         let (start, size) = split_ranges(index);
         let buf = storage
-            .read_data(&Index::new(&start, &size).unwrap(), &context, None)
+            .read_data(&Index::new(&start, &size).unwrap(), &context)
             .unwrap();
         offsets(&shape, buf.strides())
             .into_iter()
@@ -1788,7 +1782,7 @@ mod tests {
             .collect::<Vec<_>>();
         let (start, size) = split_ranges(index);
         let buf = storage
-            .read_data(&Index::new(&start, &size).unwrap(), &context, None)
+            .read_data(&Index::new(&start, &size).unwrap(), &context)
             .unwrap();
         let elements = offsets(&shape, buf.strides())
             .into_iter()
@@ -1888,10 +1882,10 @@ mod tests {
             };
             let (start, size) = split_ranges(&index);
             neg.storage
-                .read_data(
+                .read_data_into(
                     &Index::new(&start, &size).unwrap(),
                     &ReadContext::default(),
-                    Some(&mut out),
+                    &mut out,
                 )
                 .unwrap();
         }

@@ -162,35 +162,39 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
         let (inner_start, inner_size) = self.transform_index(index)?;
         let _cache_scope = self.cache_scope.enter(context);
+        let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
         unsafe {
-            read_data_and_map_strides(
-                &self.array,
-                &Index::new_unchecked(&inner_start, &inner_size),
-                context,
-                out,
-                |inner_strides| {
-                    dim_arr(index.ndim(), |i| {
-                        inner_strides[self.dims_mapping[i] as usize]
-                    })
-                },
-                |out_strides| {
-                    let mut s = dim_arr(self.array.shape().len(), |_| 0usize);
-                    for (i, &dim) in self.dims_mapping.as_ref().iter().enumerate() {
-                        s[dim as usize] = out_strides[i];
-                    }
-                    s
-                },
-            )
+            read_and_map_strides(&self.array, &inner_index, context, |inner_strides| {
+                dim_arr(index.ndim(), |i| {
+                    inner_strides[self.dims_mapping[i] as usize]
+                })
+            })
+        }
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        let (inner_start, inner_size) = self.transform_index(index)?;
+        let _cache_scope = self.cache_scope.enter(context);
+        let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
+        unsafe {
+            read_into_and_map_strides(&self.array, &inner_index, context, out, |out_strides| {
+                let mut s = dim_arr(self.array.shape().len(), |_| 0usize);
+                for (i, &dim) in self.dims_mapping.as_ref().iter().enumerate() {
+                    s[dim as usize] = out_strides[i];
+                }
+                s
+            })
         }
     }
 

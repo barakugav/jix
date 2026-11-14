@@ -124,67 +124,18 @@ impl<S: ArrayStorage> Slice<S> {
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Slice<S> {}
-impl<S: ArrayStorage> ArrayStorage for Slice<S> {
-    type ElementType = S::ElementType;
-
-    fn read_data<'a>(
-        &'a self,
+impl<S: ArrayStorage> Slice<S> {
+    /// General path: one or more dims have step > 1. nd-iter over the strided dims, and read each
+    /// sub-region from the inner array into `out`.
+    fn read_stepped_into(
+        &self,
         index: &Index<'_>,
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
-        let _cache_scope = self.cache_scope.enter(context);
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
         let ndim = self.slice.as_ref().len();
-
-        // Fast path: all dims have step == 1. Map index [a, b) to inner [start + a, start + b) and forward.
-        if self.no_steps {
-            let inner_start = dim_arr(ndim, |dim| index.start()[dim] + self.slice[dim].start);
-            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
-            return self.array.read_data(&inner_index, context, out);
-        }
-
         let out_shape = index.size();
         debug_assert!(!out_shape.contains(&0));
-
-        // Fast path: inner array is plain, read a contiguous bounding box and create a strided view over it.
-        if out.is_none() && self.array.spec().flags().plain_read() {
-            let box_start = dim_arr(ndim, |dim| {
-                let ds = &self.slice[dim];
-                ds.start + index.start()[dim] * ds.step
-            });
-            let box_size = dim_arr(ndim, |dim| {
-                (out_shape[dim] - 1) * self.slice[dim].step as usize + 1
-            });
-            let inner_box = unsafe { Index::new_unchecked(&box_start, &box_size) };
-            let inner = self.array.read_data(&inner_box, context, None)?;
-            let itemsize = self.dtype().itemsize() as usize;
-            let out_strides = dim_arr(ndim, |dim| {
-                if out_shape[dim] <= 1 {
-                    itemsize // avoid (stride*step) overflow, dim is not stepped
-                } else {
-                    inner.strides()[dim] * self.slice[dim].step as usize
-                }
-            });
-            return Ok(unsafe { inner.with_strides(out_strides) });
-        }
-
-        // General path: one or more dims have step > 1. nd-iter over the strided dims, and read
-        // each sub-region from the inner array.
-        let dtype = self.dtype();
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
         let (out_buf, out_strides) = out.data_mut();
         let iter_shape = dim_arr(ndim, |dim| {
             if self.slice[dim].step == 1 {
@@ -215,10 +166,82 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 )
             };
             let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-            self.array
-                .read_data(&inner_index, context, Some(&mut sub))?;
+            self.array.read_data_into(&inner_index, context, &mut sub)?;
         }
-        Ok(out)
+        Ok(())
+    }
+}
+
+impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Slice<S> {}
+impl<S: ArrayStorage> ArrayStorage for Slice<S> {
+    type ElementType = S::ElementType;
+
+    fn read_data<'a>(
+        &'a self,
+        index: &Index<'_>,
+        context: &'a ReadContext,
+    ) -> Result<StridedBuf<'a>> {
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        let _cache_scope = self.cache_scope.enter(context);
+        let ndim = self.slice.as_ref().len();
+
+        // Fast path: all dims have step == 1. Map index [a, b) to inner [start + a, start + b) and forward.
+        if self.no_steps {
+            let inner_start = dim_arr(ndim, |dim| index.start()[dim] + self.slice[dim].start);
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
+            return self.array.read_data(&inner_index, context);
+        }
+
+        let out_shape = index.size();
+        debug_assert!(!out_shape.contains(&0));
+
+        // Fast path: inner array is plain, read a contiguous bounding box and create a strided view over it.
+        if self.array.spec().flags().plain_read() {
+            let box_start = dim_arr(ndim, |dim| {
+                let ds = &self.slice[dim];
+                ds.start + index.start()[dim] * ds.step
+            });
+            let box_size = dim_arr(ndim, |dim| {
+                (out_shape[dim] - 1) * self.slice[dim].step as usize + 1
+            });
+            let inner_box = unsafe { Index::new_unchecked(&box_start, &box_size) };
+            let inner = self.array.read_data(&inner_box, context)?;
+            let itemsize = self.dtype().itemsize() as usize;
+            let out_strides = dim_arr(ndim, |dim| {
+                if out_shape[dim] <= 1 {
+                    itemsize // avoid (stride*step) overflow, dim is not stepped
+                } else {
+                    inner.strides()[dim] * self.slice[dim].step as usize
+                }
+            });
+            return Ok(unsafe { inner.with_strides(out_strides) });
+        }
+
+        read_via_push(
+            index,
+            context,
+            self.dtype(),
+            self.spec().read_layout_order(),
+            |out| self.read_stepped_into(index, context, out),
+        )
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        let _cache_scope = self.cache_scope.enter(context);
+        if self.no_steps {
+            let ndim = self.slice.as_ref().len();
+            let inner_start = dim_arr(ndim, |dim| index.start()[dim] + self.slice[dim].start);
+            let inner_index = unsafe { Index::new_unchecked(&inner_start, index.size()) };
+            return self.array.read_data_into(&inner_index, context, out);
+        }
+        self.read_stepped_into(index, context, out)
     }
 
     #[inline(always)]
@@ -608,7 +631,7 @@ mod tests {
         let ctx = s.read_ctx();
         let view = s
             .storage()
-            .read_data(&Index::new(&[0, 0], &[3, 4]).unwrap(), &ctx, None)
+            .read_data(&Index::new(&[0, 0], &[3, 4]).unwrap(), &ctx)
             .unwrap();
         // Zero-copy: dim-0 stride is 2 * row-stride (2*16), not the packed 16 a copy would carry.
         assert_eq!(view.strides(), &[2 * 16, 4]);
@@ -637,7 +660,7 @@ mod tests {
         // Output sub-region [1..3, 1..3] -> orig rows 2 & 4, cols 1 & 2.
         let view = s
             .storage()
-            .read_data(&Index::new(&[1, 1], &[2, 2]).unwrap(), &ctx, None)
+            .read_data(&Index::new(&[1, 1], &[2, 2]).unwrap(), &ctx)
             .unwrap();
         assert_eq!(view.strides(), &[2 * 16, 4]);
 

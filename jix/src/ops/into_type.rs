@@ -87,12 +87,24 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         if let Some(dtype) = ET::DTYPE {
             debug_assert_eq!(self.inner.dtype(), &dtype);
         }
-        self.inner.read_data(index, context, out)
+        self.inner.read_data(index, context)
+    }
+
+    #[inline(always)]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        if let Some(dtype) = ET::DTYPE {
+            debug_assert_eq!(self.inner.dtype(), &dtype);
+        }
+        self.inner.read_data_into(index, context, out)
     }
 
     #[inline(always)]

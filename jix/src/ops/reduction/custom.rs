@@ -609,7 +609,7 @@ mod tests {
                 unsafe { crate::storage::StridedBuf::from_slice_mut(&mut buf[..n_out], c) };
             let (start, size) = split_ranges(&full_index);
             storage
-                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&start, &size).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 

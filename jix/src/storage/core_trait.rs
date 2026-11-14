@@ -73,40 +73,43 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
 
     /// Read a sub-region of the array and return it as a [`StridedBuf`](crate::storage::StridedBuf).
     ///
-    /// This is the single I/O method that every storage backend must implement.
-    /// All higher-level read operations (`to_ndarray`, `to_ndarray_sub`, etc.) bottom
-    /// out here.
+    /// Every read of the array bottoms out here or in [`read_data_into`](Self::read_data_into),
+    /// the two I/O methods that every storage backend implements.
     ///
-    /// The two modes mirror NumPy's `out=`:
-    /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
-    ///   into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized one -
-    ///   and picks the strides. The bytes are only contiguous if the strides say so.
-    /// - **push** (`out` is `Some(dst)`): the region must be written into `dst` at `dst`'s own strides,
-    ///   and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have one stride
-    ///   per array dimension.
+    /// This is the **pull** mode: the impl returns the cheapest buffer it can - a borrowed view
+    /// into its own memory (possibly with broadcast/stride-0 dims), or a freshly materialized one -
+    /// and picks the strides. The bytes are only contiguous if the strides say so.
     ///
     /// # Arguments
     ///
     /// - `index` - a start and a size per dimension, one per dimension of `self.shape()`.
     ///   The region must be within the array shape bounds; an [`Index`] is never empty.
     /// - `context` - read context carrying reusable buffers and decoder state.
-    /// - `out` - optional destination, as described above.
-    ///
-    /// # Returns
-    ///
-    /// A [`StridedBuf`](crate::storage::StridedBuf) with the region's bytes.
     ///
     /// # Alignment
     ///
-    /// No alignment is required of `out`, and none is promised of the returned buffer: it is only
-    /// as aligned as its backing bytes happen to be. Reinterpret the bytes as typed values with
-    /// unaligned reads, or stage the region through a buffer of your own.
+    /// None is promised of the returned buffer: it is only as aligned as its backing bytes happen
+    /// to be. Reinterpret the bytes as typed values with unaligned reads, or stage the region
+    /// through a buffer of your own.
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>>;
+
+    /// Read a sub-region of the array into `out`, at `out`'s own strides.
+    ///
+    /// This is the **push** mode, mirroring NumPy's `out=`. `out` must be writable, have one stride
+    /// per array dimension, and hold the region without overlapping elements. No alignment is
+    /// required of it.
+    ///
+    /// `index` and `context` are as in [`read_data`](Self::read_data).
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()>;
 
     /// Read a sub-region as an element-wise pipeline over `T`.
     ///
@@ -132,7 +135,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
         Self: Sized,
     {
         check_dtype(Dtype::new_ref::<T>(), self.dtype())?;
-        let data = self.read_data(index, context, None)?;
+        let data = self.read_data(index, context)?;
         Ok(unsafe { OperandTyped::new_input(data, Dtype::new_ref::<T>()) })
     }
 

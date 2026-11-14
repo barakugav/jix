@@ -126,33 +126,19 @@ where
             .map(Array::from_storage)
     }
 
-    #[inline]
-    fn read_data_uncached<'a>(
-        &'a self,
+    fn read_into_unchecked(
+        &self,
         index: &Index<'_>,
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
         let dtype = self.dtype();
         let (itemsize, alignment) = (dtype.itemsize() as usize, dtype.alignment().as_usize());
 
-        let condition_view = self.condition.read_data(index, context, None)?;
-        let y_view = self.y.read_data(index, context, None)?;
+        let condition_view = self.condition.read_data(index, context)?;
+        let y_view = self.y.read_data(index, context)?;
         let out_shape = index.size();
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
-        self.x.read_data(index, context, Some(&mut out))?;
+        self.x.read_data_into(index, context, out)?;
 
         let (out_buf, out_strides) = out.data_mut();
         let (condition, condition_strides) = condition_view.data();
@@ -318,7 +304,7 @@ where
             }
         }
 
-        Ok(out)
+        Ok(())
     }
 }
 impl<SC, SX, SY> crate::storage::ArrayStorageImpl for Select<SC, SX, SY> {}
@@ -335,10 +321,31 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
-            self.read_data_uncached(index, context, out)
+        let dtype = self.dtype();
+        check_read(self.shape(), index, dtype.itemsize() as usize)?;
+        context.read_cached(self.cache_id, index, || {
+            read_via_push(
+                index,
+                context,
+                dtype,
+                self.spec().read_layout_order(),
+                |out| self.read_into_unchecked(index, context, out),
+            )
+        })
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        let dtype = self.dtype();
+        check_read_into(out, self.shape(), index, dtype.itemsize() as usize)?;
+        context.read_cached_into(self.cache_id, index, dtype, out, |out| {
+            self.read_into_unchecked(index, context, out)
         })
     }
 
@@ -916,7 +923,7 @@ mod tests {
             };
             let (start, size) = split_ranges(&index);
             storage
-                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&start, &size).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 

@@ -51,9 +51,18 @@ impl ArrayStorage for ArrayStorageAny {
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>, crate::Error> {
-        self.inner.storage().read_data(index, context, out)
+        self.inner.storage().read_data(index, context)
+    }
+
+    #[inline(always)]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<(), crate::Error> {
+        self.inner.storage().read_data_into(index, context, out)
     }
 
     #[inline(always)]

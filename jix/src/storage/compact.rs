@@ -17,7 +17,7 @@ use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::cache_id::ArrayCacheId;
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
-    check_out_buf, materialize_out_buf, ArraySpec, ElementType, Index, StridedBuf,
+    check_read, check_read_into, read_via_push, ArraySpec, ElementType, Index, StridedBuf,
 };
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, NdCopier, PtrMutNoalias, PtrNoalias};
@@ -118,9 +118,18 @@ macro_rules! impl_array_storage {
                 &'rd self,
                 index: &Index<'_>,
                 context: &'rd ReadContext,
-                out: Option<&'rd mut crate::storage::StridedBuf<'_>>,
             ) -> Result<crate::storage::StridedBuf<'rd>> {
-                self.0.read_data(index, context, out)
+                self.0.read_data(index, context)
+            }
+
+            #[inline(always)]
+            fn read_data_into(
+                &self,
+                index: &Index<'_>,
+                context: &ReadContext,
+                out: &mut crate::storage::StridedBuf<'_>,
+            ) -> Result<()> {
+                self.0.read_data_into(index, context, out)
             }
 
             #[inline(always)]
@@ -247,13 +256,34 @@ where
         &'rd self,
         index: &Index<'_>,
         context: &'rd ReadContext,
-        out: Option<&'rd mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'rd>>
     where
         ET: ElementType,
     {
-        context.read_cached(self.cache_id, index, self.blocks.dtype(), out, |out| {
-            self.read_data_uncached(index, context, out)
+        context.read_cached(self.cache_id, index, || {
+            let dtype = self.blocks.dtype();
+            check_read(self.shape(), index, dtype.itemsize() as usize)?;
+            let layout_order = self.spec.as_ref().read_layout_order();
+            read_via_push(index, context, dtype, layout_order, |out| {
+                self.read_into_unchecked(index, context, out)
+            })
+        })
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()>
+    where
+        ET: ElementType,
+    {
+        let dtype = self.blocks.dtype();
+        context.read_cached_into(self.cache_id, index, dtype, out, |out| {
+            check_read_into(out, self.shape(), index, dtype.itemsize() as usize)?;
+            self.read_into_unchecked(index, context, out)
         })
     }
 
@@ -299,28 +329,19 @@ where
     ///      position of the active region relative to `index`.
     ///    - Call `nd_copy` to scatter the active sub-region from `tmp_buf` into `buf`,
     ///      respecting both strides.
-    #[inline(always)]
-    fn read_data_uncached<'rd>(
-        &'rd self,
+    fn read_into_unchecked(
+        &self,
         index: &Index<'_>,
-        context: &'rd ReadContext,
-        out: Option<&'rd mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'rd>>
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()>
     where
         ET: ElementType,
     {
         let shape = self.shape();
         let dtype = self.blocks.dtype();
-        check_out_buf(out.as_deref(), shape, index, dtype.itemsize() as usize)?;
         let out_shape = index.size();
         debug_assert!(!out_shape.contains(&0));
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape,
-            dtype,
-            self.spec.as_ref().read_layout_order(),
-        );
         let is_contiguous = out.is_contiguous(out_shape, dtype);
 
         let ndim = index.ndim();
@@ -355,8 +376,7 @@ where
             let nitems = out_shape.iter().product::<usize>();
             let (out_buf, _out_strides) = out.data_mut();
             let buf = &mut out_buf[..nitems * dtype.itemsize() as usize];
-            self.blocks.read_block(single_block_idx, buf, context)?;
-            return Ok(out);
+            return self.blocks.read_block(single_block_idx, buf, context);
         }
 
         let read_fn = match self.shape().len() {
@@ -374,12 +394,10 @@ where
                 read_block_fn: &|block_idx, dst| self.blocks.read_block(block_idx, dst, context),
             },
             index,
-            &mut out,
+            out,
             context,
             single_block_idx,
-        )?;
-
-        Ok(out)
+        )
     }
 
     #[inline]
@@ -581,7 +599,7 @@ mod tests {
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, c) };
             let (start, size) = split_ranges(index);
             storage
-                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&start, &size).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 
@@ -610,7 +628,7 @@ mod tests {
             };
             let (start, size) = split_ranges(index);
             storage
-                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&start, &size).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 
@@ -692,7 +710,7 @@ mod tests {
             let mut out = unsafe { StridedBuf::from_slice_mut(bytes, c) };
             let (start, size) = split_ranges(index);
             storage
-                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&start, &size).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 
@@ -792,11 +810,7 @@ mod tests {
                 StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&byte_strides).unwrap())
             };
             storage
-                .read_data(
-                    &Index::new(&[0, 0, 0], &[1, 8, 4]).unwrap(),
-                    &ctx,
-                    Some(&mut out),
-                )
+                .read_data_into(&Index::new(&[0, 0, 0], &[1, 8, 4]).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
         let expected: Vec<i32> = (0..32).map(|x| x * 3 - 5).collect();
@@ -827,7 +841,7 @@ mod tests {
                 StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&[12, 4]).unwrap())
             };
             storage
-                .read_data(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
         let got = (0..6)
@@ -871,7 +885,7 @@ mod tests {
                 StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&byte_strides).unwrap())
             };
             storage
-                .read_data(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
         assert_eq!(&backing[..6], &[1, 2, 3, 4, 5, 6]);
@@ -908,8 +922,8 @@ mod tests {
 
         {
             let _scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
-            let a = storage.read_data(&index, &ctx, None).unwrap();
-            let b = storage.read_data(&index, &ctx, None).unwrap();
+            let a = storage.read_data(&index, &ctx).unwrap();
+            let b = storage.read_data(&index, &ctx).unwrap();
             assert_eq!(
                 a.data_ptr(),
                 b.data_ptr(),
@@ -918,7 +932,7 @@ mod tests {
 
             // Reading another region evicts the entry, but must leave the live views intact.
             let c = storage
-                .read_data(&Index::new(&[20], &[16]).unwrap(), &ctx, None)
+                .read_data(&Index::new(&[20], &[16]).unwrap(), &ctx)
                 .unwrap();
             assert_eq!(read_i32s(&a, 16), (4..20).collect::<Vec<_>>());
             assert_eq!(read_i32s(&b, 16), (4..20).collect::<Vec<_>>());
@@ -926,8 +940,8 @@ mod tests {
         }
 
         // Outside of a top level read nothing is cached.
-        let a = storage.read_data(&index, &ctx, None).unwrap();
-        let b = storage.read_data(&index, &ctx, None).unwrap();
+        let a = storage.read_data(&index, &ctx).unwrap();
+        let b = storage.read_data(&index, &ctx).unwrap();
         assert_ne!(a.data_ptr(), b.data_ptr());
     }
 
@@ -1025,8 +1039,8 @@ mod tests {
         let ctx = x.read_ctx();
         {
             let _scope = ctx.cache_scope(&sq.storage().spec().dynamic().arrays_to_cache);
-            let a = xy.storage().read_data(&index, &ctx, None).unwrap();
-            let b = xy.storage().read_data(&index, &ctx, None).unwrap();
+            let a = xy.storage().read_data(&index, &ctx).unwrap();
+            let b = xy.storage().read_data(&index, &ctx).unwrap();
             assert_eq!(a.data_ptr(), b.data_ptr());
             assert_eq!(
                 read_i32s(&b, 16),
@@ -1048,11 +1062,11 @@ mod tests {
         let ctx = x.read_ctx();
         {
             let _scope = ctx.cache_scope(&expr.storage().spec().dynamic().arrays_to_cache);
-            let a = x.storage().read_data(&index, &ctx, None).unwrap();
+            let a = x.storage().read_data(&index, &ctx).unwrap();
             max.storage()
-                .read_data(&Index::new(&[], &[]).unwrap(), &ctx, None)
+                .read_data(&Index::new(&[], &[]).unwrap(), &ctx)
                 .unwrap();
-            let b = x.storage().read_data(&index, &ctx, None).unwrap();
+            let b = x.storage().read_data(&index, &ctx).unwrap();
             assert_eq!(a.data_ptr(), b.data_ptr());
         }
         let expected = (0..64).map(|i| (i + 63) * i).collect::<Vec<_>>();
@@ -1071,7 +1085,7 @@ mod tests {
             let _scope = ctx.cache_scope(&max.storage().spec().dynamic().arrays_to_cache);
             let max = max
                 .storage()
-                .read_data(&Index::new(&[], &[]).unwrap(), &ctx, None)
+                .read_data(&Index::new(&[], &[]).unwrap(), &ctx)
                 .unwrap();
             assert_eq!(
                 unsafe { max.data_ptr().cast::<i32>().read_unaligned() },
@@ -1092,10 +1106,10 @@ mod tests {
         let ctx = x.read_ctx();
         {
             let _scope = ctx.cache_scope(&expr.storage().spec().dynamic().arrays_to_cache);
-            let a = x.storage().read_data(&index, &ctx, None).unwrap();
-            let f = flipped.storage().read_data(&index, &ctx, None).unwrap();
+            let a = x.storage().read_data(&index, &ctx).unwrap();
+            let f = flipped.storage().read_data(&index, &ctx).unwrap();
             assert_eq!(read_i32s(&f, 16), (44..60).rev().collect::<Vec<_>>());
-            let b = x.storage().read_data(&index, &ctx, None).unwrap();
+            let b = x.storage().read_data(&index, &ctx).unwrap();
             assert_eq!(a.data_ptr(), b.data_ptr());
         }
         let expected = (0..64).map(|i| (i + 63 - i) * i).collect::<Vec<_>>();
@@ -1112,12 +1126,12 @@ mod tests {
         let xx = x.view() + x.view();
         let ctx = x.read_ctx();
         let scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
-        let a = x.storage().read_data(&index, &ctx, None).unwrap();
+        let a = x.storage().read_data(&index, &ctx).unwrap();
         // The nested read caches `x` at another region, replacing the entry until it ends.
         let sq = x.view() * x.view();
         let nested = sq.to_ndarray_sub::<ndarray::Ix1>(&[20..36], &ctx).unwrap();
         assert_eq!(nested.to_vec(), (20..36).map(|i| i * i).collect::<Vec<_>>());
-        let b = x.storage().read_data(&index, &ctx, None).unwrap();
+        let b = x.storage().read_data(&index, &ctx).unwrap();
         assert_eq!(a.data_ptr(), b.data_ptr());
         assert_eq!(context_read_cache_len(&ctx), 1);
         drop(scope);
@@ -1133,7 +1147,7 @@ mod tests {
         let _scope = ctx.cache_scope(to_cache);
         let read = || {
             x.storage()
-                .read_data(&Index::new(&[4], &[16]).unwrap(), &ctx, None)
+                .read_data(&Index::new(&[4], &[16]).unwrap(), &ctx)
                 .unwrap()
         };
         let a = read();
@@ -1158,11 +1172,9 @@ mod tests {
         ids.insert(x.storage().0.cache_id);
         ids.insert(pass_id);
         let _scope = ctx.cache_scope(&Some(Arc::new(ids)));
-        let a = x.storage().read_data(&index, &ctx, None).unwrap();
-        let pass = |out| x.storage().read_data(&index, &ctx, out);
-        let b = ctx
-            .read_cached(pass_id, &index, x.dtype(), None, pass)
-            .unwrap();
+        let a = x.storage().read_data(&index, &ctx).unwrap();
+        let pass = || x.storage().read_data(&index, &ctx);
+        let b = ctx.read_cached(pass_id, &index, pass).unwrap();
         // The read of `x` is a view of its cached buffer, which is cached for the storage too.
         assert_eq!(b.data_ptr(), a.data_ptr());
         assert_eq!(context_read_cache_len(&ctx), 2);
@@ -1215,14 +1227,14 @@ mod tests {
         let mut backing = [SENTINEL; 16];
         {
             let _scope = ctx.cache_scope(&twice.storage().spec().dynamic().arrays_to_cache);
-            max.storage().read_data(&index, &ctx, None).unwrap();
+            max.storage().read_data(&index, &ctx).unwrap();
             assert_eq!(CALLS.load(Ordering::Relaxed), per_read / 2);
             // A push read of the cached region copies it into `out`, at the strides of `out`.
             let mut out = unsafe {
                 StridedBuf::from_raw_parts_mut(backing.as_mut_ptr().cast(), &[4], &[8], 4)
             };
             max.storage()
-                .read_data(&index, &ctx, Some(&mut out))
+                .read_data_into(&index, &ctx, &mut out)
                 .unwrap();
             assert_eq!(CALLS.load(Ordering::Relaxed), per_read / 2);
             // A push read is not added to the cache: the entry is still the pull read.
@@ -1240,12 +1252,12 @@ mod tests {
         let xx = x.view() + x.view();
         let ctx = x.read_ctx();
         let _scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
-        x.storage().read_data(&index, &ctx, None).unwrap();
+        x.storage().read_data(&index, &ctx).unwrap();
         // A push read of the cached region into a too small `out` fails, as an uncached one does.
         let mut backing = [0i32; 16];
         let mut out =
             unsafe { StridedBuf::from_raw_parts_mut(backing.as_mut_ptr().cast(), &[8], &[4], 4) };
-        let res = x.storage().read_data(&index, &ctx, Some(&mut out));
+        let res = x.storage().read_data_into(&index, &ctx, &mut out);
         assert!(res.is_err());
     }
 

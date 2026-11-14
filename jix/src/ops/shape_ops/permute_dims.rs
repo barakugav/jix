@@ -114,6 +114,17 @@ impl<S: ArrayStorage> PermuteDims<S> {
     }
 }
 
+impl<S: ArrayStorage> PermuteDims<S> {
+    /// The inner region read for `index`.
+    #[inline(always)]
+    fn transform_index(&self, index: &Index<'_>) -> (DimArray<u64>, DimArray<usize>) {
+        let ndim = self.dims.as_ref().len();
+        let start = dim_arr(ndim, |d| index.start()[self.inv_dims[d] as usize]);
+        let size = dim_arr(ndim, |d| index.size()[self.inv_dims[d] as usize]);
+        (start, size)
+    }
+}
+
 impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for PermuteDims<S> {}
 impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
     type ElementType = S::ElementType;
@@ -123,27 +134,35 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
-        let ndim = self.dims.as_ref().len();
-        let inner_start = dim_arr(ndim, |d| index.start()[self.inv_dims[d] as usize]);
-        let inner_size = dim_arr(ndim, |d| index.size()[self.inv_dims[d] as usize]);
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        let (inner_start, inner_size) = self.transform_index(index);
         let _cache_scope = self.cache_scope.enter(context);
+        let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
+        let ndim = self.dims.as_ref().len();
         unsafe {
-            read_data_and_map_strides(
-                &self.array,
-                &Index::new_unchecked(&inner_start, &inner_size),
-                context,
-                out,
-                |inner_strides| dim_arr(ndim, |i| inner_strides[self.dims[i] as usize]),
-                |out_strides| dim_arr(ndim, |d| out_strides[self.inv_dims[d] as usize]),
-            )
+            read_and_map_strides(&self.array, &inner_index, context, |inner_strides| {
+                dim_arr(ndim, |i| inner_strides[self.dims[i] as usize])
+            })
+        }
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        let (inner_start, inner_size) = self.transform_index(index);
+        let _cache_scope = self.cache_scope.enter(context);
+        let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
+        let ndim = self.dims.as_ref().len();
+        unsafe {
+            read_into_and_map_strides(&self.array, &inner_index, context, out, |out_strides| {
+                dim_arr(ndim, |d| out_strides[self.inv_dims[d] as usize])
+            })
         }
     }
 

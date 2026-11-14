@@ -349,19 +349,23 @@ impl<'a> StridedBuf<'a> {
     }
 }
 
+/// Checks a read of `index` from an array of `array_shape`.
 #[inline(always)]
-pub(crate) fn check_out_buf(
-    out: Option<&StridedBuf>,
+pub(crate) fn check_read(array_shape: &[u64], index: &Index<'_>, itemsize: usize) -> Result<()> {
+    check_get_range(array_shape, index)?;
+    check_region_size(index.size(), itemsize)
+}
+
+/// Checks a read of `index` from an array of `array_shape` into `out`.
+#[inline(always)]
+pub(crate) fn check_read_into(
+    out: &StridedBuf,
     array_shape: &[u64],
     index: &Index<'_>,
     itemsize: usize,
 ) -> Result<()> {
-    check_get_range(array_shape, index)?;
-    check_region_size(index.size(), itemsize)?;
-    match out {
-        Some(out) => check_out_buf_impl(out, index, itemsize),
-        None => Ok(()),
-    }
+    check_read(array_shape, index, itemsize)?;
+    check_out_buf_impl(out, index, itemsize)
 }
 
 #[inline]
@@ -431,75 +435,74 @@ pub(crate) fn check_out_buf_impl(
     Ok(())
 }
 
+/// A buffer from the pool of `context` for a region of `shape`, laid out in `layout_order`.
 #[inline]
-pub(crate) fn materialize_out_buf<'a>(
-    out: Option<&'a mut StridedBuf<'_>>,
+pub(crate) fn alloc_out_buf<'a>(
     context: &'a ReadContext,
-    out_shape: &[usize],
+    shape: &[usize],
     dtype: &Dtype,
     layout_order: &[DimIdx],
 ) -> StridedBuf<'a> {
-    match out {
-        Some(out) => out.view_mut(),
-        None => {
-            let itemsize = dtype.itemsize() as usize;
-            let buf = context.allocate_buf(
-                out_shape.iter().product::<usize>() * itemsize,
-                dtype.alignment(),
-            );
-            let strides = strides_for_layout_order(out_shape, itemsize, layout_order);
-            unsafe { StridedBuf::from_pool(buf, strides) }
-        }
-    }
+    let itemsize = dtype.itemsize() as usize;
+    let buf = context.allocate_buf(
+        shape.iter().product::<usize>() * itemsize,
+        dtype.alignment(),
+    );
+    let strides = strides_for_layout_order(shape, itemsize, layout_order);
+    unsafe { StridedBuf::from_pool(buf, strides) }
 }
 
-/// Read a stride-remapping forwarder's inner region once, honoring the caller's `out=` mode.
-///
-/// A forwarder like `PermuteDims`/`InsertDim`/`RemoveDim` relates its output dims to its inner
-/// dims by a fixed per-dim correspondence. The inner read is the same either way; only the
-/// direction of the stride remap differs:
-/// - pull (`out=None`): read the inner as a view and relabel its strides into output order with
-///   `inner2outer_strides_fn(inner_strides) -> output_strides`.
-/// - push (`out=Some`): re-stride the destination into inner order with
-///   `outer2inner_strides_fn(output_strides) -> inner_strides` and forward it down, so the inner
-///   storage writes in place.
+/// Pulls the region `index` by pushing it with `read_into` into a buffer from [`alloc_out_buf`].
+#[inline(always)]
+pub(crate) fn read_via_push<'a>(
+    index: &Index<'_>,
+    context: &'a ReadContext,
+    dtype: &Dtype,
+    layout_order: &[DimIdx],
+    read_into: impl FnOnce(&mut StridedBuf<'_>) -> Result<()>,
+) -> Result<StridedBuf<'a>> {
+    let mut out = alloc_out_buf(context, index.size(), dtype, layout_order);
+    read_into(&mut out)?;
+    Ok(out)
+}
+
+/// Pulls the region of a forwarder that relates its dims to its inner dims one to one, such as
+/// `PermuteDims`, `InsertDim` and `RemoveDim`: reads the inner region and maps its strides to the
+/// forwarder's dims with `inner2outer_strides_fn`.
 ///
 /// # Safety
 ///
 /// The caller should ensure the created strides are valid.
 #[inline]
-pub(crate) unsafe fn read_data_and_map_strides<'a>(
+pub(crate) unsafe fn read_and_map_strides<'a>(
     inner: &'a impl ArrayStorage,
     inner_index: &Index<'_>,
     context: &'a ReadContext,
-    mut out: Option<&'a mut StridedBuf<'_>>,
     inner2outer_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
-    outer2inner_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
 ) -> Result<StridedBuf<'a>> {
-    // This function does an unsafe dance of extending lifetimes, with the goal to have a single
-    // call to inner.read_data() for better inlining of ops pipelines.
+    let buf = inner.read_data(inner_index, context)?;
+    let strides = inner2outer_strides_fn(buf.strides());
+    Ok(unsafe { buf.with_strides(strides) })
+}
 
-    let is_push = out.is_some();
-    let mut inner_out = out.as_deref_mut().map(|o| {
-        let (data, strides) = o.data_mut();
-        let inner_strides = outer2inner_strides_fn(strides);
-        unsafe { StridedBuf::from_slice_mut(data, inner_strides) }
-    });
-
-    let inner_buf = inner.read_data(inner_index, context, inner_out.as_mut())?;
-
-    if is_push {
-        // The inner storage wrote into `out` through `inner_out`
-        drop(inner_buf);
-        drop(inner_out);
-        Ok(out.unwrap().view_mut())
-    } else {
-        // SAFETY: `inner_buf` does not borrow the local `inner_out` (which was `None`) - its data
-        // lives for 'a - so extending its lifetime to 'a is sound.
-        let inner_buf = unsafe { std::mem::transmute::<StridedBuf<'_>, StridedBuf<'a>>(inner_buf) };
-        let out_strides = inner2outer_strides_fn(inner_buf.strides());
-        Ok(unsafe { inner_buf.with_strides(out_strides) })
-    }
+/// The push counterpart of [`read_and_map_strides`]: maps the strides of `out` to the inner dims
+/// with `outer2inner_strides_fn`, and has the inner storage write in place.
+///
+/// # Safety
+///
+/// The caller should ensure the created strides are valid.
+#[inline]
+pub(crate) unsafe fn read_into_and_map_strides(
+    inner: &impl ArrayStorage,
+    inner_index: &Index<'_>,
+    context: &ReadContext,
+    out: &mut StridedBuf<'_>,
+    outer2inner_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
+) -> Result<()> {
+    let (data, strides) = out.data_mut();
+    let strides = outer2inner_strides_fn(strides);
+    let mut inner_out = unsafe { StridedBuf::from_slice_mut(data, strides) };
+    inner.read_data_into(inner_index, context, &mut inner_out)
 }
 
 #[cfg(test)]

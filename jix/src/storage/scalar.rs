@@ -3,7 +3,7 @@ use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
-    check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, Index, StridedBuf, Ty,
+    check_read, check_read_into, ArraySpec, ArrayStorage, ArrayStorageInfo, Index, StridedBuf, Ty,
 };
 use crate::util::dim_arr;
 use crate::ReadContext;
@@ -86,46 +86,42 @@ where
 {
     type ElementType = Ty<T>;
 
+    /// Lends a single-element view with all-zero strides: every position reads the same bytes.
     #[inline]
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
         _context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(
-            out.as_deref(),
-            self.shape(),
-            index,
-            self.dtype().itemsize() as usize,
-        )?;
-        let ndim = index.ndim();
-        let dtype = T::DTYPE;
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
+        Ok(unsafe { StridedBuf::from_slice(src, dim_arr(index.ndim(), |_| 0usize)) })
+    }
 
-        match out {
-            // Lend a single-element view with all-zero strides: every position reads the same byte.
-            None => {
-                let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
-                Ok(unsafe { StridedBuf::from_slice(src, dim_arr(ndim, |_| 0usize)) })
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        _context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        let dtype = T::DTYPE;
+        check_read_into(out, self.shape(), index, dtype.itemsize() as usize)?;
+        let read_shape = index.size();
+        if out.is_contiguous_aligned(read_shape, &dtype) {
+            // Fill the region in one tight loop.
+            let region_len = read_shape.iter().product::<usize>() * size_of::<T>();
+            let (out_buf, _) = out.data_mut();
+            for item in unsafe { cast_slice_mut::<u8, T>(&mut out_buf[..region_len]) } {
+                *item = self.data;
             }
-            Some(out) => {
-                let read_shape = index.size();
-                if out.is_contiguous_aligned(read_shape, &dtype) {
-                    // Fill the region in one tight loop.
-                    let region_len = read_shape.iter().product::<usize>() * size_of::<T>();
-                    let (out_buf, _) = out.data_mut();
-                    for item in unsafe { cast_slice_mut::<u8, T>(&mut out_buf[..region_len]) } {
-                        *item = self.data;
-                    }
-                } else {
-                    // Write the scalar to each strided output position
-                    let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
-                    let src_strides = dim_arr(ndim, |_| 0usize);
-                    unsafe { out.copy_from(src, src_strides.as_ref(), read_shape, &dtype) };
-                }
-                Ok(out.view_mut())
-            }
+        } else {
+            // Write the scalar to each strided output position
+            let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
+            let src_strides = dim_arr(index.ndim(), |_| 0usize);
+            unsafe { out.copy_from(src, src_strides.as_ref(), read_shape, &dtype) };
         }
+        Ok(())
     }
 
     #[inline]
@@ -229,10 +225,10 @@ mod tests {
                 )
             };
             a.storage()
-                .read_data(
+                .read_data_into(
                     &Index::new(&[0, 0], &[2, 4]).unwrap(),
                     &ReadContext::default(),
-                    Some(&mut out),
+                    &mut out,
                 )
                 .unwrap();
         }
@@ -246,10 +242,10 @@ mod tests {
                 StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&[16, 4]).unwrap())
             };
             a.storage()
-                .read_data(
+                .read_data_into(
                     &Index::new(&[0, 0], &[1, 4]).unwrap(),
                     &ReadContext::default(),
-                    Some(&mut out),
+                    &mut out,
                 )
                 .unwrap();
         }

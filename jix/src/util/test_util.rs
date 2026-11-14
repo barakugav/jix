@@ -1458,9 +1458,11 @@ pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
                 .iter()
                 .map(|r| (r.end - r.start) as usize)
                 .collect::<Vec<_>>();
-            storage
-                .read_data(&Index::new(&start, &size)?, &ctx, out)
-                .map(drop)
+            let index = Index::new(&start, &size)?;
+            match out {
+                None => storage.read_data(&index, &ctx).map(drop),
+                Some(out) => storage.read_data_into(&index, &ctx, out),
+            }
         };
         let err = read(None).err();
         let err = err.unwrap_or_else(|| panic!("pull read of {index:?} for {shape:?} succeeded"));

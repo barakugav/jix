@@ -223,6 +223,37 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
     }
 }
 
+impl<S, K> ReductionOp<S, K>
+where
+    S: ArrayStorageTyped,
+    K: ReductionOpKernel<S::Item, Output: Dtyped>,
+{
+    fn reduce_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        let _cache_scope = self.cache_scope.enter(context);
+        read_data_dispatch(
+            &self.array,
+            self.dtype(),
+            size_of::<K::State>(),
+            Alignment::of::<K::State>(),
+            &self.is_reduced,
+            K::NEEDS_FINALIZE,
+            &|args| reduce_tile::<S::Item, K>(&self.kernel, args),
+            &|args| finalize_states_inner_loop::<S::Item, K>(&self.kernel, args),
+            &|out, len, out_stride| {
+                finalize_states_empty_inner_loop(&self.kernel, out, len, out_stride)
+            },
+            index,
+            context,
+            out,
+        )
+    }
+}
+
 impl<S, K> crate::storage::ArrayStorageImpl for ReductionOp<S, K>
 where
     S: ArrayStorageTyped,
@@ -241,28 +272,29 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
-            let _cache_scope = self.cache_scope.enter(context);
-            read_data_dispatch(
-                &self.array,
-                self.shape(),
-                self.dtype(),
-                size_of::<K::State>(),
-                Alignment::of::<K::State>(),
-                &self.is_reduced,
-                K::NEEDS_FINALIZE,
-                &|args| reduce_tile::<S::Item, K>(&self.kernel, args),
-                &|args| finalize_states_inner_loop::<S::Item, K>(&self.kernel, args),
-                &|out, len, out_stride| {
-                    finalize_states_empty_inner_loop(&self.kernel, out, len, out_stride)
-                },
+        check_read(self.shape(), index, self.dtype().itemsize() as usize)?;
+        context.read_cached(self.cache_id, index, || {
+            read_via_push(
                 index,
                 context,
-                out,
+                self.dtype(),
                 self.spec().read_layout_order(),
+                |out| self.reduce_into(index, context, out),
             )
+        })
+    }
+
+    #[inline]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        check_read_into(out, self.shape(), index, self.dtype().itemsize() as usize)?;
+        context.read_cached_into(self.cache_id, index, self.dtype(), out, |out| {
+            self.reduce_into(index, context, out)
         })
     }
 
@@ -290,9 +322,8 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-fn read_data_dispatch<'a>(
+fn read_data_dispatch(
     inner_array: &dyn ArrayStorage,
-    outer_shape: &[u64],
     output_dtype: &Dtype,
     kernel_state_sizeof: usize,
     kernel_state_alignof: Alignment,
@@ -302,10 +333,9 @@ fn read_data_dispatch<'a>(
     finalize_state_fn: &dyn Fn(Finalize1DArgs),
     finalize_state_empty_fn: &dyn Fn(*mut u8, usize, usize),
     index: &Index<'_>,
-    context: &'a ReadContext,
-    out: Option<&'a mut StridedBuf<'_>>,
-    read_layout_order: &[DimIdx],
-) -> Result<StridedBuf<'a>> {
+    context: &ReadContext,
+    out: &mut StridedBuf<'_>,
+) -> Result<()> {
     let read_data_fn = match is_reduced.len() {
         1 => read_data_impl::<Dim<1>>,
         2 => read_data_impl::<Dim<2>>,
@@ -315,7 +345,6 @@ fn read_data_dispatch<'a>(
     };
     read_data_fn(
         inner_array,
-        outer_shape,
         output_dtype,
         kernel_state_sizeof,
         kernel_state_alignof,
@@ -327,15 +356,13 @@ fn read_data_dispatch<'a>(
         index,
         context,
         out,
-        read_layout_order,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-fn read_data_impl<'a, InnerD>(
+fn read_data_impl<InnerD>(
     inner_array: &dyn ArrayStorage,
-    outer_shape: &[u64],
     output_dtype: &Dtype,
     kernel_state_sizeof: usize,
     kernel_state_alignof: Alignment,
@@ -345,23 +372,15 @@ fn read_data_impl<'a, InnerD>(
     finalize_state_fn: &dyn Fn(Finalize1DArgs),
     finalize_state_empty_fn: &dyn Fn(*mut u8, usize, usize),
     index: &Index<'_>,
-    context: &'a ReadContext,
-    out: Option<&'a mut StridedBuf<'_>>,
-    read_layout_order: &[DimIdx],
-) -> Result<StridedBuf<'a>>
+    context: &ReadContext,
+    out: &mut StridedBuf<'_>,
+) -> Result<()>
 where
     InnerD: Dimension,
 {
     // This method accept some &dyn fns to avoid monomorphizing the whole method for every combination
     // of kernel, dimension, dtype, and backing storage.
-    check_out_buf(
-        out.as_deref(),
-        outer_shape,
-        index,
-        output_dtype.itemsize() as usize,
-    )?;
     let out_shape = index.size();
-    let mut out = materialize_out_buf(out, context, out_shape, output_dtype, read_layout_order);
     let (out_buf, out_strides) = out.data_mut();
 
     // Streams the reduction over a two-level chunking of the inner array so peak scratch
@@ -571,7 +590,7 @@ where
             let tile_size = InnerD::vec(inner_ndim, |d| tile_size[d] as usize);
             let tile_index =
                 unsafe { Index::new_unchecked(tile_start.as_ref(), tile_size.as_ref()) };
-            let items = inner_array.read_data(&tile_index, context, None)?;
+            let items = inner_array.read_data(&tile_index, context)?;
 
             let state_offset = (0..inner_ndim)
                 .map(|d| ((tile_start[d] - inner_start_full[d]) as usize) * state_strides_inner[d])
@@ -613,7 +632,7 @@ where
         finalize_state_fn,
         finalize_state_empty_fn,
     );
-    Ok(out)
+    Ok(())
 }
 
 struct ReduceTileArgs<'a> {
@@ -1952,7 +1971,7 @@ pub(crate) mod tests {
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c) };
             let (start, size) = split_ranges(&full_index);
             storage
-                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&start, &size).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 
@@ -1990,7 +2009,7 @@ pub(crate) mod tests {
                 )
             };
             storage
-                .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&[0], &[3]).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 
@@ -2165,7 +2184,7 @@ pub(crate) mod tests {
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c) };
             let (start, size) = split_ranges(&index);
             storage
-                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&start, &size).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 
@@ -2185,7 +2204,7 @@ pub(crate) mod tests {
             };
             let (start, size) = split_ranges(&index);
             storage
-                .read_data(&Index::new(&start, &size).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&start, &size).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 
@@ -2226,7 +2245,7 @@ pub(crate) mod tests {
             let c = crate::util::default_strides_slice(&[3usize], size_of::<f64>());
             let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c) };
             storage
-                .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&[0], &[3]).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 
@@ -2242,7 +2261,7 @@ pub(crate) mod tests {
                 StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&byte_strides).unwrap())
             };
             storage
-                .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&[0], &[3]).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
 
@@ -2419,6 +2438,6 @@ pub(crate) mod tests {
         let a = Array::compact_ndarray(&array![[1.0f32]]).unwrap();
         let v = a.broadcast(&[n, 1]).var(1, 0.0);
         let ctx = crate::ReadContext::default();
-        assert!(v.storage().read_data(&[0..n], &ctx, None).is_err());
+        assert!(v.storage().read_data(&[0..n], &ctx).is_err());
     }
 }

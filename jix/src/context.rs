@@ -149,33 +149,45 @@ impl Drop for CacheScopeGuard<'_> {
 }
 
 impl ReadContext {
-    /// Read the region `index` of the storage `id` with `read` (called with `out`), through the
-    /// read cache if `id` is one of the arrays to cache of the current cache scope.
+    /// Pull the region `index` of the storage `id` with `read`, through the read cache if `id` is
+    /// one of the arrays to cache of the current cache scope.
     #[inline(always)]
-    pub(crate) fn read_cached<'a, 'b>(
+    pub(crate) fn read_cached<'a>(
         &'a self,
         id: ArrayCacheId,
         index: &Index<'_>,
-        dtype: &Dtype,
-        out: Option<&'a mut StridedBuf<'b>>,
-        read: impl Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
+        read: impl Fn() -> Result<StridedBuf<'a>>,
     ) -> Result<StridedBuf<'a>> {
         if !self.is_cache_enabled() {
-            return read(out);
+            return read();
         }
-        self.read_cached_impl(id, index, dtype, out, &read)
+        self.read_cached_impl(id, index, &read)
+    }
+
+    /// Push the region `index` of the storage `id` into `out` with `read_into`, or copy it from
+    /// the read cache if the cache holds it.
+    #[inline(always)]
+    pub(crate) fn read_cached_into(
+        &self,
+        id: ArrayCacheId,
+        index: &Index<'_>,
+        dtype: &Dtype,
+        out: &mut StridedBuf<'_>,
+        read_into: impl FnOnce(&mut StridedBuf<'_>) -> Result<()>,
+    ) -> Result<()> {
+        if self.is_cache_enabled() && self.copy_cached(id, index, dtype, out)? {
+            return Ok(());
+        }
+        read_into(out)
     }
 
     #[inline(never)]
-    fn read_cached_impl<'a, 'b>(
+    fn read_cached_impl<'a>(
         &'a self,
         id: ArrayCacheId,
         index: &Index<'_>,
-        dtype: &Dtype,
-        out: Option<&'a mut StridedBuf<'b>>,
-        read_fn: &dyn CachedReadFn<'a, 'b>,
+        read_fn: &dyn CachedReadFn<'a>,
     ) -> Result<StridedBuf<'a>> {
-        let pull = out.is_none();
         let mut cache_guard = self.read_cache.borrow_mut();
         // Check if cache is enabled for this array ID
         let cache = cache_guard
@@ -183,45 +195,24 @@ impl ReadContext {
             .filter(|c| c.arrays_to_cache.contains(id));
         let Some(cache) = cache else {
             drop(cache_guard); // before calling unknown `read()`
-            return read_fn.read(out);
+            return read_fn.read();
         };
         // Search for a matching cache entry for this array ID and index
         if let Some(entry) = cache.map.get(id) {
             if entry.start.as_slice() == index.start() && entry.size.as_slice() == index.size() {
                 let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
-                let buf = unsafe {
+                return Ok(unsafe {
                     StridedBuf::from_shared(buf, entry.strides.clone()).with_offset(entry.offset)
-                };
-                drop(cache_guard);
-
-                return Ok(match out {
-                    // user didnt provide an output buffer, return the cached buffer as is
-                    None => buf,
-                    // user provided an output buffer, copy the cached data into it
-                    Some(out) => {
-                        check_out_buf_impl(out, index, dtype.itemsize() as usize)?;
-
-                        let shape = index.size();
-                        let (src, src_strides) = buf.data();
-                        // SAFETY: the cached buffer holds the region at `src_strides`, and `out`
-                        // was checked to hold it at its own strides.
-                        unsafe { out.copy_from(src, src_strides, shape, dtype) };
-                        out.view_mut()
-                    }
                 });
-            } else {
-                // Evict before reading, so the read can reuse the buffer.
-                if pull && let Some(stale) = cache.map.remove(id) {
-                    self.buffer_pool.return_shared(stale.data);
-                }
+            }
+            // Evict before reading, so the read can reuse the buffer.
+            if let Some(stale) = cache.map.remove(id) {
+                self.buffer_pool.return_shared(stale.data);
             }
         }
 
         drop(cache_guard); // before calling unknown `read()`
-        let buf = read_fn.read(out)?;
-        if !pull {
-            return Ok(buf); // user provided an output buffer, we can't hold a ref to it in cache
-        }
+        let buf = read_fn.read()?;
         let (data, offset, strides) = match buf.into_shared() {
             Ok(parts) => parts,
             Err(buf) => return Ok(buf), // A view of memory outside the pool is not cached.
@@ -246,6 +237,40 @@ impl ReadContext {
             self.buffer_pool.return_shared(stale.data);
         }
         Ok(buf)
+    }
+
+    /// Copies the region `index` of the storage `id` into `out` if the read cache holds it, and
+    /// returns whether it did. A push read is not added to the cache, as it cannot hold `out`.
+    #[inline(never)]
+    fn copy_cached(
+        &self,
+        id: ArrayCacheId,
+        index: &Index<'_>,
+        dtype: &Dtype,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<bool> {
+        let cache_guard = self.read_cache.borrow();
+        let entry = cache_guard
+            .as_ref()
+            .filter(|c| c.arrays_to_cache.contains(id))
+            .and_then(|c| c.map.get(id));
+        let Some(entry) = entry else {
+            return Ok(false);
+        };
+        if entry.start.as_slice() != index.start() || entry.size.as_slice() != index.size() {
+            return Ok(false);
+        }
+        check_out_buf_impl(out, index, dtype.itemsize() as usize)?;
+        let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
+        let buf = unsafe {
+            StridedBuf::from_shared(buf, entry.strides.clone()).with_offset(entry.offset)
+        };
+        drop(cache_guard);
+        let (src, src_strides) = buf.data();
+        // SAFETY: the cached buffer holds the region at `src_strides`, and `out` was checked to
+        // hold it at its own strides.
+        unsafe { out.copy_from(src, src_strides, index.size(), dtype) };
+        Ok(true)
     }
 
     #[inline]
@@ -296,16 +321,16 @@ impl ReadContext {
 }
 
 // could be replaced by `Fn`, but a trait generate less binary
-trait CachedReadFn<'a, 'b: 'a> {
-    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>;
+trait CachedReadFn<'a> {
+    fn read(&self) -> Result<StridedBuf<'a>>;
 }
-impl<'a, 'b: 'a, F> CachedReadFn<'a, 'b> for F
+impl<'a, F> CachedReadFn<'a> for F
 where
-    F: Fn(Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>>,
+    F: Fn() -> Result<StridedBuf<'a>>,
 {
     #[inline(always)]
-    fn read(&self, out: Option<&'a mut StridedBuf<'b>>) -> Result<StridedBuf<'a>> {
-        self(out)
+    fn read(&self) -> Result<StridedBuf<'a>> {
+        self()
     }
 }
 

@@ -3,8 +3,8 @@ use std::ops::Range;
 
 use crate::error::{check_get_buffer_size, check_ranges, check_region_size, ensure, Result};
 use crate::storage::{
-    check_out_buf_dims, check_out_buf_impl, materialize_out_buf, split_ranges, ArrayStorageTyped,
-    Index, StridedBuf,
+    alloc_out_buf, check_out_buf_dims, check_out_buf_impl, read_via_push, split_ranges,
+    ArrayStorageTyped, Index, StridedBuf,
 };
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, cast_slice_mut, default_strides_slice, dim_arr, IterExt};
@@ -262,7 +262,7 @@ impl<S: ArrayStorage> Array<S> {
                 ))
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides) };
-            self.to_buf_strided_checked(&index, context, Some(&mut out))?;
+            self.read_into_checked(&index, context, &mut out)?;
         }
         Ok(unsafe { array.assume_init() })
     }
@@ -321,7 +321,7 @@ impl<S: ArrayStorage> Array<S> {
         let index = unsafe { Index::new_unchecked(&start, &size) };
         check_region_size(&size, dtype.itemsize() as usize)?;
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides) };
-        self.to_buf_strided_checked(&index, context, Some(&mut out))?;
+        self.read_into_checked(&index, context, &mut out)?;
         Ok(())
     }
 
@@ -421,10 +421,14 @@ impl<S: ArrayStorage> Array<S> {
         let index = unsafe { Index::new_unchecked(&start, &size) };
         let itemsize = self.dtype().itemsize() as usize;
         check_region_size(index.size(), itemsize)?;
-        if let Some(out) = out.as_deref() {
-            check_out_buf_impl(out, &index, itemsize)?;
+        match out {
+            None => self.read_checked(&index, context),
+            Some(out) => {
+                check_out_buf_impl(out, &index, itemsize)?;
+                self.read_into_checked(&index, context, out)?;
+                Ok(out.view_mut())
+            }
         }
-        self.to_buf_strided_checked(&index, context, out)
     }
 
     #[cold]
@@ -438,62 +442,87 @@ impl<S: ArrayStorage> Array<S> {
         if let Some(out) = out.as_deref() {
             check_out_buf_dims(out, size.len())?;
         }
-        let spec = self.storage.spec();
-        let layout = spec.read_layout_order();
-        Ok(materialize_out_buf(
-            out,
-            context,
-            size,
-            self.dtype(),
-            layout,
-        ))
+        Ok(match out {
+            Some(out) => out.view_mut(),
+            None => {
+                let spec = self.storage.spec();
+                alloc_out_buf(context, size, self.dtype(), spec.read_layout_order())
+            }
+        })
     }
 
-    // Like `to_buf_strided`, for an `index` the caller checked against the shape and the region
-    // size, and an `out` that passes `check_out_buf_impl`.
+    // Like `to_buf_strided` in pull mode, for an `index` the caller checked against the shape and
+    // the region size.
     #[inline]
-    fn to_buf_strided_checked<'a>(
+    fn read_checked<'a>(
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        let dtype = self.dtype();
         let spec = self.storage.spec();
-        let small_read = spec.flags().plain_read() || {
-            let nitems = index.size().iter().product::<usize>();
-            let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
-            nitems as u64 <= min_nitems
-        };
         let _cache_scope = context.cache_scope(&spec.dynamic().arrays_to_cache);
-        if small_read {
-            // Fast path for small reads
-            self.storage.read_data(index, context, out)
+        if self.is_small_read(index) {
+            self.storage.read_data(index, context)
+        } else {
+            read_via_push(
+                index,
+                context,
+                self.dtype(),
+                spec.read_layout_order(),
+                |out| to_buf_strided_slow(&self.storage, index, context, out),
+            )
+        }
+    }
+
+    // Like `to_buf_strided` in push mode, for an `index` the caller checked against the shape and
+    // the region size, and an `out` that passes `check_out_buf_impl`.
+    #[inline]
+    fn read_into_checked(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        let spec = self.storage.spec();
+        let _cache_scope = context.cache_scope(&spec.dynamic().arrays_to_cache);
+        if self.is_small_read(index) {
+            self.storage.read_data_into(index, context, out)
         } else {
             to_buf_strided_slow(&self.storage, index, context, out)
+        }
+    }
+
+    /// Whether to read `index` in one storage read, or else cut it into cache-sized pieces.
+    #[inline(always)]
+    fn is_small_read(&self, index: &Index<'_>) -> bool {
+        let spec = self.storage.spec();
+        spec.flags().plain_read() || {
+            let nitems = index.size().iter().product::<usize>();
+            let (min_nitems, _) = spec.read_size().nitems(self.dtype().itemsize());
+            nitems as u64 <= min_nitems
         }
     }
 }
 
 #[inline(never)]
-fn to_buf_strided_slow<'a, S: ArrayStorage>(
-    storage: &'a S,
+fn to_buf_strided_slow<S: ArrayStorage>(
+    storage: &S,
     index: &Index<'_>,
-    context: &'a ReadContext,
-    out: Option<&'a mut StridedBuf<'_>>,
-) -> Result<StridedBuf<'a>> {
+    context: &ReadContext,
+    out: &mut StridedBuf<'_>,
+) -> Result<()> {
     // Erase the storage so the body is monomorphized once
     let storage: &dyn ArrayStorage = storage;
     to_buf_strided_slow_dyn_dispatch(storage, index, context, out)
 }
 
 #[inline(never)]
-fn to_buf_strided_slow_dyn_dispatch<'a>(
-    storage: &'a dyn ArrayStorage,
+fn to_buf_strided_slow_dyn_dispatch(
+    storage: &dyn ArrayStorage,
     index: &Index<'_>,
-    context: &'a ReadContext,
-    out: Option<&'a mut StridedBuf<'_>>,
-) -> Result<StridedBuf<'a>> {
+    context: &ReadContext,
+    out: &mut StridedBuf<'_>,
+) -> Result<()> {
     let to_ndarray_fn = match storage.shape().len() {
         0 => to_buf_strided_slow_dyn::<Dim<0>>,
         1 => to_buf_strided_slow_dyn::<Dim<1>>,
@@ -511,19 +540,18 @@ fn to_buf_strided_slow_dyn_dispatch<'a>(
 
 // index range and buffer size are not checked
 #[inline(never)]
-fn to_buf_strided_slow_dyn<'a, D: Dimension>(
-    storage: &'a dyn ArrayStorage,
+fn to_buf_strided_slow_dyn<D: Dimension>(
+    storage: &dyn ArrayStorage,
     index: &Index<'_>,
-    context: &'a ReadContext,
-    out: Option<&'a mut StridedBuf<'_>>,
-) -> Result<StridedBuf<'a>> {
+    context: &ReadContext,
+    out: &mut StridedBuf<'_>,
+) -> Result<()> {
     let shape = storage.shape();
     let ndim = index.ndim();
     let dtype = storage.dtype();
 
     let spec = storage.spec();
     let out_shape = index.size();
-    let mut out = materialize_out_buf(out, context, out_shape, dtype, spec.read_layout_order());
     debug_assert!(!out_shape.contains(&0));
     let max_shape = D::vec(ndim, |dim| out_shape[dim] as u64);
     let read_shape = spec.read_shape_heuristic::<D>(max_shape.as_ref(), shape, dtype.itemsize());
@@ -557,9 +585,9 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
         let block_size = D::vec(ndim, |dim| block_size[dim] as usize);
         let block_index =
             unsafe { Index::new_unchecked(block_start.as_ref(), block_size.as_ref()) };
-        storage.read_data(&block_index, context, Some(&mut block_out))?;
+        storage.read_data_into(&block_index, context, &mut block_out)?;
     }
-    Ok(out)
+    Ok(())
 }
 
 impl<S: ArrayStorage> Array<S> {

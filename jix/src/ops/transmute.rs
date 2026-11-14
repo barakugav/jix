@@ -89,9 +89,18 @@ where
         &'a self,
         index: &Index<'_>,
         context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        self.array.read_data(index, context, out)
+        self.array.read_data(index, context)
+    }
+
+    #[inline(always)]
+    fn read_data_into(
+        &self,
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: &mut StridedBuf<'_>,
+    ) -> Result<()> {
+        self.array.read_data_into(index, context, out)
     }
 
     #[inline(always)]
@@ -310,7 +319,7 @@ mod tests {
 
         let view = t
             .storage()
-            .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx, None)
+            .read_data(&Index::new(&[0], &[3]).unwrap(), &ctx)
             .unwrap();
         assert_eq!(view.data_ptr(), src.as_ptr().cast::<u8>());
         assert_eq!(view.strides(), &[size_of::<f32>()]);
@@ -341,7 +350,7 @@ mod tests {
                 )
             };
             t.storage()
-                .read_data(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, Some(&mut out))
+                .read_data_into(&Index::new(&[0, 0], &[2, 3]).unwrap(), &ctx, &mut out)
                 .unwrap();
         }
         assert_eq!(
