@@ -185,7 +185,7 @@ impl AlignedBytes {
     ///
     /// # Panics
     ///
-    /// Panics if the new capacity exceeds `isize::MAX` bytes.
+    /// Panics if the new capacity, rounded up to the alignment, exceeds `isize::MAX` bytes.
     #[inline]
     pub fn reserve(&mut self, additional: usize) {
         if additional > self.capacity().wrapping_sub(self.len) {
@@ -198,7 +198,7 @@ impl AlignedBytes {
     ///
     /// # Panics
     ///
-    /// Panics if the new capacity exceeds `isize::MAX` bytes.
+    /// Panics if the new capacity, rounded up to the alignment, exceeds `isize::MAX` bytes.
     #[inline]
     pub fn reserve_exact(&mut self, additional: usize) {
         if additional > self.capacity().wrapping_sub(self.len) {

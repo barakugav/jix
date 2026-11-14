@@ -34,8 +34,8 @@ use crate::util::numpy_items;
 ///     - If `value` is already an `Array` and `dtype` is `None`, it is returned as-is with no copy.
 ///       When `dtype` is given, the result is a lazy cast view over the input instead.
 ///     - 0-dimensional inputs produce a scalar array backed by a single value (no buffer).
-///     - All other inputs share the underlying buffer with the intermediate NumPy array (zero-copy);
-///       the NumPy array is kept alive for as long as the returned `Array` is alive.
+///     - All other inputs share the underlying buffer with the intermediate NumPy array
+///       (zero-copy); the NumPy array is kept alive for as long as the returned `Array` is alive.
 ///
 /// Raises:
 ///     ValueError: If the input cannot be converted by `numpy.asarray`, has more dimensions than

@@ -270,6 +270,9 @@ define_op2!(
 /// of `a` and `b` are within tolerance:
 /// `|a - b| <= max(atol, rtol * max(|a|, |b|))`
 ///
+/// This is not NumPy's formula: `numpy.isclose` tests `|a - b| <= atol + rtol * |b|`, which
+/// depends on the operand order.
+///
 /// `NaN` is close to nothing, and an infinity only to the same infinity. For complex arrays,
 /// both the real and the imaginary parts must pass the check.
 ///

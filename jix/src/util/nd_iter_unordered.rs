@@ -5,11 +5,11 @@ use crate::util::iter::NdIter;
 use crate::util::Idx;
 use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
-/// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d regions,
-/// described only by their common `shape` (in elements), each operand's `strides`, and each operand's
-/// `(size, alignment)`. It owns no buffers: it computes the element visitation order and hands the
-/// caller an offset per operand, leaving the caller in full control of the actual reads/writes
-/// (aliasing, alignment, element type).
+/// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d
+/// regions, described only by their common `shape` (in elements), each operand's `strides`, and
+/// each operand's `(size, alignment)`. It owns no buffers: it computes the element visitation order
+/// and hands the caller an offset per operand, leaving the caller in full control of the actual
+/// reads/writes (aliasing, alignment, element type).
 ///
 /// `strides`, the offsets it yields, and each operand's `(size, alignment)` are all in the *same
 /// per-operand unit*: pass byte strides with `(itemsize, alignment)` to walk a byte buffer, or
@@ -45,7 +45,8 @@ pub(crate) struct NdIterUnordered<I: Idx, const N_OPERANDS: usize> {
 
 impl<I: Idx, const N_OPERANDS: usize> NdIterUnordered<I, N_OPERANDS> {
     /// Order and coalesce the dims and compute the innermost-run flags. An empty region (any dim of
-    /// length 0) yields an iterator whose [`foreach_inner_1d`](Self::foreach_inner_1d) visits nothing.
+    /// length 0) yields an iterator whose [`foreach_inner_1d`](Self::foreach_inner_1d) visits
+    /// nothing.
     #[inline]
     pub(crate) fn new(
         shape: &[I],
@@ -274,7 +275,7 @@ fn nd_iter_unordered_nd_walk_impl<I: Idx, const N_OPERANDS: usize, OuterD: Dimen
 
     if OuterD::NDIM == Some(1) {
         // Special case for 2D: the outer `NdIter` is just a single loop over the outer dim, and
-        // and inner loop is a flat 1-d run.
+        // the inner loop is a flat 1-d run.
 
         let outer_len = shape[0].u64();
         let outer_strides: [_; N_OPERANDS] = std::array::from_fn(|i| [strides[i][0]]);
