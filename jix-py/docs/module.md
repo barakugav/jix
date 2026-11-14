@@ -9,7 +9,7 @@ and evaluates operations **lazily**. It is designed around two ideas:
 Only the blocks that overlap a read request are decompressed, so random access into large arrays is relatively cheap.
 
 **Lazy operation chains.** Every operation - arithmetic, shape change, reduction, type cast - returns a new view that wraps the
-input(s) and records the transformation, nothing is computed until data is explicitly requested.
+input(s) and records the transformation; nothing is computed until data is explicitly requested.
 A chain of such operations builds a pipeline that runs in a single decompression pass the moment you ask for output.
 
 The library is NumPy-compatible: arrays expose a NumPy `dtype`, accept NumPy index syntax,
@@ -172,8 +172,7 @@ b = jix.read_array("data.jix")
 c = jix.read_array("data.jix", mmap=True)
 ```
 
-`write_array` accepts a file path or any writable binary
-file-like object. `read_array` accepts a file path or any seekable binary file-like
+`write_array` and `read_array` accept a file path or any seekable binary file-like
 object.
 
 A key property: **a lazy array can be written directly without fully materializing it in
