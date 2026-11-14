@@ -5,19 +5,17 @@ use crate::ArrayParams;
 /// Storage adaptor that guarantees the wrapped array is always in compact
 /// block-compressed form.
 ///
-/// Returned by [`Array::maybe_compact`] and [`Array::maybe_compact_with`]. The
-/// adaptor handles two cases transparently:
+/// Returned by [`Array::maybe_compact`] and [`Array::maybe_compact_with`]:
 ///
 /// - **Already compact**: the original storage is kept as is - no copy or re-compression.
 /// - **Not compact** (lazy views, op chains, etc.): the array is materialized
-///   and compressed into a new [`Compact`] block-table.
+///   and compressed into a new [`Compact`] storage.
 ///
-/// In both cases all [`ArrayStorage`] methods delegate to the inner variant,
-/// and the storage is guaranteed to be a materialized compact storage, not a view.
-/// The element type `S::ElementType` is preserved in both paths.
+/// All [`ArrayStorage`] methods delegate to the inner storage, and the element type
+/// `S::ElementType` is preserved.
 pub struct MaybeCompact<S: ArrayStorage>(pub(crate) ToCompactInner<S>);
 
-/// The two internal states of an [`MaybeCompact<S>`] storage.
+/// The two internal states of a [`MaybeCompact<S>`] storage.
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum ToCompactInner<S: ArrayStorage> {
     /// The source was already compact; the original storage is kept as-is.
@@ -118,8 +116,7 @@ where
 }
 
 impl<S: ArrayStorage> Array<S> {
-    /// Ensure this array is in compact block-compressed form, re-compressing
-    /// if needed.
+    /// Ensure this array is in compact block-compressed form, compressing it if needed.
     ///
     /// If the array is already compact, the storage is kept as-is - no data is
     /// copied or re-compressed. Otherwise the array is materialized block by
@@ -149,15 +146,10 @@ impl<S: ArrayStorage> Array<S> {
         self.maybe_compact_with(ArrayParams::default(), &context)
     }
 
-    /// Ensure this array is in compact block-compressed form, re-compressing
-    /// if needed, with explicit control over parameters.
+    /// Like [`maybe_compact`](Self::maybe_compact), with explicit [`ArrayParams`].
     ///
-    /// Similar to [`maybe_compact`](Self::maybe_compact) but with explicit [`ArrayParams`].
-    ///
-    /// `params` controls the target block shape and compression settings. It is
-    /// **only used when the source is not already compact** - if `is_compact()`
-    /// returns `true`, the existing storage is wrapped zero-cost and `params` is
-    /// ignored.
+    /// `params` sets the block shape and compression settings of the new storage. It is
+    /// **ignored when the array is already compact**.
     pub fn maybe_compact_with(
         self,
         params: ArrayParams,
