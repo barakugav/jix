@@ -8,9 +8,7 @@ use crate::storage::{
 };
 use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
 use crate::ReadContext;
-use crate::{
-    strided_span_bytes_from_iter, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, PlainArray,
-};
+use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, PlainArray};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -466,22 +464,22 @@ where
             self.dtype().itemsize() as usize,
         )?;
 
-        let itemsize = dtype.itemsize() as usize;
-        let src_span = strided_span_bytes_from_iter(
-            index.size().iter().copied(),
-            self.strides.as_ref(),
-            itemsize,
-        );
-
-        let src_ptr = if src_span == 0 {
-            self.data.as_ptr()
-        } else {
-            let in_offset = (index.start().iter().zip(self.strides.as_ref()))
-                .map(|(&start, &stride)| start as usize * stride)
-                .sum::<usize>();
-            unsafe { self.data.as_ptr().add(in_offset) }
-        };
-        let src = unsafe { std::slice::from_raw_parts(src_ptr, src_span) };
+        // The offset of the region's first element and the span of the region, in bytes.
+        let (mut offset, mut span) = (0, dtype.itemsize() as usize);
+        let dims = index
+            .start()
+            .iter()
+            .zip(index.size())
+            .zip(self.strides.as_ref());
+        for ((&start, &size), &stride) in dims {
+            if size == 0 {
+                (offset, span) = (0, 0);
+                break;
+            }
+            offset += start as usize * stride;
+            span += (size - 1) * stride;
+        }
+        let src = unsafe { std::slice::from_raw_parts(self.data.as_ptr().add(offset), span) };
 
         match out {
             None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.clone()) }),
