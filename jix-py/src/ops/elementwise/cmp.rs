@@ -31,8 +31,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -81,8 +80,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -125,8 +123,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -166,8 +163,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -207,8 +203,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -248,8 +243,7 @@ define_op2!(
     ///     b: Second operand.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No
-    ///         computation occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape.
     ///
     /// Examples:
     ///     ```python
@@ -296,8 +290,7 @@ define_op2!(
 ///         to both parts, or may be a complex scalar setting one tolerance per part.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation
-///         occurs until the result is read.
+///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape.
 ///
 /// Raises:
 ///     TypeError: If `rtol` is complex, or if `atol` is complex for a non-complex array dtype.

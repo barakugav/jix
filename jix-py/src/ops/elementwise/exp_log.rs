@@ -20,8 +20,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
     ///
     /// Examples:
     ///     ```python
@@ -55,8 +54,7 @@ define_op1!(
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
     ///
     /// Examples:
     ///     ```python
@@ -87,8 +85,7 @@ define_op1!(
 ///     base: Logarithm base, a positive number other than 1. `None` (the default) means `e`.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-///         the result is read.
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`.
 ///
 /// Examples:
 ///     ```python

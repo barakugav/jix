@@ -23,7 +23,7 @@ where
 /// dim except `dim`. The output has as many dims as the inputs - unlike
 /// [`Stack`](crate::ops::Stack), which adds a new dim.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Examples
 ///

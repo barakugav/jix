@@ -17,8 +17,6 @@ use crate::Array;
 /// If `condition` is a scalar, or `x` and `y` are the same object, the selected operand is returned
 /// as is (after broadcasting and type promotion).
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
-///
 /// Args:
 ///     condition: Boolean selector array.
 ///     x: Values to use where `condition` is True.

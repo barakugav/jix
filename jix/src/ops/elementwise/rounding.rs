@@ -36,7 +36,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Floor`](crate::scalar::Floor) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::floor()`](crate::Array::floor).
@@ -66,7 +66,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Ceil`](crate::scalar::Ceil) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::ceil()`](crate::Array::ceil).
@@ -96,7 +96,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Round`](crate::scalar::Round) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::round()`](crate::Array::round).

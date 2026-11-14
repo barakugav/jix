@@ -66,7 +66,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::IsNan`](crate::scalar::IsNan) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::is_nan()`](crate::Array::is_nan).
@@ -98,7 +98,7 @@ define_op1!(
     /// See [`jix::scalar::IsFinite`](crate::scalar::IsFinite) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::is_finite()`](crate::Array::is_finite).
@@ -131,7 +131,7 @@ define_op1!(
     /// See [`jix::scalar::IsInfinite`](crate::scalar::IsInfinite) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::is_infinite()`](crate::Array::is_infinite).

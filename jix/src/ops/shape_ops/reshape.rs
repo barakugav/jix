@@ -5,7 +5,7 @@ use crate::ops::prelude::*;
 ///
 /// The new shape must have the same total number of elements. Output dtype equals the input dtype.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// # Performance
 ///

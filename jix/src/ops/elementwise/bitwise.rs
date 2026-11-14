@@ -197,7 +197,7 @@ define_op2!(
     /// See [`jix::scalar::BitAnd`](crate::scalar::BitAnd) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// the `&` operator or [`Array::bitand()`](core::ops::BitAnd::bitand).
@@ -230,7 +230,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::BitOr`](crate::scalar::BitOr) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// the `|` operator or [`Array::bitor()`](core::ops::BitOr::bitor).
@@ -264,7 +264,7 @@ define_op2!(
     /// See [`jix::scalar::BitXor`](crate::scalar::BitXor) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// the `^` operator or [`Array::bitxor()`](core::ops::BitXor::bitxor).
@@ -298,7 +298,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Not`](crate::scalar::Not) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// the `!` operator or [`Array::not()`](core::ops::Not::not).
@@ -331,7 +331,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Shl`](crate::scalar::Shl) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::bitwise_shift_left()`](crate::Array::bitwise_shift_left).
@@ -364,7 +364,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Shr`](crate::scalar::Shr) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::bitwise_shift_right()`](crate::Array::bitwise_shift_right).
@@ -397,7 +397,7 @@ define_op2!(
     /// See [`jix::scalar::RotateLeft`](crate::scalar::RotateLeft) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::bitwise_rotate_left()`](crate::Array::bitwise_rotate_left).
@@ -431,7 +431,7 @@ define_op2!(
     /// See [`jix::scalar::RotateRight`](crate::scalar::RotateRight) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::bitwise_rotate_right()`](crate::Array::bitwise_rotate_right).

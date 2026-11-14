@@ -264,7 +264,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Equal`](crate::scalar::Equal) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::equal()`](crate::Array::equal).
@@ -298,7 +298,7 @@ define_op2!(
     /// See [`jix::scalar::NotEqual`](crate::scalar::NotEqual) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::not_equal()`](crate::Array::not_equal).
@@ -420,7 +420,7 @@ define_swapped_cmp!(
     ///
     /// Evaluated as `b < a` by a [`Less`] with the operands swapped; see it for the semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::greater()`](crate::Array::greater).
@@ -451,7 +451,7 @@ define_swapped_cmp!(
     /// Evaluated as `b <= a` by a [`LessEqual`] with the operands swapped; see it for the
     /// semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::greater_equal()`](crate::Array::greater_equal).
@@ -481,7 +481,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Less`](crate::scalar::Less) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::less()`](crate::Array::less).
@@ -515,7 +515,7 @@ define_op2!(
     /// See [`jix::scalar::LessEqual`](crate::scalar::LessEqual) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::less_equal()`](crate::Array::less_equal).
@@ -554,7 +554,7 @@ define_op2!(
 /// Jix treats `atol` and `rtol` as independent thresholds and uses the symmetric
 /// `max(|a|, |b|)` as the scale.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation; the operation is also available as
 /// [`Array::approx_equal()`](crate::Array::approx_equal).

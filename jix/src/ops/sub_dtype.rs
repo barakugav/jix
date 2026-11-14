@@ -5,7 +5,7 @@ use crate::ops::prelude::*;
 /// The input array must have a struct dtype with a field named `sub_field`. The output has the
 /// dtype of that field and the same shape as the input.
 ///
-/// The result is a lazy view; no computation occurs until the array is read.
+/// The result is a lazy view.
 ///
 /// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::dtype_sub_field()`](crate::Array::dtype_sub_field).

@@ -399,7 +399,7 @@ define_op1!(
     ///
     /// Available via the unary `-` operator on [`Array`](crate::Array): `-arr`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::neg()`](core::ops::Neg::neg).
@@ -430,7 +430,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Sign`](crate::scalar::Sign) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::sign()`](crate::Array::sign).
@@ -464,7 +464,7 @@ define_op1!(
     ///
     /// See [`jix::scalar::Abs`](crate::scalar::Abs) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::abs()`](crate::Array::abs).
@@ -506,7 +506,7 @@ define_op1!(
     /// See [`jix::scalar::Square`](crate::scalar::Square) scalar trait for the
     /// per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::square()`](crate::Array::square).
@@ -539,7 +539,7 @@ define_op2!(
     /// Available via the `+` operator on arrays. For adding a constant to every element, use
     /// [`Array::map`]: `a.map(|x| x + 1i32)`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -566,7 +566,7 @@ define_op2!(
     /// Available via the `-` operator on arrays. For subtracting a constant from every element,
     /// use [`Array::map`]: `a.map(|x| x - 1i32)`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -593,7 +593,7 @@ define_op2!(
     /// Available via the `*` operator on arrays. For scaling every element by a constant, use
     /// [`Array::map`]: `a.map(|x| x * 2i32)`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// # Examples
     /// ```
@@ -618,7 +618,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Pow`](crate::scalar::Pow) scalar trait for the per-element semantics.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::pow()`](crate::Array::pow).
