@@ -232,9 +232,9 @@ where
         let arr_size_bytes = arr_size.as_ref().iter().product::<usize>() * itemsize;
 
         // In-place fast path (each sub-array a contiguous chunk) is valid only when the destination
-        // is contiguous and all dims before stack_dim have size <=1; else scatter.
-        let in_place =
-            out.is_contiguous(output_shape, dtype) && shape.iter().take(stack_dim).all(|&s| s <= 1);
+        // is contiguous and all requested dims before stack_dim have size <=1; else scatter.
+        let in_place = out.is_contiguous(output_shape, dtype)
+            && output_shape.iter().take(stack_dim).all(|&s| s <= 1);
         let (out_buf, out_strides) = out.data_mut();
         // Stride of the stack dim in the output (offset between consecutive sub-arrays).
         let stack_dim_stride = out_strides[stack_dim];
