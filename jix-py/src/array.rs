@@ -637,8 +637,15 @@ impl PyArray {
             )
         };
 
-        let should_detach = self.arr.storage().spec().flags().read_tiling() != ReadTiling::ZeroCopy
-            || nitems * itemsize > 4096; // TODO: we should check element cost, not just total size
+        let should_detach = {
+            let spec = self.arr.storage().spec();
+            let from_memory = matches!(
+                spec.flags().read_tiling(),
+                ReadTiling::ZeroCopy | ReadTiling::Fusable
+            );
+            let read_cost = (nitems * itemsize) as f32 * spec.element_cost().max(1.0);
+            !from_memory || read_cost > 4096.0
+        };
         maybe_detach(py, should_detach, || {
             let context = self.read_ctx()?;
             let context = context.as_ref();

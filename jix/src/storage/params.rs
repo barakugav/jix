@@ -707,8 +707,9 @@ impl<'a> ArraySpec<'a> {
     pub(crate) fn block_shape_fixed_dims(&self) -> DimBitmap {
         self.dynamic().block_shape_fixed_dims
     }
+    #[doc(hidden)]
     #[inline(always)]
-    pub(crate) fn element_cost(&self) -> f32 {
+    pub fn element_cost(&self) -> f32 {
         self.dynamic().element_cost
     }
     #[inline(always)]
