@@ -8,7 +8,9 @@ use crate::storage::{
     ArrayStorageTyped, Index, OutBuf, StridedBuf,
 };
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, cast_slice_mut, default_strides_slice, dim_arr, IterExt};
+use crate::util::{
+    advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr, IterExt,
+};
 use crate::ReadContext;
 use crate::{ArrayStorage, Dim, DimDyn, Dimension, PlainArray};
 
@@ -228,6 +230,7 @@ impl<S: ArrayStorage> Array<S> {
                 ndarray::Array::uninit(alloc_shape).permuted_axes(inv_order)
             }
         };
+        advise_huge_pages(array.as_mut_ptr().cast::<u8>(), array.len() * itemsize);
 
         if !is_empty {
             let index = unsafe { Index::new_unchecked(&start, &size) };
