@@ -177,14 +177,6 @@ where
         let dtype = self.dtype();
         check_out_buf(&out, shape, index, self.dtype().itemsize() as usize)?;
         let _cache_scope = self.cache_scope.enter(context);
-        let output_shape = index.size();
-        let out = out.materialize(
-            context,
-            output_shape,
-            dtype,
-            self.spec().read_layout_order(),
-        );
-        debug_assert!(!output_shape.contains(&0));
 
         let stack_dim = self.stack_dim as usize;
         let arr_ndim = shape.len() - 1;
@@ -197,9 +189,47 @@ where
         }
         let arr_start = without_dim(index.start(), stack_dim);
         let arr_size = without_dim(index.size(), stack_dim);
+        let inner_index = unsafe { Index::new_unchecked(&arr_start, &arr_size) };
+        let first_arr = index.start()[stack_dim] as usize;
+        let n_stack = index.size()[stack_dim];
+
+        // Fast path for reads that only touch a single inner array
+        if n_stack == 1 {
+            match out.0 {
+                OutBufInner::Pull(slot) => {
+                    let pull = OutBuf::pull(&mut *slot);
+                    self.arrays
+                        .read_data(first_arr, &inner_index, context, pull)?;
+                    let buf = slot.as_mut().unwrap();
+                    let mut strides = DimArray::from_slice(buf.strides()).unwrap();
+                    strides.insert(stack_dim, 0);
+                    unsafe { buf.set_strides(strides) };
+                }
+                OutBufInner::Push(out) => {
+                    let (data, strides) = out.data_mut();
+                    let arr_strides = without_dim(strides, stack_dim);
+                    let mut arr_out = unsafe { StridedBuf::from_slice_mut(data, arr_strides) };
+                    self.arrays.read_data(
+                        first_arr,
+                        &inner_index,
+                        context,
+                        OutBuf::push(&mut arr_out),
+                    )?;
+                }
+            }
+            return Ok(());
+        }
+
+        let output_shape = index.size();
+        let out = out.materialize(
+            context,
+            output_shape,
+            dtype,
+            self.spec().read_layout_order(),
+        );
+        debug_assert!(!output_shape.contains(&0));
         let itemsize = dtype.itemsize() as usize;
         let arr_size_bytes = arr_size.as_ref().iter().product::<usize>() * itemsize;
-        let n_stack = index.size()[stack_dim];
 
         // In-place fast path (each sub-array a contiguous chunk) is valid only when the destination
         // is contiguous and all dims before stack_dim have size <=1; else scatter.
@@ -219,10 +249,9 @@ where
             })
         });
 
-        let arr_index = unsafe { Index::new_unchecked(&arr_start, &arr_size) };
         for arr_idx in 0..n_stack {
             let buf_offset = arr_idx * stack_dim_stride;
-            let arr = index.start()[stack_dim] as usize + arr_idx;
+            let arr = first_arr + arr_idx;
             let mut sub = if in_place {
                 let sub_c = default_strides(&arr_size, itemsize);
                 // SAFETY: contiguous destination; array `arr` packs into this contiguous chunk.
@@ -241,7 +270,7 @@ where
                 }
             };
             self.arrays
-                .read_data(arr, &arr_index, context, OutBuf::push(&mut sub))?;
+                .read_data(arr, &inner_index, context, OutBuf::push(&mut sub))?;
         }
         Ok(())
     }
@@ -369,6 +398,24 @@ mod tests {
         let actual = stack((za, zb, zc.view()), 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_read_inside_one_array() {
+        let a = array![[1i32, 2], [3, 4]];
+        let b = array![[5i32, 6], [7, 8]];
+        let za = Array::plain_ndarray(a).unwrap();
+        let zb = Array::plain_ndarray(b).unwrap();
+        let s = stack([za, zb], 1); // shape [2, 2, 2]
+        let ctx = s.read_ctx();
+        let index = [0..2, 1..2, 0..2];
+        assert_eq!(
+            s.to_ndarray_sub(&index, &ctx).unwrap(),
+            array![[[5, 6]], [[7, 8]]]
+        );
+        // A pull read returns `b`'s own buffer, the stack dim given a 0 stride.
+        let buf = s.to_buf_strided(&index, &ctx).unwrap();
+        assert_eq!(buf.strides(), &[8, 0, 4]);
     }
 
     #[test]
