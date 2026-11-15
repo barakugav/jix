@@ -2,7 +2,7 @@ use jix_core::TypeDyn;
 use pyo3::prelude::*;
 
 use crate::util::IntoPyResult;
-use crate::Array;
+use crate::PyArray;
 
 /// Extracts one named field from a struct dtype array.
 ///
@@ -48,10 +48,10 @@ use crate::Array;
 pub fn dtype_sub_field<'py>(
     array: &Bound<'py, PyAny>,
     sub_field: String,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py = array.py();
     let array = crate::ops::as_array::any_to_core_array(array)?;
     let res =
         jix_core::ops::SubDtype::<_, TypeDyn>::new_array(array, &sub_field).into_py_result()?;
-    Bound::new(py, Array::from_core(res.into_any()))
+    Bound::new(py, PyArray::from_core(res.into_any()))
 }

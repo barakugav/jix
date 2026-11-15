@@ -44,7 +44,7 @@ macro_rules! define_reduction_op {
             dim: Option<crate::type_hint::ItemOrTuple<crate::type_hint::Dim>>,
             keepdim: bool,
             $($($extra_arg: $extra_ty),+)?
-        ) -> pyo3::PyResult<crate::Array> {
+        ) -> pyo3::PyResult<crate::PyArray> {
             struct DispatchArgs {
                 dims: crate::util::DimArray<usize>,
                 $($($extra_arg: $extra_ty),*)?
@@ -71,7 +71,7 @@ macro_rules! define_reduction_op {
             if keepdim {
                 res = keepdim_after_multi_reduction(res, &dims)?;
             }
-            Ok(crate::Array::from_core(res))
+            Ok(crate::PyArray::from_core(res))
         }
     };
 
@@ -93,7 +93,7 @@ macro_rules! define_reduction_op {
             array: &pyo3::Bound<'py, pyo3::PyAny>,
             dim: Option<crate::type_hint::Dim>,
             keepdim: bool,
-        ) -> pyo3::PyResult<crate::Array> {
+        ) -> pyo3::PyResult<crate::PyArray> {
             struct DispatchArgs {
                 dim: usize,
             }
@@ -117,7 +117,7 @@ macro_rules! define_reduction_op {
             if keepdim {
                 res = keepdim_after_reduction(res, dim)?;
             }
-            Ok(crate::Array::from_core(res))
+            Ok(crate::PyArray::from_core(res))
         }
     };
 }

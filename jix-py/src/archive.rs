@@ -11,7 +11,7 @@ use pyo3::{type_hint_identifier, type_hint_subscript};
 use crate::array::resolve_array_params;
 use crate::ops::asarray;
 use crate::util::IntoPyResult;
-use crate::Array;
+use crate::PyArray;
 
 /// Load a compressed array from a `.jix` file or a file-like object.
 ///
@@ -93,7 +93,7 @@ pub fn read_array(
     len: Option<u64>,
     mmap: bool,
     validation: Option<ArchiveValidation>,
-) -> PyResult<Array> {
+) -> PyResult<PyArray> {
     let params = resolve_array_params(py, params)?;
     let path_or_reader = PathOrReader::from_pyany(path_or_reader)?;
     let validation = validation.map(|v| v.0).unwrap_or_default();
@@ -115,13 +115,13 @@ pub fn read_array(
                 let array =
                     jix_core::Array::read_from_file_with(&path, offset, len, params, validation)
                         .into_py_result()?;
-                Array::from_core(array.into_any())
+                PyArray::from_core(array.into_any())
             } else {
                 let array = unsafe {
                     jix_core::Array::read_from_file_mmap(&path, offset, len, params, validation)
                         .into_py_result()?
                 };
-                Array::from_core(array.into_any())
+                PyArray::from_core(array.into_any())
             })
         }),
         PathOrReader::PyReader(reader) => {
@@ -144,7 +144,7 @@ pub fn read_array(
             let pos = reader.stream_position()?;
             reader.into_inner().seek(SeekFrom::Start(pos))?;
 
-            Ok(Array::from_core(array.into_any()))
+            Ok(PyArray::from_core(array.into_any()))
         }
     }
 }
@@ -284,7 +284,7 @@ pub fn write_array(
     }
 }
 fn write_array_impl(
-    array: &Array,
+    array: &PyArray,
     mut writer: impl Write + Seek,
     params: jix_core::ArrayParams,
 ) -> PyResult<()> {

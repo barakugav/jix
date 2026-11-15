@@ -6,16 +6,16 @@ use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
 use jix_core::scalar::bool8;
 use jix_core::scalar::{f16, Complex};
-use jix_core::{Array as CoreArray, ArrayAny, ArrayParams};
+use jix_core::{Array, ArrayAny, ArrayParams};
 
 use crate::dtype::dtype_from_numpy;
 use crate::ops::cast_impl;
 use crate::ops::common::{Precision, Rank};
 use crate::util::{check_ndim, numpy_items, DimArray, IntoPyResult};
-use crate::Array;
+use crate::PyArray;
 
 pub(crate) enum Operand {
-    PyArray(Py<Array>),
+    PyArray(Py<PyArray>),
     Array(ArrayAny),
     Scalar {
         value: Scalar,
@@ -35,7 +35,7 @@ impl Operand {
         params: ArrayParams,
         only_scalar: bool,
     ) -> PyResult<Self> {
-        if !only_scalar && let Ok(array) = value.cast::<Array>() {
+        if !only_scalar && let Ok(array) = value.cast::<PyArray>() {
             return Ok(Self::PyArray(array.clone().unbind()));
         };
         let py = value.py();
@@ -259,10 +259,10 @@ impl Operand {
         }
     }
 
-    pub(crate) fn into_py_array<'py>(self, py: Python<'py>) -> PyResult<Bound<'py, Array>> {
+    pub(crate) fn into_py_array<'py>(self, py: Python<'py>) -> PyResult<Bound<'py, PyArray>> {
         match self {
             Operand::PyArray(array) => Ok(array.into_bound(py)),
-            _ => Bound::new(py, Array::from_core(self.into_array()?)),
+            _ => Bound::new(py, PyArray::from_core(self.into_array()?)),
         }
     }
 
@@ -516,7 +516,7 @@ pub(crate) fn plain_from_numpy(
     let storage = unsafe {
         jix_core::storage::Plain::new(array, data_ptr, shape.as_slice(), &strides, dtype, params)
     };
-    Ok(CoreArray::from_storage(storage.into_py_result()?).into_any())
+    Ok(Array::from_storage(storage.into_py_result()?).into_any())
 }
 
 #[cfg(test)]

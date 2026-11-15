@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 
 use crate::ops::common::{define_op1, CastKind, OpDescriptor, OpFnDescriptor, Operand};
 use crate::util::IntoPyResult;
-use crate::Array;
+use crate::PyArray;
 
 define_op1!(
     /// Computes the square root of each element.
@@ -119,7 +119,7 @@ define_op1!(
 ///     assert np.isnan(result_b[1])
 ///     ```
 #[pyo3::pyfunction(signature = (array, base=None))]
-pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> PyResult<Array> {
+pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> PyResult<PyArray> {
     struct LogArgs {
         base: f64,
     }
@@ -167,5 +167,5 @@ pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> PyResult<Array>
     let array = Operand::from_any(array)?;
     let args = LogArgs { base };
     let res = DISPATCH_TABLE.dispatch_args([array], args)?;
-    Ok(Array::from_core(res))
+    Ok(PyArray::from_core(res))
 }

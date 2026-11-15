@@ -11,7 +11,7 @@ use crate::util::{
     normalize_dim, normalize_dim_optional, normalize_dims, normalize_dims_optional, slice_unpack,
     DimArray, IntoPyResult,
 };
-use crate::Array;
+use crate::PyArray;
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions.
 ///
@@ -56,7 +56,7 @@ use crate::Array;
 pub fn broadcast<'py>(
     array: &Bound<'py, PyAny>,
     shape: ItemOrTuple<i64>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = &py_arr.get().arr;
@@ -91,7 +91,10 @@ pub fn broadcast<'py>(
     let array = broadcast_array_impl(array.clone(), new_shape.as_slice()).into_py_result()?;
 
     let np_dtype = py_arr.get().numpy_dtype(py)?;
-    Bound::new(py, Array::from_core_with_np_dtype(array, np_dtype.unbind()))
+    Bound::new(
+        py,
+        PyArray::from_core_with_np_dtype(array, np_dtype.unbind()),
+    )
 }
 pub(crate) fn broadcast_array_impl(
     array: ArrayAny,
@@ -189,7 +192,7 @@ pub(crate) fn broadcast_array_impl(
 pub fn slice<'py>(
     array: &Bound<'py, PyAny>,
     index: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let arr = py_arr.get().to_core();
@@ -215,7 +218,7 @@ pub fn slice<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        Array::from_core_with_np_dtype(result, np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(result, np_dtype.unbind()),
     )
 }
 
@@ -427,7 +430,7 @@ pub(crate) struct ParsedBasicIndex {
 pub fn insert_dim<'py>(
     array: &Bound<'py, PyAny>,
     dim: ItemOrTuple<Dim>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
@@ -448,7 +451,7 @@ pub fn insert_dim<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }
 /// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for
@@ -467,7 +470,7 @@ pub fn insert_dim<'py>(
 pub fn unsqueeze<'py>(
     array: &Bound<'py, PyAny>,
     dim: ItemOrTuple<Dim>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     insert_dim(array, dim)
 }
 
@@ -507,7 +510,7 @@ pub fn unsqueeze<'py>(
 pub fn remove_dim<'py>(
     array: &Bound<'py, PyAny>,
     dim: ItemOrTuple<Dim>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
@@ -519,7 +522,7 @@ pub fn remove_dim<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }
 
@@ -550,7 +553,7 @@ pub fn remove_dim<'py>(
 pub fn squeeze<'py>(
     array: &Bound<'py, PyAny>,
     dim: Option<ItemOrTuple<Dim>>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let dim = dim.unwrap_or_else(|| {
         ItemOrTuple::Sequence(
@@ -609,7 +612,7 @@ pub fn squeeze<'py>(
 pub fn permute_dims<'py>(
     array: &Bound<'py, PyAny>,
     dims: Option<Vec<Dim>>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
@@ -625,7 +628,7 @@ pub fn permute_dims<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }
 
@@ -664,7 +667,7 @@ pub fn swapdims<'py>(
     array: &Bound<'py, PyAny>,
     dim0: Dim,
     dim1: Dim,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let ndim = py_arr.get().ndim();
     let dim0 = normalize_dim(dim0, ndim)?;
@@ -716,7 +719,7 @@ pub fn swapdims<'py>(
 pub fn reshape<'py>(
     array: &Bound<'py, PyAny>,
     shape: ItemOrTuple<i64>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let new_shape = shape;
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
@@ -765,7 +768,10 @@ pub fn reshape<'py>(
         .into_py_result()?
         .into_any();
     let np_dtype = py_arr.get().numpy_dtype(py)?;
-    Bound::new(py, Array::from_core_with_np_dtype(array, np_dtype.unbind()))
+    Bound::new(
+        py,
+        PyArray::from_core_with_np_dtype(array, np_dtype.unbind()),
+    )
 }
 
 /// Collapses an array into a single dimension.
@@ -794,7 +800,7 @@ pub fn reshape<'py>(
 ///     assert np.array_equal(f.numpy(), [1, 2, 3, 4, 5, 6])
 ///     ```
 #[pyfunction]
-pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     reshape(&py_arr, ItemOrTuple::Item(-1))
 }
@@ -840,7 +846,7 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///     ```
 #[pyfunction]
 #[pyo3(signature = (arrays, dim=Dim(0)))]
-pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Bound<'py, Array>> {
+pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Bound<'py, PyArray>> {
     if arrays.is_empty() {
         return Err(PyValueError::new_err(
             "arrays must contain at least one array",
@@ -879,7 +885,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Bo
     let np_dtype = py_arrays.first().unwrap().get().numpy_dtype(py)?;
     Bound::new(
         py,
-        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }
 
@@ -923,7 +929,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Bo
     arrays,
     dim=Dim(0),
 ))]
-pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Array> {
+pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<PyArray> {
     if arrays.is_empty() {
         return Err(PyValueError::new_err(
             "arrays must contain at least one array",
@@ -962,7 +968,7 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Array> {
         ret.into_any()
     };
     let np_dtype = py_arrays.first().unwrap().get().numpy_dtype(py)?;
-    Ok(Array::from_core_with_np_dtype(res, np_dtype.unbind()))
+    Ok(PyArray::from_core_with_np_dtype(res, np_dtype.unbind()))
 }
 
 /// Repeats each element along the given dim.
@@ -1017,7 +1023,7 @@ pub fn repeat<'py>(
     array: &Bound<'py, PyAny>,
     repeats: u64,
     dim: Option<Dim>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
@@ -1029,7 +1035,7 @@ pub fn repeat<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }
 
@@ -1077,7 +1083,7 @@ pub fn repeat<'py>(
 pub fn flip<'py>(
     array: &Bound<'py, PyAny>,
     dim: Option<ItemOrTuple<Dim>>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
@@ -1092,7 +1098,7 @@ pub fn flip<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }
 
@@ -1138,7 +1144,7 @@ pub fn roll<'py>(
     array: &Bound<'py, PyAny>,
     shift: i64,
     dim: Option<Dim>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let core = py_arr.get().to_core();
@@ -1150,7 +1156,7 @@ pub fn roll<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }
 
@@ -1205,7 +1211,7 @@ pub fn tile<'py>(
     array: &Bound<'py, PyAny>,
     repeats: u64,
     dim: Option<Dim>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let core = py_arr.get().to_core();
@@ -1217,6 +1223,6 @@ pub fn tile<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }
