@@ -1,9 +1,10 @@
 #![allow(clippy::assertions_on_constants)]
 
 use crate::archive::schema;
-use crate::dtype::{Alignment, Itemsize};
-use crate::error::{bail, check_ndim, ensure, error, Result};
+use crate::dtype::{Alignment, Itemsize, DTYPE_NDIM_MAX};
+use crate::error::{bail, ensure, error, Result};
 use crate::util::{DimArray, IterExt};
+use crate::NDIM_MAX;
 
 impl crate::dtype::Dtype {
     pub(crate) fn from_proto(dtype: &schema::Dtype) -> Result<Self> {
@@ -19,7 +20,13 @@ impl crate::dtype::Dtype {
                 "dtype itemsize exceeds maximum supported itemsize: {}", dtype.itemsize
             )
         })?;
-        check_ndim(dtype.shape.len())?;
+        ensure!(
+            dtype.shape.len() <= DTYPE_NDIM_MAX,
+            InvalidArchive,
+            "dtype shape ndim exceeds maximum supported ndim {DTYPE_NDIM_MAX}: {}",
+            dtype.shape.len()
+        );
+        const { assert!(DTYPE_NDIM_MAX <= NDIM_MAX) }; // ensure collect<DimArray> will not fail
         let shape = dtype
             .shape
             .iter()
@@ -211,8 +218,8 @@ mod tests {
                 ErrorKind::InvalidArchive,
             ),
             (
-                make_scalar_proto(kind, 4, 4, vec![1; crate::NDIM_MAX + 1]),
-                ErrorKind::TooManyDimensions,
+                make_scalar_proto(kind, 4, 4, vec![1; DTYPE_NDIM_MAX + 1]),
+                ErrorKind::InvalidArchive,
             ),
             (
                 make_scalar_proto(kind, 4, 4, vec![u32::MAX, u32::MAX, u32::MAX]),

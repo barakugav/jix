@@ -1040,7 +1040,11 @@ pub(crate) mod flags {
         }
         pub(crate) const fn with_read_tiling(mut self, kind: ReadTiling) -> Self {
             let bits = Self::read_tiling_bits(kind);
-            debug_assert!(bits <= (1 << READ_TILING_SIZE) - 1);
+            debug_assert!({
+                #[allow(clippy::int_plus_one)]
+                let max = (1 << READ_TILING_SIZE) - 1;
+                bits <= max
+            });
             self.0 = (self.0 & !READ_TILING_MASK) | (bits << READ_TILING_SHIFT);
             self
         }

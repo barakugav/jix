@@ -9,7 +9,7 @@ use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::archive::version::lib_version;
 use crate::codec::DecoderCodecConfig;
-use crate::error::{check_ndim, ensure, error, Error, ErrorKind, Result};
+use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
 use crate::util::{dim_arr, DimBitmap, IterExt};
@@ -456,14 +456,16 @@ where
         let mut reader = ArchiveReader::new(reader, len)?;
         let f_meta = reader.read_file_meta()?;
         Self::read_body(&mut reader, &f_meta, storage, params, validation).map_err(|mut err| {
-            if err.kind() == ErrorKind::InvalidArchive {
-                let version_str = f_meta.lib_version.as_ref().map(|v| v.to_string());
-                let version_str = version_str.as_deref().unwrap_or("unknown");
-                err.message_mut().push_str(&format!(
-                    " (archive written by jix {version_str}, read by jix {})",
-                    lib_version()
-                ));
-            }
+            let version_str = f_meta.lib_version.as_ref().map(|v| v.to_string());
+            let version_str = version_str.as_deref().unwrap_or("unknown");
+
+            use std::fmt::Write;
+            let _write_err = write!(
+                err.message_mut(),
+                " (archive written by jix {version_str}, read by jix {})",
+                lib_version()
+            );
+
             err
         })
     }
