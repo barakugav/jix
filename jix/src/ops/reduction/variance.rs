@@ -109,7 +109,6 @@ pub(crate) mod traits {
                 ) -> [Self::State; N] {
                     use crate::util::array_from_fn_inline;
                     let x = items.map_inline(#[inline(always)] |x| <_ as crate::scalar::Cast<$mean_ty>>::cast(x));
-                    // let x = <_ as crate::scalar::Cast<$mean_ty>>::cast_bulk(items, simd); // TODO: is this faster?
                     let count = states.map_inline(#[inline(always)] |s| s.count + 1);
                     let count_f = count.map_inline(#[inline(always)] |c| c as f64);
                     let old_mean = states.map_inline(#[inline(always)] |s| s.mean);
