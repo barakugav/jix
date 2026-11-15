@@ -5,7 +5,7 @@ use prost::Message;
 
 use crate::archive::schema::{self, ArchiveType};
 use crate::archive::util::stream_len;
-use crate::archive::version::VERSION_U64;
+use crate::archive::version::lib_version;
 use crate::error::{bail, ensure, error, Error, Result};
 use crate::util::{value_as_bytes, value_from_io};
 
@@ -48,7 +48,7 @@ impl<W> ArchiveWriter<W> {
 
         let file_metadata = schema::FileMetadata {
             archive_type: archive_type as i32,
-            lib_version_semver: VERSION_U64,
+            lib_version: Some(lib_version()),
         };
         writer.write_message(&file_metadata)?;
 

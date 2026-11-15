@@ -212,22 +212,25 @@ pub mod block_table_header {
         ContiguousV1(()),
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct FileMetadata {
     #[prost(enumeration = "ArchiveType", tag = "1")]
     pub archive_type: i32,
-    /// Library version encoded as a 64-bit unsigned integer.
-    ///
-    /// The u64 is encoded with the following bit field layout:
-    ///    major          :  8 \[ 0.. 8\]
-    ///    minor          :  8 \[ 8..16\]
-    ///    patch          : 10 \[16..26\]
-    ///    pre-release    :  6 \[26..32\]
-    ///    build-metadata : 32 \[32..64\]
-    /// Note that the major is the least significant byte, so comparing versions can NOT be done with
-    /// a simple integer comparison.
-    #[prost(uint64, tag = "2")]
-    pub lib_version_semver: u64,
+    #[prost(message, optional, tag = "2")]
+    pub lib_version: ::core::option::Option<Semver>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Semver {
+    #[prost(uint32, tag = "1")]
+    pub major: u32,
+    #[prost(uint32, tag = "2")]
+    pub minor: u32,
+    #[prost(uint32, tag = "3")]
+    pub patch: u32,
+    #[prost(string, tag = "4")]
+    pub pre_release: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub build_metadata: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

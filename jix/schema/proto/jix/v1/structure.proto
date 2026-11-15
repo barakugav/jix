@@ -4,18 +4,15 @@ package jix.v1;
 
 message FileMetadata {
   ArchiveType archive_type = 1;
+  Semver lib_version = 2;
+}
 
-  // Library version encoded as a 64-bit unsigned integer.
-  //
-  // The u64 is encoded with the following bit field layout:
-  //   major          :  8 [ 0.. 8]
-  //   minor          :  8 [ 8..16]
-  //   patch          : 10 [16..26]
-  //   pre-release    :  6 [26..32]
-  //   build-metadata : 32 [32..64]
-  // Note that the major is the least significant byte, so comparing versions can NOT be done with
-  // a simple integer comparison.
-  uint64 lib_version_semver = 2;
+message Semver {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
+  string pre_release = 4;
+  string build_metadata = 5;
 }
 
 enum ArchiveType {
