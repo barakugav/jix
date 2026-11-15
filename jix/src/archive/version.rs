@@ -1,3 +1,5 @@
+use core::fmt;
+
 use crate::archive::schema;
 
 const MAJOR: u32 = const_atoi(env!("CARGO_PKG_VERSION_MAJOR").as_bytes());
@@ -11,6 +13,19 @@ pub(crate) fn lib_version() -> schema::Semver {
         patch: PATCH,
         pre_release: env!("CARGO_PKG_VERSION_PRE").to_owned(),
         build_metadata: String::new(),
+    }
+}
+
+impl fmt::Display for schema::Semver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)?;
+        if !self.pre_release.is_empty() {
+            write!(f, "-{}", self.pre_release)?;
+        }
+        if !self.build_metadata.is_empty() {
+            write!(f, "+{}", self.build_metadata)?;
+        }
+        Ok(())
     }
 }
 
@@ -35,12 +50,19 @@ mod tests {
 
     #[test]
     fn lib_version_matches_cargo() {
-        let v = lib_version();
-        let mut s = format!("{}.{}.{}", v.major, v.minor, v.patch);
-        if !v.pre_release.is_empty() {
-            s += &format!("-{}", v.pre_release);
-        }
-        assert_eq!(s, env!("CARGO_PKG_VERSION"));
+        assert_eq!(lib_version().to_string(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn semver_display() {
+        let v = schema::Semver {
+            major: 1,
+            minor: 2,
+            patch: 3,
+            pre_release: "rc.1".to_owned(),
+            build_metadata: "1a2b3c4d".to_owned(),
+        };
+        assert_eq!(v.to_string(), "1.2.3-rc.1+1a2b3c4d");
     }
 
     #[test]

@@ -7,8 +7,9 @@ use std::sync::Arc;
 use crate::archive::block::{BlockArchiveWriter, BlockTableStorageRead};
 use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
+use crate::archive::version::lib_version;
 use crate::codec::DecoderCodecConfig;
-use crate::error::{check_ndim, ensure, error, Error, Result};
+use crate::error::{check_ndim, ensure, error, Error, ErrorKind, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
 use crate::util::{dim_arr, DimBitmap, IterExt};
@@ -446,7 +447,7 @@ where
         reader: impl Read + Seek,
         len: Option<u64>,
         storage: S,
-        mut params: ArrayParams,
+        params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self>
     where
@@ -454,6 +455,29 @@ where
     {
         let mut reader = ArchiveReader::new(reader, len)?;
         let f_meta = reader.read_file_meta()?;
+        Self::read_body(&mut reader, &f_meta, storage, params, validation).map_err(|mut err| {
+            if err.kind() == ErrorKind::InvalidArchive {
+                let version_str = f_meta.lib_version.as_ref().map(|v| v.to_string());
+                let version_str = version_str.as_deref().unwrap_or("unknown");
+                err.message_mut().push_str(&format!(
+                    " (archive written by jix {version_str}, read by jix {})",
+                    lib_version()
+                ));
+            }
+            err
+        })
+    }
+
+    fn read_body<R: Read + Seek>(
+        reader: &mut ArchiveReader<R>,
+        f_meta: &schema::FileMetadata,
+        storage: S,
+        mut params: ArrayParams,
+        validation: ArchiveValidation,
+    ) -> Result<Self>
+    where
+        S: BlockTableStorageRead,
+    {
         ensure!(
             f_meta.archive_type == schema::ArchiveType::ArrayV1 as i32,
             InvalidArchive,
@@ -524,7 +548,7 @@ where
             .map(|(&b, &s)| s.div_ceil(b as u64))
             .product::<u64>();
 
-        let blocks = BlockTable::read_content(&mut reader, storage, validation)?;
+        let blocks = BlockTable::read_content(reader, storage, validation)?;
         ensure!(
             blocks.block_size == expected_block_size,
             InvalidArchive,
@@ -750,6 +774,38 @@ mod tests {
             );
             assert!(result.is_err());
         }
+    }
+
+    #[test]
+    fn parse_error_names_the_lib_versions() {
+        let a = Array::compact_ndarray(&ndarray::array![0u8, 1, 2, 3]).unwrap();
+        let mut bytes = Cursor::new(Vec::new());
+        a.write_to(&mut bytes, ArrayParams::default(), &a.read_ctx())
+            .unwrap();
+        let mut bytes = bytes.into_inner();
+        // Corrupt the block_data section size in the TOC, after the three messages.
+        let mut toc = 4;
+        for _ in 0..3 {
+            let len = prost::decode_length_delimiter(&bytes[toc..]).unwrap();
+            toc += prost::length_delimiter_len(len) + len;
+        }
+        bytes[toc + 24..toc + 32].copy_from_slice(&(1u64 << 44).to_le_bytes());
+        let Err(err) = Array::read_from(
+            Cursor::new(bytes),
+            None,
+            ArrayParams::default(),
+            ArchiveValidation::Strict,
+        ) else {
+            panic!("expected an error");
+        };
+        let version = env!("CARGO_PKG_VERSION");
+        assert!(
+            err.message().ends_with(&format!(
+                "(archive written by jix {version}, read by jix {version})"
+            )),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

@@ -40,6 +40,10 @@ impl Error {
         &self.0.msg
     }
 
+    pub(crate) fn message_mut(&mut self) -> &mut String {
+        self.0.msg.to_mut()
+    }
+
     pub(crate) fn io(err: std::io::Error) -> Self {
         let mut e = Self::new(ErrorKind::Io, format!("IO error: {err}"));
         e.0.source = Some(Box::new(err));
