@@ -2,7 +2,7 @@ use jix_core::scalar::f16;
 use pyo3::prelude::*;
 
 use crate::ops::common::{define_op1_table, Operand, Rank};
-use crate::Array;
+use crate::PyArray;
 
 /// Rounds each element down to the nearest integer (towards -inf).
 ///
@@ -24,7 +24,7 @@ use crate::Array;
 ///     assert np.array_equal(result.numpy(), [1.0, 2.0, -2.0, -3.0])
 ///     ```
 #[pyo3::pyfunction]
-pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyArray>> {
     let py = array.py();
     let array = Operand::from_any(array)?;
     #[allow(clippy::collapsible_if)]
@@ -35,7 +35,7 @@ pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     }
 
     let dispatch_table = define_op1_table!(floor, Floor, dispatch = { [f16, f32, f64], None });
-    Bound::new(py, Array::from_core(dispatch_table.dispatch1(array)?))
+    Bound::new(py, PyArray::from_core(dispatch_table.dispatch1(array)?))
 }
 
 /// Rounds each element up to the nearest integer (towards +inf).
@@ -58,7 +58,7 @@ pub fn floor<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///     assert np.array_equal(result.numpy(), [2.0, 2.0, -1.0, 0.0])
 ///     ```
 #[pyo3::pyfunction]
-pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyArray>> {
     let py = array.py();
     let array = Operand::from_any(array)?;
     #[allow(clippy::collapsible_if)]
@@ -69,7 +69,7 @@ pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     }
 
     let dispatch_table = define_op1_table!(ceil, Ceil, dispatch = { [f16, f32, f64], None });
-    Bound::new(py, Array::from_core(dispatch_table.dispatch1(array)?))
+    Bound::new(py, PyArray::from_core(dispatch_table.dispatch1(array)?))
 }
 
 /// Rounds each element to the nearest integer.
@@ -95,7 +95,7 @@ pub fn ceil<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///     assert np.array_equal(result.numpy(), [1.0, 2.0, 3.0, -1.0])
 ///     ```
 #[pyo3::pyfunction]
-pub fn round<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+pub fn round<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyArray>> {
     let py = array.py();
     let array = Operand::from_any(array)?;
     #[allow(clippy::collapsible_if)]
@@ -106,5 +106,5 @@ pub fn round<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     }
 
     let dispatch_table = define_op1_table!(round, Round, dispatch = { [f16, f32, f64], None });
-    Bound::new(py, Array::from_core(dispatch_table.dispatch1(array)?))
+    Bound::new(py, PyArray::from_core(dispatch_table.dispatch1(array)?))
 }

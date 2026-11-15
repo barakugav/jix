@@ -79,6 +79,9 @@ impl<S: ArrayStorage> Repeat<S> {
             inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>(),
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
         );
+        spec.flags = spec
+            .flags
+            .with_read_tiling(inner_spec.read_tiling().pulled_copy());
         spec.add_cache_ids_from([&inner_spec]);
         let cache_scope = spec.with_cache_scope();
 
@@ -242,10 +245,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Repeat", [&self.array])

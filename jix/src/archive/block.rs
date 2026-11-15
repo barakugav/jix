@@ -1,8 +1,7 @@
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
-use crate::archive::common::{ArchiveReader, ArchiveWriter, Section};
+use crate::archive::common::{map_read_error, ArchiveReader, ArchiveWriter, Section};
 use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter, MAX_FILTERS};
 use crate::dtype::{Dtype, DTYPE_NESTING_MAX};
@@ -51,26 +50,10 @@ where
     ET: ElementType,
     S: BlockTableStorage,
 {
-    /// Write this `BlockTable` as a self-contained archive to `writer`.
-    ///
-    /// Wraps `writer` in a fresh [`ArchiveWriter`] with type `BlockTable`, then delegates to
-    /// [`write_content`](Self::write_content). Use this when writing a standalone `.jix` file;
-    /// use `write_content` when embedding into a larger archive.
-    #[allow(unused)]
-    pub(crate) fn write_to<W>(&self, writer: W) -> Result<()>
-    where
-        W: Write + Seek,
-    {
-        let mut writer =
-            ArchiveWriter::new(writer, schema::ArchiveType::BlockTable).map_err(Error::io)?;
-        self.write_content(&mut writer)
-    }
-
     /// Write this `BlockTable`'s content into an already-opened [`ArchiveWriter`].
     ///
     /// Feeds a [`BlockArchiveWriter`] each block's compressed bytes, sliced from
-    /// `self.block_data` without re-compression. Use this when embedding into a larger archive;
-    /// use [`write_to`](Self::write_to) for standalone files.
+    /// `self.block_data` without re-compression.
     pub(crate) fn write_content<W>(&self, writer: &mut ArchiveWriter<W>) -> Result<()>
     where
         W: Write + Seek,
@@ -250,44 +233,6 @@ where
     }
 }
 
-impl BlockTable<Owned, TypeDyn> {
-    /// Read a `BlockTable` from a self-contained archive, allocating storage on the heap.
-    ///
-    /// Wraps `reader` in an [`ArchiveReader`], validates the archive type, then delegates to
-    /// [`read_content`](BlockTable::read_content) with [`Owned`] storage. Use this for standalone
-    /// `.jix` files; use `read_content` when reading from a larger archive.
-    ///
-    /// # Arguments
-    ///
-    /// - `reader` - the source; must be positioned at the start of the archive.
-    /// - `len` - total byte length of the archive section, for bounds checking.
-    ///
-    /// # Errors
-    ///
-    /// Returns `InvalidArchive` if the archive type header does not match `BlockTable`.
-    /// Propagates any I/O or parse error from `read_content`.
-    #[allow(unused)]
-    pub(crate) fn read_from<R>(reader: R, len: u64) -> Result<Self>
-    where
-        R: Read + Seek,
-    {
-        let mut reader = ArchiveReader::new(reader, Some(len))?;
-        let f_meta = reader.read_file_meta().map_err(Error::io)?;
-        ensure!(
-            f_meta.archive_type == schema::ArchiveType::BlockTable as i32,
-            InvalidArchive,
-            "unexpected jix file type: expected {:?}, actual {:?}",
-            schema::ArchiveType::BlockTable,
-            schema::ArchiveType::try_from(f_meta.archive_type)
-        );
-        Self::read_content(
-            &mut reader,
-            Owned(PhantomData),
-            ArchiveValidation::default(),
-        )
-    }
-}
-
 impl<S> BlockTable<S, TypeDyn>
 where
     S: BlockTableStorage,
@@ -314,9 +259,7 @@ where
         R: Read + Seek,
         S: BlockTableStorageRead,
     {
-        let header = reader
-            .read_message::<schema::BlockTableHeader>()
-            .map_err(Error::io)?;
+        let header = reader.read_message::<schema::BlockTableHeader>()?;
         let codec = header
             .codec
             .and_then(|c| c.kind)
@@ -347,7 +290,7 @@ where
         let (block_data, blocks_loc) = match header.body_description {
             Some(schema::block_table_header::BodyDescription::ContiguousV1(())) => {
                 let [blocks_loc_section, block_data_section] = unsafe {
-                    value_from_io::<[Section; 2]>(reader.reader_mut()).map_err(Error::io)?
+                    value_from_io::<[Section; 2]>(reader.reader_mut()).map_err(map_read_error)?
                 };
 
                 let block_data = storage.read_section(reader, block_data_section)?;
@@ -459,7 +402,10 @@ impl BlockTableStorageRead for Owned {
             let start = data.len();
             data.resize((start * 2).max(4096).min(len), MaybeUninit::zeroed());
             let chunk = unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(&mut data[start..]) };
-            reader.reader_mut().read_exact(chunk).map_err(Error::io)?;
+            reader
+                .reader_mut()
+                .read_exact(chunk)
+                .map_err(map_read_error)?;
         }
         let mut data = std::mem::ManuallyDrop::new(data);
         Ok(unsafe {
@@ -511,5 +457,100 @@ impl BlockTableStorageRead for Mmap {
             mmap: self.mmap.clone(),
             data: (unsafe { SendSyncPtr::new(data) }, len),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Seek, Write};
+    use std::marker::PhantomData;
+
+    use crate::archive::common::{ArchiveReader, ArchiveWriter};
+    use crate::archive::schema;
+    use crate::codec::EncoderParams;
+    use crate::dtype::Dtyped;
+    use crate::storage::block::{BlockSize, BlockTable, Owned};
+    use crate::util::cast_slice;
+    use crate::{ArchiveValidation, ReadContext, Ty};
+
+    /// Build a table from `items`, write it into `stream` and read it back.
+    fn round_trip<T: Dtyped>(
+        items: &[T],
+        block_size: BlockSize,
+        mut stream: impl Read + Write + Seek,
+    ) -> BlockTable<Owned, Ty<T>> {
+        let table = BlockTable::<Owned, Ty<T>>::build_from_data(
+            unsafe { cast_slice::<T, u8>(items) },
+            T::DTYPE,
+            block_size,
+            &EncoderParams::default(),
+        )
+        .unwrap();
+        let mut writer = ArchiveWriter::new(&mut stream, schema::ArchiveType::BlockTable).unwrap();
+        table.write_content(&mut writer).unwrap();
+        stream.rewind().unwrap();
+
+        let mut reader = ArchiveReader::new(&mut stream, None).unwrap();
+        reader.read_file_meta().unwrap();
+        BlockTable::read_content(&mut reader, Owned(PhantomData), ArchiveValidation::Strict)
+            .unwrap()
+            .element_type_change::<Ty<T>>()
+            .unwrap()
+    }
+
+    /// Decompress all blocks of `table` back to back.
+    fn decode_all<T: Dtyped>(table: &BlockTable<Owned, Ty<T>>) -> Vec<u8> {
+        let mut buf = vec![0u8; table.nitems as usize * size_of::<T>()];
+        let block_bytes = table.block_size as usize * size_of::<T>();
+        for (i, block) in buf.chunks_mut(block_bytes).enumerate() {
+            table
+                .read_block(i as u64, block, &ReadContext::default())
+                .unwrap();
+        }
+        buf
+    }
+
+    #[test]
+    fn round_trip_single_block() {
+        let items: Vec<u8> = (0u8..8).collect();
+        let table = round_trip(&items, 8, std::io::Cursor::new(Vec::new()));
+        assert_eq!(table.nblocks(), 1);
+        assert_eq!(table.nitems, 8);
+        assert_eq!(table.block_size, 8);
+        assert_eq!(*table.dtype(), u8::DTYPE);
+        assert_eq!(decode_all(&table), items);
+    }
+
+    #[test]
+    fn round_trip_multiple_blocks() {
+        let items: Vec<u8> = (0u8..12).collect();
+        let table = round_trip(&items, 4, std::io::Cursor::new(Vec::new()));
+        assert_eq!(table.nblocks(), 3);
+        assert_eq!(table.nitems, 12);
+        assert_eq!(decode_all(&table), items);
+    }
+
+    #[test]
+    fn round_trip_preserves_blocks_loc_ordering() {
+        let items: Vec<u8> = (0u8..12).collect();
+        let table = round_trip(&items, 3, std::io::Cursor::new(Vec::new()));
+        // Each block has a non-empty range, and blocks are stored back-to-back (no gaps).
+        let mut expected_offset = 0u64;
+        for i in 0..table.nblocks() {
+            let (offset, len) = table.block_location(i);
+            assert_eq!(offset, expected_offset);
+            assert!(len > 0);
+            expected_offset += len as u64;
+        }
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn round_trip_file() {
+        let items: Vec<u32> = (0u32..18).collect();
+        let table = round_trip(&items, 3, tempfile::tempfile().unwrap());
+        assert_eq!(table.nblocks(), 6);
+        assert_eq!(table.nitems, 18);
+        assert_eq!(decode_all(&table), unsafe { cast_slice::<u32, u8>(&items) });
     }
 }

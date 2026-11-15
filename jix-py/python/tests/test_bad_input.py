@@ -183,6 +183,20 @@ def test_writer_reporting_too_many_bytes():
         jix.write_array(_array(), _OverWriter())
 
 
+def test_truncated_archive_raises_runtime_error(tmp_path):
+    data = _serialized()
+    path = tmp_path / "a.jix"
+    for cut in range(len(data)):
+        path.write_bytes(data[:cut])
+        # Passing the full length makes the reads themselves run out of bytes.
+        for kwargs in [{}, {"len": len(data)}, {"mmap": True}, {"mmap": True, "len": len(data)}]:
+            with pytest.raises(RuntimeError):
+                jix.read_array(path, **kwargs)
+        for kwargs in [{}, {"len": len(data)}]:
+            with pytest.raises(RuntimeError):
+                jix.read_array(io.BytesIO(data[:cut]), **kwargs)
+
+
 def test_writer_returning_a_non_int():
     class Writer(io.BytesIO):
         def write(self, data):

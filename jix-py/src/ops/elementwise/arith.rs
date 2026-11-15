@@ -7,7 +7,7 @@ use crate::ops::common::{
     broadcast_operands, define_op1, define_op1_desc, define_op1_table, define_op2,
     define_op2_table, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
 };
-use crate::Array;
+use crate::PyArray;
 
 /// Arithmetic negation applied element-wise.
 ///
@@ -46,7 +46,7 @@ use crate::Array;
 ///     assert np.array_equal(result.numpy(), [-1, -2, 56])
 ///     ```
 #[pyo3::pyfunction]
-pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<Array> {
+pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<PyArray> {
     static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
         let mut fns = vec![
             OpFnDescriptor::new1::<u8>(CastKind::None, |a| Ok((-a.cast::<i8>()).into_any())),
@@ -62,7 +62,7 @@ pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<Array> {
         OpDescriptor::new("negative", fns)
     });
     let array = Operand::from_any(array)?;
-    Ok(Array::from_core(DISPATCH_TABLE.dispatch1(array)?))
+    Ok(PyArray::from_core(DISPATCH_TABLE.dispatch1(array)?))
 }
 
 /// Computes the absolute value of each element.
@@ -102,7 +102,7 @@ pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<Array> {
 ///     assert np.array_equal(result.numpy(), [3, 0, 5, 7])
 ///     ```
 #[pyo3::pyfunction]
-pub fn absolute<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+pub fn absolute<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyArray>> {
     let py = array.py();
     let mut operand = Operand::from_any(array)?;
 
@@ -137,7 +137,7 @@ pub fn absolute<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
         dispatch = { [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>], None }
     );
     let res = dispatch_table.dispatch1(operand)?;
-    Bound::new(py, Array::from_core(res))
+    Bound::new(py, PyArray::from_core(res))
 }
 
 define_op1!(
@@ -379,7 +379,7 @@ define_op2!(
 ///     assert np.array_equal(result.numpy(), [4, 10, 18])
 ///     ```
 #[pyo3::pyfunction]
-pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Array> {
+pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<PyArray> {
     let a_op = Operand::from_any(a)?;
 
     // fast path for x * x
@@ -406,7 +406,7 @@ pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<A
     );
     let res = dispatch_table.dispatch2(a, b)?;
 
-    Ok(Array::from_core(res))
+    Ok(PyArray::from_core(res))
 }
 
 /// Element-wise exponentiation (`a` raised to the power `b`).
@@ -461,7 +461,7 @@ pub fn multiply<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<A
 ///     assert jix.power(ai, 3).dtype == np.dtype("int32")
 ///     ```
 #[pyo3::pyfunction]
-pub fn power<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Array> {
+pub fn power<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<PyArray> {
     // `x ** 2`. Same pairs as the `Pow` table, so the promotion is identical.
     static SQUARE_TABLE: LazyLock<OpDescriptor<2, ()>> = LazyLock::new(|| {
         OpDescriptor::new(
@@ -554,5 +554,5 @@ pub fn power<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Arra
 
     let [a, b] = broadcast_operands([a, b])?;
     let res = table.dispatch2(a, b)?;
-    Ok(Array::from_core(res))
+    Ok(PyArray::from_core(res))
 }

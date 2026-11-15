@@ -117,6 +117,9 @@ where
             read_shape_scale_weight,
             read_layout_order,
         );
+        spec.flags = spec
+            .flags
+            .with_read_tiling(inner_spec.read_tiling().forwarded());
         spec.add_cache_ids_from([&inner_spec]);
         let cache_scope = spec.with_cache_scope();
 
@@ -199,10 +202,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .map_flags(|flags| flags.clear_compact())
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("RemoveDim", [&self.array])

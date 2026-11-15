@@ -91,6 +91,7 @@ impl<T> IntoPyResult<T> for Result<T, jix_core::Error> {
                 ErrorKind::Arithmetic => PyArithmeticError::new_err(err_str),
                 ErrorKind::UnsupportedDtype => PyTypeError::new_err(err_str),
                 ErrorKind::Io => PyOSError::new_err(err_str),
+                ErrorKind::InvalidIndex => PyIndexError::new_err(err_str),
                 _ => PyRuntimeError::new_err(err_str),
             }
         }

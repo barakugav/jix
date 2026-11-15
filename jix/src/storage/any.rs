@@ -101,10 +101,16 @@ impl<S: ArrayStorage + Send + Sync + 'static> AnyInner for AnyInnerImpl<S> {
 
 impl AnyMeta {
     fn new(storage: &dyn ArrayStorage) -> Self {
+        let mut spec = storage.spec().to_owned();
+
+        // A parent can't fuse through the erased storage, it reads it with `read_data`
+        let flags = &mut spec.dynamic_mut().flags;
+        *flags = flags.with_read_tiling(flags.read_tiling().forwarded());
+
         Self {
             shape: DimDyn::from_slice(storage.shape()),
             element_type: TypeDyn::new(storage.dtype().clone()),
-            spec: storage.spec().to_owned(),
+            spec,
         }
     }
 }

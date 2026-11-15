@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 
 use crate::ops::common::{define_op1, define_op1_table, Operand, Precision, Rank};
-use crate::Array;
+use crate::PyArray;
 
 define_op1!(
     /// Counts the number of set bits (`1`s) in each element (population count).
@@ -170,7 +170,7 @@ define_op1!(
 ///     assert result.numpy()[0] == 0x78563412
 ///     ```
 #[pyo3::pyfunction]
-pub fn byteswap<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+pub fn byteswap<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyArray>> {
     let py = array.py();
     let array = Operand::from_any(array)?;
 
@@ -188,7 +188,7 @@ pub fn byteswap<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
         dispatch = { [u16, i16, u32, i32, u64, i64], None }
     );
     let res = dispatch_table.dispatch1(array)?;
-    Bound::new(py, Array::from_core(res))
+    Bound::new(py, PyArray::from_core(res))
 }
 
 define_op1!(

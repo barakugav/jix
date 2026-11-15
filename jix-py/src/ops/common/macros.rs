@@ -77,7 +77,7 @@ macro_rules! define_op1 {
         #[pyo3::pyfunction]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-        ) -> pyo3::PyResult<crate::Array> {
+        ) -> pyo3::PyResult<crate::PyArray> {
             let array = crate::ops::common::Operand::from_any(array)?;
 
             let dispatch_table = crate::ops::common::define_op1_table!(
@@ -87,7 +87,7 @@ macro_rules! define_op1 {
             );
             let res = dispatch_table.dispatch1(array)?;
 
-            Ok(crate::Array::from_core(res))
+            Ok(crate::PyArray::from_core(res))
         }
     };
 }
@@ -178,7 +178,7 @@ macro_rules! define_op2 {
         pub fn $name<'py>(
             a: &pyo3::Bound<'py, pyo3::PyAny>,
             b: &pyo3::Bound<'py, pyo3::PyAny>,
-        ) -> pyo3::PyResult<crate::Array> {
+        ) -> pyo3::PyResult<crate::PyArray> {
             let a = crate::ops::common::Operand::from_any(a)?;
             let b = crate::ops::common::Operand::from_any(b)?;
             let [a, b] = crate::ops::common::broadcast_operands([a, b])?;
@@ -191,7 +191,7 @@ macro_rules! define_op2 {
             );
             let res = dispatch_table.dispatch2(a, b)?;
 
-            Ok(crate::Array::from_core(res))
+            Ok(crate::PyArray::from_core(res))
         }
     };
 }

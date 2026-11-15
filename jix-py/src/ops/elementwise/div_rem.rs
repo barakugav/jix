@@ -4,7 +4,7 @@ use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::{prelude::*, type_hint_identifier, type_hint_subscript};
 
 use crate::ops::common::{broadcast_operands, define_op2_table, Operand};
-use crate::Array;
+use crate::PyArray;
 
 /// Element-wise division of two arrays (`a / b`), with the quotient optionally rounded to an
 /// integer.
@@ -79,7 +79,7 @@ pub fn divide<'py>(
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
     rounding_mode: Option<RoundingMode>,
-) -> PyResult<Array> {
+) -> PyResult<PyArray> {
     let table = match rounding_mode {
         None => define_op2_table!(
             divide,
@@ -105,7 +105,7 @@ pub fn divide<'py>(
     let a = Operand::from_any(a)?;
     let b = Operand::from_any(b)?;
     let [a, b] = broadcast_operands([a, b])?;
-    Ok(Array::from_core(table.dispatch2(a, b)?))
+    Ok(PyArray::from_core(table.dispatch2(a, b)?))
 }
 
 /// Element-wise remainder of two arrays: `a - b * q`, where `q` is the quotient `a / b` rounded to
@@ -166,7 +166,7 @@ pub fn remainder<'py>(
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
     rounding_mode: &str,
-) -> PyResult<Array> {
+) -> PyResult<PyArray> {
     let table = match rounding_mode.parse()? {
         RoundingMode::Trunc => define_op2_table!(
             remainder,
@@ -187,7 +187,7 @@ pub fn remainder<'py>(
     let a = Operand::from_any(a)?;
     let b = Operand::from_any(b)?;
     let [a, b] = broadcast_operands([a, b])?;
-    Ok(Array::from_core(table.dispatch2(a, b)?))
+    Ok(PyArray::from_core(table.dispatch2(a, b)?))
 }
 
 /// The `rounding_mode` of [`crate::ops::divide`] and [`crate::ops::remainder`]: how the quotient

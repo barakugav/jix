@@ -234,6 +234,9 @@ where
             read_shape_scale_weight,
             read_layout_order,
         );
+        spec.flags = spec
+            .flags
+            .with_read_tiling(ReadTiling::fused(specs.iter().map(|sp| sp.read_tiling())));
         spec.add_cache_ids_from(specs.each_ref());
         spec.add_cache_id(cache_id);
         Ok(Self {
@@ -363,10 +366,7 @@ where
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.a
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
+        self.a.spec().with_dynamic_spec(&self.spec)
     }
 
     fn info(&self) -> ArrayStorageInfo<'_> {

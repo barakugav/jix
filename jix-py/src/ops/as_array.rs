@@ -3,7 +3,7 @@ use numpy::PyUntypedArray;
 use pyo3::prelude::*;
 use pyo3::types::{IntoPyDict, PyDict};
 
-use crate::array::{resolve_array_params, Array};
+use crate::array::{resolve_array_params, PyArray};
 use crate::dtype::{dtype_from_numpy, numpy_descr_from_any};
 use crate::ops::cast_impl;
 use crate::ops::common::Operand;
@@ -52,14 +52,14 @@ pub fn asarray<'py>(
     value: &Bound<'py, PyAny>,
     dtype: Option<&Bound<'_, PyAny>>,
     params: Option<Bound<'_, PyDict>>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py = value.py();
     let params = resolve_array_params(py, params)?;
     let np_dtype = dtype
         .map(|dtype| numpy_descr_from_any(py, dtype))
         .transpose()?;
 
-    let value_is_array = value.is_instance_of::<Array>()
+    let value_is_array = value.is_instance_of::<PyArray>()
         || value.is_instance_of::<PyUntypedArray>()
         || value.is_instance(numpy_items(py)?.generic.bind(py))?;
     let value = match &np_dtype {
@@ -77,7 +77,7 @@ pub fn asarray<'py>(
         let array = cast_impl(py_arr.get().arr.clone(), &dtype)?;
         py_arr = Bound::new(
             py,
-            Array::from_core_with_np_dtype(array, np_dtype.clone().unbind()),
+            PyArray::from_core_with_np_dtype(array, np_dtype.clone().unbind()),
         )?;
     }
 
@@ -85,7 +85,7 @@ pub fn asarray<'py>(
 }
 
 #[inline]
-pub(crate) fn asarray_simple<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+pub(crate) fn asarray_simple<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyArray>> {
     asarray(value, None, None)
 }
 

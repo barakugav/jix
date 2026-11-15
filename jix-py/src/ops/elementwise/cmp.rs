@@ -10,7 +10,7 @@ use crate::ops::common::{
     broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Scalar,
 };
 use crate::util::IntoPyResult;
-use crate::Array;
+use crate::PyArray;
 
 define_op2!(
     /// Element-wise equality test (`a == b`).
@@ -332,7 +332,7 @@ pub fn isclose<'py>(
     b: &Bound<'py, PyAny>,
     rtol: &Bound<'py, PyAny>,
     atol: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py = a.py();
 
     struct ApproxEqualArgs {
@@ -429,5 +429,5 @@ pub fn isclose<'py>(
             atol: atol_scalar,
         },
     )?;
-    Bound::new(py, Array::from_core(res))
+    Bound::new(py, PyArray::from_core(res))
 }

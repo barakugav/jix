@@ -3,8 +3,9 @@ use std::fmt::Write;
 use std::ops::Range;
 use std::sync::Mutex;
 
+use jix_core::__private::ReadTiling;
 use jix_core::storage::StridedBuf;
-use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
+use jix_core::{Array, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
@@ -119,8 +120,8 @@ use crate::util::{
 /// backend; a memory-mapped variant is also available. Every operation constructs a new
 /// storage that wraps the input(s) and applies its transformation on each read request.
 /// Reads release the GIL while decompressing, so Python threads can run concurrently.
-#[pyclass(module = "jix", frozen)]
-pub struct Array {
+#[pyclass(name = "Array", module = "jix", frozen)]
+pub struct PyArray {
     pub(crate) arr: ArrayAny,
     cache: Mutex<ArrayCache>,
 }
@@ -128,7 +129,7 @@ struct ArrayCache {
     numpy_dtype: Option<Py<PyArrayDescr>>,
     context: Option<Box<ReadContext>>,
 }
-impl Array {
+impl PyArray {
     #[inline]
     pub(crate) fn from_core(array: ArrayAny) -> Self {
         Self::from_core_impl(array, None)
@@ -150,7 +151,7 @@ impl Array {
 
     #[inline(always)]
     pub(crate) fn to_core(&self) -> ArrayAny {
-        CoreArray::from_storage(self.arr.storage().clone())
+        Array::from_storage(self.arr.storage().clone())
     }
 
     /// Borrows the array's cached decoder context, lazily creating it on first use.
@@ -328,7 +329,7 @@ impl Array {
     }
 }
 #[pymethods]
-impl Array {
+impl PyArray {
     /// The shape of the array: a tuple of dim lengths.
     ///
     /// ```python
@@ -636,8 +637,15 @@ impl Array {
             )
         };
 
-        let should_detach =
-            !self.arr.storage().spec().flags().plain_read() || nitems * itemsize > 4096;
+        let should_detach = {
+            let spec = self.arr.storage().spec();
+            let from_memory = matches!(
+                spec.flags().read_tiling(),
+                ReadTiling::ZeroCopy | ReadTiling::Fusable
+            );
+            let read_cost = (nitems * itemsize) as f32 * spec.element_cost().max(1.0);
+            !from_memory || read_cost > 4096.0
+        };
         maybe_detach(py, should_detach, || {
             let context = self.read_ctx()?;
             let context = context.as_ref();
@@ -727,13 +735,13 @@ impl Array {
         &self,
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
-    ) -> PyResult<Bound<'py, Array>> {
+    ) -> PyResult<Bound<'py, PyArray>> {
         let np_arr = self.numpy(py, index, None)?.0;
         let params = resolve_array_params(py, None)?;
         let array = plain_from_numpy(np_arr, self.arr.dtype().clone(), params)?;
         Bound::new(
             py,
-            Array::from_core_with_np_dtype(array, self.numpy_dtype(py)?.unbind()),
+            PyArray::from_core_with_np_dtype(array, self.numpy_dtype(py)?.unbind()),
         )
     }
 
@@ -1415,7 +1423,7 @@ impl Array {
     /// [`jix.permute_dims()`][jix.permute_dims].
     #[allow(non_snake_case)]
     #[getter]
-    pub fn T<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Array>> {
+    pub fn T<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyArray>> {
         crate::ops::permute_dims(slf, None)
     }
 
@@ -1498,13 +1506,13 @@ impl Array {
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].
     #[getter]
-    pub fn real<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Array>> {
+    pub fn real<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyArray>> {
         crate::ops::real(slf)
     }
 
     /// Extracts the imaginary part of each complex element. See [`jix.imag()`][jix.imag].
     #[getter]
-    pub fn imag(slf: &Bound<'_, Self>) -> PyResult<Array> {
+    pub fn imag(slf: &Bound<'_, Self>) -> PyResult<PyArray> {
         crate::ops::imag(slf)
     }
 
@@ -1715,7 +1723,7 @@ pub fn compact<'py>(
     array: &Bound<'py, PyAny>,
     dtype: Option<&Bound<'_, PyAny>>,
     params: Option<Bound<'_, PyDict>>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py = array.py();
     let array = crate::asarray(array, dtype, params.clone())?;
     let params = resolve_array_params(py, params)?;
@@ -1729,7 +1737,7 @@ pub fn compact<'py>(
             .into_py_result()
     })?;
 
-    Bound::new(py, Array::from_core(compacted.into_any()))
+    Bound::new(py, PyArray::from_core(compacted.into_any()))
 }
 
 pub(crate) fn resolve_array_params(
@@ -1832,10 +1840,10 @@ pub(crate) fn resolve_array_params(
 
 fn binary_op_builtin(
     other: &Bound<'_, PyAny>,
-    op: impl FnOnce() -> PyResult<Array>,
-) -> PyResult<ValueOrUnimplemented<Array>> {
+    op: impl FnOnce() -> PyResult<PyArray>,
+) -> PyResult<ValueOrUnimplemented<PyArray>> {
     let py = other.py();
-    let is_known_type = other.is_instance_of::<Array>()
+    let is_known_type = other.is_instance_of::<PyArray>()
         || other.is_instance_of::<PyUntypedArray>()
         || other.is_instance_of::<PyInt>()
         || other.is_instance_of::<PyFloat>()
@@ -1855,7 +1863,7 @@ fn binary_op_builtin(
 }
 
 pub(crate) struct ContextGuard<'a> {
-    array: &'a Array,
+    array: &'a PyArray,
     context: Option<Box<ReadContext>>,
 }
 impl Drop for ContextGuard<'_> {

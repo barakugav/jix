@@ -96,6 +96,9 @@ where
             read_shape_scale_weight,
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
         );
+        spec.flags = spec
+            .flags
+            .with_read_tiling(inner_spec.read_tiling().pulled_view());
         spec.add_cache_ids_from([&inner_spec]);
 
         Ok(Self {
@@ -180,10 +183,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Broadcast", [&self.array])

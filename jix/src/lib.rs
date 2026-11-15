@@ -433,7 +433,7 @@ const BLOCK_SIZE_BYTES_MAX: u64 = 1 << 30;
 
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::storage::params::flags::ArraySpecFlags;
+    pub use crate::storage::params::flags::{ArraySpecFlags, ReadTiling};
     pub use crate::storage::scalar::Scalar;
 
     #[doc(hidden)]

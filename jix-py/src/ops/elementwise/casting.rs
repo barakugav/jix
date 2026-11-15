@@ -3,7 +3,7 @@ use jix_core::ArrayAny;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
-use crate::array::Array;
+use crate::array::PyArray;
 use crate::util::IntoPyResult;
 #[pyfunction]
 /// Casts each element of `array` to a new dtype.
@@ -48,7 +48,7 @@ use crate::util::IntoPyResult;
 pub fn cast<'py>(
     array: &Bound<'py, PyAny>,
     dtype: &Bound<'_, PyAny>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     crate::ops::asarray(array, Some(dtype), None)
 }
 #[inline(never)]

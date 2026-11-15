@@ -285,7 +285,7 @@ impl<'a> Decoder<'a> {
             let inner = unsafe { &mut *self.inner.get() };
             inner
                 .decompress_to_buffer(src, decompress_out)
-                .map_err(|e| error!(CodecError, "Failed to decompress data with Zstd: {e}"))?
+                .map_err(|e| error!(InvalidArchive, "Failed to decompress data with Zstd: {e}"))?
         };
         #[cfg(miri)]
         let nbytes = {

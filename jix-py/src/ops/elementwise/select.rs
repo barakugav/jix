@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 
 use crate::ops::common::{broadcast_operands, operands_dtype_promotion, Operand, Scalar};
 use crate::util::IntoPyResult;
-use crate::Array;
+use crate::PyArray;
 
 /// Selects `x[i]` where `condition[i]` is `True` and `y[i]` elsewhere.
 ///
@@ -55,7 +55,7 @@ pub fn r#where<'py>(
     condition: &Bound<'py, PyAny>,
     x: &Bound<'py, PyAny>,
     y: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py = condition.py();
     let same_values = x.is(y);
 
@@ -89,6 +89,6 @@ pub fn r#where<'py>(
     let ret = jix_core::ops::Select::new_array(condition, x, y).into_py_result()?;
     Bound::new(
         py,
-        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
     )
 }

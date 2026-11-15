@@ -518,7 +518,6 @@ impl ArrayParams {
 pub struct ArraySpec<'a> {
     shared: &'a Arc<ArraySpecShared>,
     dynamic: &'a ArraySpecDynamic,
-    flags: ArraySpecFlags,
 }
 /// Owned version of [`ArraySpec`].
 ///
@@ -534,7 +533,6 @@ pub struct ArraySpec<'a> {
 pub(crate) struct ArraySpecOwned {
     shared: Arc<ArraySpecShared>,
     dynamic: ArraySpecDynamic,
-    flags: ArraySpecFlags,
 }
 /// See [`ArraySpecOwned`] docs.
 #[derive(Clone)]
@@ -617,6 +615,8 @@ pub(crate) struct ArraySpecDynamic {
     /// The set of array IDs reachable from this array that are accessed with the
     /// same index as this array, e.g. `x` and `y` in `x + y`.
     pub(crate) arrays_to_cache_potentially: Option<Arc<ArrayCacheIdSet>>,
+
+    pub(crate) flags: ArraySpecFlags,
 }
 impl ArraySpecOwned {
     pub(crate) fn new(
@@ -635,17 +635,17 @@ impl ArraySpecOwned {
             decoder_params,
         };
         let ndim = block_shape.len();
-        let dynamic = ArraySpecDynamic::new(
+        let mut dynamic = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             1.0,
             dim_arr(ndim, |_| ScaleWeight::NONE),
             dim_arr(ndim, |i| i as DimIdx), // default to C-order
         );
+        dynamic.flags = flags;
         Self {
             shared: Arc::new(shared),
             dynamic,
-            flags,
         }
     }
 
@@ -654,7 +654,6 @@ impl ArraySpecOwned {
         ArraySpec {
             shared: &self.shared,
             dynamic: &self.dynamic,
-            flags: self.flags,
         }
     }
 
@@ -668,29 +667,10 @@ impl<'a> ArraySpec<'a> {
         Self { dynamic, ..self }
     }
 
-    // #[inline(always)]
-    // pub(crate) fn with_flags(self, flags: ArraySpecFlags) -> Self {
-    //     Self { flags, ..self }
-    // }
-
-    #[inline(always)]
-    pub(crate) fn map_flags(self, f: impl FnOnce(ArraySpecFlags) -> ArraySpecFlags) -> Self {
-        Self {
-            flags: f(self.flags),
-            ..self
-        }
-    }
-
-    pub(crate) fn with_cleared_flags(mut self) -> Self {
-        self.flags = ArraySpecFlags::default();
-        self
-    }
-
     pub(crate) fn to_owned(&self) -> ArraySpecOwned {
         ArraySpecOwned {
             shared: Arc::clone(self.shared),
             dynamic: self.dynamic.clone(),
-            flags: self.flags,
         }
     }
 
@@ -727,8 +707,9 @@ impl<'a> ArraySpec<'a> {
     pub(crate) fn block_shape_fixed_dims(&self) -> DimBitmap {
         self.dynamic().block_shape_fixed_dims
     }
+    #[doc(hidden)]
     #[inline(always)]
-    pub(crate) fn element_cost(&self) -> f32 {
+    pub fn element_cost(&self) -> f32 {
         self.dynamic().element_cost
     }
     #[inline(always)]
@@ -749,7 +730,11 @@ impl<'a> ArraySpec<'a> {
     #[doc(hidden)]
     #[inline(always)]
     pub fn flags(&self) -> ArraySpecFlags {
-        self.flags
+        self.dynamic().flags
+    }
+    #[inline(always)]
+    pub(crate) fn read_tiling(&self) -> ReadTiling {
+        self.flags().read_tiling()
     }
 
     /// Scale a read tile to the preferred read size for `itemsize`. Seeds every dim from
@@ -801,6 +786,8 @@ impl ArraySpecDynamic {
 
             arrays_to_cache: None,
             arrays_to_cache_potentially: None,
+
+            flags: ArraySpecFlags::new(),
         }
     }
 
@@ -1000,50 +987,143 @@ pub(crate) fn combine_block_layout(
     (block_shape, block_shape_fixed_dims)
 }
 
-pub(crate) use flags::ArraySpecFlags;
+pub(crate) use flags::{ArraySpecFlags, ReadTiling};
 pub(crate) mod flags {
     #[doc(hidden)]
-    #[derive(Clone, Copy, Default)]
+    #[derive(Clone, Copy)]
     pub struct ArraySpecFlags(u8);
 
     /// The array is stored in a compact layout, divided into nd-blocks, each compressed
     /// independently.
     const IS_COMPACT: u8 = 0b0000_0001;
-    /// The array read operation is a simple strided copy.
-    ///
-    /// This is a hint to the caller, useful for Plain, Scalar, insert_dim, remove_dim, etc.
-    const PLAIN_READ: u8 = 0b0000_0010;
+
+    const READ_TILING_SHIFT: u32 = 1;
+    const READ_TILING_SIZE: u32 = 2;
+    const READ_TILING_MASK: u8 = ((1 << READ_TILING_SIZE) - 1) << READ_TILING_SHIFT;
 
     #[allow(dead_code)]
     impl ArraySpecFlags {
-        pub(crate) fn new() -> Self {
-            Self::default()
+        pub(crate) const fn new() -> Self {
+            Self(0)
+                .clear_compact()
+                // tiled is a conservative default
+                .with_read_tiling(ReadTiling::Tiled)
         }
 
         #[doc(hidden)]
-        pub fn is_compact(&self) -> bool {
+        pub const fn is_compact(&self) -> bool {
             self.0 & IS_COMPACT != 0
         }
-        pub(crate) fn set_compact(mut self) -> Self {
+        pub(crate) const fn set_compact(mut self) -> Self {
             self.0 |= IS_COMPACT;
             self
         }
-        pub(crate) fn clear_compact(mut self) -> Self {
+        pub(crate) const fn clear_compact(mut self) -> Self {
             self.0 &= !IS_COMPACT;
             self
         }
 
         #[doc(hidden)]
-        pub fn plain_read(&self) -> bool {
-            self.0 & PLAIN_READ != 0
+        pub const fn read_tiling(&self) -> ReadTiling {
+            let bits = (self.0 & READ_TILING_MASK) >> READ_TILING_SHIFT;
+            const fn bits_(read_tiling: ReadTiling) -> u8 {
+                ArraySpecFlags::read_tiling_bits(read_tiling)
+            }
+            match bits {
+                _ if bits == bits_(ReadTiling::ZeroCopy) => ReadTiling::ZeroCopy,
+                _ if bits == bits_(ReadTiling::Fusable) => ReadTiling::Fusable,
+                _ if bits == bits_(ReadTiling::SinglePass) => ReadTiling::SinglePass,
+                _ if bits == bits_(ReadTiling::Tiled) => ReadTiling::Tiled,
+                // unreachable
+                _ => ReadTiling::Tiled,
+            }
         }
-        pub(crate) fn set_plain_read(mut self) -> Self {
-            self.0 |= PLAIN_READ;
+        pub(crate) const fn with_read_tiling(mut self, kind: ReadTiling) -> Self {
+            let bits = Self::read_tiling_bits(kind);
+            debug_assert!({
+                #[allow(clippy::int_plus_one)]
+                let max = (1 << READ_TILING_SIZE) - 1;
+                bits <= max
+            });
+            self.0 = (self.0 & !READ_TILING_MASK) | (bits << READ_TILING_SHIFT);
             self
         }
-        pub(crate) fn clear_plain_read(mut self) -> Self {
-            self.0 &= !PLAIN_READ;
-            self
+
+        const fn read_tiling_bits(read_tiling: ReadTiling) -> u8 {
+            match read_tiling {
+                ReadTiling::ZeroCopy => 0,
+                ReadTiling::Fusable => 1,
+                ReadTiling::SinglePass => 2,
+                ReadTiling::Tiled => 3,
+            }
+        }
+    }
+    impl Default for ArraySpecFlags {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    #[doc(hidden)]
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+    pub enum ReadTiling {
+        /// A pull returns a view into existing memory: no compute, no allocation.
+        ZeroCopy,
+        /// A fused element-wise tree whose leaves are all [`ZeroCopy`](Self::ZeroCopy): it streams
+        /// from the source memory into the destination, with no temporary.
+        Fusable,
+        /// One top-level read writes straight into the destination, but as a pipeline leaf or a
+        /// pull it fills a temporary.
+        SinglePass,
+        /// Needs the read to be cut into tiles.
+        Tiled,
+    }
+
+    impl ReadTiling {
+        /// An element-wise op fused into one pipeline with its inputs.
+        pub(crate) fn fused(inputs: impl IntoIterator<Item = Self>) -> Self {
+            let max = inputs.into_iter().max().unwrap_or(Self::ZeroCopy);
+            if max <= Self::Fusable {
+                Self::Fusable
+            } else {
+                Self::Tiled
+            }
+        }
+
+        /// An op that forwards a read to its input, re-strided: a pull it hands back as a view,
+        /// a push it passes down with the destination re-strided.
+        pub(crate) fn forwarded(self) -> Self {
+            match self {
+                Self::ZeroCopy => Self::ZeroCopy,
+                Self::Fusable | Self::SinglePass => Self::SinglePass,
+                Self::Tiled => Self::Tiled,
+            }
+        }
+
+        /// An op that pulls its input and hands back a view of it.
+        pub(crate) fn pulled_view(self) -> Self {
+            match self {
+                Self::ZeroCopy => Self::ZeroCopy,
+                _ => Self::Tiled,
+            }
+        }
+
+        /// An op that pulls its input and copies it into the destination.
+        pub(crate) fn pulled_copy(self) -> Self {
+            match self {
+                Self::ZeroCopy => Self::SinglePass,
+                _ => Self::Tiled,
+            }
+        }
+
+        /// An op that pushes its inputs' reads into pieces of the destination.
+        pub(crate) fn pushed_pieces(inputs: impl IntoIterator<Item = Self>) -> Self {
+            let max = inputs.into_iter().max().unwrap_or(Self::ZeroCopy);
+            if max <= Self::SinglePass {
+                Self::SinglePass
+            } else {
+                Self::Tiled
+            }
         }
     }
 }
@@ -2197,5 +2277,93 @@ mod tests {
             result.unwrap_err().kind(),
             crate::error::ErrorKind::InvalidShapeOperation
         );
+    }
+
+    #[test]
+    fn read_tiling_flags_roundtrip() {
+        use super::ReadTiling::{Fusable, SinglePass, Tiled, ZeroCopy};
+        assert_eq!(ArraySpecFlags::new().read_tiling(), Tiled);
+        for kind in [ZeroCopy, Fusable, SinglePass, Tiled] {
+            let flags = ArraySpecFlags::new().set_compact().with_read_tiling(kind);
+            assert_eq!(flags.read_tiling(), kind);
+            assert!(flags.is_compact());
+            let flags = flags.with_read_tiling(Tiled).with_read_tiling(kind);
+            assert_eq!(flags.read_tiling(), kind);
+        }
+    }
+
+    #[test]
+    fn read_tiling_of_expressions() {
+        use super::ReadTiling::{self, Fusable, SinglePass, Tiled, ZeroCopy};
+        use crate::ops::{concatenate, stack};
+        use crate::storage::scalar::Scalar;
+        use crate::ArrayStorage;
+
+        fn kind<S: ArrayStorage>(a: Array<S>) -> ReadTiling {
+            a.storage().spec().read_tiling()
+        }
+        let data = ndarray::Array2::<i32>::zeros((4, 6));
+        let plain = || Array::plain_ndarray(data.clone()).unwrap();
+        let compact = || Array::compact_ndarray(&data).unwrap();
+        let row = || Array::plain_ndarray(ndarray::Array2::<i32>::zeros((1, 6))).unwrap();
+        let scalar = |shape: &[u64]| {
+            Array::from_storage(Scalar::new(1i32, shape, ArrayParams::default()).unwrap())
+        };
+
+        // Leaves
+        assert_eq!(kind(plain()), ZeroCopy);
+        assert_eq!(kind(scalar(&[4, 6])), ZeroCopy);
+        assert_eq!(kind(compact()), SinglePass);
+
+        // Element-wise ops fuse over zero-copy leaves, whatever the depth
+        assert_eq!(kind(-plain()), Fusable);
+        assert_eq!(kind(plain() + plain()), Fusable);
+        assert_eq!(kind((plain() + plain()) * plain()), Fusable);
+        assert_eq!(kind(plain() + scalar(&[4, 6])), Fusable);
+        assert_eq!(kind(plain().map(|x: i32| x * 2)), Fusable);
+        assert_eq!(kind(row().broadcast(&[4, 6]) + plain()), Fusable);
+        // A compact leaf is decompressed into a temporary
+        assert_eq!(kind(-compact()), Tiled);
+        assert_eq!(kind(compact() + plain()), Tiled);
+
+        // Views of a view are views
+        assert_eq!(kind(plain().slice((1..3, ..))), ZeroCopy);
+        assert_eq!(kind(plain().permute_dims(&[1, 0])), ZeroCopy);
+        assert_eq!(kind(plain().insert_dim(0).remove_dim(0)), ZeroCopy);
+        assert_eq!(kind(row().broadcast(&[4, 6])), ZeroCopy);
+        assert_eq!(kind(plain().transmute_elements::<u32>()), ZeroCopy);
+        // Re-strided ops forward a top-level read, but a parent can't fuse through them
+        assert_eq!(kind((-plain()).slice((1..3, ..))), SinglePass);
+        assert_eq!(kind((-plain()).permute_dims(&[1, 0])), SinglePass);
+        assert_eq!(kind(compact().insert_dim(0)), SinglePass);
+        assert_eq!(kind(-(-plain()).permute_dims(&[1, 0])), Tiled);
+        // Broadcast pulls its input, it is only free over a view
+        assert_eq!(kind((-row()).broadcast(&[4, 6])), Tiled);
+
+        // Copies
+        assert_eq!(kind(plain().flip(0)), SinglePass);
+        assert_eq!(kind(plain().repeat(2, 0)), SinglePass);
+        assert_eq!(kind(plain().tile(2, 0)), SinglePass);
+        assert_eq!(kind(compact().tile(2, 0)), Tiled);
+        assert_eq!(kind(plain().roll(1, 0)), SinglePass);
+        assert_eq!(kind(compact().roll(1, 0)), SinglePass);
+        assert_eq!(kind(plain().reshape(&[24])), SinglePass);
+        assert_eq!(kind(concatenate((plain(), plain()), 0)), SinglePass);
+        assert_eq!(kind(concatenate((compact(), -plain()), 0)), SinglePass);
+        assert_eq!(kind(concatenate((plain(), -compact()), 0)), Tiled);
+        assert_eq!(kind(stack((plain(), compact()), 0)), SinglePass);
+
+        // Type-erased, a parent reads it with `read_data`
+        assert_eq!(kind(plain().into_any()), ZeroCopy);
+        assert_eq!(kind((-plain()).into_any()), SinglePass);
+        assert_eq!(
+            kind(-plain().into_any().into_typed::<i32>().unwrap()),
+            Fusable
+        );
+        let any_neg = (-plain()).into_any().into_typed::<i32>().unwrap();
+        assert_eq!(kind(any_neg + plain()), Tiled);
+
+        // Reductions are left tiled for now
+        assert_eq!(kind(plain().sum(0usize)), Tiled);
     }
 }

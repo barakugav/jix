@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use crate::ops::common::{
     broadcast_operands, define_op1, define_op2, define_op2_table, Operand, Scalar,
 };
-use crate::Array;
+use crate::PyArray;
 
 define_op2!(
     /// Element-wise logical AND of two arrays.
@@ -400,7 +400,7 @@ define_op2!(
 ///     assert np.array_equal(result.numpy(), [0b00000011, 0b00001000, 0b00001111])
 ///     ```
 #[pyo3::pyfunction]
-pub fn bitwise_rotate_left<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Array> {
+pub fn bitwise_rotate_left<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<PyArray> {
     let a = Operand::from_any(a)?;
     let b = rotate_amount(b)?;
     let [a, b] = broadcast_operands([a, b])?;
@@ -421,7 +421,7 @@ pub fn bitwise_rotate_left<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) ->
             (None, Safe)
         }
     );
-    Ok(Array::from_core(dispatch_table.dispatch2(a, b)?))
+    Ok(PyArray::from_core(dispatch_table.dispatch2(a, b)?))
 }
 
 /// Element-wise bitwise right rotation.
@@ -454,7 +454,10 @@ pub fn bitwise_rotate_left<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) ->
 ///     assert np.array_equal(result.numpy(), [0b11000000, 0b00000001, 0b11110000])
 ///     ```
 #[pyo3::pyfunction]
-pub fn bitwise_rotate_right<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -> PyResult<Array> {
+pub fn bitwise_rotate_right<'py>(
+    a: &Bound<'py, PyAny>,
+    b: &Bound<'py, PyAny>,
+) -> PyResult<PyArray> {
     let a = Operand::from_any(a)?;
     let b = rotate_amount(b)?;
     let [a, b] = broadcast_operands([a, b])?;
@@ -475,7 +478,7 @@ pub fn bitwise_rotate_right<'py>(a: &Bound<'py, PyAny>, b: &Bound<'py, PyAny>) -
             (None, Safe)
         }
     );
-    Ok(Array::from_core(dispatch_table.dispatch2(a, b)?))
+    Ok(PyArray::from_core(dispatch_table.dispatch2(a, b)?))
 }
 
 fn rotate_amount(b: &Bound<'_, PyAny>) -> PyResult<Operand> {

@@ -36,6 +36,8 @@ impl<S, K> Op1<S, K> {
         let cache_id = ArrayCacheId::new();
         let mut spec = array.spec().dynamic().clone();
         spec.add_elementwise_cost(1.0);
+        spec.flags =
+            ArraySpecFlags::new().with_read_tiling(ReadTiling::fused([array.spec().read_tiling()]));
         spec.add_cache_id(cache_id);
         Ok(Self {
             array,
@@ -139,10 +141,7 @@ where
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
 
     fn info(&self) -> ArrayStorageInfo<'_> {

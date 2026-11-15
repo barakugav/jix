@@ -138,7 +138,7 @@ pub(crate) mod prelude {
     pub(crate) use crate::storage::cache_id::ArrayCacheId;
     pub(crate) use crate::storage::params::{
         combine_block_layout, combine_elementwise_hints, combine_select_hints,
-        read_layout_order_insert_dont_care_dim, ArraySpecDynamic,
+        read_layout_order_insert_dont_care_dim, ArraySpecDynamic, ArraySpecFlags, ReadTiling,
     };
     pub(crate) use crate::storage::{
         check_out_buf, read_data_and_map_strides, write_out_buf_slot, ArraySpec, ArrayStorageExt,

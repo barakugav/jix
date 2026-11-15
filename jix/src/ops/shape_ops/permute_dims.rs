@@ -91,6 +91,9 @@ impl<S: ArrayStorage> PermuteDims<S> {
                 .map(|&old| inv_dims[old as usize])
                 .collect(),
         );
+        spec.flags = spec
+            .flags
+            .with_read_tiling(inner_spec.read_tiling().forwarded());
         spec.add_cache_ids_from([&inner_spec]);
         let cache_scope = spec.with_cache_scope();
         let dims = dim_arr(ndim, |i| dims[i] as DimIdx);
@@ -149,10 +152,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("PermuteDims", [&self.array])

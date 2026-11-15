@@ -106,6 +106,11 @@ where
             read_shape_scale_weight,
             read_layout_order,
         );
+        spec.flags = spec.flags.with_read_tiling(ReadTiling::fused([
+            c_spec.read_tiling(),
+            x_spec.read_tiling(),
+            y_spec.read_tiling(),
+        ]));
         spec.add_cache_ids_from([&c_spec, &x_spec, &y_spec]);
         spec.add_cache_id(cache_id);
         Ok(Self {
@@ -404,10 +409,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.x
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
+        self.x.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Select", [&self.condition, &self.x, &self.y])

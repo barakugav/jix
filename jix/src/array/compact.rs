@@ -36,7 +36,9 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - compression or decompression fails.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - compression fails.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored source block is
+    ///   corrupt.
     ///
     /// # Examples
     ///
@@ -63,7 +65,9 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - compression or decompression fails.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) - compression fails.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored source block is
+    ///   corrupt.
     ///
     /// ```
     /// use jix::{Array, ArrayParams};

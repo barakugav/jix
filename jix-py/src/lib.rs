@@ -39,7 +39,7 @@ mod jix {
     pub const _build_profile: &str = env!("BUILD_PROFILE");
 
     #[pymodule_export]
-    pub use crate::array::Array;
+    pub use crate::array::PyArray;
 
     #[pymodule_export]
     pub use crate::array::compact;

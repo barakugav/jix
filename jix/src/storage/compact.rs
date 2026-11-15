@@ -16,7 +16,7 @@ use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::cache_id::ArrayCacheId;
-use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
+use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{check_out_buf, ArraySpec, ElementType, Index, OutBuf, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, NdCopier, PtrMutNoalias, PtrNoalias};
@@ -195,7 +195,9 @@ where
         let mut spec = params.into_spec(
             shape_slice,
             blocks.dtype(),
-            ArraySpecFlags::new().set_compact(),
+            ArraySpecFlags::new()
+                .set_compact()
+                .with_read_tiling(ReadTiling::SinglePass),
         )?;
         // Reading a compact element is more expensive than reading a plain element (1).
         spec.dynamic_mut().element_cost = 8.0;
@@ -1279,6 +1281,26 @@ mod tests {
         let expr = twice.insert_dim(1);
         assert!(expr.storage().spec().dynamic().arrays_to_cache.is_none());
         assert_eq!(expr.to_ndarray::<ndarray::Ix2>().unwrap()[[0, 0]], 126);
+        assert_eq!(CALLS.load(Ordering::Relaxed), per_read);
+    }
+
+    #[test]
+    fn unit_length_concat_caches_repeats_of_its_inputs() {
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let (max, per_read) = counted_max(&CALLS);
+        // Every input has length 1, so each is read at the same region, as in a stack. The maps
+        // pull `max`, as a push read is not cached.
+        let expr = crate::ops::concatenate(
+            (
+                max.view().map(|x| x + 1).insert_dim(0),
+                max.view().map(|x| x * 2).insert_dim(0),
+            ),
+            0,
+        );
+        assert_eq!(
+            expr.to_ndarray::<ndarray::Ix1>().unwrap().to_vec(),
+            [64, 126]
+        );
         assert_eq!(CALLS.load(Ordering::Relaxed), per_read);
     }
 

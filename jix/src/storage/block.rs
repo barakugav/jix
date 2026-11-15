@@ -458,8 +458,6 @@ impl BlockTableStorage for Mmap {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-
     use super::{BlockSize, BlockTable};
     use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
@@ -547,47 +545,6 @@ mod tests {
         });
     }
 
-    // -----------------------------------------------------------------------
-    // write_to / read_from round-trip
-    // -----------------------------------------------------------------------
-
-    fn round_trip<T: Dtyped>(items: &[T], block_size: BlockSize) -> BlockTable<Owned, Ty<T>> {
-        let table = build_from_items(items, block_size, &EncoderParams::default()).unwrap();
-        let mut buf = Cursor::new(Vec::<u8>::new());
-        table.write_to(&mut buf).unwrap();
-        let bytes = buf.into_inner();
-        let len = bytes.len() as u64;
-        BlockTable::read_from(Cursor::new(bytes), len)
-            .unwrap()
-            .element_type_change::<Ty<T>>()
-            .unwrap()
-    }
-
-    #[test]
-    fn round_trip_single_block() {
-        let items: Vec<u8> = (0u8..8).collect();
-        let table2 = round_trip(&items, 8);
-        assert_eq!(table2.nblocks(), 1);
-        assert_eq!(table2.nitems, 8);
-        assert_eq!(table2.block_size, 8);
-        assert_eq!(*table2.dtype(), u8::DTYPE);
-        let mut context = ReadContext::default();
-        assert_eq!(decode_block(&table2, 0, &mut context), items);
-    }
-
-    #[test]
-    fn round_trip_multiple_blocks() {
-        let items: Vec<u8> = (0u8..12).collect();
-        let table = round_trip(&items, 4);
-        assert_eq!(table.nblocks(), 3);
-        assert_eq!(table.nitems, 12);
-        let mut context = ReadContext::default();
-        let recovered: Vec<u8> = (0..table.nblocks() as usize)
-            .flat_map(|i| decode_block(&table, i, &mut context))
-            .collect();
-        assert_eq!(recovered, items);
-    }
-
     #[test]
     fn out_of_bounds_block_location_is_an_error() {
         let table = build_from_items(&[0u8; 4], 4, &EncoderParams::default()).unwrap();
@@ -606,50 +563,6 @@ mod tests {
         assert!(bad
             .read_block(0, &mut buf, &ReadContext::default())
             .is_err());
-    }
-
-    #[test]
-    fn round_trip_preserves_blocks_loc_ordering() {
-        let items: Vec<u8> = (0u8..12).collect();
-        let table2 = round_trip(&items, 3);
-        // Each block has a non-empty range, and blocks are stored back-to-back (no gaps).
-        let mut expected_offset = 0u64;
-        for i in 0..table2.nblocks() {
-            let (offset, len) = table2.block_location(i);
-            assert_eq!(offset, expected_offset);
-            assert!(len > 0);
-            expected_offset += len as u64;
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // write_to_file / read_from_file round-trip
-    // -----------------------------------------------------------------------
-
-    #[cfg(not(miri))]
-    #[test]
-    fn round_trip_file() {
-        let items: Vec<u32> = (0u32..18).collect();
-        let table = build_from_items(&items, 3, &EncoderParams::default()).unwrap();
-
-        let tmp_file = tempfile::NamedTempFile::new().unwrap();
-        let path = tmp_file.path();
-        table
-            .write_to(&mut std::fs::File::create(path).unwrap())
-            .unwrap();
-
-        let file = std::fs::File::open(path).unwrap();
-        let reader_len = file.metadata().unwrap().len();
-        let table2 = BlockTable::read_from(file, reader_len).unwrap();
-        std::fs::remove_file(path).unwrap();
-
-        assert_eq!(table2.nblocks(), 6);
-        assert_eq!(table2.nitems, 18);
-        let mut context = ReadContext::default();
-        let recovered: Vec<u8> = (0..table2.nblocks() as usize)
-            .flat_map(|i| decode_block(&table2, i, &mut context))
-            .collect();
-        assert_eq!(recovered, unsafe { cast_slice::<u32, u8>(&items) });
     }
 
     fn make_storage<T: Dtyped>(

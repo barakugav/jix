@@ -10,7 +10,7 @@ use crate::ops::common::{
     broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand,
 };
 use crate::util::IntoPyResult;
-use crate::Array;
+use crate::PyArray;
 
 define_op2!(
     /// Element-wise maximum of two arrays.
@@ -149,7 +149,7 @@ pub fn clamp<'py>(
     array: &Bound<'py, PyAny>,
     min: Option<&Bound<'py, PyAny>>,
     max: Option<&Bound<'py, PyAny>>,
-) -> PyResult<Bound<'py, Array>> {
+) -> PyResult<Bound<'py, PyArray>> {
     let py = array.py();
     let (min, max) = match (min, max) {
         (None, None) => return asarray_simple(array),
@@ -192,5 +192,5 @@ pub fn clamp<'py>(
         Operand::from_any(max)?,
     ])?;
     let res = DISPATCH_TABLE.dispatch3(array, min, max)?;
-    Bound::new(py, Array::from_core(res))
+    Bound::new(py, PyArray::from_core(res))
 }
