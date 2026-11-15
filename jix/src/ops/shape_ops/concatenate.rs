@@ -57,6 +57,8 @@ where
     arrays: ArraysT,
     concat_dim: DimIdx,
     borders: Vec<u64>,
+    // Every input has length 1 on the concat dim
+    unit_lengths: bool,
 
     shape: DimDyn,
     cache_scope: CacheScope,
@@ -117,6 +119,7 @@ where
             borders.push(shape[dim]);
         }
         check_shape_overflow(&shape, dtype.itemsize() as _)?;
+        let unit_lengths = borders.iter().enumerate().all(|(i, &b)| b == i as u64 + 1);
 
         let (element_cost, read_shape_scale_weight, read_layout_order) = {
             let inputs = (0..narrays)
@@ -157,9 +160,10 @@ where
         ));
         spec.add_cache_ids_from_impl(
             (0..narrays).map(|i| arrays.spec(i).dynamic()),
-            // The inputs are read at different regions, so dont enabled the cache for array reachable from different
-            // input arrays
-            false,
+            // The inputs are read at different regions, so an array reachable from several inputs
+            // is not cached - unless they all have length 1, as then each is read at the same
+            // region, as in `Stack`.
+            unit_lengths,
         );
         let cache_scope = spec.with_cache_scope();
 
@@ -169,6 +173,7 @@ where
             arrays,
             concat_dim: dim as DimIdx,
             borders,
+            unit_lengths,
             cache_scope,
             spec,
         })
@@ -190,19 +195,6 @@ where
 {
     type ElementType = ArraysT::ElementType;
 
-    /// Reads the region `index` of the concatenated array.
-    ///
-    /// `borders` holds the cumulative end of each sub-array along `concat_dim`, so sub-array `i`
-    /// owns `[borders[i-1], borders[i])` (with `borders[-1] == 0`). Only the sub-arrays that
-    /// overlap `index[concat_dim]` are read: the first is found by a linear scan for small
-    /// `borders` or a binary search otherwise, and the loop stops at the first sub-array past the
-    /// requested range. A request inside a single sub-array is forwarded to it as is.
-    ///
-    /// Each overlapping sub-array is read, with an index local to it on the concat dim, straight
-    /// into its sub-region of the output at the output's own strides - no temporary buffer. When
-    /// the output is contiguous and all requested dims before `concat_dim` have size <= 1, that
-    /// sub-region is itself contiguous and is read as a packed slice (the `inner_contiguous` fast
-    /// path).
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
@@ -219,7 +211,9 @@ where
 
         // Find the first sub-array whose end exceeds req_start (the first that may overlap).
         const BINARY_SEARCH_THRESHOLD: usize = 32;
-        let first_arr = if self.borders.len() <= BINARY_SEARCH_THRESHOLD {
+        let first_arr = if self.unit_lengths {
+            req_start as usize
+        } else if self.borders.len() <= BINARY_SEARCH_THRESHOLD {
             self.borders
                 .iter()
                 .position(|&b| b > req_start)
@@ -515,7 +509,9 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[allow(clippy::type_complexity)]
-    fn concat_strategy<T>() -> impl Strategy<
+    fn concat_strategy<T>(
+        dim_sizes: std::ops::RangeInclusive<usize>,
+    ) -> impl Strategy<
         Value = (
             Vec<ndarray::ArrayD<T>>,
             Vec<crate::util::TestArray<T>>,
@@ -531,11 +527,11 @@ mod tests {
                 let ndim = shape.len();
                 (Just(shape), 0..ndim, 1usize..=5usize)
             })
-            .prop_flat_map(|(shape, dim, n_arrays)| {
+            .prop_flat_map(move |(shape, dim, n_arrays)| {
                 let prefix = shape[..dim].to_vec();
                 let suffix = shape[dim + 1..].to_vec();
                 // Each array shares every dim size except the concat dim, which is drawn independently.
-                let per_array_strat = (0usize..=5).prop_map(move |dim_size| {
+                let per_array_strat = dim_sizes.clone().prop_map(move |dim_size| {
                     let mut s = prefix.clone();
                     s.push(dim_size);
                     s.extend_from_slice(&suffix);
@@ -553,7 +549,14 @@ mod tests {
 
     proptest::proptest! {
         #[test]
-        fn proptest_concatenate((nds, zas, dim) in concat_strategy::<i32>()) {
+        fn proptest_concatenate((nds, zas, dim) in concat_strategy::<i32>(0..=5)) {
+            let nd_views: Vec<_> = nds.iter().map(|nd| nd.view()).collect();
+            let expected = ndarray::concatenate(ndarray::Axis(dim), &nd_views).unwrap();
+            crate::util::assert_array_matches(&concatenate(zas, dim), &expected);
+        }
+
+        #[test]
+        fn proptest_concatenate_unit_lengths((nds, zas, dim) in concat_strategy::<i32>(1..=1)) {
             let nd_views: Vec<_> = nds.iter().map(|nd| nd.view()).collect();
             let expected = ndarray::concatenate(ndarray::Axis(dim), &nd_views).unwrap();
             crate::util::assert_array_matches(&concatenate(zas, dim), &expected);

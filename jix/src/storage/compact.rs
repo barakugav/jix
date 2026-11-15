@@ -1284,6 +1284,26 @@ mod tests {
         assert_eq!(CALLS.load(Ordering::Relaxed), per_read);
     }
 
+    #[test]
+    fn unit_length_concat_caches_repeats_of_its_inputs() {
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let (max, per_read) = counted_max(&CALLS);
+        // Every input has length 1, so each is read at the same region, as in a stack. The maps
+        // pull `max`, as a push read is not cached.
+        let expr = crate::ops::concatenate(
+            (
+                max.view().map(|x| x + 1).insert_dim(0),
+                max.view().map(|x| x * 2).insert_dim(0),
+            ),
+            0,
+        );
+        assert_eq!(
+            expr.to_ndarray::<ndarray::Ix1>().unwrap().to_vec(),
+            [64, 126]
+        );
+        assert_eq!(CALLS.load(Ordering::Relaxed), per_read);
+    }
+
     /// Arrays reached through shape ops at different regions.
     #[test]
     fn read_cache_through_shape_ops() {
