@@ -1,7 +1,7 @@
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
-use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
+use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{
     check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorage, ArrayStorageInfo, Index, OutBuf,
     OutBufInner, StridedBuf, Ty,
@@ -54,7 +54,7 @@ impl<T> Scalar<T> {
         let mut spec = params.into_spec(
             shape.as_slice(),
             &T::DTYPE,
-            ArraySpecFlags::new().set_plain_read(),
+            ArraySpecFlags::new().with_read_tiling(ReadTiling::ZeroCopy),
         )?;
         spec.dynamic_mut().block_shape = dim_arr(ndim, |_| 1);
         // Reading a scalar element is free, and it broadcasts over every dimension.

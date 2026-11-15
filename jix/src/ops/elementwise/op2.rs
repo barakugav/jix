@@ -81,6 +81,10 @@ impl<S1, S2, K> Op2<S1, S2, K> {
                 read_shape_scale_weight,
                 read_layout_order,
             );
+            spec.flags = spec.flags.with_read_tiling(ReadTiling::fused([
+                a_spec.read_tiling(),
+                b_spec.read_tiling(),
+            ]));
             spec.add_cache_ids_from([&a_spec, &b_spec]);
             spec.add_cache_id(cache_id);
             spec

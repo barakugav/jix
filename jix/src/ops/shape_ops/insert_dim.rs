@@ -119,8 +119,10 @@ where
             read_shape_scale_weight,
             read_layout_order,
         );
+        spec.flags = spec
+            .flags
+            .with_read_tiling(orig_spec.read_tiling().forwarded());
         spec.add_cache_ids_from([&orig_spec]);
-        spec.flags = orig_spec.flags().clear_compact();
         // Dims inserted in front keep the inner dims aligned to the last ones, as broadcasting
         // aligns the operands of element-wise ops, so the inner storages are read at the region
         // other paths of element-wise ops, broadcasts and dims inserted in front read them at.

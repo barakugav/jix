@@ -61,7 +61,8 @@ impl<S: ArrayStorage> Flip<S> {
             is_flipped[d] = true;
         }
         let mut spec = array.spec().dynamic().clone();
-        spec.flags = ArraySpecFlags::new();
+        spec.flags =
+            ArraySpecFlags::new().with_read_tiling(array.spec().read_tiling().pulled_copy());
         let cache_scope = spec.with_cache_scope();
         Ok(Self {
             array,

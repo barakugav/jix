@@ -3,6 +3,7 @@ use std::fmt::Write;
 use std::ops::Range;
 use std::sync::Mutex;
 
+use jix_core::__private::ReadTiling;
 use jix_core::storage::StridedBuf;
 use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
@@ -636,8 +637,8 @@ impl Array {
             )
         };
 
-        let should_detach =
-            !self.arr.storage().spec().flags().plain_read() || nitems * itemsize > 4096;
+        let should_detach = self.arr.storage().spec().flags().read_tiling() != ReadTiling::ZeroCopy
+            || nitems * itemsize > 4096; // TODO: we should check element cost, not just total size
         maybe_detach(py, should_detach, || {
             let context = self.read_ctx()?;
             let context = context.as_ref();

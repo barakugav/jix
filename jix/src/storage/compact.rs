@@ -16,7 +16,7 @@ use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::cache_id::ArrayCacheId;
-use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
+use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{check_out_buf, ArraySpec, ElementType, Index, OutBuf, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, NdCopier, PtrMutNoalias, PtrNoalias};
@@ -195,7 +195,9 @@ where
         let mut spec = params.into_spec(
             shape_slice,
             blocks.dtype(),
-            ArraySpecFlags::new().set_compact(),
+            ArraySpecFlags::new()
+                .set_compact()
+                .with_read_tiling(ReadTiling::SinglePass),
         )?;
         // Reading a compact element is more expensive than reading a plain element (1).
         spec.dynamic_mut().element_cost = 8.0;

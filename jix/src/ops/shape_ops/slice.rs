@@ -98,6 +98,9 @@ impl<S: ArrayStorage> Slice<S> {
             DimArray::from_slice(inner_spec.read_shape_scale_weight()).unwrap(),
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
         );
+        spec.flags = spec
+            .flags
+            .with_read_tiling(inner_spec.read_tiling().forwarded());
         spec.add_cache_ids_from([&inner_spec]);
         let cache_scope = spec.with_cache_scope();
 
@@ -147,7 +150,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         debug_assert!(!out_shape.contains(&0));
 
         // Fast path: inner array is plain, read a contiguous bounding box and create a strided view over it.
-        if self.array.spec().flags().plain_read()
+        if self.array.spec().flags().read_tiling() == ReadTiling::ZeroCopy
             && let OutBufInner::Pull(slot) = out.0
         {
             let box_start = dim_arr(ndim, |dim| {
@@ -588,7 +591,7 @@ mod tests {
 
     #[test]
     fn stepped_slice_pull_returns_strided_view_plain() {
-        // Plain-backed inner (`plain_read`), so a stepped slice lends a strided view.
+        // Plain-backed inner (`ZeroCopy`), so a stepped slice lends a strided view.
         let s = plain6x4().slice((SliceItem::new(None, None, 2), ..)); // rows 0, 2, 4
         let ctx = s.read_ctx();
         let view = s

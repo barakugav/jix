@@ -117,8 +117,10 @@ where
             read_shape_scale_weight,
             read_layout_order,
         );
+        spec.flags = spec
+            .flags
+            .with_read_tiling(inner_spec.read_tiling().forwarded());
         spec.add_cache_ids_from([&inner_spec]);
-        spec.flags = inner_spec.flags().clear_compact();
         let cache_scope = spec.with_cache_scope();
 
         Ok(Self {

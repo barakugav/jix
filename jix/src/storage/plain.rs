@@ -1,7 +1,7 @@
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, ensure, error, Result};
 use crate::storage::params::{
-    read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned,
+    read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned, ReadTiling,
 };
 use crate::storage::{
     check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, ElementType, Index, OutBuf,
@@ -131,7 +131,7 @@ impl<A> Plain<A, TypeDyn> {
         let mut spec = params.into_spec(
             shape.as_slice(),
             &dtype,
-            ArraySpecFlags::new().set_plain_read(),
+            ArraySpecFlags::new().with_read_tiling(ReadTiling::ZeroCopy),
         )?;
         spec.dynamic_mut().block_shape = dim_arr(ndim, |_| 1);
 

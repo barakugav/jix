@@ -62,7 +62,8 @@ where
 
         let dst_dtype = ET::from_dtype(dtype.clone())?;
         let mut spec = array.spec().dynamic().clone();
-        spec.flags = ArraySpecFlags::new();
+        spec.flags =
+            ArraySpecFlags::new().with_read_tiling(array.spec().read_tiling().pulled_view());
         Ok(Self {
             dst_type: dst_dtype,
             sub_field_offset: offset,

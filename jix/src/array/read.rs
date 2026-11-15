@@ -2,6 +2,7 @@ use std::mem::MaybeUninit;
 use std::ops::Range;
 
 use crate::error::{check_get_buffer_size, check_ranges, check_region_size, ensure, Result};
+use crate::storage::params::ReadTiling;
 use crate::storage::{
     alloc_out_buf, check_out_buf_dims, check_out_buf_impl, split_ranges, ArrayStorageExt,
     ArrayStorageTyped, Index, OutBuf, StridedBuf,
@@ -453,16 +454,16 @@ impl<S: ArrayStorage> Array<S> {
         context: &'a ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
-        let dtype = self.dtype();
         let spec = self.storage.spec();
-        let small_read = spec.flags().plain_read() || {
+        let single_read = spec.flags().read_tiling() <= ReadTiling::SinglePass || {
+            let dtype = self.dtype();
             let nitems = index.size().iter().product::<usize>();
             let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
             nitems as u64 <= min_nitems
         };
         let _cache_scope = context.cache_scope(&spec.dynamic().arrays_to_cache);
-        if small_read {
-            // Fast path for small reads
+        if single_read {
+            // Fast path for non-tiled reads
             self.storage.read_data(index, context, out)
         } else {
             to_buf_strided_slow(&self.storage, index, context, out)

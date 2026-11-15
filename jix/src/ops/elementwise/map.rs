@@ -272,6 +272,9 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
             read_shape_scale_weight,
             read_layout_order,
         );
+        spec.flags = spec
+            .flags
+            .with_read_tiling(ReadTiling::fused(specs.iter().map(|sp| sp.read_tiling())));
         spec.add_cache_ids_from(specs.as_slice());
         spec.add_cache_id(cache_id);
         Ok(Self {

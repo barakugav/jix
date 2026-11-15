@@ -55,7 +55,8 @@ impl<S: ArrayStorage> Roll<S> {
         };
 
         let mut spec = array.spec().dynamic().clone();
-        spec.flags = ArraySpecFlags::new();
+        spec.flags = ArraySpecFlags::new()
+            .with_read_tiling(ReadTiling::pushed_pieces([array.spec().read_tiling()]));
         let cache_scope = spec.with_cache_scope();
         Ok(Self {
             array,

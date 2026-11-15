@@ -54,13 +54,8 @@ where
         );
         let inner_spec = array.spec().dynamic();
         let mut spec = inner_spec.clone();
-        spec.flags = {
-            let mut flags = ArraySpecFlags::new();
-            if inner_spec.flags.plain_read() {
-                flags = flags.set_plain_read();
-            }
-            flags
-        };
+        spec.flags =
+            ArraySpecFlags::new().with_read_tiling(inner_spec.flags.read_tiling().forwarded());
         Ok(Self {
             element_type: new_type,
             array,
@@ -159,6 +154,7 @@ mod tests {
 
     use super::Transmute;
     use crate::dtype::Dtyped;
+    use crate::storage::params::ReadTiling;
     use crate::storage::{Index, StridedBuf};
     use crate::util::assert_array_matches;
     use crate::ReadContext;
@@ -198,19 +194,19 @@ mod tests {
     }
 
     /// A transmute is a lazy view, so it is never compact, but it reads straight through to its
-    /// input, so a plain read stays plain.
+    /// input, so a zero-copy read stays zero-copy.
     #[test]
-    fn flags_drop_compact_and_keep_plain_read() {
+    fn flags_drop_compact_and_keep_read_kind() {
         let data = ndarray::array![1u32, 2, 3];
         let compact = Array::compact_ndarray(&data).unwrap();
         assert!(compact.storage().spec().flags().is_compact());
         let t = compact.transmute_elements::<i32>();
         assert!(!t.storage().spec().flags().is_compact());
+        assert_eq!(t.storage().spec().read_tiling(), ReadTiling::SinglePass);
 
         let plain = Array::plain_ndarray_ref(&data).unwrap();
-        assert!(plain.storage().spec().flags().plain_read());
         let t = plain.transmute_elements::<i32>();
-        assert!(t.storage().spec().flags().plain_read());
+        assert_eq!(t.storage().spec().read_tiling(), ReadTiling::ZeroCopy);
     }
 
     // -----------------------------------------------------------------------

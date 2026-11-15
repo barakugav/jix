@@ -152,6 +152,9 @@ where
             read_shape_scale_weight,
             read_layout_order,
         );
+        spec.flags = spec.flags.with_read_tiling(ReadTiling::pushed_pieces(
+            (0..narrays).map(|i| arrays.spec(i).read_tiling()),
+        ));
         spec.add_cache_ids_from_impl(
             (0..narrays).map(|i| arrays.spec(i).dynamic()),
             // The inputs are read at different regions, so dont enabled the cache for array reachable from different
