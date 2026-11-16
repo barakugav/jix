@@ -404,19 +404,6 @@ impl PyArray {
         })
     }
 
-    /// Always raises: an array has no single truth value.
-    ///
-    /// Use `.any().item()` or `.all().item()` instead.
-    ///
-    /// Raises:
-    ///     ValueError: Always.
-    pub fn __bool__(&self) -> PyResult<bool> {
-        Err(PyValueError::new_err(
-            "the truth value of a jix.Array is ambiguous; use .any() or .all(), \
-             and .item() to get a Python bool",
-        ))
-    }
-
     /// The data type of the array elements, as a NumPy dtype object.
     ///
     /// ```python
@@ -1619,6 +1606,43 @@ impl PyArray {
         dim: ItemOrTuple<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::remove_dim(slf, dim)
+    }
+
+    /// Always raises: an array has no single truth value.
+    ///
+    /// Use `.any().item()` or `.all().item()` instead.
+    ///
+    /// Raises:
+    ///     ValueError: Always.
+    pub fn __bool__(&self) -> PyResult<bool> {
+        Err(PyValueError::new_err(
+            "the truth value of a jix.Array is ambiguous; use .any() or .all(), \
+             and .item() to get a Python bool",
+        ))
+    }
+
+    /// Always raises: iterating an array is not supported.
+    ///
+    /// Use `.numpy()` and iterate the NumPy array instead.
+    ///
+    /// Raises:
+    ///     TypeError: Always.
+    pub fn __iter__(&self) -> PyResult<Py<PyAny>> {
+        Err(PyTypeError::new_err(
+            "iteration over a jix.Array is not supported; use .numpy()",
+        ))
+    }
+
+    /// Always raises: `in` on an array is not supported.
+    ///
+    /// Use `(a == value).any().item()` instead.
+    ///
+    /// Raises:
+    ///     TypeError: Always.
+    pub fn __contains__(&self, _value: &Bound<'_, PyAny>) -> PyResult<bool> {
+        Err(PyTypeError::new_err(
+            "`in` on a jix.Array is not supported; use (a == value).any()",
+        ))
     }
 
     // Opts out of NumPy ufuncs
