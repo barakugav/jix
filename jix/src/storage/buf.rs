@@ -488,15 +488,22 @@ impl<'s, 'a> OutBuf<'s, 'a> {
     }
 
     #[inline]
-    pub(crate) fn set(self, data: StridedBuf<'a>, shape: &[usize], dtype: &Dtype) {
+    pub(crate) fn set(self, data: StridedBuf<'a>, index: &Index<'_>, dtype: &Dtype) -> Result<()> {
         match self.0 {
             OutBufInner::Pull(slot) => _ = write_out_buf_slot(slot, data),
             OutBufInner::Push(out) => {
+                let itemsize = dtype.itemsize() as usize;
+                check_out_buf_impl(out, index, itemsize)?;
                 let (src, src_strides) = data.data();
-                // SAFETY: `data` holds the region at its strides, and the caller checked `out`.
-                unsafe { out.copy_from(src, src_strides, shape, dtype) };
+                assert!(
+                    src_strides.len() == index.ndim()
+                        && strided_span_bytes(index.size(), src_strides, itemsize) <= src.len()
+                );
+                // SAFETY: both the source and the destination hold the region, checked above.
+                unsafe { out.copy_from(src, src_strides, index.size(), dtype) };
             }
         }
+        Ok(())
     }
 }
 
