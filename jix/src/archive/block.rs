@@ -113,6 +113,7 @@ where
         block_size: BlockSize,
         decoder_config: &DecoderCodecConfig,
     ) -> Result<Self> {
+        let blocks_loc = BlockLocation::alloc_table(nblocks)?;
         let nitems = nblocks * block_size as u64;
         ensure!(
             decoder_config.dtype.nesting_depth() <= DTYPE_NESTING_MAX,
@@ -164,7 +165,7 @@ where
             toc_offset,
             blocks_loc_offset,
             block_data_offset,
-            blocks_loc: vec![BlockLocation::default(); nblocks as usize],
+            blocks_loc,
             block_data_total_len: 0,
         })
     }

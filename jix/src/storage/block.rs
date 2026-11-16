@@ -29,6 +29,20 @@ pub(crate) struct BlockLocation {
     /// Byte length of the block's compressed data.
     len: Unaligned<u32>,
 }
+
+impl BlockLocation {
+    pub(crate) fn alloc_table(nblocks: u64) -> Result<Vec<Self>> {
+        let mut table = Vec::new();
+        let n = usize::try_from(nblocks).ok();
+        ensure!(
+            n.is_some_and(|n| table.try_reserve_exact(n).is_ok()),
+            InvalidShapeOperation,
+            "the location table of {nblocks} blocks does not fit in memory"
+        );
+        table.resize(n.unwrap(), Self::default());
+        Ok(table)
+    }
+}
 const _: () = assert!(size_of::<BlockLocation>() == 12 && align_of::<BlockLocation>() == 1);
 impl BlockLocation {
     #[inline]
@@ -285,7 +299,7 @@ impl OwnedBlockTableBuilder {
     ) -> Result<Self> {
         Ok(Self {
             block_data: Vec::new(),
-            blocks_loc: vec![BlockLocation::default(); nblocks as usize],
+            blocks_loc: BlockLocation::alloc_table(nblocks)?,
             block_size,
             decoder_config,
             nblocks,

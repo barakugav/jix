@@ -379,6 +379,20 @@ mod tests {
     }
 
     #[test]
+    fn too_many_blocks_is_an_error() {
+        let a = Array::compact_ndarray(&array![1u8])
+            .unwrap()
+            .broadcast(&[1 << 62]);
+        let params = crate::ArrayParams::new().block_shape(&[1]).unwrap();
+        let ctx = a.read_ctx();
+        let err = a.compact_with(params.clone(), &ctx).unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
+        let mut out = std::io::Cursor::new(Vec::new());
+        let err = a.write_to(&mut out, params, &ctx).unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
+    }
+
+    #[test]
     fn compact_1d_multi_block() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], [6], &[3]);
         let b = a.compact().unwrap();
