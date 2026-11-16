@@ -90,7 +90,14 @@ impl<T> IntoPyResult<T> for Result<T, jix_core::Error> {
             match e.kind() {
                 ErrorKind::Arithmetic => PyArithmeticError::new_err(err_str),
                 ErrorKind::UnsupportedDtype => PyTypeError::new_err(err_str),
-                ErrorKind::Io => PyOSError::new_err(err_str),
+                ErrorKind::Io => {
+                    let source = std::error::Error::source(&e)
+                        .and_then(|s| s.downcast_ref::<std::io::Error>());
+                    match source {
+                        Some(io_err) => std::io::Error::new(io_err.kind(), err_str).into(),
+                        None => PyOSError::new_err(err_str),
+                    }
+                }
                 ErrorKind::InvalidIndex => PyIndexError::new_err(err_str),
                 _ => PyRuntimeError::new_err(err_str),
             }

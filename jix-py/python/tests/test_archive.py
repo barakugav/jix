@@ -433,3 +433,9 @@ def test_write_writer_read_path(tmp_path):
         jix.write_array(a, f)
     a2 = jix.read_array(p)
     np.testing.assert_array_equal(a2.numpy(), a.numpy())
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"len": 100}, {"mmap": True}, {"mmap": True, "len": 100}])
+def test_read_array_missing_file_raises_file_not_found(tmp_path, kwargs):
+    with pytest.raises(FileNotFoundError):
+        jix.read_array(tmp_path / "missing.jix", **kwargs)
