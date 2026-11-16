@@ -32,7 +32,7 @@ def shape_strategy():
         st.lists(st.integers(1, 16), min_size=3, max_size=3),  # 3D
         st.lists(st.integers(1, 8), min_size=4, max_size=4),  # 4D
         st.lists(st.integers(1, 4), min_size=1, max_size=8),  # many dims
-        st.lists(st.integers(0, 3), min_size=1, max_size=8),  # zero-length dims
+        st.lists(st.integers(0, 3), min_size=0, max_size=8),  # zero-length dims, and 0-d
     )
 
 
@@ -169,6 +169,12 @@ def _compact(draw, np_a: np.ndarray, block_shape) -> jix.Array:
     if np_a.dtype == np.bool_:
         true_bytes = draw(np_arrays(np.uint8, np_a.shape, elements=st.sampled_from([1, 2, 0x80, 0xFF])))
         np_a = np.where(np_a, true_bytes, 0).astype(np.uint8).view(np.bool_)
+    # The same values in a C, Fortran or strided layout
+    layout = draw(st.sampled_from(["C", "F", "strided"]), label="layout")
+    if layout == "F" and np_a.ndim > 0:
+        np_a = np.asfortranarray(np_a)
+    elif layout == "strided" and np_a.ndim > 0:
+        np_a = np.repeat(np_a, 2, axis=-1)[..., ::2]
     return jix.compact(np_a, params={"block_shape": block_shape})
 
 
