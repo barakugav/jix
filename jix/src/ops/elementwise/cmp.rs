@@ -227,7 +227,7 @@ pub(crate) mod traits {
                     let (abs_a, abs_b) = (crate::scalar::Abs::abs(a), crate::scalar::Abs::abs(b));
                     let largest = if abs_b > abs_a { abs_b } else { abs_a };
                     let close = (diff <= *atol) | (diff <= largest * *rtol);
-                    let no_inf = !<$T>::is_infinite(a) & !<$T>::is_infinite(b);
+                    let no_inf = !<$T>::is_infinite(a) & !<$T>::is_infinite(b) & diff.is_finite();
                     (a == b) | (close & no_inf)
                 }
             }
@@ -1081,6 +1081,9 @@ mod tests {
             return false;
         }
         let diff = (a - b).abs();
+        if bool::from(diff.is_infinite()) {
+            return false;
+        }
         if diff <= atol {
             return true;
         }
@@ -1097,7 +1100,17 @@ mod tests {
         macro_rules! check {
             ($t:ty) => {
                 let values = <$t>::edge_cases();
-                let tols = [0.0, -0.0, 1e-6, 0.1, 1.0, -0.1, <$t>::INFINITY, <$t>::NAN];
+                let tols = [
+                    0.0,
+                    -0.0,
+                    1e-6,
+                    0.1,
+                    1.0,
+                    1.5,
+                    -0.1,
+                    <$t>::INFINITY,
+                    <$t>::NAN,
+                ];
                 for &a in &values {
                     for &b in &values {
                         for &rtol in &tols {
@@ -1115,6 +1128,7 @@ mod tests {
         }
         check!(f32);
         check!(f64);
+        assert!(!f64::MAX.approx_eq(&-f64::MAX, &1.5, &0.0));
     }
 
     proptest::proptest! {
