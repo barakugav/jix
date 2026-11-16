@@ -28,6 +28,19 @@ def test_dtype():
     np.testing.assert_array_equal(res, np_a)
 
 
+def test_subarray_dtype():
+    np_a = np.arange(12, dtype=np.int32).reshape(6, 2)
+    sub = np.dtype(("<i4", (2,)))
+    np.testing.assert_array_equal(np.asarray(jix.compact(np_a), dtype=sub), np.asarray(np_a, dtype=sub))
+
+
+def test_dtype_class():
+    np_a = np.arange(6, dtype=np.int32)
+    res = jix.compact(np_a).__array__(np.dtypes.Float64DType)
+    assert res.dtype == np.float64
+    np.testing.assert_array_equal(res, np_a)
+
+
 def test_copy():
     np_a = np.arange(6, dtype=np.int32)
     a = jix.compact(np_a)

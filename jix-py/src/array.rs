@@ -780,6 +780,16 @@ impl PyArray {
         let mut arr = self.numpy(py, None, None)?;
 
         if let Some(dtype) = dtype {
+            // NumPy appends a subarray dtype's shape itself, so cast only to its base
+            let dtype = {
+                let descr = PyArrayDescr::new(py, dtype)?;
+                if descr.has_subarray() {
+                    descr.base().into_any()
+                } else {
+                    dtype.clone()
+                }
+            };
+
             let kwargs = PyDict::new(py);
             kwargs.set_item("copy", false)?;
             arr.0 = arr
