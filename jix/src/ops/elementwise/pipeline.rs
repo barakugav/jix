@@ -492,7 +492,7 @@ fn compute_need_staging(
         && (0..n_operands).all(|i| is_broadcast(i) || is_contiguous[i] || need_staging[i]);
     if stage {
         for (i, need_staging) in need_staging.iter_mut().enumerate() {
-            *need_staging |= is_broadcast(i);
+            *need_staging |= is_broadcast(i) && layouts[i].0 as usize <= 32;
         }
     }
 }
