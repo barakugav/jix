@@ -23,8 +23,8 @@ pub(crate) struct ReadSize {
 
 impl ReadSize {
     pub(crate) fn new(min: u64, max: u64) -> Self {
-        let min = min.max(1);
-        let max = max.max(min);
+        let min = min.clamp(1, isize::MAX as u64);
+        let max = max.clamp(min, isize::MAX as u64);
         Self { min, max }
     }
 
@@ -455,7 +455,7 @@ impl ArrayParams {
             .min(1 << 30)
             .floor_to_multiple(base_block_len)
             .max(1);
-        let base_block_len = base_block_len.max(1).min(max_block_len);
+        let base_block_len = base_block_len.min(max_block_len).max(1);
         let block_len = if max_block_len == dim_len {
             dim_len
         } else {
@@ -1817,6 +1817,8 @@ mod tests {
     fn read_size_normalizes_and_converts() {
         // min floored at 1, max raised to at least min.
         assert_eq!(ReadSize::new(0, 0), ReadSize::new(1, 1));
+        let huge = ReadSize::new(u64::MAX, u64::MAX);
+        assert_eq!((huge.min, huge.max), (isize::MAX as u64, isize::MAX as u64));
         let rs = ReadSize::new(10, 4); // max < min -> max raised to min
         assert_eq!((rs.min, rs.max), (10, 10));
 
