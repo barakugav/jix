@@ -461,7 +461,8 @@ impl PyArray {
     ///
     ///     out: An existing NumPy array to decode into, instead of allocating a new one. It must
     ///         have the same dtype as `self` and exactly the shape the `index` selects, and it must
-    ///         be writeable.
+    ///         be writeable. For a dtype with an inner shape, the array should have the base dtype
+    ///         and have shape expanded with the dtype inner dims.
     ///
     ///         The destination does not have to be C-contiguous - almost any strided view works.
     ///         Three kinds of view are rejected: reversed ones (a negative stride, e.g.
@@ -497,7 +498,8 @@ impl PyArray {
     ///         argument (or `self.shape` when no index is supplied). Without `out`, a new
     ///         allocation whose memory layout is implementation-defined (it usually follows the
     ///         source's memory order, like NumPy `order='K'`). With `out`, that same object, so
-    ///         `arr.numpy(out=dst) is dst`.
+    ///         `arr.numpy(out=dst) is dst`. As in NumPy, a dtype with an inner shape is expanded:
+    ///         the result has its base dtype and the inner dims as trailing dims.
     ///
     /// Raises:
     ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds or
@@ -664,7 +666,7 @@ impl PyArray {
     ///     The element as a Python scalar (`int`, `float`, `complex` or `bool`).
     ///
     /// Raises:
-    ///     ValueError: If the array is not zero-dimensional.
+    ///     ValueError: If the array is not zero-dimensional, or its dtype has an inner shape.
     ///
     /// ```python
     /// import jix
@@ -679,6 +681,11 @@ impl PyArray {
                 "item() requires a zero-dimensional array, got an array with ndim {}",
                 self.ndim()
             )));
+        }
+        if !self.arr.dtype().shape().is_empty() {
+            return Err(PyValueError::new_err(
+                "item() does not support a dtype with an inner shape, use numpy() instead",
+            ));
         }
         self.numpy(py, None, None)?.call_method0("item")
     }
@@ -748,7 +755,8 @@ impl PyArray {
     ///     copy: `None` or `True` are accepted. `False` raises, since the data is always copied.
     ///
     /// Returns:
-    ///     A NumPy array with the same shape as `self`.
+    ///     A NumPy array with the same shape as `self`, with the inner dims of a dtype with an
+    ///         inner shape appended, as in `numpy()`.
     ///
     /// Raises:
     ///     ValueError: `copy=False`.

@@ -268,3 +268,9 @@ def test_aligned_struct_property_accepted_iff_no_padding(dtype):
             jix.compact(a)
     else:
         _assert_same(jix.compact(a), a)
+
+
+def test_item_of_an_inner_shape_dtype_raises():
+    z = np.zeros((), dtype=[("f", np.int32, (3,))])
+    with pytest.raises(ValueError, match="inner shape"):
+        jix.dtype_sub_field(jix.compact(z), "f").item()
