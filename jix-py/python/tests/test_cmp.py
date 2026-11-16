@@ -369,6 +369,13 @@ def test_isclose_within_rtol():
     assert np.array_equal(result, [True, False])
 
 
+def test_isclose_small_ints_compare_in_f64():
+    a = jix.compact([4955], dtype=np.uint16)
+    b = jix.compact([5000], dtype=np.uint16)
+    expected = np.isclose(np.array([4955], np.uint16), np.array([5000], np.uint16), rtol=0.009, atol=0)
+    assert np.array_equal(jix.isclose(a, b, rtol=0.009, atol=0.0).numpy(), expected)
+
+
 def test_isclose_nan_always_false():
     a = jix.compact([float("nan"), 1.0], dtype=np.float32)
     b = jix.compact([float("nan"), 1.0], dtype=np.float32)

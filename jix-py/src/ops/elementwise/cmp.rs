@@ -7,7 +7,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use crate::ops::common::{
-    broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Scalar,
+    broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
 };
 use crate::util::IntoPyResult;
 use crate::PyArray;
@@ -403,26 +403,45 @@ pub fn isclose<'py>(
         })
     }
 
-    static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ApproxEqualArgs>> = LazyLock::new(|| {
-        OpDescriptor::new(
-            "isclose",
-            vec![
-                float_descriptor::<f16>(),
-                float_descriptor::<f32>(),
-                float_descriptor::<f64>(),
-                complex_descriptor::<f32>(),
-                complex_descriptor::<f64>(),
-            ],
-        )
-        .cast_untyped_float_to_f64(true)
-    });
-
     let rtol_scalar = Scalar::from_any(rtol)?;
     let atol_scalar = Scalar::from_any(atol)?;
     let a = Operand::from_any(a)?;
     let b = Operand::from_any(b)?;
     let [a, b] = broadcast_operands([a, b])?;
-    let res = DISPATCH_TABLE.dispatch_args(
+    let typed_float = [&a, &b].iter().any(|op| {
+        matches!(
+            op.rank_precision(),
+            Some((Rank::Float | Rank::Complex, Some(_)))
+        )
+    });
+    let table = if typed_float {
+        static DISPATCH_TABLE: LazyLock<OpDescriptor<2, ApproxEqualArgs>> = LazyLock::new(|| {
+            OpDescriptor::new(
+                "isclose",
+                vec![
+                    float_descriptor::<f16>(),
+                    float_descriptor::<f32>(),
+                    float_descriptor::<f64>(),
+                    complex_descriptor::<f32>(),
+                    complex_descriptor::<f64>(),
+                ],
+            )
+            .cast_untyped_float_to_f64(true)
+        });
+        &DISPATCH_TABLE
+    } else {
+        // Without a typed float operand, compare in f64, not in the narrowest float
+        static DISPATCH_TABLE_F64: LazyLock<OpDescriptor<2, ApproxEqualArgs>> =
+            LazyLock::new(|| {
+                OpDescriptor::new(
+                    "isclose",
+                    vec![float_descriptor::<f64>(), complex_descriptor::<f64>()],
+                )
+                .cast_untyped_float_to_f64(true)
+            });
+        &DISPATCH_TABLE_F64
+    };
+    let res = table.dispatch_args(
         [a, b],
         ApproxEqualArgs {
             rtol: rtol_scalar,
