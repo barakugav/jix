@@ -93,6 +93,6 @@ pub fn r#where<'py>(
     let ret = jix_core::ops::Select::new_array(condition, x, y).into_py_result()?;
     Bound::new(
         py,
-        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any().into_type_dyn(), np_dtype.unbind()),
     )
 }

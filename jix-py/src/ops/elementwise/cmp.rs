@@ -372,7 +372,7 @@ pub fn isclose<'py>(
             let rtol = cast_tol::<T>(args.rtol)?;
             let atol = cast_tol::<T>(args.atol)?;
             let res = jix_core::ops::ApproxEq::new_array(a, b, rtol, atol).into_py_result()?;
-            Ok(res.into_any())
+            Ok(res.into_any().into_type_dyn())
         })
     }
 
@@ -399,7 +399,7 @@ pub fn isclose<'py>(
                 },
             };
             let res = jix_core::ops::ApproxEq::new_array(a, b, rtol, atol).into_py_result()?;
-            Ok(res.into_any())
+            Ok(res.into_any().into_type_dyn())
         })
     }
 

@@ -134,16 +134,25 @@ pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> PyResult<PyArra
         use jix_core::ops::{Cast, Ln, Log10, Log2};
         OpFnDescriptor::new1_args::<T>(CastKind::Safe, |a, args: LogArgs| {
             Ok(match args.base {
-                core::f64::consts::E => Ln::new_array(a).into_py_result()?.into_any(),
-                2.0 => Log2::new_array(a).into_py_result()?.into_any(),
-                10.0 => Log10::new_array(a).into_py_result()?.into_any(),
+                core::f64::consts::E => Ln::new_array(a)
+                    .into_py_result()?
+                    .into_any()
+                    .into_type_dyn(),
+                2.0 => Log2::new_array(a)
+                    .into_py_result()?
+                    .into_any()
+                    .into_type_dyn(),
+                10.0 => Log10::new_array(a)
+                    .into_py_result()?
+                    .into_any()
+                    .into_type_dyn(),
                 base => {
                     let ln_base = base.ln();
                     let a = Cast::<_, f64>::new_array(a).into_py_result()?;
                     let res = Ln::new_array(a).into_py_result()?;
                     let res = res
                         .map(move |x: f64| <f64 as jix_core::scalar::Cast<T>>::cast(x / ln_base));
-                    res.into_any()
+                    res.into_any().into_type_dyn()
                 }
             })
         })

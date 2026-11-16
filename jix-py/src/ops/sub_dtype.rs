@@ -53,5 +53,5 @@ pub fn dtype_sub_field<'py>(
     let array = crate::ops::as_array::any_to_core_array(array)?;
     let res =
         jix_core::ops::SubDtype::<_, TypeDyn>::new_array(array, &sub_field).into_py_result()?;
-    Bound::new(py, PyArray::from_core(res.into_any()))
+    Bound::new(py, PyArray::from_core(res.into_any().into_type_dyn()))
 }

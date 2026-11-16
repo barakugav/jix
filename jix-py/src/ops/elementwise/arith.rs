@@ -49,10 +49,18 @@ use crate::PyArray;
 pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<PyArray> {
     static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
         let mut fns = vec![
-            OpFnDescriptor::new1::<u8>(CastKind::None, |a| Ok((-a.cast::<i8>()).into_any())),
-            OpFnDescriptor::new1::<u16>(CastKind::None, |a| Ok((-a.cast::<i16>()).into_any())),
-            OpFnDescriptor::new1::<u32>(CastKind::None, |a| Ok((-a.cast::<i32>()).into_any())),
-            OpFnDescriptor::new1::<u64>(CastKind::None, |a| Ok((-a.cast::<i64>()).into_any())),
+            OpFnDescriptor::new1::<u8>(CastKind::None, |a| {
+                Ok((-a.cast::<i8>()).into_any().into_type_dyn())
+            }),
+            OpFnDescriptor::new1::<u16>(CastKind::None, |a| {
+                Ok((-a.cast::<i16>()).into_any().into_type_dyn())
+            }),
+            OpFnDescriptor::new1::<u32>(CastKind::None, |a| {
+                Ok((-a.cast::<i32>()).into_any().into_type_dyn())
+            }),
+            OpFnDescriptor::new1::<u64>(CastKind::None, |a| {
+                Ok((-a.cast::<i64>()).into_any().into_type_dyn())
+            }),
         ];
         fns.extend(define_op1_desc!(
             Neg,
@@ -227,7 +235,7 @@ macro_rules! unary_shortcut_desc {
                 crate::ops::common::OpFnDescriptor::new2::<$a_ty, $b_ty>(
                     crate::ops::common::CastKind::Safe,
                     |$x, _b| {
-                        let res = { $f }.map(|res| res.into_any());
+                        let res = { $f }.map(|res| res.into_any().into_type_dyn());
                         <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
                     },
                 ),

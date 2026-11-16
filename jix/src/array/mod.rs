@@ -276,7 +276,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The storage is wrapped in an `Arc` and hidden behind [`ArrayStorageAny`], so the
     /// resulting array can be stored alongside arrays of other concrete storage types.
-    pub fn into_any(self) -> ArrayAny
+    pub fn into_any(self) -> ArrayAny<S::ElementType>
     where
         S: ArrayStorage + Send + Sync + 'static,
     {

@@ -164,7 +164,7 @@ pub fn clamp<'py>(
     {
         OpFnDescriptor::new3::<T>(CastKind::Safe, |a, min, max| {
             let res = jix_core::ops::Clamp::new_array(a, min, max).into_py_result()?;
-            Ok(res.into_any())
+            Ok(res.into_any().into_type_dyn())
         })
     }
     static DISPATCH_TABLE: LazyLock<OpDescriptor<3, ()>> = LazyLock::new(|| {

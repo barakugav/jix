@@ -12,7 +12,7 @@ fn keepdim_after_multi_reduction(
     // keepdim=true: re-insert singleton dims via insert_dim
     let res = jix_core::ops::InsertDim::new_array(array, original_reduced_dims);
     let ret = res.into_py_result()?;
-    Ok(ret.into_any())
+    Ok(ret.into_any().into_type_dyn())
 }
 
 #[inline]
@@ -20,7 +20,7 @@ fn keepdim_after_reduction(array: ArrayAny, original_reduced_dim: usize) -> PyRe
     // keepdim=true: re-insert singleton dim via insert_dim
     let res = jix_core::ops::InsertDim::new_array(array, [original_reduced_dim]);
     let ret = res.into_py_result()?;
-    Ok(ret.into_any())
+    Ok(ret.into_any().into_type_dyn())
 }
 
 macro_rules! define_reduction_op {

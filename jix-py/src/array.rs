@@ -1781,7 +1781,7 @@ pub fn compact<'py>(
             .into_py_result()
     })?;
 
-    Bound::new(py, PyArray::from_core(compacted.into_any()))
+    Bound::new(py, PyArray::from_core(compacted.into_any().into_type_dyn()))
 }
 
 pub(crate) fn resolve_array_params(

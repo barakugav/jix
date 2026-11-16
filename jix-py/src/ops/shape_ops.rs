@@ -116,16 +116,16 @@ pub(crate) fn broadcast_array_impl(
     let array = match array {
         Either::Left(arr) => {
             if shape == arr.shape() {
-                arr.into_any()
+                arr.into_any().into_type_dyn()
             } else {
-                Broadcast::new_array(arr, shape)?.into_any()
+                Broadcast::new_array(arr, shape)?.into_any().into_type_dyn()
             }
         }
         Either::Right(arr) => {
             if shape == arr.shape() {
                 arr
             } else {
-                Broadcast::new_array(arr, shape)?.into_any()
+                Broadcast::new_array(arr, shape)?.into_any().into_type_dyn()
             }
         }
     };
@@ -201,7 +201,8 @@ pub fn slice<'py>(
     let spec = SliceSpec::new(parsed.items.as_slice()).into_py_result()?;
     let sliced = jix_core::ops::Slice::new_array(arr, spec)
         .into_py_result()?
-        .into_any();
+        .into_any()
+        .into_type_dyn();
     let drop_dims = parsed
         .drop_dims
         .into_iter()
@@ -214,6 +215,7 @@ pub fn slice<'py>(
         jix_core::ops::RemoveDim::new_array(sliced, drop_dims.as_slice())
             .into_py_result()?
             .into_any()
+            .into_type_dyn()
     };
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
@@ -451,7 +453,7 @@ pub fn insert_dim<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any().into_type_dyn(), np_dtype.unbind()),
     )
 }
 /// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for
@@ -522,7 +524,7 @@ pub fn remove_dim<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any().into_type_dyn(), np_dtype.unbind()),
     )
 }
 
@@ -628,7 +630,7 @@ pub fn permute_dims<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any().into_type_dyn(), np_dtype.unbind()),
     )
 }
 
@@ -766,7 +768,8 @@ pub fn reshape<'py>(
 
     let array = jix_core::ops::Reshape::new_array(array.clone(), new_shape.as_slice())
         .into_py_result()?
-        .into_any();
+        .into_any()
+        .into_type_dyn();
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
@@ -885,7 +888,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<Bo
     let np_dtype = py_arrays.first().unwrap().get().numpy_dtype(py)?;
     Bound::new(
         py,
-        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any().into_type_dyn(), np_dtype.unbind()),
     )
 }
 
@@ -962,10 +965,10 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, dim: Dim) -> PyResult<PyArray>
         // if only one array, equivalent to insert_dim along that dim
         let [array] = arrays.try_into().unwrap();
         let ret = jix_core::ops::InsertDim::new_array(array, dim).into_py_result()?;
-        ret.into_any()
+        ret.into_any().into_type_dyn()
     } else {
         let ret = jix_core::ops::Stack::new_array(arrays, dim).into_py_result()?;
-        ret.into_any()
+        ret.into_any().into_type_dyn()
     };
     let np_dtype = py_arrays.first().unwrap().get().numpy_dtype(py)?;
     Ok(PyArray::from_core_with_np_dtype(res, np_dtype.unbind()))
@@ -1035,7 +1038,7 @@ pub fn repeat<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any().into_type_dyn(), np_dtype.unbind()),
     )
 }
 
@@ -1098,7 +1101,7 @@ pub fn flip<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any().into_type_dyn(), np_dtype.unbind()),
     )
 }
 
@@ -1156,7 +1159,7 @@ pub fn roll<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any().into_type_dyn(), np_dtype.unbind()),
     )
 }
 
@@ -1223,6 +1226,6 @@ pub fn tile<'py>(
     let np_dtype = py_arr.get().numpy_dtype(py)?;
     Bound::new(
         py,
-        PyArray::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+        PyArray::from_core_with_np_dtype(ret.into_any().into_type_dyn(), np_dtype.unbind()),
     )
 }

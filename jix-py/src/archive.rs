@@ -114,13 +114,13 @@ pub fn read_array(
                 let array =
                     jix_core::Array::read_from_file_with(&path, offset, len, params, validation)
                         .into_py_result()?;
-                PyArray::from_core(array.into_any())
+                PyArray::from_core(array.into_any().into_type_dyn())
             } else {
                 let array = unsafe {
                     jix_core::Array::read_from_file_mmap(&path, offset, len, params, validation)
                         .into_py_result()?
                 };
-                PyArray::from_core(array.into_any())
+                PyArray::from_core(array.into_any().into_type_dyn())
             })
         })
     } else if path_or_reader.hasattr("read")? {
@@ -145,7 +145,7 @@ pub fn read_array(
             reader.into_inner().seek(SeekFrom::Current(-read_ahead))?;
         }
 
-        Ok(PyArray::from_core(array.into_any()))
+        Ok(PyArray::from_core(array.into_any().into_type_dyn()))
     } else {
         Err(PyTypeError::new_err(
             format!("Expected a file path or a file-like object with a 'read' method, got {path_or_reader:?}"),

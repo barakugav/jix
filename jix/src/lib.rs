@@ -427,7 +427,10 @@ pub type PlainArrayRef<'a, T> = Array<storage::Plain<&'a (), Ty<T>>>;
 /// at compile time are not.
 ///
 /// Create one with [`Array::into_any`].
-pub type ArrayAny = Array<storage::ArrayStorageAny>;
+///
+/// EXPERIMENT (api-simplify): `ET` defaults to [`TypeDyn`]; `into_any()` keeps the static
+/// element type, e.g. `ArrayAny<Ty<f32>>`.
+pub type ArrayAny<ET = TypeDyn> = Array<storage::ArrayStorageAny<ET>>;
 
 const BLOCK_SIZE_BYTES_MAX: u64 = 1 << 30;
 

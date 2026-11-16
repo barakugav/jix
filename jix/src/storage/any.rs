@@ -13,9 +13,13 @@ use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 /// Cloning clones the `Arc`. Use [`ArrayAny`](crate::ArrayAny) (the alias
 /// `Array<ArrayStorageAny>`) to hold arrays of different storage types in one collection, such
 /// as a `Vec<ArrayAny>`; convert an array with [`Array::into_any`](crate::Array::into_any).
+///
+/// EXPERIMENT (api-simplify): `ET` keeps the element type of the erased storage, so an erased
+/// `f32` pipeline is still an `f32` array and keeps its element-wise ops.
 #[derive(Clone)]
-pub struct ArrayStorageAny {
+pub struct ArrayStorageAny<ET = TypeDyn> {
     inner: Arc<dyn AnyInner>,
+    element_type: ET,
 }
 trait AnyInner: Send + Sync {
     fn storage(&self) -> &dyn ArrayStorage;
@@ -23,25 +27,29 @@ trait AnyInner: Send + Sync {
 }
 struct AnyMeta {
     shape: DimDyn,
-    element_type: TypeDyn,
     spec: ArraySpecOwned,
 }
-impl ArrayStorageAny {
-    pub(crate) fn new(storage: impl ArrayStorage + Send + Sync + 'static) -> Self {
+impl<ET: ElementType> ArrayStorageAny<ET> {
+    pub(crate) fn new<S>(storage: S) -> Self
+    where
+        S: ArrayStorage<ElementType = ET> + Send + Sync + 'static,
+    {
+        let element_type = ET::from_dtype(storage.dtype().clone()).expect("storage dtype");
         let meta = AnyMeta::new(&storage);
-        Self::from_inner_box(Box::new(AnyInnerImpl { storage, meta }))
-    }
-
-    #[inline(never)]
-    fn from_inner_box(inner: Box<dyn AnyInner>) -> Self {
         Self {
-            inner: Arc::from(inner),
+            inner: from_inner_box(Box::new(AnyInnerImpl { storage, meta })),
+            element_type,
         }
     }
 }
-impl crate::storage::ArrayStorageImpl for ArrayStorageAny {}
-impl ArrayStorage for ArrayStorageAny {
-    type ElementType = TypeDyn;
+
+#[inline(never)]
+fn from_inner_box(inner: Box<dyn AnyInner>) -> Arc<dyn AnyInner> {
+    Arc::from(inner)
+}
+impl<ET: ElementType> crate::storage::ArrayStorageImpl for ArrayStorageAny<ET> {}
+impl<ET: ElementType> ArrayStorage for ArrayStorageAny<ET> {
+    type ElementType = ET;
 
     #[inline(always)]
     fn read_data<'a>(
@@ -64,8 +72,7 @@ impl ArrayStorage for ArrayStorageAny {
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        let meta = self.inner.meta();
-        meta.element_type.dtype()
+        self.element_type.dtype()
     }
 
     #[inline]
@@ -82,7 +89,16 @@ impl ArrayStorage for ArrayStorageAny {
         self.inner.storage().as_compact()
     }
 
-    crate::ops::impl_element_type_change_default!();
+    // Re-tag in place: no `IntoType` wrapper around an erased storage.
+    type ElementTypeChange<NewET: ElementType> = ArrayStorageAny<NewET>;
+
+    fn element_type_change<NewET: ElementType>(self) -> Result<ArrayStorageAny<NewET>> {
+        let element_type = NewET::from_dtype(self.dtype().clone())?;
+        Ok(ArrayStorageAny {
+            inner: self.inner,
+            element_type,
+        })
+    }
 }
 
 struct AnyInnerImpl<S> {
@@ -109,7 +125,6 @@ impl AnyMeta {
 
         Self {
             shape: DimDyn::from_slice(storage.shape()),
-            element_type: TypeDyn::new(storage.dtype().clone()),
             spec,
         }
     }

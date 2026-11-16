@@ -559,7 +559,7 @@ where
     array_strategy_from_data(ndarray_strategy_generic::<T>(shape, element))
 }
 
-pub(crate) type TestArray<T> = Array<crate::ops::IntoType<crate::storage::ArrayStorageAny, Ty<T>>>;
+pub(crate) type TestArray<T> = crate::ArrayAny<Ty<T>>;
 
 #[derive(Debug, Clone, Copy)]
 enum TestArrayKind {

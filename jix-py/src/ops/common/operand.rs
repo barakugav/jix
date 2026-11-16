@@ -208,7 +208,7 @@ impl Operand {
                     let array = jix_core::Array::from_storage(
                         jix_core::__private::Scalar::new(value, shape, params).into_py_result()?,
                     );
-                    Ok(array.into_any())
+                    Ok(array.into_any().into_type_dyn())
                 }
                 #[allow(clippy::unnecessary_cast)]
                 let array = match value {
@@ -517,7 +517,9 @@ pub(crate) fn plain_from_numpy(
     let storage = unsafe {
         jix_core::storage::Plain::new(array, data_ptr, shape.as_slice(), &strides, dtype, params)
     };
-    Ok(Array::from_storage(storage.into_py_result()?).into_any())
+    Ok(Array::from_storage(storage.into_py_result()?)
+        .into_any()
+        .into_type_dyn())
 }
 
 #[cfg(test)]
