@@ -246,7 +246,10 @@ impl ArrayParams {
                 .chain([storage.dtype().itemsize() as u64])
                 .try_shape_product();
             // If the block size exceeds the maximum allowed, enabled block shape scaling
-            if block_bytes.is_none_or(|n| n > BLOCK_SIZE_BYTES_MAX) {
+            if block_bytes.is_none_or(|n| n > BLOCK_SIZE_BYTES_MAX)
+                // if len is wrong, keep as is for later failure
+                && block_shape_fixed_dims.len() == block_shape.len()
+            {
                 block_shape_fixed_dims = DimBitmap::filled(block_shape.len(), false);
             }
 
@@ -1259,6 +1262,19 @@ mod tests {
         params.tune(a.shape(), a.dtype()).unwrap();
         let block_shape = params.block_shape.unwrap();
         assert!(block_shape[0] as u64 * 1024 <= BLOCK_SIZE_BYTES_MAX);
+    }
+
+    #[test]
+    fn wrong_length_fixed_dims_are_rejected_with_an_oversized_inherited_block() {
+        let n = (1 << 20) + 8;
+        let params = ArrayParams::new().block_shape(&[n as u32]).unwrap();
+        let a = Array::compact_ndarray_with(&ndarray::Array1::<u8>::zeros(n), params).unwrap();
+        let a = a.map(|x: u8| [x as f64; 128]);
+        let mut params = ArrayParams::new()
+            .block_shape_fixed_dims(&[true; 3])
+            .unwrap();
+        params.inherit_unset_from_storage(a.storage());
+        assert!(params.tune(a.shape(), a.dtype()).is_err());
     }
 
     #[test]
