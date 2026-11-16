@@ -242,21 +242,22 @@ pub fn write_array(
 
     if let Ok(path) = path_or_writer.extract::<PathBuf>() {
         return py.detach(|| {
-            let (file, original_file_size) = if !append {
-                (std::fs::File::create_new(&path)?, None)
-            } else {
-                let file_exists = path.exists();
-                // O_APPEND would force every write to EOF, breaking the
-                // seek-then-write used to patch the block TOC placeholder.
-                // Instead, open for writing and seek to the end manually.
-                let mut file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(false)
-                    .open(&path)?;
-                let original_size = file.seek(std::io::SeekFrom::End(0))?;
-                let original_size = (file_exists || original_size > 0).then_some(original_size);
-                (file, original_size)
+            let path = std::path::absolute(&path)?;
+            let (file, original_file_size) = match std::fs::File::create_new(&path) {
+                Ok(file) => (file, None),
+                Err(err) if append && err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // O_APPEND would force every write to EOF, breaking the
+                    // seek-then-write used to patch the block TOC placeholder.
+                    // Instead, open for writing and seek to the end manually.
+                    let mut file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .truncate(false)
+                        .open(&path)?;
+                    let original_size = file.seek(std::io::SeekFrom::End(0))?;
+                    (file, Some(original_size))
+                }
+                Err(err) => return Err(err.into()),
             };
             let result = write_array_impl(array, BufWriter::new(&file), params);
             if result.is_err() {

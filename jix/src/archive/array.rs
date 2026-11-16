@@ -323,11 +323,12 @@ where
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn write_to_file(&self, path: &Path) -> Result<()> {
-        let writer = BufWriter::new(std::fs::File::create_new(path).map_err(Error::io)?);
+        let path = std::path::absolute(path).map_err(Error::io)?;
+        let writer = BufWriter::new(std::fs::File::create_new(&path).map_err(Error::io)?);
         let result = self.write_to(writer, ArrayParams::default(), &self.read_ctx());
         if result.is_err() {
             // Don't leave a partial archive behind
-            let revert_result = std::fs::remove_file(path);
+            let revert_result = std::fs::remove_file(&path);
             if let Err(err) = revert_result {
                 eprintln!("Error cleaning up partial archive: {err}");
             }
