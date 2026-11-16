@@ -140,8 +140,10 @@ pub fn read_array(
             jix_core::Array::read_from(&mut reader, len, params, validation).into_py_result()?;
 
         // Leave the reader at the current position after reading the array, BufReader may have read ahead
-        let pos = reader.stream_position()?;
-        reader.into_inner().seek(SeekFrom::Start(pos))?;
+        let read_ahead = reader.buffer().len() as i64;
+        if read_ahead > 0 {
+            reader.into_inner().seek(SeekFrom::Current(-read_ahead))?;
+        }
 
         Ok(PyArray::from_core(array.into_any()))
     } else {

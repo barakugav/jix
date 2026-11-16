@@ -183,6 +183,20 @@ def test_writer_reporting_too_many_bytes():
         jix.write_array(_array(), _OverWriter())
 
 
+class _TellZero(io.BytesIO):
+    """A reader whose `tell()` always reports 0."""
+
+    def tell(self):
+        return 0
+
+
+def test_reader_with_bad_tell_after_packed_archives():
+    data = _serialized()
+    reader = _TellZero(data + data)
+    np.testing.assert_array_equal(jix.read_array(reader).numpy(), _array().numpy())
+    np.testing.assert_array_equal(jix.read_array(reader).numpy(), _array().numpy())
+
+
 def test_truncated_archive_raises_runtime_error(tmp_path):
     data = _serialized()
     path = tmp_path / "a.jix"
