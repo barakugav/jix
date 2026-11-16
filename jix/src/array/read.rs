@@ -260,6 +260,8 @@ impl<S: ArrayStorage> Array<S> {
     ///   target, the region does not fit in memory.
     /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
     ///
+    /// On any error, the contents of the destination are unspecified.
+    ///
     /// # Examples
     ///
     /// ```
@@ -392,6 +394,8 @@ impl<S: ArrayStorage> Array<S> {
     /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - on a 32-bit
     ///   target, the region does not fit in memory.
     /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
+    ///
+    /// On any error, the contents of the destination are unspecified.
     ///
     /// # Examples
     ///

@@ -483,6 +483,7 @@ impl PyArray {
     ///         aligned to the dtype.
     ///
     ///         It must not share memory with a buffer this array reads from (see the warning).
+    ///         If the call raises, the contents of `out` are unspecified.
     ///
     /// Warning:
     ///     **`out` must not overlap memory the array itself reads from.** jix does not check for
