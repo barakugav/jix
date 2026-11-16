@@ -194,7 +194,8 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
 ///         must support seeking backwards, so a file object opened in append mode (`"ab"`)
 ///         raises; use `append=True` with a path instead. As with `io.RawIOBase`,
 ///         `.write(b)` must only access `b` during the call, and must not keep `b` or any view of
-///         it (a slice, `np.frombuffer(b)`, ...) after it returns.
+///         it (a slice, `np.frombuffer(b)`, ...) after it returns. `b` points into jix's memory and
+///         its release after the call is best effort: a view kept past it reads freed memory.
 ///     append: When `False` (default), the file is created anew and must not already exist.
 ///         When `True`, the array is appended to an existing file (or a new one is created).
 ///         Ignored when `path_or_writer` is a file-like object.
