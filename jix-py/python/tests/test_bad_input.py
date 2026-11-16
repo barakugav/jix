@@ -188,13 +188,25 @@ def test_truncated_archive_raises_runtime_error(tmp_path):
     path = tmp_path / "a.jix"
     for cut in range(len(data)):
         path.write_bytes(data[:cut])
-        # Passing the full length makes the reads themselves run out of bytes.
+        # Passing the full length trips the check that len fits in the data.
         for kwargs in [{}, {"len": len(data)}, {"mmap": True}, {"mmap": True, "len": len(data)}]:
             with pytest.raises(RuntimeError):
                 jix.read_array(path, **kwargs)
         for kwargs in [{}, {"len": len(data)}]:
             with pytest.raises(RuntimeError):
                 jix.read_array(io.BytesIO(data[:cut]), **kwargs)
+
+
+def test_len_past_end_raises(tmp_path):
+    data = _serialized()
+    path = tmp_path / "a.jix"
+    path.write_bytes(data)
+    for offset, len_ in [(0, len(data) + 1), (1, len(data))]:
+        for mmap in [False, True]:
+            with pytest.raises(RuntimeError, match="larger than"):
+                jix.read_array(path, offset=offset, len=len_, mmap=mmap)
+    with pytest.raises(RuntimeError, match="larger than"):
+        jix.read_array(io.BytesIO(data), len=len(data) + 1)
 
 
 def test_writer_returning_a_non_int():
