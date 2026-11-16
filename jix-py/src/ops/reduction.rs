@@ -288,6 +288,10 @@ define_reduction_op!(
     /// float/complex inputs keep their dtype. This matches NumPy, except that NumPy sums `bool`
     /// into `int64`. Integer sums wrap on overflow. An empty reduction returns `0`.
     ///
+    /// Float and complex results depend on the elements iteration order, which is
+    /// implementation-defined, so their rounding can differ between machines and versions.
+    /// The same holds for the other float reductions, such as `mean` and `var`.
+    ///
     /// Args:
     ///     array: Input array.
     ///     dim: Dim or dims to reduce. Accepts negative values (e.g. `-1` for the last dim).
@@ -322,6 +326,10 @@ define_reduction_op!(
     /// The output dtype matches NumPy: signed integers accumulate into `i64`, unsigned
     /// integers into `u64`, and float/complex inputs keep their dtype. `bool` is not
     /// supported. Integer products wrap on overflow. An empty reduction returns `1`.
+    ///
+    /// Float and complex results depend on the elements iteration order, which is
+    /// implementation-defined, so their rounding can differ between machines and versions.
+    /// The same holds for the other float reductions, such as `mean` and `var`.
     ///
     /// Args:
     ///     array: Input array.
