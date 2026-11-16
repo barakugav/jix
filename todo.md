@@ -16,3 +16,7 @@
 - Plain::read_data and numpy(out=) build &[u8]/&mut [u8] over the whole strided span, element-disjoint views alias (UB)
 - support writes to Compact and Plain
 - review inlines
+- route power(float, PyInt > i32) to (float, float)
+- variance of finite data with deviations that overflow returns NaN instead of inf
+- f64 -> f16 cast round twice
+- every op copies the cache-ids of everything below it, so a deep chain of n ops holds n^2/2 ids

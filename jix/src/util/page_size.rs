@@ -15,7 +15,7 @@ fn advise_huge_pages_impl(ptr: *mut u8, len: usize) {
     {
         static HUGE_PAGES_ENABLED: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
             let env_val = std::env::var("JIX_HUGE_PAGES_ENABLED").ok();
-            env_val.map_or(true, |val| val != "0")
+            env_val.is_none_or(|val| val != "0")
         });
         if !*HUGE_PAGES_ENABLED {
             return;

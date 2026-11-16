@@ -242,7 +242,7 @@ pub fn write_array(
     let params = resolve_array_params(py, params)?;
 
     if let Ok(path) = path_or_writer.extract::<PathBuf>() {
-        return py.detach(|| {
+        py.detach(|| {
             let path = std::path::absolute(&path)?;
             let (file, original_file_size) = match std::fs::File::create_new(&path) {
                 Ok(file) => (file, None),
@@ -275,7 +275,7 @@ pub fn write_array(
                 }
             }
             result
-        });
+        })
     } else if path_or_writer.hasattr("write")? {
         // cant detach the GIL here since the writer is a Python object
         let mut writer = BufWriter::new(PyWriter::new(path_or_writer.clone())?);
@@ -284,9 +284,9 @@ pub fn write_array(
         let _ = writer.into_parts();
         result
     } else {
-        return Err(PyTypeError::new_err(
+        Err(PyTypeError::new_err(
             "Expected a file path or a file-like object with a 'write' method",
-        ));
+        ))
     }
 }
 fn write_array_impl(
