@@ -5,13 +5,13 @@ use pyo3::prelude::*;
 use crate::ops::broadcast_array_impl;
 use crate::ops::common::Operand;
 use crate::util::{array_try_map, DimArray, IntoPyResult};
+use crate::PyArray;
 
 pub(crate) fn broadcast_operands<const N: usize>(
     mut operands: [Operand; N],
 ) -> PyResult<[Operand; N]> {
     if let Some(shape) = broadcast_operands_shape(&operands)? {
-        operands = array_try_map(operands, |_i, operand| broadcast_operand(operand, &shape))
-            .into_py_result()?;
+        operands = array_try_map(operands, |_i, operand| broadcast_operand(operand, &shape))?;
     };
     Ok(operands)
 }
@@ -36,7 +36,7 @@ pub(crate) fn broadcast_operands_shape(operands: &[Operand]) -> PyResult<Option<
     Ok(Some(shape))
 }
 
-fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_core::Error> {
+fn broadcast_operand(operand: Operand, shape: &[u64]) -> PyResult<Operand> {
     let op_shape = match &operand {
         Operand::PyArray(py) => py.get().arr.shape(),
         Operand::Array(array) => array.shape(),
@@ -48,7 +48,14 @@ fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_cor
     assert!(shape.len() <= NDIM_MAX);
 
     let array = match operand {
-        Operand::PyArray(arr) => arr.get().arr.clone(),
+        Operand::PyArray(arr) => {
+            let array = broadcast_array_impl(arr.get().arr.clone(), shape).into_py_result()?;
+            return Python::attach(|py| {
+                let np_dtype = arr.get().numpy_dtype(py)?.unbind();
+                let array = PyArray::from_core_with_np_dtype(array, np_dtype);
+                Ok(Operand::PyArray(Py::new(py, array)?))
+            });
+        }
         Operand::Array(arr) => arr,
         Operand::Scalar {
             value,
@@ -65,7 +72,7 @@ fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_cor
         }
     };
 
-    let array = broadcast_array_impl(array, shape)?;
+    let array = broadcast_array_impl(array, shape).into_py_result()?;
 
     Ok(Operand::Array(array))
 }
