@@ -299,19 +299,26 @@ pub(crate) fn check_get_buffer_size(size: &[usize], dtype: &Dtype, buf: &mut [u8
     Ok(())
 }
 
+/// Check that a region of `size` fits in memory, on every target.
+#[inline]
+pub(crate) fn check_alloc_size(size: &[usize], itemsize: usize) -> Result<()> {
+    let bytes = size
+        .iter()
+        .map(|&n| n.max(1) as u64)
+        .chain([itemsize as u64])
+        .try_shape_product();
+    ensure!(
+        bytes.is_some_and(|b| b <= isize::MAX as u64),
+        InvalidShapeOperation,
+        "read region of size {size:?} with itemsize {itemsize} does not fit in memory"
+    );
+    Ok(())
+}
+
 #[inline]
 pub(crate) fn check_region_size(size: &[usize], itemsize: usize) -> Result<()> {
     if cfg!(target_pointer_width = "32") {
-        let bytes = size
-            .iter()
-            .map(|&n| n.max(1) as u64)
-            .chain([itemsize as u64])
-            .try_shape_product();
-        ensure!(
-            bytes.is_some_and(|b| b <= isize::MAX as u64),
-            InvalidShapeOperation,
-            "read region of size {size:?} with itemsize {itemsize} does not fit in memory"
-        );
+        check_alloc_size(size, itemsize)?;
     }
     Ok(())
 }

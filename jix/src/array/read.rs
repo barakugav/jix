@@ -1,7 +1,9 @@
 use std::mem::MaybeUninit;
 use std::ops::Range;
 
-use crate::error::{check_get_buffer_size, check_ranges, check_region_size, ensure, Result};
+use crate::error::{
+    check_alloc_size, check_get_buffer_size, check_ranges, check_region_size, ensure, Result,
+};
 use crate::storage::params::ReadTiling;
 use crate::storage::{
     alloc_out_buf, check_out_buf_dims, check_out_buf_impl, split_ranges, ArrayStorageExt,
@@ -9,7 +11,7 @@ use crate::storage::{
 };
 use crate::util::iter::NdIter;
 use crate::util::{
-    advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr, IterExt,
+    advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr,
 };
 use crate::ReadContext;
 use crate::{ArrayStorage, Dim, DimDyn, Dimension, PlainArray};
@@ -193,16 +195,7 @@ impl<S: ArrayStorage> Array<S> {
             );
         }
         let itemsize = self.dtype().itemsize() as usize;
-        let alloc_bytes = size
-            .iter()
-            .map(|&n| n.max(1) as u64)
-            .chain([itemsize as u64])
-            .try_shape_product();
-        ensure!(
-            alloc_bytes.is_some_and(|b| b <= isize::MAX as u64),
-            InvalidShapeOperation,
-            "read region {index:?} with itemsize {itemsize} does not fit in memory"
-        );
+        check_alloc_size(&size, itemsize)?;
         let mut out_shape = D::zeros(ndim);
         for dim in 0..ndim {
             out_shape[dim] = size[dim];
@@ -331,8 +324,8 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` has the wrong number
     ///   of ranges, or a range starts after it ends or reaches past the array shape.
-    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - on a 32-bit
-    ///   target, the region does not fit in memory.
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - the region
+    ///   does not fit in memory.
     /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
     ///
     /// # Examples
@@ -366,7 +359,7 @@ impl<S: ArrayStorage> Array<S> {
     ) -> Result<StridedBuf<'a>> {
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
-        check_region_size(&size, self.dtype().itemsize() as usize)?;
+        check_alloc_size(&size, self.dtype().itemsize() as usize)?;
         if size.contains(&0) {
             return Ok(self.alloc_empty(&size, context));
         }
@@ -1033,5 +1026,20 @@ mod tests {
         let slice = b.to_buf_slice(&idx, &mut [], &ctx).map_err(|e| e.kind());
         assert_eq!(strided, sub);
         assert_eq!(slice, sub);
+    }
+
+    #[test]
+    fn to_buf_strided_rejects_a_region_over_isize_max() {
+        let m = 1u64 << 21;
+        let x = Array::compact_ndarray(&array![[[1u8]]])
+            .unwrap()
+            .broadcast(&[m, m, m]);
+        let s = x.view() + x.view();
+        let ctx = s.read_ctx();
+        let r = s.to_buf_strided(&[0..m, 0..m, 0..m], &ctx);
+        assert_eq!(
+            r.err().map(|e| e.kind()),
+            Some(ErrorKind::InvalidShapeOperation)
+        );
     }
 }
