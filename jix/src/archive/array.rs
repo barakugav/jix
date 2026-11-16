@@ -43,7 +43,8 @@ impl Array<Compact<TypeDyn>> {
     /// assert_eq!(array.shape(), &[2, 2]);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn read_from_file(path: &Path) -> Result<Self> {
+    pub fn read_from_file(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
         let len = path.metadata().map_err(Error::io)?.len();
         Self::read_from_file_with(
             path,
@@ -102,12 +103,13 @@ impl Array<Compact<TypeDyn>> {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn read_from_file_with(
-        path: &Path,
+        path: impl AsRef<Path>,
         offset: u64,
         len: u64,
         params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self> {
+        let path = path.as_ref();
         let file = File::open(path).map_err(Error::io)?;
         let mut reader = BufReader::new(file);
         reader.seek(SeekFrom::Start(offset)).map_err(Error::io)?;
@@ -226,12 +228,13 @@ impl Array<CompactMmap<TypeDyn>> {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub unsafe fn read_from_file_mmap(
-        path: &Path,
+        path: impl AsRef<Path>,
         offset: u64,
         len: u64,
         params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self> {
+        let path = path.as_ref();
         let file = File::open(path).map_err(Error::io)?;
         let mmap = unsafe { memmap2::Mmap::map(&file).map_err(Error::io)? };
         let mut reader = BufReader::new(file);
@@ -322,7 +325,8 @@ where
     /// view.write_to_file(&tmp_dir.path().join("modified.jix"))?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn write_to_file(&self, path: &Path) -> Result<()> {
+    pub fn write_to_file(&self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
         let path = std::path::absolute(path).map_err(Error::io)?;
         let writer = BufWriter::new(std::fs::File::create_new(&path).map_err(Error::io)?);
         let result = self.write_to(writer, ArrayParams::default(), &self.read_ctx());

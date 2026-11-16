@@ -408,7 +408,7 @@ mod util;
 pub use util::*;
 
 pub mod error;
-pub use error::Error;
+pub use error::{Error, Result};
 
 /// Compact (compressed) owned array of type `T` (type alias).
 pub type CompactArray<T> = Array<storage::Compact<Ty<T>>>;

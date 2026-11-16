@@ -78,7 +78,7 @@ impl<S: ArrayStorage> Array<S> {
     {
         let shape = self.shape();
         let full_range = dim_arr(shape.len(), |dim| 0..shape[dim]);
-        self.to_ndarray_sub(full_range.as_ref(), &self.read_ctx())
+        crate::context::with_default_context(|ctx| self.to_ndarray_sub(full_range.as_ref(), ctx))
     }
 
     /// Read a rectangular sub-region of the array into a fresh heap-allocated [`ndarray::Array`].
@@ -559,6 +559,30 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
 }
 
 impl<S: ArrayStorage> Array<S> {
+    /// EXPERIMENT (api-simplify): the single element of an array with exactly one element,
+    /// e.g. the result of a full reduction: `a.sum([0, 1]).item()?`.
+    pub fn item(&self) -> Result<S::Item>
+    where
+        S: ArrayStorageTyped,
+    {
+        ensure!(
+            self.nitems() == 1,
+            InvalidShapeOperation,
+            "item() needs an array with exactly one element, got shape {:?}",
+            self.shape()
+        );
+        let index = dim_arr(self.ndim(), |_| 0..1u64);
+        let mut value = MaybeUninit::<S::Item>::uninit();
+        let bytes = unsafe {
+            std::slice::from_raw_parts_mut(
+                value.as_mut_ptr().cast::<u8>(),
+                std::mem::size_of::<S::Item>(),
+            )
+        };
+        crate::context::with_default_context(|ctx| self.to_buf_slice(index.as_ref(), bytes, ctx))?;
+        Ok(unsafe { value.assume_init() })
+    }
+
     /// Read the entire array into a new heap-allocated `Array<Plain>`.
     ///
     /// Equivalent to `Array::plain_ndarray(self.to_ndarray()?)`.

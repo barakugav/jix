@@ -101,7 +101,8 @@ impl std::error::Error for Error {
         self.0.source.as_deref().map(|e| e as _)
     }
 }
-pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
+/// `Result` with [`Error`] as the default error type.
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 macro_rules! error {
     ($kind:ident, $($arg:tt)*) => {

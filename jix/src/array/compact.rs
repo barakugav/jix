@@ -54,8 +54,7 @@ impl<S: ArrayStorage> Array<S> {
     /// # Ok::<(), jix::Error>(())
     /// ```
     pub fn compact(&self) -> Result<Array<Compact<S::ElementType>>> {
-        let context = self.read_ctx();
-        self.compact_with(ArrayParams::default(), &context)
+        crate::context::with_default_context(|ctx| self.compact_with(ArrayParams::default(), ctx))
     }
 
     /// Compress the data of this array into a new `Array<Compact>` with explicit [`ArrayParams`].

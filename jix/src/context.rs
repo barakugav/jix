@@ -93,6 +93,18 @@ const _: fn() = || {
     assert_send::<ReadContext>();
 };
 
+thread_local! {
+    // EXPERIMENT (api-simplify): one cached context per thread for the context-free methods.
+    // Creating a context (a zstd decompressor + buffer pool) costs ~17us, which dominated small
+    // reads through `to_ndarray()`.
+    static DEFAULT_CONTEXT: ReadContext = ReadContext::default();
+}
+
+/// Run `f` with this thread's cached default context.
+pub(crate) fn with_default_context<R>(f: impl FnOnce(&ReadContext) -> R) -> R {
+    DEFAULT_CONTEXT.with(f)
+}
+
 impl Default for ReadContext {
     fn default() -> Self {
         Self::new(&DecoderParams::default()).unwrap()
