@@ -55,10 +55,10 @@ impl<S: ArrayStorage> Flip<S> {
                 InvalidShapeOperation,
                 "duplicate dim {d} in flip"
             );
-            if input_shape[d] <= 1 {
-                continue; // flipping a dim of size 0 or 1 does nothing
-            }
             is_flipped[d] = true;
+        }
+        for (flipped, &n) in is_flipped.iter_mut().zip(input_shape) {
+            *flipped &= n > 1; // flipping a dim of size 0 or 1 does nothing
         }
         let mut spec = array.spec().dynamic().clone();
         spec.flags =
@@ -326,6 +326,12 @@ mod tests {
         let a = make(arange(12), [3u64, 4]);
         let err = super::Flip::new_array(a.view(), [1, 1]).unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
+        for shape in [[1u64, 4], [0, 3]] {
+            let n = shape.iter().product::<u64>() as i32;
+            let a = make((0..n).collect(), shape);
+            let err = super::Flip::new_array(a.view(), [0, 0]).unwrap_err();
+            assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
+        }
     }
 
     // -----------------------------------------------------------------------
