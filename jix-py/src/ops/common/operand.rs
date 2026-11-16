@@ -240,7 +240,8 @@ impl Operand {
                         }
                         Some(Precision::P4) => create_scalar_array(value as f32, &shape, params),
                         Some(Precision::P2) => {
-                            create_scalar_array(f16::from_f64(value), &shape, params)
+                            let value = jix_core::scalar::Cast::<f16>::cast(value);
+                            create_scalar_array(value, &shape, params)
                         }
                         Some(_) => unreachable!(),
                     },
