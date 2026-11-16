@@ -295,13 +295,13 @@ impl<S: ArrayStorage> Array<S> {
         let dtype = self.dtype();
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
-        let strides = default_strides_slice(&size, dtype.itemsize() as usize);
+        check_region_size(&size, dtype.itemsize() as usize)?;
         check_get_buffer_size(&size, dtype, buf)?;
         if size.contains(&0) {
             return Ok(());
         }
+        let strides = default_strides_slice(&size, dtype.itemsize() as usize);
         let index = unsafe { Index::new_unchecked(&start, &size) };
-        check_region_size(&size, dtype.itemsize() as usize)?;
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides) };
         self.to_buf_strided_checked(&index, context, OutBuf::push(&mut out))?;
         Ok(())
@@ -1013,5 +1013,25 @@ mod tests {
             a.to_ndarray_sub::<Ix1>(&[0..1], &ctx).unwrap_err().kind(),
             ErrorKind::InvalidIndex
         );
+    }
+
+    #[test]
+    fn read_entries_agree_on_an_empty_region_with_huge_extents() {
+        let b = Array::compact_ndarray(&array![[[7u8]]])
+            .unwrap()
+            .broadcast(&[0, 1 << 20, 1 << 20]);
+        let ctx = b.read_ctx();
+        let idx = [0..0, 0..(1u64 << 20), 0..(1 << 20)];
+        let strided = b
+            .to_buf_strided(&idx, &ctx)
+            .map(|_| ())
+            .map_err(|e| e.kind());
+        let sub = b
+            .to_ndarray_sub::<IxDyn>(&idx, &ctx)
+            .map(|_| ())
+            .map_err(|e| e.kind());
+        let slice = b.to_buf_slice(&idx, &mut [], &ctx).map_err(|e| e.kind());
+        assert_eq!(strided, sub);
+        assert_eq!(slice, sub);
     }
 }
