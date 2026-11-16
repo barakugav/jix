@@ -656,6 +656,8 @@ def test_flip_duplicate_dim_raises():
     a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
     with pytest.raises(Exception):
         jix.flip(a, dim=[0, 0])
+    with pytest.raises(Exception):
+        jix.flip(jix.compact(np.zeros((1, 4), dtype=np.int32)), dim=(0, -2))
 
 
 def test_flip_out_of_bounds_dim_raises():

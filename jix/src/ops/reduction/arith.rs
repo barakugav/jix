@@ -337,6 +337,10 @@ define_reduction_op!(
     /// sums wrap on overflow. An empty reduction (zero elements along the reduced dims) returns
     /// `0`.
     ///
+    /// Float and complex results depend on the elements iteration order, which is
+    /// implementation-defined, so their rounding can differ between machines and versions.
+    /// The same holds for the other float reductions, such as `mean` and `var`.
+    ///
     /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
@@ -428,6 +432,10 @@ define_reduction_op!(
     /// The output dtypes match NumPy. `bool8` is not supported (NumPy would promote it to
     /// `int64`). Integer products wrap on overflow. An empty reduction (zero elements along the
     /// reduced dims) returns `1`.
+    ///
+    /// Float and complex results depend on the elements iteration order, which is
+    /// implementation-defined, so their rounding can differ between machines and versions.
+    /// The same holds for the other float reductions, such as `mean` and `var`.
     ///
     /// The result is a lazy view.
     ///

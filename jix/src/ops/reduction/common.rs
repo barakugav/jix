@@ -20,6 +20,10 @@ pub(crate) struct ReductionOp<S: ArrayStorage, K> {
 pub(crate) trait ReductionOpKernel<T> {
     type Output;
 
+    /// The accumulator a kernel folds items into.
+    ///
+    /// States may be leaked: if any kernel method panics, the engine unwinds without dropping
+    /// the states it holds. This is never UB, but. may leak resources.
     type State;
 
     /// Build the initial accumulator. `init_item` is the first stream element together with
@@ -1010,8 +1014,7 @@ where
     T: Dtyped,
     K: ReductionOpKernel<T>,
 {
-    // TODO: this function is not panic-safe.
-
+    // If kernel::merge_states panics, the states are leaked
     const { assert!(LANES > 0 && LANES.is_power_of_two()) };
     let mut states = states.map_inline(MaybeUninit::new);
     let mut width = LANES;
@@ -2394,12 +2397,13 @@ pub(crate) mod tests {
     #[test]
     #[cfg(target_pointer_width = "32")]
     fn var_state_buffer_must_fit_in_memory_on_32_bit() {
-        use crate::ArrayStorage;
         // The 4-byte output fits, the 24-byte states do not.
         let n = (1u64 << 32) / 24 + 1;
         let a = Array::compact_ndarray(&array![[1.0f32]]).unwrap();
         let v = a.broadcast(&[n, 1]).var(1, 0.0);
         let ctx = crate::ReadContext::default();
-        assert!(v.storage().read_data_pull(&[0..n], &ctx).is_err());
+        let size = [n as usize];
+        let index = crate::storage::Index::new(&[0], &size).unwrap();
+        assert!(v.storage().read_data_pull(&index, &ctx).is_err());
     }
 }

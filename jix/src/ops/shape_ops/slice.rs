@@ -150,19 +150,24 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         debug_assert!(!out_shape.contains(&0));
 
         // Fast path: inner array is plain, read a contiguous bounding box and create a strided view over it.
+        let itemsize = self.dtype().itemsize() as usize;
+        let box_size = (0..ndim)
+            .map(|dim| {
+                let n = (out_shape[dim] as u64 - 1).checked_mul(self.slice[dim].step)? + 1;
+                usize::try_from(n).ok()
+            })
+            .collect::<Option<DimArray<_>>>();
+        let box_size = box_size.filter(|b| check_region_size(b, itemsize).is_ok());
         if self.array.spec().flags().read_tiling() == ReadTiling::ZeroCopy
+            && let Some(box_size) = box_size
             && let OutBufInner::Pull(slot) = out.0
         {
             let box_start = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
                 ds.start + index.start()[dim] * ds.step
             });
-            let box_size = dim_arr(ndim, |dim| {
-                (out_shape[dim] - 1) * self.slice[dim].step as usize + 1
-            });
             let inner_box = unsafe { Index::new_unchecked(&box_start, &box_size) };
             let inner = self.array.read_data_pull_in(&inner_box, context, slot)?;
-            let itemsize = self.dtype().itemsize() as usize;
             let out_strides = dim_arr(ndim, |dim| {
                 if out_shape[dim] <= 1 {
                     itemsize // avoid (stride*step) overflow, dim is not stepped

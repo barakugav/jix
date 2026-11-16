@@ -34,7 +34,7 @@ def make_dst(shape, dtype, layout):
     `dst`'s own elements were written.
     """
     shape = tuple(shape)
-    if layout == "c":
+    if layout == "c" or (layout == "gapped" and not shape):
         host = np.full(shape, UNTOUCHED, dtype=dtype)
         return host, host
     if layout == "f":

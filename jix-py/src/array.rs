@@ -404,19 +404,6 @@ impl PyArray {
         })
     }
 
-    /// Always raises: an array has no single truth value.
-    ///
-    /// Use `.any().item()` or `.all().item()` instead.
-    ///
-    /// Raises:
-    ///     ValueError: Always.
-    pub fn __bool__(&self) -> PyResult<bool> {
-        Err(PyValueError::new_err(
-            "the truth value of a jix.Array is ambiguous; use .any() or .all(), \
-             and .item() to get a Python bool",
-        ))
-    }
-
     /// The data type of the array elements, as a NumPy dtype object.
     ///
     /// ```python
@@ -474,7 +461,8 @@ impl PyArray {
     ///
     ///     out: An existing NumPy array to decode into, instead of allocating a new one. It must
     ///         have the same dtype as `self` and exactly the shape the `index` selects, and it must
-    ///         be writeable.
+    ///         be writeable. For a dtype with an inner shape, the array should have the base dtype
+    ///         and have shape expanded with the dtype inner dims.
     ///
     ///         The destination does not have to be C-contiguous - almost any strided view works.
     ///         Three kinds of view are rejected: reversed ones (a negative stride, e.g.
@@ -482,7 +470,9 @@ impl PyArray {
     ///         elements overlap (e.g. a `sliding_window_view`). The destination must also be
     ///         aligned to the dtype.
     ///
-    ///         It must not share memory with a buffer this array reads from (see the warning).
+    ///         It must not share memory with a buffer this array reads from (see the warning),
+    ///         and another thread must not modify it during the call. If the call raises, the
+    ///         contents of `out` are unspecified.
     ///
     /// Warning:
     ///     **`out` must not overlap memory the array itself reads from.** jix does not check for
@@ -509,7 +499,8 @@ impl PyArray {
     ///         argument (or `self.shape` when no index is supplied). Without `out`, a new
     ///         allocation whose memory layout is implementation-defined (it usually follows the
     ///         source's memory order, like NumPy `order='K'`). With `out`, that same object, so
-    ///         `arr.numpy(out=dst) is dst`.
+    ///         `arr.numpy(out=dst) is dst`. As in NumPy, a dtype with an inner shape is expanded:
+    ///         the result has its base dtype and the inner dims as trailing dims.
     ///
     /// Raises:
     ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds or
@@ -676,7 +667,7 @@ impl PyArray {
     ///     The element as a Python scalar (`int`, `float`, `complex` or `bool`).
     ///
     /// Raises:
-    ///     ValueError: If the array is not zero-dimensional.
+    ///     ValueError: If the array is not zero-dimensional, or its dtype has an inner shape.
     ///
     /// ```python
     /// import jix
@@ -691,6 +682,11 @@ impl PyArray {
                 "item() requires a zero-dimensional array, got an array with ndim {}",
                 self.ndim()
             )));
+        }
+        if !self.arr.dtype().shape().is_empty() {
+            return Err(PyValueError::new_err(
+                "item() does not support a dtype with an inner shape, use numpy() instead",
+            ));
         }
         self.numpy(py, None, None)?.call_method0("item")
     }
@@ -760,7 +756,8 @@ impl PyArray {
     ///     copy: `None` or `True` are accepted. `False` raises, since the data is always copied.
     ///
     /// Returns:
-    ///     A NumPy array with the same shape as `self`.
+    ///     A NumPy array with the same shape as `self`, with the inner dims of a dtype with an
+    ///         inner shape appended, as in `numpy()`.
     ///
     /// Raises:
     ///     ValueError: `copy=False`.
@@ -780,6 +777,16 @@ impl PyArray {
         let mut arr = self.numpy(py, None, None)?;
 
         if let Some(dtype) = dtype {
+            // NumPy appends a subarray dtype's shape itself, so cast only to its base
+            let dtype = {
+                let descr = PyArrayDescr::new(py, dtype)?;
+                if descr.has_subarray() {
+                    descr.base().into_any()
+                } else {
+                    dtype.clone()
+                }
+            };
+
             let kwargs = PyDict::new(py);
             kwargs.set_item("copy", false)?;
             arr.0 = arr
@@ -1608,6 +1615,43 @@ impl PyArray {
         dim: ItemOrTuple<Dim>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::remove_dim(slf, dim)
+    }
+
+    /// Always raises: an array has no single truth value.
+    ///
+    /// Use `.any().item()` or `.all().item()` instead.
+    ///
+    /// Raises:
+    ///     ValueError: Always.
+    pub fn __bool__(&self) -> PyResult<bool> {
+        Err(PyValueError::new_err(
+            "the truth value of a jix.Array is ambiguous; use .any() or .all(), \
+             and .item() to get a Python bool",
+        ))
+    }
+
+    /// Always raises: iterating an array is not supported.
+    ///
+    /// Use `.numpy()` and iterate the NumPy array instead.
+    ///
+    /// Raises:
+    ///     TypeError: Always.
+    pub fn __iter__(&self) -> PyResult<Py<PyAny>> {
+        Err(PyTypeError::new_err(
+            "iteration over a jix.Array is not supported; use .numpy()",
+        ))
+    }
+
+    /// Always raises: `in` on an array is not supported.
+    ///
+    /// Use `(a == value).any().item()` instead.
+    ///
+    /// Raises:
+    ///     TypeError: Always.
+    pub fn __contains__(&self, _value: &Bound<'_, PyAny>) -> PyResult<bool> {
+        Err(PyTypeError::new_err(
+            "`in` on a jix.Array is not supported; use (a == value).any()",
+        ))
     }
 
     // Opts out of NumPy ufuncs

@@ -6,9 +6,7 @@ use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
-use crate::storage::{
-    check_out_buf_impl, write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf,
-};
+use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf};
 use crate::util::{DimArray, RawAlignedBytes, SliceExt};
 use crate::DimDyn;
 
@@ -185,12 +183,8 @@ impl ReadContext {
                     StridedBuf::from_shared(buf, entry.strides.clone()).with_offset(entry.offset)
                 };
                 drop(cache_guard);
-                if let OutBufInner::Push(dst) = &out.0 {
-                    check_out_buf_impl(dst, index, dtype.itemsize() as usize)?;
-                }
-                // The cached buffer itself to a pull read, a copy of it to a push read.
-                out.set(buf, index.size(), dtype);
-                return Ok(());
+                // return the cached buffer itself if this is a pull read, or a copy in push mode.
+                return out.set(buf, index, dtype);
             } else {
                 // Evict before reading, so the read can reuse the buffer.
                 if out.is_pull()

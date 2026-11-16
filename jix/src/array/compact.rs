@@ -278,6 +278,8 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
             .map(|dim| chunk_idx[dim] * chunk_shape_in_blocks[dim] * block_grid_lstrides[dim])
             .sum::<u64>();
 
+        let full_block_in_place =
+            (0..ndim).all(|dim| block_shape[dim] == 1 || chunk_strides[dim] == block_strides[dim]);
         // Inner loop over the target blocks within the chunk.
         let block_iter = NdIter::builder(D::vec(ndim, |dim| {
             chunk_size[dim].div_ceil(block_shape[dim] as u64)
@@ -296,16 +298,6 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
                     .map(|dim| block_in_chunk_idx[dim] * block_grid_lstrides[dim])
                     .sum::<u64>();
             let full_block = (0..ndim).all(|dim| block_active_size[dim] == block_shape[dim] as u64);
-
-            // Gather the block out of the chunk buffer with the target block strides,
-            // zero-padding boundary blocks first.
-            tmp_block_plain.clear();
-            tmp_block_plain.reserve(block_size_bytes);
-            unsafe { tmp_block_plain.set_len(block_size_bytes) };
-            if !full_block {
-                // TODO: to we need to fill all?
-                tmp_block_plain.fill(0); // zero-pad,
-            }
             let src_byte_offset = (0..ndim)
                 .map(|dim| {
                     block_in_chunk_idx[dim] as usize
@@ -313,25 +305,41 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
                         * chunk_strides[dim]
                 })
                 .sum::<usize>();
-            // TODO: this nd_copy may be redundant if the chunk and block strides are identical.
-            // In that case, we can compress directly from the chunk buffer
-            unsafe {
-                copier.copy(
-                    PtrNoalias::from_slice(chunk_buf.as_slice().get_unchecked(src_byte_offset..)),
-                    PtrMutNoalias::from_slice(tmp_block_plain.as_mut_slice()),
-                    D::vec(ndim, |dim| block_active_size[dim] as usize).as_ref(),
-                    chunk_strides.as_ref(),
-                    block_strides.as_ref(),
-                    dtype,
-                )
+
+            let plain_data = if full_block && full_block_in_place {
+                // Compress straight from the chunk buffer, no gather needed.
+                &chunk_buf.as_slice()[src_byte_offset..][..block_size_bytes]
+            } else {
+                // Gather the block out of the chunk buffer with the target block strides,
+                // zero-padding boundary blocks first.
+                tmp_block_plain.clear();
+                tmp_block_plain.reserve(block_size_bytes);
+                unsafe { tmp_block_plain.set_len(block_size_bytes) };
+                if !full_block {
+                    // TODO: to we need to fill all?
+                    tmp_block_plain.fill(0); // zero-pad,
+                }
+                unsafe {
+                    copier.copy(
+                        PtrNoalias::from_slice(
+                            chunk_buf.as_slice().get_unchecked(src_byte_offset..),
+                        ),
+                        PtrMutNoalias::from_slice(tmp_block_plain.as_mut_slice()),
+                        D::vec(ndim, |dim| block_active_size[dim] as usize).as_ref(),
+                        chunk_strides.as_ref(),
+                        block_strides.as_ref(),
+                        dtype,
+                    )
+                };
+                tmp_block_plain.as_slice()
             };
-            let plain_data = tmp_block_plain.as_slice();
 
             // Compress block data
             tmp_block_compressed.clear();
             tmp_block_compressed.reserve(block_compressed_bound);
             unsafe { tmp_block_compressed.set_len(block_compressed_bound) };
             let cdata_len = encoder.encode(plain_data, tmp_block_compressed.as_mut_slice())?;
+            debug_assert!(cdata_len <= block_compressed_bound);
             unsafe { tmp_block_compressed.set_len(cdata_len) };
 
             builder.write_compressed_block(block_index, tmp_block_compressed.as_slice())?;
@@ -368,6 +376,20 @@ mod tests {
         assert_eq!(b.dtype(), &u8::DTYPE);
         assert_eq!(b.storage.spec().block_shape()[..], [4]);
         assert_eq!(b.to_ndarray().unwrap(), array![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn too_many_blocks_is_an_error() {
+        let a = Array::compact_ndarray(&array![1u8])
+            .unwrap()
+            .broadcast(&[1 << 62]);
+        let params = crate::ArrayParams::new().block_shape(&[1]).unwrap();
+        let ctx = a.read_ctx();
+        let err = a.compact_with(params.clone(), &ctx).unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
+        let mut out = std::io::Cursor::new(Vec::new());
+        let err = a.write_to(&mut out, params, &ctx).unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
     }
 
     #[test]

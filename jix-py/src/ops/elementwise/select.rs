@@ -17,6 +17,10 @@ use crate::PyArray;
 /// If `condition` is a scalar, or `x` and `y` are the same object, the selected operand is returned
 /// as is (after broadcasting and type promotion).
 ///
+/// As in NumPy, `x` and `y` are evaluated in full: an integer error in an element that is not
+/// selected still raises, so `where(b != 0, a // b, 0)` raises for a zero in `b`. Use
+/// `a // where(b != 0, b, 1)` instead.
+///
 /// Args:
 ///     condition: Boolean selector array.
 ///     x: Values to use where `condition` is True.

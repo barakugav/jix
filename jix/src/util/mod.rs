@@ -17,6 +17,9 @@ pub(crate) use arr_ext::*;
 mod nd_copy;
 pub(crate) use nd_copy::*;
 
+mod page_size;
+pub(crate) use page_size::*;
+
 mod nd_iter_unordered;
 pub(crate) use nd_iter_unordered::*;
 

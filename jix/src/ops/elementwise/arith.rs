@@ -819,9 +819,6 @@ mod tests {
         let expectedd = ndd.mapv(|a: f64| a.abs());
         crate::util::assert_array_matches(&zad.view().abs(), &expectedd);
     }
-    // TODO
-    // #[cfg(feature = "half")]
-    // [f16]
 
     #[cfg(feature = "num-complex")]
     mod complex {

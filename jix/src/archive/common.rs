@@ -117,14 +117,20 @@ impl<R> ArchiveReader<R> {
     where
         R: Read + Seek,
     {
+        let pos = reader.stream_position().map_err(Error::io)?;
+        let available = stream_len(&mut reader)
+            .map_err(Error::io)?
+            .saturating_sub(pos);
         let total_size = match length {
-            Some(length) => length,
-            None => {
-                let pos = reader.stream_position().map_err(Error::io)?;
-                stream_len(&mut reader)
-                    .map_err(Error::io)?
-                    .saturating_sub(pos)
+            Some(length) => {
+                ensure!(
+                    length <= available,
+                    InvalidArgument,
+                    "length {length} is larger than the {available} bytes available"
+                );
+                length
             }
+            None => available,
         };
         let mut reader = reader.take(total_size);
         ensure!(

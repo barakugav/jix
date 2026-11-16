@@ -174,3 +174,12 @@ def test_binary_ops_return_not_implemented_for_operands_that_opt_out():
         OptsOut() - a
     np.testing.assert_array_equal((a + [1, 1]).numpy(), [2, 3])
     np.testing.assert_array_equal((a + np.array([1, 1])).numpy(), [2, 3])
+
+
+@pytest.mark.parametrize("shape", [(), (3,)])
+def test_iter_and_contains_raise(shape):
+    a = jix.compact(np.zeros(shape, np.int32))
+    with pytest.raises(TypeError):
+        iter(a)
+    with pytest.raises(TypeError):
+        0 in a  # noqa: B015

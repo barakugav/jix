@@ -42,8 +42,14 @@ def test_compression_level_in_range(level):
 
 @pytest.mark.parametrize("dtype", ["O", "U10", "S4", "M8[s]", "m8[s]", "V0", "V4"])
 def test_unsupported_dtype(dtype):
-    with pytest.raises(ValueError, match="Unsupported dtype"):
+    with pytest.raises(TypeError, match="Unsupported dtype"):
         jix.asarray(np.zeros(2, dtype=dtype))
+
+
+@pytest.mark.parametrize("other", [None, "x", object()])
+def test_unsupported_operand_raises_type_error(other):
+    with pytest.raises(TypeError):
+        _array() + other
 
 
 def test_dtype_inner_shape_too_many_dims():
@@ -183,18 +189,44 @@ def test_writer_reporting_too_many_bytes():
         jix.write_array(_array(), _OverWriter())
 
 
+class _TellZero(io.BytesIO):
+    """A reader whose `tell()` always reports 0."""
+
+    def tell(self):
+        return 0
+
+
+def test_reader_with_bad_tell_after_packed_archives():
+    data = _serialized()
+    reader = _TellZero(data + data)
+    np.testing.assert_array_equal(jix.read_array(reader).numpy(), _array().numpy())
+    np.testing.assert_array_equal(jix.read_array(reader).numpy(), _array().numpy())
+
+
 def test_truncated_archive_raises_runtime_error(tmp_path):
     data = _serialized()
     path = tmp_path / "a.jix"
     for cut in range(len(data)):
         path.write_bytes(data[:cut])
-        # Passing the full length makes the reads themselves run out of bytes.
+        # Passing the full length trips the check that len fits in the data.
         for kwargs in [{}, {"len": len(data)}, {"mmap": True}, {"mmap": True, "len": len(data)}]:
             with pytest.raises(RuntimeError):
                 jix.read_array(path, **kwargs)
         for kwargs in [{}, {"len": len(data)}]:
             with pytest.raises(RuntimeError):
                 jix.read_array(io.BytesIO(data[:cut]), **kwargs)
+
+
+def test_len_past_end_raises(tmp_path):
+    data = _serialized()
+    path = tmp_path / "a.jix"
+    path.write_bytes(data)
+    for offset, len_ in [(0, len(data) + 1), (1, len(data))]:
+        for mmap in [False, True]:
+            with pytest.raises(RuntimeError, match="larger than"):
+                jix.read_array(path, offset=offset, len=len_, mmap=mmap)
+    with pytest.raises(RuntimeError, match="larger than"):
+        jix.read_array(io.BytesIO(data), len=len(data) + 1)
 
 
 def test_writer_returning_a_non_int():
@@ -273,5 +305,5 @@ def test_missing_file_raises_os_error(tmp_path):
     ],
 )
 def test_big_endian_dtype_raises(make):
-    with pytest.raises(ValueError, match="big-endian"):
+    with pytest.raises(TypeError, match="big-endian"):
         make()

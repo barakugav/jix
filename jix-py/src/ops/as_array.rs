@@ -36,12 +36,14 @@ use crate::util::numpy_items;
 ///     - 0-dimensional inputs produce a scalar array backed by a single value (no buffer).
 ///     - All other inputs share the underlying buffer with the intermediate NumPy array
 ///       (zero-copy); the NumPy array is kept alive for as long as the returned `Array` is alive.
+///       The NumPy array should not be modified as long as the returned `Array` is alive.
 ///
 /// Raises:
 ///     ValueError: If the input cannot be converted by `numpy.asarray`, has more dimensions than
 ///         jix supports, or has negative strides (e.g. a reversed slice `a[::-1]`).
-///     TypeError: If `dtype` requests an unsupported cast (e.g. from a complex type to an int or
-///         float type, or a cast involving struct dtypes).
+///     TypeError: If the input has a dtype jix does not support (e.g. object, string, datetime or
+///         big-endian), or `dtype` requests an unsupported cast (e.g. from a complex type to an
+///         int or float type, or a cast involving struct dtypes).
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] view of the input.

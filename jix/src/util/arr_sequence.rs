@@ -217,7 +217,8 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>;
             D: ElementwisePipelineImpl<S::Item>,
         {
             const N_OPERANDS: Option<usize> = n_operands_mul(D::N_OPERANDS, N);
-            const MAX_ITEMSIZE: usize = D::MAX_ITEMSIZE;
+            // All N items are held at once
+            const MAX_ITEMSIZE: usize = max_itemsize(&[D::MAX_ITEMSIZE, N * size_of::<S::Item>()]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -314,7 +315,8 @@ impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [A
             D: ElementwisePipelineImpl<S::Item>,
         {
             const N_OPERANDS: Option<usize> = n_operands_mul(D::N_OPERANDS, N);
-            const MAX_ITEMSIZE: usize = D::MAX_ITEMSIZE;
+            // All N items are held at once
+            const MAX_ITEMSIZE: usize = max_itemsize(&[D::MAX_ITEMSIZE, N * size_of::<S::Item>()]);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {

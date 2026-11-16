@@ -63,7 +63,8 @@ impl Array<Compact<TypeDyn>> {
     ///
     /// - `path`: path to the `.jix` file containing the array.
     /// - `offset`: byte offset of the start of the array's archive section within the file.
-    /// - `len`: byte length of the array's archive section.
+    /// - `len`: byte length of the array's archive section. Must not run past the end of the
+    ///   file.
     /// - `params`: never changes the loaded data - the block shape and codec come from the file
     ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
     ///   where they seed arrays derived from this one (e.g. the codec used by
@@ -119,7 +120,7 @@ impl Array<Compact<TypeDyn>> {
     ///
     /// - `reader`: any source implementing `Read` + `Seek` containing the array's archive section.
     /// - `len`: byte length of the archive section within the reader, used for bounds checking.
-    ///   Pass `None` to skip bounds checking.
+    ///   Must not run past the end of the reader. Pass `None` to read to the end of the reader.
     /// - `params`: never changes the loaded data - the block shape and codec come from the file
     ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
     ///   where they seed arrays derived from this one (e.g. the codec used by
@@ -184,7 +185,8 @@ impl Array<CompactMmap<TypeDyn>> {
     ///
     /// - `path`: path to the `.jix` file containing the array.
     /// - `offset`: byte offset of the start of the array's archive section within the file.
-    /// - `len`: byte length of the array's archive section.
+    /// - `len`: byte length of the array's archive section. Must not run past the end of the
+    ///   file.
     /// - `params`: never changes the loaded data - the block shape and codec come from the file
     ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
     ///   where they seed arrays derived from this one (e.g. the codec used by
@@ -321,11 +323,12 @@ where
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn write_to_file(&self, path: &Path) -> Result<()> {
-        let writer = BufWriter::new(std::fs::File::create_new(path).map_err(Error::io)?);
+        let path = std::path::absolute(path).map_err(Error::io)?;
+        let writer = BufWriter::new(std::fs::File::create_new(&path).map_err(Error::io)?);
         let result = self.write_to(writer, ArrayParams::default(), &self.read_ctx());
         if result.is_err() {
             // Don't leave a partial archive behind
-            let revert_result = std::fs::remove_file(path);
+            let revert_result = std::fs::remove_file(&path);
             if let Err(err) = revert_result {
                 eprintln!("Error cleaning up partial archive: {err}");
             }
@@ -1271,6 +1274,54 @@ mod tests {
             r1.into_typed::<f32>().unwrap().to_ndarray().unwrap(),
             src1.into_dyn()
         );
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn read_len_past_end_is_an_error() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let a = compact((0..6u8).collect(), [6], &[3]);
+        a.write_to(
+            std::fs::File::create(tmp.path()).unwrap(),
+            ArrayParams::default(),
+            &a.read_ctx(),
+        )
+        .unwrap();
+        let bytes = std::fs::read(tmp.path()).unwrap();
+        let total = bytes.len() as u64;
+
+        for (offset, len) in [(0, total + 1), (1, total), (total + 1, 1)] {
+            let err = Array::read_from_file_with(
+                tmp.path(),
+                offset,
+                len,
+                ArrayParams::default(),
+                ArchiveValidation::default(),
+            )
+            .unwrap_err();
+            assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArgument);
+
+            let err = unsafe {
+                Array::read_from_file_mmap(
+                    tmp.path(),
+                    offset,
+                    len,
+                    ArrayParams::default(),
+                    ArchiveValidation::default(),
+                )
+            }
+            .unwrap_err();
+            assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArgument);
+        }
+
+        let err = Array::read_from(
+            std::io::Cursor::new(&bytes),
+            Some(total + 1),
+            ArrayParams::default(),
+            ArchiveValidation::default(),
+        )
+        .unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArgument);
     }
 
     // -----------------------------------------------------------------------

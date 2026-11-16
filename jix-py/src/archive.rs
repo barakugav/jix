@@ -26,8 +26,8 @@ use crate::PyArray;
 ///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle).
 ///     offset: Byte offset within the file to start reading from. Only supported when
 ///         `path_or_reader` is a file path. Defaults to `0`.
-///     len: Number of bytes to read. Defaults to the file size minus `offset`. For a file-like
-///         object it is only used for bounds checking, which is skipped when `len` is unset.
+///     len: Number of bytes to read. Defaults to the file size minus `offset`. Must not run past
+///         the end of the file or file-like object.
 ///     mmap: If `True`, maps the file into virtual address space instead of copying bytes onto
 ///         the heap; blocks are paged in on demand. Defaults to `False`. **Caution:** modifying
 ///         the file while the returned array is live has undefined behavior. Not supported for
@@ -95,11 +95,10 @@ pub fn read_array(
     validation: Option<ArchiveValidation>,
 ) -> PyResult<PyArray> {
     let params = resolve_array_params(py, params)?;
-    let path_or_reader = PathOrReader::from_pyany(path_or_reader)?;
     let validation = validation.map(|v| v.0).unwrap_or_default();
 
-    match path_or_reader {
-        PathOrReader::Path(path) => py.detach(|| {
+    if let Ok(path) = path_or_reader.extract::<PathBuf>() {
+        py.detach(|| {
             let offset = offset.unwrap_or(0);
             let len = match len {
                 Some(len) => len,
@@ -123,29 +122,34 @@ pub fn read_array(
                 };
                 PyArray::from_core(array.into_any())
             })
-        }),
-        PathOrReader::PyReader(reader) => {
-            if offset.is_some() {
-                return Err(PyValueError::new_err(
-                    "offset is not supported for file-like readers",
-                ));
-            }
-            if mmap {
-                return Err(PyValueError::new_err(
-                    "mmap=True is not supported for file-like readers",
-                ));
-            }
-            // Can't detach the GIL since the reader is a Python object.
-            let mut reader = BufReader::new(reader);
-            let array = jix_core::Array::read_from(&mut reader, len, params, validation)
-                .into_py_result()?;
-
-            // Leave the reader at the current position after reading the array, BufReader may have read ahead
-            let pos = reader.stream_position()?;
-            reader.into_inner().seek(SeekFrom::Start(pos))?;
-
-            Ok(PyArray::from_core(array.into_any()))
+        })
+    } else if path_or_reader.hasattr("read")? {
+        if offset.is_some() {
+            return Err(PyValueError::new_err(
+                "offset is not supported for file-like readers",
+            ));
         }
+        if mmap {
+            return Err(PyValueError::new_err(
+                "mmap=True is not supported for file-like readers",
+            ));
+        }
+        // Can't detach the GIL since the reader is a Python object.
+        let mut reader = BufReader::new(PyReader::new(path_or_reader.clone())?);
+        let array =
+            jix_core::Array::read_from(&mut reader, len, params, validation).into_py_result()?;
+
+        // Leave the reader at the current position after reading the array, BufReader may have read ahead
+        let read_ahead = reader.buffer().len() as i64;
+        if read_ahead > 0 {
+            reader.into_inner().seek(SeekFrom::Current(-read_ahead))?;
+        }
+
+        Ok(PyArray::from_core(array.into_any()))
+    } else {
+        Err(PyTypeError::new_err(
+            format!("Expected a file path or a file-like object with a 'read' method, got {path_or_reader:?}"),
+        ))
     }
 }
 
@@ -190,7 +194,8 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
 ///         must support seeking backwards, so a file object opened in append mode (`"ab"`)
 ///         raises; use `append=True` with a path instead. As with `io.RawIOBase`,
 ///         `.write(b)` must only access `b` during the call, and must not keep `b` or any view of
-///         it (a slice, `np.frombuffer(b)`, ...) after it returns.
+///         it (a slice, `np.frombuffer(b)`, ...) after it returns. `b` points into jix's memory and
+///         its release after the call is best effort: a view kept past it reads freed memory.
 ///     append: When `False` (default), the file is created anew and must not already exist.
 ///         When `True`, the array is appended to an existing file (or a new one is created).
 ///         Ignored when `path_or_writer` is a file-like object.
@@ -234,16 +239,14 @@ pub fn write_array(
     let array = asarray(array, None, params.clone())?;
     let py = array.py();
     let array = array.get();
-    let path_or_writer = PathOrWriter::from_pyany(path_or_writer)?;
     let params = resolve_array_params(py, params)?;
 
-    match path_or_writer {
-        PathOrWriter::Path(path) => {
-            py.detach(|| {
-                let (file, original_file_size) = if !append {
-                    (std::fs::File::create_new(&path)?, None)
-                } else {
-                    let file_exists = path.exists();
+    if let Ok(path) = path_or_writer.extract::<PathBuf>() {
+        py.detach(|| {
+            let path = std::path::absolute(&path)?;
+            let (file, original_file_size) = match std::fs::File::create_new(&path) {
+                Ok(file) => (file, None),
+                Err(err) if append && err.kind() == std::io::ErrorKind::AlreadyExists => {
                     // O_APPEND would force every write to EOF, breaking the
                     // seek-then-write used to patch the block TOC placeholder.
                     // Instead, open for writing and seek to the end manually.
@@ -253,34 +256,37 @@ pub fn write_array(
                         .truncate(false)
                         .open(&path)?;
                     let original_size = file.seek(std::io::SeekFrom::End(0))?;
-                    let original_size = (file_exists || original_size > 0).then_some(original_size);
-                    (file, original_size)
-                };
-                let written = write_array_impl(array, BufWriter::new(&file), params);
-                if written.is_err() {
-                    // Don't leave a partial archive behind
-                    let revert_result = match original_file_size {
-                        Some(original_size) => file.set_len(original_size),
-                        None => {
-                            drop(file);
-                            std::fs::remove_file(&path)
-                        }
-                    };
-                    if let Err(err) = revert_result {
-                        eprintln!("Error cleaning up partial archive: {err}");
-                    }
+                    (file, Some(original_size))
                 }
-                written
-            })
-        }
-        PathOrWriter::PyWriter(writer) => {
-            // cant detach the GIL here since the writer is a Python object
-            let mut writer = BufWriter::new(writer);
-            let written = write_array_impl(array, &mut writer, params);
-            // Drop the buffer of a failed write instead of writing it again on drop
-            let _ = writer.into_parts();
-            written
-        }
+                Err(err) => return Err(err.into()),
+            };
+            let result = write_array_impl(array, BufWriter::new(&file), params);
+            if result.is_err() {
+                // Don't leave a partial archive behind
+                let revert_result = match original_file_size {
+                    Some(original_size) => file.set_len(original_size),
+                    None => {
+                        drop(file);
+                        std::fs::remove_file(&path)
+                    }
+                };
+                if let Err(err) = revert_result {
+                    eprintln!("Error cleaning up partial archive: {err}");
+                }
+            }
+            result
+        })
+    } else if path_or_writer.hasattr("write")? {
+        // cant detach the GIL here since the writer is a Python object
+        let mut writer = BufWriter::new(PyWriter::new(path_or_writer.clone())?);
+        let result = write_array_impl(array, &mut writer, params);
+        // Drop the buffer of a failed write instead of writing it again on drop
+        let _ = writer.into_parts();
+        result
+    } else {
+        Err(PyTypeError::new_err(
+            "Expected a file path or a file-like object with a 'write' method",
+        ))
     }
 }
 fn write_array_impl(
@@ -294,24 +300,6 @@ fn write_array_impl(
         .write_to(&mut writer, params, context.as_ref())
         .into_py_result()?;
     Ok(writer.flush()?)
-}
-
-enum PathOrReader<'a> {
-    Path(PathBuf),
-    PyReader(PyReader<'a>),
-}
-impl<'a> PathOrReader<'a> {
-    fn from_pyany(pyany: &'a Bound<'a, PyAny>) -> PyResult<Self> {
-        if let Ok(path) = pyany.extract::<PathBuf>() {
-            Ok(Self::Path(path))
-        } else if pyany.hasattr("read")? {
-            Ok(Self::PyReader(PyReader::new(pyany.clone())?))
-        } else {
-            Err(PyTypeError::new_err(
-                "Expected a file path or a file-like object with a 'read' method",
-            ))
-        }
-    }
 }
 
 /// Wraps any Python file-like object that has `.read()`, `.seek()`, and `.tell()` methods.
@@ -391,24 +379,6 @@ impl Seek for PyReader<'_> {
             .map_err(py_to_io_err)?
             .extract::<u64>()
             .map_err(py_to_io_err)
-    }
-}
-
-enum PathOrWriter<'a> {
-    Path(PathBuf),
-    PyWriter(PyWriter<'a>),
-}
-impl<'a> PathOrWriter<'a> {
-    fn from_pyany(pyany: &'a Bound<'a, PyAny>) -> PyResult<Self> {
-        if let Ok(path) = pyany.extract::<PathBuf>() {
-            Ok(Self::Path(path))
-        } else if pyany.hasattr("write")? {
-            Ok(Self::PyWriter(PyWriter::new(pyany.clone())?))
-        } else {
-            Err(PyTypeError::new_err(
-                "Expected a file path or a file-like object with a 'write' method",
-            ))
-        }
     }
 }
 

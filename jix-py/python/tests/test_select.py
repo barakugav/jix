@@ -64,3 +64,10 @@ def test_where_same_operands_returns_operand():
     assert jix.where(jix.compact([True, False, True]), x, x) is x
     with pytest.raises(TypeError):
         jix.where(jix.compact([1, 0, 1]), x, x)
+
+
+def test_where_broadcast_keeps_numpy_dtype():
+    d = np.dtype("<i4", metadata={"unit": "m"})
+    x = jix.asarray(np.zeros(3, d), dtype=d)
+    r = jix.where(jix.asarray(np.ones((2, 3), bool)), x, x[:])
+    assert r.numpy().dtype.metadata == {"unit": "m"}

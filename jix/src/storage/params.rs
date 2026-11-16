@@ -23,8 +23,8 @@ pub(crate) struct ReadSize {
 
 impl ReadSize {
     pub(crate) fn new(min: u64, max: u64) -> Self {
-        let min = min.max(1);
-        let max = max.max(min);
+        let min = min.clamp(1, isize::MAX as u64);
+        let max = max.clamp(min, isize::MAX as u64);
         Self { min, max }
     }
 
@@ -246,7 +246,10 @@ impl ArrayParams {
                 .chain([storage.dtype().itemsize() as u64])
                 .try_shape_product();
             // If the block size exceeds the maximum allowed, enabled block shape scaling
-            if block_bytes.is_none_or(|n| n > BLOCK_SIZE_BYTES_MAX) {
+            if block_bytes.is_none_or(|n| n > BLOCK_SIZE_BYTES_MAX)
+                // if len is wrong, keep as is for later failure
+                && block_shape_fixed_dims.len() == block_shape.len()
+            {
                 block_shape_fixed_dims = DimBitmap::filled(block_shape.len(), false);
             }
 
@@ -452,7 +455,7 @@ impl ArrayParams {
             .min(1 << 30)
             .floor_to_multiple(base_block_len)
             .max(1);
-        let base_block_len = base_block_len.max(1).min(max_block_len);
+        let base_block_len = base_block_len.min(max_block_len).max(1);
         let block_len = if max_block_len == dim_len {
             dim_len
         } else {
@@ -1262,6 +1265,19 @@ mod tests {
     }
 
     #[test]
+    fn wrong_length_fixed_dims_are_rejected_with_an_oversized_inherited_block() {
+        let n = (1 << 20) + 8;
+        let params = ArrayParams::new().block_shape(&[n as u32]).unwrap();
+        let a = Array::compact_ndarray_with(&ndarray::Array1::<u8>::zeros(n), params).unwrap();
+        let a = a.map(|x: u8| [x as f64; 128]);
+        let mut params = ArrayParams::new()
+            .block_shape_fixed_dims(&[true; 3])
+            .unwrap();
+        params.inherit_unset_from_storage(a.storage());
+        assert!(params.tune(a.shape(), a.dtype()).is_err());
+    }
+
+    #[test]
     fn element_cost_is_bounded() {
         // Each add doubles the cost, past f32::MAX if unbounded.
         let x = Array::compact_ndarray(&ndarray::Array1::<f32>::zeros(0)).unwrap();
@@ -1801,6 +1817,8 @@ mod tests {
     fn read_size_normalizes_and_converts() {
         // min floored at 1, max raised to at least min.
         assert_eq!(ReadSize::new(0, 0), ReadSize::new(1, 1));
+        let huge = ReadSize::new(u64::MAX, u64::MAX);
+        assert_eq!((huge.min, huge.max), (isize::MAX as u64, isize::MAX as u64));
         let rs = ReadSize::new(10, 4); // max < min -> max raised to min
         assert_eq!((rs.min, rs.max), (10, 10));
 

@@ -433,3 +433,21 @@ def test_write_writer_read_path(tmp_path):
         jix.write_array(a, f)
     a2 = jix.read_array(p)
     np.testing.assert_array_equal(a2.numpy(), a.numpy())
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"len": 100}, {"mmap": True}, {"mmap": True, "len": 100}])
+def test_read_array_missing_file_raises_file_not_found(tmp_path, kwargs):
+    with pytest.raises(FileNotFoundError):
+        jix.read_array(tmp_path / "missing.jix", **kwargs)
+
+
+def test_failed_append_through_dangling_symlink_keeps_the_symlink(tmp_path):
+    den = np.ones(100_000, np.int32)
+    den[-1] = 0
+    failing = jix.asarray(np.ones(100_000, np.int32)) // jix.asarray(den)
+    link = tmp_path / "link.jix"
+    link.symlink_to(tmp_path / "target.jix")
+    with pytest.raises(ArithmeticError):
+        jix.write_array(failing, link, append=True)
+    assert link.is_symlink()
+    assert (tmp_path / "target.jix").stat().st_size == 0

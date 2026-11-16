@@ -139,46 +139,46 @@ fn dtype_from_numpy_nested(numpy_dtype: &Bound<PyArrayDescr>, depth: usize) -> P
     let dtype = if !numpy_base.has_fields() {
         // scalar
         if numpy_base.byteorder() == b'>' {
-            return Err(PyValueError::new_err(format!(
+            return Err(PyTypeError::new_err(format!(
                 "Unsupported dtype: big-endian {numpy_base:?}; convert it to native byte order \
                  first, e.g. with `x.astype(x.dtype.newbyteorder('='))`"
             )));
         }
         let scalar_kind = match (numpy_base.kind() as char, base_itemsize) {
             ('b', 1) => Ok(ScalarKind::Bool8),
-            ('b', itemsize) => Err(PyValueError::new_err(format!(
+            ('b', itemsize) => Err(PyTypeError::new_err(format!(
                 "Unsupported bool itemsize: {itemsize}"
             ))),
             ('i', 1) => Ok(ScalarKind::I8),
             ('i', 2) => Ok(ScalarKind::I16),
             ('i', 4) => Ok(ScalarKind::I32),
             ('i', 8) => Ok(ScalarKind::I64),
-            ('i', itemsize) => Err(PyValueError::new_err(format!(
+            ('i', itemsize) => Err(PyTypeError::new_err(format!(
                 "Unsupported signed integer itemsize: {itemsize}"
             ))),
             ('u', 1) => Ok(ScalarKind::U8),
             ('u', 2) => Ok(ScalarKind::U16),
             ('u', 4) => Ok(ScalarKind::U32),
             ('u', 8) => Ok(ScalarKind::U64),
-            ('u', itemsize) => Err(PyValueError::new_err(format!(
+            ('u', itemsize) => Err(PyTypeError::new_err(format!(
                 "Unsupported unsigned integer itemsize: {itemsize}"
             ))),
             ('f', 2) => Ok(ScalarKind::F16),
             ('f', 4) => Ok(ScalarKind::F32),
             ('f', 8) => Ok(ScalarKind::F64),
-            ('f', itemsize) => Err(PyValueError::new_err(format!(
+            ('f', itemsize) => Err(PyTypeError::new_err(format!(
                 "Unsupported float itemsize: {itemsize}"
             ))),
             ('c', 8) => Ok(ScalarKind::ComplexF32),
             ('c', 16) => Ok(ScalarKind::ComplexF64),
-            ('c', itemsize) => Err(PyValueError::new_err(format!(
+            ('c', itemsize) => Err(PyTypeError::new_err(format!(
                 "Unsupported complex itemsize: {itemsize}"
             ))),
-            ('m' | 'M' | 'O' | 'S' | 'U' | 'V', _) => Err(PyValueError::new_err(format!(
+            ('m' | 'M' | 'O' | 'S' | 'U' | 'V', _) => Err(PyTypeError::new_err(format!(
                 "Unsupported dtype: {numpy_base:?}"
             ))),
             (_, _) => {
-                return Err(PyValueError::new_err(format!(
+                return Err(PyTypeError::new_err(format!(
                     "Unsupported dtype: {numpy_base:?}"
                 )));
             }

@@ -109,7 +109,6 @@ pub(crate) mod traits {
                 ) -> [Self::State; N] {
                     use crate::util::array_from_fn_inline;
                     let x = items.map_inline(#[inline(always)] |x| <_ as crate::scalar::Cast<$mean_ty>>::cast(x));
-                    // let x = <_ as crate::scalar::Cast<$mean_ty>>::cast_bulk(items, simd); // TODO: is this faster?
                     let count = states.map_inline(#[inline(always)] |s| s.count + 1);
                     let count_f = count.map_inline(#[inline(always)] |c| c as f64);
                     let old_mean = states.map_inline(#[inline(always)] |s| s.mean);
@@ -138,13 +137,12 @@ pub(crate) mod traits {
                     // Chan's parallel Welford combine. The m2 cross-term is the squared
                     // deviation of the means (real: delta^2; complex: |delta|^2).
                     let delta = b.mean - a.mean;
-                    let mean = a.mean
-                        + delta
-                            * <f64 as crate::scalar::Cast<$mean_ty>>::cast(nb as f64 / n as f64);
+                    let delta_b = delta
+                        * <f64 as crate::scalar::Cast<$mean_ty>>::cast(nb as f64 / n as f64);
+                    let mean = a.mean + delta_b;
                     let m2 = a.m2
                         + b.m2
-                        + impl_variance!(@mul_dev is_complex=$is_complex, delta, delta)
-                            * (na as f64 * nb as f64 / n as f64);
+                        + impl_variance!(@mul_dev is_complex=$is_complex, delta, delta_b) * na as f64;
                     VarianceState {
                         mean,
                         m2,
@@ -575,6 +573,28 @@ mod tests {
         assert!(var(array![1.0, f64::NEG_INFINITY]).is_nan());
         let a = Array::compact_ndarray(&array![1.0f64, f64::NAN, 2.0]).unwrap();
         assert!(a.std(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]].is_nan());
+    }
+
+    #[test]
+    fn var_finite_when_only_the_squared_mean_delta_overflows() {
+        // Deviations are 0 or +-m, so var = 2 m^2 / n is finite, but (2m)^2 overflows.
+        let m = 7.5e153;
+        for n in [2usize, 8, 16, 32] {
+            let mut xs = ndarray::Array1::from_elem(n, m);
+            xs[0] = 0.0;
+            xs[n / 2] = 2.0 * m;
+            let expected = 2.0 * m * m / n as f64;
+            let mut padded = ndarray::Array1::from_elem(2 * n, f64::NAN);
+            padded.slice_mut(ndarray::s![..;2]).assign(&xs);
+            for view in [xs.view(), padded.slice(ndarray::s![..;2])] {
+                let a = Array::plain_ndarray_view(view).unwrap();
+                let var = a.var(0usize, 0.0).to_ndarray::<Ix0>().unwrap()[[]];
+                assert!(
+                    ((var - expected) / expected).abs() < 1e-12,
+                    "n={n}: {var:e}"
+                );
+            }
+        }
     }
 
     #[test]
