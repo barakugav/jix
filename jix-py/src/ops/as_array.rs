@@ -41,8 +41,9 @@ use crate::util::numpy_items;
 /// Raises:
 ///     ValueError: If the input cannot be converted by `numpy.asarray`, has more dimensions than
 ///         jix supports, or has negative strides (e.g. a reversed slice `a[::-1]`).
-///     TypeError: If `dtype` requests an unsupported cast (e.g. from a complex type to an int or
-///         float type, or a cast involving struct dtypes).
+///     TypeError: If the input has a dtype jix does not support (e.g. object, string, datetime or
+///         big-endian), or `dtype` requests an unsupported cast (e.g. from a complex type to an
+///         int or float type, or a cast involving struct dtypes).
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] view of the input.

@@ -42,8 +42,14 @@ def test_compression_level_in_range(level):
 
 @pytest.mark.parametrize("dtype", ["O", "U10", "S4", "M8[s]", "m8[s]", "V0", "V4"])
 def test_unsupported_dtype(dtype):
-    with pytest.raises(ValueError, match="Unsupported dtype"):
+    with pytest.raises(TypeError, match="Unsupported dtype"):
         jix.asarray(np.zeros(2, dtype=dtype))
+
+
+@pytest.mark.parametrize("other", [None, "x", object()])
+def test_unsupported_operand_raises_type_error(other):
+    with pytest.raises(TypeError):
+        _array() + other
 
 
 def test_dtype_inner_shape_too_many_dims():
@@ -299,5 +305,5 @@ def test_missing_file_raises_os_error(tmp_path):
     ],
 )
 def test_big_endian_dtype_raises(make):
-    with pytest.raises(ValueError, match="big-endian"):
+    with pytest.raises(TypeError, match="big-endian"):
         make()
