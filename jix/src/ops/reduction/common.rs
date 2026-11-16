@@ -2397,12 +2397,13 @@ pub(crate) mod tests {
     #[test]
     #[cfg(target_pointer_width = "32")]
     fn var_state_buffer_must_fit_in_memory_on_32_bit() {
-        use crate::ArrayStorage;
         // The 4-byte output fits, the 24-byte states do not.
         let n = (1u64 << 32) / 24 + 1;
         let a = Array::compact_ndarray(&array![[1.0f32]]).unwrap();
         let v = a.broadcast(&[n, 1]).var(1, 0.0);
         let ctx = crate::ReadContext::default();
-        assert!(v.storage().read_data_pull(&[0..n], &ctx).is_err());
+        let size = [n as usize];
+        let index = crate::storage::Index::new(&[0], &size).unwrap();
+        assert!(v.storage().read_data_pull(&index, &ctx).is_err());
     }
 }
