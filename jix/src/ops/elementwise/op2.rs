@@ -329,6 +329,44 @@ macro_rules! define_op2 {
                 $Op::new_array(self, b).unwrap()
             }
         }
+
+        // EXPERIMENT: `array <op> scalar`. Does not overlap the impl above: an `Array` is never
+        // `Dtyped`.
+        impl<S1, T2> core::ops::$core_op_trait<T2> for Array<S1>
+        where
+            S1: crate::storage::ArrayStorageTyped,
+            T2: crate::dtype::Dtyped,
+            S1::Item: crate::scalar::$trait<T2, Output: crate::dtype::Dtyped>,
+        {
+            type Output = Array<$Op<S1, crate::storage::Scalar<T2>>>;
+            #[track_caller]
+            fn $core_op_fn(self, b: T2) -> Self::Output {
+                let b = crate::ops::IntoOperand::into_operand(b, self.shape()).unwrap();
+                $Op::new_array(self, b).unwrap()
+            }
+        }
+
+        // EXPERIMENT: `scalar <op> array`, one impl per scalar type (orphan rules forbid a
+        // blanket impl over `T: Dtyped`).
+        crate::ops::elementwise::op2::define_op2!(@scalar_lhs $Op, $trait, $core_op_trait, $core_op_fn,
+            [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, crate::scalar::bool8]);
+    };
+
+    (@scalar_lhs $Op:ident, $trait:ident, $core_op_trait:ident, $core_op_fn:ident, [$($t:ty),*]) => {
+        $(
+            impl<S2> core::ops::$core_op_trait<Array<S2>> for $t
+            where
+                S2: crate::storage::ArrayStorageTyped,
+                $t: crate::scalar::$trait<S2::Item, Output: crate::dtype::Dtyped>,
+            {
+                type Output = Array<$Op<crate::storage::Scalar<$t>, S2>>;
+                #[track_caller]
+                fn $core_op_fn(self, b: Array<S2>) -> Self::Output {
+                    let a = crate::ops::IntoOperand::into_operand(self, b.shape()).unwrap();
+                    $Op::new_array(a, b).unwrap()
+                }
+            }
+        )*
     };
 }
 
@@ -336,24 +374,26 @@ macro_rules! define_array_op2_method {
     ($method:ident : $Op:ident, $($trait:ident)::+) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
+        pub fn $method<T2, R>(self, other: R) -> crate::Array<$Op<S, R::Storage>>
         where
             S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
+            R: crate::ops::IntoOperand<T2>,
+            S::Item: $($trait)::+<T2, Output: crate::dtype::Dtyped>,
         {
+            let other = other.into_operand(self.shape()).unwrap();
             $Op::new_array(self, other).unwrap()
         }
     };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_rhs_type = $rhs_type:ty) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
+        pub fn $method<R>(self, other: R) -> crate::Array<$Op<S, R::Storage>>
         where
             S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Item = $rhs_type>,
+            R: crate::ops::IntoOperand<$rhs_type>,
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
+            let other = other.into_operand(self.shape()).unwrap();
             $Op::new_array(self, other).unwrap()
         }
     };

@@ -64,6 +64,7 @@ pub use block::BlockSize;
 pub(crate) mod cache_id;
 
 pub(crate) mod scalar;
+pub use scalar::Scalar; // EXPERIMENT: public, was `__private::Scalar`
 
 mod buf;
 pub use buf::*;

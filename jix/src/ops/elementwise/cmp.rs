@@ -679,23 +679,25 @@ where
 
     /// Applies the [`Greater`] operation, see the op struct docs for details.
     #[track_caller]
-    pub fn greater<S2>(self, other: Array<S2>) -> Array<Greater<S, S2>>
+    pub fn greater<T2, R>(self, other: R) -> Array<Greater<S, R::Storage>>
     where
         S: ArrayStorageTyped,
-        S2: ArrayStorageTyped,
-        S2::Item: crate::scalar::Less<S::Item, Output: Dtyped>,
+        R: crate::ops::IntoOperand<T2>, // EXPERIMENT: array or scalar
+        T2: crate::scalar::Less<S::Item, Output: Dtyped>,
     {
+        let other = other.into_operand(self.shape()).unwrap();
         Greater::new_array(self, other).unwrap()
     }
 
     /// Applies the [`GreaterEqual`] operation, see the op struct docs for details.
     #[track_caller]
-    pub fn greater_equal<S2>(self, other: Array<S2>) -> Array<GreaterEqual<S, S2>>
+    pub fn greater_equal<T2, R>(self, other: R) -> Array<GreaterEqual<S, R::Storage>>
     where
         S: ArrayStorageTyped,
-        S2: ArrayStorageTyped,
-        S2::Item: crate::scalar::LessEqual<S::Item, Output: Dtyped>,
+        R: crate::ops::IntoOperand<T2>, // EXPERIMENT: array or scalar
+        T2: crate::scalar::LessEqual<S::Item, Output: Dtyped>,
     {
+        let other = other.into_operand(self.shape()).unwrap();
         GreaterEqual::new_array(self, other).unwrap()
     }
 

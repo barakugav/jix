@@ -385,18 +385,21 @@ where
 
     /// Applies the [`Clamp`] operation, see the op struct docs for details.
     #[track_caller]
-    pub fn clamp<SMin, SMax>(
+    pub fn clamp<RMin, RMax>(
         self,
-        min: Array<SMin>,
-        max: Array<SMax>,
-    ) -> Array<Clamp<S, SMin, SMax>>
+        min: RMin,
+        max: RMax,
+    ) -> Array<Clamp<S, RMin::Storage, RMax::Storage>>
     where
         S: ArrayStorageTyped,
-        SMin: ArrayStorageTyped<Item = S::Item>,
-        SMax: ArrayStorageTyped<Item = S::Item>,
+        // EXPERIMENT: bounds may be arrays or scalars
+        RMin: crate::ops::IntoOperand<S::Item>,
+        RMax: crate::ops::IntoOperand<S::Item>,
         S::Item:
             crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
     {
+        let min = min.into_operand(self.shape()).unwrap();
+        let max = max.into_operand(self.shape()).unwrap();
         Clamp::new_array(self, min, max).unwrap()
     }
 }

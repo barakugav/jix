@@ -7,7 +7,10 @@ mod op1;
 pub(crate) use op1::*;
 
 mod op2;
+
+mod operand;
 pub(crate) use op2::*;
+pub use operand::IntoOperand;
 
 mod arith;
 pub use arith::*;
