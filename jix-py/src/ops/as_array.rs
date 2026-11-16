@@ -36,6 +36,7 @@ use crate::util::numpy_items;
 ///     - 0-dimensional inputs produce a scalar array backed by a single value (no buffer).
 ///     - All other inputs share the underlying buffer with the intermediate NumPy array
 ///       (zero-copy); the NumPy array is kept alive for as long as the returned `Array` is alive.
+///       The NumPy array should not be modified as long as the returned `Array` is alive.
 ///
 /// Raises:
 ///     ValueError: If the input cannot be converted by `numpy.asarray`, has more dimensions than
