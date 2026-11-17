@@ -7,7 +7,7 @@ use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
 use crate::storage::{ArrayStorageExt, Compact, Index};
 use crate::util::{AlignedBytes, DimArray};
-use crate::{Array, ArrayParams, ArrayStorage, CompactArray, Ty, TypeDyn};
+use crate::{Array, ArrayParams, ArrayStorage, CompactArray, TypeDyn};
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper
@@ -559,7 +559,7 @@ where
     array_strategy_from_data(ndarray_strategy_generic::<T>(shape, element))
 }
 
-pub(crate) type TestArray<T> = Array<crate::ops::IntoType<crate::storage::ArrayStorageAny, Ty<T>>>;
+pub(crate) type TestArray<T> = Array<crate::ops::IntoType<crate::storage::ArrayStorageAny, T>>;
 
 #[derive(Debug, Clone, Copy)]
 enum TestArrayKind {

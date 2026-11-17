@@ -232,7 +232,7 @@ where
     S: ArrayStorageTyped,
     K: ReductionOpKernel<S::Item, Output: Dtyped>,
 {
-    type ElementType = Ty<K::Output>;
+    type ElementType = K::Output;
 
     #[inline]
     fn read_data<'a>(
@@ -1319,7 +1319,7 @@ macro_rules! define_reduction_op {
         where
             $($where_)+
         {
-            type ElementType = crate::Ty<$output_ty>;
+            type ElementType = $output_ty;
             crate::storage::impl_array_storage_forward!(<S>);
 
             fn info(&self) -> ArrayStorageInfo<'_> {
@@ -1367,7 +1367,7 @@ macro_rules! define_reduction_op {
         where
             $($where_)+
         {
-            type ElementType = crate::Ty<$output_ty>;
+            type ElementType = $output_ty;
             crate::storage::impl_array_storage_forward!(<S>);
 
             fn info(&self) -> ArrayStorageInfo<'_> {
@@ -1763,7 +1763,7 @@ pub(crate) mod tests {
 
     #[test]
     fn reduction_over_plain_with_hand_picked_strides() {
-        use crate::{Array, ArrayParams, Ty};
+        use crate::{Array, ArrayParams};
 
         // The reduction reads its source in pull mode, and `Plain::read_data` in pull mode hands
         // back a zero-copy view with exactly the strides it was built with. So a `Plain` array
@@ -1811,7 +1811,7 @@ pub(crate) mod tests {
                 if let Some(w) = window {
                     params = params.read_size(w);
                 }
-                let arr: Array<crate::storage::Plain<_, Ty<i32>>> = unsafe {
+                let arr: Array<crate::storage::Plain<_, i32>> = unsafe {
                     // SAFETY: `backing` outlives `arr`, and every index combination stays in bounds.
                     Array::plain_ndarray_ptr(
                         backing.as_ptr().add(base),

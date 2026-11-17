@@ -23,11 +23,11 @@
 //! # Element types
 //!
 //! Every storage carries its compile-time element type as the associated type
-//! **[`ElementType`]**: either [`Ty<T>`] (`T` known at compile time) or [`TypeDyn`] (only known
-//! at runtime, e.g. for arrays loaded from disk). The number of dims is always a runtime
-//! property, read from [`shape`](ArrayStorage::shape).
+//! **[`ElementType`]**: either the element type itself, e.g. `f32` (known at compile time), or
+//! [`TypeDyn`] (only known at runtime, e.g. for arrays loaded from disk). The number of dims is
+//! always a runtime property, read from [`shape`](ArrayStorage::shape).
 //!
-//! [`ArrayStorageTyped`] is a shorthand for `ArrayStorage<ElementType = Ty<T>>`. All
+//! [`ArrayStorageTyped`] is a shorthand for `ArrayStorage<ElementType = T>`. All
 //! element-wise operations require it, so the compiler can dispatch to the correct scalar
 //! implementation.
 //!
@@ -41,7 +41,7 @@ use std::sync::Arc;
 
 use crate::dtype::Dtyped;
 use crate::ops::ElementwisePipeline;
-use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
+use crate::{ArrayStorage, ElementType, TypeDyn};
 
 pub(crate) mod core_trait;
 pub(crate) use core_trait::{ArrayStorageExt, ArrayStorageImpl};
@@ -77,20 +77,20 @@ pub use info::*;
 
 /// An [`ArrayStorage`] whose element type is statically known.
 ///
-/// Shorthand for `ArrayStorage<ElementType = Ty<T>>`, with `T` as the associated type `Item`.
+/// Shorthand for `ArrayStorage<ElementType = T>`, with `T` as the associated type `Item`.
 /// All element-wise operations - arithmetic, comparisons, reductions, type casts - are bounded
 /// on this trait so the compiler can dispatch to the correct scalar implementation without
 /// runtime checks.
 ///
 /// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use
 /// [`Array::into_typed::<T>()`](crate::Array::into_typed).
-pub trait ArrayStorageTyped: ArrayStorage<ElementType = Ty<Self::Item>> + Sized {
+pub trait ArrayStorageTyped: ArrayStorage<ElementType = Self::Item> + Sized {
     /// The concrete Rust element type stored in this array (e.g. `f32`, `i64`).
     type Item: Dtyped;
 }
 impl<S, T> ArrayStorageTyped for S
 where
-    S: ArrayStorage<ElementType = Ty<T>>,
+    S: ArrayStorage<ElementType = T>,
     T: Dtyped,
 {
     type Item = T;

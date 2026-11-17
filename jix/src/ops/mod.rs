@@ -48,7 +48,7 @@
 //! require the input storage to be *typed*: the element type must be known at compile time, not
 //! just at runtime. Concretely, the input must satisfy
 //! [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), which is a shorthand for
-//! `ArrayStorage<ElementType = Ty<T>>` for some concrete `T: Dtyped`.
+//! `ArrayStorage<ElementType = T>` for some concrete `T: Dtyped`.
 //!
 //! Arrays constructed from typed sources are typed automatically:
 //!
@@ -56,7 +56,7 @@
 //! use jix::Array;
 //! use ndarray::array;
 //!
-//! // compact_ndarray returns Array<Compact<Ty<f32>>>: automatically typed.
+//! // compact_ndarray returns Array<Compact<f32>>: automatically typed.
 //! let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
 //! let b = a.exp();        // fine: f32: Exp
 //! let c = b.cast::<i32>(); // fine: f32: Cast<i32>
@@ -77,7 +77,7 @@
 //!
 //! // validates the dtype at runtime
 //! let typed = src.into_typed::<f32>()?;
-//! // typed is Array<Compact<Ty<f32>>> - ops available
+//! // typed is Array<Compact<f32>> - ops available
 //! let result = typed.exp().cast::<f64>().compact()?;
 //! # Ok::<(), jix::Error>(())
 //! ```
@@ -151,6 +151,6 @@ pub(crate) mod prelude {
         ScaleWeight, SliceExt, REQUIRE_ALIGNED,
     };
     pub(crate) use crate::{
-        Array, ArrayStorage, DimDyn, DimVec, Dimension, ElementType, Ty, TypeDyn, NDIM_MAX,
+        Array, ArrayStorage, DimDyn, DimVec, Dimension, ElementType, TypeDyn, NDIM_MAX,
     };
 }

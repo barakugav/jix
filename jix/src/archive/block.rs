@@ -472,15 +472,15 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable, Owned};
     use crate::util::cast_slice;
-    use crate::{ArchiveValidation, ReadContext, Ty};
+    use crate::{ArchiveValidation, ReadContext};
 
     /// Build a table from `items`, write it into `stream` and read it back.
     fn round_trip<T: Dtyped>(
         items: &[T],
         block_size: BlockSize,
         mut stream: impl Read + Write + Seek,
-    ) -> BlockTable<Owned, Ty<T>> {
-        let table = BlockTable::<Owned, Ty<T>>::build_from_data(
+    ) -> BlockTable<Owned, T> {
+        let table = BlockTable::<Owned, T>::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
             T::DTYPE,
             block_size,
@@ -495,12 +495,12 @@ mod tests {
         reader.read_file_meta().unwrap();
         BlockTable::read_content(&mut reader, Owned(PhantomData), ArchiveValidation::Strict)
             .unwrap()
-            .element_type_change::<Ty<T>>()
+            .element_type_change::<T>()
             .unwrap()
     }
 
     /// Decompress all blocks of `table` back to back.
-    fn decode_all<T: Dtyped>(table: &BlockTable<Owned, Ty<T>>) -> Vec<u8> {
+    fn decode_all<T: Dtyped>(table: &BlockTable<Owned, T>) -> Vec<u8> {
         let mut buf = vec![0u8; table.nitems as usize * size_of::<T>()];
         let block_bytes = table.block_size as usize * size_of::<T>();
         for (i, block) in buf.chunks_mut(block_bytes).enumerate() {

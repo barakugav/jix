@@ -110,9 +110,9 @@ oversized request into cache-sized pieces read one at a time.
 `Array::to_buf_slice(index, buf, ctx)` is the shorthand for a packed row-major destination.
 
 Storage carries one piece of compile-time info as an associated type, **`ElementType`** - either
-`Ty<T>` (scalar type `T` known at compile time) or `TypeDyn` (runtime-only; arrays loaded from disk
-start here). `ArrayStorageTyped` is the supertrait shorthand for `ArrayStorage<ElementType = Ty<T>>`,
-and **all element-wise ops require it**. Recover a typed array from a `TypeDyn` one with
+the element type itself (`Compact<f32>`: known at compile time) or `TypeDyn` (runtime-only; arrays
+loaded from disk start here). `ArrayStorageTyped` is the supertrait shorthand for
+`ArrayStorage<ElementType = T>` with `T: Dtyped`, and **all element-wise ops require it**. Recover a typed array from a `TypeDyn` one with
 `Array::into_typed::<T>()` (runtime-checked against the header).
 
 The number of dims is always a runtime property (`shape().len()`); internally per-dim data lives in

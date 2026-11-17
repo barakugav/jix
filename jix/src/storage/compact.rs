@@ -28,10 +28,10 @@ use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dim
 /// The array data is divided into fixed-size nd-blocks, each compressed independently, and the
 /// compressed bytes are held in a heap buffer owned by this struct.
 ///
-/// The type parameter **`ET: ElementType`** is the compile-time element type, either
-/// [`Ty<T>`](crate::Ty) (known at compile time) or [`TypeDyn`](crate::TypeDyn) (runtime only).
-/// Arrays built from typed sources carry `Ty<_>`; arrays loaded from disk carry `TypeDyn`. Use
-/// [`Array::into_typed`](crate::Array::into_typed) to go from `TypeDyn` to `Ty<T>`.
+/// The type parameter **`ET: ElementType`** is the compile-time element type, either the element
+/// type itself (e.g. `Compact<f32>`) or [`TypeDyn`](crate::TypeDyn) (runtime only). Arrays built
+/// from typed sources are typed; arrays loaded from disk carry `TypeDyn`. Use
+/// [`Array::into_typed`](crate::Array::into_typed) to go from `TypeDyn` to a static type.
 ///
 /// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray),
 /// [`Array::compact`](crate::Array::compact) and their variants or by deserializing an archive
@@ -880,7 +880,7 @@ mod tests {
     }
 
     /// A compact `0..64` i32 array with blocks of 8.
-    fn arange64() -> Array<super::Compact<crate::Ty<i32>>> {
+    fn arange64() -> Array<super::Compact<i32>> {
         let nd = ndarray::Array1::from_iter(0..64i32);
         let params = ArrayParams::new().block_shape(&[8]).unwrap();
         Array::compact_ndarray_with(&nd, params).unwrap()

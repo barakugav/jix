@@ -85,7 +85,7 @@ pub trait ArraySequenceElementType: ArraySequence {
 }
 
 /// Subtrait of [`ArraySequence`] for sequences whose arrays all have a statically-known element
-/// type (`Ty<T>`), so their elements can be read back as concrete Rust values.
+/// type, so their elements can be read back as concrete Rust values.
 ///
 /// Required by element-wise multi-array operations such as
 /// [`map_multiple`](crate::ops::map_multiple). Unlike [`ArraySequenceElementType`] it does *not*

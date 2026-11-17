@@ -176,7 +176,7 @@ where
     /// Panics if the array dtype is not a struct dtype, has an inner shape or has no field with the
     /// given name, or if the field dtype is zero-sized or not `T`.
     #[track_caller]
-    pub fn dtype_sub_field<T>(self, sub_field: &str) -> Array<SubDtype<S, Ty<T>>>
+    pub fn dtype_sub_field<T>(self, sub_field: &str) -> Array<SubDtype<S, T>>
     where
         T: Dtyped,
     {

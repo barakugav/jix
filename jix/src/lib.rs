@@ -187,16 +187,16 @@
 //! assert_eq!(fields[0].0, "r");
 //! ```
 //!
-//! **Compile-time - [`ElementType`], [`Ty<T>`](Ty), [`TypeDyn`]**
+//! **Compile-time - [`ElementType`], [`TypeDyn`]**
 //!
 //! In addition to the runtime [`Dtype`](dtype::Dtype), the storage type parameter `S` carries the
 //! element type at the *type level* via `S::ElementType`:
 //!
-//! - [`Ty<T>`](Ty) - the scalar element type `T` is known at compile time.
+//! - A [`Dtyped`](dtype::Dtyped) type, e.g. `f32` - the element type is known at compile time.
 //!   Arrays constructed from typed sources carry this automatically (e.g.
-//!   `Array::compact_ndarray(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>>>`).
-//!   Most of the element-wise operations require `Ty<T>`, as they are bounded by a scalar trait of
-//!   `T`.
+//!   `Array::compact_ndarray(&array![1.0f32, 2.0])` yields `Array<Compact<f32>>`).
+//!   Most of the element-wise operations require it, as they are bounded by a scalar trait of
+//!   the element type.
 //!
 //! - [`TypeDyn`] - the element type is only known at runtime. Arrays loaded
 //!   from disk start with this (`Array<Compact<TypeDyn>>`). Call
@@ -213,7 +213,7 @@
 //! // src: Array<S::ElementType = TypeDyn>
 //!
 //! let typed = src.into_typed::<f32>()?; // runtime check: dtype must be f32
-//! // typed: Array<S::ElementType = Ty<f32>>
+//! // typed: Array<S::ElementType = f32>
 //! let result = typed.exp().sum(0).compact()?;
 //! # Ok::<(), jix::Error>(())
 //! ```
@@ -411,13 +411,13 @@ pub mod error;
 pub use error::Error;
 
 /// Compact (compressed) owned array of type `T` (type alias).
-pub type CompactArray<T> = Array<storage::Compact<Ty<T>>>;
+pub type CompactArray<T> = Array<storage::Compact<T>>;
 
 /// Plain (uncompressed) owned array (type alias).
-pub type PlainArray<T> = Array<storage::Plain<Vec<T>, Ty<T>>>;
+pub type PlainArray<T> = Array<storage::Plain<Vec<T>, T>>;
 
 /// Plain (uncompressed) borrowed array (type alias).
-pub type PlainArrayRef<'a, T> = Array<storage::Plain<&'a (), Ty<T>>>;
+pub type PlainArrayRef<'a, T> = Array<storage::Plain<&'a (), T>>;
 
 /// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn ArrayStorage>`.
 ///

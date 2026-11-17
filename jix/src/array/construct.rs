@@ -7,7 +7,7 @@ use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, Index, OutBuf};
 use crate::util::dim_arr;
 use crate::util::iter::NdIter;
 use crate::ReadContext;
-use crate::{ArrayParams, ArrayStorage, CompactArray, DimArray, DimDyn, SliceExt, Ty, TypeDyn};
+use crate::{ArrayParams, ArrayStorage, CompactArray, DimArray, DimDyn, SliceExt, TypeDyn};
 
 use super::Array;
 
@@ -20,7 +20,7 @@ impl<T> CompactArray<T> {
     /// level and other codec settings; a block shape matching a known access pattern can improve
     /// read performance significantly.
     ///
-    /// The element type `Ty<T>` is inferred from the ndarray's element type.
+    /// The element type `T` is inferred from the ndarray's element type.
     ///
     /// # Errors
     ///
@@ -224,7 +224,7 @@ impl<T> CompactArray<T> {
             T: Dtyped,
             F: Fn(&[u64]) -> T,
         {
-            type ElementType = Ty<T>;
+            type ElementType = T;
 
             #[inline]
             fn read_data<'a>(

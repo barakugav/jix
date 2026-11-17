@@ -471,7 +471,7 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::error::Result;
     use crate::storage::block::{BlockTableStorage, Owned};
-    use crate::storage::{ElementType, Ty};
+    use crate::storage::ElementType;
     use crate::util::{cast_slice, AlignedBytes};
     use crate::ReadContext;
 
@@ -494,7 +494,7 @@ mod tests {
         items: &[T],
         block_size: BlockSize,
         encoder_params: &EncoderParams,
-    ) -> Result<BlockTable<Owned, Ty<T>>>
+    ) -> Result<BlockTable<Owned, T>>
     where
         T: Dtyped,
     {
@@ -558,7 +558,7 @@ mod tests {
         let table = build_from_items(&[0u8; 4], 4, &EncoderParams::default()).unwrap();
         let locs = [super::BlockLocation::new(0, u32::MAX)];
         let config = table.decoder_config.clone();
-        let bad = BlockTable::<super::Borrowed<'_>, Ty<u8>>::new(
+        let bad = BlockTable::<super::Borrowed<'_>, u8>::new(
             table.block_data.as_ref(),
             &locs,
             1,
@@ -577,7 +577,7 @@ mod tests {
         items: &[T],
         block_size: BlockSize,
         encoder_params: &EncoderParams,
-    ) -> BlockTable<Owned, Ty<T>> {
+    ) -> BlockTable<Owned, T> {
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
             T::DTYPE,
@@ -587,7 +587,7 @@ mod tests {
         .unwrap()
     }
 
-    fn read_block_items<T, S>(storage: &BlockTable<S, Ty<T>>, idx: usize) -> Vec<T>
+    fn read_block_items<T, S>(storage: &BlockTable<S, T>, idx: usize) -> Vec<T>
     where
         T: Dtyped,
         S: BlockTableStorage,

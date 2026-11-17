@@ -361,7 +361,7 @@ macro_rules! define_swapped_cmp {
             S2: ArrayStorageTyped,
             S2::Item: crate::scalar::$InnerTrait<S1::Item, Output: Dtyped>,
         {
-            type ElementType = Ty<<S2::Item as crate::scalar::$InnerTrait<S1::Item>>::Output>;
+            type ElementType = <S2::Item as crate::scalar::$InnerTrait<S1::Item>>::Output;
 
             #[inline(always)]
             fn read_data<'a>(
@@ -660,7 +660,7 @@ where
     S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
     S2: ArrayStorageTyped<Item = S1::Item>,
 {
-    type ElementType = Ty<bool8>;
+    type ElementType = bool8;
     crate::storage::impl_array_storage_forward!(<S1, S2>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {

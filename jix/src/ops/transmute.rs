@@ -134,7 +134,7 @@ where
     /// Panics if the itemsize of `T` differs from the array's dtype itemsize. Use
     /// [`Transmute::new_array`] for a fallible version.
     #[track_caller]
-    pub fn transmute_elements<T>(self) -> Array<Transmute<S, Ty<T>>>
+    pub fn transmute_elements<T>(self) -> Array<Transmute<S, T>>
     where
         T: Dtyped,
     {
@@ -166,7 +166,7 @@ mod tests {
     use crate::storage::{Index, StridedBuf};
     use crate::util::assert_array_matches;
     use crate::ReadContext;
-    use crate::{Array, ArrayStorage, Ty};
+    use crate::{Array, ArrayStorage};
 
     /// An 8-byte struct dtype, to check that a transmute handles a composite element type and not
     /// just scalars.
@@ -188,7 +188,7 @@ mod tests {
     fn new_rejects_a_different_itemsize() {
         let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
         // u32 is 4 bytes, u16 is 2.
-        assert!(Transmute::<_, Ty<u16>>::new(arr.into_storage(), u16::DTYPE).is_err());
+        assert!(Transmute::<_, u16>::new(arr.into_storage(), u16::DTYPE).is_err());
     }
 
     /// Equal itemsize is the only requirement - the kinds may differ freely, and so may the
@@ -196,11 +196,9 @@ mod tests {
     #[test]
     fn new_accepts_any_dtype_of_the_same_itemsize() {
         let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
-        assert!(Transmute::<_, Ty<i32>>::new(arr.view().into_storage(), i32::DTYPE).is_ok());
-        assert!(Transmute::<_, Ty<f32>>::new(arr.view().into_storage(), f32::DTYPE).is_ok());
-        assert!(
-            Transmute::<_, Ty<[u8; 4]>>::new(arr.view().into_storage(), <[u8; 4]>::DTYPE).is_ok()
-        );
+        assert!(Transmute::<_, i32>::new(arr.view().into_storage(), i32::DTYPE).is_ok());
+        assert!(Transmute::<_, f32>::new(arr.view().into_storage(), f32::DTYPE).is_ok());
+        assert!(Transmute::<_, [u8; 4]>::new(arr.view().into_storage(), <[u8; 4]>::DTYPE).is_ok());
     }
 
     /// A transmute is a lazy view, so it is never compact, but it reads straight through to its

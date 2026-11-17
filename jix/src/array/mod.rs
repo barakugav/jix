@@ -143,14 +143,14 @@ mod read;
 /// # Element type tracking
 ///
 /// `S::ElementType` records the scalar element type at the type level. When the element type is
-/// statically known, `S::ElementType = Ty<T>`, and all element-wise operations - arithmetic,
+/// statically known, `S::ElementType = T`, and all element-wise operations - arithmetic,
 /// comparisons, reductions, type casts - become available. When the element type is only known
 /// at runtime (e.g. for arrays loaded from files), `S::ElementType = TypeDyn`, and those
 /// operations are not available until the type is asserted.
 ///
-/// Arrays built from typed sources carry `Ty<T>`: `compact_ndarray(&array![1.0f32])` returns
-/// `Array<Compact<Ty<f32>>>`. Use [`into_typed::<T>()`](Array::into_typed) to assert the element
-/// type - validated against the stored dtype at runtime - and recover `Ty<T>`. Use
+/// Arrays built from typed sources are typed: `compact_ndarray(&array![1.0f32])` returns
+/// `Array<Compact<f32>>`. Use [`into_typed::<T>()`](Array::into_typed) to assert the element
+/// type - validated against the stored dtype at runtime - and recover `S::ElementType = T`. Use
 /// [`into_type_dyn()`](Array::into_type_dyn) to erase the static element type.
 ///
 /// The number of dims is a runtime property, read from [`shape`](Array::shape).
@@ -384,7 +384,7 @@ pub(crate) mod tests {
     use crate::storage::block::{BlockSize, BlockTable};
 
     use crate::util::{arr_params, cast_slice, DimArray};
-    use crate::{ArrayParams, CompactArray, Dimension, IntoDimension, Ty};
+    use crate::{ArrayParams, CompactArray, Dimension, IntoDimension};
 
     // -----------------------------------------------------------------------
     // compact_ndarray roundtrip helper
@@ -409,7 +409,7 @@ pub(crate) mod tests {
 
     pub(crate) fn make_block_table<T: Dtyped>(
         blocks: &[&[T]],
-    ) -> BlockTable<crate::storage::block::Owned, Ty<T>> {
+    ) -> BlockTable<crate::storage::block::Owned, T> {
         let block_len = blocks[0].len() as BlockSize;
         let data: Vec<u8> = blocks
             .iter()

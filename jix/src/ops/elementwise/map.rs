@@ -64,7 +64,7 @@ where
     O: Dtyped,
     F: Fn(S::Item) -> O,
 {
-    type ElementType = Ty<O>;
+    type ElementType = O;
     crate::storage::impl_array_storage_forward!(<S, O, F>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -135,7 +135,7 @@ where
     O: Dtyped,
     F: Fn(S1::Item, S2::Item) -> O,
 {
-    type ElementType = Ty<O>;
+    type ElementType = O;
     crate::storage::impl_array_storage_forward!(<S1, S2, O, F>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -298,7 +298,7 @@ where
     F: Fn(ArraysT::ItemSequence<'_>) -> O,
     O: Dtyped,
 {
-    type ElementType = Ty<O>;
+    type ElementType = O;
 
     #[inline]
     fn read_data<'a>(

@@ -386,7 +386,7 @@ pub(crate) mod traits {
 /// The [`Cast<T>`](crate::scalar::Cast) bound on the source element type rejects unsupported
 /// pairs at compile time.
 ///
-/// The output dtype is `T` (element type `Ty<T>`) and the shape is the input shape.
+/// The output dtype is `T` and the shape is the input shape.
 ///
 /// The result is a lazy view.
 ///
@@ -458,7 +458,7 @@ where
     S::Item: crate::scalar::Cast<T>,
     T: Dtyped,
 {
-    type ElementType = crate::Ty<T>;
+    type ElementType = T;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
