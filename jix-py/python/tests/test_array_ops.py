@@ -174,6 +174,11 @@ def test_binary_ops_return_not_implemented_for_operands_that_opt_out():
         OptsOut() - a
     np.testing.assert_array_equal((a + [1, 1]).numpy(), [2, 3])
     np.testing.assert_array_equal((a + np.array([1, 1])).numpy(), [2, 3])
+    assert (a == None) is False
+    assert (a != None) is True
+    assert (a == "x") is False
+    with pytest.raises(TypeError, match="unsupported operand"):
+        a + None
 
 
 @pytest.mark.parametrize("shape", [(), (3,)])

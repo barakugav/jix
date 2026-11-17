@@ -13,7 +13,7 @@ use crate::type_hint::{
     Dim, ItemOrTuple, NumpyArray, NumpyDtype, Shape, ShapeLen, ValueOrUnimplemented,
 };
 use pyo3::prelude::*;
-use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyTuple};
+use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyString, PyTuple};
 
 use pyo3::exceptions::{
     PyIndexError, PyNotImplementedError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
@@ -1896,10 +1896,12 @@ fn binary_op_builtin(
         || other.is_instance_of::<PyComplex>()
         || other.is_instance(numpy_items(py)?.generic.bind(py))?;
     if !is_known_type {
-        let opts_out = other
-            .get_type()
-            .getattr("__array_ufunc__")
-            .is_ok_and(|f| f.is_none());
+        let opts_out = other.is_none()
+            || other.is_instance_of::<PyString>()
+            || other
+                .get_type()
+                .getattr("__array_ufunc__")
+                .is_ok_and(|f| f.is_none());
         if opts_out {
             return Ok(ValueOrUnimplemented::NotImplemented);
         }
