@@ -16,12 +16,12 @@ use crate::error::{check_dtype, Result};
 pub trait ElementType: Clone + Send + Sync + crate::util::Sealed {
     /// `Some(dtype)` when the element type is statically known ([`Ty<T>`]),
     /// `None` for [`TypeDyn`].
-    const DTYPE: Option<Dtype>;
+    const STATIC_DTYPE: Option<Dtype>;
 }
 
 /// Check that `dtype` matches `ET`: always true for [`TypeDyn`].
 pub(crate) fn check_element_type<ET: ElementType>(dtype: &Dtype) -> Result<()> {
-    match &ET::DTYPE {
+    match &ET::STATIC_DTYPE {
         Some(expected) => check_dtype(dtype, expected),
         None => Ok(()),
     }
@@ -37,7 +37,7 @@ pub(crate) fn check_element_type<ET: ElementType>(dtype: &Dtype) -> Result<()> {
 pub enum TypeDyn {}
 impl crate::util::Sealed for TypeDyn {}
 impl ElementType for TypeDyn {
-    const DTYPE: Option<Dtype> = None;
+    const STATIC_DTYPE: Option<Dtype> = None;
 }
 
 /// Compile-time element type tag. `S::ElementType = Ty<T>` when the scalar element type
@@ -64,5 +64,5 @@ impl<T> ElementType for Ty<T>
 where
     T: Dtyped,
 {
-    const DTYPE: Option<Dtype> = Some(T::DTYPE);
+    const STATIC_DTYPE: Option<Dtype> = Some(T::DTYPE);
 }
