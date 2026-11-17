@@ -179,9 +179,6 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
     }
 
     fn spec(&self) -> ArraySpec<'_> {
-        if self.is_identity() {
-            return self.array.spec();
-        }
         self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -364,11 +361,15 @@ mod tests {
     }
 
     #[test]
-    fn identity_keeps_compact() {
+    fn identity_as_compact() {
         let a = make(arange(4), [1u64, 4]).flip([0]);
-        assert!(a.is_compact());
+        assert!(!a.is_compact());
         assert!(a.storage().as_compact().is_some());
-        assert!(!make(arange(4), [1u64, 4]).flip([1]).is_compact());
+        assert!(make(arange(4), [1u64, 4])
+            .flip([1])
+            .storage()
+            .as_compact()
+            .is_none());
     }
 
     // -----------------------------------------------------------------------

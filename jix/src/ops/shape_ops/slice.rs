@@ -227,9 +227,6 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         self.array.dtype()
     }
     fn spec(&self) -> ArraySpec<'_> {
-        if self.is_identity() {
-            return self.array.spec();
-        }
         self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -501,11 +498,28 @@ mod tests {
     }
 
     #[test]
-    fn identity_rangefull_keeps_compact() {
+    fn identity_rangefull_as_compact() {
         let a = make2d(arange(12), 3, 4).slice((.., ..));
-        assert!(a.is_compact());
+        assert!(!a.is_compact());
         assert!(a.storage().as_compact().is_some());
-        assert!(!make2d(arange(12), 3, 4).slice((.., 1..)).is_compact());
+        assert!(make2d(arange(12), 3, 4)
+            .slice((.., 1..))
+            .storage()
+            .as_compact()
+            .is_none());
+    }
+
+    /// An identity view does not read as an element-wise pipeline, so it cannot fuse.
+    #[test]
+    fn identity_view_of_elementwise_op_is_not_fusable() {
+        use crate::storage::params::ReadTiling::Fusable;
+        let data = array![[1.0f64, 2.0, 3.0]];
+        let neg = || -Array::plain_ndarray_ref(&data).unwrap();
+        let tiling = |a: &dyn ArrayStorage| a.spec().read_tiling();
+        assert_eq!(tiling(neg().storage()), Fusable);
+        assert_ne!(tiling(neg().slice((.., ..)).storage()), Fusable);
+        assert_ne!(tiling(neg().flip(0usize).storage()), Fusable);
+        assert_ne!(tiling(neg().roll(0, 1).storage()), Fusable);
     }
 
     #[test]

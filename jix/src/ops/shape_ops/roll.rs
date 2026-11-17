@@ -159,9 +159,6 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     }
 
     fn spec(&self) -> ArraySpec<'_> {
-        if self.is_identity() {
-            return self.array.spec();
-        }
         self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -289,11 +286,15 @@ mod tests {
     }
 
     #[test]
-    fn identity_keeps_compact() {
+    fn identity_as_compact() {
         let a = make(arange(12), [3u64, 4]).roll(3, 0);
-        assert!(a.is_compact());
+        assert!(!a.is_compact());
         assert!(a.storage().as_compact().is_some());
-        assert!(!make(arange(12), [3u64, 4]).roll(1, 0).is_compact());
+        assert!(make(arange(12), [3u64, 4])
+            .roll(1, 0)
+            .storage()
+            .as_compact()
+            .is_none());
     }
 
     #[test]
