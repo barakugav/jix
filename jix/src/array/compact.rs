@@ -61,7 +61,8 @@ impl<S: ArrayStorage> Array<S> {
     /// Compress the data of this array into a new `Array<Compact>` with explicit [`ArrayParams`].
     ///
     /// Like [`compact`](Array::compact). Fields not set in `params` are inherited from the source
-    /// storage.
+    /// storage, except that setting any of the codec, level or filters resets the other two to
+    /// their defaults.
     ///
     /// # Errors
     ///

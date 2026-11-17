@@ -175,8 +175,10 @@ impl ArrayParams {
 
     /// Sets the compression codec used when writing blocks.
     ///
-    /// Defaults to [`Codec::Zstd`] when not set. Setting any codec field materializes the codec
-    /// configuration to its defaults, then applies this override.
+    /// Defaults to [`Codec::Zstd`] when not set.
+    ///
+    /// The codec, level and filters are inherited only as a group: setting any of them resets
+    /// the other two to their defaults.
     #[must_use]
     pub fn codec(mut self, codec: Codec) -> Self {
         self.encoder_params
@@ -189,6 +191,9 @@ impl ArrayParams {
     ///
     /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the
     /// default.
+    ///
+    /// The codec, level and filters are inherited only as a group: setting any of them resets
+    /// the other two to their defaults.
     ///
     /// Fails with `InvalidArgument` if `level` does not fit in an `i8`.
     pub fn level(mut self, level: i32) -> Result<Self> {
@@ -204,6 +209,9 @@ impl ArrayParams {
     /// numeric dtypes [`Filter::ByteShuffle`] (the default) gives a good ratio improvement at low
     /// cost; [`Filter::BitShuffle`] can do better on low-entropy data at higher CPU cost. Pass an
     /// empty slice to disable filtering.
+    ///
+    /// The codec, level and filters are inherited only as a group: setting any of them resets
+    /// the other two to their defaults.
     ///
     /// # Errors
     ///

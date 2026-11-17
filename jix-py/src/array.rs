@@ -1684,8 +1684,10 @@ impl PyArray {
 ///         `numpy.dtype()` accepts. When omitted the input dtype is preserved.
 ///     params: A dictionary of block layout and codec settings, with the optional keys below.
 ///         Unset keys are inherited from the source storage if `array` is a jix array, and
-///         chosen automatically otherwise. The block layout is critical for performance and
-///         should match your access pattern; the codec defaults suit most workloads.
+///         chosen automatically otherwise, except that setting any of `codec`,
+///         `compression_level` or `filters` resets the other two to their defaults. The block
+///         layout is critical for performance and should match your access pattern; the codec
+///         defaults suit most workloads.
 ///
 ///         - `block_shape`: The block shape, as a list of integers (one per dimension), each
 ///             clamped to the array boundary. For example, if you always read row slices,
