@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Run cargo for the 32-bit i686-unknown-linux-musl target. The test binaries are static, so they
+# run natively on an x86_64 kernel with IA32 emulation. Example (from the repo root):
+#   bug-hunt/tools/cargo-i686 test --manifest-path jix/Cargo.toml --all-features --test <name>
+# Uses its own target dir so it never invalidates the host build cache. Needs: rustup target
+# i686-unknown-linux-musl, ziglang in .venv (C compiler for zstd-sys), clang + lld on PATH.
+set -euo pipefail
+TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$TOOLS/../.." && pwd)"
+export CC_i686_unknown_linux_musl="$TOOLS/zig-i686-cc"
+export AR_i686_unknown_linux_musl="$TOOLS/zig-i686-ar"
+export CFLAGS_i686_unknown_linux_musl="-fno-sanitize=undefined"
+# Link with clang + lld against Rust's self-contained musl (zig's linker would add a second crt1.o).
+export CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_LINKER=clang
+export CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C link-arg=--target=i686-unknown-linux-musl -C link-arg=-fuse-ld=lld"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR_I686:-$ROOT/target-i686}"
+cmd="$1"; shift
+exec cargo "$cmd" --target i686-unknown-linux-musl "$@"
