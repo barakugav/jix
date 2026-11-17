@@ -48,6 +48,10 @@ pub use map::*;
 mod select;
 pub use select::*;
 
+mod scalar_core_ops;
+#[cfg(jix_nightly)]
+pub use scalar_core_ops::AddF32Fn;
+
 #[cfg(feature = "num-complex")]
 mod complex;
 #[cfg(feature = "num-complex")]
