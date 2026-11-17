@@ -9,7 +9,9 @@ use jix_core::{Array, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
-use crate::type_hint::{Dim, ItemOrTuple, NumpyArray, NumpyDtype, Shape, ValueOrUnimplemented};
+use crate::type_hint::{
+    Dim, ItemOrTuple, NumpyArray, NumpyDtype, Shape, ShapeLen, ValueOrUnimplemented,
+};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyTuple};
 
@@ -1396,7 +1398,7 @@ impl PyArray {
     /// Reinterprets an array with a different shape. See [`jix.reshape()`][jix.reshape].
     pub fn reshape<'py>(
         slf: &Bound<'py, Self>,
-        shape: ItemOrTuple<i64>,
+        shape: ItemOrTuple<ShapeLen>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::reshape(slf, shape)
     }
@@ -1439,7 +1441,7 @@ impl PyArray {
     #[pyo3(signature = (shape))]
     pub fn broadcast<'py>(
         slf: &Bound<'py, Self>,
-        shape: ItemOrTuple<i64>,
+        shape: ItemOrTuple<ShapeLen>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::broadcast(slf, shape)
     }

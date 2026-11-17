@@ -108,6 +108,25 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Dim {
     }
 }
 
+/// A shape entry. Unlike a plain `i64` it rejects a `bool`.
+#[derive(Clone, Copy)]
+pub struct ShapeLen(pub i64);
+
+impl<'a, 'py> FromPyObject<'a, 'py> for ShapeLen {
+    type Error = PyErr;
+
+    const INPUT_TYPE: PyStaticExpr = <PyInt as PyTypeInfo>::TYPE_HINT;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        if obj.is_instance_of::<PyBool>() {
+            return Err(PyTypeError::new_err(
+                "a shape entry must be an int, not a bool",
+            ));
+        }
+        Ok(Self(obj.extract()?))
+    }
+}
+
 /// The result of a binary dunder. `NotImplemented` makes Python try the other operand's reflected
 /// op. Typed as an `Array`, like numpy's dunders.
 pub enum ValueOrUnimplemented<T>

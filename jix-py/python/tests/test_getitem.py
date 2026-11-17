@@ -204,6 +204,10 @@ def test_bool_index_raises(index):
         lambda a: jix.concatenate([a, a], True),
         lambda a: jix.swapdims(a, 0, True),
         lambda a: jix.permute_dims(a, (True, 0)),
+        lambda a: jix.reshape(a, (True, -1)),
+        lambda a: a.reshape((3, True, 4)),
+        lambda a: jix.broadcast(a, (True, 3, 4)),
+        lambda a: a.broadcast((False, 3, 4)),
     ],
 )
 def test_bool_dim_raises(fn):

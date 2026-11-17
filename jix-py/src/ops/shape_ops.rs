@@ -6,7 +6,7 @@ use pyo3::types::{PyBool, PyEllipsis, PySlice, PyTuple};
 
 use crate::ops::asarray_simple;
 use crate::ops::common::{operands_dtype_promotion_vec, Operand};
-use crate::type_hint::{Dim, ItemOrTuple};
+use crate::type_hint::{Dim, ItemOrTuple, ShapeLen};
 use crate::util::{
     normalize_dim, normalize_dim_optional, normalize_dims, normalize_dims_optional, slice_unpack,
     DimArray, IntoPyResult,
@@ -55,13 +55,13 @@ use crate::PyArray;
 #[pyfunction]
 pub fn broadcast<'py>(
     array: &Bound<'py, PyAny>,
-    shape: ItemOrTuple<i64>,
+    shape: ItemOrTuple<ShapeLen>,
 ) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
     let py = py_arr.py();
     let array = &py_arr.get().arr;
     let old_shape = array.shape();
-    let shape = shape.into_dim_array()?;
+    let shape: DimArray<i64> = shape.into_dim_array()?.iter().map(|d| d.0).collect();
     let Some(added_ndim) = shape.len().checked_sub(old_shape.len()) else {
         return Err(PyValueError::new_err(format!(
             "Cannot broadcast array of shape {:?} to shape {:?}: fewer dimensions",
@@ -718,7 +718,7 @@ pub fn swapdims<'py>(
 ))]
 pub fn reshape<'py>(
     array: &Bound<'py, PyAny>,
-    shape: ItemOrTuple<i64>,
+    shape: ItemOrTuple<ShapeLen>,
 ) -> PyResult<Bound<'py, PyArray>> {
     let new_shape = shape;
     let py_arr = asarray_simple(array)?;
@@ -727,7 +727,11 @@ pub fn reshape<'py>(
 
     // handle -1 in new_shape
     let new_shape = {
-        let mut new_shape = new_shape.into_dim_array()?;
+        let mut new_shape = new_shape
+            .into_dim_array()?
+            .iter()
+            .map(|d| d.0)
+            .collect::<DimArray<_>>();
         let mut inferred_dim = None;
         let mut known_size = 1u64;
         for (i, &dim) in new_shape.iter().enumerate() {
@@ -802,7 +806,7 @@ pub fn reshape<'py>(
 #[pyfunction]
 pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyArray>> {
     let py_arr = asarray_simple(array)?;
-    reshape(&py_arr, ItemOrTuple::Item(-1))
+    reshape(&py_arr, ItemOrTuple::Item(ShapeLen(-1)))
 }
 
 /// Joins a sequence of arrays along an existing dim.
