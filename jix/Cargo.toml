@@ -45,11 +45,6 @@ half = ["dep:half"]
 num-complex = ["dep:num-complex", "half?/num-traits"]
 
 
-# `--cfg jix_nightly`: nightly-only experiments, see `ops/elementwise/scalar_core_ops.rs`.
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(jix_nightly)'] }
-
-
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

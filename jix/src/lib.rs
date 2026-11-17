@@ -1,6 +1,5 @@
 #![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(jix_nightly, feature(type_alias_impl_trait))]
 
 //! Multi-dimensional array library with block-compressed storage and lazy-evaluated operations.
 //!

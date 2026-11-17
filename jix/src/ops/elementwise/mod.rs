@@ -49,8 +49,7 @@ mod select;
 pub use select::*;
 
 mod scalar_core_ops;
-#[cfg(jix_nightly)]
-pub use scalar_core_ops::AddF32Fn;
+pub use scalar_core_ops::AddScalar;
 
 #[cfg(feature = "num-complex")]
 mod complex;

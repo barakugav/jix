@@ -236,7 +236,7 @@ macro_rules! define_op2 {
         simd: $bulk_fn:ident,
         $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
-        struct $Kernel;
+        pub(crate) struct $Kernel;
         impl<T1, T2> crate::ops::elementwise::op2::Op2Kernel<T1, T2> for $Kernel
         where
             T1: crate::scalar::$trait<T2> + Copy + 'static,
