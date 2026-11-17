@@ -23,8 +23,9 @@ pub(crate) struct ReadSize {
 
 impl ReadSize {
     pub(crate) fn new(min: u64, max: u64) -> Self {
-        let min = min.clamp(1, isize::MAX as u64);
-        let max = max.clamp(min, isize::MAX as u64);
+        let limit = isize::MAX as u64 / 2;
+        let min = min.clamp(1, limit);
+        let max = max.clamp(min, limit);
         Self { min, max }
     }
 
@@ -1818,7 +1819,8 @@ mod tests {
         // min floored at 1, max raised to at least min.
         assert_eq!(ReadSize::new(0, 0), ReadSize::new(1, 1));
         let huge = ReadSize::new(u64::MAX, u64::MAX);
-        assert_eq!((huge.min, huge.max), (isize::MAX as u64, isize::MAX as u64));
+        let half = isize::MAX as u64 / 2;
+        assert_eq!((huge.min, huge.max), (half, half));
         let rs = ReadSize::new(10, 4); // max < min -> max raised to min
         assert_eq!((rs.min, rs.max), (10, 10));
 

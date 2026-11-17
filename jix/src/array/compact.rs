@@ -1,5 +1,5 @@
 use crate::codec::{DecoderCodecConfig, Encoder};
-use crate::error::Result;
+use crate::error::{check_region_size, Result};
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageExt, BlockSize, Compact, Index, StridedBuf,
@@ -240,6 +240,8 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
         block_shape[dim] as u64 * chunk_shape_in_blocks[dim]
     });
     let chunk_grid_shape = D::vec(ndim, |dim| shape[dim].div_ceil(chunk_shape[dim]));
+    let max_chunk_size = D::vec(ndim, |dim| chunk_shape[dim].min(shape[dim]) as usize);
+    check_region_size(max_chunk_size.as_ref(), itemsize)?;
 
     let mut chunk_buf = AlignedBytes::new_padded(alignment);
     let mut tmp_block_plain = AlignedBytes::new_padded(alignment);
