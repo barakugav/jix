@@ -540,14 +540,6 @@ impl<T> SendSyncPtr<T> {
     }
 }
 
-macro_rules! assert_unchecked_eq {
-    ($a:expr, $b:expr) => {{
-        debug_assert_eq!($a, $b);
-        std::hint::assert_unchecked($a == $b);
-    }};
-}
-pub(crate) use assert_unchecked_eq;
-
 #[inline(always)]
 pub(crate) unsafe fn value_as_bytes<T>(val: &T) -> &[u8]
 where

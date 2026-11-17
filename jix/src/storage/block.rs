@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams};
 use crate::dtype::Dtype;
+use crate::element_type::check_element_type;
 use crate::error::{ensure, error, Result};
-use crate::util::{assert_unchecked_eq, SendSyncPtr, Unaligned};
+use crate::util::{SendSyncPtr, Unaligned};
 use crate::{ElementType, ReadContext};
 
 const _: () = const {
@@ -96,7 +97,7 @@ where
     pub(crate) blocks_loc: S::Data<BlockLocation>,
 
     pub(crate) nitems: u64,
-    element_type: ET,
+    element_type: PhantomData<ET>,
 
     /// The number of items (not bytes) in each block. All blocks are full (nitems is divisible by
     /// block_size).
@@ -137,12 +138,12 @@ where
         ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
         let nitems = nblocks * block_size as u64;
         debug_assert_eq!(blocks_loc.as_ref().len() as u64, nblocks);
-        let element_type = ET::from_dtype(decoder_config.dtype.clone())?;
+        check_element_type::<ET>(&decoder_config.dtype)?;
         Ok(Self {
             block_data,
             blocks_loc,
             nitems,
-            element_type,
+            element_type: PhantomData,
             block_size,
             decoder_config,
         })
@@ -150,11 +151,8 @@ where
 
     /// Get the dtype of items in this storage.
     #[inline(always)]
-    pub(crate) fn dtype(&self) -> &Dtype
-    where
-        ET: ElementType,
-    {
-        self.element_type.dtype()
+    pub(crate) fn dtype(&self) -> &Dtype {
+        &self.decoder_config.dtype
     }
 
     /// Get the number of blocks in this storage.
@@ -229,18 +227,14 @@ where
             block_data: self.block_data.as_ref(),
             blocks_loc: self.blocks_loc.as_ref(),
             nitems: self.nitems,
-            element_type: self.element_type.clone(),
+            element_type: PhantomData,
             block_size: self.block_size,
             decoder_config: self.decoder_config.clone(),
         }
     }
 
     #[inline(always)]
-    pub(crate) fn decoder_config(&self) -> &DecoderCodecConfig
-    where
-        ET: ElementType,
-    {
-        unsafe { assert_unchecked_eq!(self.element_type.dtype(), &self.decoder_config.dtype) };
+    pub(crate) fn decoder_config(&self) -> &DecoderCodecConfig {
         &self.decoder_config
     }
 
@@ -249,12 +243,12 @@ where
     where
         ET: ElementType,
     {
-        let element_type = NewET::from_dtype(self.dtype().clone())?;
+        check_element_type::<NewET>(self.dtype())?;
         Ok(BlockTable {
             block_data: self.block_data,
             blocks_loc: self.blocks_loc,
             nitems: self.nitems,
-            element_type,
+            element_type: PhantomData,
             block_size: self.block_size,
             decoder_config: self.decoder_config,
         })
