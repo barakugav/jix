@@ -174,10 +174,7 @@ impl<S: StorageBase> StorageBase for PermuteDims<S> {
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array with its dims reordered. See [`PermuteDims`] for details
     /// and examples.
     ///

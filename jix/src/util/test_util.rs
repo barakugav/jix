@@ -871,10 +871,10 @@ fn build_test_array<T: Dtyped>(
         .unwrap()
         .into_any(),
         // `Plain` keeps the buffer as its storage, so every read downstream sees these strides and
-        // this alignment. `Plain::new` takes the allocation by value, so the buffer travels along.
+        // this alignment. `PlainBase::new` takes the allocation by value, so the buffer travels along.
         TestArrayKind::Plain => {
             let storage = unsafe {
-                crate::storage::Plain::<AlignedBytes, TypeDyn>::new(
+                crate::storage::PlainBase::<AlignedBytes, TypeDyn>::new(
                     buf,
                     data,
                     &shape,

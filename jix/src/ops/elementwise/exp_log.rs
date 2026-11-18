@@ -194,10 +194,7 @@ define_op1!(
     simd: log10_bulk,
 );
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op1_method!(sqrt: Sqrt, crate::scalar::Sqrt);
     define_array_op1_method!(exp: Exp, crate::scalar::Exp);
     define_array_op1_method!(ln: Ln, crate::scalar::Ln);

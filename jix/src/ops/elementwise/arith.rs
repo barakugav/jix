@@ -645,10 +645,7 @@ define_op2!(
     simd: pow_bulk,
 );
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op1_method!(square: Square, crate::scalar::Square);
     define_array_op1_method!(sign: Sign, crate::scalar::Sign);
     define_array_op1_method!(abs: Abs, crate::scalar::Abs);

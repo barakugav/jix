@@ -161,10 +161,7 @@ where
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a view of one named field of a struct dtype. See [`SubDtype`] for details and
     /// examples.
     ///

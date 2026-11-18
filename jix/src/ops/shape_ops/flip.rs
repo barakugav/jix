@@ -206,10 +206,7 @@ impl<S: StorageBase> StorageBase for Flip<S> {
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array with the order of elements reversed along the
     /// specified dims. See [`Flip`] for details and examples.
     ///

@@ -240,10 +240,7 @@ define_op1!(
     simd: atan_bulk,
 );
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op1_method!(sin: Sin, crate::scalar::Sin);
     define_array_op1_method!(cos: Cos, crate::scalar::Cos);
     define_array_op1_method!(tan: Tan, crate::scalar::Tan);

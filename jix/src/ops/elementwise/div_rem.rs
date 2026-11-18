@@ -805,10 +805,7 @@ define_op2!(
     simd: remainder_euclid_bulk,
 );
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op2_method!(divide_trunc: DivideTrunc, crate::scalar::DivideTrunc);
     define_array_op2_method!(divide_floor: DivideFloor, crate::scalar::DivideFloor);
     define_array_op2_method!(

@@ -1101,7 +1101,7 @@ mod tests {
         let [dst, lhs, rhs] = &mut bufs;
 
         let shape_u64 = shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
-        let lhs_array: Array<crate::storage::Plain<_, T>> = unsafe {
+        let lhs_array: Array<crate::storage::PlainView<'_, T>> = unsafe {
             Array::plain_ndarray_ptr(
                 lhs.ptr(),
                 &shape_u64,
@@ -1111,7 +1111,7 @@ mod tests {
             )
             .unwrap()
         };
-        let rhs_array: Array<crate::storage::Plain<_, T>> = unsafe {
+        let rhs_array: Array<crate::storage::PlainView<'_, T>> = unsafe {
             Array::plain_ndarray_ptr(
                 rhs.ptr(),
                 &shape_u64,
@@ -2279,7 +2279,7 @@ mod tests {
             let backings =
                 gaps.map_inline(|gap| (0..LEN * gap.max(1)).map(|i| i as T).collect::<Vec<T>>());
             let arrays = array_from_fn_inline::<_, N_IN>(|k| {
-                let arr: Array<crate::storage::Plain<_, T>> = unsafe {
+                let arr: Array<crate::storage::PlainView<'_, T>> = unsafe {
                     Array::plain_ndarray_ptr(
                         backings[k].as_ptr().cast::<u8>(),
                         &[LEN as u64][..],

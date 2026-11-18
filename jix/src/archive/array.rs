@@ -254,10 +254,7 @@ impl Array<CompactMmap<TypeDyn>> {
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Save the array to a new file at `path`.
     ///
     /// Works for any array: a compact array streams its compressed blocks to disk without
@@ -641,7 +638,7 @@ mod tests {
         assert!(Dtype::from_fields(vec![("f".to_string(), 0, dtype.clone())]).is_err());
 
         let data = [7u8; 4];
-        let a: Array<crate::storage::Plain<&(), TypeDyn>> = unsafe {
+        let a: Array<crate::storage::PlainView<'_, TypeDyn>> = unsafe {
             Array::plain_ndarray_ptr(data.as_ptr(), &[4], &[1], dtype.clone(), ArrayParams::new())
                 .unwrap()
         };

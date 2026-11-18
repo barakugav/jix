@@ -152,10 +152,7 @@ macro_rules! impl_element_type_change_default {
 pub(crate) use impl_element_type_change_default;
 
 /// Methods for converting an array to a different element type.
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Re-tag this array's element type as `NewET`, returning an error if the runtime dtype does
     /// not match.
     ///

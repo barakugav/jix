@@ -468,10 +468,7 @@ where
     crate::ops::impl_element_type_change_default!();
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Casts each element to scalar type `T`. See [`Cast`] for details and examples.
     #[track_caller]
     pub fn cast<T>(self) -> Array<Cast<S, T>>

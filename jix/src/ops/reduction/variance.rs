@@ -487,10 +487,7 @@ where
     const NEEDS_INDICES: bool = false;
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_reduction_method!(
         var: Variance,
         where {

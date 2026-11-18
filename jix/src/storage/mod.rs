@@ -12,8 +12,8 @@
 //! - [`Compact`] - heap-allocated
 //! - [`CompactMmap`] - memory-mapped file
 //!
-//! [`Plain`] is a zero-copy view into a contiguous or strided in-memory buffer, so uncompressed
-//! data can be combined with compact arrays.
+//! [`Plain`] (owned) and [`PlainView`] (borrowed) are zero-copy views into a contiguous or strided
+//! in-memory buffer, so uncompressed data can be combined with compact arrays.
 //!
 //! Operations on `Array` produce lazy views whose storage wraps the original and applies
 //! the transformation at read time. These are defined in [`jix::ops`](crate::ops) and include shape

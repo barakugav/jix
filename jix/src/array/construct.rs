@@ -59,9 +59,9 @@ impl<T> CompactArray<T> {
     /// assert_eq!(scaled.to_ndarray::<Ix2>()?[[1, 1]], 957.0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn compact_ndarray<S, InD>(array: &ndarray::ArrayBase<S, InD>) -> Result<Self>
+    pub fn compact_ndarray<S, D>(array: &ndarray::ArrayBase<S, D>) -> Result<Self>
     where
-        InD: ndarray::Dimension,
+        D: ndarray::Dimension,
         S: ndarray::Data<Elem = T>,
         T: Dtyped,
     {
@@ -97,12 +97,12 @@ impl<T> CompactArray<T> {
     /// }
     /// # Ok::<(), jix::Error>(())
     /// ```
-    pub fn compact_ndarray_with<S, InD>(
-        array: &ndarray::ArrayBase<S, InD>,
+    pub fn compact_ndarray_with<S, D>(
+        array: &ndarray::ArrayBase<S, D>,
         mut params: ArrayParams,
     ) -> Result<Self>
     where
-        InD: ndarray::Dimension,
+        D: ndarray::Dimension,
         S: ndarray::Data<Elem = T>,
         T: Dtyped,
     {

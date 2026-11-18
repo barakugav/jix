@@ -403,10 +403,7 @@ where
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array with a new shape. See [`Reshape`] for details and
     /// examples.
     ///

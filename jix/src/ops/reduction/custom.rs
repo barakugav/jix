@@ -297,10 +297,7 @@ where
 }
 */
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Applies the [`Reduce`] operation, see the op struct docs for details.
     ///
     /// `f` MUST be associative and commutative: the elements are visited in an unspecified

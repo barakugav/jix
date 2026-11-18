@@ -686,10 +686,7 @@ where
     crate::ops::impl_element_type_change_default!();
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op2_method!(equal: Equal, crate::scalar::Equal);
     define_array_op2_method!(not_equal: NotEqual, crate::scalar::NotEqual);
 
