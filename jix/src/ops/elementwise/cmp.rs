@@ -220,14 +220,30 @@ pub(crate) mod traits {
                 ) -> bool {
                     // credit to https://github.com/brendanzab/approx
                     //
-                    // The code was re-written as branchless. enabled auto-vectorization.
+                    // Branchless, so `approx_eq_bulk` auto-vectorizes.
 
                     let (a, b) = (*self, *other);
-                    let diff = crate::scalar::Abs::abs(a - b);
                     let (abs_a, abs_b) = (crate::scalar::Abs::abs(a), crate::scalar::Abs::abs(b));
-                    let largest = if abs_b > abs_a { abs_b } else { abs_a };
-                    let close = (diff <= *atol) | (diff <= largest * *rtol);
-                    let no_inf = !<$T>::is_infinite(a) & !<$T>::is_infinite(b) & diff.is_finite();
+                    let (abs_large, abs_small) = if abs_a > abs_b {
+                        (abs_a, abs_b)
+                    } else {
+                        (abs_b, abs_a)
+                    };
+                    let abs_diff = crate::scalar::Abs::abs(a - b);
+                    let relative = if abs_diff.is_finite() {
+                        abs_diff <= abs_large * *rtol
+                    } else {
+                        // `a - b` overflowed, which is impossible when both `a` and `b` have the
+                        // same sign. When signs are different, the following holds:
+                        // |a - b| = |a| + |b|
+                        //
+                        // |a - b|               <= abs_large * rtol
+                        // abs_large + abs_small <= abs_large * rtol
+                        // abs_small             <= abs_large * (rtol - 1)
+                        abs_small <= abs_large * (*rtol - <$T>::from(1u8))
+                    };
+                    let close = (abs_diff <= *atol) | relative;
+                    let no_inf = !a.is_infinite() & !b.is_infinite();
                     (a == b) | (close & no_inf)
                 }
             }
@@ -254,7 +270,7 @@ pub(crate) mod traits {
             atol: &Self::AbsoluteTolerance,
         ) -> bool {
             self.re.approx_eq(&other.re, rtol, &atol.re)
-                & self.im.approx_eq(&other.im, rtol, &atol.im)
+                && self.im.approx_eq(&other.im, rtol, &atol.im)
         }
     }
 }
@@ -1069,8 +1085,10 @@ mod tests {
     where
         T: Copy
             + PartialOrd
+            + From<u8>
             + core::ops::Sub<Output = T>
             + core::ops::Mul<Output = T>
+            + core::ops::Div<Output = T>
             + crate::scalar::Abs<Output = T>
             + crate::scalar::IsInfinite<Output = bool8>,
     {
@@ -1081,17 +1099,19 @@ mod tests {
             return false;
         }
         let diff = (a - b).abs();
-        if bool::from(diff.is_infinite()) {
-            return false;
-        }
         if diff <= atol {
             return true;
         }
         let largest = if a.abs() > b.abs() { a.abs() } else { b.abs() };
+        if bool::from(diff.is_infinite()) {
+            // compare at half scale, where halving is exact
+            let two = T::from(2u8);
+            return (a / two - b / two).abs() <= largest / two * rtol;
+        }
         diff <= largest * rtol
     }
 
-    /// The branch-free `approx_eq` against the reference, on every pair of edge values (infinities,
+    /// `approx_eq` against the reference, on every pair of edge values (infinities,
     /// NaN, +-0, subnormals, MAX) and odd tolerances.
     #[test]
     fn approx_eq_edge_cases() {
@@ -1107,6 +1127,7 @@ mod tests {
                     0.1,
                     1.0,
                     1.5,
+                    2.0,
                     -0.1,
                     <$t>::INFINITY,
                     <$t>::NAN,
@@ -1129,6 +1150,9 @@ mod tests {
         check!(f32);
         check!(f64);
         assert!(!f64::MAX.approx_eq(&-f64::MAX, &1.5, &0.0));
+        assert!(f64::MAX.approx_eq(&-f64::MAX, &2.0, &0.0));
+        assert!(f64::MAX.approx_eq(&-f64::MAX, &0.0, &f64::INFINITY));
+        assert!(f64::MAX.approx_eq(&(-f64::MAX / 4.0), &1.5, &0.0));
     }
 
     proptest::proptest! {
