@@ -41,7 +41,7 @@ pub struct SubDtype<S, ET> {
 }
 impl<S, ET> SubDtype<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     /// Constructs a [`SubDtype`] storage. See the struct docs for semantics and examples.
@@ -84,9 +84,9 @@ where
     }
 }
 impl<S, ET> crate::storage::ArrayStorageImpl for SubDtype<S, ET> {}
-impl<S, ET> ArrayStorage for SubDtype<S, ET>
+impl<S, ET> StorageBase for SubDtype<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     type ElementType = ET;
@@ -163,7 +163,7 @@ where
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Returns a view of one named field of a struct dtype. See [`SubDtype`] for details and
     /// examples.

@@ -80,9 +80,9 @@ uv pip install -r scripts/dev_requirements.txt   # maturin, pytest, pytest-xdist
 
 ## Architecture
 
-### `Array<S: ArrayStorage>` - the generic core
+### `Array<S: StorageBase>` - the generic core
 
-`ArrayStorage` (`jix/src/storage/core_trait.rs`, sealed: every impl also needs an empty
+`StorageBase` (`jix/src/storage/core_trait.rs`, sealed: every impl also needs an empty
 `impl crate::storage::ArrayStorageImpl for X {}` marker) exposes exactly three things: `shape()`, `dtype()`,
 and `read_data(index, ctx, out)` which reads a rectangular sub-region (an `Index`: a start and a
 size per dimension) as a `StridedBuf` - a block of bytes plus one byte stride per dimension
@@ -109,11 +109,11 @@ pull mode - or end with `out.set(view, ...)`, which hands a view back or copies 
 oversized request into cache-sized pieces read one at a time.
 `Array::to_buf_slice(index, buf, ctx)` is the shorthand for a packed row-major destination.
 
-Storage carries one piece of compile-time info as an associated type, **`ElementType`** - either
-the element type itself (`Compact<f32>`: known at compile time) or `TypeDyn` (runtime-only; arrays
-loaded from disk start here). `ArrayStorageTyped` is the supertrait shorthand for
-`ArrayStorage<ElementType = T>` with `T: Dtyped`, and **all element-wise ops require it**. Recover a typed array from a `TypeDyn` one with
-`Array::into_typed::<T>()` (runtime-checked against the header).
+Every storage carries one piece of compile-time info as an associated type, **`ElementType`** -
+either the element type itself (`Compact<f32>`: known at compile time) or `TypeDyn` (runtime-only;
+arrays loaded from disk start here). `Storage` is the shorthand for `StorageBase<ElementType = T>`
+with `T: Dtyped`, and **all element-wise ops require it**. Recover a typed array from a `TypeDyn`
+one with `Array::into_typed::<T>()` (runtime-checked against the header).
 
 The number of dims is always a runtime property (`shape().len()`); internally per-dim data lives in
 `DimArray<T>` (a stack `ArrayVec` of capacity `NDIM_MAX`). `Dimension` (`Dim<N>` / `DimDyn`) and
@@ -138,7 +138,7 @@ Nothing runs until you materialize via `.to_ndarray()`, `.compact()`, or `.write
   main backends).
 - `Plain<...>` - zero-copy view over a contiguous/strided in-memory buffer, so plain ndarrays can
   participate in the same op chains.
-- `ArrayAny` (= `Array<ArrayStorageAny>`) - type-erased (`Arc<dyn ArrayStorage>`) for holding mixed
+- `ArrayAny` (= `Array<ArrayStorageAny>`) - type-erased (`Arc<dyn StorageBase>`) for holding mixed
   storage types in one collection; loses compile-time element-wise ops.
 
 ### Block storage & codec pipeline

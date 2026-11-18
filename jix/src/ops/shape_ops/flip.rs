@@ -29,14 +29,14 @@ use crate::ops::prelude::*;
 /// assert_eq!(a.flip([0, 1]).to_ndarray()?, array![[6, 5, 4], [3, 2, 1]]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Flip<S: ArrayStorage> {
+pub struct Flip<S: StorageBase> {
     array: S,
     is_flipped: DimArray<bool>,
     cache_scope: CacheScope,
     spec: ArraySpecDynamic,
 }
 
-impl<S: ArrayStorage> Flip<S> {
+impl<S: StorageBase> Flip<S> {
     /// Constructs a [`Flip`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, dim: impl DimsArg) -> Result<Self> {
         let input_shape = array.shape();
@@ -83,8 +83,8 @@ impl<S: ArrayStorage> Flip<S> {
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Flip<S> {}
-impl<S: ArrayStorage> ArrayStorage for Flip<S> {
+impl<S: StorageBase> crate::storage::ArrayStorageImpl for Flip<S> {}
+impl<S: StorageBase> StorageBase for Flip<S> {
     type ElementType = S::ElementType;
 
     fn read_data<'a>(
@@ -211,7 +211,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Returns a lazy view of the array with the order of elements reversed along the
     /// specified dims. See [`Flip`] for details and examples.
@@ -234,7 +234,7 @@ mod tests {
     use ndarray::{array, Ix2};
 
     use crate::ReadContext;
-    use crate::{Array, ArrayStorage, CompactArray, IntoDimension};
+    use crate::{Array, CompactArray, IntoDimension, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers

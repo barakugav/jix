@@ -47,7 +47,7 @@ use crate::ops::prelude::*;
 /// assert_eq!(result, array![[7, 8, 9]]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Slice<S: ArrayStorage> {
+pub struct Slice<S: StorageBase> {
     array: S,
     /// Resolved slice for each dimension.
     slice: DimArray<DimSlice>,
@@ -59,7 +59,7 @@ pub struct Slice<S: ArrayStorage> {
     spec: ArraySpecDynamic,
 }
 
-impl<S: ArrayStorage> Slice<S> {
+impl<S: StorageBase> Slice<S> {
     /// Constructs a [`Slice`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, slice: SliceSpec) -> Result<Self> {
         let input_shape = array.shape();
@@ -125,8 +125,8 @@ impl<S: ArrayStorage> Slice<S> {
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Slice<S> {}
-impl<S: ArrayStorage> ArrayStorage for Slice<S> {
+impl<S: StorageBase> crate::storage::ArrayStorageImpl for Slice<S> {}
+impl<S: StorageBase> StorageBase for Slice<S> {
     type ElementType = S::ElementType;
 
     fn read_data<'a>(
@@ -436,7 +436,7 @@ impl DimSlice {
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Returns a lazy view of a sub-region of the array. See [`Slice`] for details and examples.
     ///
@@ -465,7 +465,7 @@ mod tests {
     use crate::ReadContext;
 
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{ArrayStorage, CompactArray, PlainArray};
+    use crate::{CompactArray, PlainArray, StorageBase};
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();

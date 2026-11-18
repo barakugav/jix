@@ -7,7 +7,7 @@ use crate::error::{bail, check_ndim, Result};
 use crate::util::{dim_arr, DimArray};
 use crate::NDIM_MAX;
 
-/// The region [`read_data`](crate::ArrayStorage::read_data) reads: a start and a size per
+/// The region [`read_data`](crate::StorageBase::read_data) reads: a start and a size per
 /// dimension, covering `start[d]..start[d] + size[d]`.
 ///
 /// There are as many sizes as starts, at most [`NDIM_MAX`] of each, no size is zero (the region is

@@ -37,7 +37,7 @@ impl<T> crate::ops::elementwise::op1::Op1Kernel<Complex<T>> for RealKernel<T> {
 }
 impl<S, T> Real<S, T>
 where
-    S: ArrayStorageTyped<Item = Complex<T>>,
+    S: Storage<Item = Complex<T>>,
     Complex<T>: Dtyped,
     T: Dtyped,
 {
@@ -54,9 +54,9 @@ where
     }
 }
 impl<S, T> crate::storage::ArrayStorageImpl for Real<S, T> {}
-impl<S, T> ArrayStorage for Real<S, T>
+impl<S, T> StorageBase for Real<S, T>
 where
-    S: ArrayStorageTyped<Item = Complex<T>>,
+    S: Storage<Item = Complex<T>>,
     Complex<T>: Dtyped,
     T: Dtyped,
 {
@@ -106,7 +106,7 @@ impl<T> crate::ops::elementwise::op1::Op1Kernel<Complex<T>> for ImaginaryKernel<
 }
 impl<S, T> Imaginary<S, T>
 where
-    S: ArrayStorageTyped<Item = Complex<T>>,
+    S: Storage<Item = Complex<T>>,
     Complex<T>: Dtyped,
     T: Dtyped,
 {
@@ -123,9 +123,9 @@ where
     }
 }
 impl<S, T> crate::storage::ArrayStorageImpl for Imaginary<S, T> {}
-impl<S, T> ArrayStorage for Imaginary<S, T>
+impl<S, T> StorageBase for Imaginary<S, T>
 where
-    S: ArrayStorageTyped<Item = Complex<T>>,
+    S: Storage<Item = Complex<T>>,
     Complex<T>: Dtyped,
     T: Dtyped,
 {
@@ -141,7 +141,7 @@ where
 
 impl<S, T> Array<S>
 where
-    S: ArrayStorageTyped<Item = Complex<T>>,
+    S: Storage<Item = Complex<T>>,
     Complex<T>: Dtyped,
     T: Dtyped,
 {

@@ -14,7 +14,7 @@ use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
 use crate::util::{dim_arr, DimBitmap, IterExt};
 use crate::{
-    ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, ReadContext, TypeDyn,
+    ArchiveValidation, Array, ArrayParams, DimDyn, Dimension, ReadContext, StorageBase, TypeDyn,
 };
 
 impl Array<Compact<TypeDyn>> {
@@ -256,7 +256,7 @@ impl Array<CompactMmap<TypeDyn>> {
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Save the array to a new file at `path`.
     ///
@@ -607,7 +607,7 @@ mod tests {
     use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
     use crate::{ArchiveValidation, Array, ArrayParams, CompactArray, Dimension, IntoDimension};
-    use crate::{ArrayStorage, TypeDyn};
+    use crate::{StorageBase, TypeDyn};
 
     #[test]
     fn read_back_to_back_archives() {
@@ -660,7 +660,7 @@ mod tests {
     }
 
     /// Writes `a`, edits its array and block table headers, and reads the result back.
-    fn read_edited<S: ArrayStorage>(
+    fn read_edited<S: StorageBase>(
         a: &Array<S>,
         edit: impl FnOnce(&mut schema::ArrayHeader, &mut schema::BlockTableHeader),
     ) -> crate::error::Result<Array<Compact<TypeDyn>>> {
@@ -1517,7 +1517,7 @@ mod tests {
     /// ignored.
     #[test]
     fn write_compact_behind_wrappers_copies_blocks() {
-        fn write<S: crate::ArrayStorage>(a: &Array<S>) -> Vec<u8> {
+        fn write<S: crate::StorageBase>(a: &Array<S>) -> Vec<u8> {
             let mut buf = Cursor::new(Vec::new());
             // A block shape different from the source's, ignored when the source is compact.
             a.write_to(&mut buf, arr_params(&[2, 8]), &a.read_ctx())

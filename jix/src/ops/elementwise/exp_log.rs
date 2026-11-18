@@ -196,7 +196,7 @@ define_op1!(
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_op1_method!(sqrt: Sqrt, crate::scalar::Sqrt);
     define_array_op1_method!(exp: Exp, crate::scalar::Exp);

@@ -367,7 +367,7 @@ define_reduction_op!(
     Sum,
     SumKernel,
     where {
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::Sum<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Sum>::Output,
@@ -463,7 +463,7 @@ define_reduction_op!(
     Product,
     ProductKernel,
     where {
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::Product<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Product>::Output,
@@ -546,7 +546,7 @@ define_reduction_op!(
     Mean,
     MeanKernel,
     where {
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::Mean<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Mean>::Output,
@@ -595,26 +595,26 @@ where
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_reduction_method!(
         sum: Sum,
         where {
-            S: ArrayStorageTyped,
+            S: Storage,
             S::Item: crate::scalar::Sum<Output: Dtyped>,
         }
     );
     define_array_reduction_method!(
         product: Product,
         where {
-            S: ArrayStorageTyped,
+            S: Storage,
             S::Item: crate::scalar::Product<Output: Dtyped>,
         }
     );
     define_array_reduction_method!(
         mean: Mean,
         where {
-            S: ArrayStorageTyped,
+            S: Storage,
             S::Item: crate::scalar::Mean<Output: Dtyped>,
         }
     );

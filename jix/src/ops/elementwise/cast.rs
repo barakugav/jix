@@ -435,7 +435,7 @@ where
 }
 impl<S, T> Cast<S, T>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     S::Item: crate::scalar::Cast<T>,
     T: Dtyped,
 {
@@ -452,9 +452,9 @@ where
     }
 }
 impl<S, T> crate::storage::ArrayStorageImpl for Cast<S, T> {}
-impl<S, T> ArrayStorage for Cast<S, T>
+impl<S, T> StorageBase for Cast<S, T>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     S::Item: crate::scalar::Cast<T>,
     T: Dtyped,
 {
@@ -470,13 +470,13 @@ where
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Casts each element to scalar type `T`. See [`Cast`] for details and examples.
     #[track_caller]
     pub fn cast<T>(self) -> Array<Cast<S, T>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::Cast<T>,
         T: Dtyped,
     {

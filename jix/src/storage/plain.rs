@@ -12,7 +12,7 @@ use crate::storage::{
 };
 use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
 use crate::ReadContext;
-use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, PlainArray};
+use crate::{Array, ArrayParams, DimDyn, Dimension, PlainArray, StorageBase};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -88,7 +88,7 @@ impl<A> Plain<A, TypeDyn> {
     ///   [`Array::compact_with`] instead.
     ///
     /// `data` and `strides` need not be aligned to `dtype.alignment()`: a `Plain` read lends a
-    /// view of the caller's own bytes, and per the [`read_data`](ArrayStorage::read_data)
+    /// view of the caller's own bytes, and per the [`read_data`](StorageBase::read_data)
     /// contract a lent view is only as aligned as the bytes behind it. Consumers that need
     /// alignment stage the region themselves.
     ///
@@ -433,7 +433,7 @@ impl<ET> Array<Plain<&(), ET>> {
 }
 
 impl<A, ET> crate::storage::ArrayStorageImpl for Plain<A, ET> {}
-impl<A, ET> ArrayStorage for Plain<A, ET>
+impl<A, ET> StorageBase for Plain<A, ET>
 where
     ET: ElementType,
 {
@@ -597,8 +597,8 @@ mod tests {
         let a = Array::plain_ndarray_view_with(data.view(), params).unwrap();
         let b = Array::plain_ndarray_view(data.view()).unwrap();
         assert_eq!(
-            crate::ArrayStorage::spec(a.storage()).block_shape()[..],
-            crate::ArrayStorage::spec(b.storage()).block_shape()[..]
+            crate::StorageBase::spec(a.storage()).block_shape()[..],
+            crate::StorageBase::spec(b.storage()).block_shape()[..]
         );
     }
 

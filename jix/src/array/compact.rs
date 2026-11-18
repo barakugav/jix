@@ -9,13 +9,13 @@ use crate::util::{
     scale_read_shape, AlignedBytes, IterExt, NdCopier, PtrMutNoalias, PtrNoalias, SliceExt,
 };
 use crate::{
-    default_logical_strides, default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec,
-    Dimension, ReadContext,
+    default_logical_strides, default_strides, ArrayParams, Dim, DimDyn, DimVec, Dimension,
+    ReadContext, StorageBase,
 };
 
 use super::Array;
 
-impl<S: ArrayStorage> Array<S> {
+impl<S: StorageBase> Array<S> {
     /// Compress the data of this array into a new `Array<Compact>` with new blocks.
     ///
     /// The primary use of `compact` is to materialize a lazy view such as
@@ -136,14 +136,14 @@ impl<S: ArrayStorage> Array<S> {
         B: BlockTableBuilder,
     {
         // Erase the storage to reduce monomorphization bloat
-        let storage: &dyn ArrayStorage = &self.storage;
+        let storage: &dyn StorageBase = &self.storage;
         compact_into_builder_dyn_dispatch(storage, params, context, builder_init)
     }
 }
 
 #[inline(never)]
 fn compact_into_builder_dyn_dispatch<B: BlockTableBuilder>(
-    storage: &dyn ArrayStorage,
+    storage: &dyn StorageBase,
     params: &mut ArrayParams,
     context: &ReadContext,
     builder_init: impl FnOnce(
@@ -163,7 +163,7 @@ fn compact_into_builder_dyn_dispatch<B: BlockTableBuilder>(
 }
 #[inline(never)]
 fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
-    storage: &dyn ArrayStorage,
+    storage: &dyn StorageBase,
     params: &mut ArrayParams,
     context: &ReadContext,
     builder_init: impl FnOnce(
@@ -359,7 +359,7 @@ mod tests {
     use crate::dtype::Dtyped;
 
     use crate::util::arr_params;
-    use crate::ArrayStorage;
+    use crate::StorageBase;
 
     use crate::array::tests::*;
 

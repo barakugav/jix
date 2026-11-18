@@ -1,8 +1,8 @@
 use crate::arrayvec::ArrayVec;
-use crate::ArrayStorage;
+use crate::StorageBase;
 
-/// Introspection metadata for an [`ArrayStorage`], returned by
-/// [`ArrayStorage::info`](crate::ArrayStorage::info).
+/// Introspection metadata for a [`StorageBase`], returned by
+/// [`StorageBase::info`](crate::StorageBase::info).
 ///
 /// Pairs a short human-readable name for the storage node with references to the storages it
 /// depends on. Chaining these across a lazy pipeline yields a tree describing the whole operation.
@@ -19,7 +19,7 @@ impl<'a> ArrayStorageInfo<'a> {
         }
     }
     #[inline]
-    fn new_deps_inline(name: &'a str, deps: &[&'a dyn ArrayStorage]) -> Self {
+    fn new_deps_inline(name: &'a str, deps: &[&'a dyn StorageBase]) -> Self {
         debug_assert!(deps.len() <= INLINE_DEPS_CAPACITY);
         let mut deps_vec = ArrayVec::new();
         for dep in deps.iter() {
@@ -31,7 +31,7 @@ impl<'a> ArrayStorageInfo<'a> {
         }
     }
     #[inline]
-    pub(crate) fn new_deps<const N: usize>(name: &'a str, deps: [&'a dyn ArrayStorage; N]) -> Self {
+    pub(crate) fn new_deps<const N: usize>(name: &'a str, deps: [&'a dyn StorageBase; N]) -> Self {
         if N <= INLINE_DEPS_CAPACITY {
             Self::new_deps_inline(name, &deps)
         } else {
@@ -43,7 +43,7 @@ impl<'a> ArrayStorageInfo<'a> {
     }
 
     #[inline]
-    pub(crate) fn new_deps_dyn(name: &'a str, deps: Vec<&'a dyn ArrayStorage>) -> Self {
+    pub(crate) fn new_deps_dyn(name: &'a str, deps: Vec<&'a dyn StorageBase>) -> Self {
         if deps.len() <= INLINE_DEPS_CAPACITY {
             Self::new_deps_inline(name, &deps)
         } else {
@@ -60,7 +60,7 @@ impl<'a> ArrayStorageInfo<'a> {
     }
 
     /// The storages this node reads from, in argument order. Empty for leaf storages.
-    pub fn dependencies(&self) -> &[&'a dyn ArrayStorage] {
+    pub fn dependencies(&self) -> &[&'a dyn StorageBase] {
         match &self.dependencies {
             ArrayDependencies::Inline(deps) => deps.as_slice(),
             ArrayDependencies::Vec(deps) => deps.as_slice(),
@@ -68,7 +68,7 @@ impl<'a> ArrayStorageInfo<'a> {
     }
 }
 pub(crate) enum ArrayDependencies<'a> {
-    Inline(ArrayVec<&'a dyn ArrayStorage, INLINE_DEPS_CAPACITY>),
-    Vec(Vec<&'a dyn ArrayStorage>),
+    Inline(ArrayVec<&'a dyn StorageBase, INLINE_DEPS_CAPACITY>),
+    Vec(Vec<&'a dyn StorageBase>),
 }
 const INLINE_DEPS_CAPACITY: usize = 2;

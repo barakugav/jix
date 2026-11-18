@@ -8,7 +8,7 @@ use crate::storage::block::BlockSize;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
 use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight};
 use crate::{
-    dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt, BLOCK_SIZE_BYTES_MAX,
+    dim_arr, Array, DimBitmap, DimDyn, Dimension, SliceExt, StorageBase, BLOCK_SIZE_BYTES_MAX,
 };
 
 const ELEMENT_COST_MAX: f32 = u64::MAX as f32; // 2^64
@@ -222,12 +222,12 @@ impl ArrayParams {
     #[allow(unused)]
     pub(crate) fn inherit_unset_from_array<S>(&mut self, array: &Array<S>)
     where
-        S: ArrayStorage,
+        S: StorageBase,
     {
         self.inherit_unset_from_storage(array.storage());
     }
 
-    pub(crate) fn inherit_unset_from_storage(&mut self, storage: &impl ArrayStorage) {
+    pub(crate) fn inherit_unset_from_storage(&mut self, storage: &impl StorageBase) {
         let spec = storage.spec();
         self.encoder_params
             .get_or_insert_with(|| spec.encoder_params().clone());
@@ -1141,7 +1141,7 @@ mod tests {
 
     use super::scale_order_from_weights;
     use crate::util::ScaleWeight;
-    use crate::{Array, ArrayParams, ArrayStorage, CompactArray, BLOCK_SIZE_BYTES_MAX};
+    use crate::{Array, ArrayParams, CompactArray, StorageBase, BLOCK_SIZE_BYTES_MAX};
 
     #[test]
     fn compact_with_keeps_caller_fixed_dims() {
@@ -2315,9 +2315,9 @@ mod tests {
         use super::ReadTiling::{self, Fusable, SinglePass, Tiled, ZeroCopy};
         use crate::ops::{concatenate, stack};
         use crate::storage::scalar::Scalar;
-        use crate::ArrayStorage;
+        use crate::StorageBase;
 
-        fn kind<S: ArrayStorage>(a: Array<S>) -> ReadTiling {
+        fn kind<S: StorageBase>(a: Array<S>) -> ReadTiling {
             a.storage().spec().read_tiling()
         }
         let data = ndarray::Array2::<i32>::zeros((4, 6));

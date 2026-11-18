@@ -24,7 +24,7 @@ use crate::ops::prelude::*;
 /// assert_eq!(r2, array![[1, 1, 2, 2, 3, 3], [4, 4, 5, 5, 6, 6]]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Repeat<S: ArrayStorage> {
+pub struct Repeat<S: StorageBase> {
     array: S,
     dim: DimIdx,
     repeats: u64,
@@ -33,7 +33,7 @@ pub struct Repeat<S: ArrayStorage> {
     spec: ArraySpecDynamic,
 }
 
-impl<S: ArrayStorage> Repeat<S> {
+impl<S: StorageBase> Repeat<S> {
     /// Constructs a [`Repeat`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, repeats: u64, dim: usize) -> Result<Self> {
         let input_shape = array.shape();
@@ -102,8 +102,8 @@ impl<S: ArrayStorage> Repeat<S> {
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Repeat<S> {}
-impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
+impl<S: StorageBase> crate::storage::ArrayStorageImpl for Repeat<S> {}
+impl<S: StorageBase> StorageBase for Repeat<S> {
     type ElementType = S::ElementType;
 
     fn read_data<'a>(
@@ -269,7 +269,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Returns a lazy view with each element repeated `repeats` times along `dim`.
     /// See [`Repeat`] for details and examples.
@@ -291,7 +291,7 @@ mod tests {
 
     use crate::ReadContext;
 
-    use crate::{Array, ArrayStorage, CompactArray, IntoDimension, NDIM_MAX};
+    use crate::{Array, CompactArray, IntoDimension, StorageBase, NDIM_MAX};
 
     // -----------------------------------------------------------------------
     // Helpers

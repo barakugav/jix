@@ -6,7 +6,7 @@ use crate::error::Result;
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, OutBuf};
 use crate::ReadContext;
-use crate::{ArrayStorage, DimDyn, Dimension, TypeDyn, NDIM_MAX};
+use crate::{DimDyn, Dimension, StorageBase, TypeDyn, NDIM_MAX};
 
 /// A type-erased storage: any storage behind an `Arc`, with reads forwarded to it dynamically.
 ///
@@ -18,7 +18,7 @@ pub struct ArrayStorageAny {
     inner: Arc<dyn AnyInner>,
 }
 trait AnyInner: Send + Sync {
-    fn storage(&self) -> &dyn ArrayStorage;
+    fn storage(&self) -> &dyn StorageBase;
     fn meta(&self) -> &AnyMeta;
 }
 struct AnyMeta {
@@ -27,7 +27,7 @@ struct AnyMeta {
     spec: ArraySpecOwned,
 }
 impl ArrayStorageAny {
-    pub(crate) fn new(storage: impl ArrayStorage + Send + Sync + 'static) -> Self {
+    pub(crate) fn new(storage: impl StorageBase + Send + Sync + 'static) -> Self {
         let meta = AnyMeta::new(&storage);
         Self::from_inner_box(Box::new(AnyInnerImpl { storage, meta }))
     }
@@ -40,7 +40,7 @@ impl ArrayStorageAny {
     }
 }
 impl crate::storage::ArrayStorageImpl for ArrayStorageAny {}
-impl ArrayStorage for ArrayStorageAny {
+impl StorageBase for ArrayStorageAny {
     type ElementType = TypeDyn;
 
     #[inline(always)]
@@ -88,8 +88,8 @@ struct AnyInnerImpl<S> {
     storage: S,
     meta: AnyMeta,
 }
-impl<S: ArrayStorage + Send + Sync + 'static> AnyInner for AnyInnerImpl<S> {
-    fn storage(&self) -> &dyn ArrayStorage {
+impl<S: StorageBase + Send + Sync + 'static> AnyInner for AnyInnerImpl<S> {
+    fn storage(&self) -> &dyn StorageBase {
         &self.storage
     }
 
@@ -99,7 +99,7 @@ impl<S: ArrayStorage + Send + Sync + 'static> AnyInner for AnyInnerImpl<S> {
 }
 
 impl AnyMeta {
-    fn new(storage: &dyn ArrayStorage) -> Self {
+    fn new(storage: &dyn StorageBase) -> Self {
         let mut spec = storage.spec().to_owned();
 
         // A parent can't fuse through the erased storage, it reads it with `read_data`

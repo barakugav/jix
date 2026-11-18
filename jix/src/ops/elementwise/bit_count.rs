@@ -309,7 +309,7 @@ define_op1!(
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_op1_method!(count_ones: CountOnes, crate::scalar::CountOnes);
     define_array_op1_method!(count_zeros: CountZeros, crate::scalar::CountZeros);

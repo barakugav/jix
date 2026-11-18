@@ -93,7 +93,7 @@
 //!
 //! # Core type: `Array<S>`
 //!
-//! [`Array<S>`](Array) is generic over its storage backend [`S: ArrayStorage`](ArrayStorage). The
+//! [`Array<S>`](Array) is generic over its storage backend [`S: StorageBase`](StorageBase). The
 //! storage trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else -
 //! slicing, arithmetic, reductions, serialization - is implemented on top of those three.
 //!
@@ -391,8 +391,9 @@ pub mod dtype;
 pub mod scalar;
 
 pub mod storage;
-pub use storage::core_trait::ArrayStorage;
+pub use storage::core_trait::StorageBase;
 pub use storage::params::ArrayParams;
+pub use storage::Storage;
 
 mod archive;
 pub use archive::ArchiveValidation;
@@ -419,7 +420,7 @@ pub type PlainArray<T> = Array<storage::Plain<Vec<T>, T>>;
 /// Plain (uncompressed) borrowed array (type alias).
 pub type PlainArrayRef<'a, T> = Array<storage::Plain<&'a (), T>>;
 
-/// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn ArrayStorage>`.
+/// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn StorageBase>`.
 ///
 /// Use `ArrayAny` when you need to hold arrays of different concrete storage types in the same
 /// place - for example a `Vec<ArrayAny>` mixing on-disk, in-memory, and lazy views. All runtime

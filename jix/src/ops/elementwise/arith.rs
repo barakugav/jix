@@ -647,7 +647,7 @@ define_op2!(
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_op1_method!(square: Square, crate::scalar::Square);
     define_array_op1_method!(sign: Sign, crate::scalar::Sign);

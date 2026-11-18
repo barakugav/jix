@@ -339,8 +339,8 @@ macro_rules! define_swapped_cmp {
 
         impl<S1, S2> $Op<S1, S2>
         where
-            S1: ArrayStorageTyped,
-            S2: ArrayStorageTyped,
+            S1: Storage,
+            S2: Storage,
             S2::Item: crate::scalar::$InnerTrait<S1::Item, Output: Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
@@ -355,10 +355,10 @@ macro_rules! define_swapped_cmp {
         }
 
         impl<S1, S2> crate::storage::ArrayStorageImpl for $Op<S1, S2> {}
-        impl<S1, S2> ArrayStorage for $Op<S1, S2>
+        impl<S1, S2> StorageBase for $Op<S1, S2>
         where
-            S1: ArrayStorageTyped,
-            S2: ArrayStorageTyped,
+            S1: Storage,
+            S2: Storage,
             S2::Item: crate::scalar::$InnerTrait<S1::Item, Output: Dtyped>,
         {
             type ElementType = <S2::Item as crate::scalar::$InnerTrait<S1::Item>>::Output;
@@ -592,7 +592,7 @@ define_op2!(
 /// ```
 pub struct ApproxEq<S1, S2>(Op2<S1, S2, ApproxEqKernel<S1::Item>>)
 where
-    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>;
+    S1: Storage<Item: crate::scalar::ApproxEq>;
 struct ApproxEqKernel<T: crate::scalar::ApproxEq> {
     rtol: <T as crate::scalar::ApproxEq>::RelativeTolerance,
     atol: <T as crate::scalar::ApproxEq>::AbsoluteTolerance,
@@ -618,7 +618,7 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
 }
 impl<S1, S2> ApproxEq<S1, S2>
 where
-    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
+    S1: Storage<Item: crate::scalar::ApproxEq>,
 {
     /// Constructs an [`ApproxEq`] storage. See the struct docs for semantics and examples.
     pub fn new(
@@ -628,8 +628,8 @@ where
         atol: <S1::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
     ) -> Result<Self>
     where
-        S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-        S2: ArrayStorageTyped<Item = S1::Item>,
+        S1: Storage<Item: crate::scalar::ApproxEq>,
+        S2: Storage<Item = S1::Item>,
     {
         Ok(Self(Op2::new(a, b, ApproxEqKernel { rtol, atol }, false)?))
     }
@@ -643,22 +643,22 @@ where
         atol: <S1::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
     ) -> Result<Array<Self>>
     where
-        S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-        S2: ArrayStorageTyped<Item = S1::Item>,
+        S1: Storage<Item: crate::scalar::ApproxEq>,
+        S2: Storage<Item = S1::Item>,
     {
         Self::new(a.into_storage(), b.into_storage(), rtol, atol).map(Array::from_storage)
     }
 }
 impl<S1, S2> crate::storage::ArrayStorageImpl for ApproxEq<S1, S2>
 where
-    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-    S2: ArrayStorageTyped<Item = S1::Item>,
+    S1: Storage<Item: crate::scalar::ApproxEq>,
+    S2: Storage<Item = S1::Item>,
 {
 }
-impl<S1, S2> ArrayStorage for ApproxEq<S1, S2>
+impl<S1, S2> StorageBase for ApproxEq<S1, S2>
 where
-    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-    S2: ArrayStorageTyped<Item = S1::Item>,
+    S1: Storage<Item: crate::scalar::ApproxEq>,
+    S2: Storage<Item = S1::Item>,
 {
     type ElementType = bool8;
     crate::storage::impl_array_storage_forward!(<S1, S2>);
@@ -672,7 +672,7 @@ where
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_op2_method!(equal: Equal, crate::scalar::Equal);
     define_array_op2_method!(not_equal: NotEqual, crate::scalar::NotEqual);
@@ -681,8 +681,8 @@ where
     #[track_caller]
     pub fn greater<S2>(self, other: Array<S2>) -> Array<Greater<S, S2>>
     where
-        S: ArrayStorageTyped,
-        S2: ArrayStorageTyped,
+        S: Storage,
+        S2: Storage,
         S2::Item: crate::scalar::Less<S::Item, Output: Dtyped>,
     {
         Greater::new_array(self, other).unwrap()
@@ -692,8 +692,8 @@ where
     #[track_caller]
     pub fn greater_equal<S2>(self, other: Array<S2>) -> Array<GreaterEqual<S, S2>>
     where
-        S: ArrayStorageTyped,
-        S2: ArrayStorageTyped,
+        S: Storage,
+        S2: Storage,
         S2::Item: crate::scalar::LessEqual<S::Item, Output: Dtyped>,
     {
         GreaterEqual::new_array(self, other).unwrap()
@@ -710,8 +710,8 @@ where
         atol: <S::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
     ) -> Array<ApproxEq<S, S2>>
     where
-        S: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-        S2: ArrayStorageTyped<Item = S::Item>,
+        S: Storage<Item: crate::scalar::ApproxEq>,
+        S2: Storage<Item = S::Item>,
     {
         ApproxEq::new_array(self, other, rtol, atol).unwrap()
     }
@@ -935,7 +935,7 @@ mod tests {
     // still see the caller's order.
     #[test]
     fn swapped_cmp_reports_operands_in_caller_order() {
-        use crate::{Array, ArrayParams, ArrayStorage};
+        use crate::{Array, ArrayParams, StorageBase};
         use ndarray::ShapeBuilder;
 
         let c_order = ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap();
@@ -948,7 +948,7 @@ mod tests {
             b.storage().spec().block_size()
         );
 
-        let check = |storage: &dyn ArrayStorage, name: &str| {
+        let check = |storage: &dyn StorageBase, name: &str| {
             let info = storage.info();
             assert_eq!(info.name(), name);
             let [dep_a, dep_b] = info.dependencies() else {

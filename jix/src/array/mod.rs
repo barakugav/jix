@@ -2,7 +2,7 @@ use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::ArrayStorageAny;
 use crate::ReadContext;
-use crate::{ArrayAny, ArrayStorage, ElementType};
+use crate::{ArrayAny, ElementType, StorageBase};
 
 mod compact;
 mod construct;
@@ -15,7 +15,7 @@ mod read;
 /// provided by [`shape()`](Array::shape), [`dtype()`](Array::dtype) and
 /// [`to_buf_strided()`](Array::to_buf_strided); all other functions are built on top of those.
 ///
-/// An array is generic over `S: ArrayStorage`, which provides the implementation of the three core
+/// An array is generic over `S: StorageBase`, which provides the implementation of the three core
 /// methods. The main concrete storage backend is the block-compressed
 /// [`Compact`](crate::storage::Compact) type, which divides the array into n-dimensional blocks
 /// and compresses each block independently, and it's the return type of the common creation
@@ -159,7 +159,7 @@ pub struct Array<S> {
     pub(crate) storage: S,
 }
 
-impl<S: ArrayStorage> Array<S> {
+impl<S: StorageBase> Array<S> {
     /// Get the shape of the array, one element per dimension.
     #[inline(always)]
     pub fn shape(&self) -> &[u64] {
@@ -278,7 +278,7 @@ impl<S: ArrayStorage> Array<S> {
     /// resulting array can be stored alongside arrays of other concrete storage types.
     pub fn into_any(self) -> ArrayAny
     where
-        S: ArrayStorage + Send + Sync + 'static,
+        S: StorageBase + Send + Sync + 'static,
     {
         Array::from_storage(ArrayStorageAny::new(self.into_storage()))
     }
@@ -362,7 +362,7 @@ impl<S: ArrayStorage> Array<S> {
     }
 }
 
-impl<S: ArrayStorage> std::fmt::Debug for Array<S> {
+impl<S: StorageBase> std::fmt::Debug for Array<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Array")
             .field("shape", &self.shape())

@@ -3,7 +3,7 @@ mod common;
 use std::ops::Neg;
 
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion};
-use jix::{storage::ArrayStorageTyped, Array};
+use jix::{storage::Storage, Array};
 use ndarray::Ix2;
 
 use crate::common::{create_data, Profile};
@@ -21,7 +21,7 @@ fn bench_op1_plain(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_op1_impl<S: ArrayStorageTyped<Item = i32>>(
+fn bench_op1_impl<S: Storage<Item = i32>>(
     group: &mut BenchmarkGroup<'_, criterion::measurement::WallTime>,
     create_array: impl Fn(ndarray::ArrayD<i32>) -> Array<S>,
 ) {

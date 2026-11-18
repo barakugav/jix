@@ -11,13 +11,13 @@ use crate::ArrayParams;
 /// - **Not compact** (lazy views, op chains, etc.): the array is materialized
 ///   and compressed into a new [`Compact`] storage.
 ///
-/// All [`ArrayStorage`] methods delegate to the inner storage, and the element type
+/// All [`StorageBase`] methods delegate to the inner storage, and the element type
 /// `S::ElementType` is preserved.
-pub struct MaybeCompact<S: ArrayStorage>(pub(crate) ToCompactInner<S>);
+pub struct MaybeCompact<S: StorageBase>(pub(crate) ToCompactInner<S>);
 
 /// The two internal states of a [`MaybeCompact<S>`] storage.
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum ToCompactInner<S: ArrayStorage> {
+pub(crate) enum ToCompactInner<S: StorageBase> {
     /// The source was already compact; the original storage is kept as-is.
     Original(S),
     /// The source was not compact; it was materialized into a new `Compact`.
@@ -25,7 +25,7 @@ pub(crate) enum ToCompactInner<S: ArrayStorage> {
 }
 impl<S> MaybeCompact<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Constructs a [`MaybeCompact`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, params: ArrayParams, context: &ReadContext) -> Result<Self> {
@@ -50,10 +50,10 @@ where
         Self::new(array.into_storage(), params, context).map(Array::from_storage)
     }
 }
-impl<S> crate::storage::ArrayStorageImpl for MaybeCompact<S> where S: ArrayStorage {}
-impl<S> ArrayStorage for MaybeCompact<S>
+impl<S> crate::storage::ArrayStorageImpl for MaybeCompact<S> where S: StorageBase {}
+impl<S> StorageBase for MaybeCompact<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     type ElementType = S::ElementType;
 
@@ -92,7 +92,7 @@ where
         }
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
-        let inner: &dyn ArrayStorage = match &self.0 {
+        let inner: &dyn StorageBase = match &self.0 {
             ToCompactInner::Original(s) => s,
             ToCompactInner::Compact(c) => c,
         };
@@ -116,7 +116,7 @@ where
     }
 }
 
-impl<S: ArrayStorage> Array<S> {
+impl<S: StorageBase> Array<S> {
     /// Ensure this array is in compact block-compressed form, compressing it if needed.
     ///
     /// If the array is already compact, the storage is kept as-is - no data is
@@ -170,7 +170,7 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams, ArrayStorage, CompactArray, ElementType};
+    use crate::{Array, ArrayParams, CompactArray, ElementType, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers
