@@ -53,7 +53,7 @@ where
 {
     /// Constructs an [`IntoType`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S) -> Result<Self> {
-        if let Some(expected_dtype) = ET::DTYPE {
+        if let Some(expected_dtype) = ET::STATIC_DTYPE {
             check_dtype(array.dtype(), &expected_dtype)?;
         }
         Ok(Self {
@@ -88,7 +88,7 @@ where
         context: &'a ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
-        if let Some(dtype) = ET::DTYPE {
+        if let Some(dtype) = ET::STATIC_DTYPE {
             debug_assert_eq!(self.inner.dtype(), &dtype);
         }
         self.inner.read_data(index, context, out)
@@ -103,7 +103,7 @@ where
     where
         T: Dtyped,
     {
-        if let Some(dtype) = ET::DTYPE {
+        if let Some(dtype) = ET::STATIC_DTYPE {
             debug_assert_eq!(self.inner.dtype(), &dtype);
         }
         self.inner.read_as_elementwise_pipeline(index, context)
@@ -115,7 +115,7 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &crate::dtype::Dtype {
-        const { &ET::DTYPE }
+        const { &ET::STATIC_DTYPE }
             .as_ref()
             .unwrap_or_else(|| self.inner.dtype())
     }

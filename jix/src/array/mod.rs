@@ -209,7 +209,7 @@ impl<S: ArrayStorage> Array<S> {
     /// ```
     #[inline(always)]
     pub fn dtype(&self) -> &Dtype {
-        const { &S::ElementType::DTYPE }
+        const { &S::ElementType::STATIC_DTYPE }
             .as_ref()
             .unwrap_or_else(|| self.storage.dtype())
     }
