@@ -106,11 +106,14 @@ where
             read_shape_scale_weight,
             read_layout_order,
         );
-        spec.flags = spec.flags.with_read_tiling(ReadTiling::fused([
-            c_spec.read_tiling(),
-            x_spec.read_tiling(),
-            y_spec.read_tiling(),
-        ]));
+        // read_data pulls condition and y, so it reads in one pass only if they are views
+        let views = c_spec.read_tiling() == ReadTiling::ZeroCopy
+            && y_spec.read_tiling() == ReadTiling::ZeroCopy;
+        spec.flags = spec.flags.with_read_tiling(if views {
+            x_spec.read_tiling().max(ReadTiling::SinglePass)
+        } else {
+            ReadTiling::Tiled
+        });
         spec.add_cache_ids_from([&c_spec, &x_spec, &y_spec]);
         spec.add_cache_id(cache_id);
         Ok(Self {
@@ -1134,5 +1137,18 @@ mod tests {
         assert_eq!(result[0], Pair { a: 1, b: 2 }); // cond=true  -> x
         assert_eq!(result[1], Pair { a: 30, b: 40 }); // cond=false -> y
         assert_eq!(result[2], Pair { a: 5, b: 6 }); // cond=true  -> x
+    }
+
+    #[test]
+    fn read_tiling_is_not_fusable() {
+        use crate::storage::params::ReadTiling::{SinglePass, Tiled};
+        use crate::ArrayStorage;
+        let (c, x) = (array![bool8::TRUE, bool8::FALSE], array![1i32, 2]);
+        let c = Array::plain_ndarray_ref(&c).unwrap();
+        let x = || Array::plain_ndarray_ref(&x).unwrap();
+        let sel = c.view().select(x(), x());
+        assert_eq!(sel.storage().spec().read_tiling(), SinglePass);
+        let sel = c.view().select(x(), -x());
+        assert_eq!(sel.storage().spec().read_tiling(), Tiled);
     }
 }
