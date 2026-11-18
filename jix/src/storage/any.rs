@@ -6,7 +6,7 @@ use crate::error::Result;
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, OutBuf};
 use crate::ReadContext;
-use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
+use crate::{ArrayStorage, DimDyn, Dimension, TypeDyn, NDIM_MAX};
 
 /// A type-erased storage: any storage behind an `Arc`, with reads forwarded to it dynamically.
 ///
@@ -23,7 +23,7 @@ trait AnyInner: Send + Sync {
 }
 struct AnyMeta {
     shape: DimDyn,
-    element_type: TypeDyn,
+    dtype: Dtype,
     spec: ArraySpecOwned,
 }
 impl ArrayStorageAny {
@@ -64,8 +64,7 @@ impl ArrayStorage for ArrayStorageAny {
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        let meta = self.inner.meta();
-        meta.element_type.dtype()
+        &self.inner.meta().dtype
     }
 
     #[inline]
@@ -109,7 +108,7 @@ impl AnyMeta {
 
         Self {
             shape: DimDyn::from_slice(storage.shape()),
-            element_type: TypeDyn::new(storage.dtype().clone()),
+            dtype: storage.dtype().clone(),
             spec,
         }
     }

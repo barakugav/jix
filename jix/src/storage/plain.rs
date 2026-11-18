@@ -1,4 +1,7 @@
+use std::marker::PhantomData;
+
 use crate::dtype::{Dtype, Dtyped};
+use crate::element_type::check_element_type;
 use crate::error::{check_ndim, ensure, error, Result};
 use crate::storage::params::{
     read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned, ReadTiling,
@@ -59,7 +62,8 @@ pub struct Plain<A, ET> {
     data: SendSyncPtr<u8>,
     shape: DimDyn,
     strides: DimArray<usize>, // in bytes
-    element_type: ET,
+    dtype: Dtype,
+    element_type: PhantomData<ET>,
     spec: ArraySpecOwned,
 }
 impl<A> Plain<A, TypeDyn> {
@@ -171,14 +175,13 @@ impl<A> Plain<A, TypeDyn> {
             dynamic.read_layout_order = order;
         }
 
-        let element_type = TypeDyn::new(dtype);
-
         Ok(Self {
             allocation,
             data: unsafe { SendSyncPtr::new(data) },
             shape,
             strides,
-            element_type,
+            dtype,
+            element_type: PhantomData,
             spec,
         })
     }
@@ -478,7 +481,7 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        self.element_type.dtype()
+        &self.dtype
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
@@ -492,12 +495,14 @@ where
     type ElementTypeChange<NewET: ElementType> = Plain<A, NewET>;
     #[inline]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+        check_element_type::<NewET>(&self.dtype)?;
         Ok(Plain {
             allocation: self.allocation,
             data: self.data,
             shape: self.shape,
             strides: self.strides,
-            element_type: NewET::from_dtype(self.element_type.dtype().clone())?,
+            dtype: self.dtype,
+            element_type: PhantomData,
             spec: self.spec,
         })
     }

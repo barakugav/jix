@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
@@ -5,9 +7,7 @@ use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, Index, OutBuf};
 use crate::util::dim_arr;
 use crate::util::iter::NdIter;
 use crate::ReadContext;
-use crate::{
-    ArrayParams, ArrayStorage, CompactArray, DimArray, DimDyn, ElementType, SliceExt, Ty, TypeDyn,
-};
+use crate::{ArrayParams, ArrayStorage, CompactArray, DimArray, DimDyn, SliceExt, Ty, TypeDyn};
 
 use super::Array;
 
@@ -213,7 +213,7 @@ impl<T> CompactArray<T> {
         T: Dtyped,
     {
         struct FnStorage<T, F> {
-            dtype: Ty<T>,
+            element_type: PhantomData<T>,
             shape: DimArray<u64>,
             f: F,
             spec: ArraySpecOwned,
@@ -275,7 +275,7 @@ impl<T> CompactArray<T> {
 
             #[inline(always)]
             fn dtype(&self) -> &Dtype {
-                self.dtype.dtype()
+                Dtype::new_ref::<T>()
             }
 
             #[inline]
@@ -290,17 +290,14 @@ impl<T> CompactArray<T> {
             crate::ops::impl_element_type_change_default!();
         }
 
-        let dtype = Ty::<T>::new();
-
         check_ndim(shape.len())?;
         let shape = DimArray::from_slice(shape).unwrap();
-        params.tune(shape.as_slice(), dtype.dtype())?;
-        let spec =
-            params
-                .clone()
-                .into_spec(shape.as_slice(), dtype.dtype(), ArraySpecFlags::new())?;
+        params.tune(shape.as_slice(), &T::DTYPE)?;
+        let spec = params
+            .clone()
+            .into_spec(shape.as_slice(), &T::DTYPE, ArraySpecFlags::new())?;
         let array = Array::from_storage(FnStorage {
-            dtype,
+            element_type: PhantomData,
             shape,
             f,
             spec,

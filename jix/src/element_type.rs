@@ -17,46 +17,29 @@ pub trait ElementType: Clone + Send + Sync + crate::util::Sealed {
     /// `Some(dtype)` when the element type is statically known ([`Ty<T>`]),
     /// `None` for [`TypeDyn`].
     const DTYPE: Option<Dtype>;
-
-    /// Construct from a runtime `Dtype`, validating it against `DTYPE`.
-    ///
-    /// Returns an error if `Self::DTYPE = Some(d)` and `dtype != d`.
-    /// Always succeeds for `TypeDyn`.
-    fn from_dtype(dtype: Dtype) -> Result<Self>
-    where
-        Self: Sized;
-
-    /// Returns the element dtype, either the fixed dtype or the runtime one.
-    fn dtype(&self) -> &Dtype;
 }
 
-/// Runtime-only element type tag. `S::ElementType = TypeDyn` when the element type is not
-/// known at compile time (e.g. arrays loaded from a `.jix` file).
+/// Check that `dtype` matches `ET`: always true for [`TypeDyn`].
+pub(crate) fn check_element_type<ET: ElementType>(dtype: &Dtype) -> Result<()> {
+    match &ET::DTYPE {
+        Some(expected) => check_dtype(dtype, expected),
+        None => Ok(()),
+    }
+}
+
+/// Runtime-only element type marker. `S::ElementType = TypeDyn` when the element type is not
+/// known at compile time (e.g. arrays loaded from a `.jix` file). It is only used as a type: the
+/// dtype itself is kept by the storage.
 ///
 /// Arrays with `TypeDyn` do not support most element-wise operations directly; call
 /// [`Array::into_typed::<T>()`](crate::Array::into_typed) first to assert the expected
 /// element type and recover [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped).
 #[derive(Clone)]
-pub struct TypeDyn(Dtype);
-impl TypeDyn {
-    #[inline]
-    pub(crate) fn new(dtype: Dtype) -> Self {
-        Self(dtype)
-    }
-}
+#[non_exhaustive]
+pub struct TypeDyn;
 impl crate::util::Sealed for TypeDyn {}
 impl ElementType for TypeDyn {
     const DTYPE: Option<Dtype> = None;
-
-    #[inline(always)]
-    fn from_dtype(dtype: Dtype) -> Result<Self> {
-        Ok(Self::new(dtype))
-    }
-
-    #[inline(always)]
-    fn dtype(&self) -> &Dtype {
-        &self.0
-    }
 }
 
 /// Compile-time element type tag. `S::ElementType = Ty<T>` when the scalar element type
@@ -84,15 +67,4 @@ where
     T: Dtyped,
 {
     const DTYPE: Option<Dtype> = Some(T::DTYPE);
-
-    #[inline(always)]
-    fn from_dtype(dtype: Dtype) -> Result<Self> {
-        check_dtype(&dtype, Dtype::new_ref::<T>())?;
-        Ok(Self::new())
-    }
-
-    #[inline(always)]
-    fn dtype(&self) -> &Dtype {
-        Dtype::new_ref::<T>()
-    }
 }
