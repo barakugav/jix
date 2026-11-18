@@ -506,13 +506,14 @@ impl PyArray {
     ///
     /// Raises:
     ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds or
-    ///         `start > stop`, more index items than array dimensions, or more than one ellipsis.
+    ///         `start > stop`, more index items than array dimensions, more than one ellipsis, or
+    ///         an unsupported index item type (anything other than an integer, slice, `...`, or
+    ///         tuple of these).
     ///     ValueError: Slice step other than 1. Or `out` has the wrong dtype or shape, is not
     ///         writeable, is not aligned to the dtype, has a negative or zero stride on a dim
     ///         longer than 1, has non-C-contiguous inner (dtype) dims, or has overlapping
     ///         elements.
-    ///     TypeError: Unsupported index item type (anything other than an integer, slice, `...`,
-    ///         or tuple of these). Or `out` is not a NumPy array.
+    ///     TypeError: `out` is not a NumPy array.
     ///
     /// ```python
     /// import jix

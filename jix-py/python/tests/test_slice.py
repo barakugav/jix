@@ -275,7 +275,7 @@ def test_slice_multiple_ellipsis_raises():
 
 def test_slice_unsupported_index_type_raises():
     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
-    with pytest.raises(TypeError):
+    with pytest.raises(IndexError):
         jix.slice(a, "not a valid index")
 
 

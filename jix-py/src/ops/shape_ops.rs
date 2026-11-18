@@ -1,6 +1,6 @@
 use jix_core::ops::{Broadcast, InsertDim, SliceItem, SliceSpec};
 use jix_core::{ArrayAny, NDIM_MAX};
-use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyEllipsis, PySlice, PyTuple};
 
@@ -162,9 +162,9 @@ pub(crate) fn broadcast_array_impl(
 ///
 /// Raises:
 ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds or
-///         `start > stop`, more index items than array dimensions, or more than one ellipsis.
+///         `start > stop`, more index items than array dimensions, more than one ellipsis, or
+///         an unsupported index item type.
 ///     ValueError: Slice step other than 1.
-///     TypeError: Unsupported index item type.
 ///
 /// Examples:
 ///     ```python
@@ -276,7 +276,7 @@ pub(crate) fn parse_basic_index<'py>(
             {
                 return Ok(RawIdxItem::Int(i));
             }
-            Err(PyTypeError::new_err(
+            Err(PyIndexError::new_err(
                 "only integers, slices (`:`), and ellipsis (`...`) are valid indices",
             ))
         })
