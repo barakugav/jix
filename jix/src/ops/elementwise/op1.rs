@@ -54,7 +54,7 @@ where
     S: ArrayStorageTyped,
     K: Op1Kernel<S::Item, Output: Dtyped>,
 {
-    type ElementType = Ty<K::Output>;
+    type ElementType = K::Output;
 
     #[inline]
     fn read_data<'a>(
@@ -216,7 +216,7 @@ macro_rules! define_op1 {
             S: crate::storage::ArrayStorageTyped,
             S::Item: crate::scalar::$trait<Output: crate::dtype::Dtyped>,
         {
-            type ElementType = crate::Ty<<S::Item as crate::scalar::$trait>::Output>;
+            type ElementType = <S::Item as crate::scalar::$trait>::Output;
             crate::storage::impl_array_storage_forward!(<S>);
 
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {

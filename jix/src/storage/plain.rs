@@ -8,7 +8,7 @@ use crate::storage::params::{
 };
 use crate::storage::{
     check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, ElementType, Index, OutBuf,
-    OutBufInner, StridedBuf, Ty, TypeDyn,
+    OutBufInner, StridedBuf, TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
 use crate::ReadContext;
@@ -34,7 +34,8 @@ use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, PlainArray};
 ///   (see [`Array::plain_ndarray_ref`]).
 ///
 /// `ET: ElementType` tracks the element type at the type level and follows the same semantics as
-/// [`Compact<ET>`](crate::storage::Compact): `ET` is inferred from the dtype argument type.
+/// [`Compact<ET>`](crate::storage::Compact): the ndarray constructors give e.g. `Plain<_, f32>`,
+/// while [`Plain::new`] and [`Array::plain_ndarray_ptr`] start from a runtime [`Dtype`].
 ///
 /// # Examples
 ///
@@ -260,7 +261,7 @@ impl<T> PlainArray<T> {
     }
 }
 
-impl<'a, T> Array<Plain<&'a (), Ty<T>>> {
+impl<'a, T> Array<Plain<&'a (), T>> {
     /// Internal implementation for creating a `Plain` array that borrows from an ndarray view.
     ///
     /// Note this function does not have any lifetime bounds on the input array.

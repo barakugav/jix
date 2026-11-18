@@ -54,12 +54,12 @@ pub(crate) use sealed::ArrayStorageImpl;
 pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// The compile-time element type of arrays backed by this storage.
     ///
-    /// Either [`Ty<T>`](crate::Ty) (`T` known at compile time) or [`TypeDyn`](crate::TypeDyn)
-    /// (only available at runtime via [`dtype()`](ArrayStorage::dtype)).
+    /// Either the element type itself, e.g. `f32` (known at compile time), or
+    /// [`TypeDyn`](crate::TypeDyn) (only available at runtime via [`dtype()`](ArrayStorage::dtype)).
     ///
     /// Operations that require knowing the element type (arithmetic, comparisons, reductions,
     /// cast) are bounded on [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), a shorthand
-    /// for `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
+    /// for `ArrayStorage<ElementType = T>`. Arrays loaded from disk carry `TypeDyn`; call
     /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
     /// type and re-enable those operations.
     type ElementType: ElementType
@@ -154,7 +154,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// re-tagged storage.
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
-    /// `NewET = Ty<T>` and the runtime dtype does not equal `T::DTYPE`. Always succeeds for
+    /// `NewET = T` and the runtime dtype does not equal `T::DTYPE`. Always succeeds for
     /// `NewET = TypeDyn`.
     #[doc(hidden)]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>>

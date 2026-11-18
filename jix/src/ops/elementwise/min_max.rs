@@ -261,7 +261,7 @@ where
     SMax: ArrayStorageTyped<Item = S::Item>,
     S::Item: crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
 {
-    type ElementType = Ty<S::Item>;
+    type ElementType = S::Item;
 
     #[inline]
     fn read_data<'a>(

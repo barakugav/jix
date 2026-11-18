@@ -30,7 +30,7 @@ mod bitmap;
 pub(crate) use bitmap::*;
 
 mod sealed {
-    /// Seals a public trait: only types in this crate can implement it.
+    /// Seals a public trait: only this crate can implement it.
     pub trait Sealed {}
 }
 pub(crate) use sealed::Sealed;

@@ -60,7 +60,7 @@ where
     Complex<T>: Dtyped,
     T: Dtyped,
 {
-    type ElementType = crate::Ty<T>;
+    type ElementType = T;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -129,7 +129,7 @@ where
     Complex<T>: Dtyped,
     T: Dtyped,
 {
-    type ElementType = crate::Ty<T>;
+    type ElementType = T;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {

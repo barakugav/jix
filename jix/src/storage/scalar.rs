@@ -4,7 +4,7 @@ use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{
     check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorage, ArrayStorageInfo, Index, OutBuf,
-    OutBufInner, StridedBuf, Ty,
+    OutBufInner, StridedBuf,
 };
 use crate::util::dim_arr;
 use crate::ReadContext;
@@ -74,7 +74,7 @@ impl<T> ArrayStorage for Scalar<T>
 where
     T: Dtyped,
 {
-    type ElementType = Ty<T>;
+    type ElementType = T;
 
     #[inline]
     fn read_data<'a>(
