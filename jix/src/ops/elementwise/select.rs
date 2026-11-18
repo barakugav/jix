@@ -43,9 +43,9 @@ pub struct Select<SC, SX, SY> {
 }
 impl<SC, SX, SY> Select<SC, SX, SY>
 where
-    SC: ArrayStorageTyped<Item = bool8>,
-    SX: ArrayStorage,
-    SY: ArrayStorage<ElementType = SX::ElementType>,
+    SC: Storage<Item = bool8>,
+    SX: StorageBase,
+    SY: StorageBase<ElementType = SX::ElementType>,
 {
     /// Constructs a [`Select`] storage. See the struct docs for semantics and examples.
     pub fn new(condition: SC, x: SX, y: SY) -> Result<Self> {
@@ -317,11 +317,11 @@ where
     }
 }
 impl<SC, SX, SY> crate::storage::ArrayStorageImpl for Select<SC, SX, SY> {}
-impl<SC, SX, SY> ArrayStorage for Select<SC, SX, SY>
+impl<SC, SX, SY> StorageBase for Select<SC, SX, SY>
 where
-    SC: ArrayStorageTyped<Item = bool8>,
-    SX: ArrayStorage,
-    SY: ArrayStorage<ElementType = SX::ElementType>,
+    SC: Storage<Item = bool8>,
+    SX: StorageBase,
+    SY: StorageBase<ElementType = SX::ElementType>,
 {
     type ElementType = SX::ElementType;
 
@@ -439,7 +439,7 @@ where
 
 impl<S> Array<S>
 where
-    S: ArrayStorageTyped<Item = bool8>,
+    S: Storage<Item = bool8>,
 {
     /// Element-wise selection from `x` where `self` is `true`, and from `y` elsewhere. See
     /// [`Select`] for details and examples.
@@ -450,8 +450,8 @@ where
     #[track_caller]
     pub fn select<SX, SY>(self, x: Array<SX>, y: Array<SY>) -> Array<Select<S, SX, SY>>
     where
-        SX: ArrayStorage,
-        SY: ArrayStorage<ElementType = SX::ElementType>,
+        SX: StorageBase,
+        SY: StorageBase<ElementType = SX::ElementType>,
     {
         Select::new_array(self, x, y).unwrap()
     }
@@ -1142,7 +1142,7 @@ mod tests {
     #[test]
     fn read_tiling_is_not_fusable() {
         use crate::storage::params::ReadTiling::{SinglePass, Tiled};
-        use crate::ArrayStorage;
+        use crate::StorageBase;
         let (c, x) = (array![bool8::TRUE, bool8::FALSE], array![1i32, 2]);
         let c = Array::plain_ndarray_ref(&c).unwrap();
         let x = || Array::plain_ndarray_ref(&x).unwrap();

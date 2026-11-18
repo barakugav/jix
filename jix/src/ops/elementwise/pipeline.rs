@@ -19,7 +19,7 @@ use crate::{
 
 /// A lazy pipeline of element-wise operations over a rectangular region.
 ///
-/// Returned by [`ArrayStorage::read_as_elementwise_pipeline`](crate::ArrayStorage::read_as_elementwise_pipeline).
+/// Returned by [`StorageBase::read_as_elementwise_pipeline`](crate::StorageBase::read_as_elementwise_pipeline).
 /// Used internally; users rarely need it.
 #[allow(private_bounds)]
 pub trait ElementwisePipeline<T>: ElementwisePipelineImpl<T> {}
@@ -992,7 +992,7 @@ mod tests {
     use std::ops::Range;
 
     use crate::storage::{split_ranges, Index};
-    use crate::{array_from_fn_inline, strided_span_bytes, Array, ArrayStorage, CompactArray};
+    use crate::{array_from_fn_inline, strided_span_bytes, Array, CompactArray, StorageBase};
 
     // ---------------------------------------------------------------------------
     // Harness
@@ -1515,7 +1515,7 @@ mod tests {
     #[track_caller]
     fn pipeline_elements<S, T>(storage: &S, index: &[Range<u64>]) -> Vec<T>
     where
-        S: ArrayStorage,
+        S: StorageBase,
         T: Dtyped + std::fmt::Debug + PartialEq,
     {
         let context = ReadContext::default();
@@ -1573,7 +1573,7 @@ mod tests {
     /// checked against.
     fn read_data_elements<S, T>(storage: &S, index: &[Range<u64>]) -> Vec<T>
     where
-        S: ArrayStorage,
+        S: StorageBase,
         T: Dtyped,
     {
         let context = ReadContext::default();
@@ -1599,7 +1599,7 @@ mod tests {
     /// it actually walks: one per separate leaf, a direct measure of how far the chain fused.
     fn operand_counts<S, T>(storage: &S, index: &[Range<u64>]) -> (Option<usize>, usize)
     where
-        S: ArrayStorage,
+        S: StorageBase,
         T: Dtyped,
     {
         fn declared<T, P: ElementwisePipelineImpl<T>>(_pipeline: &P) -> Option<usize> {
@@ -1618,7 +1618,7 @@ mod tests {
     #[track_caller]
     fn operand_count<S, T>(storage: &S, index: &[Range<u64>]) -> usize
     where
-        S: ArrayStorage,
+        S: StorageBase,
         T: Dtyped,
     {
         let (declared, walked) = operand_counts::<S, T>(storage, index);
@@ -1783,7 +1783,7 @@ mod tests {
     /// `read_data` in pull mode, as `(strides, elements)` read back through those strides.
     fn pull_strides_and_elements<S, T>(storage: &S, index: &[Range<u64>]) -> (Vec<usize>, Vec<T>)
     where
-        S: ArrayStorage,
+        S: StorageBase,
         T: Dtyped,
     {
         let context = ReadContext::default();
@@ -2049,7 +2049,7 @@ mod tests {
     #[track_caller]
     fn declared_n_operands<S, T>(storage: &S, index: &[Range<u64>]) -> Option<usize>
     where
-        S: ArrayStorage,
+        S: StorageBase,
         T: Dtyped,
     {
         operand_counts::<S, T>(storage, index).0
@@ -2058,7 +2058,7 @@ mod tests {
     /// The declared `MAX_ITEMSIZE` for a pipeline over `storage`.
     fn declared_max_itemsize<S, T>(storage: &S, index: &[Range<u64>]) -> usize
     where
-        S: ArrayStorage,
+        S: StorageBase,
         T: Dtyped,
     {
         fn declared<T, P: ElementwisePipelineImpl<T>>(_pipeline: &P) -> usize {

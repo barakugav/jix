@@ -1,6 +1,6 @@
 //! Block-compressed nd-array storage backends.
 //!
-//! This module provides the three concrete [`ArrayStorage`] implementations that store array
+//! This module provides the three concrete [`StorageBase`] implementations that store array
 //! data as independently compressed nd-blocks:
 //!
 //! - [`Compact`] - heap-allocated; the standard in-memory storage.
@@ -21,7 +21,7 @@ use crate::storage::{check_out_buf, ArraySpec, ElementType, Index, OutBuf, Strid
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, NdCopier, PtrMutNoalias, PtrNoalias};
 use crate::ReadContext;
-use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dimension, TypeDyn};
+use crate::{default_strides, ArrayParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -99,7 +99,7 @@ pub struct CompactMmap<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage:
 macro_rules! impl_array_storage {
     ($ty:ident < $($lt:lifetime,)? ET >) => {
         impl<$($lt,)? ET> crate::storage::ArrayStorageImpl for $ty<$($lt,)? ET> {}
-        impl<$($lt,)? ET> ArrayStorage for $ty<$($lt,)? ET>
+        impl<$($lt,)? ET> StorageBase for $ty<$($lt,)? ET>
         where
             ET: crate::ElementType,
         {
@@ -157,7 +157,7 @@ impl_array_storage!(CompactMmap<ET>);
 
 /// Nd-array layer on top of [`BlockTable<S>`](crate::storage::block::BlockTable).
 ///
-/// Bridges the nd-array world of [`ArrayStorage`] and the 1D block world of [`BlockTable`].
+/// Bridges the nd-array world of [`StorageBase`] and the 1D block world of [`BlockTable`].
 /// The array's nd-blocks are stored in row-major order in the `BlockTable`: an nd-block at
 /// grid position `(b0, b1, ..., bn)` has 1D index
 /// `b0 * block_grid_shape[1] * ... * block_grid_shape[n] + ... + bn`.
@@ -167,7 +167,7 @@ impl_array_storage!(CompactMmap<ET>);
 /// need not be a multiple of `block_shape[d]`.
 ///
 /// The block shape (in items, not bytes) and codec params are kept in `spec` - not in
-/// `BlockTable` - so that [`ArrayStorage::spec`] can propagate them through lazy view operations
+/// `BlockTable` - so that [`StorageBase::spec`] can propagate them through lazy view operations
 /// and [`compact_with`](crate::Array::compact_with).
 pub(crate) struct ArrayBlockTableStorageBase<S, ET>
 where
@@ -533,10 +533,10 @@ mod tests {
     use crate::context::tests::context_read_cache_len;
     use crate::scalar::bool8;
     use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
-    use crate::storage::ArrayStorageTyped;
     use crate::storage::{split_ranges, ArraySpec, ArrayStorageExt, Index, OutBuf, StridedBuf};
     use crate::util::DimArray;
-    use crate::{Array, ArrayParams, ArrayStorage};
+    use crate::Storage;
+    use crate::{Array, ArrayParams, StorageBase};
 
     /// Read `index` from a compact `i32` array both into a plain contiguous buffer and into a
     /// *strided* destination whose inner spacing is doubled (a one-element gap between consecutive
@@ -1163,7 +1163,7 @@ mod tests {
     /// and the number of calls a read of it makes.
     fn counted_max(
         calls: &'static AtomicUsize,
-    ) -> (Array<impl ArrayStorageTyped<Item = i32> + use<>>, usize) {
+    ) -> (Array<impl Storage<Item = i32> + use<>>, usize) {
         let max = arange64().reduce_unordered(0, |a: i32, b: i32| {
             calls.fetch_add(1, Ordering::Relaxed);
             a.max(b)
@@ -1179,7 +1179,7 @@ mod tests {
     /// and the number of calls a read of it makes.
     fn counted_row_max(
         calls: &'static AtomicUsize,
-    ) -> (Array<impl ArrayStorageTyped<Item = i32> + use<>>, usize) {
+    ) -> (Array<impl Storage<Item = i32> + use<>>, usize) {
         let nd = ndarray::Array2::from_shape_fn((8, 8), |(i, j)| (8 * i + j) as i32);
         let params = ArrayParams::new().block_shape(&[4, 4]).unwrap();
         let x = Array::compact_ndarray_with(&nd, params).unwrap();

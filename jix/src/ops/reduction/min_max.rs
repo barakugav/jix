@@ -121,7 +121,7 @@ define_reduction_op!(
     Max,
     MaxKernel,
     where {
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::Maximum<Output = S::Item> + Dtyped,
     }
     output = S::Item,
@@ -201,7 +201,7 @@ define_reduction_op!(
     Min,
     MinKernel,
     where {
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::Minimum<Output = S::Item> + Dtyped,
     }
     output = S::Item,
@@ -281,7 +281,7 @@ define_reduction_op!(
     ArgMax,
     ArgMaxKernel,
     where {
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::ArgMax,
     }
     output = u64,
@@ -363,7 +363,7 @@ define_reduction_op!(
     ArgMin,
     ArgMinKernel,
     where {
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::ArgMin,
     }
     output = u64,
@@ -411,26 +411,26 @@ where
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_reduction_method!(
         max: Max,
         where {
-            S: ArrayStorageTyped,
+            S: Storage,
             S::Item: crate::scalar::Maximum<Output = S::Item> + Dtyped,
         }
     );
     define_array_reduction_method!(
         min: Min,
         where {
-            S: ArrayStorageTyped,
+            S: Storage,
             S::Item: crate::scalar::Minimum<Output = S::Item> + Dtyped,
         }
     );
     define_array_reduction_method!(
         argmax: ArgMax,
         where {
-            S: ArrayStorageTyped,
+            S: Storage,
             S::Item: crate::scalar::ArgMax,
         },
         single_dim
@@ -438,7 +438,7 @@ where
     define_array_reduction_method!(
         argmin: ArgMin,
         where {
-            S: ArrayStorageTyped,
+            S: Storage,
             S::Item: crate::scalar::ArgMin,
         },
         single_dim

@@ -1,7 +1,7 @@
 //! Storage backends for [`Array`](crate::Array).
 //!
-//! Every `Array<S>` is backed by a storage `S` implementing [`ArrayStorage`], which exposes three
-//! things: the array's shape, its element dtype, and [`read_data`](ArrayStorage::read_data),
+//! Every `Array<S>` is backed by a storage `S` implementing [`StorageBase`], which exposes three
+//! things: the array's shape, its element dtype, and [`read_data`](StorageBase::read_data),
 //! which reads any rectangular sub-region as a [`StridedBuf`] - a borrowed view, a freshly
 //! materialized buffer, or bytes written into a caller-supplied destination. All other operations
 //! are built on these three.
@@ -25,9 +25,9 @@
 //! Every storage carries its compile-time element type as the associated type
 //! **[`ElementType`]**: either the element type itself, e.g. `f32` (known at compile time), or
 //! [`TypeDyn`] (only known at runtime, e.g. for arrays loaded from disk). The number of dims is
-//! always a runtime property, read from [`shape`](ArrayStorage::shape).
+//! always a runtime property, read from [`shape`](StorageBase::shape).
 //!
-//! [`ArrayStorageTyped`] is a shorthand for `ArrayStorage<ElementType = T>`. All
+//! [`Storage`](crate::Storage) is a shorthand for `StorageBase<ElementType = T>`. All
 //! element-wise operations require it, so the compiler can dispatch to the correct scalar
 //! implementation.
 //!
@@ -41,7 +41,7 @@ use std::sync::Arc;
 
 use crate::dtype::Dtyped;
 use crate::ops::ElementwisePipeline;
-use crate::{ArrayStorage, ElementType, TypeDyn};
+use crate::{ElementType, StorageBase, TypeDyn};
 
 pub(crate) mod core_trait;
 pub(crate) use core_trait::{ArrayStorageExt, ArrayStorageImpl};
@@ -75,27 +75,6 @@ pub use index::Index;
 mod info;
 pub use info::*;
 
-/// An [`ArrayStorage`] whose element type is statically known.
-///
-/// Shorthand for `ArrayStorage<ElementType = T>`, with `T` as the associated type `Item`.
-/// All element-wise operations - arithmetic, comparisons, reductions, type casts - are bounded
-/// on this trait so the compiler can dispatch to the correct scalar implementation without
-/// runtime checks.
-///
-/// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use
-/// [`Array::into_typed::<T>()`](crate::Array::into_typed).
-pub trait ArrayStorageTyped: ArrayStorage<ElementType = Self::Item> + Sized {
-    /// The concrete Rust element type stored in this array (e.g. `f32`, `i64`).
-    type Item: Dtyped;
-}
-impl<S, T> ArrayStorageTyped for S
-where
-    S: ArrayStorage<ElementType = T>,
-    T: Dtyped,
-{
-    type Item = T;
-}
-
 macro_rules! impl_array_storage_smart_ptr {
     (<$($gen:tt),*>, $ptr:ty) => {
         impl_array_storage_smart_ptr!(<$($gen),*>, $ptr, {
@@ -103,8 +82,8 @@ macro_rules! impl_array_storage_smart_ptr {
         });
     };
     (<$($gen:tt),*>, $ptr:ty, { $($change_items:tt)* }) => {
-        impl<$($gen),*> crate::storage::ArrayStorageImpl for $ptr where S: ArrayStorage {}
-        impl<$($gen),*> ArrayStorage for $ptr where S: ArrayStorage {
+        impl<$($gen),*> crate::storage::ArrayStorageImpl for $ptr where S: StorageBase {}
+        impl<$($gen),*> StorageBase for $ptr where S: StorageBase {
             type ElementType = S::ElementType;
 
             #[inline(always)]
@@ -173,8 +152,8 @@ impl_array_storage_smart_ptr!(<S>, Box<S>, {
 impl_array_storage_smart_ptr!(<S>, Rc<S>);
 impl_array_storage_smart_ptr!(<S>, Arc<S>);
 
-impl crate::storage::ArrayStorageImpl for &dyn ArrayStorage {}
-impl ArrayStorage for &dyn ArrayStorage {
+impl crate::storage::ArrayStorageImpl for &dyn StorageBase {}
+impl StorageBase for &dyn StorageBase {
     type ElementType = crate::TypeDyn;
 
     #[inline(always)]

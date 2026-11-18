@@ -29,7 +29,7 @@ let result = a.exp().sum(0).map(|x| x - 1.0);
 result.write_to_file(Path::new("result.jix"))?;
 ```
 
-`Array<S>` is generic over its storage backend `S: ArrayStorage`, which can be `Compact` (block-compressed data),
+`Array<S>` is generic over its storage backend `S: StorageBase`, which can be `Compact` (block-compressed data),
 `CompactMmap` (memory-mapped file), `Plain` (uncompressed in-memory), a lazy operation view like `Neg<Compact>`,
 `Reshape<Neg<Compact>>`, etc.
 

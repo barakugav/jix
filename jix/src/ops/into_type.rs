@@ -29,13 +29,13 @@ use crate::ops::prelude::*;
 /// // Erase the static element type - always succeeds.
 /// let dyn_a = a.view().into_type_dyn();
 /// // dyn_a: Array<IntoType<&Compact<f32>, TypeDyn>>
-/// // dyn_a: Array<Storage::ElementType = TypeDyn>
+/// // dyn_a: Array<S::ElementType = TypeDyn>
 /// assert_eq!(dyn_a.dtype(), &f32::DTYPE);
 ///
 /// // Recover the concrete type - validated at runtime.
 /// let typed_a = dyn_a.into_typed::<f32>()?;
 /// // typed_a: Array<IntoType<..., f32>>
-/// // typed_a: Array<Storage::ElementType = f32>
+/// // typed_a: Array<S::ElementType = f32>
 ///
 /// // Element-wise operations are available again.
 /// let result = typed_a.exp().to_ndarray::<Ix1>()?;
@@ -47,7 +47,7 @@ pub struct IntoType<S, ET> {
 }
 impl<S, ET> IntoType<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     /// Constructs an [`IntoType`] storage. See the struct docs for semantics and examples.
@@ -69,13 +69,13 @@ where
 }
 impl<S, ET> crate::storage::ArrayStorageImpl for IntoType<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
 }
-impl<S, ET> ArrayStorage for IntoType<S, ET>
+impl<S, ET> StorageBase for IntoType<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     type ElementType = ET;
@@ -154,14 +154,14 @@ pub(crate) use impl_element_type_change_default;
 /// Methods for converting an array to a different element type.
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Re-tag this array's element type as `NewET`, returning an error if the runtime dtype does
     /// not match.
     ///
     /// Arrays loaded from files carry [`TypeDyn`]. Once the dtype is known, `into_type::<T>()`
     /// (or [`into_typed::<T>`](Self::into_typed)) recovers the static `T` that most
-    /// element-wise operations require (`ArrayStorageTyped`);
+    /// element-wise operations require (`Storage`);
     /// [`into_type_dyn`](Self::into_type_dyn) erases it.
     ///
     /// The storage becomes `S::ElementTypeChange<NewET>`: an

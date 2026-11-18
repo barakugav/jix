@@ -1,7 +1,7 @@
 //! Array operations.
 //!
 //! Every operation returns a new [`Array<S>`](crate::Array) where `S` is a struct that implements
-//! [`ArrayStorage`](crate::ArrayStorage). The storage wraps the input array(s) and
+//! [`StorageBase`](crate::StorageBase). The storage wraps the input array(s) and
 //! transforms read requests on demand - no data is copied at construction time. An operation only
 //! executes when its result is materialized, e.g. via [`.to_ndarray()`](crate::Array::to_ndarray)
 //! or [`.compact()`](crate::Array::compact).
@@ -47,8 +47,8 @@
 //! Element-wise operations - arithmetic, comparisons, reductions, bitwise ops, type casting - all
 //! require the input storage to be *typed*: the element type must be known at compile time, not
 //! just at runtime. Concretely, the input must satisfy
-//! [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), which is a shorthand for
-//! `ArrayStorage<ElementType = T>` for some concrete `T: Dtyped`.
+//! [`Storage`](crate::Storage), which is a shorthand for
+//! `StorageBase<ElementType = T>` for some concrete `T: Dtyped`.
 //!
 //! Arrays constructed from typed sources are typed automatically:
 //!
@@ -142,7 +142,7 @@ pub(crate) mod prelude {
     };
     pub(crate) use crate::storage::{
         check_out_buf, read_data_and_map_strides, write_out_buf_slot, ArraySpec, ArrayStorageExt,
-        ArrayStorageInfo, ArrayStorageTyped, BlockSize, Index, OutBuf, OutBufInner, StridedBuf,
+        ArrayStorageInfo, BlockSize, Index, OutBuf, OutBufInner, StridedBuf,
     };
     pub(crate) use crate::util::{
         array_from_fn_inline, calc_block_end, default_logical_strides, default_strides,
@@ -151,6 +151,6 @@ pub(crate) mod prelude {
         ScaleWeight, SliceExt, REQUIRE_ALIGNED,
     };
     pub(crate) use crate::{
-        Array, ArrayStorage, DimDyn, DimVec, Dimension, ElementType, TypeDyn, NDIM_MAX,
+        Array, DimDyn, DimVec, Dimension, ElementType, Storage, StorageBase, TypeDyn, NDIM_MAX,
     };
 }

@@ -7,7 +7,7 @@ use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, Index, OutBuf};
 use crate::util::dim_arr;
 use crate::util::iter::NdIter;
 use crate::ReadContext;
-use crate::{ArrayParams, ArrayStorage, CompactArray, DimArray, DimDyn, SliceExt, TypeDyn};
+use crate::{ArrayParams, CompactArray, DimArray, DimDyn, SliceExt, StorageBase, TypeDyn};
 
 use super::Array;
 
@@ -219,7 +219,7 @@ impl<T> CompactArray<T> {
             spec: ArraySpecOwned,
         }
         impl<T, F> crate::storage::ArrayStorageImpl for FnStorage<T, F> {}
-        impl<T, F> ArrayStorage for FnStorage<T, F>
+        impl<T, F> StorageBase for FnStorage<T, F>
         where
             T: Dtyped,
             F: Fn(&[u64]) -> T,
@@ -319,7 +319,7 @@ mod tests {
     use crate::storage::block::BlockSize;
 
     use crate::util::arr_params;
-    use crate::{ArrayParams, ArrayStorage};
+    use crate::{ArrayParams, StorageBase};
 
     use crate::array::tests::*;
 

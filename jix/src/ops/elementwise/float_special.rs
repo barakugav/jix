@@ -162,7 +162,7 @@ define_op1!(
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_op1_method!(is_nan: IsNan, crate::scalar::IsNan);
     define_array_op1_method!(is_finite: IsFinite, crate::scalar::IsFinite);

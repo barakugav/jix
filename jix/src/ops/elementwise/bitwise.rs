@@ -461,7 +461,7 @@ define_op2!(
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_op2_method!(bitwise_shift_left: BitwiseShiftLeft, crate::scalar::Shl);
     define_array_op2_method!(bitwise_shift_right: BitwiseShiftRight, crate::scalar::Shr);

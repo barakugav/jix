@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use jix_core::dtype::{Dtyped, ScalarKind};
 use jix_core::ops::IntoType;
-use jix_core::storage::ArrayStorageAny;
+use jix_core::storage::StorageAny;
 use jix_core::{Array, ArrayAny};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -14,7 +14,7 @@ use crate::ops::common::{
 use crate::type_hint::ItemOrTuple;
 use crate::util::IterExt;
 
-type TypedOperand<T> = Array<IntoType<ArrayStorageAny, T>>;
+type TypedOperand<T> = Array<IntoType<StorageAny, T>>;
 
 /// Runtime dtype-dispatch table for an op with `IN_N` array inputs.
 ///

@@ -807,7 +807,7 @@ define_op2!(
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_op2_method!(divide_trunc: DivideTrunc, crate::scalar::DivideTrunc);
     define_array_op2_method!(divide_floor: DivideFloor, crate::scalar::DivideFloor);
@@ -1384,7 +1384,7 @@ mod tests {
             )
         };
         // `1.0 % 0.0` is `NaN`, not an error.
-        fn read<S: crate::storage::ArrayStorageTyped>(r: Array<S>) -> ndarray::Array1<S::Item> {
+        fn read<S: crate::Storage>(r: Array<S>) -> ndarray::Array1<S::Item> {
             r.to_ndarray().unwrap()
         }
         let (zf, zg) = floats();

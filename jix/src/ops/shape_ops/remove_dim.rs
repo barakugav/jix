@@ -47,7 +47,7 @@ pub struct RemoveDim<S> {
 
 impl<S> RemoveDim<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Constructs a [`RemoveDim`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, dim: impl DimsArg) -> Result<Self> {
@@ -154,9 +154,9 @@ where
 }
 
 impl<S> crate::storage::ArrayStorageImpl for RemoveDim<S> {}
-impl<S> ArrayStorage for RemoveDim<S>
+impl<S> StorageBase for RemoveDim<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     type ElementType = S::ElementType;
 
@@ -225,7 +225,7 @@ where
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Returns a lazy view of the array with the specified length-1 dimensions removed.
     /// See [`RemoveDim`] for details and examples.
