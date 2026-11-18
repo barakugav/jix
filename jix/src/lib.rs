@@ -118,7 +118,7 @@
 //! | [`Array<Compact<...>>`](storage::Compact) | Heap-allocated block-compressed array. The main backend of the library. |
 //! | [`Array<CompactMmap<...>>`](storage::CompactMmap) | Block-compressed array served from a memory-mapped file. Created by [`Array::read_from_file_mmap`]. |
 //! | [`Array<Op<...>>`](ops) | Lazy operation views defined in [`ops`]. Wrap one or more arrays; apply their transformation on each read. |
-//! | [`Array<Plain<...>>`](storage::Plain) | Zero-copy view of a contiguous or strided in-memory buffer. Created by [`Array::plain_ndarray`] (owned) or [`Array::plain_ndarray_ref`] (borrowed). |
+//! | [`Array<Plain<T>>`](storage::Plain) | Zero-copy view of a contiguous or strided in-memory buffer. Created by [`Array::plain_ndarray`] (owned) or [`Array::plain_ndarray_ref`] (borrowed). |
 //!
 //! # Operations
 //!
@@ -415,10 +415,10 @@ pub use error::Error;
 pub type CompactArray<T> = Array<storage::Compact<T>>;
 
 /// Plain (uncompressed) owned array (type alias).
-pub type PlainArray<T> = Array<storage::Plain<Vec<T>, T>>;
+pub type PlainArray<T> = Array<storage::Plain<T>>;
 
 /// Plain (uncompressed) borrowed array (type alias).
-pub type PlainArrayRef<'a, T> = Array<storage::Plain<&'a (), T>>;
+pub type PlainArrayView<'a, T> = Array<storage::PlainView<'a, T>>;
 
 /// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn StorageBase>`.
 ///

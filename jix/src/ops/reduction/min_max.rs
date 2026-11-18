@@ -409,10 +409,7 @@ where
     const ONE_CELL_LANES: Option<usize> = Some(if cfg!(target_arch = "x86") { 8 } else { 16 });
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_reduction_method!(
         max: Max,
         where {

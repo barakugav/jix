@@ -1765,7 +1765,7 @@ pub(crate) mod tests {
     fn reduction_over_plain_with_hand_picked_strides() {
         use crate::{Array, ArrayParams};
 
-        // The reduction reads its source in pull mode, and `Plain::read_data` in pull mode hands
+        // The reduction reads its source in pull mode, and `PlainBase::read_data` in pull mode hands
         // back a zero-copy view with exactly the strides it was built with. So a `Plain` array
         // feeds the in-tile loop a chosen stride pattern directly - one row per shape that loop
         // can see, including the degenerate and unaligned ones the fast path has to reject.
@@ -1811,7 +1811,7 @@ pub(crate) mod tests {
                 if let Some(w) = window {
                     params = params.read_size(w);
                 }
-                let arr: Array<crate::storage::Plain<_, i32>> = unsafe {
+                let arr: Array<crate::storage::PlainView<'_, i32>> = unsafe {
                     // SAFETY: `backing` outlives `arr`, and every index combination stays in bounds.
                     Array::plain_ndarray_ptr(
                         backing.as_ptr().add(base),

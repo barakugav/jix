@@ -307,10 +307,7 @@ define_op1!(
     simd: reverse_bits_bulk,
 );
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op1_method!(count_ones: CountOnes, crate::scalar::CountOnes);
     define_array_op1_method!(count_zeros: CountZeros, crate::scalar::CountZeros);
     define_array_op1_method!(leading_zeros: LeadingZeros, crate::scalar::LeadingZeros);

@@ -187,10 +187,7 @@ impl<S: StorageBase> StorageBase for Roll<S> {
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array with elements rolled along the given dim.
     /// See [`Roll`] for details and examples.
     ///

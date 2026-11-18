@@ -4,9 +4,11 @@ use crate::storage::StorageAny;
 use crate::ReadContext;
 use crate::{ArrayAny, ElementType, StorageBase};
 
-mod compact;
 mod construct;
+
 mod read;
+
+mod compact;
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
 ///
@@ -30,7 +32,7 @@ mod read;
 /// |------|-------------|
 /// | [`Array<Compact>`](crate::storage::Compact) | Heap-allocated block-compressed array. The main storage backend. |
 /// | [`Array<Add<S1, S2>> or Array<Neg<S>> ...`](crate::ops) | Lazy operation views that wrap one or more arrays and apply a transformation at read time. Created by methods in [`ops`](crate::ops). |
-/// | [`Array<Plain<...>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_ref`](Array::plain_ndarray_ref). |
+/// | [`Array<Plain<T>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_ref`](Array::plain_ndarray_ref). |
 ///
 /// # Operations and lazy evaluation
 ///

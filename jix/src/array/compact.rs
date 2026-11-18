@@ -556,7 +556,7 @@ mod tests {
             plain.to_ndarray().unwrap(),
             ndarray::array![[1i32, 4], [2, 5], [3, 6]]
         );
-        // `to_plain` goes through `to_ndarray`, so the buffer is F-laid-out; `Plain::new` then
+        // `to_plain` goes through `to_ndarray`, so the buffer is F-laid-out; `PlainBase::new` then
         // re-derives the hint from those strides, and the layout survives into the new leaf.
         assert_eq!(plain.storage().spec().read_layout_order(), &[1, 0]);
     }

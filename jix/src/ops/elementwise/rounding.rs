@@ -122,10 +122,7 @@ define_op1!(
     simd: round_bulk,
 );
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op1_method!(floor: Floor, crate::scalar::Floor);
     define_array_op1_method!(ceil: Ceil, crate::scalar::Ceil);
     define_array_op1_method!(round: Round, crate::scalar::Round);

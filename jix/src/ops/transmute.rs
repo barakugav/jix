@@ -122,10 +122,7 @@ where
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Reinterprets each element as the type `T` without converting the bytes. See [`Transmute`]
     /// for details and examples.
     ///

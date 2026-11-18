@@ -267,10 +267,7 @@ impl<S: StorageBase> StorageBase for Repeat<S> {
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view with each element repeated `repeats` times along `dim`.
     /// See [`Repeat`] for details and examples.
     ///

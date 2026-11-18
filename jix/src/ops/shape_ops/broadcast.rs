@@ -203,10 +203,7 @@ impl<S: StorageBase> StorageBase for Broadcast<S> {
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.
     /// See [`Broadcast`] for details and examples.
     ///

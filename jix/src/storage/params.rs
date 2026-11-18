@@ -2200,7 +2200,7 @@ mod tests {
     fn plain_ndarray_ptr_rejects_zero_itemsize() {
         let buf = [0u8; 8];
         let result = unsafe {
-            Array::<crate::storage::Plain<&(), crate::TypeDyn>>::plain_ndarray_ptr(
+            Array::<crate::storage::PlainView<'_, crate::TypeDyn>>::plain_ndarray_ptr(
                 buf.as_ptr(),
                 &[4],
                 &[0usize],
@@ -2282,7 +2282,7 @@ mod tests {
     fn plain_ndarray_ptr_rejects_overflowing_shape() {
         let buf = [0u8; 8];
         let result = unsafe {
-            Array::<crate::storage::Plain<&(), crate::TypeDyn>>::plain_ndarray_ptr(
+            Array::<crate::storage::PlainView<'_, crate::TypeDyn>>::plain_ndarray_ptr(
                 buf.as_ptr(),
                 &OVERFLOWING_EMPTY_SHAPE,
                 &[0usize; 3],

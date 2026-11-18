@@ -459,10 +459,7 @@ define_op2!(
     simd: rotate_right_bulk,
 );
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op2_method!(bitwise_shift_left: BitwiseShiftLeft, crate::scalar::Shl);
     define_array_op2_method!(bitwise_shift_right: BitwiseShiftRight, crate::scalar::Shr);
     define_array_op2_method!(bitwise_rotate_left: BitwiseRotateLeft, crate::scalar::RotateLeft, fixed_rhs_type = u32);

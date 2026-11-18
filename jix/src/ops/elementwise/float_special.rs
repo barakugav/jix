@@ -160,10 +160,7 @@ define_op1!(
     simd: is_infinite_bulk,
 );
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op1_method!(is_nan: IsNan, crate::scalar::IsNan);
     define_array_op1_method!(is_finite: IsFinite, crate::scalar::IsFinite);
     define_array_op1_method!(is_infinite: IsInfinite, crate::scalar::IsInfinite);

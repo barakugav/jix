@@ -223,10 +223,7 @@ where
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array with the specified length-1 dimensions removed.
     /// See [`RemoveDim`] for details and examples.
     ///

@@ -419,10 +419,7 @@ where
     Array::from_storage(MapMultiple::new(arrays, map_fn).unwrap())
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Applies `map_fn` to each element, returning an array with dtype `R`. See [`Map`] for
     /// details and examples.
     ///

@@ -532,14 +532,14 @@ mod tests {
     /// `select` on them, and asserts the result matches the element-wise `if c { x }
     /// else { y }` reference. Shared by the concrete per-byte-width tests below, which only
     /// differ in the fixed input arrays.
-    fn check_select_concrete<T, InD>(
-        cond: &ndarray::Array<bool8, InD>,
-        x: &ndarray::Array<T, InD>,
-        y: &ndarray::Array<T, InD>,
+    fn check_select_concrete<T, D>(
+        cond: &ndarray::Array<bool8, D>,
+        x: &ndarray::Array<T, D>,
+        y: &ndarray::Array<T, D>,
         block_shape: Option<&[usize]>,
     ) where
         T: Dtyped + Copy + Debug + PartialEq,
-        InD: ndarray::Dimension,
+        D: ndarray::Dimension,
     {
         let za_cond = match block_shape {
             Some(bs) => Array::compact_ndarray_with(cond, crate::util::arr_params(bs)).unwrap(),
@@ -853,15 +853,15 @@ mod tests {
     /// `base_offset` shifts the destination base that many bytes off an 8-aligned address - so a
     /// non-multiple of the dtype's alignment drives the unaligned inner loop.
     #[track_caller]
-    fn check_select_strided<T, InD>(
-        cond: &ndarray::Array<bool8, InD>,
-        x: &ndarray::Array<T, InD>,
-        y: &ndarray::Array<T, InD>,
+    fn check_select_strided<T, D>(
+        cond: &ndarray::Array<bool8, D>,
+        x: &ndarray::Array<T, D>,
+        y: &ndarray::Array<T, D>,
         inner_gap: usize,
         base_offset: usize,
     ) where
         T: Dtyped + Copy + Debug + PartialEq,
-        InD: ndarray::Dimension,
+        D: ndarray::Dimension,
     {
         use crate::storage::StridedBuf;
 

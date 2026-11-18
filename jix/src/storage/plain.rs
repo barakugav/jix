@@ -14,28 +14,47 @@ use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
 use crate::ReadContext;
 use crate::{Array, ArrayParams, DimDyn, Dimension, PlainArray, StorageBase};
 
+/// Uncompressed nd-array storage that owns its data in a `Vec<T>`.
+///
+/// Same as [`PlainBase`] (see there for details) with a `Vec<T>` as the owner of the data.
+///
+/// Created by [`Array::plain_ndarray`] and [`Array::to_plain`].
+pub struct Plain<T>(PlainBase<Vec<T>, T>);
+
+/// Uncompressed nd-array storage that borrows its data.
+///
+/// Same as [`PlainBase`] (see there for details) but borrows the data for the lifetime `'a`
+/// instead of owning it.
+///
+/// Created by [`Array::plain_ndarray_ref`], [`Array::plain_ndarray_view`] and
+/// [`Array::plain_ndarray_ptr`].
+pub struct PlainView<'a, ET>(PlainBase<&'a (), ET>);
+
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
-/// `Plain` lets uncompressed data be the storage of an `Array`, unlike the block-compressed
+/// `PlainBase` lets uncompressed data be the storage of an `Array`, unlike the block-compressed
 /// [`Compact`](crate::storage::Compact). It is useful when regular ndarrays need to behave like
 /// `Array`, for example to participate in math operations with compressed arrays.
 ///
-/// `Plain<A, ...>` holds a raw pointer into a buffer owned by `A`, together with a per-dimension
-/// shape and byte strides. The buffer may be laid out in any order (C-contiguous,
+/// `PlainBase<A, ...>` holds a raw pointer into a buffer owned by `A`, together with a
+/// per-dimension shape and byte strides. The buffer may be laid out in any order (C-contiguous,
 /// Fortran-contiguous, transposed, sliced with gaps, etc.): a pull read lends a view of the
 /// requested sub-region at these strides, and a push read copies it into the destination.
 ///
 /// The type parameter `A` is the *owner* of the underlying memory and can be any type; keeping it
-/// alongside the pointer keeps the data valid. Two concrete owners are provided:
+/// alongside the pointer keeps the data valid. Most code uses one of the two aliases:
 ///
-/// * `Plain<Vec<T>, ...>` - owns the data, `Vec<T>` is the data allocation (see
+/// * [`Plain<T>`] - owns the data, `Vec<T>` is the data allocation (see
 ///   [`Array::plain_ndarray`]).
-/// * `Plain<&'a (), ...>` - borrows the data, `&'a ()` is a marker for the borrowed allocation
+/// * [`PlainView<'a, ET>`] - borrows the data, `&'a ()` is a marker for the borrowed allocation
 ///   (see [`Array::plain_ndarray_ref`]).
 ///
+/// Other owners, e.g. a Python object keeping a NumPy buffer alive, use `PlainBase` directly
+/// through [`PlainBase::new`].
+///
 /// `ET: ElementType` tracks the element type at the type level and follows the same semantics as
-/// [`Compact<ET>`](crate::storage::Compact): the ndarray constructors give e.g. `Plain<_, f32>`,
-/// while [`Plain::new`] and [`Array::plain_ndarray_ptr`] start from a runtime [`Dtype`].
+/// [`Compact<ET>`](crate::storage::Compact): the ndarray constructors give e.g. `Plain<f32>`,
+/// while [`PlainBase::new`] and [`Array::plain_ndarray_ptr`] start from a runtime [`Dtype`].
 ///
 /// # Examples
 ///
@@ -56,7 +75,7 @@ use crate::{Array, ArrayParams, DimDyn, Dimension, PlainArray, StorageBase};
 /// assert_eq!(result, array![[11.0f32, 22.0], [33.0, 44.0]]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Plain<A, ET> {
+pub struct PlainBase<A, ET> {
     #[allow(unused)]
     allocation: A,
 
@@ -67,8 +86,8 @@ pub struct Plain<A, ET> {
     element_type: PhantomData<ET>,
     spec: ArraySpecOwned,
 }
-impl<A> Plain<A, TypeDyn> {
-    /// Construct a `Plain` storage from a raw pointer, shape, and byte strides.
+impl<A> PlainBase<A, TypeDyn> {
+    /// Construct a `PlainBase` storage from a raw pointer, shape, and byte strides.
     ///
     /// # Arguments
     ///
@@ -103,7 +122,7 @@ impl<A> Plain<A, TypeDyn> {
     ///
     /// The caller must ensure:
     /// * `data` is a valid, non-dangling pointer for the lifetime of the
-    ///   returned `Plain`.
+    ///   returned `PlainBase`.
     /// * The memory region reachable via `data` and `strides` is valid to
     ///   read for all index combinations in `0..shape[d]` on each dimension
     ///   `d`.
@@ -206,10 +225,10 @@ impl<T> PlainArray<T> {
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim, or if it has a negative stride (e.g. a reversed axis).
-    pub fn plain_ndarray<D2>(arr: ndarray::Array<T, D2>) -> Result<Self>
+    pub fn plain_ndarray<D>(arr: ndarray::Array<T, D>) -> Result<Self>
     where
         T: Dtyped,
-        D2: ndarray::Dimension,
+        D: ndarray::Dimension,
     {
         Self::plain_ndarray_with(arr, ArrayParams::default())
     }
@@ -229,10 +248,10 @@ impl<T> PlainArray<T> {
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim, or if it has a negative stride (e.g. a reversed axis).
-    pub fn plain_ndarray_with<D2>(arr: ndarray::Array<T, D2>, params: ArrayParams) -> Result<Self>
+    pub fn plain_ndarray_with<D>(arr: ndarray::Array<T, D>, params: ArrayParams) -> Result<Self>
     where
         T: Dtyped,
-        D2: ndarray::Dimension,
+        D: ndarray::Dimension,
     {
         let shape = shape_from_ndarray(arr.shape())?;
 
@@ -246,7 +265,7 @@ impl<T> PlainArray<T> {
         let data_ptr = data_ptr.cast::<u8>();
 
         let storage = unsafe {
-            Plain::new(
+            PlainBase::new(
                 allocation,
                 data_ptr,
                 shape.as_slice(),
@@ -255,13 +274,13 @@ impl<T> PlainArray<T> {
                 params,
             )
         }?;
-        let array = Array::from_storage(storage);
-        let array = array.into_type().unwrap();
-        Ok(array)
+        Ok(Array::from_storage(Plain(
+            storage.element_type_change::<T>()?,
+        )))
     }
 }
 
-impl<'a, T> Array<Plain<&'a (), T>> {
+impl<'a, T> Array<PlainView<'a, T>> {
     /// Internal implementation for creating a `Plain` array that borrows from an ndarray view.
     ///
     /// Note this function does not have any lifetime bounds on the input array.
@@ -270,13 +289,13 @@ impl<'a, T> Array<Plain<&'a (), T>> {
     ///
     /// The caller must ensure that the lifetime `'a` correctly reflects the lifetime of the
     /// borrowed *data* in `arr`.
-    unsafe fn plain_ndarray_ref_impl<S, D2>(
-        arr: &ndarray::ArrayBase<S, D2>,
+    unsafe fn plain_ndarray_ref_impl<S, D>(
+        arr: &ndarray::ArrayBase<S, D>,
         params: ArrayParams,
     ) -> Result<Self>
     where
         S: ndarray::Data<Elem = T>,
-        D2: ndarray::Dimension,
+        D: ndarray::Dimension,
         T: Dtyped,
     {
         let shape = shape_from_ndarray(arr.shape())?;
@@ -285,7 +304,7 @@ impl<'a, T> Array<Plain<&'a (), T>> {
         unsafe { Self::plain_ndarray_ptr(data_ptr, shape.as_slice(), &strides, T::DTYPE, params) }
     }
 
-    /// Create a [`Plain`] array that borrows from an ndarray.
+    /// Create a [`PlainView`] array that borrows from an ndarray.
     ///
     /// No element data is copied. The resulting array shares memory with
     /// `arr` and is valid for its lifetime `'a`. Any layout supported by
@@ -302,16 +321,16 @@ impl<'a, T> Array<Plain<&'a (), T>> {
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim, or if it has a negative stride (e.g. a reversed axis).
-    pub fn plain_ndarray_ref<S, D2>(arr: &'a ndarray::ArrayBase<S, D2>) -> Result<Self>
+    pub fn plain_ndarray_ref<S, D>(arr: &'a ndarray::ArrayBase<S, D>) -> Result<Self>
     where
         S: ndarray::Data<Elem = T>,
-        D2: ndarray::Dimension,
+        D: ndarray::Dimension,
         T: Dtyped,
     {
         Self::plain_ndarray_ref_with(arr, ArrayParams::default())
     }
 
-    /// Create a [`Plain`] array that borrows from an ndarray, with explicit params.
+    /// Create a [`PlainView`] array that borrows from an ndarray, with explicit params.
     ///
     /// Same as [`plain_ndarray_ref`](Self::plain_ndarray_ref) but takes an explicit
     /// [`ArrayParams`].
@@ -327,35 +346,35 @@ impl<'a, T> Array<Plain<&'a (), T>> {
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim, or if it has a negative stride (e.g. a reversed axis).
-    pub fn plain_ndarray_ref_with<S, D2>(
-        arr: &'a ndarray::ArrayBase<S, D2>,
+    pub fn plain_ndarray_ref_with<S, D>(
+        arr: &'a ndarray::ArrayBase<S, D>,
         params: ArrayParams,
     ) -> Result<Self>
     where
         S: ndarray::Data<Elem = T>,
-        D2: ndarray::Dimension,
+        D: ndarray::Dimension,
         T: Dtyped,
     {
         // SAFETY: `arr` is 'a, so the returned `Plain` will not outlive the data in `arr`.
         unsafe { Self::plain_ndarray_ref_impl(arr, params) }
     }
 
-    /// Create a [`Plain`] array that borrows from an ndarray view.
+    /// Create a [`PlainView`] array that borrows from an ndarray view.
     ///
     /// Similar to [`Self::plain_ndarray_ref`] but takes an `ArrayView` instead of an `ArrayBase`.
     /// See `plain_ndarray_ref` for more details.
     ///
     /// Uses default [`ArrayParams`]. To pass explicit params, use
     /// [`plain_ndarray_view_with`](Self::plain_ndarray_view_with).
-    pub fn plain_ndarray_view<D2>(arr: ndarray::ArrayView<'a, T, D2>) -> Result<Self>
+    pub fn plain_ndarray_view<D>(arr: ndarray::ArrayView<'a, T, D>) -> Result<Self>
     where
-        D2: ndarray::Dimension,
+        D: ndarray::Dimension,
         T: Dtyped,
     {
         Self::plain_ndarray_view_with(arr, ArrayParams::default())
     }
 
-    /// Create a [`Plain`] array that borrows from an ndarray view, with explicit params.
+    /// Create a [`PlainView`] array that borrows from an ndarray view, with explicit params.
     ///
     /// Same as [`plain_ndarray_view`](Self::plain_ndarray_view) but takes an explicit
     /// [`ArrayParams`].
@@ -366,20 +385,20 @@ impl<'a, T> Array<Plain<&'a (), T>> {
     /// [`Array::compact`]/[`Array::compact_with`]) and steer reads, e.g.
     /// [`read_size`](ArrayParams::read_size). See [`ArrayParams`] for the full list. The block
     /// shape is ignored, as a plain view has no blocks: pass it to [`Array::compact_with`] instead.
-    pub fn plain_ndarray_view_with<D2>(
-        arr: ndarray::ArrayView<'a, T, D2>,
+    pub fn plain_ndarray_view_with<D>(
+        arr: ndarray::ArrayView<'a, T, D>,
         params: ArrayParams,
     ) -> Result<Self>
     where
-        D2: ndarray::Dimension,
+        D: ndarray::Dimension,
         T: Dtyped,
     {
         // SAFETY: `arr` *data* is 'a, so the returned `Plain` will not outlive the data in `arr`.
         unsafe { Self::plain_ndarray_ref_impl(&arr, params) }
     }
 }
-impl<ET> Array<Plain<&(), ET>> {
-    /// Create a [`Plain`] array from a raw pointer, shape, and byte strides, borrowing from an
+impl<ET> Array<PlainView<'_, ET>> {
+    /// Create a [`PlainView`] array from a raw pointer, shape, and byte strides, borrowing from an
     /// external allocation.
     ///
     /// No element data is copied: the resulting array shares memory with the external allocation.
@@ -425,15 +444,16 @@ impl<ET> Array<Plain<&(), ET>> {
         ET: ElementType,
     {
         let allocation = &();
-        let storage = unsafe { Plain::new(allocation, data_ptr, shape, strides, dtype, params) }?;
-        let array = Array::from_storage(storage);
-        let array = array.into_type()?;
-        Ok(array)
+        let storage =
+            unsafe { PlainBase::new(allocation, data_ptr, shape, strides, dtype, params) }?;
+        Ok(Array::from_storage(PlainView(
+            storage.element_type_change::<ET>()?,
+        )))
     }
 }
 
-impl<A, ET> crate::storage::ArrayStorageImpl for Plain<A, ET> {}
-impl<A, ET> StorageBase for Plain<A, ET>
+impl<A, ET> crate::storage::ArrayStorageImpl for PlainBase<A, ET> {}
+impl<A, ET> StorageBase for PlainBase<A, ET>
 where
     ET: ElementType,
 {
@@ -493,11 +513,11 @@ where
         ArrayStorageInfo::new("Plain")
     }
 
-    type ElementTypeChange<NewET: ElementType> = Plain<A, NewET>;
+    type ElementTypeChange<NewET: ElementType> = PlainBase<A, NewET>;
     #[inline]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
         check_element_type::<NewET>(&self.dtype)?;
-        Ok(Plain {
+        Ok(PlainBase {
             allocation: self.allocation,
             data: self.data,
             shape: self.shape,
@@ -506,6 +526,69 @@ where
             element_type: PhantomData,
             spec: self.spec,
         })
+    }
+}
+
+macro_rules! forward_plain_storage {
+    () => {
+        #[inline(always)]
+        fn read_data<'rd>(
+            &'rd self,
+            index: &crate::storage::Index<'_>,
+            context: &'rd crate::ReadContext,
+            out: crate::storage::OutBuf<'_, 'rd>,
+        ) -> crate::error::Result<()> {
+            self.0.read_data(index, context, out)
+        }
+
+        #[inline(always)]
+        fn shape(&self) -> &[u64] {
+            self.0.shape()
+        }
+        #[inline(always)]
+        fn dtype(&self) -> &crate::dtype::Dtype {
+            self.0.dtype()
+        }
+        #[inline]
+        fn spec(&self) -> crate::storage::ArraySpec<'_> {
+            self.0.spec()
+        }
+
+        fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+            self.0.info()
+        }
+    };
+}
+
+impl<T> crate::storage::ArrayStorageImpl for Plain<T> {}
+impl<T> StorageBase for Plain<T>
+where
+    T: Dtyped,
+{
+    type ElementType = T;
+
+    forward_plain_storage!();
+
+    type ElementTypeChange<NewET: ElementType> = PlainBase<Vec<T>, NewET>;
+    #[inline]
+    fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+        self.0.element_type_change()
+    }
+}
+
+impl<ET> crate::storage::ArrayStorageImpl for PlainView<'_, ET> {}
+impl<'a, ET> StorageBase for PlainView<'a, ET>
+where
+    ET: ElementType,
+{
+    type ElementType = ET;
+
+    forward_plain_storage!();
+
+    type ElementTypeChange<NewET: ElementType> = PlainView<'a, NewET>;
+    #[inline]
+    fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+        Ok(PlainView(self.0.element_type_change()?))
     }
 }
 

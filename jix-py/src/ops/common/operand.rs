@@ -515,7 +515,14 @@ pub(crate) fn plain_from_numpy(
     };
     let array = array.unbind();
     let storage = unsafe {
-        jix_core::storage::Plain::new(array, data_ptr, shape.as_slice(), &strides, dtype, params)
+        jix_core::storage::PlainBase::new(
+            array,
+            data_ptr,
+            shape.as_slice(),
+            &strides,
+            dtype,
+            params,
+        )
     };
     Ok(Array::from_storage(storage.into_py_result()?).into_any())
 }

@@ -330,10 +330,7 @@ impl<S: StorageBase> StorageBase for Tile<S> {
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array replicated `repeats` times along `dim`.
     /// See [`Tile`] for details and examples.
     ///

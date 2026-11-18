@@ -431,10 +431,7 @@ impl DimSlice {
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of a sub-region of the array. See [`Slice`] for details and examples.
     ///
     /// Accepts a tuple of Rust ranges or [`SliceItem`]s, one per dimension. Negative integer

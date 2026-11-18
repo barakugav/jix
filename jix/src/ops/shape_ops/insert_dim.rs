@@ -225,10 +225,7 @@ where
     }
 }
 
-impl<S> Array<S>
-where
-    S: StorageBase,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array with new length-1 dimensions inserted. See [`InsertDim`]
     /// for details and examples.
     ///
