@@ -42,7 +42,7 @@ pub struct Transmute<S, ET> {
 }
 impl<S, ET> Transmute<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     /// Constructs a [`Transmute`] storage. See the struct docs for semantics and examples.
@@ -76,9 +76,9 @@ where
     }
 }
 impl<S, ET> crate::storage::ArrayStorageImpl for Transmute<S, ET> {}
-impl<S, ET> ArrayStorage for Transmute<S, ET>
+impl<S, ET> StorageBase for Transmute<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     type ElementType = ET;
@@ -124,7 +124,7 @@ where
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Reinterprets each element as the type `T` without converting the bytes. See [`Transmute`]
     /// for details and examples.
@@ -166,7 +166,7 @@ mod tests {
     use crate::storage::{Index, StridedBuf};
     use crate::util::assert_array_matches;
     use crate::ReadContext;
-    use crate::{Array, ArrayStorage};
+    use crate::{Array, StorageBase};
 
     /// An 8-byte struct dtype, to check that a transmute handles a composite element type and not
     /// just scalars.

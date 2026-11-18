@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use jix_core::__private::ReadTiling;
 use jix_core::storage::StridedBuf;
-use jix_core::{Array, ArrayAny, ArrayStorage, ReadContext};
+use jix_core::{Array, ArrayAny, ReadContext, StorageBase};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
@@ -821,7 +821,7 @@ impl PyArray {
         const MAX_ITEMS: usize = 8;
 
         fn format_storage(
-            storage: &dyn ArrayStorage,
+            storage: &dyn StorageBase,
             f: &mut std::fmt::Formatter<'_>,
             n_printed: &mut usize,
         ) -> std::fmt::Result {
@@ -849,7 +849,7 @@ impl PyArray {
             Ok(())
         }
 
-        struct StorageFormatter<'a>(&'a dyn ArrayStorage);
+        struct StorageFormatter<'a>(&'a dyn StorageBase);
         impl std::fmt::Display for StorageFormatter<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let mut n_printed = 0;

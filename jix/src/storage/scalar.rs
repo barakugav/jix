@@ -3,8 +3,8 @@ use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{
-    check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorage, ArrayStorageInfo, Index, OutBuf,
-    OutBufInner, StridedBuf,
+    check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, Index, OutBuf, OutBufInner,
+    StorageBase, StridedBuf,
 };
 use crate::util::dim_arr;
 use crate::ReadContext;
@@ -70,7 +70,7 @@ impl<T> Scalar<T> {
 }
 
 impl<T> crate::storage::ArrayStorageImpl for Scalar<T> {}
-impl<T> ArrayStorage for Scalar<T>
+impl<T> StorageBase for Scalar<T>
 where
     T: Dtyped,
 {

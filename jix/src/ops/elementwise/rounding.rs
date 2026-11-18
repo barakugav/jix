@@ -124,7 +124,7 @@ define_op1!(
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_op1_method!(floor: Floor, crate::scalar::Floor);
     define_array_op1_method!(ceil: Ceil, crate::scalar::Ceil);

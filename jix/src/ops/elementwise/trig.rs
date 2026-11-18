@@ -242,7 +242,7 @@ define_op1!(
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_op1_method!(sin: Sin, crate::scalar::Sin);
     define_array_op1_method!(cos: Cos, crate::scalar::Cos);

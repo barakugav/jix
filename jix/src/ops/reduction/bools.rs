@@ -35,7 +35,7 @@ define_reduction_op!(
     All,
     AllKernel,
     where {
-        S: ArrayStorageTyped<Item = bool8>,
+        S: Storage<Item = bool8>,
     }
     output = bool8,
 );
@@ -101,7 +101,7 @@ define_reduction_op!(
     Any,
     AnyKernel,
     where {
-        S: ArrayStorageTyped<Item = bool8>,
+        S: Storage<Item = bool8>,
     }
     output = bool8,
 );
@@ -137,18 +137,18 @@ impl ReductionOpKernel<bool8> for AnyKernel {
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     define_array_reduction_method!(
         all: All,
         where {
-            S: ArrayStorageTyped<Item = bool8>,
+            S: Storage<Item = bool8>,
         }
     );
     define_array_reduction_method!(
         any: Any,
         where {
-            S: ArrayStorageTyped<Item = bool8>,
+            S: Storage<Item = bool8>,
         }
     );
 }

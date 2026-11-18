@@ -40,7 +40,7 @@ use crate::ops::prelude::*;
 /// );
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Tile<S: ArrayStorage> {
+pub struct Tile<S: StorageBase> {
     array: S,
     dim: DimIdx,
     repeats: u64,
@@ -49,7 +49,7 @@ pub struct Tile<S: ArrayStorage> {
     spec: ArraySpecDynamic,
 }
 
-impl<S: ArrayStorage> Tile<S> {
+impl<S: StorageBase> Tile<S> {
     /// Constructs a [`Tile`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, repeats: u64, dim: usize) -> Result<Self> {
         let input_shape = array.shape();
@@ -119,8 +119,8 @@ impl<S: ArrayStorage> Tile<S> {
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Tile<S> {}
-impl<S: ArrayStorage> ArrayStorage for Tile<S> {
+impl<S: StorageBase> crate::storage::ArrayStorageImpl for Tile<S> {}
+impl<S: StorageBase> StorageBase for Tile<S> {
     type ElementType = S::ElementType;
 
     fn read_data<'a>(
@@ -332,7 +332,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
 impl<S> Array<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Returns a lazy view of the array replicated `repeats` times along `dim`.
     /// See [`Tile`] for details and examples.
@@ -354,7 +354,7 @@ mod tests {
 
     use crate::ReadContext;
 
-    use crate::{Array, ArrayStorage, CompactArray, IntoDimension, NDIM_MAX};
+    use crate::{Array, CompactArray, IntoDimension, StorageBase, NDIM_MAX};
 
     // -----------------------------------------------------------------------
     // Helpers

@@ -2,7 +2,7 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 
 /// Compile-time element-type tracking: the bound on the `ElementType` associated type of
-/// [`ArrayStorage`](crate::ArrayStorage). Its implementors:
+/// [`StorageBase`](crate::StorageBase). Its implementors:
 ///
 /// - every [`Dtyped`] type `T` - the element type is known at compile time. All element-wise
 ///   operations (arithmetic, comparisons, reductions, cast) are available.
@@ -35,7 +35,7 @@ pub(crate) fn check_element_type<ET: ElementType>(dtype: &Dtype) -> Result<()> {
 ///
 /// Arrays with `TypeDyn` do not support most element-wise operations directly; call
 /// [`Array::into_typed::<T>()`](crate::Array::into_typed) first to assert the expected
-/// element type and recover [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped).
+/// element type and recover [`Storage`](crate::storage::Storage).
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct TypeDyn;

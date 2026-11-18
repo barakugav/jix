@@ -6,7 +6,7 @@ use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 use crate::ops::prelude::*;
 use crate::{array2_map_inline, const_max, const_min, prev_power_of_two, Dim};
 
-pub(crate) struct ReductionOp<S: ArrayStorage, K> {
+pub(crate) struct ReductionOp<S: StorageBase, K> {
     kernel: K,
 
     pub(crate) array: S,
@@ -117,10 +117,10 @@ pub(crate) trait ReductionOpKernel<T> {
     const NEEDS_INDICES: bool = true;
 }
 
-impl<S: ArrayStorage, K> ReductionOp<S, K> {
+impl<S: StorageBase, K> ReductionOp<S, K> {
     pub(crate) fn new(array: S, kernel: K, dims: impl DimsArg) -> Result<Self>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         K: ReductionOpKernel<S::Item, Output: Dtyped>,
     {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
@@ -223,13 +223,13 @@ impl<S: ArrayStorage, K> ReductionOp<S, K> {
 
 impl<S, K> crate::storage::ArrayStorageImpl for ReductionOp<S, K>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     K: ReductionOpKernel<S::Item, Output: Dtyped>,
 {
 }
-impl<S, K> ArrayStorage for ReductionOp<S, K>
+impl<S, K> StorageBase for ReductionOp<S, K>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     K: ReductionOpKernel<S::Item, Output: Dtyped>,
 {
     type ElementType = K::Output;
@@ -286,7 +286,7 @@ where
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
 fn read_data_dispatch<'a>(
-    inner_array: &dyn ArrayStorage,
+    inner_array: &dyn StorageBase,
     outer_shape: &[u64],
     output_dtype: &Dtype,
     kernel_state_sizeof: usize,
@@ -329,7 +329,7 @@ fn read_data_dispatch<'a>(
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
 fn read_data_impl<'a, InnerD>(
-    inner_array: &dyn ArrayStorage,
+    inner_array: &dyn StorageBase,
     outer_shape: &[u64],
     output_dtype: &Dtype,
     kernel_state_sizeof: usize,
@@ -1263,7 +1263,7 @@ where
 }
 
 /// Emits the wrapper storage struct `$Op<S>` with its `new` / `new_array` constructors and
-/// `ArrayStorage` impl, and the private kernel struct `$Kernel` (with the `extra_arg` fields,
+/// `StorageBase` impl, and the private kernel struct `$Kernel` (with the `extra_arg` fields,
 /// if any). The `ReductionOpKernel` impl for the kernel is written by hand next to the macro
 /// invocation.
 ///
@@ -1272,7 +1272,7 @@ where
 /// define_reduction_op!(
 ///     /// docs...
 ///     Op, Kernel { extra_arg: Type, ... },           // `{ ... }` is optional
-///     where { S: ArrayStorageTyped, S::Item: ... }   // full where-clause, no `,` after `}`
+///     where { S: Storage, S::Item: ... }   // full where-clause, no `,` after `}`
 ///     output = <S::Item as Trait>::Output,
 ///     single_dim,                                 // optional; omit for multi-dim
 /// );
@@ -1292,7 +1292,7 @@ macro_rules! define_reduction_op {
         $(#[$meta])*
         pub struct $Op<S>(crate::ops::reduction::common::ReductionOp<S, $Kernel>)
         where
-            S: crate::ArrayStorage;
+            S: crate::StorageBase;
 
         impl<S> $Op<S>
         where
@@ -1315,7 +1315,7 @@ macro_rules! define_reduction_op {
             $($where_)+
         {
         }
-        impl<S> crate::ArrayStorage for $Op<S>
+        impl<S> crate::StorageBase for $Op<S>
         where
             $($where_)+
         {
@@ -1340,7 +1340,7 @@ macro_rules! define_reduction_op {
         struct $Kernel { $($($extra_arg: $extra_ty),+)? }
 
         $(#[$meta])*
-        pub struct $Op<S: crate::ArrayStorage>(crate::ops::reduction::common::ReductionOp<S, $Kernel>);
+        pub struct $Op<S: crate::StorageBase>(crate::ops::reduction::common::ReductionOp<S, $Kernel>);
 
         impl<S> $Op<S>
         where
@@ -1363,7 +1363,7 @@ macro_rules! define_reduction_op {
             $($where_)+
         {
         }
-        impl<S> crate::ArrayStorage for $Op<S>
+        impl<S> crate::StorageBase for $Op<S>
         where
             $($where_)+
         {
@@ -1464,7 +1464,7 @@ pub(crate) mod tests {
     pub(crate) trait ReductionCompare:
         crate::dtype::Dtyped + std::fmt::Debug + Clone
     {
-        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>);
+        fn assert_matches<S: crate::StorageBase>(actual: &Array<S>, expected: &ArrayD<Self>);
     }
 
     /// Implements [`ReductionCompare`] with exact comparison, see
@@ -1472,7 +1472,7 @@ pub(crate) mod tests {
     macro_rules! reduction_compare_exact {
         ($($t:ty),* $(,)?) => {$(
             impl ReductionCompare for $t {
-                fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+                fn assert_matches<S: crate::StorageBase>(actual: &Array<S>, expected: &ArrayD<Self>) {
                     crate::util::assert_array_matches(actual, expected);
                 }
             }
@@ -1483,18 +1483,18 @@ pub(crate) mod tests {
     reduction_compare_exact!(f16);
 
     impl ReductionCompare for f32 {
-        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+        fn assert_matches<S: crate::StorageBase>(actual: &Array<S>, expected: &ArrayD<Self>) {
             crate::util::assert_array_matches_approx(actual, expected, 1e-3, 1e-1);
         }
     }
     impl ReductionCompare for f64 {
-        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+        fn assert_matches<S: crate::StorageBase>(actual: &Array<S>, expected: &ArrayD<Self>) {
             crate::util::assert_array_matches_approx(actual, expected, 1e-9, 1e-6);
         }
     }
     #[cfg(feature = "num-complex")]
     impl ReductionCompare for complex_f32 {
-        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+        fn assert_matches<S: crate::StorageBase>(actual: &Array<S>, expected: &ArrayD<Self>) {
             crate::util::assert_array_matches_approx(
                 actual,
                 expected,
@@ -1505,7 +1505,7 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "num-complex")]
     impl ReductionCompare for complex_f64 {
-        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+        fn assert_matches<S: crate::StorageBase>(actual: &Array<S>, expected: &ArrayD<Self>) {
             crate::util::assert_array_matches_approx(
                 actual,
                 expected,
@@ -1517,7 +1517,7 @@ pub(crate) mod tests {
 
     /// Asserts a reduction result matches its reference, dispatching exact vs. approximate
     /// comparison (and the per-dtype tolerance) on the output dtype via [`ReductionCompare`].
-    pub(crate) fn assert_reduction_matches<S: crate::ArrayStorage, T: ReductionCompare>(
+    pub(crate) fn assert_reduction_matches<S: crate::StorageBase, T: ReductionCompare>(
         actual: &Array<S>,
         expected: &ArrayD<T>,
     ) {
