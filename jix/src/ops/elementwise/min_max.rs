@@ -197,9 +197,9 @@ pub struct Clamp<S, SMin, SMax> {
 }
 impl<S, SMin, SMax> Clamp<S, SMin, SMax>
 where
-    S: ArrayStorageTyped,
-    SMin: ArrayStorageTyped<Item = S::Item>,
-    SMax: ArrayStorageTyped<Item = S::Item>,
+    S: Storage,
+    SMin: Storage<Item = S::Item>,
+    SMax: Storage<Item = S::Item>,
     S::Item: crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
 {
     /// Constructs a [`Clamp`] storage. See the struct docs for semantics and examples.
@@ -254,14 +254,14 @@ where
     }
 }
 impl<S, SMin, SMax> crate::storage::ArrayStorageImpl for Clamp<S, SMin, SMax> {}
-impl<S, SMin, SMax> ArrayStorage for Clamp<S, SMin, SMax>
+impl<S, SMin, SMax> StorageBase for Clamp<S, SMin, SMax>
 where
-    S: ArrayStorageTyped,
-    SMin: ArrayStorageTyped<Item = S::Item>,
-    SMax: ArrayStorageTyped<Item = S::Item>,
+    S: Storage,
+    SMin: Storage<Item = S::Item>,
+    SMax: Storage<Item = S::Item>,
     S::Item: crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
 {
-    type ElementType = Ty<S::Item>;
+    type ElementType = S::Item;
 
     #[inline]
     fn read_data<'a>(
@@ -376,10 +376,7 @@ where
     crate::ops::impl_element_type_change_default!();
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op2_method!(maximum: Maximum, crate::scalar::Maximum);
     define_array_op2_method!(minimum: Minimum, crate::scalar::Minimum);
 
@@ -391,9 +388,9 @@ where
         max: Array<SMax>,
     ) -> Array<Clamp<S, SMin, SMax>>
     where
-        S: ArrayStorageTyped,
-        SMin: ArrayStorageTyped<Item = S::Item>,
-        SMax: ArrayStorageTyped<Item = S::Item>,
+        S: Storage,
+        SMin: Storage<Item = S::Item>,
+        SMax: Storage<Item = S::Item>,
         S::Item:
             crate::scalar::Maximum<Output = S::Item> + crate::scalar::Minimum<Output = S::Item>,
     {

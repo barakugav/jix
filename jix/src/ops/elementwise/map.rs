@@ -33,7 +33,7 @@ impl<S, F> Map<S, F> {
     /// Constructs a [`Map`] storage. See the struct docs for semantics and examples.
     pub fn new<O>(array: S, map_fn: F) -> Result<Self>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         F: Fn(S::Item) -> O,
         O: Dtyped,
     {
@@ -44,7 +44,7 @@ impl<S, F> Map<S, F> {
     /// examples.
     pub fn new_array<O>(array: Array<S>, map_fn: F) -> Result<Array<Self>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         F: Fn(S::Item) -> O,
         O: Dtyped,
     {
@@ -53,18 +53,18 @@ impl<S, F> Map<S, F> {
 }
 impl<S, O, F> crate::storage::ArrayStorageImpl for Map<S, F>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     O: Dtyped,
     F: Fn(S::Item) -> O,
 {
 }
-impl<S, O, F> ArrayStorage for Map<S, F>
+impl<S, O, F> StorageBase for Map<S, F>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     O: Dtyped,
     F: Fn(S::Item) -> O,
 {
-    type ElementType = Ty<O>;
+    type ElementType = O;
     crate::storage::impl_array_storage_forward!(<S, O, F>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -100,8 +100,8 @@ impl<S1, S2, F> Map2<S1, S2, F> {
     /// Constructs a [`Map2`] storage. See the struct docs for semantics and examples.
     pub fn new<O>(a: S1, b: S2, map_fn: F) -> Result<Self>
     where
-        S1: ArrayStorageTyped,
-        S2: ArrayStorageTyped,
+        S1: Storage,
+        S2: Storage,
         F: Fn(S1::Item, S2::Item) -> O,
         O: Dtyped,
     {
@@ -112,8 +112,8 @@ impl<S1, S2, F> Map2<S1, S2, F> {
     /// examples.
     pub fn new_array<O>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Result<Array<Self>>
     where
-        S1: ArrayStorageTyped,
-        S2: ArrayStorageTyped,
+        S1: Storage,
+        S2: Storage,
         F: Fn(S1::Item, S2::Item) -> O,
         O: Dtyped,
     {
@@ -122,20 +122,20 @@ impl<S1, S2, F> Map2<S1, S2, F> {
 }
 impl<S1, S2, O, F> crate::storage::ArrayStorageImpl for Map2<S1, S2, F>
 where
-    S1: ArrayStorageTyped,
-    S2: ArrayStorageTyped,
+    S1: Storage,
+    S2: Storage,
     O: Dtyped,
     F: Fn(S1::Item, S2::Item) -> O,
 {
 }
-impl<S1, S2, O, F> ArrayStorage for Map2<S1, S2, F>
+impl<S1, S2, O, F> StorageBase for Map2<S1, S2, F>
 where
-    S1: ArrayStorageTyped,
-    S2: ArrayStorageTyped,
+    S1: Storage,
+    S2: Storage,
     O: Dtyped,
     F: Fn(S1::Item, S2::Item) -> O,
 {
-    type ElementType = Ty<O>;
+    type ElementType = O;
     crate::storage::impl_array_storage_forward!(<S1, S2, O, F>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -149,8 +149,8 @@ where
 #[track_caller]
 pub fn map2<S1, S2, O, F>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Array<Map2<S1, S2, F>>
 where
-    S1: ArrayStorageTyped,
-    S2: ArrayStorageTyped,
+    S1: Storage,
+    S2: Storage,
     O: Dtyped,
     F: Fn(S1::Item, S2::Item) -> O,
 {
@@ -292,13 +292,13 @@ where
     O: Dtyped,
 {
 }
-impl<ArraysT, O, F> ArrayStorage for MapMultiple<ArraysT, F>
+impl<ArraysT, O, F> StorageBase for MapMultiple<ArraysT, F>
 where
     ArraysT: ArraySequence + ArraySequenceTyped,
     F: Fn(ArraysT::ItemSequence<'_>) -> O,
     O: Dtyped,
 {
-    type ElementType = Ty<O>;
+    type ElementType = O;
 
     #[inline]
     fn read_data<'a>(
@@ -419,10 +419,7 @@ where
     Array::from_storage(MapMultiple::new(arrays, map_fn).unwrap())
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Applies `map_fn` to each element, returning an array with dtype `R`. See [`Map`] for
     /// details and examples.
     ///
@@ -432,7 +429,7 @@ where
     #[track_caller]
     pub fn map<R, F>(self, map_fn: F) -> Array<Map<S, F>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         R: Dtyped,
         F: Fn(S::Item) -> R,
     {

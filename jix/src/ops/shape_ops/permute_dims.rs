@@ -31,7 +31,7 @@ use crate::ops::prelude::*;
 /// assert_eq!(p.shape(), &[4, 2, 3]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct PermuteDims<S: ArrayStorage> {
+pub struct PermuteDims<S: StorageBase> {
     array: S,
     /// `dims[i]` = index of the input dimension that maps to output dimension `i`.
     dims: DimArray<DimIdx>,
@@ -43,7 +43,7 @@ pub struct PermuteDims<S: ArrayStorage> {
     spec: ArraySpecDynamic,
 }
 
-impl<S: ArrayStorage> PermuteDims<S> {
+impl<S: StorageBase> PermuteDims<S> {
     /// Constructs a [`PermuteDims`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, dims: &[usize]) -> Result<Self> {
         let ndim = array.shape().len();
@@ -114,8 +114,8 @@ impl<S: ArrayStorage> PermuteDims<S> {
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for PermuteDims<S> {}
-impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
+impl<S: StorageBase> crate::storage::ArrayStorageImpl for PermuteDims<S> {}
+impl<S: StorageBase> StorageBase for PermuteDims<S> {
     type ElementType = S::ElementType;
 
     #[inline]
@@ -174,10 +174,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
     }
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array with its dims reordered. See [`PermuteDims`] for details
     /// and examples.
     ///

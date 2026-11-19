@@ -1,10 +1,9 @@
-use std::io::{self, Read, Seek, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::ops::{Deref, DerefMut};
 
 use prost::Message;
 
 use crate::archive::schema::{self, ArchiveType};
-use crate::archive::util::stream_len;
 use crate::archive::version::lib_version;
 use crate::error::{bail, ensure, error, Error, Result};
 use crate::util::{value_as_bytes, value_from_io};
@@ -117,10 +116,13 @@ impl<R> ArchiveReader<R> {
     where
         R: Read + Seek,
     {
-        let pos = reader.stream_position().map_err(Error::io)?;
-        let available = stream_len(&mut reader)
-            .map_err(Error::io)?
-            .saturating_sub(pos);
+        #[allow(clippy::seek_from_current)]
+        let start = reader.seek(SeekFrom::Current(0)).map_err(Error::io)?;
+        let end = reader.seek(SeekFrom::End(0)).map_err(Error::io)?;
+        reader
+            .seek(SeekFrom::Current(start as i64 - end as i64))
+            .map_err(Error::io)?;
+        let available = end.saturating_sub(start);
         let total_size = match length {
             Some(length) => {
                 ensure!(

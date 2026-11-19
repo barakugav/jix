@@ -33,7 +33,7 @@ use crate::ops::prelude::*;
 /// assert_eq!(result[[2, 1]], 30);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Broadcast<S: ArrayStorage> {
+pub struct Broadcast<S: StorageBase> {
     array: S,
     /// `is_broadcast[d]` is `true` when output dim `d` was expanded from length 1.
     is_broadcast: DimArray<bool>,
@@ -44,7 +44,7 @@ pub struct Broadcast<S: ArrayStorage> {
 
 impl<S> Broadcast<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Constructs a [`Broadcast`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, shape: &[u64]) -> Result<Self> {
@@ -116,8 +116,8 @@ where
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Broadcast<S> {}
-impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
+impl<S: StorageBase> crate::storage::ArrayStorageImpl for Broadcast<S> {}
+impl<S: StorageBase> StorageBase for Broadcast<S> {
     type ElementType = S::ElementType;
 
     #[inline]
@@ -203,10 +203,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     }
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.
     /// See [`Broadcast`] for details and examples.
     ///

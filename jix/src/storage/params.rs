@@ -8,7 +8,7 @@ use crate::storage::block::BlockSize;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
 use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight};
 use crate::{
-    dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt, BLOCK_SIZE_BYTES_MAX,
+    dim_arr, Array, DimBitmap, DimDyn, Dimension, SliceExt, StorageBase, BLOCK_SIZE_BYTES_MAX,
 };
 
 const ELEMENT_COST_MAX: f32 = u64::MAX as f32; // 2^64
@@ -23,8 +23,9 @@ pub(crate) struct ReadSize {
 
 impl ReadSize {
     pub(crate) fn new(min: u64, max: u64) -> Self {
-        let min = min.clamp(1, isize::MAX as u64);
-        let max = max.clamp(min, isize::MAX as u64);
+        let limit = isize::MAX as u64 / 2;
+        let min = min.clamp(1, limit);
+        let max = max.clamp(min, limit);
         Self { min, max }
     }
 
@@ -174,8 +175,10 @@ impl ArrayParams {
 
     /// Sets the compression codec used when writing blocks.
     ///
-    /// Defaults to [`Codec::Zstd`] when not set. Setting any codec field materializes the codec
-    /// configuration to its defaults, then applies this override.
+    /// Defaults to [`Codec::Zstd`] when not set.
+    ///
+    /// The codec, level and filters are inherited only as a group: setting any of them resets
+    /// the other two to their defaults.
     #[must_use]
     pub fn codec(mut self, codec: Codec) -> Self {
         self.encoder_params
@@ -188,6 +191,9 @@ impl ArrayParams {
     ///
     /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the
     /// default.
+    ///
+    /// The codec, level and filters are inherited only as a group: setting any of them resets
+    /// the other two to their defaults.
     ///
     /// Fails with `InvalidArgument` if `level` does not fit in an `i8`.
     pub fn level(mut self, level: i32) -> Result<Self> {
@@ -203,6 +209,9 @@ impl ArrayParams {
     /// numeric dtypes [`Filter::ByteShuffle`] (the default) gives a good ratio improvement at low
     /// cost; [`Filter::BitShuffle`] can do better on low-entropy data at higher CPU cost. Pass an
     /// empty slice to disable filtering.
+    ///
+    /// The codec, level and filters are inherited only as a group: setting any of them resets
+    /// the other two to their defaults.
     ///
     /// # Errors
     ///
@@ -222,12 +231,12 @@ impl ArrayParams {
     #[allow(unused)]
     pub(crate) fn inherit_unset_from_array<S>(&mut self, array: &Array<S>)
     where
-        S: ArrayStorage,
+        S: StorageBase,
     {
         self.inherit_unset_from_storage(array.storage());
     }
 
-    pub(crate) fn inherit_unset_from_storage(&mut self, storage: &impl ArrayStorage) {
+    pub(crate) fn inherit_unset_from_storage(&mut self, storage: &impl StorageBase) {
         let spec = storage.spec();
         self.encoder_params
             .get_or_insert_with(|| spec.encoder_params().clone());
@@ -1141,7 +1150,7 @@ mod tests {
 
     use super::scale_order_from_weights;
     use crate::util::ScaleWeight;
-    use crate::{Array, ArrayParams, ArrayStorage, CompactArray, BLOCK_SIZE_BYTES_MAX};
+    use crate::{Array, ArrayParams, CompactArray, StorageBase, BLOCK_SIZE_BYTES_MAX};
 
     #[test]
     fn compact_with_keeps_caller_fixed_dims() {
@@ -1818,7 +1827,8 @@ mod tests {
         // min floored at 1, max raised to at least min.
         assert_eq!(ReadSize::new(0, 0), ReadSize::new(1, 1));
         let huge = ReadSize::new(u64::MAX, u64::MAX);
-        assert_eq!((huge.min, huge.max), (isize::MAX as u64, isize::MAX as u64));
+        let half = isize::MAX as u64 / 2;
+        assert_eq!((huge.min, huge.max), (half, half));
         let rs = ReadSize::new(10, 4); // max < min -> max raised to min
         assert_eq!((rs.min, rs.max), (10, 10));
 
@@ -2190,7 +2200,7 @@ mod tests {
     fn plain_ndarray_ptr_rejects_zero_itemsize() {
         let buf = [0u8; 8];
         let result = unsafe {
-            Array::<crate::storage::Plain<&(), crate::TypeDyn>>::plain_ndarray_ptr(
+            Array::<crate::storage::PlainView<'_, crate::TypeDyn>>::plain_ndarray_ptr(
                 buf.as_ptr(),
                 &[4],
                 &[0usize],
@@ -2272,7 +2282,7 @@ mod tests {
     fn plain_ndarray_ptr_rejects_overflowing_shape() {
         let buf = [0u8; 8];
         let result = unsafe {
-            Array::<crate::storage::Plain<&(), crate::TypeDyn>>::plain_ndarray_ptr(
+            Array::<crate::storage::PlainView<'_, crate::TypeDyn>>::plain_ndarray_ptr(
                 buf.as_ptr(),
                 &OVERFLOWING_EMPTY_SHAPE,
                 &[0usize; 3],
@@ -2315,9 +2325,9 @@ mod tests {
         use super::ReadTiling::{self, Fusable, SinglePass, Tiled, ZeroCopy};
         use crate::ops::{concatenate, stack};
         use crate::storage::scalar::Scalar;
-        use crate::ArrayStorage;
+        use crate::StorageBase;
 
-        fn kind<S: ArrayStorage>(a: Array<S>) -> ReadTiling {
+        fn kind<S: StorageBase>(a: Array<S>) -> ReadTiling {
             a.storage().spec().read_tiling()
         }
         let data = ndarray::Array2::<i32>::zeros((4, 6));

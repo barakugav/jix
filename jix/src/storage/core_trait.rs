@@ -6,15 +6,15 @@ use crate::ReadContext;
 use crate::{ElementType, TypeDyn};
 
 mod sealed {
-    /// Seals [`ArrayStorage`](super::ArrayStorage).
+    /// Seals [`StorageBase`](super::StorageBase).
     pub trait ArrayStorageImpl {}
 }
 pub(crate) use sealed::ArrayStorageImpl;
 
 /// The backing data source of an [`Array<S>`](crate::Array).
 ///
-/// `Array<S>` is generic over its storage `S: ArrayStorage`, which provides three things: the
-/// array's shape, its element type, and reading any rectangular sub-region into a byte buffer.
+/// `Array<S>` is generic over its storage `S: StorageBase`, which provides three things: the
+/// array's shape, its element dtype, and reading any rectangular sub-region into a byte buffer.
 /// Everything else - slicing, reshaping, arithmetic, reductions - is built on these three methods.
 ///
 /// # Primary storage backends
@@ -51,15 +51,15 @@ pub(crate) use sealed::ArrayStorageImpl;
 /// Because `Array<S>` is monomorphized over `S` at compile time, chains of operations
 /// carry zero heap allocation or virtual dispatch overhead. The full static type of an
 /// expression - e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` - is resolved by the compiler.
-pub trait ArrayStorage: sealed::ArrayStorageImpl {
+pub trait StorageBase: sealed::ArrayStorageImpl {
     /// The compile-time element type of arrays backed by this storage.
     ///
-    /// Either [`Ty<T>`](crate::Ty) (`T` known at compile time) or [`TypeDyn`](crate::TypeDyn)
-    /// (only available at runtime via [`dtype()`](ArrayStorage::dtype)).
+    /// Either the element type itself, e.g. `f32` (known at compile time), or
+    /// [`TypeDyn`](crate::TypeDyn) (only available at runtime via [`dtype()`](StorageBase::dtype)).
     ///
     /// Operations that require knowing the element type (arithmetic, comparisons, reductions,
-    /// cast) are bounded on [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), a shorthand
-    /// for `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
+    /// cast) are bounded on [`Storage`](crate::Storage), a shorthand
+    /// for `StorageBase<ElementType = T>`. Arrays loaded from disk carry `TypeDyn`; call
     /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
     /// type and re-enable those operations.
     type ElementType: ElementType
@@ -127,7 +127,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// Returns the shape of the array, one element per dimension.
     fn shape(&self) -> &[u64];
 
-    /// Returns the element type of the array.
+    /// Returns the element dtype of the array.
     fn dtype(&self) -> &Dtype;
 
     /// Returns metadata about this storage backend.
@@ -146,7 +146,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     }
 
     /// The concrete storage type after swapping the element type to `NewET`.
-    type ElementTypeChange<NewET: ElementType>: ArrayStorage<ElementType = NewET>
+    type ElementTypeChange<NewET: ElementType>: StorageBase<ElementType = NewET>
     where
         Self: Sized;
 
@@ -154,7 +154,7 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
     /// re-tagged storage.
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
-    /// `NewET = Ty<T>` and the runtime dtype does not equal `T::DTYPE`. Always succeeds for
+    /// `NewET = T` and the runtime dtype does not equal `T::DTYPE`. Always succeeds for
     /// `NewET = TypeDyn`.
     #[doc(hidden)]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>>
@@ -162,7 +162,28 @@ pub trait ArrayStorage: sealed::ArrayStorageImpl {
         Self: Sized;
 }
 
-pub(crate) trait ArrayStorageExt: ArrayStorage {
+/// A [`StorageBase`] whose element type is statically known.
+///
+/// Shorthand for `StorageBase<ElementType = T>`, with `T` as the associated type `Item`.
+/// All element-wise operations - arithmetic, comparisons, reductions, type casts - are bounded
+/// on this trait so the compiler can dispatch to the correct scalar implementation without
+/// runtime checks.
+///
+/// To obtain `Storage` from a `TypeDyn` array (e.g. after loading from disk), use
+/// [`Array::into_typed::<T>()`](crate::Array::into_typed).
+pub trait Storage: StorageBase<ElementType = Self::Item> + Sized {
+    /// The concrete Rust element type stored in this array (e.g. `f32`, `i64`).
+    type Item: Dtyped;
+}
+impl<S, T> Storage for S
+where
+    S: StorageBase<ElementType = T>,
+    T: Dtyped,
+{
+    type Item = T;
+}
+
+pub(crate) trait ArrayStorageExt: StorageBase {
     #[inline(always)]
     fn read_data_pull<'a>(
         &'a self,
@@ -197,4 +218,4 @@ pub(crate) trait ArrayStorageExt: ArrayStorage {
         self.read_data(index, context, OutBuf::push(out))
     }
 }
-impl<S: ArrayStorage + ?Sized> ArrayStorageExt for S {}
+impl<S: StorageBase + ?Sized> ArrayStorageExt for S {}

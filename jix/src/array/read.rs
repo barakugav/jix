@@ -6,19 +6,19 @@ use crate::error::{
 };
 use crate::storage::params::ReadTiling;
 use crate::storage::{
-    alloc_out_buf, check_out_buf_dims, check_out_buf_impl, split_ranges, ArrayStorageExt,
-    ArrayStorageTyped, Index, OutBuf, StridedBuf,
+    alloc_out_buf, check_out_buf_dims, check_out_buf_impl, split_ranges, ArrayStorageExt, Index,
+    OutBuf, StridedBuf,
 };
 use crate::util::iter::NdIter;
 use crate::util::{
     advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr,
 };
-use crate::ReadContext;
-use crate::{ArrayStorage, Dim, DimDyn, Dimension, PlainArray};
+use crate::{Dim, DimDyn, Dimension, PlainArray, StorageBase};
+use crate::{ReadContext, Storage};
 
 use super::Array;
 
-impl<S: ArrayStorage> Array<S> {
+impl<S: StorageBase> Array<S> {
     /// Read the entire array into a new heap-allocated [`ndarray::Array`].
     ///
     /// For a lazy view (e.g. `Array<Add<Mul<Compact, _>, _>>`), `to_ndarray` runs the whole
@@ -73,7 +73,7 @@ impl<S: ArrayStorage> Array<S> {
     #[inline]
     pub fn to_ndarray<D>(&self) -> Result<ndarray::Array<S::Item, D>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         D: ndarray::Dimension,
     {
         let shape = self.shape();
@@ -181,7 +181,7 @@ impl<S: ArrayStorage> Array<S> {
         context: &ReadContext,
     ) -> Result<ndarray::Array<S::Item, D>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         D: ndarray::Dimension,
     {
         check_ranges(self.shape(), index)?;
@@ -472,20 +472,20 @@ impl<S: ArrayStorage> Array<S> {
 }
 
 #[inline(never)]
-fn to_buf_strided_slow<'a, S: ArrayStorage>(
+fn to_buf_strided_slow<'a, S: StorageBase>(
     storage: &'a S,
     index: &Index<'_>,
     context: &'a ReadContext,
     out: OutBuf<'_, 'a>,
 ) -> Result<()> {
     // Erase the storage so the body is monomorphized once
-    let storage: &dyn ArrayStorage = storage;
+    let storage: &dyn StorageBase = storage;
     to_buf_strided_slow_dyn_dispatch(storage, index, context, out)
 }
 
 #[inline(never)]
 fn to_buf_strided_slow_dyn_dispatch<'a>(
-    storage: &'a dyn ArrayStorage,
+    storage: &'a dyn StorageBase,
     index: &Index<'_>,
     context: &'a ReadContext,
     out: OutBuf<'_, 'a>,
@@ -508,7 +508,7 @@ fn to_buf_strided_slow_dyn_dispatch<'a>(
 // index range and buffer size are not checked
 #[inline(never)]
 fn to_buf_strided_slow_dyn<'a, D: Dimension>(
-    storage: &'a dyn ArrayStorage,
+    storage: &'a dyn StorageBase,
     index: &Index<'_>,
     context: &'a ReadContext,
     out: OutBuf<'_, 'a>,
@@ -558,7 +558,7 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     Ok(())
 }
 
-impl<S: ArrayStorage> Array<S> {
+impl<S: StorageBase> Array<S> {
     /// Read the entire array into a new heap-allocated `Array<Plain>`.
     ///
     /// Equivalent to `Array::plain_ndarray(self.to_ndarray()?)`.
@@ -601,7 +601,7 @@ impl<S: ArrayStorage> Array<S> {
     /// ```
     pub fn to_plain(&self) -> Result<PlainArray<S::Item>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
     {
         let array = self.to_ndarray::<ndarray::IxDyn>()?;
         Array::plain_ndarray(array)

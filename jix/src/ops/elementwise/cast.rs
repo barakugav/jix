@@ -386,7 +386,7 @@ pub(crate) mod traits {
 /// The [`Cast<T>`](crate::scalar::Cast) bound on the source element type rejects unsupported
 /// pairs at compile time.
 ///
-/// The output dtype is `T` (element type `Ty<T>`) and the shape is the input shape.
+/// The output dtype is `T` and the shape is the input shape.
 ///
 /// The result is a lazy view.
 ///
@@ -435,7 +435,7 @@ where
 }
 impl<S, T> Cast<S, T>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     S::Item: crate::scalar::Cast<T>,
     T: Dtyped,
 {
@@ -452,13 +452,13 @@ where
     }
 }
 impl<S, T> crate::storage::ArrayStorageImpl for Cast<S, T> {}
-impl<S, T> ArrayStorage for Cast<S, T>
+impl<S, T> StorageBase for Cast<S, T>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     S::Item: crate::scalar::Cast<T>,
     T: Dtyped,
 {
-    type ElementType = crate::Ty<T>;
+    type ElementType = T;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -468,15 +468,12 @@ where
     crate::ops::impl_element_type_change_default!();
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Casts each element to scalar type `T`. See [`Cast`] for details and examples.
     #[track_caller]
     pub fn cast<T>(self) -> Array<Cast<S, T>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::Cast<T>,
         T: Dtyped,
     {

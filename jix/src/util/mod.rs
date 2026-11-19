@@ -30,7 +30,7 @@ mod bitmap;
 pub(crate) use bitmap::*;
 
 mod sealed {
-    /// Seals a public trait: only types in this crate can implement it.
+    /// Seals a public trait: only this crate can implement it.
     pub trait Sealed {}
 }
 pub(crate) use sealed::Sealed;
@@ -539,14 +539,6 @@ impl<T> SendSyncPtr<T> {
         self.0
     }
 }
-
-macro_rules! assert_unchecked_eq {
-    ($a:expr, $b:expr) => {{
-        debug_assert_eq!($a, $b);
-        std::hint::assert_unchecked($a == $b);
-    }};
-}
-pub(crate) use assert_unchecked_eq;
 
 #[inline(always)]
 pub(crate) unsafe fn value_as_bytes<T>(val: &T) -> &[u8]

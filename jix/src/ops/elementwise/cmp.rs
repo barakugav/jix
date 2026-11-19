@@ -220,14 +220,30 @@ pub(crate) mod traits {
                 ) -> bool {
                     // credit to https://github.com/brendanzab/approx
                     //
-                    // The code was re-written as branchless. enabled auto-vectorization.
+                    // Branchless, so `approx_eq_bulk` auto-vectorizes.
 
                     let (a, b) = (*self, *other);
-                    let diff = crate::scalar::Abs::abs(a - b);
                     let (abs_a, abs_b) = (crate::scalar::Abs::abs(a), crate::scalar::Abs::abs(b));
-                    let largest = if abs_b > abs_a { abs_b } else { abs_a };
-                    let close = (diff <= *atol) | (diff <= largest * *rtol);
-                    let no_inf = !<$T>::is_infinite(a) & !<$T>::is_infinite(b) & diff.is_finite();
+                    let (abs_large, abs_small) = if abs_a > abs_b {
+                        (abs_a, abs_b)
+                    } else {
+                        (abs_b, abs_a)
+                    };
+                    let abs_diff = crate::scalar::Abs::abs(a - b);
+                    let relative = if abs_diff.is_finite() {
+                        abs_diff <= abs_large * *rtol
+                    } else {
+                        // `a - b` overflowed, which is impossible when both `a` and `b` have the
+                        // same sign. When signs are different, the following holds:
+                        // |a - b| = |a| + |b|
+                        //
+                        // |a - b|               <= abs_large * rtol
+                        // abs_large + abs_small <= abs_large * rtol
+                        // abs_small             <= abs_large * (rtol - 1)
+                        abs_small <= abs_large * (*rtol - <$T>::from(1u8))
+                    };
+                    let close = (abs_diff <= *atol) | relative;
+                    let no_inf = !a.is_infinite() & !b.is_infinite();
                     (a == b) | (close & no_inf)
                 }
             }
@@ -254,7 +270,7 @@ pub(crate) mod traits {
             atol: &Self::AbsoluteTolerance,
         ) -> bool {
             self.re.approx_eq(&other.re, rtol, &atol.re)
-                & self.im.approx_eq(&other.im, rtol, &atol.im)
+                && self.im.approx_eq(&other.im, rtol, &atol.im)
         }
     }
 }
@@ -339,8 +355,8 @@ macro_rules! define_swapped_cmp {
 
         impl<S1, S2> $Op<S1, S2>
         where
-            S1: ArrayStorageTyped,
-            S2: ArrayStorageTyped,
+            S1: Storage,
+            S2: Storage,
             S2::Item: crate::scalar::$InnerTrait<S1::Item, Output: Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
@@ -355,13 +371,13 @@ macro_rules! define_swapped_cmp {
         }
 
         impl<S1, S2> crate::storage::ArrayStorageImpl for $Op<S1, S2> {}
-        impl<S1, S2> ArrayStorage for $Op<S1, S2>
+        impl<S1, S2> StorageBase for $Op<S1, S2>
         where
-            S1: ArrayStorageTyped,
-            S2: ArrayStorageTyped,
+            S1: Storage,
+            S2: Storage,
             S2::Item: crate::scalar::$InnerTrait<S1::Item, Output: Dtyped>,
         {
-            type ElementType = Ty<<S2::Item as crate::scalar::$InnerTrait<S1::Item>>::Output>;
+            type ElementType = <S2::Item as crate::scalar::$InnerTrait<S1::Item>>::Output;
 
             #[inline(always)]
             fn read_data<'a>(
@@ -592,7 +608,7 @@ define_op2!(
 /// ```
 pub struct ApproxEq<S1, S2>(Op2<S1, S2, ApproxEqKernel<S1::Item>>)
 where
-    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>;
+    S1: Storage<Item: crate::scalar::ApproxEq>;
 struct ApproxEqKernel<T: crate::scalar::ApproxEq> {
     rtol: <T as crate::scalar::ApproxEq>::RelativeTolerance,
     atol: <T as crate::scalar::ApproxEq>::AbsoluteTolerance,
@@ -618,7 +634,7 @@ impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
 }
 impl<S1, S2> ApproxEq<S1, S2>
 where
-    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
+    S1: Storage<Item: crate::scalar::ApproxEq>,
 {
     /// Constructs an [`ApproxEq`] storage. See the struct docs for semantics and examples.
     pub fn new(
@@ -628,8 +644,8 @@ where
         atol: <S1::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
     ) -> Result<Self>
     where
-        S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-        S2: ArrayStorageTyped<Item = S1::Item>,
+        S1: Storage<Item: crate::scalar::ApproxEq>,
+        S2: Storage<Item = S1::Item>,
     {
         Ok(Self(Op2::new(a, b, ApproxEqKernel { rtol, atol }, false)?))
     }
@@ -643,24 +659,24 @@ where
         atol: <S1::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
     ) -> Result<Array<Self>>
     where
-        S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-        S2: ArrayStorageTyped<Item = S1::Item>,
+        S1: Storage<Item: crate::scalar::ApproxEq>,
+        S2: Storage<Item = S1::Item>,
     {
         Self::new(a.into_storage(), b.into_storage(), rtol, atol).map(Array::from_storage)
     }
 }
 impl<S1, S2> crate::storage::ArrayStorageImpl for ApproxEq<S1, S2>
 where
-    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-    S2: ArrayStorageTyped<Item = S1::Item>,
+    S1: Storage<Item: crate::scalar::ApproxEq>,
+    S2: Storage<Item = S1::Item>,
 {
 }
-impl<S1, S2> ArrayStorage for ApproxEq<S1, S2>
+impl<S1, S2> StorageBase for ApproxEq<S1, S2>
 where
-    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-    S2: ArrayStorageTyped<Item = S1::Item>,
+    S1: Storage<Item: crate::scalar::ApproxEq>,
+    S2: Storage<Item = S1::Item>,
 {
-    type ElementType = Ty<bool8>;
+    type ElementType = bool8;
     crate::storage::impl_array_storage_forward!(<S1, S2>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -670,10 +686,7 @@ where
     crate::ops::impl_element_type_change_default!();
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     define_array_op2_method!(equal: Equal, crate::scalar::Equal);
     define_array_op2_method!(not_equal: NotEqual, crate::scalar::NotEqual);
 
@@ -681,8 +694,8 @@ where
     #[track_caller]
     pub fn greater<S2>(self, other: Array<S2>) -> Array<Greater<S, S2>>
     where
-        S: ArrayStorageTyped,
-        S2: ArrayStorageTyped,
+        S: Storage,
+        S2: Storage,
         S2::Item: crate::scalar::Less<S::Item, Output: Dtyped>,
     {
         Greater::new_array(self, other).unwrap()
@@ -692,8 +705,8 @@ where
     #[track_caller]
     pub fn greater_equal<S2>(self, other: Array<S2>) -> Array<GreaterEqual<S, S2>>
     where
-        S: ArrayStorageTyped,
-        S2: ArrayStorageTyped,
+        S: Storage,
+        S2: Storage,
         S2::Item: crate::scalar::LessEqual<S::Item, Output: Dtyped>,
     {
         GreaterEqual::new_array(self, other).unwrap()
@@ -710,8 +723,8 @@ where
         atol: <S::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
     ) -> Array<ApproxEq<S, S2>>
     where
-        S: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
-        S2: ArrayStorageTyped<Item = S::Item>,
+        S: Storage<Item: crate::scalar::ApproxEq>,
+        S2: Storage<Item = S::Item>,
     {
         ApproxEq::new_array(self, other, rtol, atol).unwrap()
     }
@@ -935,7 +948,7 @@ mod tests {
     // still see the caller's order.
     #[test]
     fn swapped_cmp_reports_operands_in_caller_order() {
-        use crate::{Array, ArrayParams, ArrayStorage};
+        use crate::{Array, ArrayParams, StorageBase};
         use ndarray::ShapeBuilder;
 
         let c_order = ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap();
@@ -948,7 +961,7 @@ mod tests {
             b.storage().spec().block_size()
         );
 
-        let check = |storage: &dyn ArrayStorage, name: &str| {
+        let check = |storage: &dyn StorageBase, name: &str| {
             let info = storage.info();
             assert_eq!(info.name(), name);
             let [dep_a, dep_b] = info.dependencies() else {
@@ -1069,8 +1082,10 @@ mod tests {
     where
         T: Copy
             + PartialOrd
+            + From<u8>
             + core::ops::Sub<Output = T>
             + core::ops::Mul<Output = T>
+            + core::ops::Div<Output = T>
             + crate::scalar::Abs<Output = T>
             + crate::scalar::IsInfinite<Output = bool8>,
     {
@@ -1081,17 +1096,19 @@ mod tests {
             return false;
         }
         let diff = (a - b).abs();
-        if bool::from(diff.is_infinite()) {
-            return false;
-        }
         if diff <= atol {
             return true;
         }
         let largest = if a.abs() > b.abs() { a.abs() } else { b.abs() };
+        if bool::from(diff.is_infinite()) {
+            // compare at half scale, where halving is exact
+            let two = T::from(2u8);
+            return (a / two - b / two).abs() <= largest / two * rtol;
+        }
         diff <= largest * rtol
     }
 
-    /// The branch-free `approx_eq` against the reference, on every pair of edge values (infinities,
+    /// `approx_eq` against the reference, on every pair of edge values (infinities,
     /// NaN, +-0, subnormals, MAX) and odd tolerances.
     #[test]
     fn approx_eq_edge_cases() {
@@ -1107,6 +1124,7 @@ mod tests {
                     0.1,
                     1.0,
                     1.5,
+                    2.0,
                     -0.1,
                     <$t>::INFINITY,
                     <$t>::NAN,
@@ -1129,6 +1147,9 @@ mod tests {
         check!(f32);
         check!(f64);
         assert!(!f64::MAX.approx_eq(&-f64::MAX, &1.5, &0.0));
+        assert!(f64::MAX.approx_eq(&-f64::MAX, &2.0, &0.0));
+        assert!(f64::MAX.approx_eq(&-f64::MAX, &0.0, &f64::INFINITY));
+        assert!(f64::MAX.approx_eq(&(-f64::MAX / 4.0), &1.5, &0.0));
     }
 
     proptest::proptest! {

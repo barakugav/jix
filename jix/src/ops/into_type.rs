@@ -4,9 +4,8 @@ use crate::ops::prelude::*;
 
 /// A lazy storage adapter that re-tags an array's element type as `ET` without touching its bytes.
 ///
-/// At construction, if `ET` is [`Ty<T>`](crate::Ty) the runtime
-/// [`Dtype`](crate::dtype::Dtype) must match `T`; if it is [`TypeDyn`](crate::TypeDyn)
-/// construction always succeeds.
+/// At construction, if `ET` is a [`Dtyped`] type, the runtime [`Dtype`](crate::dtype::Dtype) must
+/// match it; if it is [`TypeDyn`](crate::TypeDyn) construction always succeeds.
 ///
 /// The entry points are [`Array::into_type`](crate::Array::into_type),
 /// [`Array::into_typed`](crate::Array::into_typed) and
@@ -23,20 +22,20 @@ use crate::ops::prelude::*;
 /// use jix::Array;
 /// use ndarray::{array, Ix1};
 ///
-/// // compact_ndarray infers Ty<f32> from the ndarray input type.
+/// // compact_ndarray infers f32 from the ndarray input type.
 /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
-/// // a: Array<Compact<Ty<f32>>>
+/// // a: Array<Compact<f32>>
 ///
 /// // Erase the static element type - always succeeds.
 /// let dyn_a = a.view().into_type_dyn();
-/// // dyn_a: Array<IntoType<&Compact<Ty<f32>>, TypeDyn>>
-/// // dyn_a: Array<Storage::ElementType = TypeDyn>
+/// // dyn_a: Array<IntoType<&Compact<f32>, TypeDyn>>
+/// // dyn_a: Array<S::ElementType = TypeDyn>
 /// assert_eq!(dyn_a.dtype(), &f32::DTYPE);
 ///
 /// // Recover the concrete type - validated at runtime.
 /// let typed_a = dyn_a.into_typed::<f32>()?;
-/// // typed_a: Array<IntoType<..., Ty<f32>>>
-/// // typed_a: Array<Storage::ElementType = Ty<f32>>
+/// // typed_a: Array<IntoType<..., f32>>
+/// // typed_a: Array<S::ElementType = f32>
 ///
 /// // Element-wise operations are available again.
 /// let result = typed_a.exp().to_ndarray::<Ix1>()?;
@@ -48,12 +47,12 @@ pub struct IntoType<S, ET> {
 }
 impl<S, ET> IntoType<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     /// Constructs an [`IntoType`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S) -> Result<Self> {
-        if let Some(expected_dtype) = ET::DTYPE {
+        if let Some(expected_dtype) = ET::STATIC_DTYPE {
             check_dtype(array.dtype(), &expected_dtype)?;
         }
         Ok(Self {
@@ -70,13 +69,13 @@ where
 }
 impl<S, ET> crate::storage::ArrayStorageImpl for IntoType<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
 }
-impl<S, ET> ArrayStorage for IntoType<S, ET>
+impl<S, ET> StorageBase for IntoType<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     type ElementType = ET;
@@ -88,7 +87,7 @@ where
         context: &'a ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
-        if let Some(dtype) = ET::DTYPE {
+        if let Some(dtype) = ET::STATIC_DTYPE {
             debug_assert_eq!(self.inner.dtype(), &dtype);
         }
         self.inner.read_data(index, context, out)
@@ -103,7 +102,7 @@ where
     where
         T: Dtyped,
     {
-        if let Some(dtype) = ET::DTYPE {
+        if let Some(dtype) = ET::STATIC_DTYPE {
             debug_assert_eq!(self.inner.dtype(), &dtype);
         }
         self.inner.read_as_elementwise_pipeline(index, context)
@@ -115,7 +114,7 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &crate::dtype::Dtype {
-        const { &ET::DTYPE }
+        const { &ET::STATIC_DTYPE }
             .as_ref()
             .unwrap_or_else(|| self.inner.dtype())
     }
@@ -153,16 +152,13 @@ macro_rules! impl_element_type_change_default {
 pub(crate) use impl_element_type_change_default;
 
 /// Methods for converting an array to a different element type.
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Re-tag this array's element type as `NewET`, returning an error if the runtime dtype does
     /// not match.
     ///
-    /// Arrays loaded from files carry [`TypeDyn`]. Once the dtype is known, `into_type::<Ty<T>>()`
-    /// (or [`into_typed::<T>`](Self::into_typed)) recovers the static `Ty<T>` that most
-    /// element-wise operations require (`ArrayStorageTyped`);
+    /// Arrays loaded from files carry [`TypeDyn`]. Once the dtype is known, `into_type::<T>()`
+    /// (or [`into_typed::<T>`](Self::into_typed)) recovers the static `T` that most
+    /// element-wise operations require (`Storage`);
     /// [`into_type_dyn`](Self::into_type_dyn) erases it.
     ///
     /// The storage becomes `S::ElementTypeChange<NewET>`: an
@@ -172,7 +168,7 @@ where
     /// # Errors
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
-    /// `NewET = Ty<T>` and `self.dtype() != T::DTYPE`. Always succeeds for `NewET = TypeDyn`.
+    /// `NewET = T` and `self.dtype() != T::DTYPE`. Always succeeds for `NewET = TypeDyn`.
     #[inline]
     pub fn into_type<NewET>(self) -> Result<Array<S::ElementTypeChange<NewET>>>
     where
@@ -183,16 +179,16 @@ where
         ))
     }
 
-    /// Re-tag this array's element type as [`Ty<T>`](crate::Ty), asserting a concrete scalar type.
+    /// Re-tag this array's element type as `T`, asserting a concrete scalar type.
     ///
-    /// Sugar for [`into_type::<Ty<T>>()`](Self::into_type).
+    /// Sugar for [`into_type::<T>()`](Self::into_type).
     ///
     /// # Errors
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
     /// `self.dtype() != T::DTYPE`.
     #[inline]
-    pub fn into_typed<T>(self) -> Result<Array<S::ElementTypeChange<Ty<T>>>>
+    pub fn into_typed<T>(self) -> Result<Array<S::ElementTypeChange<T>>>
     where
         T: Dtyped,
     {

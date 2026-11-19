@@ -8,10 +8,10 @@ use crate::util::{
     default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
     RawAlignedBytes, SliceExt,
 };
-use crate::{ArrayStorage, DimDyn, DimIdx, NdCopier, PtrMutNoalias, PtrNoalias, ReadContext};
+use crate::{DimDyn, DimIdx, NdCopier, PtrMutNoalias, PtrNoalias, ReadContext, StorageBase};
 
 /// A borrowed, strided view over a region of array bytes - the value produced and consumed by
-/// [`ArrayStorage::read_data`](crate::ArrayStorage::read_data).
+/// [`StorageBase::read_data`](crate::StorageBase::read_data).
 ///
 /// A `StridedBuf` pairs a block of bytes with one byte stride per dimension. Element
 /// `(i0, i1, ..., in)` of the read region lives at byte offset
@@ -446,7 +446,7 @@ pub(crate) fn alloc_out_buf<'a>(
     unsafe { StridedBuf::from_pool(buf, strides) }
 }
 
-/// The destination of an [`ArrayStorage::read_data`](crate::ArrayStorage::read_data).
+/// The destination of a [`StorageBase::read_data`](crate::StorageBase::read_data).
 pub struct OutBuf<'s, 'a>(pub(crate) OutBufInner<'s, 'a>);
 
 pub(crate) enum OutBufInner<'s, 'a> {
@@ -537,7 +537,7 @@ pub(crate) fn write_out_buf_slot<'a, 'b>(
 /// The caller should ensure the created strides are valid.
 #[inline]
 pub(crate) unsafe fn read_data_and_map_strides<'a>(
-    inner: &'a impl ArrayStorage,
+    inner: &'a impl StorageBase,
     inner_index: &Index<'_>,
     context: &'a ReadContext,
     out: OutBuf<'_, 'a>,

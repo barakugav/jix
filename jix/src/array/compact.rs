@@ -1,5 +1,5 @@
 use crate::codec::{DecoderCodecConfig, Encoder};
-use crate::error::Result;
+use crate::error::{check_region_size, Result};
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageExt, BlockSize, Compact, Index, StridedBuf,
@@ -9,13 +9,13 @@ use crate::util::{
     scale_read_shape, AlignedBytes, IterExt, NdCopier, PtrMutNoalias, PtrNoalias, SliceExt,
 };
 use crate::{
-    default_logical_strides, default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec,
-    Dimension, ReadContext,
+    default_logical_strides, default_strides, ArrayParams, Dim, DimDyn, DimVec, Dimension,
+    ReadContext, StorageBase,
 };
 
 use super::Array;
 
-impl<S: ArrayStorage> Array<S> {
+impl<S: StorageBase> Array<S> {
     /// Compress the data of this array into a new `Array<Compact>` with new blocks.
     ///
     /// The primary use of `compact` is to materialize a lazy view such as
@@ -61,7 +61,8 @@ impl<S: ArrayStorage> Array<S> {
     /// Compress the data of this array into a new `Array<Compact>` with explicit [`ArrayParams`].
     ///
     /// Like [`compact`](Array::compact). Fields not set in `params` are inherited from the source
-    /// storage.
+    /// storage, except that setting any of the codec, level or filters resets the other two to
+    /// their defaults.
     ///
     /// # Errors
     ///
@@ -136,14 +137,14 @@ impl<S: ArrayStorage> Array<S> {
         B: BlockTableBuilder,
     {
         // Erase the storage to reduce monomorphization bloat
-        let storage: &dyn ArrayStorage = &self.storage;
+        let storage: &dyn StorageBase = &self.storage;
         compact_into_builder_dyn_dispatch(storage, params, context, builder_init)
     }
 }
 
 #[inline(never)]
 fn compact_into_builder_dyn_dispatch<B: BlockTableBuilder>(
-    storage: &dyn ArrayStorage,
+    storage: &dyn StorageBase,
     params: &mut ArrayParams,
     context: &ReadContext,
     builder_init: impl FnOnce(
@@ -163,7 +164,7 @@ fn compact_into_builder_dyn_dispatch<B: BlockTableBuilder>(
 }
 #[inline(never)]
 fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
-    storage: &dyn ArrayStorage,
+    storage: &dyn StorageBase,
     params: &mut ArrayParams,
     context: &ReadContext,
     builder_init: impl FnOnce(
@@ -240,6 +241,8 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
         block_shape[dim] as u64 * chunk_shape_in_blocks[dim]
     });
     let chunk_grid_shape = D::vec(ndim, |dim| shape[dim].div_ceil(chunk_shape[dim]));
+    let max_chunk_size = D::vec(ndim, |dim| chunk_shape[dim].min(shape[dim]) as usize);
+    check_region_size(max_chunk_size.as_ref(), itemsize)?;
 
     let mut chunk_buf = AlignedBytes::new_padded(alignment);
     let mut tmp_block_plain = AlignedBytes::new_padded(alignment);
@@ -359,7 +362,7 @@ mod tests {
     use crate::dtype::Dtyped;
 
     use crate::util::arr_params;
-    use crate::ArrayStorage;
+    use crate::StorageBase;
 
     use crate::array::tests::*;
 
@@ -553,7 +556,7 @@ mod tests {
             plain.to_ndarray().unwrap(),
             ndarray::array![[1i32, 4], [2, 5], [3, 6]]
         );
-        // `to_plain` goes through `to_ndarray`, so the buffer is F-laid-out; `Plain::new` then
+        // `to_plain` goes through `to_ndarray`, so the buffer is F-laid-out; `PlainBase::new` then
         // re-derives the hint from those strides, and the layout survives into the new leaf.
         assert_eq!(plain.storage().spec().read_layout_order(), &[1, 0]);
     }

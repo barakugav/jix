@@ -182,7 +182,7 @@ TYPES = {
 EW = "jix::ops::elementwise::pipeline"
 INNER_LOOP = re.compile(rf"{EW}::inner_loop::<(.+?), (<.*), true, true>")
 LEAF = re.compile(rf"{EW}::OperandTyped<(.+)>")
-# `<jix::ops::elementwise::op2::Op2<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline::Op2Pipeline<..>`
+# `<jix::ops::elementwise::op2::Op2<_, _> as jix::storage::core_trait::StorageBase>::read_as_elementwise_pipeline::Op2Pipeline<..>`
 NODE = re.compile(r"<[^<>]*(?:<[_, ]*>)?[^<>]* as [\w:]+>::read_as_elementwise_pipeline::(\w+)<(.*)>")
 
 # The reduction loops over contiguous items, by name suffix; groups: the item type, the op, and the

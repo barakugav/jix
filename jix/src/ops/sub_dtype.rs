@@ -1,3 +1,6 @@
+use std::marker::PhantomData;
+
+use crate::element_type::check_element_type;
 use crate::ops::prelude::*;
 
 /// Extracts one named field from a struct dtype array.
@@ -31,13 +34,14 @@ use crate::ops::prelude::*;
 /// ```
 pub struct SubDtype<S, ET> {
     array: S,
-    dst_type: ET,
+    dtype: Dtype,
+    element_type: PhantomData<ET>,
     sub_field_offset: Itemsize,
     spec: ArraySpecDynamic,
 }
 impl<S, ET> SubDtype<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     /// Constructs a [`SubDtype`] storage. See the struct docs for semantics and examples.
@@ -60,12 +64,13 @@ where
         let (offset, dtype) = sub_field_spec.unwrap();
         check_dtype_size_nonzero(dtype)?;
 
-        let dst_dtype = ET::from_dtype(dtype.clone())?;
+        check_element_type::<ET>(dtype)?;
         let mut spec = array.spec().dynamic().clone();
         spec.flags =
             ArraySpecFlags::new().with_read_tiling(array.spec().read_tiling().pulled_view());
         Ok(Self {
-            dst_type: dst_dtype,
+            dtype: dtype.clone(),
+            element_type: PhantomData,
             sub_field_offset: offset,
             array,
             spec,
@@ -79,9 +84,9 @@ where
     }
 }
 impl<S, ET> crate::storage::ArrayStorageImpl for SubDtype<S, ET> {}
-impl<S, ET> ArrayStorage for SubDtype<S, ET>
+impl<S, ET> StorageBase for SubDtype<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     type ElementType = ET;
@@ -132,7 +137,7 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        self.dst_type.dtype()
+        &self.dtype
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
@@ -145,19 +150,18 @@ where
     type ElementTypeChange<NewET: ElementType> = SubDtype<S, NewET>;
     #[inline]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+        check_element_type::<NewET>(&self.dtype)?;
         Ok(SubDtype {
             array: self.array,
-            dst_type: NewET::from_dtype(self.dst_type.dtype().clone())?,
+            dtype: self.dtype,
+            element_type: PhantomData,
             sub_field_offset: self.sub_field_offset,
             spec: self.spec,
         })
     }
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a view of one named field of a struct dtype. See [`SubDtype`] for details and
     /// examples.
     ///
@@ -169,7 +173,7 @@ where
     /// Panics if the array dtype is not a struct dtype, has an inner shape or has no field with the
     /// given name, or if the field dtype is zero-sized or not `T`.
     #[track_caller]
-    pub fn dtype_sub_field<T>(self, sub_field: &str) -> Array<SubDtype<S, Ty<T>>>
+    pub fn dtype_sub_field<T>(self, sub_field: &str) -> Array<SubDtype<S, T>>
     where
         T: Dtyped,
     {

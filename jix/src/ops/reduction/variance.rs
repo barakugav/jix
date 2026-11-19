@@ -329,7 +329,7 @@ define_reduction_op!(
     Variance,
     VarianceKernel { ddof: f64 },
     where {
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::Variance<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Variance>::Output,
@@ -426,7 +426,7 @@ define_reduction_op!(
     StandardDeviation,
     StandardDeviationKernel { ddof: f64 },
     where {
-        S: ArrayStorageTyped,
+        S: Storage,
         S::Item: crate::scalar::Variance<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Variance>::Output,
@@ -487,14 +487,11 @@ where
     const NEEDS_INDICES: bool = false;
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     define_array_reduction_method!(
         var: Variance,
         where {
-            S: ArrayStorageTyped,
+            S: Storage,
             S::Item: crate::scalar::Variance<Output: Dtyped>,
         },
         extra_args = (ddof: f64)
@@ -502,7 +499,7 @@ where
     define_array_reduction_method!(
         std: StandardDeviation,
         where {
-            S: ArrayStorageTyped,
+            S: Storage,
             S::Item: crate::scalar::Variance<Output: Dtyped>,
         },
         extra_args = (ddof: f64)

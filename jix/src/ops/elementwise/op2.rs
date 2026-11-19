@@ -32,8 +32,8 @@ pub(crate) trait Op2Kernel<T1, T2> {
 impl<S1, S2, K> Op2<S1, S2, K> {
     pub(crate) fn new(a: S1, b: S2, kernel: K, swapped_operand_order: bool) -> Result<Self>
     where
-        S1: ArrayStorageTyped,
-        S2: ArrayStorageTyped,
+        S1: Storage,
+        S2: Storage,
         K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
     {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
@@ -105,13 +105,13 @@ impl<S1, S2, K> Op2<S1, S2, K> {
 }
 
 impl<S1, S2, K> crate::storage::ArrayStorageImpl for Op2<S1, S2, K> {}
-impl<S1, S2, K> ArrayStorage for Op2<S1, S2, K>
+impl<S1, S2, K> StorageBase for Op2<S1, S2, K>
 where
-    S1: ArrayStorageTyped,
-    S2: ArrayStorageTyped,
+    S1: Storage,
+    S2: Storage,
     K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
 {
-    type ElementType = Ty<K::Output>;
+    type ElementType = K::Output;
 
     #[inline]
     fn read_data<'a>(
@@ -268,8 +268,8 @@ macro_rules! define_op2 {
         pub struct $Op<S1, S2>(crate::ops::elementwise::op2::Op2<S1, S2, $Kernel>);
         impl<S1, S2> $Op<S1, S2>
         where
-            S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped,
+            S1: crate::Storage,
+            S2: crate::Storage,
             S1::Item: crate::scalar::$trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
@@ -283,13 +283,13 @@ macro_rules! define_op2 {
             }
         }
         impl<S1, S2> crate::storage::ArrayStorageImpl for $Op<S1, S2> {}
-        impl<S1, S2> ArrayStorage for $Op<S1, S2>
+        impl<S1, S2> StorageBase for $Op<S1, S2>
         where
-            S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped,
+            S1: crate::Storage,
+            S2: crate::Storage,
             S1::Item: crate::scalar::$trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
-            type ElementType = crate::Ty<<S1::Item as crate::scalar::$trait<S2::Item>>::Output>;
+            type ElementType = <S1::Item as crate::scalar::$trait<S2::Item>>::Output;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
 
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
@@ -318,8 +318,8 @@ macro_rules! define_op2 {
     ) => {
         impl<S1, S2> core::ops::$core_op_trait<Array<S2>> for Array<S1>
         where
-            S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped,
+            S1: crate::Storage,
+            S2: crate::Storage,
             S1::Item: crate::scalar::$trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S1, S2>>;
@@ -338,8 +338,8 @@ macro_rules! define_array_op2_method {
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
-            S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped,
+            S: crate::Storage,
+            S2: crate::Storage,
             S::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, other).unwrap()
@@ -350,8 +350,8 @@ macro_rules! define_array_op2_method {
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
-            S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Item = $rhs_type>,
+            S: crate::Storage,
+            S2: crate::Storage<Item = $rhs_type>,
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, other).unwrap()

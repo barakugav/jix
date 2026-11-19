@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
@@ -5,9 +7,7 @@ use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, Index, OutBuf};
 use crate::util::dim_arr;
 use crate::util::iter::NdIter;
 use crate::ReadContext;
-use crate::{
-    ArrayParams, ArrayStorage, CompactArray, DimArray, DimDyn, ElementType, SliceExt, Ty, TypeDyn,
-};
+use crate::{ArrayParams, CompactArray, DimArray, DimDyn, SliceExt, StorageBase, TypeDyn};
 
 use super::Array;
 
@@ -20,7 +20,7 @@ impl<T> CompactArray<T> {
     /// level and other codec settings; a block shape matching a known access pattern can improve
     /// read performance significantly.
     ///
-    /// The element type `Ty<T>` is inferred from the ndarray's element type.
+    /// The element type `T` is inferred from the ndarray's element type.
     ///
     /// # Errors
     ///
@@ -59,9 +59,9 @@ impl<T> CompactArray<T> {
     /// assert_eq!(scaled.to_ndarray::<Ix2>()?[[1, 1]], 957.0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn compact_ndarray<S, InD>(array: &ndarray::ArrayBase<S, InD>) -> Result<Self>
+    pub fn compact_ndarray<S, D>(array: &ndarray::ArrayBase<S, D>) -> Result<Self>
     where
-        InD: ndarray::Dimension,
+        D: ndarray::Dimension,
         S: ndarray::Data<Elem = T>,
         T: Dtyped,
     {
@@ -97,12 +97,12 @@ impl<T> CompactArray<T> {
     /// }
     /// # Ok::<(), jix::Error>(())
     /// ```
-    pub fn compact_ndarray_with<S, InD>(
-        array: &ndarray::ArrayBase<S, InD>,
+    pub fn compact_ndarray_with<S, D>(
+        array: &ndarray::ArrayBase<S, D>,
         mut params: ArrayParams,
     ) -> Result<Self>
     where
-        InD: ndarray::Dimension,
+        D: ndarray::Dimension,
         S: ndarray::Data<Elem = T>,
         T: Dtyped,
     {
@@ -213,18 +213,18 @@ impl<T> CompactArray<T> {
         T: Dtyped,
     {
         struct FnStorage<T, F> {
-            dtype: Ty<T>,
+            element_type: PhantomData<T>,
             shape: DimArray<u64>,
             f: F,
             spec: ArraySpecOwned,
         }
         impl<T, F> crate::storage::ArrayStorageImpl for FnStorage<T, F> {}
-        impl<T, F> ArrayStorage for FnStorage<T, F>
+        impl<T, F> StorageBase for FnStorage<T, F>
         where
             T: Dtyped,
             F: Fn(&[u64]) -> T,
         {
-            type ElementType = Ty<T>;
+            type ElementType = T;
 
             #[inline]
             fn read_data<'a>(
@@ -275,7 +275,7 @@ impl<T> CompactArray<T> {
 
             #[inline(always)]
             fn dtype(&self) -> &Dtype {
-                self.dtype.dtype()
+                Dtype::new_ref::<T>()
             }
 
             #[inline]
@@ -290,17 +290,14 @@ impl<T> CompactArray<T> {
             crate::ops::impl_element_type_change_default!();
         }
 
-        let dtype = Ty::<T>::new();
-
         check_ndim(shape.len())?;
         let shape = DimArray::from_slice(shape).unwrap();
-        params.tune(shape.as_slice(), dtype.dtype())?;
-        let spec =
-            params
-                .clone()
-                .into_spec(shape.as_slice(), dtype.dtype(), ArraySpecFlags::new())?;
+        params.tune(shape.as_slice(), &T::DTYPE)?;
+        let spec = params
+            .clone()
+            .into_spec(shape.as_slice(), &T::DTYPE, ArraySpecFlags::new())?;
         let array = Array::from_storage(FnStorage {
-            dtype,
+            element_type: PhantomData,
             shape,
             f,
             spec,
@@ -322,7 +319,7 @@ mod tests {
     use crate::storage::block::BlockSize;
 
     use crate::util::arr_params;
-    use crate::{ArrayParams, ArrayStorage};
+    use crate::{ArrayParams, StorageBase};
 
     use crate::array::tests::*;
 

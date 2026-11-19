@@ -1,12 +1,14 @@
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::ArrayStorageAny;
+use crate::storage::StorageAny;
 use crate::ReadContext;
-use crate::{ArrayAny, ArrayStorage, ElementType};
+use crate::{ArrayAny, ElementType, StorageBase};
+
+mod construct;
+
+mod read;
 
 mod compact;
-mod construct;
-mod read;
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
 ///
@@ -15,7 +17,7 @@ mod read;
 /// provided by [`shape()`](Array::shape), [`dtype()`](Array::dtype) and
 /// [`to_buf_strided()`](Array::to_buf_strided); all other functions are built on top of those.
 ///
-/// An array is generic over `S: ArrayStorage`, which provides the implementation of the three core
+/// An array is generic over `S: StorageBase`, which provides the implementation of the three core
 /// methods. The main concrete storage backend is the block-compressed
 /// [`Compact`](crate::storage::Compact) type, which divides the array into n-dimensional blocks
 /// and compresses each block independently, and it's the return type of the common creation
@@ -30,7 +32,7 @@ mod read;
 /// |------|-------------|
 /// | [`Array<Compact>`](crate::storage::Compact) | Heap-allocated block-compressed array. The main storage backend. |
 /// | [`Array<Add<S1, S2>> or Array<Neg<S>> ...`](crate::ops) | Lazy operation views that wrap one or more arrays and apply a transformation at read time. Created by methods in [`ops`](crate::ops). |
-/// | [`Array<Plain<...>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_ref`](Array::plain_ndarray_ref). |
+/// | [`Array<Plain<T>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_ref`](Array::plain_ndarray_ref). |
 ///
 /// # Operations and lazy evaluation
 ///
@@ -143,14 +145,14 @@ mod read;
 /// # Element type tracking
 ///
 /// `S::ElementType` records the scalar element type at the type level. When the element type is
-/// statically known, `S::ElementType = Ty<T>`, and all element-wise operations - arithmetic,
+/// statically known, `S::ElementType = T`, and all element-wise operations - arithmetic,
 /// comparisons, reductions, type casts - become available. When the element type is only known
 /// at runtime (e.g. for arrays loaded from files), `S::ElementType = TypeDyn`, and those
 /// operations are not available until the type is asserted.
 ///
-/// Arrays built from typed sources carry `Ty<T>`: `compact_ndarray(&array![1.0f32])` returns
-/// `Array<Compact<Ty<f32>>>`. Use [`into_typed::<T>()`](Array::into_typed) to assert the element
-/// type - validated against the stored dtype at runtime - and recover `Ty<T>`. Use
+/// Arrays built from typed sources are typed: `compact_ndarray(&array![1.0f32])` returns
+/// `Array<Compact<f32>>`. Use [`into_typed::<T>()`](Array::into_typed) to assert the element
+/// type - validated against the stored dtype at runtime - and recover `S::ElementType = T`. Use
 /// [`into_type_dyn()`](Array::into_type_dyn) to erase the static element type.
 ///
 /// The number of dims is a runtime property, read from [`shape`](Array::shape).
@@ -159,7 +161,7 @@ pub struct Array<S> {
     pub(crate) storage: S,
 }
 
-impl<S: ArrayStorage> Array<S> {
+impl<S: StorageBase> Array<S> {
     /// Get the shape of the array, one element per dimension.
     #[inline(always)]
     pub fn shape(&self) -> &[u64] {
@@ -209,7 +211,7 @@ impl<S: ArrayStorage> Array<S> {
     /// ```
     #[inline(always)]
     pub fn dtype(&self) -> &Dtype {
-        const { &S::ElementType::DTYPE }
+        const { &S::ElementType::STATIC_DTYPE }
             .as_ref()
             .unwrap_or_else(|| self.storage.dtype())
     }
@@ -274,13 +276,13 @@ impl<S: ArrayStorage> Array<S> {
 
     /// Convert this array into a type-erased [`ArrayAny`](crate::ArrayAny).
     ///
-    /// The storage is wrapped in an `Arc` and hidden behind [`ArrayStorageAny`], so the
+    /// The storage is wrapped in an `Arc` and hidden behind [`StorageAny`], so the
     /// resulting array can be stored alongside arrays of other concrete storage types.
     pub fn into_any(self) -> ArrayAny
     where
-        S: ArrayStorage + Send + Sync + 'static,
+        S: StorageBase + Send + Sync + 'static,
     {
-        Array::from_storage(ArrayStorageAny::new(self.into_storage()))
+        Array::from_storage(StorageAny::new(self.into_storage()))
     }
 
     /// Check if this array's storage is block-compressed.
@@ -362,7 +364,7 @@ impl<S: ArrayStorage> Array<S> {
     }
 }
 
-impl<S: ArrayStorage> std::fmt::Debug for Array<S> {
+impl<S: StorageBase> std::fmt::Debug for Array<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Array")
             .field("shape", &self.shape())
@@ -384,7 +386,7 @@ pub(crate) mod tests {
     use crate::storage::block::{BlockSize, BlockTable};
 
     use crate::util::{arr_params, cast_slice, DimArray};
-    use crate::{ArrayParams, CompactArray, Dimension, IntoDimension, Ty};
+    use crate::{ArrayParams, CompactArray, Dimension, IntoDimension};
 
     // -----------------------------------------------------------------------
     // compact_ndarray roundtrip helper
@@ -409,7 +411,7 @@ pub(crate) mod tests {
 
     pub(crate) fn make_block_table<T: Dtyped>(
         blocks: &[&[T]],
-    ) -> BlockTable<crate::storage::block::Owned, Ty<T>> {
+    ) -> BlockTable<crate::storage::block::Owned, T> {
         let block_len = blocks[0].len() as BlockSize;
         let data: Vec<u8> = blocks
             .iter()

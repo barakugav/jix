@@ -170,7 +170,9 @@ def test_too_many_indices_raises():
         (-6, IndexError),
         (slice(None, None, 2), ValueError),
         ((Ellipsis, Ellipsis), IndexError),
-        ("bad", TypeError),
+        ("bad", IndexError),
+        (2**63, IndexError),
+        (np.uint64(2**63), IndexError),
     ],
 )
 def test_bad_index_raises(index, exc):
@@ -186,11 +188,11 @@ def test_bad_index_raises(index, exc):
 @pytest.mark.parametrize("index", [True, False, (0, True), np.True_])
 def test_bool_index_raises(index):
     a = jix.compact(arange((3, 4)))
-    with pytest.raises(TypeError):
+    with pytest.raises(IndexError):
         a[index]
-    with pytest.raises(TypeError):
+    with pytest.raises(IndexError):
         a.numpy(index)
-    with pytest.raises(TypeError):
+    with pytest.raises(IndexError):
         jix.slice(a, index)
 
 
@@ -204,6 +206,10 @@ def test_bool_index_raises(index):
         lambda a: jix.concatenate([a, a], True),
         lambda a: jix.swapdims(a, 0, True),
         lambda a: jix.permute_dims(a, (True, 0)),
+        lambda a: jix.reshape(a, (True, -1)),
+        lambda a: a.reshape((3, True, 4)),
+        lambda a: jix.broadcast(a, (True, 3, 4)),
+        lambda a: a.broadcast((False, 3, 4)),
     ],
 )
 def test_bool_dim_raises(fn):

@@ -6,28 +6,28 @@ use crate::error::Result;
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, OutBuf};
 use crate::ReadContext;
-use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
+use crate::{DimDyn, Dimension, StorageBase, TypeDyn, NDIM_MAX};
 
 /// A type-erased storage: any storage behind an `Arc`, with reads forwarded to it dynamically.
 ///
 /// Cloning clones the `Arc`. Use [`ArrayAny`](crate::ArrayAny) (the alias
-/// `Array<ArrayStorageAny>`) to hold arrays of different storage types in one collection, such
+/// `Array<StorageAny>`) to hold arrays of different storage types in one collection, such
 /// as a `Vec<ArrayAny>`; convert an array with [`Array::into_any`](crate::Array::into_any).
 #[derive(Clone)]
-pub struct ArrayStorageAny {
+pub struct StorageAny {
     inner: Arc<dyn AnyInner>,
 }
 trait AnyInner: Send + Sync {
-    fn storage(&self) -> &dyn ArrayStorage;
+    fn storage(&self) -> &dyn StorageBase;
     fn meta(&self) -> &AnyMeta;
 }
 struct AnyMeta {
     shape: DimDyn,
-    element_type: TypeDyn,
+    dtype: Dtype,
     spec: ArraySpecOwned,
 }
-impl ArrayStorageAny {
-    pub(crate) fn new(storage: impl ArrayStorage + Send + Sync + 'static) -> Self {
+impl StorageAny {
+    pub(crate) fn new(storage: impl StorageBase + Send + Sync + 'static) -> Self {
         let meta = AnyMeta::new(&storage);
         Self::from_inner_box(Box::new(AnyInnerImpl { storage, meta }))
     }
@@ -39,8 +39,8 @@ impl ArrayStorageAny {
         }
     }
 }
-impl crate::storage::ArrayStorageImpl for ArrayStorageAny {}
-impl ArrayStorage for ArrayStorageAny {
+impl crate::storage::ArrayStorageImpl for StorageAny {}
+impl StorageBase for StorageAny {
     type ElementType = TypeDyn;
 
     #[inline(always)]
@@ -64,8 +64,7 @@ impl ArrayStorage for ArrayStorageAny {
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        let meta = self.inner.meta();
-        meta.element_type.dtype()
+        &self.inner.meta().dtype
     }
 
     #[inline]
@@ -89,8 +88,8 @@ struct AnyInnerImpl<S> {
     storage: S,
     meta: AnyMeta,
 }
-impl<S: ArrayStorage + Send + Sync + 'static> AnyInner for AnyInnerImpl<S> {
-    fn storage(&self) -> &dyn ArrayStorage {
+impl<S: StorageBase + Send + Sync + 'static> AnyInner for AnyInnerImpl<S> {
+    fn storage(&self) -> &dyn StorageBase {
         &self.storage
     }
 
@@ -100,7 +99,7 @@ impl<S: ArrayStorage + Send + Sync + 'static> AnyInner for AnyInnerImpl<S> {
 }
 
 impl AnyMeta {
-    fn new(storage: &dyn ArrayStorage) -> Self {
+    fn new(storage: &dyn StorageBase) -> Self {
         let mut spec = storage.spec().to_owned();
 
         // A parent can't fuse through the erased storage, it reads it with `read_data`
@@ -109,7 +108,7 @@ impl AnyMeta {
 
         Self {
             shape: DimDyn::from_slice(storage.shape()),
-            element_type: TypeDyn::new(storage.dtype().clone()),
+            dtype: storage.dtype().clone(),
             spec,
         }
     }

@@ -43,9 +43,9 @@ pub struct Select<SC, SX, SY> {
 }
 impl<SC, SX, SY> Select<SC, SX, SY>
 where
-    SC: ArrayStorageTyped<Item = bool8>,
-    SX: ArrayStorage,
-    SY: ArrayStorage<ElementType = SX::ElementType>,
+    SC: Storage<Item = bool8>,
+    SX: StorageBase,
+    SY: StorageBase<ElementType = SX::ElementType>,
 {
     /// Constructs a [`Select`] storage. See the struct docs for semantics and examples.
     pub fn new(condition: SC, x: SX, y: SY) -> Result<Self> {
@@ -106,11 +106,14 @@ where
             read_shape_scale_weight,
             read_layout_order,
         );
-        spec.flags = spec.flags.with_read_tiling(ReadTiling::fused([
-            c_spec.read_tiling(),
-            x_spec.read_tiling(),
-            y_spec.read_tiling(),
-        ]));
+        // read_data pulls condition and y, so it reads in one pass only if they are views
+        let views = c_spec.read_tiling() == ReadTiling::ZeroCopy
+            && y_spec.read_tiling() == ReadTiling::ZeroCopy;
+        spec.flags = spec.flags.with_read_tiling(if views {
+            x_spec.read_tiling().max(ReadTiling::SinglePass)
+        } else {
+            ReadTiling::Tiled
+        });
         spec.add_cache_ids_from([&c_spec, &x_spec, &y_spec]);
         spec.add_cache_id(cache_id);
         Ok(Self {
@@ -314,11 +317,11 @@ where
     }
 }
 impl<SC, SX, SY> crate::storage::ArrayStorageImpl for Select<SC, SX, SY> {}
-impl<SC, SX, SY> ArrayStorage for Select<SC, SX, SY>
+impl<SC, SX, SY> StorageBase for Select<SC, SX, SY>
 where
-    SC: ArrayStorageTyped<Item = bool8>,
-    SX: ArrayStorage,
-    SY: ArrayStorage<ElementType = SX::ElementType>,
+    SC: Storage<Item = bool8>,
+    SX: StorageBase,
+    SY: StorageBase<ElementType = SX::ElementType>,
 {
     type ElementType = SX::ElementType;
 
@@ -436,7 +439,7 @@ where
 
 impl<S> Array<S>
 where
-    S: ArrayStorageTyped<Item = bool8>,
+    S: Storage<Item = bool8>,
 {
     /// Element-wise selection from `x` where `self` is `true`, and from `y` elsewhere. See
     /// [`Select`] for details and examples.
@@ -447,8 +450,8 @@ where
     #[track_caller]
     pub fn select<SX, SY>(self, x: Array<SX>, y: Array<SY>) -> Array<Select<S, SX, SY>>
     where
-        SX: ArrayStorage,
-        SY: ArrayStorage<ElementType = SX::ElementType>,
+        SX: StorageBase,
+        SY: StorageBase<ElementType = SX::ElementType>,
     {
         Select::new_array(self, x, y).unwrap()
     }
@@ -529,14 +532,14 @@ mod tests {
     /// `select` on them, and asserts the result matches the element-wise `if c { x }
     /// else { y }` reference. Shared by the concrete per-byte-width tests below, which only
     /// differ in the fixed input arrays.
-    fn check_select_concrete<T, InD>(
-        cond: &ndarray::Array<bool8, InD>,
-        x: &ndarray::Array<T, InD>,
-        y: &ndarray::Array<T, InD>,
+    fn check_select_concrete<T, D>(
+        cond: &ndarray::Array<bool8, D>,
+        x: &ndarray::Array<T, D>,
+        y: &ndarray::Array<T, D>,
         block_shape: Option<&[usize]>,
     ) where
         T: Dtyped + Copy + Debug + PartialEq,
-        InD: ndarray::Dimension,
+        D: ndarray::Dimension,
     {
         let za_cond = match block_shape {
             Some(bs) => Array::compact_ndarray_with(cond, crate::util::arr_params(bs)).unwrap(),
@@ -850,15 +853,15 @@ mod tests {
     /// `base_offset` shifts the destination base that many bytes off an 8-aligned address - so a
     /// non-multiple of the dtype's alignment drives the unaligned inner loop.
     #[track_caller]
-    fn check_select_strided<T, InD>(
-        cond: &ndarray::Array<bool8, InD>,
-        x: &ndarray::Array<T, InD>,
-        y: &ndarray::Array<T, InD>,
+    fn check_select_strided<T, D>(
+        cond: &ndarray::Array<bool8, D>,
+        x: &ndarray::Array<T, D>,
+        y: &ndarray::Array<T, D>,
         inner_gap: usize,
         base_offset: usize,
     ) where
         T: Dtyped + Copy + Debug + PartialEq,
-        InD: ndarray::Dimension,
+        D: ndarray::Dimension,
     {
         use crate::storage::StridedBuf;
 
@@ -1134,5 +1137,18 @@ mod tests {
         assert_eq!(result[0], Pair { a: 1, b: 2 }); // cond=true  -> x
         assert_eq!(result[1], Pair { a: 30, b: 40 }); // cond=false -> y
         assert_eq!(result[2], Pair { a: 5, b: 6 }); // cond=true  -> x
+    }
+
+    #[test]
+    fn read_tiling_is_not_fusable() {
+        use crate::storage::params::ReadTiling::{SinglePass, Tiled};
+        use crate::StorageBase;
+        let (c, x) = (array![bool8::TRUE, bool8::FALSE], array![1i32, 2]);
+        let c = Array::plain_ndarray_ref(&c).unwrap();
+        let x = || Array::plain_ndarray_ref(&x).unwrap();
+        let sel = c.view().select(x(), x());
+        assert_eq!(sel.storage().spec().read_tiling(), SinglePass);
+        let sel = c.view().select(x(), -x());
+        assert_eq!(sel.storage().spec().read_tiling(), Tiled);
     }
 }

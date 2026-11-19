@@ -3,12 +3,12 @@ use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{
-    check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorage, ArrayStorageInfo, Index, OutBuf,
-    OutBufInner, StridedBuf, Ty,
+    check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, Index, OutBuf, OutBufInner,
+    StorageBase, StridedBuf,
 };
 use crate::util::dim_arr;
 use crate::ReadContext;
-use crate::{cast_slice, cast_slice_mut, ArrayParams, DimDyn, Dimension, ElementType};
+use crate::{cast_slice, cast_slice_mut, ArrayParams, DimDyn, Dimension};
 
 /// Storage that broadcasts a single scalar value across an arbitrary shape: a zero-copy
 /// constant array. A 0-D `Scalar` (empty `shape`) is a plain scalar value.
@@ -30,7 +30,6 @@ use crate::{cast_slice, cast_slice_mut, ArrayParams, DimDyn, Dimension, ElementT
 pub struct Scalar<T> {
     data: T,
     shape: DimDyn,
-    element_type: Ty<T>,
     spec: ArraySpecOwned,
 }
 impl<T> Scalar<T> {
@@ -60,12 +59,7 @@ impl<T> Scalar<T> {
         // Reading a scalar element is free, and it broadcasts over every dimension.
         spec.dynamic_mut().element_cost = 0.0;
 
-        Ok(Self {
-            data,
-            shape,
-            element_type: Ty::new(),
-            spec,
-        })
+        Ok(Self { data, shape, spec })
     }
 
     /// Get the (singular) value of this storage.
@@ -76,11 +70,11 @@ impl<T> Scalar<T> {
 }
 
 impl<T> crate::storage::ArrayStorageImpl for Scalar<T> {}
-impl<T> ArrayStorage for Scalar<T>
+impl<T> StorageBase for Scalar<T>
 where
     T: Dtyped,
 {
-    type ElementType = Ty<T>;
+    type ElementType = T;
 
     #[inline]
     fn read_data<'a>(
@@ -166,7 +160,7 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        self.element_type.dtype()
+        Dtype::new_ref::<T>()
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {

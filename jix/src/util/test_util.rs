@@ -7,7 +7,7 @@ use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
 use crate::storage::{ArrayStorageExt, Compact, Index};
 use crate::util::{AlignedBytes, DimArray};
-use crate::{Array, ArrayParams, ArrayStorage, CompactArray, Ty, TypeDyn};
+use crate::{Array, ArrayParams, CompactArray, StorageBase, TypeDyn};
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper
@@ -559,7 +559,7 @@ where
     array_strategy_from_data(ndarray_strategy_generic::<T>(shape, element))
 }
 
-pub(crate) type TestArray<T> = Array<crate::ops::IntoType<crate::storage::ArrayStorageAny, Ty<T>>>;
+pub(crate) type TestArray<T> = Array<crate::ops::IntoType<crate::storage::StorageAny, T>>;
 
 #[derive(Debug, Clone, Copy)]
 enum TestArrayKind {
@@ -871,10 +871,10 @@ fn build_test_array<T: Dtyped>(
         .unwrap()
         .into_any(),
         // `Plain` keeps the buffer as its storage, so every read downstream sees these strides and
-        // this alignment. `Plain::new` takes the allocation by value, so the buffer travels along.
+        // this alignment. `PlainBase::new` takes the allocation by value, so the buffer travels along.
         TestArrayKind::Plain => {
             let storage = unsafe {
-                crate::storage::Plain::<AlignedBytes, TypeDyn>::new(
+                crate::storage::PlainBase::<AlignedBytes, TypeDyn>::new(
                     buf,
                     data,
                     &shape,
@@ -915,7 +915,7 @@ pub(crate) fn sub_range_strategy(shape: &[u64]) -> BoxedStrategy<Vec<Range<u64>>
 /// strict.
 pub(crate) fn assert_array_matches<S, T, D>(actual: &Array<S>, expected: &ndarray::Array<T, D>)
 where
-    S: ArrayStorage,
+    S: StorageBase,
     T: Dtyped + std::fmt::Debug + Clone + PartialEq,
     D: ndarray::Dimension,
 {
@@ -937,7 +937,7 @@ pub(crate) fn assert_array_matches_approx<S, T, D>(
     rtol: <T as crate::scalar::ApproxEq>::RelativeTolerance,
     atol: <T as crate::scalar::ApproxEq>::AbsoluteTolerance,
 ) where
-    S: ArrayStorage,
+    S: StorageBase,
     T: Dtyped + std::fmt::Debug + Clone + crate::scalar::ApproxEq,
     D: ndarray::Dimension,
 {
@@ -951,14 +951,14 @@ fn assert_array_matches_with<S, T, D>(
     expected: &ndarray::Array<T, D>,
     eq: &dyn Fn(&T, &T) -> bool,
 ) where
-    S: ArrayStorage,
+    S: StorageBase,
     T: Dtyped + std::fmt::Debug + Clone,
     D: ndarray::Dimension,
 {
-    // Erase the storage to `&dyn ArrayStorage` and the dimension to `IxDyn` so the comparison
+    // Erase the storage to `&dyn StorageBase` and the dimension to `IxDyn` so the comparison
     // body (`assert_array_matches_with_dyn`) is monomorphized once instead of once per
     // (storage type x ndim).
-    let storage: &dyn ArrayStorage = &actual.storage;
+    let storage: &dyn StorageBase = &actual.storage;
     let actual = Array::from_storage(storage);
     let expected = expected.view().into_dyn();
     assert_array_matches_dyn::<T>(&actual, expected, eq);
@@ -967,7 +967,7 @@ fn assert_array_matches_with<S, T, D>(
 /// Storage- and dimension-agnostic core of [`assert_array_matches_with`]: checks storage
 /// invariants, then compares the full read and 16 random sub-range reads against `expected`.
 fn assert_array_matches_dyn<T>(
-    actual: &Array<&dyn ArrayStorage>,
+    actual: &Array<&dyn StorageBase>,
     expected: ndarray::ArrayViewD<'_, T>,
     eq: &dyn Fn(&T, &T) -> bool,
 ) where
@@ -1160,7 +1160,7 @@ mod tests {
     }
 
     /// Walks a storage tree down to its first leaf and returns that leaf's name.
-    fn leaf_storage_name(storage: &dyn ArrayStorage) -> String {
+    fn leaf_storage_name(storage: &dyn StorageBase) -> String {
         let info = storage.info();
         match info.dependencies() {
             [] => info.name().to_string(),
@@ -1399,7 +1399,7 @@ pub(crate) fn assert_same_elements<T: PartialEq + Debug, const N: usize>(
 /// dim, which must not skip the validation.
 #[track_caller]
 #[allow(clippy::reversed_empty_ranges, clippy::single_range_in_vec_init)]
-pub(crate) fn assert_read_rejects_invalid_index(storage: &impl ArrayStorage) {
+pub(crate) fn assert_read_rejects_invalid_index(storage: &impl StorageBase) {
     use crate::error::ErrorKind;
     use crate::storage::StridedBuf;
     use crate::ReadContext;

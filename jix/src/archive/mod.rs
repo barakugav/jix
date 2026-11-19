@@ -2,7 +2,6 @@ mod array;
 mod block;
 mod common;
 mod schema;
-mod util;
 mod version;
 
 /// How thoroughly an archive's consistency is verified at load time.

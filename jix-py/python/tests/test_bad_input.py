@@ -197,10 +197,12 @@ class _TellZero(io.BytesIO):
 
 
 def test_reader_with_bad_tell_after_packed_archives():
-    data = _serialized()
-    reader = _TellZero(data + data)
+    buf = io.BytesIO()
+    jix.write_array(_array(), buf)
+    jix.write_array(_array() + 1, buf)
+    reader = _TellZero(buf.getvalue())
     np.testing.assert_array_equal(jix.read_array(reader).numpy(), _array().numpy())
-    np.testing.assert_array_equal(jix.read_array(reader).numpy(), _array().numpy())
+    np.testing.assert_array_equal(jix.read_array(reader).numpy(), _array().numpy() + 1)
 
 
 def test_truncated_archive_raises_runtime_error(tmp_path):
@@ -266,12 +268,10 @@ def _interrupt(*args, **kwargs):
     raise _Interrupted
 
 
-@pytest.mark.parametrize("method", ["seek", "tell"])
-def test_reader_exceptions_keep_their_type(method):
+def test_reader_exceptions_keep_their_type():
     class Reader(io.BytesIO):
-        pass
+        seek = _interrupt
 
-    setattr(Reader, method, _interrupt)
     with pytest.raises(_Interrupted):
         jix.read_array(Reader(_serialized()))
 

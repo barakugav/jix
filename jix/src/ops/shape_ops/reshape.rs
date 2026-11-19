@@ -38,7 +38,7 @@ impl<S> Reshape<S> {
     /// Constructs a [`Reshape`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, shape: &[u64]) -> Result<Self>
     where
-        S: ArrayStorage,
+        S: StorageBase,
     {
         check_ndim(shape.len())?;
         let new_shape = DimArray::from_slice(shape).unwrap();
@@ -149,15 +149,15 @@ impl<S> Reshape<S> {
     /// semantics and examples.
     pub fn new_array(array: Array<S>, shape: &[u64]) -> Result<Array<Self>>
     where
-        S: ArrayStorage,
+        S: StorageBase,
     {
         Self::new(array.into_storage(), shape).map(Array::from_storage)
     }
 }
 impl<S> crate::storage::ArrayStorageImpl for Reshape<S> {}
-impl<S> ArrayStorage for Reshape<S>
+impl<S> StorageBase for Reshape<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     type ElementType = S::ElementType;
 
@@ -403,10 +403,7 @@ where
     }
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array with a new shape. See [`Reshape`] for details and
     /// examples.
     ///

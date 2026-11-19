@@ -5,13 +5,15 @@ use std::sync::Mutex;
 
 use jix_core::__private::ReadTiling;
 use jix_core::storage::StridedBuf;
-use jix_core::{Array, ArrayAny, ArrayStorage, ReadContext};
+use jix_core::{Array, ArrayAny, ReadContext, StorageBase};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
-use crate::type_hint::{Dim, ItemOrTuple, NumpyArray, NumpyDtype, Shape, ValueOrUnimplemented};
+use crate::type_hint::{
+    Dim, ItemOrTuple, NumpyArray, NumpyDtype, Shape, ShapeLen, ValueOrUnimplemented,
+};
 use pyo3::prelude::*;
-use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyTuple};
+use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyString, PyTuple};
 
 use pyo3::exceptions::{
     PyIndexError, PyNotImplementedError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
@@ -504,13 +506,14 @@ impl PyArray {
     ///
     /// Raises:
     ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds or
-    ///         `start > stop`, more index items than array dimensions, or more than one ellipsis.
+    ///         `start > stop`, more index items than array dimensions, more than one ellipsis, or
+    ///         an unsupported index item type (anything other than an integer, slice, `...`, or
+    ///         tuple of these).
     ///     ValueError: Slice step other than 1. Or `out` has the wrong dtype or shape, is not
     ///         writeable, is not aligned to the dtype, has a negative or zero stride on a dim
     ///         longer than 1, has non-C-contiguous inner (dtype) dims, or has overlapping
     ///         elements.
-    ///     TypeError: Unsupported index item type (anything other than an integer, slice, `...`,
-    ///         or tuple of these). Or `out` is not a NumPy array.
+    ///     TypeError: `out` is not a NumPy array.
     ///
     /// ```python
     /// import jix
@@ -630,12 +633,9 @@ impl PyArray {
 
         let should_detach = {
             let spec = self.arr.storage().spec();
-            let from_memory = matches!(
-                spec.flags().read_tiling(),
-                ReadTiling::ZeroCopy | ReadTiling::Fusable
-            );
+            let single_read = spec.flags().read_tiling() <= ReadTiling::SinglePass;
             let read_cost = (nitems * itemsize) as f32 * spec.element_cost().max(1.0);
-            !from_memory || read_cost > 4096.0
+            !single_read || read_cost > 4096.0
         };
         maybe_detach(py, should_detach, || {
             let context = self.read_ctx()?;
@@ -821,7 +821,7 @@ impl PyArray {
         const MAX_ITEMS: usize = 8;
 
         fn format_storage(
-            storage: &dyn ArrayStorage,
+            storage: &dyn StorageBase,
             f: &mut std::fmt::Formatter<'_>,
             n_printed: &mut usize,
         ) -> std::fmt::Result {
@@ -849,7 +849,7 @@ impl PyArray {
             Ok(())
         }
 
-        struct StorageFormatter<'a>(&'a dyn ArrayStorage);
+        struct StorageFormatter<'a>(&'a dyn StorageBase);
         impl std::fmt::Display for StorageFormatter<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let mut n_printed = 0;
@@ -1396,7 +1396,7 @@ impl PyArray {
     /// Reinterprets an array with a different shape. See [`jix.reshape()`][jix.reshape].
     pub fn reshape<'py>(
         slf: &Bound<'py, Self>,
-        shape: ItemOrTuple<i64>,
+        shape: ItemOrTuple<ShapeLen>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::reshape(slf, shape)
     }
@@ -1439,7 +1439,7 @@ impl PyArray {
     #[pyo3(signature = (shape))]
     pub fn broadcast<'py>(
         slf: &Bound<'py, Self>,
-        shape: ItemOrTuple<i64>,
+        shape: ItemOrTuple<ShapeLen>,
     ) -> PyResult<Bound<'py, Self>> {
         crate::ops::broadcast(slf, shape)
     }
@@ -1682,8 +1682,10 @@ impl PyArray {
 ///         `numpy.dtype()` accepts. When omitted the input dtype is preserved.
 ///     params: A dictionary of block layout and codec settings, with the optional keys below.
 ///         Unset keys are inherited from the source storage if `array` is a jix array, and
-///         chosen automatically otherwise. The block layout is critical for performance and
-///         should match your access pattern; the codec defaults suit most workloads.
+///         chosen automatically otherwise, except that setting any of `codec`,
+///         `compression_level` or `filters` resets the other two to their defaults. The block
+///         layout is critical for performance and should match your access pattern; the codec
+///         defaults suit most workloads.
 ///
 ///         - `block_shape`: The block shape, as a list of integers (one per dimension), each
 ///             clamped to the array boundary. For example, if you always read row slices,
@@ -1894,10 +1896,12 @@ fn binary_op_builtin(
         || other.is_instance_of::<PyComplex>()
         || other.is_instance(numpy_items(py)?.generic.bind(py))?;
     if !is_known_type {
-        let opts_out = other
-            .get_type()
-            .getattr("__array_ufunc__")
-            .is_ok_and(|f| f.is_none());
+        let opts_out = other.is_none()
+            || other.is_instance_of::<PyString>()
+            || other
+                .get_type()
+                .getattr("__array_ufunc__")
+                .is_ok_and(|f| f.is_none());
         if opts_out {
             return Ok(ValueOrUnimplemented::NotImplemented);
         }

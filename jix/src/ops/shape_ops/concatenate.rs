@@ -189,7 +189,7 @@ impl<ArraysT> crate::storage::ArrayStorageImpl for Concatenate<ArraysT> where
     ArraysT: ArraySequence + ArraySequenceElementType
 {
 }
-impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
+impl<ArraysT> StorageBase for Concatenate<ArraysT>
 where
     ArraysT: ArraySequence + ArraySequenceElementType,
 {

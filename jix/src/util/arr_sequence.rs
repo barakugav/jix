@@ -4,9 +4,9 @@ use crate::array::Array;
 use crate::dtype::Dtype;
 use crate::error::{ArithmeticStatus, Result};
 use crate::ops::{max_itemsize, n_operands_mul, n_operands_sum, ElementwisePipelineImpl, Operand};
-use crate::storage::{ArraySpec, ArrayStorageTyped, Index, OutBuf};
-use crate::ReadContext;
-use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, ElementType};
+use crate::storage::{ArraySpec, Index, OutBuf};
+use crate::{array_from_fn_inline, ArrayExt, ElementType, StorageBase};
+use crate::{ReadContext, Storage};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
 /// and [`concatenate`](crate::ops::concatenate).
@@ -70,7 +70,7 @@ pub(crate) trait ArraySequenceImpl {
     fn dtype(&self, arr: usize) -> &Dtype;
     fn spec(&self, arr: usize) -> ArraySpec<'_>;
 
-    fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage;
+    fn as_array_storage(&self, arr: usize) -> &dyn StorageBase;
 }
 impl<T: ArraySequenceImpl> ArraySequence for T {}
 
@@ -85,7 +85,7 @@ pub trait ArraySequenceElementType: ArraySequence {
 }
 
 /// Subtrait of [`ArraySequence`] for sequences whose arrays all have a statically-known element
-/// type (`Ty<T>`), so their elements can be read back as concrete Rust values.
+/// type, so their elements can be read back as concrete Rust values.
 ///
 /// Required by element-wise multi-array operations such as
 /// [`map_multiple`](crate::ops::map_multiple). Unlike [`ArraySequenceElementType`] it does *not*
@@ -152,7 +152,7 @@ pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> 
 
 impl<S, const N: usize> ArraySequenceImpl for [Array<S>; N]
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     #[inline(always)]
     fn narrays(&self) -> usize {
@@ -186,18 +186,18 @@ where
     }
 
     #[inline]
-    fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage {
+    fn as_array_storage(&self, arr: usize) -> &dyn StorageBase {
         &self[arr].storage
     }
 }
 
-impl<S: ArrayStorage, const N: usize> ArraySequenceElementType for [Array<S>; N] {
+impl<S: StorageBase, const N: usize> ArraySequenceElementType for [Array<S>; N] {
     type ElementType = S::ElementType;
 }
-impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTyped for [Array<S>; N] {
+impl<S: Storage, const N: usize> ArraySequenceTyped for [Array<S>; N] {
     type ItemSequence<'a> = [S::Item; N];
 }
-impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>; N] {
+impl<S: Storage, const N: usize> ArraySequenceTypedImpl for [Array<S>; N] {
     #[inline]
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
@@ -213,7 +213,7 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>;
         }
         impl<S, D, const N: usize> ElementwisePipelineTuple<[Array<S>; N]> for PipelineTupleImpl<D, N>
         where
-            S: ArrayStorageTyped,
+            S: Storage,
             D: ElementwisePipelineImpl<S::Item>,
         {
             const N_OPERANDS: Option<usize> = n_operands_mul(D::N_OPERANDS, N);
@@ -251,7 +251,7 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>;
 
 impl<S, const N: usize> ArraySequenceImpl for &[Array<S>; N]
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     #[inline(always)]
     fn narrays(&self) -> usize {
@@ -285,17 +285,17 @@ where
     }
 
     #[inline]
-    fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage {
+    fn as_array_storage(&self, arr: usize) -> &dyn StorageBase {
         &self[arr].storage
     }
 }
-impl<S: ArrayStorage, const N: usize> ArraySequenceElementType for &[Array<S>; N] {
+impl<S: StorageBase, const N: usize> ArraySequenceElementType for &[Array<S>; N] {
     type ElementType = S::ElementType;
 }
-impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTyped for &[Array<S>; N] {
+impl<S: Storage, const N: usize> ArraySequenceTyped for &[Array<S>; N] {
     type ItemSequence<'a> = [S::Item; N];
 }
-impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [Array<S>; N] {
+impl<'b, S: Storage, const N: usize> ArraySequenceTypedImpl for &'b [Array<S>; N] {
     #[inline]
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
@@ -311,7 +311,7 @@ impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [A
         }
         impl<S, D, const N: usize> ElementwisePipelineTuple<&[Array<S>; N]> for PipelineTupleImpl<D, N>
         where
-            S: ArrayStorageTyped,
+            S: Storage,
             D: ElementwisePipelineImpl<S::Item>,
         {
             const N_OPERANDS: Option<usize> = n_operands_mul(D::N_OPERANDS, N);
@@ -349,7 +349,7 @@ impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [A
 
 impl<S> ArraySequenceImpl for Vec<Array<S>>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     #[inline(always)]
     fn narrays(&self) -> usize {
@@ -382,17 +382,17 @@ where
         self[arr].storage.spec()
     }
     #[inline]
-    fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage {
+    fn as_array_storage(&self, arr: usize) -> &dyn StorageBase {
         &self[arr].storage
     }
 }
-impl<S: ArrayStorage> ArraySequenceElementType for Vec<Array<S>> {
+impl<S: StorageBase> ArraySequenceElementType for Vec<Array<S>> {
     type ElementType = S::ElementType;
 }
-impl<S: ArrayStorageTyped> ArraySequenceTyped for Vec<Array<S>> {
+impl<S: Storage> ArraySequenceTyped for Vec<Array<S>> {
     type ItemSequence<'a> = &'a [S::Item];
 }
-impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
+impl<S: Storage> ArraySequenceTypedImpl for Vec<Array<S>> {
     #[inline]
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
@@ -415,7 +415,7 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
         }
         impl<S, D> ElementwisePipelineTuple<Vec<Array<S>>> for PipelineTupleImpl<D, S::Item>
         where
-            S: ArrayStorageTyped,
+            S: Storage,
             D: ElementwisePipelineImpl<S::Item>,
         {
             // The number of arrays in the sequence is only known at runtime.
@@ -471,7 +471,7 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
 
 impl<S> ArraySequenceImpl for &[Array<S>]
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     #[inline(always)]
     fn narrays(&self) -> usize {
@@ -504,17 +504,17 @@ where
         self[arr].storage.spec()
     }
     #[inline]
-    fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage {
+    fn as_array_storage(&self, arr: usize) -> &dyn StorageBase {
         &self[arr].storage
     }
 }
-impl<S: ArrayStorage> ArraySequenceElementType for &[Array<S>] {
+impl<S: StorageBase> ArraySequenceElementType for &[Array<S>] {
     type ElementType = S::ElementType;
 }
-impl<S: ArrayStorageTyped> ArraySequenceTyped for &[Array<S>] {
+impl<S: Storage> ArraySequenceTyped for &[Array<S>] {
     type ItemSequence<'a> = &'a [S::Item];
 }
-impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
+impl<'b, S: Storage> ArraySequenceTypedImpl for &'b [Array<S>] {
     #[inline]
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
@@ -537,7 +537,7 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
         }
         impl<S, D> ElementwisePipelineTuple<&[Array<S>]> for PipelineTupleImpl<D, S::Item>
         where
-            S: ArrayStorageTyped,
+            S: Storage,
             D: ElementwisePipelineImpl<S::Item>,
         {
             // The number of arrays in the sequence is only known at runtime.
@@ -595,7 +595,7 @@ macro_rules! impl_array_sequence_for_tuple {
     ($($idx:tt : $S:ident, $D:ident),+ $(,)?) => {
         impl<$($S),+> ArraySequenceImpl for ($(Array<$S>,)+)
         where
-            $($S: ArrayStorage,)+
+            $($S: StorageBase,)+
         {
             #[inline(always)]
             fn narrays(&self) -> usize {
@@ -641,7 +641,7 @@ macro_rules! impl_array_sequence_for_tuple {
             }
 
             #[inline]
-            fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage {
+            fn as_array_storage(&self, arr: usize) -> &dyn StorageBase {
                 match arr {
                     $($idx => &self.$idx.storage,)+
                     _ => out_of_bounds_array_index(arr),
@@ -650,20 +650,20 @@ macro_rules! impl_array_sequence_for_tuple {
         }
         impl<$($S),+, ET> ArraySequenceElementType for ($(Array<$S>,)+)
         where
-            $($S: ArrayStorage<ElementType = ET>,)+
+            $($S: StorageBase<ElementType = ET>,)+
             ET: ElementType,
         {
             type ElementType = ET;
         }
         impl<$($S),+> ArraySequenceTyped for ($(Array<$S>,)+)
         where
-            $($S: ArrayStorageTyped,)+
+            $($S: Storage,)+
         {
             type ItemSequence<'a> = ($($S::Item,)+);
         }
         impl<$($S),+> ArraySequenceTypedImpl for ($(Array<$S>,)+)
         where
-            $($S: ArrayStorageTyped,)+
+            $($S: Storage,)+
         {
             #[inline]
             fn read_as_elementwise_pipeline<'a>(
@@ -674,7 +674,7 @@ macro_rules! impl_array_sequence_for_tuple {
                 struct PipelineTupleImpl<$($D),+>($($D),+);
                 impl<$($S),+, $($D),+> ElementwisePipelineTuple<($(Array<$S>,)+)> for PipelineTupleImpl<$($D),+>
                 where
-                    $($S: ArrayStorageTyped,)+
+                    $($S: Storage,)+
                     $($D: ElementwisePipelineImpl<$S::Item>,)+
                 {
                     const N_OPERANDS: Option<usize> = n_operands_sum(&[$($D::N_OPERANDS),+]);

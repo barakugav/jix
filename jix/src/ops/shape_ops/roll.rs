@@ -27,7 +27,7 @@ use crate::ops::prelude::*;
 /// assert_eq!(a.roll(5, 0).to_ndarray()?, array![0, 1, 2, 3, 4]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Roll<S: ArrayStorage> {
+pub struct Roll<S: StorageBase> {
     array: S,
     dim: DimIdx,
     /// `shift` normalized to `[0, shape[dim])`. Zero means the op is a pass-through.
@@ -36,7 +36,7 @@ pub struct Roll<S: ArrayStorage> {
     spec: ArraySpecDynamic,
 }
 
-impl<S: ArrayStorage> Roll<S> {
+impl<S: StorageBase> Roll<S> {
     /// Constructs a [`Roll`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, shift: i64, dim: usize) -> Result<Self> {
         let input_shape = array.shape();
@@ -78,8 +78,8 @@ impl<S: ArrayStorage> Roll<S> {
     }
 }
 
-impl<S: ArrayStorage> crate::storage::ArrayStorageImpl for Roll<S> {}
-impl<S: ArrayStorage> ArrayStorage for Roll<S> {
+impl<S: StorageBase> crate::storage::ArrayStorageImpl for Roll<S> {}
+impl<S: StorageBase> StorageBase for Roll<S> {
     type ElementType = S::ElementType;
 
     fn read_data<'a>(
@@ -159,9 +159,6 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     }
 
     fn spec(&self) -> ArraySpec<'_> {
-        if self.is_identity() {
-            return self.array.spec();
-        }
         self.array.spec().with_dynamic_spec(&self.spec)
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -190,10 +187,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     }
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array with elements rolled along the given dim.
     /// See [`Roll`] for details and examples.
     ///
@@ -213,7 +207,7 @@ mod tests {
 
     use crate::ReadContext;
 
-    use crate::{Array, ArrayStorage, CompactArray, IntoDimension};
+    use crate::{Array, CompactArray, IntoDimension, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -289,11 +283,15 @@ mod tests {
     }
 
     #[test]
-    fn identity_keeps_compact() {
+    fn identity_as_compact() {
         let a = make(arange(12), [3u64, 4]).roll(3, 0);
-        assert!(a.is_compact());
+        assert!(!a.is_compact());
         assert!(a.storage().as_compact().is_some());
-        assert!(!make(arange(12), [3u64, 4]).roll(1, 0).is_compact());
+        assert!(make(arange(12), [3u64, 4])
+            .roll(1, 0)
+            .storage()
+            .as_compact()
+            .is_none());
     }
 
     #[test]

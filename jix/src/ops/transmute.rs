@@ -1,3 +1,6 @@
+use std::marker::PhantomData;
+
+use crate::element_type::check_element_type;
 use crate::ops::prelude::*;
 
 /// Storage that reinterprets each element of the inner array as a different dtype of the same
@@ -33,20 +36,22 @@ use crate::ops::prelude::*;
 /// ```
 pub struct Transmute<S, ET> {
     array: S,
-    element_type: ET,
+    dtype: Dtype,
+    element_type: PhantomData<ET>,
     spec: ArraySpecDynamic,
 }
 impl<S, ET> Transmute<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     /// Constructs a [`Transmute`] storage. See the struct docs for semantics and examples.
     ///
-    /// Errors if `new_type`'s itemsize differs from `array`'s dtype itemsize.
-    pub fn new(array: S, new_type: ET) -> Result<Self> {
+    /// Errors if `dtype` does not match `ET`, or its itemsize differs from `array`'s dtype itemsize.
+    pub fn new(array: S, dtype: Dtype) -> Result<Self> {
+        check_element_type::<ET>(&dtype)?;
         let src_dtype = array.dtype();
-        let dst_dtype = new_type.dtype();
+        let dst_dtype = &dtype;
         ensure!(
             src_dtype.itemsize() == dst_dtype.itemsize(),
             UnsupportedDtype,
@@ -57,22 +62,23 @@ where
         spec.flags =
             ArraySpecFlags::new().with_read_tiling(inner_spec.flags.read_tiling().forwarded());
         Ok(Self {
-            element_type: new_type,
             array,
+            dtype,
+            element_type: PhantomData,
             spec,
         })
     }
 
     /// Constructs an array with [`Transmute`] storage. See the storage struct docs for
     /// semantics and examples.
-    pub fn new_array(array: Array<S>, new_type: ET) -> Result<Array<Self>> {
-        Self::new(array.into_storage(), new_type).map(Array::from_storage)
+    pub fn new_array(array: Array<S>, dtype: Dtype) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), dtype).map(Array::from_storage)
     }
 }
 impl<S, ET> crate::storage::ArrayStorageImpl for Transmute<S, ET> {}
-impl<S, ET> ArrayStorage for Transmute<S, ET>
+impl<S, ET> StorageBase for Transmute<S, ET>
 where
-    S: ArrayStorage,
+    S: StorageBase,
     ET: ElementType,
 {
     type ElementType = ET;
@@ -93,7 +99,7 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        self.element_type.dtype()
+        &self.dtype
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
@@ -106,18 +112,17 @@ where
     type ElementTypeChange<NewET: ElementType> = Transmute<S, NewET>;
     #[inline]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+        check_element_type::<NewET>(&self.dtype)?;
         Ok(Transmute {
             array: self.array,
-            element_type: NewET::from_dtype(self.element_type.dtype().clone())?,
+            dtype: self.dtype,
+            element_type: PhantomData,
             spec: self.spec,
         })
     }
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Reinterprets each element as the type `T` without converting the bytes. See [`Transmute`]
     /// for details and examples.
     ///
@@ -126,11 +131,11 @@ where
     /// Panics if the itemsize of `T` differs from the array's dtype itemsize. Use
     /// [`Transmute::new_array`] for a fallible version.
     #[track_caller]
-    pub fn transmute_elements<T>(self) -> Array<Transmute<S, Ty<T>>>
+    pub fn transmute_elements<T>(self) -> Array<Transmute<S, T>>
     where
         T: Dtyped,
     {
-        Transmute::new_array(self, Ty::new()).unwrap()
+        Transmute::new_array(self, T::DTYPE).unwrap()
     }
 
     /// Reinterprets each element as the runtime dtype `dtype` without converting the bytes;
@@ -142,7 +147,7 @@ where
     /// [`Transmute::new_array`] for a fallible version.
     #[track_caller]
     pub fn transmute_elements_dyn(self, dtype: Dtype) -> Array<Transmute<S, TypeDyn>> {
-        Transmute::new_array(self, TypeDyn::new(dtype)).unwrap()
+        Transmute::new_array(self, dtype).unwrap()
     }
 }
 
@@ -158,7 +163,7 @@ mod tests {
     use crate::storage::{Index, StridedBuf};
     use crate::util::assert_array_matches;
     use crate::ReadContext;
-    use crate::{Array, ArrayStorage, Ty};
+    use crate::{Array, StorageBase};
 
     /// An 8-byte struct dtype, to check that a transmute handles a composite element type and not
     /// just scalars.
@@ -180,7 +185,7 @@ mod tests {
     fn new_rejects_a_different_itemsize() {
         let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
         // u32 is 4 bytes, u16 is 2.
-        assert!(Transmute::new(arr.into_storage(), Ty::<u16>::new()).is_err());
+        assert!(Transmute::<_, u16>::new(arr.into_storage(), u16::DTYPE).is_err());
     }
 
     /// Equal itemsize is the only requirement - the kinds may differ freely, and so may the
@@ -188,9 +193,9 @@ mod tests {
     #[test]
     fn new_accepts_any_dtype_of_the_same_itemsize() {
         let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
-        assert!(Transmute::new(arr.view().into_storage(), Ty::<i32>::new()).is_ok());
-        assert!(Transmute::new(arr.view().into_storage(), Ty::<f32>::new()).is_ok());
-        assert!(Transmute::new(arr.view().into_storage(), Ty::<[u8; 4]>::new()).is_ok());
+        assert!(Transmute::<_, i32>::new(arr.view().into_storage(), i32::DTYPE).is_ok());
+        assert!(Transmute::<_, f32>::new(arr.view().into_storage(), f32::DTYPE).is_ok());
+        assert!(Transmute::<_, [u8; 4]>::new(arr.view().into_storage(), <[u8; 4]>::DTYPE).is_ok());
     }
 
     /// A transmute is a lazy view, so it is never compact, but it reads straight through to its

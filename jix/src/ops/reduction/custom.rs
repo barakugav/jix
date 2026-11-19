@@ -67,12 +67,12 @@ use crate::ops::reduction::common::{ReductionOp, ReductionOpKernel};
 /// assert_eq!(xor[[]], 0b1110);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Reduce<S: ArrayStorage, F>(ReductionOp<S, ReduceKernel<F>>);
-impl<S: ArrayStorage, F> Reduce<S, F> {
+pub struct Reduce<S: StorageBase, F>(ReductionOp<S, ReduceKernel<F>>);
+impl<S: StorageBase, F> Reduce<S, F> {
     /// Constructs a [`Reduce`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, dims: impl DimsArg, f: F) -> Result<Self>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         F: Fn(S::Item, S::Item) -> S::Item,
     {
         Ok(Self(ReductionOp::new(array, ReduceKernel(f), dims)?))
@@ -82,7 +82,7 @@ impl<S: ArrayStorage, F> Reduce<S, F> {
     /// examples.
     pub fn new_array(array: Array<S>, dims: impl DimsArg, f: F) -> Result<Array<Reduce<S, F>>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         F: Fn(S::Item, S::Item) -> S::Item,
     {
         Self::new(array.into_storage(), dims, f).map(Array::from_storage)
@@ -119,16 +119,16 @@ where
 }
 impl<S, F> crate::storage::ArrayStorageImpl for Reduce<S, F>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     F: Fn(S::Item, S::Item) -> S::Item,
 {
 }
-impl<S, F> ArrayStorage for Reduce<S, F>
+impl<S, F> StorageBase for Reduce<S, F>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     F: Fn(S::Item, S::Item) -> S::Item,
 {
-    type ElementType = Ty<S::Item>;
+    type ElementType = S::Item;
     crate::storage::impl_array_storage_forward!(<S, F>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -214,12 +214,12 @@ where
 /// assert_eq!(counts.as_slice().unwrap(), &[2, 2]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Fold<S: ArrayStorage, B, F>(ReductionOp<S, VanillaFoldKernel<B, F>>);
-impl<S: ArrayStorage, B, F> Fold<S, B, F> {
+pub struct Fold<S: StorageBase, B, F>(ReductionOp<S, VanillaFoldKernel<B, F>>);
+impl<S: StorageBase, B, F> Fold<S, B, F> {
     /// Constructs a [`Fold`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, dims: impl DimsArg, init: B, f: F) -> Result<Self>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
     {
@@ -239,7 +239,7 @@ impl<S: ArrayStorage, B, F> Fold<S, B, F> {
         f: F,
     ) -> Result<Array<Fold<S, B, F>>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
     {
@@ -280,13 +280,13 @@ where
     const NEEDS_INDICES: bool = false;
 }
 impl<S, B, F> crate::storage::ArrayStorageImpl for Fold<S, B, F> {}
-impl<S, B, F> ArrayStorage for Fold<S, B, F>
+impl<S, B, F> StorageBase for Fold<S, B, F>
 where
-    S: ArrayStorageTyped,
+    S: Storage,
     B: Dtyped,
     F: Fn(B, S::Item) -> B,
 {
-    type ElementType = Ty<B>;
+    type ElementType = B;
     crate::storage::impl_array_storage_forward!(<S, B, F>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -297,10 +297,7 @@ where
 }
 */
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Applies the [`Reduce`] operation, see the op struct docs for details.
     ///
     /// `f` MUST be associative and commutative: the elements are visited in an unspecified
@@ -308,7 +305,7 @@ where
     #[track_caller]
     pub fn reduce_unordered<F>(self, dims: impl DimsArg, f: F) -> Array<Reduce<S, F>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         F: Fn(S::Item, S::Item) -> S::Item,
     {
         Reduce::new_array(self, dims, f).unwrap()
@@ -325,7 +322,7 @@ where
         f: F,
     ) -> Array<Fold<S, B, F>>
     where
-        S: ArrayStorageTyped,
+        S: Storage,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
     {

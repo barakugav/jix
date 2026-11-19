@@ -65,7 +65,7 @@ def test_eval_scev():
 def test_kernel_names():
     ew = a.EW
     leaf = f"{ew}::OperandTyped<f32>"
-    op2 = "<jix::ops::elementwise::op2::Op2<_, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline::Op2Pipeline"
+    op2 = "<jix::ops::elementwise::op2::Op2<_, _> as jix::storage::core_trait::StorageBase>::read_as_elementwise_pipeline::Op2Pipeline"
     add = f"{op2}<{leaf}, {leaf}, jix::ops::elementwise::arith::AddKernel, f32, f32>"
     assert a.elementwise_kernel(f"{ew}::inner_loop::<f32, {add}, true, true>").name == "add_f32"
     assert a.elementwise_kernel(f"{ew}::inner_loop::<f32, {add}, true, false>") is None
@@ -75,7 +75,7 @@ def test_kernel_names():
         == "less_f32_bool"
     )
     clamp = (
-        "<jix::ops::elementwise::min_max::Clamp<_, _, _> as jix::storage::core_trait::ArrayStorage>::read_as_elementwise_pipeline"
+        "<jix::ops::elementwise::min_max::Clamp<_, _, _> as jix::storage::core_trait::StorageBase>::read_as_elementwise_pipeline"
         f"::ClampPipeline<{leaf}, {leaf}, {leaf}, f32>"
     )
     assert a.elementwise_kernel(f"{ew}::inner_loop::<f32, {clamp}, true, true>").name == "clamp_f32"

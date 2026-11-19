@@ -41,7 +41,7 @@ use crate::ops::prelude::*;
 /// assert_eq!(a.view().insert_dim([0, 1, 3, 4]).shape(), &[1, 1, 3, 1, 1]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct InsertDim<S: ArrayStorage> {
+pub struct InsertDim<S: StorageBase> {
     array: S,
     original_dims: DimArray<DimIdx>,
 
@@ -53,7 +53,7 @@ pub struct InsertDim<S: ArrayStorage> {
 
 impl<S> InsertDim<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     /// Constructs an [`InsertDim`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S, dim: impl DimsArg) -> Result<Self> {
@@ -155,10 +155,10 @@ where
     }
 }
 
-impl<S> crate::storage::ArrayStorageImpl for InsertDim<S> where S: ArrayStorage {}
-impl<S> ArrayStorage for InsertDim<S>
+impl<S> crate::storage::ArrayStorageImpl for InsertDim<S> where S: StorageBase {}
+impl<S> StorageBase for InsertDim<S>
 where
-    S: ArrayStorage,
+    S: StorageBase,
 {
     type ElementType = S::ElementType;
 
@@ -225,10 +225,7 @@ where
     }
 }
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
+impl<S: StorageBase> Array<S> {
     /// Returns a lazy view of the array with new length-1 dimensions inserted. See [`InsertDim`]
     /// for details and examples.
     ///
