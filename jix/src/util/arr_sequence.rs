@@ -5,7 +5,8 @@ use crate::dtype::Dtype;
 use crate::error::{ArithmeticStatus, Result};
 use crate::ops::{max_itemsize, n_operands_mul, n_operands_sum, ElementwisePipelineImpl, Operand};
 use crate::storage::{ArraySpec, Index, OutBuf};
-use crate::{array_from_fn_inline, ArrayExt, ElementType, StorageBase};
+use crate::util::{array_from_fn_inline, ArrayExt};
+use crate::{ElementType, StorageBase};
 use crate::{ReadContext, Storage};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
@@ -21,7 +22,7 @@ use crate::{ReadContext, Storage};
 /// | `[Array<S>; N]`, `&[Array<S>; N]` | Fixed-length array; all elements share the same storage type. |
 /// | `Vec<Array<S>>` | Dynamic-length list; all elements share the same storage type. |
 /// | `&[Array<S>]` | Borrowed slice; all elements share the same storage type. |
-/// | `(Array<S0>, Array<S1>, ...)` | Tuple of up to 10 arrays; each element may have a different storage type. |
+/// | `(Array<S0>, Array<S1>, ...)` | Tuple of up to 12 arrays; each element may have a different storage type. |
 ///
 /// # Examples
 ///
@@ -72,7 +73,6 @@ pub(crate) trait ArraySequenceImpl {
 
     fn as_array_storage(&self, arr: usize) -> &dyn StorageBase;
 }
-impl<T: ArraySequenceImpl> ArraySequence for T {}
 
 /// Subtrait of [`ArraySequence`] for sequences whose arrays all share the same element type.
 ///
@@ -150,6 +150,7 @@ pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> 
     ) -> impl Iterator<Item = ArraysT::ItemSequence<'s>> + 's;
 }
 
+impl<S: StorageBase, const N: usize> ArraySequence for [Array<S>; N] {}
 impl<S, const N: usize> ArraySequenceImpl for [Array<S>; N]
 where
     S: StorageBase,
@@ -249,6 +250,7 @@ impl<S: Storage, const N: usize> ArraySequenceTypedImpl for [Array<S>; N] {
     }
 }
 
+impl<S: StorageBase, const N: usize> ArraySequence for &[Array<S>; N] {}
 impl<S, const N: usize> ArraySequenceImpl for &[Array<S>; N]
 where
     S: StorageBase,
@@ -347,6 +349,7 @@ impl<'b, S: Storage, const N: usize> ArraySequenceTypedImpl for &'b [Array<S>; N
     }
 }
 
+impl<S: StorageBase> ArraySequence for Vec<Array<S>> {}
 impl<S> ArraySequenceImpl for Vec<Array<S>>
 where
     S: StorageBase,
@@ -469,6 +472,7 @@ impl<S: Storage> ArraySequenceTypedImpl for Vec<Array<S>> {
     }
 }
 
+impl<S: StorageBase> ArraySequence for &[Array<S>] {}
 impl<S> ArraySequenceImpl for &[Array<S>]
 where
     S: StorageBase,
@@ -593,6 +597,10 @@ impl<'b, S: Storage> ArraySequenceTypedImpl for &'b [Array<S>] {
 
 macro_rules! impl_array_sequence_for_tuple {
     ($($idx:tt : $S:ident, $D:ident),+ $(,)?) => {
+        impl<$($S),+> ArraySequence for ($(Array<$S>,)+)
+        where
+            $($S: StorageBase,)+
+        {}
         impl<$($S),+> ArraySequenceImpl for ($(Array<$S>,)+)
         where
             $($S: StorageBase,)+
@@ -721,6 +729,8 @@ impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4
 impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7);
 impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7, 8: S8, D8);
 impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7, 8: S8, D8, 9: S9, D9);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7, 8: S8, D8, 9: S9, D9, 10: S10, D10);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7, 8: S8, D8, 9: S9, D9, 10: S10, D10, 11: S11, D11);
 
 #[cold]
 #[inline(never)]

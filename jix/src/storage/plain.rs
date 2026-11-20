@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use crate::dtype::{Dtype, Dtyped};
 use crate::element_type::check_element_type;
-use crate::error::{check_ndim, ensure, error, Result};
+use crate::error::{bail, check_ndim, ensure, error, Result};
 use crate::storage::params::{
     read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned, ReadTiling,
 };
@@ -10,7 +10,7 @@ use crate::storage::{
     check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, ElementType, Index, OutBuf,
     OutBufInner, StridedBuf, TypeDyn,
 };
-use crate::util::{dim_arr, DimArray, DimIdx, SendSyncPtr};
+use crate::util::{dim_arr, DimArray, DimIdx, IterExt, SendSyncPtr};
 use crate::ReadContext;
 use crate::{Array, ArrayParams, DimDyn, Dimension, PlainArray, StorageBase};
 
@@ -19,6 +19,8 @@ use crate::{Array, ArrayParams, DimDyn, Dimension, PlainArray, StorageBase};
 /// Same as [`PlainBase`] (see there for details) with a `Vec<T>` as the owner of the data.
 ///
 /// Created by [`Array::plain_ndarray`] and [`Array::to_plain`].
+///
+/// Its data is accessible directly, without a copy, through [`PlainArrayMethods`].
 pub struct Plain<T>(PlainBase<Vec<T>, T>);
 
 /// Uncompressed nd-array storage that borrows its data.
@@ -28,6 +30,8 @@ pub struct Plain<T>(PlainBase<Vec<T>, T>);
 ///
 /// Created by [`Array::plain_ndarray_ref`], [`Array::plain_ndarray_view`] and
 /// [`Array::plain_ndarray_ptr`].
+///
+/// Its data is accessible directly, without a copy, through [`PlainArrayMethods`].
 pub struct PlainView<'a, T>(PlainBase<&'a (), T>);
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
@@ -51,6 +55,8 @@ pub struct PlainView<'a, T>(PlainBase<&'a (), T>);
 ///
 /// Other owners, e.g. a Python object keeping a NumPy buffer alive, use `PlainBase` directly
 /// through [`PlainBase::new`].
+///
+/// Its data is accessible directly, without a copy, through [`PlainArrayMethods`].
 ///
 /// `ET: ElementType` tracks the element type at the type level and follows the same semantics as
 /// [`Compact<ET>`](crate::storage::Compact): the ndarray constructors give e.g. `Plain<f32>`,
@@ -116,6 +122,7 @@ impl<A> PlainBase<A, TypeDyn> {
     /// Returns an error if:
     /// * `shape.len()` exceeds the maximum supported number of dimensions.
     /// * `strides.len() != shape.len()`.
+    /// * The number of elements exceeds `isize::MAX`.
     /// * `dtype` has itemsize 0, or the byte size of `shape` overflows.
     ///
     /// # Safety
@@ -149,6 +156,18 @@ impl<A> PlainBase<A, TypeDyn> {
             strides.len()
         );
         let strides = dim_arr(ndim, |d| strides[d]);
+
+        let nitems = shape
+            .as_slice()
+            .iter()
+            .map(|&len| len.max(1))
+            .try_shape_product();
+        ensure!(
+            nitems.is_some_and(|n| n <= isize::MAX as u64),
+            InvalidShapeOperation,
+            "Shape {:?} has too many elements",
+            shape.as_slice()
+        );
 
         params.block_shape = None;
         params.block_shape_fixed_dims = None;
@@ -612,6 +631,370 @@ fn strides_from_ndarray<T>(shape: &[usize], strides: &[isize]) -> Result<DimArra
         .collect()
 }
 
+impl<A, ET> PlainBase<A, ET> {
+    #[inline]
+    fn as_ptr(&self) -> *const u8 {
+        self.data.as_ptr()
+    }
+
+    #[inline]
+    fn strides(&self) -> &[usize] {
+        self.strides.as_ref()
+    }
+
+    fn is_standard_layout(&self) -> bool {
+        // TODO: keep a pre-computed flag for this
+        let shape = self.shape.as_slice();
+        if shape.contains(&0) {
+            return true;
+        }
+        let mut expected = self.dtype.itemsize() as u64;
+        for (&len, &stride) in std::iter::zip(shape, self.strides.as_ref()).rev() {
+            if len > 1 && stride as u64 != expected {
+                return false;
+            }
+            expected *= len;
+        }
+        true
+    }
+
+    fn is_contiguous(&self) -> bool {
+        // TODO: keep a pre-computed flag for this
+        let shape = self.shape.as_slice();
+        if shape.contains(&0) {
+            return true;
+        }
+        // Walk the stepped dims from the innermost (smallest stride) out: each must start right
+        // where the dims inside it end.
+        let mut dims = (0..shape.len())
+            .filter(|&d| shape[d] > 1)
+            .collect::<DimArray<usize>>();
+        dims.sort_by_key(|&d| self.strides[d]);
+        let mut expected = self.dtype.itemsize() as u64;
+        for d in dims {
+            if self.strides[d] as u64 != expected {
+                return false;
+            }
+            expected *= shape[d];
+        }
+        true
+    }
+
+    fn nitems(&self) -> usize {
+        self.shape
+            .as_slice()
+            .iter()
+            .map(|&len| len as usize)
+            .product()
+    }
+
+    fn as_bytes(&self) -> Option<&[u8]> {
+        if !self.is_standard_layout() {
+            return None;
+        }
+        let nbytes = self.nitems() * self.dtype.itemsize() as usize;
+        if nbytes == 0 {
+            return Some(&[]);
+        }
+        Some(unsafe { std::slice::from_raw_parts(self.data.as_ptr(), nbytes) })
+    }
+
+    fn as_slice(&self) -> Option<&[ET]>
+    where
+        ET: Dtyped,
+    {
+        if !self.is_standard_layout() {
+            return None;
+        }
+        let nitems = self.nitems();
+        if nitems == 0 {
+            return Some(&[]);
+        }
+        let ptr = self.data.as_ptr().cast::<ET>();
+        ptr.is_aligned()
+            .then(|| unsafe { std::slice::from_raw_parts(ptr, nitems) })
+    }
+
+    fn as_ndarray_view<D>(&self) -> Result<ndarray::ArrayView<'_, ET, D>>
+    where
+        ET: Dtyped,
+        D: ndarray::Dimension,
+    {
+        use ndarray::ShapeBuilder;
+
+        let shape = self.shape.as_slice();
+        let ndim = shape.len();
+        if let Some(expected) = D::NDIM {
+            ensure!(
+                ndim == expected,
+                InvalidShapeOperation,
+                "Can't create ndarray view of ndim {ndim} as an ndarray of ndim {expected}"
+            );
+        }
+        let mut dim = D::zeros(ndim);
+        for d in 0..ndim {
+            dim[d] = shape[d] as usize;
+        }
+        if shape.contains(&0) {
+            let ptr = std::ptr::NonNull::<ET>::dangling().as_ptr();
+            return Ok(unsafe { ndarray::ArrayView::from_shape_ptr(dim, ptr) });
+        }
+
+        let ptr = self.data.as_ptr().cast::<ET>();
+        ensure!(
+            ptr.is_aligned(),
+            InvalidArgument,
+            "Can't create ndarray view: data pointer {ptr:?} is not aligned to the element alignment {}",
+            align_of::<ET>()
+        );
+        let mut strides = D::zeros(ndim);
+        for d in 0..ndim {
+            let stride = self.strides[d];
+            strides[d] = if stride.is_multiple_of(size_of::<ET>()) {
+                stride / size_of::<ET>()
+            } else if shape[d] == 1 {
+                0 // never stepped
+            } else {
+                bail!(
+                    InvalidArgument,
+                    "Can't create ndarray view: stride {stride} of dim {d} is not a multiple of the itemsize {}",
+                    size_of::<ET>()
+                );
+            };
+        }
+        Ok(unsafe { ndarray::ArrayView::from_shape_ptr(dim.strides(strides), ptr) })
+    }
+}
+
+/// Extension methods for arrays with plain (uncompressed) storage.
+///
+/// Implemented for `Array` of [`Plain`], [`PlainView`] and [`PlainBase`]. These give direct,
+/// zero-copy access to the in-memory buffer behind the array.
+pub trait PlainArrayMethods {
+    /// The compile-time element type: the [`ElementType`](StorageBase::ElementType) of the
+    /// storage.
+    type ElementType: ElementType;
+
+    /// A raw pointer to the first element, at index `[0, 0, ..., 0]`.
+    ///
+    /// Element `[i0, i1, ...]` is at byte offset `i0 * strides[0] + i1 * strides[1] + ...` (see
+    /// [`strides`](Self::strides)). The pointer may not be aligned to the element type if the
+    /// array was made with [`Array::plain_ndarray_ptr`]. Don't write through it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::PlainArrayMethods;
+    /// use jix::Array;
+    /// use ndarray::{array, s};
+    ///
+    /// let nd = array![[1u8, 2, 3], [4, 5, 6]];
+    /// let a = Array::plain_ndarray_ref(&nd)?;
+    /// assert_eq!(a.as_ptr(), nd.as_ptr()); // no copy
+    ///
+    /// let b = Array::plain_ndarray_view(nd.slice(s![1.., 1..]))?;
+    /// assert_eq!(unsafe { *b.as_ptr() }, 5);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn as_ptr(&self) -> *const u8;
+
+    /// The stride of each dimension, **in bytes** (ndarray's strides are in elements).
+    ///
+    /// Strides are never negative. A stride of 0 is a broadcast dim. The stride of a dim of
+    /// length 1 is never used and may be anything.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::PlainArrayMethods;
+    /// use jix::Array;
+    /// use ndarray::{s, Array3};
+    ///
+    /// let nd = Array3::<f64>::zeros((2, 3, 4));
+    /// assert_eq!(Array::plain_ndarray_ref(&nd)?.strides(), &[96, 32, 8]);
+    ///
+    /// let every_other = nd.slice(s![.., .., ..;2]);
+    /// assert_eq!(Array::plain_ndarray_view(every_other)?.strides(), &[96, 32, 16]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn strides(&self) -> &[usize];
+
+    /// Check if the data is in standard layout: C-contiguous, i.e. row-major with no gaps.
+    ///
+    /// Dims of length 1 are ignored, and an array with no elements is always in standard layout.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::PlainArrayMethods;
+    /// use jix::Array;
+    /// use ndarray::{s, Array2};
+    ///
+    /// let nd = Array2::<f32>::zeros((3, 4));
+    /// assert!(Array::plain_ndarray_ref(&nd)?.is_standard_layout());
+    /// assert!(!Array::plain_ndarray_view(nd.t())?.is_standard_layout());
+    /// assert!(Array::plain_ndarray_view(nd.slice(s![1..2, ..]))?.is_standard_layout());
+    /// assert!(!Array::plain_ndarray_view(nd.slice(s![.., 1..3]))?.is_standard_layout());
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn is_standard_layout(&self) -> bool;
+
+    /// Check if the data is contiguous: the elements fill one block of memory with no gaps, with
+    /// the dims in any order (C, Fortran, or any other permutation).
+    ///
+    /// Dims of length 1 are ignored, and an array with no elements is always contiguous. A
+    /// broadcast dim (stride 0) makes the array non-contiguous.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::PlainArrayMethods;
+    /// use jix::Array;
+    /// use ndarray::{s, Array2};
+    ///
+    /// let nd = Array2::<f32>::zeros((3, 4));
+    /// assert!(Array::plain_ndarray_ref(&nd)?.is_contiguous());
+    /// assert!(Array::plain_ndarray_view(nd.t())?.is_contiguous()); // Fortran layout
+    /// assert!(!Array::plain_ndarray_view(nd.slice(s![.., ..;2]))?.is_contiguous());
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn is_contiguous(&self) -> bool;
+
+    /// The raw bytes of the array in row-major order, or `None` if it is not in
+    /// [standard layout](Self::is_standard_layout).
+    ///
+    /// Works for any element type, including [`TypeDyn`], and for unaligned data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::PlainArrayMethods;
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::plain_ndarray(array![[1u16, 2], [3, 4]])?;
+    /// assert_eq!(a.as_bytes(), Some(&[1u8, 0, 2, 0, 3, 0, 4, 0][..]));
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn as_bytes(&self) -> Option<&[u8]>;
+
+    /// The elements of the array in row-major order, or `None` if it is not in
+    /// [standard layout](Self::is_standard_layout) or the data is not aligned to the element
+    /// type.
+    ///
+    /// Data from an ndarray is always aligned; only [`Array::plain_ndarray_ptr`] and
+    /// [`PlainBase::new`] can make unaligned arrays. Needs a compile-time element type: for
+    /// [`TypeDyn`], call [`Array::into_typed`] first.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::PlainArrayMethods;
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::plain_ndarray(array![[1.0f32, 2.0], [3.0, 4.0]])?;
+    /// assert_eq!(a.as_slice(), Some(&[1.0f32, 2.0, 3.0, 4.0][..]));
+    ///
+    /// let t = Array::plain_ndarray(array![[1.0f32, 2.0], [3.0, 4.0]].reversed_axes())?;
+    /// assert_eq!(t.as_slice(), None); // not row-major
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn as_slice(&self) -> Option<&[Self::ElementType]>
+    where
+        Self::ElementType: Dtyped;
+
+    /// Borrow the data as an [`ndarray::ArrayView`], without a copy.
+    ///
+    /// Works for any layout, including sliced and broadcast ones. `D` (e.g. `Ix2` or `IxDyn`)
+    /// is checked against the array's ndim at runtime. Needs a compile-time element type: for
+    /// [`TypeDyn`], call [`Array::into_typed`] first.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - `D` has a
+    ///   different ndim than the array.
+    /// - [`InvalidArgument`](crate::error::ErrorKind::InvalidArgument) - the data is not aligned
+    ///   to the element type, or a stride is not a whole number of elements. Only possible for
+    ///   arrays made with [`Array::plain_ndarray_ptr`] or [`PlainBase::new`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::PlainArrayMethods;
+    /// use jix::Array;
+    /// use ndarray::{array, s, Ix2};
+    ///
+    /// let nd = array![[1i32, 2, 3, 4], [5, 6, 7, 8]];
+    /// let a = Array::plain_ndarray_view(nd.slice(s![.., ..;2]))?;
+    ///
+    /// let view = a.as_ndarray_view::<Ix2>()?;
+    /// assert_eq!(view, array![[1, 3], [5, 7]]);
+    /// assert_eq!(view.as_ptr(), nd.as_ptr()); // same memory
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn as_ndarray_view<D>(&self) -> Result<ndarray::ArrayView<'_, Self::ElementType, D>>
+    where
+        Self::ElementType: Dtyped,
+        D: ndarray::Dimension;
+}
+
+macro_rules! impl_plain_array_methods {
+    ([$($gen:tt)*] $storage:ty, $element_type:ty $(, .$field:tt)?) => {
+        impl<$($gen)*> crate::storage::PlainArrayMethods for crate::Array<$storage> {
+            type ElementType = $element_type;
+
+            #[inline]
+            fn as_ptr(&self) -> *const u8 {
+                self.storage $(.$field)? .as_ptr()
+            }
+
+            #[inline]
+            fn strides(&self) -> &[usize] {
+                self.storage $(.$field)? .strides()
+            }
+
+            #[inline]
+            fn is_standard_layout(&self) -> bool {
+                self.storage $(.$field)? .is_standard_layout()
+            }
+
+            #[inline]
+            fn is_contiguous(&self) -> bool {
+                self.storage $(.$field)? .is_contiguous()
+            }
+
+            #[inline]
+            fn as_bytes(&self) -> Option<&[u8]> {
+                self.storage $(.$field)? .as_bytes()
+            }
+
+            #[inline]
+            fn as_slice(&self) -> Option<&[Self::ElementType]>
+            where
+                Self::ElementType: crate::dtype::Dtyped,
+            {
+                self.storage $(.$field)? .as_slice()
+            }
+
+            #[inline]
+            fn as_ndarray_view<D>(
+                &self,
+            ) -> crate::error::Result<ndarray::ArrayView<'_, Self::ElementType, D>>
+            where
+                Self::ElementType: crate::dtype::Dtyped,
+                D: ndarray::Dimension,
+            {
+                self.storage $(.$field)? .as_ndarray_view()
+            }
+        }
+    };
+}
+
+impl_plain_array_methods!([T: Dtyped] Plain<T>, T, .0);
+impl_plain_array_methods!(['a, ET: ElementType] PlainView<'a, ET>, ET, .0);
+impl_plain_array_methods!([A, ET: ElementType] PlainBase<A, ET>, ET);
+
 #[cfg(test)]
 mod tests {
     use ndarray::{array, s, ArrayD, Ix3};
@@ -984,5 +1367,235 @@ mod tests {
             transposed.to_ndarray().unwrap(),
             owned.t().as_standard_layout().into_owned()
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // PlainArrayMethods
+    // -----------------------------------------------------------------------
+
+    use crate::storage::PlainArrayMethods;
+
+    #[test]
+    fn methods_standard_layout() {
+        let nd = array![[1i32, 2, 3], [4, 5, 6]];
+        let a = Array::plain_ndarray_ref(&nd).unwrap();
+        assert_eq!(a.as_ptr(), nd.as_ptr().cast::<u8>());
+        assert_eq!(a.strides(), &[12, 4]);
+        assert!(a.is_standard_layout());
+        assert!(a.is_contiguous());
+        assert_eq!(a.as_slice(), Some(&[1, 2, 3, 4, 5, 6][..]));
+        let bytes = nd.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+        assert_eq!(a.as_bytes(), Some(&bytes[..]));
+        assert_eq!(a.as_ndarray_view().unwrap(), nd);
+    }
+
+    #[test]
+    fn methods_fortran_layout() {
+        let nd = array![[1i32, 2, 3], [4, 5, 6]];
+        let a = Array::plain_ndarray(nd.clone().reversed_axes()).unwrap();
+        assert_eq!(a.strides(), &[4, 12]);
+        assert!(!a.is_standard_layout());
+        assert!(a.is_contiguous());
+        assert_eq!(a.as_slice(), None);
+        assert_eq!(a.as_bytes(), None);
+        assert_eq!(a.as_ndarray_view().unwrap(), nd.t());
+    }
+
+    #[test]
+    fn methods_permuted_3d_is_contiguous() {
+        let nd = ArrayD::from_shape_vec(vec![2, 3, 4], (0..24).collect::<Vec<i64>>()).unwrap();
+        let permuted = nd.view().permuted_axes(vec![1, 2, 0]);
+        let a = Array::plain_ndarray_view(permuted.clone()).unwrap();
+        assert!(!a.is_standard_layout());
+        assert!(a.is_contiguous());
+        assert_eq!(a.as_ndarray_view::<ndarray::IxDyn>().unwrap(), permuted);
+    }
+
+    #[test]
+    fn methods_with_gaps() {
+        let nd = array![[1i32, 2, 3, 4], [5, 6, 7, 8]];
+        for sliced in [nd.slice(s![.., ..;2]), nd.slice(s![.., 1..3])] {
+            let a = Array::plain_ndarray_view(sliced).unwrap();
+            assert_eq!(a.as_ptr(), sliced.as_ptr().cast::<u8>());
+            assert!(!a.is_standard_layout());
+            assert!(!a.is_contiguous());
+            assert_eq!(a.as_slice(), None);
+            assert_eq!(a.as_bytes(), None);
+            let view = a.as_ndarray_view::<ndarray::Ix2>().unwrap();
+            assert_eq!(view, sliced);
+            assert_eq!(view.as_ptr(), sliced.as_ptr());
+        }
+        // A row slice has no gaps.
+        let row = nd.slice(s![1..2, ..]);
+        let a = Array::plain_ndarray_view(row).unwrap();
+        assert!(a.is_standard_layout());
+        assert_eq!(a.as_slice(), Some(&[5, 6, 7, 8][..]));
+    }
+
+    #[test]
+    fn methods_ignore_length_one_dims() {
+        // A length-1 dim with a stride that is neither packed nor a whole number of elements.
+        let data = [1u16, 2, 3];
+        let a = unsafe {
+            Array::<crate::storage::PlainView<'_, u16>>::plain_ndarray_ptr(
+                data.as_ptr().cast(),
+                &[1, 3],
+                &[1001, 2],
+                <u16 as crate::dtype::Dtyped>::DTYPE,
+                ArrayParams::default(),
+            )
+        }
+        .unwrap();
+        assert!(a.is_standard_layout());
+        assert!(a.is_contiguous());
+        assert_eq!(a.as_slice(), Some(&data[..]));
+        assert_eq!(a.as_ndarray_view().unwrap(), array![[1u16, 2, 3]]);
+    }
+
+    #[test]
+    fn methods_broadcast() {
+        let data = [7i32, 8];
+        let a = unsafe {
+            Array::<crate::storage::PlainView<'_, i32>>::plain_ndarray_ptr(
+                data.as_ptr().cast(),
+                &[3, 2],
+                &[0, 4],
+                <i32 as crate::dtype::Dtyped>::DTYPE,
+                ArrayParams::default(),
+            )
+        }
+        .unwrap();
+        assert!(!a.is_standard_layout());
+        assert!(!a.is_contiguous());
+        assert_eq!(a.as_slice(), None);
+        let view = a.as_ndarray_view::<ndarray::Ix2>().unwrap();
+        assert_eq!(view, array![[7, 8], [7, 8], [7, 8]]);
+        assert_eq!(view.strides(), &[0, 1]);
+    }
+
+    #[test]
+    fn methods_empty() {
+        let nd = ndarray::Array2::<f32>::zeros((0, 3));
+        let a = Array::plain_ndarray(nd).unwrap();
+        assert!(a.is_standard_layout());
+        assert!(a.is_contiguous());
+        assert_eq!(a.as_slice(), Some(&[][..]));
+        assert_eq!(a.as_bytes(), Some(&[][..]));
+        let view = a.as_ndarray_view::<ndarray::Ix2>().unwrap();
+        assert_eq!(view.shape(), &[0, 3]);
+
+        // An empty array may come with a null pointer.
+        let a = unsafe {
+            Array::<crate::storage::PlainView<'_, f32>>::plain_ndarray_ptr(
+                std::ptr::null(),
+                &[2, 0],
+                &[3, 1],
+                <f32 as crate::dtype::Dtyped>::DTYPE,
+                ArrayParams::default(),
+            )
+        }
+        .unwrap();
+        assert_eq!(a.as_slice(), Some(&[][..]));
+        assert_eq!(
+            a.as_ndarray_view::<ndarray::Ix2>().unwrap().shape(),
+            &[2, 0]
+        );
+    }
+
+    #[test]
+    fn methods_misaligned() {
+        let backing = [0u64; 4];
+        let base = unsafe { backing.as_ptr().cast::<u8>().add(1) };
+        let a = unsafe {
+            Array::<crate::storage::PlainView<'_, i32>>::plain_ndarray_ptr(
+                base,
+                &[2, 3],
+                &[12, 4],
+                <i32 as crate::dtype::Dtyped>::DTYPE,
+                ArrayParams::default(),
+            )
+        }
+        .unwrap();
+        assert_eq!(a.as_ptr(), base);
+        assert!(a.is_standard_layout());
+        assert_eq!(a.as_bytes().map(<[u8]>::len), Some(24));
+        assert_eq!(a.as_slice(), None);
+        let err = a.as_ndarray_view::<ndarray::Ix2>().unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArgument);
+    }
+
+    #[test]
+    fn methods_ndarray_view_errors() {
+        use crate::error::ErrorKind;
+
+        let a = Array::plain_ndarray(array![[1i32, 2], [3, 4]]).unwrap();
+        let err = a.as_ndarray_view::<ndarray::Ix3>().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidShapeOperation);
+
+        // A stride that is not a whole number of elements on a stepped dim.
+        let backing = [0u32; 8];
+        let a = unsafe {
+            Array::<crate::storage::PlainView<'_, u16>>::plain_ndarray_ptr(
+                backing.as_ptr().cast(),
+                &[2, 2],
+                &[5, 2],
+                <u16 as crate::dtype::Dtyped>::DTYPE,
+                ArrayParams::default(),
+            )
+        }
+        .unwrap();
+        let err = a.as_ndarray_view::<ndarray::Ix2>().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidArgument);
+    }
+
+    #[test]
+    fn too_many_elements_is_an_error() {
+        use crate::error::ErrorKind;
+
+        // A broadcast array addresses one element, but ndarray can't view more than isize::MAX.
+        let data = [0u8];
+        let make = |len: u64| unsafe {
+            Array::<crate::storage::PlainView<'_, u8>>::plain_ndarray_ptr(
+                data.as_ptr(),
+                &[len, 2],
+                &[0, 0],
+                <u8 as crate::dtype::Dtyped>::DTYPE,
+                ArrayParams::default(),
+            )
+        };
+        assert!(make(isize::MAX as u64 / 2).is_ok());
+        let err = make(isize::MAX as u64 / 2 + 1).map(|_| ()).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidShapeOperation);
+    }
+
+    #[test]
+    fn methods_plain_base() {
+        use crate::dtype::Dtyped;
+        use crate::storage::PlainBase;
+        use crate::TypeDyn;
+
+        let data = vec![1i32, 2, 3, 4, 5, 6];
+        let ptr = data.as_ptr().cast::<u8>();
+        let storage = unsafe {
+            PlainBase::<Vec<i32>, TypeDyn>::new(
+                data,
+                ptr,
+                &[3, 2],
+                &[4, 12],
+                i32::DTYPE,
+                ArrayParams::default(),
+            )
+        }
+        .unwrap();
+        let a = Array::from_storage(storage);
+        assert_eq!(a.as_ptr(), ptr);
+        assert_eq!(a.strides(), &[4, 12]);
+        assert!(!a.is_standard_layout());
+        assert!(a.is_contiguous());
+        assert_eq!(a.as_bytes(), None);
+
+        let a = a.into_typed::<i32>().unwrap();
+        assert_eq!(a.as_slice(), None);
+        assert_eq!(a.as_ndarray_view().unwrap(), array![[1, 4], [2, 5], [3, 6]]);
     }
 }

@@ -1,7 +1,6 @@
 use crate::ops::prelude::*;
 
-use crate::util::ArraySequence;
-use crate::ArraySequenceElementType;
+use crate::storage::{ArraySequence, ArraySequenceElementType};
 
 /// Joins a sequence of arrays along an existing dim. See [`Concatenate`] for details and examples.
 ///
@@ -491,10 +490,10 @@ mod tests {
     fn test_dtype_mismatch_panics() {
         let a = Array::compact_ndarray(&array![1i32, 2])
             .unwrap()
-            .into_type_dyn();
+            .into_typed_dyn();
         let b = Array::compact_ndarray(&array![1.0f32, 2.0])
             .unwrap()
-            .into_type_dyn();
+            .into_typed_dyn();
         let _ = concatenate((a, b), 0);
     }
 

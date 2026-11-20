@@ -27,7 +27,7 @@
 //! [`TypeDyn`] (only known at runtime, e.g. for arrays loaded from disk). The number of dims is
 //! always a runtime property, read from [`shape`](StorageBase::shape).
 //!
-//! [`Storage`](crate::Storage) is a shorthand for `StorageBase<ElementType = T>`. All
+//! [`Storage`] is a shorthand for `StorageBase<ElementType = T>`. All
 //! element-wise operations require it, so the compiler can dispatch to the correct scalar
 //! implementation.
 //!
@@ -41,10 +41,11 @@ use std::sync::Arc;
 
 use crate::dtype::Dtyped;
 use crate::ops::ElementwisePipeline;
-use crate::{ElementType, StorageBase, TypeDyn};
+use crate::{ElementType, TypeDyn};
 
-pub(crate) mod core_trait;
+mod core_trait;
 pub(crate) use core_trait::{ArrayStorageExt, ArrayStorageImpl};
+pub use core_trait::{Storage, StorageBase};
 
 mod compact;
 pub use compact::*;
@@ -55,8 +56,13 @@ pub use plain::*;
 pub(crate) mod params;
 pub use params::ArraySpec;
 
+pub use crate::archive::ArchiveValidation;
+pub use crate::codec::{Codec, Filter};
+
 mod any;
 pub use any::*;
+
+pub use crate::util::{ArraySequence, ArraySequenceElementType, ArraySequenceTyped};
 
 pub(crate) mod block;
 pub use block::BlockSize;
@@ -129,7 +135,7 @@ macro_rules! impl_array_storage_smart_ptr {
             }
 
             #[inline]
-            fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
+            fn as_compact(&self) -> Option<CompactView<'_, TypeDyn>> {
                 (**self).as_compact()
             }
 
@@ -186,7 +192,7 @@ impl StorageBase for &dyn StorageBase {
     }
 
     #[inline]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
+    fn as_compact(&self) -> Option<CompactView<'_, TypeDyn>> {
         (**self).as_compact()
     }
 
@@ -237,7 +243,7 @@ macro_rules! impl_array_storage_forward {
         #[inline]
         fn as_compact(
             &self,
-        ) -> Option<crate::storage::CompactBorrowed<'_, crate::TypeDyn>> {
+        ) -> Option<crate::storage::CompactView<'_, crate::TypeDyn>> {
             self.0.as_compact()
         }
     };
@@ -272,7 +278,7 @@ mod tests {
         assert_eq!(arc.shape(), &[2, 3]);
 
         let boxed: Array<Box<crate::storage::Compact<crate::TypeDyn>>> =
-            Array::from_storage(Box::new(compact())).into_type_dyn();
+            Array::from_storage(Box::new(compact())).into_typed_dyn();
         let typed = boxed.into_typed::<f32>().unwrap();
         assert_eq!(typed.to_ndarray().unwrap(), nd);
     }

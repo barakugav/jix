@@ -260,7 +260,7 @@ macro_rules! impl_dim {
             #[inline(always)]
             fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T> {
                 assert_dim::<Self>(ndim);
-                crate::array_from_fn_inline(f)
+                crate::util::array_from_fn_inline(f)
             }
         }
         impl Index<usize> for Dim<$dim> {

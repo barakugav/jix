@@ -98,7 +98,7 @@ where
         };
         ArrayStorageInfo::new_deps("MaybeCompact", [inner])
     }
-    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn>> {
+    fn as_compact(&self) -> Option<crate::storage::CompactView<'_, TypeDyn>> {
         let compact = match &self.0 {
             ToCompactInner::Original(s) => s.as_compact(),
             ToCompactInner::Compact(c) => c.as_compact(),

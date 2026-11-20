@@ -164,7 +164,7 @@ impl<S: StorageBase> StorageBase for Roll<S> {
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Roll", [&self.array])
     }
-    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn>> {
+    fn as_compact(&self) -> Option<crate::storage::CompactView<'_, TypeDyn>> {
         if self.is_identity() {
             self.array.as_compact()
         } else {
@@ -514,7 +514,7 @@ mod tests {
     fn element_type_change_into_type_dyn() {
         let a = make(arange(6), [2u64, 3]);
         let r = a.roll(1, 1);
-        let dyn_et = r.into_type_dyn();
+        let dyn_et = r.into_typed_dyn();
         assert_eq!(dyn_et.dtype(), &<i32 as crate::dtype::Dtyped>::DTYPE);
     }
 

@@ -3,10 +3,12 @@
 //! ## Operation traits
 //!
 //! Each element-wise [`Array`](crate::Array) operation is bounded by a *scalar-level* trait of
-//! this module, implemented for each supported element type: for example [`crate::ops::Add`]
-//! requires [`Add`], and [`crate::ops::Exp`] requires [`Exp`]. The module also holds reduction
-//! traits such as [`Sum`] and [`Mean`]. Each trait has a scalar function (`add`) and a bulk one
-//! on `N` elements (`add_bulk`), which the ops call, vectorized with SIMD for the types with SIMD
+//! this module, implemented for each supported element type: for example
+//! [`jix::ops::Add`](crate::ops::Add) requires [`jix::scalar::Add`](crate::scalar::Add),
+//! and [`jix::ops::Exp`](crate::ops::Exp) requires [`jix::scalar::Exp`](crate::scalar::Exp).
+//! The module also holds reduction traits such as [`Sum`] and [`Mean`].
+//! Each trait has a scalar function (`add`) and a bulk one on `N` elements (`add_bulk`),
+//! which the ops call, vectorized with SIMD for the types with SIMD
 //! support (the default computes element by element).
 //!
 //! ## `f16` and `Complex<T>` coverage

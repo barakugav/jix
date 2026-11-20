@@ -523,8 +523,8 @@ mod tests {
 
     use super::*;
     use crate::util::iter::strides::NdIterExtStridesOffset;
-    use crate::util::DimArray;
-    use crate::{Dim, DimDyn, SliceExt};
+    use crate::util::{DimArray, SliceExt};
+    use crate::{Dim, DimDyn};
 
     /// Build a [`DimArray`] (the `DimDyn` vec container) from a slice, for constructing test
     /// extensions whose `new` takes an owned `D::Vec<S>`.

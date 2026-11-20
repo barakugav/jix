@@ -1,7 +1,7 @@
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 use crate::ops::{ElementwisePipeline, OperandTyped};
-use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, OutBuf, StridedBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactView, Index, OutBuf, StridedBuf};
 use crate::ReadContext;
 use crate::{ElementType, TypeDyn};
 
@@ -141,7 +141,7 @@ pub trait StorageBase: sealed::ArrayStorageImpl {
     /// If this storage is a compact block-compressed backend, return a borrowed view of itself.
     #[doc(hidden)]
     #[inline(always)]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
+    fn as_compact(&self) -> Option<CompactView<'_, TypeDyn>> {
         None
     }
 

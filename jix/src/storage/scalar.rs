@@ -6,9 +6,9 @@ use crate::storage::{
     check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, Index, OutBuf, OutBufInner,
     StorageBase, StridedBuf,
 };
-use crate::util::dim_arr;
+use crate::util::{cast_slice, cast_slice_mut, dim_arr};
 use crate::ReadContext;
-use crate::{cast_slice, cast_slice_mut, ArrayParams, DimDyn, Dimension};
+use crate::{ArrayParams, DimDyn, Dimension};
 
 /// Storage that broadcasts a single scalar value across an arbitrary shape: a zero-copy
 /// constant array. A 0-D `Scalar` (empty `shape`) is a plain scalar value.
@@ -208,7 +208,7 @@ mod tests {
         let ctx = ReadContext::default();
         let mut dst = [-1i32; 12];
         {
-            let bytes = unsafe { crate::cast_slice_mut::<i32, u8>(&mut dst) };
+            let bytes = unsafe { crate::util::cast_slice_mut::<i32, u8>(&mut dst) };
             // Rows 1..3 of a 3x4 row-major buffer, starting at row 1.
             let mut out = unsafe {
                 StridedBuf::from_slice_mut(
@@ -224,7 +224,7 @@ mod tests {
 
         let mut dst = [-1i32; 12];
         {
-            let bytes = unsafe { crate::cast_slice_mut::<i32, u8>(&mut dst) };
+            let bytes = unsafe { crate::util::cast_slice_mut::<i32, u8>(&mut dst) };
             // Row 0 only, in a destination spanning all three rows.
             let mut out = unsafe {
                 StridedBuf::from_slice_mut(bytes, DimArray::from_slice(&[16, 4]).unwrap())

@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use crate::buf_pool::{PoolBuf, PoolBufShared};
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_region_size, ensure, Result};
 use crate::storage::{ArrayStorageExt, Index};
+use crate::util::buf_pool::{PoolBuf, PoolBufShared};
 use crate::util::{
     default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
-    RawAlignedBytes, SliceExt,
+    NdCopier, PtrMutNoalias, PtrNoalias, RawAlignedBytes, SliceExt,
 };
-use crate::{DimDyn, DimIdx, NdCopier, PtrMutNoalias, PtrNoalias, ReadContext, StorageBase};
+use crate::{DimDyn, DimIdx, ReadContext, StorageBase};
 
 /// A borrowed, strided view over a region of array bytes - the value produced and consumed by
 /// [`StorageBase::read_data`](crate::StorageBase::read_data).

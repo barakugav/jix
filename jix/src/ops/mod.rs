@@ -91,9 +91,9 @@
 //! # Multi-array operations
 //!
 //! Operations that accept a variable number of input arrays - [`stack`] and [`concatenate`] - take
-//! an [`ArraySequence`](crate::util::ArraySequence) argument. This covers `Vec<Array<S>>`,
-//! `&[Array<S>]`, fixed-length arrays `[Array<S>; N]`, and heterogeneous tuples of up to ten
-//! arrays. See [`ArraySequence`](crate::util::ArraySequence) for details.
+//! an [`ArraySequence`](crate::storage::ArraySequence) argument. This covers `Vec<Array<S>>`,
+//! `&[Array<S>]`, fixed-length arrays `[Array<S>; N]`, and heterogeneous tuples of up to 12
+//! arrays. See [`ArraySequence`](crate::storage::ArraySequence) for details.
 
 mod maybe_compact;
 pub use maybe_compact::*;

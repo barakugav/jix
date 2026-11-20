@@ -241,10 +241,11 @@
 //!
 //! Codec settings are controlled via [`ArrayParams`]:
 //!
-//! - [`codec`](ArrayParams::codec) - the compression codec (e.g. [`Codec::Zstd`]).
+//! - [`codec`](ArrayParams::codec) - the compression codec (e.g.
+//!   [`Codec::Zstd`](storage::Codec::Zstd)).
 //! - [`level`](ArrayParams::level) - the compression level.
 //! - [`filters`](ArrayParams::filters) - the pre-compression filter pipeline (e.g.
-//!   [`Filter::ByteShuffle`]).
+//!   [`Filter::ByteShuffle`](storage::Filter::ByteShuffle)).
 //!
 //! The codec and filter configuration is serialized into the array archive, so readers never need
 //! to know ahead of time which settings were used.
@@ -329,7 +330,8 @@
 //! from the source lazily:
 //!
 //! ```
-//! use jix::{ArchiveValidation, Array, ArrayParams};
+//! use jix::storage::ArchiveValidation;
+//! use jix::{Array, ArrayParams};
 //! use ndarray::array;
 //!
 //! let tmp_dir = tempfile::tempdir()?;
@@ -384,18 +386,16 @@ mod context;
 pub use context::ReadContext;
 
 pub(crate) mod codec;
-pub use codec::{Codec, Filter};
 
 pub mod dtype;
 
 pub mod scalar;
 
 pub mod storage;
-pub use storage::core_trait::{Storage, StorageBase};
 pub use storage::params::ArrayParams;
+pub use storage::{Storage, StorageBase};
 
 mod archive;
-pub use archive::ArchiveValidation;
 
 pub mod ops;
 
@@ -405,7 +405,6 @@ pub use dimension::*;
 pub use element_type::*;
 
 mod util;
-pub use util::*;
 
 pub mod error;
 pub use error::Error;

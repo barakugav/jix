@@ -5,17 +5,16 @@ use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 use std::cmp::Reverse;
 use std::marker::PhantomData;
 
-use crate::buf_pool::PoolBuf;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{ArithmeticStatus, Result};
 use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf};
-use crate::util::default_strides_slice;
-use crate::util::{fill_contiguous, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
-use crate::ReadContext;
-use crate::{
-    array_from_fn_inline, const_min, dim_arr, prev_power_of_two, strided_span_bytes, ArrayExt,
-    DimArray, DimBitmap, DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn,
+use crate::util::buf_pool::PoolBuf;
+use crate::util::{
+    array_from_fn_inline, const_min, default_strides_slice, fill_contiguous, prev_power_of_two,
+    strided_span_bytes, ArrayExt, DimBitmap, NdCopier, NdIterUnordered, NdIterUnorderedDyn, PtrExt,
+    PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED,
 };
+use crate::{dim_arr, DimArray, DimIdx, ReadContext};
 
 /// A lazy pipeline of element-wise operations over a rectangular region.
 ///
@@ -992,7 +991,8 @@ mod tests {
     use std::ops::Range;
 
     use crate::storage::{split_ranges, Index};
-    use crate::{array_from_fn_inline, strided_span_bytes, Array, CompactArray, StorageBase};
+    use crate::util::{array_from_fn_inline, strided_span_bytes};
+    use crate::{Array, CompactArray, StorageBase};
 
     // ---------------------------------------------------------------------------
     // Harness

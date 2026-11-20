@@ -1,7 +1,7 @@
 use std::ops::Not;
 
 use crate::ops::prelude::*;
-use crate::util::{ArraySequence, ArraySequenceElementType};
+use crate::storage::{ArraySequence, ArraySequenceElementType};
 
 /// Joins a sequence of arrays along a new dim. See [`Stack`] for details and examples.
 ///
@@ -431,10 +431,10 @@ mod tests {
     fn test_dtype_mismatch_panics() {
         let a = Array::compact_ndarray(&array![1i32, 2])
             .unwrap()
-            .into_type_dyn();
+            .into_typed_dyn();
         let b = Array::compact_ndarray(&array![1.0f32, 2.0])
             .unwrap()
-            .into_type_dyn();
+            .into_typed_dyn();
         let _ = stack((a, b), 0);
     }
 

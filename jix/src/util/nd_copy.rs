@@ -1,7 +1,7 @@
 use std::ptr;
 
 use crate::dtype::{Alignment, Dtype, Itemsize};
-use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
+use crate::util::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// byte slices under independent source and destination strides.

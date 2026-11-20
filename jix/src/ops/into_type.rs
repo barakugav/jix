@@ -7,9 +7,8 @@ use crate::ops::prelude::*;
 /// At construction, if `ET` is a [`Dtyped`] type, the runtime [`Dtype`](crate::dtype::Dtype) must
 /// match it; if it is [`TypeDyn`](crate::TypeDyn) construction always succeeds.
 ///
-/// The entry points are [`Array::into_type`](crate::Array::into_type),
-/// [`Array::into_typed`](crate::Array::into_typed) and
-/// [`Array::into_type_dyn`](crate::Array::into_type_dyn), which wrap the array in `IntoType` or,
+/// The entry points are [`Array::into_typed`](crate::Array::into_typed) and
+/// [`Array::into_typed_dyn`](crate::Array::into_typed_dyn), which wrap the array in `IntoType` or,
 /// for some storages, re-tag it in place: a borrowed `&S` (from
 /// [`Array::view`](crate::Array::view)) is wrapped, a [`Compact`](crate::storage::Compact) is not.
 ///
@@ -27,7 +26,7 @@ use crate::ops::prelude::*;
 /// // a: Array<Compact<f32>>
 ///
 /// // Erase the static element type - always succeeds.
-/// let dyn_a = a.view().into_type_dyn();
+/// let dyn_a = a.view().into_typed_dyn();
 /// // dyn_a: Array<IntoType<&Compact<f32>, TypeDyn>>
 /// // dyn_a: Array<S::ElementType = TypeDyn>
 /// assert_eq!(dyn_a.dtype(), &f32::DTYPE);
@@ -126,7 +125,7 @@ where
         ArrayStorageInfo::new_deps("IntoType", [&self.inner])
     }
     #[inline]
-    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn>> {
+    fn as_compact(&self) -> Option<crate::storage::CompactView<'_, TypeDyn>> {
         self.inner.as_compact()
     }
 
@@ -153,53 +152,39 @@ pub(crate) use impl_element_type_change_default;
 
 /// Methods for converting an array to a different element type.
 impl<S: StorageBase> Array<S> {
-    /// Re-tag this array's element type as `NewET`, returning an error if the runtime dtype does
+    /// Re-tag this array's element type as `ET`, returning an error if the runtime dtype does
     /// not match.
     ///
-    /// Arrays loaded from files carry [`TypeDyn`]. Once the dtype is known, `into_type::<T>()`
-    /// (or [`into_typed::<T>`](Self::into_typed)) recovers the static `T` that most
-    /// element-wise operations require (`Storage`);
-    /// [`into_type_dyn`](Self::into_type_dyn) erases it.
+    /// This never converts values: the bytes are left as they are and only the static element
+    /// type changes. To convert values to another element type, use [`cast`](Self::cast).
     ///
-    /// The storage becomes `S::ElementTypeChange<NewET>`: an
-    /// [`IntoType<S, NewET>`](crate::ops::IntoType) wrapper for some storages, the same storage
+    /// Arrays loaded from files carry [`TypeDyn`]. Once the dtype is known, `into_typed::<T>()`
+    /// recovers the static `T` that most element-wise operations require (`Storage`);
+    /// [`into_typed_dyn`](Self::into_typed_dyn) erases it.
+    ///
+    /// The storage becomes `S::ElementTypeChange<ET>`: an
+    /// [`IntoType<S, ET>`](crate::ops::IntoType) wrapper for some storages, the same storage
     /// re-tagged in place for others.
     ///
     /// # Errors
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
-    /// `NewET = T` and `self.dtype() != T::DTYPE`. Always succeeds for `NewET = TypeDyn`.
+    /// `ET = T` and `self.dtype() != T::DTYPE`. Always succeeds for `ET = TypeDyn`.
     #[inline]
-    pub fn into_type<NewET>(self) -> Result<Array<S::ElementTypeChange<NewET>>>
+    pub fn into_typed<ET>(self) -> Result<Array<S::ElementTypeChange<ET>>>
     where
-        NewET: ElementType,
+        ET: ElementType,
     {
         Ok(Array::from_storage(
             self.into_storage().element_type_change()?,
         ))
     }
 
-    /// Re-tag this array's element type as `T`, asserting a concrete scalar type.
-    ///
-    /// Sugar for [`into_type::<T>()`](Self::into_type).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorKind::UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) if
-    /// `self.dtype() != T::DTYPE`.
-    #[inline]
-    pub fn into_typed<T>(self) -> Result<Array<S::ElementTypeChange<T>>>
-    where
-        T: Dtyped,
-    {
-        self.into_type()
-    }
-
     /// Re-tag this array's element type as [`TypeDyn`], erasing static element-type information.
     ///
-    /// Infallible sugar for [`into_type::<TypeDyn>()`](Self::into_type).
+    /// Infallible sugar for [`into_typed::<TypeDyn>()`](Self::into_typed).
     #[inline]
-    pub fn into_type_dyn(self) -> Array<S::ElementTypeChange<TypeDyn>> {
-        self.into_type().unwrap()
+    pub fn into_typed_dyn(self) -> Array<S::ElementTypeChange<TypeDyn>> {
+        self.into_typed().unwrap()
     }
 }

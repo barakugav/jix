@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::params::ArraySpecOwned;
-use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, Index, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactView, Index, OutBuf};
 use crate::ReadContext;
 use crate::{DimDyn, Dimension, StorageBase, TypeDyn, NDIM_MAX};
 
@@ -77,7 +77,7 @@ impl StorageBase for StorageAny {
     }
 
     #[inline]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
+    fn as_compact(&self) -> Option<CompactView<'_, TypeDyn>> {
         self.inner.storage().as_compact()
     }
 

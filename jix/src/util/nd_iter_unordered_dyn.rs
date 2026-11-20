@@ -4,7 +4,7 @@ use crate::util::iter::NdIter;
 use crate::util::Idx;
 use crate::{dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
-/// [`NdIterUnordered`](crate::NdIterUnordered) with the operand count known only at runtime.
+/// [`NdIterUnordered`](crate::util::NdIterUnordered) with the operand count known only at runtime.
 ///
 /// Same walk, flags and caller contract, except that the per-operand tables are heap-allocated,
 /// [`foreach_inner_1d`](Self::foreach_inner_1d) lends the offsets and inner strides out as slices
@@ -184,7 +184,7 @@ impl<I: Idx> NdIterUnorderedDyn<I> {
     #[inline]
     pub(crate) fn foreach_inner_1d(&self, mut inner_loop: impl FnMut(&[I], I, &[I])) {
         let ndim = self.shape.len();
-        if crate::hint::likely(ndim == 1) {
+        if crate::util::hint::likely(ndim == 1) {
             let offsets = vec![I::ZERO; self.strides.len()];
             let inner_strides = self.strides.iter().map(|s| s[0]).collect::<Vec<_>>();
             inner_loop(&offsets, self.shape[0], &inner_strides);
@@ -200,9 +200,9 @@ impl<I: Idx> NdIterUnorderedDyn<I> {
     }
 }
 
-/// The `nd_iter_unordered_nd_walk` of [`NdIterUnordered`](crate::NdIterUnordered), instantiated per
-/// outer rank only - whatever the number of operands. The offsets are lent out as a slice, so the
-/// outer `NdIter` here is the lending kind.
+/// The `nd_iter_unordered_nd_walk` of [`NdIterUnordered`](crate::util::NdIterUnordered),
+/// instantiated per outer rank only - whatever the number of operands. The offsets are lent out as
+/// a slice, so the outer `NdIter` here is the lending kind.
 #[allow(clippy::type_complexity)]
 #[inline(never)]
 fn nd_iter_unordered_nd_walk<I: Idx, OuterD: Dimension>(
@@ -248,7 +248,7 @@ fn nd_iter_unordered_nd_walk<I: Idx, OuterD: Dimension>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NdIterUnordered;
+    use crate::util::NdIterUnordered;
 
     // ---------------------------------------------------------------------------
     // Harness: what a walk reveals, reduced to a form both iterators share

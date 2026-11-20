@@ -4,7 +4,7 @@
 //! data as independently compressed nd-blocks:
 //!
 //! - [`Compact`] - heap-allocated; the standard in-memory storage.
-//! - [`CompactBorrowed`] - borrows its data from an existing byte buffer.
+//! - [`CompactView`] - borrows its data from an existing byte buffer.
 //! - [`CompactMmap`] - memory-mapped; the OS pages data from disk on demand.
 //!
 //! All three are thin wrappers around [`ArrayBlockTableStorageBase`], which contains the
@@ -19,9 +19,9 @@ use crate::storage::cache_id::ArrayCacheId;
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{check_out_buf, ArraySpec, ElementType, Index, OutBuf, StridedBuf};
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, NdCopier, PtrMutNoalias, PtrNoalias};
+use crate::util::{calc_block_end, default_strides, NdCopier, PtrMutNoalias, PtrNoalias};
 use crate::ReadContext;
-use crate::{default_strides, ArrayParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
+use crate::{ArrayParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -66,9 +66,9 @@ use crate::{default_strides, ArrayParams, Dim, DimDyn, DimVec, Dimension, Storag
 ///
 /// ## Filters
 ///
-/// [`Filter`](crate::Filter)s are byte-level transforms that rearrange element data into a layout
-/// that compresses better. [`Filter::ByteShuffle`](crate::Filter::ByteShuffle), the default, suits
-/// most numeric data; [`Filter::BitShuffle`](crate::Filter::BitShuffle) can compress low-entropy
+/// [`Filter`](crate::storage::Filter)s are byte-level transforms that rearrange element data into a layout
+/// that compresses better. [`Filter::ByteShuffle`](crate::storage::Filter::ByteShuffle), the default, suits
+/// most numeric data; [`Filter::BitShuffle`](crate::storage::Filter::BitShuffle) can compress low-entropy
 /// data further at higher CPU cost.
 ///
 /// ## Read context
@@ -83,7 +83,7 @@ pub struct Compact<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::blo
 /// Same layout as [`Compact`] but borrows its compressed bytes from an existing byte slice
 /// instead of owning them. Used internally when constructing temporary views into a
 /// pre-encoded buffer.
-pub struct CompactBorrowed<'a, ET>(
+pub struct CompactView<'a, ET>(
     pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>, ET>,
 );
 
@@ -133,8 +133,8 @@ macro_rules! impl_array_storage {
                 crate::storage::ArrayStorageInfo::new("Compact")
             }
 
-            fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
-                Some(CompactBorrowed(ArrayBlockTableStorageBase {
+            fn as_compact(&self) -> Option<CompactView<'_, TypeDyn>> {
+                Some(CompactView(ArrayBlockTableStorageBase {
                     cache_id: self.0.cache_id,
                     // Re-tagging to `TypeDyn` never fails
                     blocks: self.0.blocks.as_ref().element_type_change().ok()?,
@@ -152,7 +152,7 @@ macro_rules! impl_array_storage {
     };
 }
 impl_array_storage!(Compact<ET>);
-impl_array_storage!(CompactBorrowed<'a, ET>);
+impl_array_storage!(CompactView<'a, ET>);
 impl_array_storage!(CompactMmap<ET>);
 
 /// Nd-array layer on top of [`BlockTable<S>`](crate::storage::block::BlockTable).

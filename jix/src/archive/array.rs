@@ -11,11 +11,9 @@ use crate::archive::version::lib_version;
 use crate::codec::DecoderCodecConfig;
 use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
+use crate::storage::{ArchiveValidation, ArrayBlockTableStorageBase, Compact, CompactMmap};
 use crate::util::{dim_arr, DimBitmap, IterExt};
-use crate::{
-    ArchiveValidation, Array, ArrayParams, DimDyn, Dimension, ReadContext, StorageBase, TypeDyn,
-};
+use crate::{Array, ArrayParams, DimDyn, Dimension, ReadContext, StorageBase, TypeDyn};
 
 impl Array<Compact<TypeDyn>> {
     /// Load a compressed array from a `.jix` file, allocating storage on the heap.
@@ -75,7 +73,8 @@ impl Array<Compact<TypeDyn>> {
     /// # Examples
     ///
     /// ```
-    /// use jix::{ArchiveValidation, Array, ArrayParams};
+    /// use jix::storage::ArchiveValidation;
+    /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -133,7 +132,8 @@ impl Array<Compact<TypeDyn>> {
     /// ```
     /// use std::io::Cursor;
     ///
-    /// use jix::{ArchiveValidation, Array, ArrayParams};
+    /// use jix::storage::ArchiveValidation;
+    /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
     /// // Serialize to an in-memory buffer and read it back.
@@ -204,7 +204,8 @@ impl Array<CompactMmap<TypeDyn>> {
     /// # Examples
     ///
     /// ```
-    /// use jix::{ArchiveValidation, Array, ArrayParams};
+    /// use jix::storage::ArchiveValidation;
+    /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -291,7 +292,8 @@ impl<S: StorageBase> Array<S> {
     /// array (compressed or decompressed) in memory:
     ///
     /// ```
-    /// use jix::{ArchiveValidation, Array, ArrayParams};
+    /// use jix::storage::ArchiveValidation;
+    /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -359,7 +361,8 @@ impl<S: StorageBase> Array<S> {
     /// ```
     /// use std::io::Cursor;
     ///
-    /// use jix::{ArchiveValidation, Array, ArrayParams};
+    /// use jix::storage::ArchiveValidation;
+    /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3, 4], [5, 6, 7, 8]])?;
@@ -601,9 +604,9 @@ mod tests {
 
     use crate::archive::schema;
     use crate::dtype::Dtyped;
-    use crate::storage::Compact;
+    use crate::storage::{ArchiveValidation, Compact};
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{ArchiveValidation, Array, ArrayParams, CompactArray, Dimension, IntoDimension};
+    use crate::{Array, ArrayParams, CompactArray, Dimension, IntoDimension};
     use crate::{StorageBase, TypeDyn};
 
     #[test]
@@ -1530,7 +1533,7 @@ mod tests {
 
         assert_eq!(write(&make()), expected);
         assert_eq!(write(&make().view()), expected);
-        assert_eq!(write(&make().view().into_type_dyn()), expected);
+        assert_eq!(write(&make().view().into_typed_dyn()), expected);
         assert_eq!(write(&make().into_any()), expected);
         assert_eq!(write(&make().into_any().into_any()), expected);
         assert_eq!(

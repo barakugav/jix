@@ -2,9 +2,9 @@ use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
 use std::sync::Arc;
 
-use crate::cpu_cache::CACHE_LINE_SIZE;
 use crate::dtype::Alignment;
-use crate::RawAlignedBytes;
+use crate::util::cpu_cache::CACHE_LINE_SIZE;
+use crate::util::RawAlignedBytes;
 
 /// A pool of aligned byte buffers.
 ///

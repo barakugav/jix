@@ -6,10 +6,10 @@ use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
-use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight};
-use crate::{
-    dim_arr, Array, DimBitmap, DimDyn, Dimension, SliceExt, StorageBase, BLOCK_SIZE_BYTES_MAX,
+use crate::util::{
+    scale_read_shape, DimArray, DimBitmap, DimIdx, Idx, IterExt, ScaleWeight, SliceExt,
 };
+use crate::{dim_arr, Array, DimDyn, Dimension, StorageBase, BLOCK_SIZE_BYTES_MAX};
 
 const ELEMENT_COST_MAX: f32 = u64::MAX as f32; // 2^64
 

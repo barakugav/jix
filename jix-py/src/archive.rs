@@ -154,7 +154,7 @@ pub fn read_array(
 }
 
 /// The `validation` mode of [`crate::archive::read_array`].
-pub struct ArchiveValidation(pub jix_core::ArchiveValidation);
+pub struct ArchiveValidation(pub jix_core::storage::ArchiveValidation);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
     type Error = PyErr;
@@ -171,8 +171,8 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         match obj.extract::<&str>()? {
-            "minimal" => Ok(Self(jix_core::ArchiveValidation::Minimal)),
-            "strict" => Ok(Self(jix_core::ArchiveValidation::Strict)),
+            "minimal" => Ok(Self(jix_core::storage::ArchiveValidation::Minimal)),
+            "strict" => Ok(Self(jix_core::storage::ArchiveValidation::Strict)),
             other => Err(PyValueError::new_err(format!(
                 "invalid validation value: '{other}', expected 'minimal' or 'strict'"
             ))),
