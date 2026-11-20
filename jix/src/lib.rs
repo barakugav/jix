@@ -391,8 +391,8 @@ pub mod dtype;
 pub mod scalar;
 
 pub mod storage;
-pub use storage::core_trait::{Storage, StorageBase};
 pub use storage::params::ArrayParams;
+pub use storage::{Storage, StorageBase};
 
 mod archive;
 pub use archive::ArchiveValidation;

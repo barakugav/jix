@@ -27,7 +27,7 @@
 //! [`TypeDyn`] (only known at runtime, e.g. for arrays loaded from disk). The number of dims is
 //! always a runtime property, read from [`shape`](StorageBase::shape).
 //!
-//! [`Storage`](crate::Storage) is a shorthand for `StorageBase<ElementType = T>`. All
+//! [`Storage`] is a shorthand for `StorageBase<ElementType = T>`. All
 //! element-wise operations require it, so the compiler can dispatch to the correct scalar
 //! implementation.
 //!
@@ -41,10 +41,11 @@ use std::sync::Arc;
 
 use crate::dtype::Dtyped;
 use crate::ops::ElementwisePipeline;
-use crate::{ElementType, StorageBase, TypeDyn};
+use crate::{ElementType, TypeDyn};
 
-pub(crate) mod core_trait;
+mod core_trait;
 pub(crate) use core_trait::{ArrayStorageExt, ArrayStorageImpl};
+pub use core_trait::{Storage, StorageBase};
 
 mod compact;
 pub use compact::*;
