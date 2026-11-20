@@ -85,6 +85,16 @@ impl ReadContext {
     pub(crate) fn allocate_buf(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
         self.buffer_pool.get(size, alignment)
     }
+
+    #[inline]
+    pub(crate) fn return_buf(&self, buf: PoolBuf<'_>) {
+        self.buffer_pool.return_buf(buf);
+    }
+
+    #[inline]
+    pub(crate) fn return_buf_strided(&self, buf: StridedBuf<'_>) {
+        buf.return_to(&self.buffer_pool);
+    }
 }
 const _: fn() = || {
     fn assert_send<T: Send>() {}
@@ -182,13 +192,13 @@ impl ReadContext {
                 };
                 drop(cache_guard);
                 // return the cached buffer itself if this is a pull read, or a copy in push mode.
-                return out.set(buf, index, dtype);
+                return out.set(buf, index, dtype, self);
             } else {
                 // Evict before reading, so the read can reuse the buffer.
                 if out.is_pull()
                     && let Some(stale) = cache.map.remove(id)
                 {
-                    self.buffer_pool.return_shared(stale.data);
+                    self.buffer_pool.return_shared_raw(stale.data);
                 }
             }
         }
@@ -229,7 +239,7 @@ impl ReadContext {
             .map
             .insert(id, entry);
         if let Some(stale) = stale {
-            self.buffer_pool.return_shared(stale.data);
+            self.buffer_pool.return_shared_raw(stale.data);
         }
         Ok(())
     }
@@ -268,7 +278,7 @@ impl ReadContext {
         if let Some(mut ended) = ended {
             ended
                 .map
-                .clear_with(|entry| self.buffer_pool.return_shared(entry.data));
+                .clear_with(|entry| self.buffer_pool.return_shared_raw(entry.data));
             self.temp_cache_maps.borrow_mut().push(ended.map);
         }
     }

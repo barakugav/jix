@@ -250,13 +250,14 @@ impl<'a> Decoder<'a> {
     pub(crate) fn decode(&self, src: &[u8], dst: &mut [u8]) -> Result<()> {
         let dst_len = dst.len();
         let mut buffers = None;
-        let mut tmp_buf;
+        let mut tmp_buf = None;
         let decompress_out = if self.filters.is_empty() {
             dst
         } else {
-            tmp_buf = self
-                .context
-                .allocate_buf(dst.len(), Alignment::new(CACHE_LINE_SIZE).unwrap());
+            let tmp_buf = tmp_buf.insert(
+                self.context
+                    .allocate_buf(dst.len(), Alignment::new(CACHE_LINE_SIZE).unwrap()),
+            );
             let tmp_buf = &mut tmp_buf.as_mut_slice()[..dst.len()];
 
             let dst_ptr = dst.as_mut_ptr();
@@ -302,6 +303,9 @@ impl<'a> Decoder<'a> {
         for filter in self.filters.iter().rev() {
             let (data, buf) = buffers.as_mut().unwrap().edit();
             filter.decode(data, buf, self.dtype, &self.context.buffer_pool);
+        }
+        if let Some(tmp_buf) = tmp_buf {
+            self.context.return_buf(tmp_buf);
         }
 
         Ok(())

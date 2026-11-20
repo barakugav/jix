@@ -165,6 +165,7 @@ impl<S: StorageBase> StorageBase for Flip<S> {
                 )
             };
         }
+        context.return_buf_strided(tmp);
         Ok(())
     }
 

@@ -126,6 +126,7 @@ where
                         dst_dtype,
                     )
                 };
+                context.return_buf_strided(tmp);
             }
         }
         Ok(())

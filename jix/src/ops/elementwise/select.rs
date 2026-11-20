@@ -218,6 +218,8 @@ where
                 )
             },
         );
+        context.return_buf_strided(condition_view);
+        context.return_buf_strided(y_view);
 
         #[inline(never)]
         unsafe fn inner_loop<T: Copy, const LANES: usize, const CONTIGUOUS: bool>(

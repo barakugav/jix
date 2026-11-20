@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{ArithmeticStatus, Result};
-use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf};
+use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf, StridedBufBytes};
 use crate::util::buf_pool::PoolBuf;
 use crate::util::{
     array_from_fn_inline, const_min, default_strides_slice, fill_contiguous, prev_power_of_two,
@@ -305,6 +305,12 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
             }
         }
     });
+    for staging in staging.into_iter().flatten() {
+        context.return_buf(staging.buf);
+    }
+    for operand in operands {
+        operand.return_buf_to(context);
+    }
 
     status.into_result()
 }
@@ -436,6 +442,12 @@ fn to_buf_type_erased_dyn(
             }
         }
     });
+    for staging in staging.into_iter().flatten() {
+        context.return_buf(staging.buf);
+    }
+    for operand in operands {
+        operand.return_buf_to(context);
+    }
 
     status.into_result()
 }
@@ -733,7 +745,13 @@ type InnerLoop<'a> =
 /// first element and sets `inner_stride` to the byte step between consecutive elements;
 /// `read_bulk` then reads element `offset` at `offset * inner_stride` bytes past `current_ptr`.
 pub(crate) struct Operand<'a> {
-    data: OperandData<'a>,
+    base_ptr: *mut u8,
+    strides: DimArray<usize>,
+    /// hack to erase the lifetime to keep `Operand` covariant in `'a`
+    /// (`operands()` shortens it to `'s`), which is sound as the cell is only ever emptied, never
+    /// set to a buffer of a shorter lifetime.
+    buf: Cell<StridedBufBytes<'static>>,
+    _buf_lifetime: PhantomData<StridedBufBytes<'a>>,
     dtype: &'a Dtype,
 
     /// The first element of the current run: null until `to_buf` positions it.
@@ -741,57 +759,55 @@ pub(crate) struct Operand<'a> {
     /// Byte step between consecutive elements of the current run.
     pub(crate) inner_stride: Cell<usize>,
 }
-enum OperandData<'a> {
-    Input(StridedBuf<'a>),
-    Output {
-        // we hold here a raw pointer rather than `StridedBuf` due to some Miri restrictions
-        base_ptr: *mut u8,
-        strides: &'a [usize],
-    },
-}
-
 impl<'a> Operand<'a> {
     #[inline(never)]
-    pub(crate) fn new_input(original_data: StridedBuf<'a>, dtype: &'a Dtype) -> Self {
-        Self::new_impl(OperandData::Input(original_data), dtype)
+    pub(crate) fn new_input(mut data: StridedBuf<'a>, dtype: &'a Dtype) -> Self {
+        // An input is only read, and a shared view stays valid when moved into the cell below.
+        data.make_readonly();
+        let base_ptr = data.data_ptr().cast_mut();
+        let strides = DimArray::from_slice(data.strides()).unwrap();
+        // SAFETY: only the lifetime changes, and `_buf_lifetime` keeps `'a` alive.
+        let buf = unsafe {
+            std::mem::transmute::<StridedBufBytes<'a>, StridedBufBytes<'static>>(data.into_bytes())
+        };
+        Self::new_impl(base_ptr, strides, buf, dtype)
     }
 
     #[inline(never)]
     pub(crate) fn new_output(out: &'a mut StridedBuf<'_>, dtype: &'a Dtype) -> Self {
         let base_ptr = out.data_ptr_mut().unwrap();
-        // The data is only reached through `base_ptr` from here on, so the rest of `out` can be
-        // shared, its ok to borrow the strides here.
-        let out: &'a StridedBuf<'_> = out;
-        let strides = out.strides();
-        Self::new_impl(OperandData::Output { base_ptr, strides }, dtype)
+        let strides = DimArray::from_slice(out.strides()).unwrap();
+        Self::new_impl(base_ptr, strides, StridedBufBytes::default(), dtype)
     }
 
     #[inline]
-    fn new_impl(data: OperandData<'a>, dtype: &'a Dtype) -> Self {
+    fn new_impl(
+        base_ptr: *mut u8,
+        strides: DimArray<usize>,
+        buf: StridedBufBytes<'static>,
+        dtype: &'a Dtype,
+    ) -> Self {
         Self {
+            base_ptr,
+            strides,
+            buf: Cell::new(buf),
+            _buf_lifetime: PhantomData,
+            dtype,
             // Both cursor fields are set by `to_buf` before every run; there is nothing to read
             // here until then.
             current_ptr: Cell::new(std::ptr::null()),
             inner_stride: Cell::new(0),
-            data,
-            dtype,
         }
     }
 
     #[inline]
     fn strides(&self) -> &[usize] {
-        match &self.data {
-            OperandData::Input(data) => data.strides(),
-            OperandData::Output { strides, .. } => strides,
-        }
+        self.strides.as_ref()
     }
 
     #[inline]
     fn base_ptr(&self) -> *mut u8 {
-        match &self.data {
-            OperandData::Input(data) => data.data_ptr().cast_mut(),
-            OperandData::Output { base_ptr, .. } => *base_ptr,
-        }
+        self.base_ptr
     }
 
     /// Point the cursor at the first of a run of elements `inner_stride` bytes apart.
@@ -799,6 +815,13 @@ impl<'a> Operand<'a> {
     fn set_cursor(&self, ptr: *const u8, inner_stride: usize) {
         self.current_ptr.set(ptr);
         self.inner_stride.set(inner_stride);
+    }
+
+    /// Gives the input buffer back to `context`'s pool. The operand's pointers dangle from here on.
+    #[inline]
+    fn return_buf_to(&self, context: &ReadContext) {
+        self.current_ptr.set(std::ptr::null());
+        self.buf.take().return_to(&context.buffer_pool);
     }
 }
 

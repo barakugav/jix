@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_region_size, ensure, Result};
 use crate::storage::{ArrayStorageExt, Index};
-use crate::util::buf_pool::{PoolBuf, PoolBufShared};
+use crate::util::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
 use crate::util::{
     default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
     NdCopier, PtrMutNoalias, PtrNoalias, RawAlignedBytes, SliceExt,
@@ -334,6 +334,15 @@ impl<'a> StridedBuf<'a> {
         }
     }
 
+    pub(crate) fn return_to(self, pool: &BufferPool) {
+        self.into_bytes().return_to(pool);
+    }
+
+    #[inline]
+    pub(crate) fn into_bytes(self) -> StridedBufBytes<'a> {
+        StridedBufBytes(self.data)
+    }
+
     pub(crate) fn into_shared(
         self,
     ) -> Result<(Arc<RawAlignedBytes>, usize, DimArray<usize>), Self> {
@@ -345,6 +354,28 @@ impl<'a> StridedBuf<'a> {
             StridedBufData::Shared { buf, offset } => (buf.into_arc(), offset, self.strides),
             _ => return Err(self),
         })
+    }
+}
+
+pub(crate) struct StridedBufBytes<'a>(StridedBufData<'a>);
+
+/// No bytes.
+impl Default for StridedBufBytes<'_> {
+    #[inline]
+    fn default() -> Self {
+        Self(StridedBufData::Slice(&[]))
+    }
+}
+
+impl StridedBufBytes<'_> {
+    pub(crate) fn return_to(self, pool: &BufferPool) {
+        match self.0 {
+            StridedBufData::Slice(_) | StridedBufData::SliceMut(_) => {}
+            StridedBufData::PoolBuf { buf, .. } | StridedBufData::PoolBufMut { buf, .. } => {
+                pool.return_buf(buf)
+            }
+            StridedBufData::Shared { buf, .. } => pool.return_shared(buf),
+        }
     }
 }
 
@@ -488,7 +519,13 @@ impl<'s, 'a> OutBuf<'s, 'a> {
     }
 
     #[inline]
-    pub(crate) fn set(self, data: StridedBuf<'a>, index: &Index<'_>, dtype: &Dtype) -> Result<()> {
+    pub(crate) fn set(
+        self,
+        data: StridedBuf<'a>,
+        index: &Index<'_>,
+        dtype: &Dtype,
+        context: &ReadContext,
+    ) -> Result<()> {
         match self.0 {
             OutBufInner::Pull(slot) => _ = write_out_buf_slot(slot, data),
             OutBufInner::Push(out) => {
@@ -501,6 +538,7 @@ impl<'s, 'a> OutBuf<'s, 'a> {
                 );
                 // SAFETY: both the source and the destination hold the region, checked above.
                 unsafe { out.copy_from(src, src_strides, index.size(), dtype) };
+                context.return_buf_strided(data);
             }
         }
         Ok(())

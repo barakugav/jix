@@ -200,9 +200,9 @@ impl<S: StorageBase> StorageBase for Tile<S> {
         let inner_start = dim_arr(ndim, |d| if d == k { 0 } else { index.start()[d] });
         let inner_size = dim_arr(ndim, |d| if d == k { l as usize } else { index.size()[d] });
         let inner_full = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-        let tmp = self.array.read_data_pull(&inner_full, context)?;
+        let tmp_buf = self.array.read_data_pull(&inner_full, context)?;
         // Use the period view's own strides - it may be a lent (strided) view, not contiguous.
-        let (tmp, src_strides) = tmp.data();
+        let (tmp, src_strides) = tmp_buf.data();
 
         let head_len = l - s_in; // 0 < head_len <= L
         let remaining = total - head_len; // > 0 since total > L
@@ -293,6 +293,7 @@ impl<S: StorageBase> StorageBase for Tile<S> {
                 )
             };
         }
+        context.return_buf_strided(tmp_buf);
         Ok(())
     }
 

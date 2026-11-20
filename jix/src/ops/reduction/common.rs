@@ -487,7 +487,7 @@ where
             .all(|&s| s.is_multiple_of(output_align));
     let out_ptr = out_buf.as_mut_ptr();
     let out_buf_len = out_buf.len();
-    let mut tmp_state_buf;
+    let mut tmp_state_buf = None;
     // CAREFUL: state_buf and out_ptr may alias
     let (state_buf, state_strides) = if state_in_out_buf {
         // Reuse the output bytes as the state buffer
@@ -496,7 +496,8 @@ where
     } else {
         check_region_size(index.size(), kernel_state_sizeof)?; // states may be bigger than the output
         let state_buf_len = out_nitems * kernel_state_sizeof;
-        tmp_state_buf = context.allocate_buf(state_buf_len, kernel_state_alignof);
+        let tmp_state_buf =
+            tmp_state_buf.insert(context.allocate_buf(state_buf_len, kernel_state_alignof));
         (
             &mut tmp_state_buf.as_mut_slice()[..state_buf_len],
             crate::util::default_strides_slice(out_shape, kernel_state_sizeof),
@@ -582,6 +583,7 @@ where
                 tile_base_reduced_idx,
                 reduced_shape_logical_strides: reduced_shape_logical_strides.as_ref(),
             });
+            context.return_buf_strided(items);
         }
     }
 
@@ -604,6 +606,9 @@ where
         finalize_state_fn,
         finalize_state_empty_fn,
     );
+    if let Some(tmp_state_buf) = tmp_state_buf {
+        context.return_buf(tmp_state_buf);
+    }
     Ok(())
 }
 

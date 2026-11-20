@@ -105,8 +105,8 @@ impl FilterImpl for BitShuffleFilter {
         let n_full = (n / 8) * 8;
         let full_bytes = n_full * typesize;
 
-        let mut tmp = buf_pool.get(full_bytes, 16.try_into().unwrap());
-        let tmp = &mut tmp.as_mut_slice()[..full_bytes];
+        let mut tmp_buf = buf_pool.get(full_bytes, 16.try_into().unwrap());
+        let tmp = &mut tmp_buf.as_mut_slice()[..full_bytes];
 
         // Pass 1: byte shuffle, `(N, B) -> (B, N)`. After this, `dst` holds per
         // byte-plane a contiguous run of N bytes (one byte per element).
@@ -122,6 +122,7 @@ impl FilterImpl for BitShuffleFilter {
         // Just moves length-`G` byte runs around to produce the final
         // byte-plane-major, bit-plane-minor layout.
         trans_bitrow_eight(tmp, &mut dst[..full_bytes], n_full, typesize);
+        buf_pool.return_buf(tmp_buf);
 
         // Tail: the final `N mod 8` elements weren't processed; copy them
         // through verbatim so the decoder can recover them the same way.
@@ -144,8 +145,8 @@ impl FilterImpl for BitShuffleFilter {
         let n_full = (n / 8) * 8;
         let full_bytes = n_full * typesize;
 
-        let mut tmp = buf_pool.get(full_bytes, 16.try_into().unwrap());
-        let tmp = &mut tmp.as_mut_slice()[..full_bytes];
+        let mut tmp_buf = buf_pool.get(full_bytes, 16.try_into().unwrap());
+        let tmp = &mut tmp_buf.as_mut_slice()[..full_bytes];
 
         // Pass 1: invert encode pass 3. `(B, 8, G) -> (8, B, G)`. Length-`G`
         // runs are moved; no bit-level work.
@@ -159,6 +160,7 @@ impl FilterImpl for BitShuffleFilter {
 
         // Pass 3: invert encode pass 1 via byte_shuffle's own decode (SoA -> AoS).
         ByteShuffleFilter.decode(tmp, &mut dst[..full_bytes], dtype, buf_pool);
+        buf_pool.return_buf(tmp_buf);
 
         // Tail was copied verbatim by the encoder; copy it back.
         dst[full_bytes..].copy_from_slice(&src[full_bytes..]);

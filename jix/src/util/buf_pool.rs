@@ -49,17 +49,24 @@ impl BufferPool {
         }
     }
 
-    fn return_buf(&self, buf: RawAlignedBytes) {
+    pub(crate) fn return_buf(&self, buf: PoolBuf<'_>) {
+        self.return_buf_raw(buf.into_inner());
+    }
+
+    pub(crate) fn return_shared(&self, buf: PoolBufShared<'_>) {
+        self.return_shared_raw(buf.into_arc());
+    }
+
+    pub(crate) fn return_shared_raw(&self, buf: Arc<RawAlignedBytes>) {
+        if let Some(buf) = Arc::into_inner(buf) {
+            self.return_buf_raw(buf);
+        }
+    }
+
+    fn return_buf_raw(&self, buf: RawAlignedBytes) {
         let (pool, _) = self.get_pool(buf.align().try_into().unwrap());
         let pool = unsafe { &mut *pool };
         pool.push(buf);
-    }
-
-    /// Returns a shared buffer to the pool if this was the last reference.
-    pub(crate) fn return_shared(&self, buf: Arc<RawAlignedBytes>) {
-        if let Some(buf) = Arc::into_inner(buf) {
-            self.return_buf(buf);
-        }
     }
 
     /// Returns a raw pointer to the free list for `alignment` together with the actual alignment
@@ -126,7 +133,7 @@ impl Drop for PoolBuf<'_> {
     fn drop(&mut self) {
         // SAFETY: `buf` is not touched again after being taken.
         let buf = unsafe { ManuallyDrop::take(&mut self.buf) };
-        self.buffers.return_buf(buf);
+        self.buffers.return_buf_raw(buf);
     }
 }
 
@@ -159,7 +166,7 @@ impl Drop for PoolBufShared<'_> {
     fn drop(&mut self) {
         // SAFETY: `self.buf` is never used again.
         let buf = unsafe { ManuallyDrop::take(&mut self.buf) };
-        self.buffers.return_shared(buf);
+        self.buffers.return_shared_raw(buf);
     }
 }
 

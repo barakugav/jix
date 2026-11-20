@@ -168,6 +168,7 @@ impl<S: StorageBase> StorageBase for Broadcast<S> {
                 let (src, src_strides) = inner.data();
                 let strides = broadcast_strides(src_strides);
                 unsafe { out.copy_from(src, strides.as_ref(), index.size(), self.dtype()) };
+                context.return_buf_strided(inner);
             }
         }
         Ok(())
