@@ -2,7 +2,8 @@ use std::mem::MaybeUninit;
 use std::ops::Range;
 
 use crate::error::{
-    check_alloc_size, check_get_buffer_size, check_ranges, check_region_size, ensure, Result,
+    check_alloc_size, check_get_buffer_size, check_ndim, check_ranges, check_region_size, ensure,
+    Result,
 };
 use crate::storage::params::ReadTiling;
 use crate::storage::{
@@ -13,7 +14,7 @@ use crate::util::iter::NdIter;
 use crate::util::{
     advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr,
 };
-use crate::{Dim, DimDyn, Dimension, PlainArray, StorageBase};
+use crate::{Dim, DimDyn, Dimension, PlainArray, StorageBase, NDIM_MAX};
 use crate::{ReadContext, Storage};
 
 use super::Array;
@@ -559,6 +560,45 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
 }
 
 impl<S: StorageBase> Array<S> {
+    /// Read a single element at `index`.
+    ///
+    /// Each call decompresses every block it touches, so use
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub) to read many elements in bulk.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` is out of bounds or
+    ///   has a different number of dimensions than the array.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?;
+    /// assert_eq!(a.get(&[1, 2], &a.read_ctx())?, 6);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    #[inline]
+    pub fn get(&self, index: &[u64], context: &ReadContext) -> Result<S::Item>
+    where
+        S: Storage,
+    {
+        check_ndim(index.len())?;
+        let index = Index::new(index, &[1; NDIM_MAX][..index.len()])?;
+        let mut value = MaybeUninit::<S::Item>::zeroed();
+        let buf = unsafe {
+            std::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<S::Item>())
+        };
+        let mut out = unsafe { StridedBuf::from_slice_mut(buf, dim_arr(index.ndim(), |_| 0)) };
+        let _cache_scope = context.cache_scope(&self.storage.spec().dynamic().arrays_to_cache);
+        self.storage
+            .read_data(&index, context, OutBuf::push(&mut out))?;
+        Ok(unsafe { value.assume_init() })
+    }
+
     /// Read the entire array into a new heap-allocated `Array<Plain>`.
     ///
     /// Equivalent to `Array::plain_ndarray(self.to_ndarray()?)`.
@@ -708,6 +748,29 @@ mod tests {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], [6], &[3]);
         let got = a.to_ndarray_sub(&[1..2], &a.read_ctx()).unwrap();
         assert_eq!(got, array![1]);
+    }
+
+    #[test]
+    fn get_reads_one_element() {
+        let a = array(
+            &[&[0u8, 1, 2, 6, 7, 8], &[3, 4, 5, 9, 10, 11]],
+            [2, 6],
+            &[2, 3],
+        );
+        let ctx = a.read_ctx();
+        assert_eq!(a.get(&[1, 4], &ctx).unwrap(), 10);
+        assert_eq!(
+            a.get(&[2, 0], &ctx).unwrap_err().kind(),
+            ErrorKind::InvalidIndex
+        );
+        assert_eq!(
+            a.get(&[0], &ctx).unwrap_err().kind(),
+            ErrorKind::InvalidIndex
+        );
+        assert_eq!(
+            a.get(&[u64::MAX, 0], &ctx).unwrap_err().kind(),
+            ErrorKind::InvalidIndex
+        );
     }
 
     // -----------------------------------------------------------------------

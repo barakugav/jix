@@ -20,3 +20,4 @@
 - variance of finite data with deviations that overflow returns NaN instead of inf
 - f64 -> f16 cast round twice
 - every op copies the cache-ids of everything below it, so a deep chain of n ops holds n^2/2 ids
+- should scalar traits accept &T or T?
