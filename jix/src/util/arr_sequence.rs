@@ -21,7 +21,7 @@ use crate::{ReadContext, Storage};
 /// | `[Array<S>; N]`, `&[Array<S>; N]` | Fixed-length array; all elements share the same storage type. |
 /// | `Vec<Array<S>>` | Dynamic-length list; all elements share the same storage type. |
 /// | `&[Array<S>]` | Borrowed slice; all elements share the same storage type. |
-/// | `(Array<S0>, Array<S1>, ...)` | Tuple of up to 10 arrays; each element may have a different storage type. |
+/// | `(Array<S0>, Array<S1>, ...)` | Tuple of up to 12 arrays; each element may have a different storage type. |
 ///
 /// # Examples
 ///
@@ -728,6 +728,8 @@ impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4
 impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7);
 impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7, 8: S8, D8);
 impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7, 8: S8, D8, 9: S9, D9);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7, 8: S8, D8, 9: S9, D9, 10: S10, D10);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7, 8: S8, D8, 9: S9, D9, 10: S10, D10, 11: S11, D11);
 
 #[cold]
 #[inline(never)]
