@@ -4,10 +4,10 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, Index, OutBuf};
-use crate::util::dim_arr;
 use crate::util::iter::NdIter;
+use crate::util::{dim_arr, SliceExt};
 use crate::ReadContext;
-use crate::{ArrayParams, CompactArray, DimArray, DimDyn, SliceExt, StorageBase, TypeDyn};
+use crate::{ArrayParams, CompactArray, DimArray, DimDyn, StorageBase, TypeDyn};
 
 use super::Array;
 

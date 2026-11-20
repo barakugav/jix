@@ -1,7 +1,7 @@
-use crate::buf_pool::BufferPool;
 use crate::codec::bit_shuffle::BitShuffleFilter;
 use crate::codec::byte_shuffle::ByteShuffleFilter;
 use crate::dtype::Dtype;
+use crate::util::buf_pool::BufferPool;
 
 /// A byte transform applied to block data before compression and reversed after decompression.
 ///
@@ -52,9 +52,9 @@ pub(super) trait FilterImpl {
 
 #[cfg(test)]
 pub(super) mod tests {
-    use crate::buf_pool::BufferPool;
     use crate::codec::filter::FilterImpl;
     use crate::dtype::Dtyped;
+    use crate::util::buf_pool::BufferPool;
     use crate::util::gen_data_bytes_from_slice;
 
     pub(crate) fn test_roundtrip<F, T>(items: &[T])

@@ -1,7 +1,7 @@
 use std::ops::Not;
 
 use crate::ops::prelude::*;
-use crate::util::{ArraySequence, ArraySequenceElementType};
+use crate::{ArraySequence, ArraySequenceElementType};
 
 /// Joins a sequence of arrays along a new dim. See [`Stack`] for details and examples.
 ///

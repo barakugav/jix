@@ -146,7 +146,7 @@ mod tests {
     use crate::dimension::DimDyn;
     use crate::util::calc_block_end;
     use crate::util::iter::NdIter;
-    use crate::SliceExt;
+    use crate::util::SliceExt;
 
     fn make_iter(
         begin: &[u64],

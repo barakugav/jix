@@ -11,11 +11,11 @@ mod byte_shuffle;
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 
-use crate::buf_pool::BufferPool;
 use crate::dtype::{Alignment, Dtype};
 #[allow(unused_imports)]
 use crate::error::{ensure, error, Result};
 use crate::util::arrayvec::ArrayVec;
+use crate::util::buf_pool::BufferPool;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
 use crate::util::{AlignedBytes, AlternatingBuffers};
 use crate::ReadContext;

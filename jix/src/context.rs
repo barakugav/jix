@@ -1,12 +1,12 @@
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::sync::Arc;
 
-use crate::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
 use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
 use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf};
+use crate::util::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
 use crate::util::{DimArray, RawAlignedBytes, SliceExt};
 use crate::DimDyn;
 

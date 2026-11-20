@@ -323,7 +323,8 @@ impl<S: StorageBase> Array<S> {
     pub fn from_storage(storage: S) -> Self {
         #[cfg(debug_assertions)]
         {
-            use crate::{DimIdx, IterExt, NDIM_MAX};
+            use crate::util::IterExt;
+            use crate::{DimIdx, NDIM_MAX};
 
             let shape = storage.shape();
             let ndim = shape.len();

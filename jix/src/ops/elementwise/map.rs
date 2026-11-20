@@ -1,6 +1,7 @@
 use crate::ops::prelude::*;
 use crate::ops::{Op1, Op2};
-use crate::{ArraySequence, ArraySequenceTyped, ElementwisePipelineTuple};
+use crate::util::ElementwisePipelineTuple;
+use crate::{ArraySequence, ArraySequenceTyped};
 
 /// Applies a function element-wise to an array.
 ///
@@ -161,7 +162,7 @@ where
 ///
 /// All input arrays must have the same shape. For each element position the corresponding element
 /// of every input array is gathered into an
-/// [`ItemSequence`](crate::util::ArraySequenceTyped::ItemSequence) and passed to `map_fn`. The
+/// [`ItemSequence`](crate::ArraySequenceTyped::ItemSequence) and passed to `map_fn`. The
 /// output array has that same shape, and dtype determined by the output of
 /// `F: Fn(ArraysT::ItemSequence<'_>) -> O`. This generalizes [`Map`] (one input) and [`Map2`] (two
 /// inputs) to an arbitrary number of arrays.

@@ -1,4 +1,4 @@
-use crate::arrayvec::ArrayVec;
+use crate::util::arrayvec::ArrayVec;
 use crate::StorageBase;
 
 /// Introspection metadata for a [`StorageBase`], returned by

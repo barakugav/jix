@@ -1,7 +1,6 @@
 use crate::util::iter::{impl_merge_extension, NdIterExtension};
-use crate::util::Idx;
-use crate::Dimension;
-use crate::{default_logical_strides_slice, DimVec};
+use crate::util::{default_logical_strides_slice, Idx};
+use crate::{DimVec, Dimension};
 
 /// An nd-iterator extension that tracks an offset into a strided array.
 ///
@@ -175,8 +174,8 @@ pub(crate) fn nd_iter_ext_logical_global_index<D: Dimension>(
 mod tests {
     use super::*;
     use crate::util::iter::NdIter;
-    use crate::util::DimArray;
-    use crate::{Dim, DimDyn, SliceExt};
+    use crate::util::{DimArray, SliceExt};
+    use crate::{Dim, DimDyn};
 
     /// Build a [`DimArray`] (the `DimDyn` vec container) from a slice, for constructing test
     /// extensions whose `new` takes an owned `D::Vec<S>`.

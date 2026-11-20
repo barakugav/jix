@@ -1,6 +1,6 @@
-use crate::buf_pool::BufferPool;
 use crate::codec::filter::FilterImpl;
 use crate::dtype::Dtype;
+use crate::util::buf_pool::BufferPool;
 use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 
 // This code has been optimized by static analysis using cargo-asm and llvm-mca, for
@@ -225,9 +225,9 @@ fn is_sse2<S: Simd>(simd: S) -> bool {
 #[cfg(test)]
 mod tests {
     use super::ByteShuffleFilter;
-    use crate::buf_pool::BufferPool;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    use crate::util::buf_pool::BufferPool;
 
     fn byte_shuffle_encode_reference(src: &[u8], dst: &mut [u8], itemsize: usize) {
         debug_assert!(src.len().is_multiple_of(itemsize));

@@ -4,7 +4,8 @@ use std::ops::Not;
 use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 
 use crate::ops::prelude::*;
-use crate::{array2_map_inline, const_max, const_min, prev_power_of_two, Dim};
+use crate::util::{array2_map_inline, const_max, const_min, prev_power_of_two};
+use crate::Dim;
 
 pub(crate) struct ReductionOp<S: StorageBase, K> {
     kernel: K,

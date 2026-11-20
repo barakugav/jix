@@ -1,4 +1,5 @@
-use crate::{dtype::Dtype, NdCopier, PtrMutNoalias, PtrNoalias};
+use crate::dtype::Dtype;
+use crate::util::{NdCopier, PtrMutNoalias, PtrNoalias};
 
 /// Copy `shape` elements from `src` to `dst`, using the given strides and data type.
 ///

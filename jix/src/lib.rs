@@ -405,7 +405,7 @@ pub use dimension::*;
 pub use element_type::*;
 
 mod util;
-pub use util::*;
+pub use util::{ArraySequence, ArraySequenceElementType, ArraySequenceTyped};
 
 pub mod error;
 pub use error::Error;

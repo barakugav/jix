@@ -19,9 +19,9 @@ use crate::storage::cache_id::ArrayCacheId;
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{check_out_buf, ArraySpec, ElementType, Index, OutBuf, StridedBuf};
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, NdCopier, PtrMutNoalias, PtrNoalias};
+use crate::util::{calc_block_end, default_strides, NdCopier, PtrMutNoalias, PtrNoalias};
 use crate::ReadContext;
-use crate::{default_strides, ArrayParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
+use crate::{ArrayParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///

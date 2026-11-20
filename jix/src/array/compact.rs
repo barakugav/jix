@@ -6,12 +6,10 @@ use crate::storage::{
 };
 use crate::util::iter::NdIter;
 use crate::util::{
-    scale_read_shape, AlignedBytes, IterExt, NdCopier, PtrMutNoalias, PtrNoalias, SliceExt,
+    default_logical_strides, default_strides, scale_read_shape, AlignedBytes, IterExt, NdCopier,
+    PtrMutNoalias, PtrNoalias, SliceExt,
 };
-use crate::{
-    default_logical_strides, default_strides, ArrayParams, Dim, DimDyn, DimVec, Dimension,
-    ReadContext, StorageBase,
-};
+use crate::{ArrayParams, Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase};
 
 use super::Array;
 

@@ -1,10 +1,10 @@
 use fearless_simd::{Level as SimdLevel, Simd};
 
 use super::byte_shuffle::ByteShuffleFilter;
-use crate::array_from_fn_inline;
-use crate::buf_pool::BufferPool;
 use crate::codec::FilterImpl;
 use crate::dtype::Dtype;
+use crate::util::array_from_fn_inline;
+use crate::util::buf_pool::BufferPool;
 
 // Bitshuffle filter, derived from Bitshuffle by Kiyoshi Masui (MIT,
 // https://github.com/kiyo-masui/bitshuffle) via its adaptation in
@@ -358,9 +358,9 @@ fn transpose8x8(x: [u8; 8]) -> [u8; 8] {
 #[cfg(test)]
 mod tests {
     use super::BitShuffleFilter;
-    use crate::buf_pool::BufferPool;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    use crate::util::buf_pool::BufferPool;
 
     macro_rules! test_roundtrip {
         ($ty:ty, $fn_name:ident) => {

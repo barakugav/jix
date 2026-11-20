@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 
 use crate::dtype::{Alignment, Itemsize};
 use crate::util::iter::NdIter;
-use crate::util::Idx;
-use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
+use crate::util::{array_from_fn_inline, Idx};
+use crate::{dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
 /// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d
 /// regions, described only by their common `shape` (in elements), each operand's `strides`, and
@@ -225,7 +225,7 @@ impl<I: Idx, const N_OPERANDS: usize> NdIterUnordered<I, N_OPERANDS> {
         let ndim = self.shape.len();
         let inner_len = self.shape[ndim - 1];
         let inner_strides = array_from_fn_inline::<_, N_OPERANDS>(|i| self.strides[i][ndim - 1]);
-        if crate::hint::likely(ndim == 1) {
+        if crate::util::hint::likely(ndim == 1) {
             // always static dispatch for 1D
             inner_loop([I::ZERO; N_OPERANDS], inner_len, inner_strides);
             return;

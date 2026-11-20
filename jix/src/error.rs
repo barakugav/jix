@@ -6,7 +6,8 @@ use std::ops::Range;
 
 use crate::dtype::Dtype;
 use crate::storage::Index;
-use crate::{Dimension, IterExt, NDIM_MAX};
+use crate::util::IterExt;
+use crate::{Dimension, NDIM_MAX};
 
 /// The single error type of all fallible operations in this crate.
 ///
