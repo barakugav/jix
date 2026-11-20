@@ -37,6 +37,8 @@ use crate::{ArrayParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
 /// [`Array::compact`](crate::Array::compact) and their variants or by deserializing an archive
 /// file. The memory-mapped equivalent is [`CompactMmap`].
 ///
+/// Its block layout and compression settings are available through [`CompactArrayMethods`].
+///
 /// # Block codec pipeline
 ///
 /// Each block is encoded through a two-stage pipeline before being stored:
@@ -83,6 +85,8 @@ pub struct Compact<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::blo
 /// Same layout as [`Compact`] but borrows its compressed bytes from an existing byte slice
 /// instead of owning them. Used internally when constructing temporary views into a
 /// pre-encoded buffer.
+///
+/// Its block layout and compression settings are available through [`CompactArrayMethods`].
 pub struct CompactView<'a, ET>(
     pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>, ET>,
 );
@@ -95,6 +99,8 @@ pub struct CompactView<'a, ET>(
 /// from the file header at runtime.
 ///
 /// Created by [`Array::read_from_file_mmap`](crate::Array::read_from_file_mmap).
+///
+/// Its block layout and compression settings are available through [`CompactArrayMethods`].
 pub struct CompactMmap<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, ET>);
 macro_rules! impl_array_storage {
     ($ty:ident < $($lt:lifetime,)? ET >) => {
@@ -521,6 +527,135 @@ fn read_data_slow<ActualD: Dimension>(
 
     Ok(())
 }
+
+impl<S, ET> ArrayBlockTableStorageBase<S, ET>
+where
+    S: BlockTableStorage,
+{
+    fn nblocks(&self) -> u64 {
+        self.blocks.nblocks()
+    }
+
+    fn codec(&self) -> &crate::storage::Codec {
+        &self.blocks.decoder_config().codec
+    }
+
+    fn filters(&self) -> &[crate::storage::Filter] {
+        self.blocks.decoder_config().filters.as_ref()
+    }
+}
+
+/// Extension methods for arrays with block-compressed storage.
+///
+/// Implemented for `Array` of [`Compact`], [`CompactView`] and [`CompactMmap`]. These describe how
+/// the array is split into blocks and compressed.
+pub trait CompactArrayMethods {
+    /// The shape of one block, in elements per dimension.
+    ///
+    /// Each block is compressed on its own, so a read decompresses every block it touches, in
+    /// full. Blocks at the end of a dim may be padded with zeros out past the array's shape.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::CompactArrayMethods;
+    /// use jix::{Array, ArrayParams};
+    /// use ndarray::Array2;
+    ///
+    /// let data = Array2::<f32>::zeros((100, 100));
+    /// let params = ArrayParams::new().block_shape(&[32, 64])?;
+    /// let a = Array::compact_ndarray_with(&data, params)?;
+    /// assert_eq!(a.block_shape(), &[32, 64]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn block_shape(&self) -> &[BlockSize];
+
+    /// The number of blocks.
+    ///
+    /// The product over the dims of `ceil(shape[d] / block_shape[d])`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::CompactArrayMethods;
+    /// use jix::{Array, ArrayParams};
+    /// use ndarray::Array2;
+    ///
+    /// let data = Array2::<f32>::zeros((100, 100));
+    /// let params = ArrayParams::new().block_shape(&[32, 64])?;
+    /// let a = Array::compact_ndarray_with(&data, params)?;
+    /// assert_eq!(a.nblocks(), 4 * 2);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn nblocks(&self) -> u64;
+
+    /// The codec the blocks were compressed with.
+    ///
+    /// Comes from the stored data, so for an array read from a file it is the codec the file was
+    /// written with.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::{Codec, CompactArrayMethods};
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
+    /// assert!(matches!(a.codec(), Codec::Zstd));
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn codec(&self) -> &crate::storage::Codec;
+
+    /// The filters applied to each block before compression, in the order they were applied.
+    ///
+    /// Comes from the stored data, like [`codec`](Self::codec).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::storage::{CompactArrayMethods, Filter};
+    /// use jix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// let data = array![1u32, 2, 3];
+    /// let params = ArrayParams::new().filters(&[Filter::BitShuffle])?;
+    /// let a = Array::compact_ndarray_with(&data, params)?;
+    /// assert!(matches!(a.filters(), [Filter::BitShuffle]));
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    fn filters(&self) -> &[crate::storage::Filter];
+}
+
+macro_rules! impl_compact_array_methods {
+    ([$($gen:tt)*] $storage:ty) => {
+        impl<$($gen)*> crate::storage::CompactArrayMethods for crate::Array<$storage> {
+            #[inline]
+            fn block_shape(&self) -> &[crate::storage::BlockSize] {
+                self.storage.0.block_shape()
+            }
+
+            #[inline]
+            fn nblocks(&self) -> u64 {
+                self.storage.0.nblocks()
+            }
+
+            #[inline]
+            fn codec(&self) -> &crate::storage::Codec {
+                self.storage.0.codec()
+            }
+
+            #[inline]
+            fn filters(&self) -> &[crate::storage::Filter] {
+                self.storage.0.filters()
+            }
+        }
+    };
+}
+
+impl_compact_array_methods!([ET] Compact<ET>);
+impl_compact_array_methods!(['a, ET] CompactView<'a, ET>);
+impl_compact_array_methods!([ET] CompactMmap<ET>);
 
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
@@ -1338,5 +1473,76 @@ mod tests {
         let stacked = crate::ops::stack((x.view() + t(), x.view() + x.view()), 0);
         let expected = ndarray::stack![ndarray::Axis(0), &nd + &nd.t(), &nd + &nd];
         assert_eq!(stacked.to_ndarray::<ndarray::Ix3>().unwrap(), expected);
+    }
+
+    // -----------------------------------------------------------------------
+    // CompactArrayMethods
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn methods_describe_blocks_and_codec() {
+        use crate::storage::{Codec, CompactArrayMethods, Filter};
+
+        let nd = ndarray::Array2::from_shape_fn((5, 7), |(i, j)| (i * 7 + j) as i32);
+        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
+        let a = Array::compact_ndarray_with(&nd, params).unwrap();
+        assert_eq!(a.block_shape(), &[2, 3]);
+        assert_eq!(a.nblocks(), 3 * 3);
+        assert!(matches!(a.codec(), Codec::Zstd));
+        assert!(matches!(a.filters(), [Filter::ByteShuffle]));
+
+        let params = ArrayParams::new()
+            .filters(&[Filter::BitShuffle, Filter::ByteShuffle])
+            .unwrap();
+        let b = Array::compact_ndarray_with(&nd, params).unwrap();
+        assert!(matches!(
+            b.filters(),
+            [Filter::BitShuffle, Filter::ByteShuffle]
+        ));
+    }
+
+    #[test]
+    fn methods_empty_array_has_no_blocks() {
+        use crate::storage::CompactArrayMethods;
+
+        let a = Array::compact_ndarray(&ndarray::Array2::<f32>::zeros((0, 5))).unwrap();
+        assert_eq!(a.nblocks(), 0);
+    }
+
+    #[test]
+    fn methods_on_view_and_mmap() {
+        use crate::storage::{CompactArrayMethods, Filter};
+
+        let nd = ndarray::Array2::from_shape_fn((6, 5), |(i, j)| (i * 5 + j) as f64);
+        let params = ArrayParams::new()
+            .block_shape(&[4, 2])
+            .unwrap()
+            .filters(&[Filter::BitShuffle])
+            .unwrap();
+        let a = Array::compact_ndarray_with(&nd, params).unwrap();
+
+        let view = Array::from_storage(a.storage().as_compact().unwrap());
+        assert_eq!(view.block_shape(), &[4, 2]);
+        assert_eq!(view.nblocks(), 2 * 3);
+        assert!(matches!(view.filters(), [Filter::BitShuffle]));
+
+        // The block shape and filters come from the file, not from the params it is read with.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.jix");
+        a.write_to_file(&path).unwrap();
+        let len = path.metadata().unwrap().len();
+        let mmap = unsafe {
+            Array::read_from_file_mmap(
+                &path,
+                0,
+                len,
+                ArrayParams::default(),
+                crate::storage::ArchiveValidation::default(),
+            )
+        }
+        .unwrap();
+        assert_eq!(mmap.block_shape(), &[4, 2]);
+        assert_eq!(mmap.nblocks(), 2 * 3);
+        assert!(matches!(mmap.filters(), [Filter::BitShuffle]));
     }
 }
