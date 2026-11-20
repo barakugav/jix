@@ -72,7 +72,6 @@ pub(crate) trait ArraySequenceImpl {
 
     fn as_array_storage(&self, arr: usize) -> &dyn StorageBase;
 }
-impl<T: ArraySequenceImpl> ArraySequence for T {}
 
 /// Subtrait of [`ArraySequence`] for sequences whose arrays all share the same element type.
 ///
@@ -150,6 +149,7 @@ pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> 
     ) -> impl Iterator<Item = ArraysT::ItemSequence<'s>> + 's;
 }
 
+impl<S: StorageBase, const N: usize> ArraySequence for [Array<S>; N] {}
 impl<S, const N: usize> ArraySequenceImpl for [Array<S>; N]
 where
     S: StorageBase,
@@ -249,6 +249,7 @@ impl<S: Storage, const N: usize> ArraySequenceTypedImpl for [Array<S>; N] {
     }
 }
 
+impl<S: StorageBase, const N: usize> ArraySequence for &[Array<S>; N] {}
 impl<S, const N: usize> ArraySequenceImpl for &[Array<S>; N]
 where
     S: StorageBase,
@@ -347,6 +348,7 @@ impl<'b, S: Storage, const N: usize> ArraySequenceTypedImpl for &'b [Array<S>; N
     }
 }
 
+impl<S: StorageBase> ArraySequence for Vec<Array<S>> {}
 impl<S> ArraySequenceImpl for Vec<Array<S>>
 where
     S: StorageBase,
@@ -469,6 +471,7 @@ impl<S: Storage> ArraySequenceTypedImpl for Vec<Array<S>> {
     }
 }
 
+impl<S: StorageBase> ArraySequence for &[Array<S>] {}
 impl<S> ArraySequenceImpl for &[Array<S>]
 where
     S: StorageBase,
@@ -593,6 +596,10 @@ impl<'b, S: Storage> ArraySequenceTypedImpl for &'b [Array<S>] {
 
 macro_rules! impl_array_sequence_for_tuple {
     ($($idx:tt : $S:ident, $D:ident),+ $(,)?) => {
+        impl<$($S),+> ArraySequence for ($(Array<$S>,)+)
+        where
+            $($S: StorageBase,)+
+        {}
         impl<$($S),+> ArraySequenceImpl for ($(Array<$S>,)+)
         where
             $($S: StorageBase,)+
