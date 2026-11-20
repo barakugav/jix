@@ -164,7 +164,7 @@ impl<S: StorageBase> StorageBase for Roll<S> {
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Roll", [&self.array])
     }
-    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn>> {
+    fn as_compact(&self) -> Option<crate::storage::CompactView<'_, TypeDyn>> {
         if self.is_identity() {
             self.array.as_compact()
         } else {

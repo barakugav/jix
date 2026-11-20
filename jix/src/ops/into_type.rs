@@ -126,7 +126,7 @@ where
         ArrayStorageInfo::new_deps("IntoType", [&self.inner])
     }
     #[inline]
-    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, TypeDyn>> {
+    fn as_compact(&self) -> Option<crate::storage::CompactView<'_, TypeDyn>> {
         self.inner.as_compact()
     }
 

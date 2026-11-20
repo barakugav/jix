@@ -129,7 +129,7 @@ macro_rules! impl_array_storage_smart_ptr {
             }
 
             #[inline]
-            fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
+            fn as_compact(&self) -> Option<CompactView<'_, TypeDyn>> {
                 (**self).as_compact()
             }
 
@@ -186,7 +186,7 @@ impl StorageBase for &dyn StorageBase {
     }
 
     #[inline]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
+    fn as_compact(&self) -> Option<CompactView<'_, TypeDyn>> {
         (**self).as_compact()
     }
 
@@ -237,7 +237,7 @@ macro_rules! impl_array_storage_forward {
         #[inline]
         fn as_compact(
             &self,
-        ) -> Option<crate::storage::CompactBorrowed<'_, crate::TypeDyn>> {
+        ) -> Option<crate::storage::CompactView<'_, crate::TypeDyn>> {
             self.0.as_compact()
         }
     };

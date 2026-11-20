@@ -4,7 +4,7 @@
 //! data as independently compressed nd-blocks:
 //!
 //! - [`Compact`] - heap-allocated; the standard in-memory storage.
-//! - [`CompactBorrowed`] - borrows its data from an existing byte buffer.
+//! - [`CompactView`] - borrows its data from an existing byte buffer.
 //! - [`CompactMmap`] - memory-mapped; the OS pages data from disk on demand.
 //!
 //! All three are thin wrappers around [`ArrayBlockTableStorageBase`], which contains the
@@ -83,7 +83,7 @@ pub struct Compact<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::blo
 /// Same layout as [`Compact`] but borrows its compressed bytes from an existing byte slice
 /// instead of owning them. Used internally when constructing temporary views into a
 /// pre-encoded buffer.
-pub struct CompactBorrowed<'a, ET>(
+pub struct CompactView<'a, ET>(
     pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>, ET>,
 );
 
@@ -133,8 +133,8 @@ macro_rules! impl_array_storage {
                 crate::storage::ArrayStorageInfo::new("Compact")
             }
 
-            fn as_compact(&self) -> Option<CompactBorrowed<'_, TypeDyn>> {
-                Some(CompactBorrowed(ArrayBlockTableStorageBase {
+            fn as_compact(&self) -> Option<CompactView<'_, TypeDyn>> {
+                Some(CompactView(ArrayBlockTableStorageBase {
                     cache_id: self.0.cache_id,
                     // Re-tagging to `TypeDyn` never fails
                     blocks: self.0.blocks.as_ref().element_type_change().ok()?,
@@ -152,7 +152,7 @@ macro_rules! impl_array_storage {
     };
 }
 impl_array_storage!(Compact<ET>);
-impl_array_storage!(CompactBorrowed<'a, ET>);
+impl_array_storage!(CompactView<'a, ET>);
 impl_array_storage!(CompactMmap<ET>);
 
 /// Nd-array layer on top of [`BlockTable<S>`](crate::storage::block::BlockTable).
