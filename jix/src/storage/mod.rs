@@ -56,6 +56,9 @@ pub use plain::*;
 pub(crate) mod params;
 pub use params::ArraySpec;
 
+pub use crate::archive::ArchiveValidation;
+pub use crate::codec::{Codec, Filter};
+
 mod any;
 pub use any::*;
 

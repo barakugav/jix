@@ -10,9 +10,10 @@ use crate::storage::block::{
     BlockLocation, BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage, Mmap, MmapData,
     Owned,
 };
+use crate::storage::ArchiveValidation;
 use crate::util::arrayvec::ArrayVec;
 use crate::util::{cast_slice, cast_slice_mut, value_as_bytes, value_from_io, SendSyncPtr};
-use crate::{ArchiveValidation, ElementType, TypeDyn};
+use crate::{ElementType, TypeDyn};
 
 /// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
 ///
@@ -471,8 +472,9 @@ mod tests {
     use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable, Owned};
+    use crate::storage::ArchiveValidation;
     use crate::util::cast_slice;
-    use crate::{ArchiveValidation, ReadContext};
+    use crate::ReadContext;
 
     /// Build a table from `items`, write it into `stream` and read it back.
     fn round_trip<T: Dtyped>(

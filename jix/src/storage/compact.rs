@@ -66,9 +66,9 @@ use crate::{default_strides, ArrayParams, Dim, DimDyn, DimVec, Dimension, Storag
 ///
 /// ## Filters
 ///
-/// [`Filter`](crate::Filter)s are byte-level transforms that rearrange element data into a layout
-/// that compresses better. [`Filter::ByteShuffle`](crate::Filter::ByteShuffle), the default, suits
-/// most numeric data; [`Filter::BitShuffle`](crate::Filter::BitShuffle) can compress low-entropy
+/// [`Filter`](crate::storage::Filter)s are byte-level transforms that rearrange element data into a layout
+/// that compresses better. [`Filter::ByteShuffle`](crate::storage::Filter::ByteShuffle), the default, suits
+/// most numeric data; [`Filter::BitShuffle`](crate::storage::Filter::BitShuffle) can compress low-entropy
 /// data further at higher CPU cost.
 ///
 /// ## Read context
