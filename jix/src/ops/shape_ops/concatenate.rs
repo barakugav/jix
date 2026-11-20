@@ -1,6 +1,6 @@
 use crate::ops::prelude::*;
 
-use crate::{ArraySequence, ArraySequenceElementType};
+use crate::storage::{ArraySequence, ArraySequenceElementType};
 
 /// Joins a sequence of arrays along an existing dim. See [`Concatenate`] for details and examples.
 ///

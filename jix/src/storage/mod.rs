@@ -62,6 +62,8 @@ pub use crate::codec::{Codec, Filter};
 mod any;
 pub use any::*;
 
+pub use crate::util::{ArraySequence, ArraySequenceElementType, ArraySequenceTyped};
+
 pub(crate) mod block;
 pub use block::BlockSize;
 
