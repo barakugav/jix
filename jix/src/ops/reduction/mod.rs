@@ -26,7 +26,7 @@ pub use custom::*;
 /// final result is not just the accumulator.
 ///
 /// Max/Min do **not** appear here - those ops are bounded directly by the element-wise
-/// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`].
+/// [`Maximum`](crate::scalar::Maximum) / [`Minimum`](crate::scalar::Minimum).
 pub(crate) mod traits {
     pub use super::arith::traits::*;
     pub use super::min_max::traits::*;

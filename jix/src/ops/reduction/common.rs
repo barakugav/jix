@@ -1468,7 +1468,7 @@ pub(crate) mod tests {
     }
 
     /// Implements [`ReductionCompare`] with exact comparison, see
-    /// [`crate::util::assert_array_matches`].
+    /// [`assert_array_matches`](crate::util::assert_array_matches).
     macro_rules! reduction_compare_exact {
         ($($t:ty),* $(,)?) => {$(
             impl ReductionCompare for $t {
