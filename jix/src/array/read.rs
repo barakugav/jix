@@ -599,6 +599,38 @@ impl<S: StorageBase> Array<S> {
         Ok(unsafe { value.assume_init() })
     }
 
+    /// Read the only element of an array with a single element, like NumPy's `ndarray.item()`.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - the array
+    ///   does not have exactly one element.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?;
+    /// assert_eq!(a.sum((0, 1)).item()?, 21);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    #[inline]
+    pub fn item(&self) -> Result<S::Item>
+    where
+        S: Storage,
+    {
+        let shape = self.shape();
+        ensure!(
+            shape.iter().all(|&dim| dim == 1),
+            InvalidShapeOperation,
+            "Cannot take the item of an array of shape {shape:?}"
+        );
+        self.get(&[0; NDIM_MAX][..self.ndim()], &self.read_ctx())
+    }
+
     /// Read the entire array into a new heap-allocated `Array<Plain>`.
     ///
     /// Equivalent to `Array::plain_ndarray(self.to_ndarray()?)`.
@@ -770,6 +802,21 @@ mod tests {
         assert_eq!(
             a.get(&[u64::MAX, 0], &ctx).unwrap_err().kind(),
             ErrorKind::InvalidIndex
+        );
+    }
+
+    #[test]
+    fn item_reads_the_only_element() {
+        let a = array(
+            &[&[0u8, 1, 2, 6, 7, 8], &[3, 4, 5, 9, 10, 11]],
+            [2, 6],
+            &[2, 3],
+        );
+        assert_eq!(a.view().slice((1..2, 4..5)).item().unwrap(), 10);
+        assert_eq!(a.view().sum((0, 1)).item().unwrap(), 66);
+        assert_eq!(
+            a.item().unwrap_err().kind(),
+            ErrorKind::InvalidShapeOperation
         );
     }
 
