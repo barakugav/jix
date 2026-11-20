@@ -633,7 +633,7 @@ mod tests {
     fn element_type_change_into_type_dyn() {
         let a = make(arange(6), [2u64, 3]);
         let rep = a.repeat(3, 1);
-        let dyn_et = rep.into_type_dyn();
+        let dyn_et = rep.into_typed_dyn();
         // dtype preserved at runtime.
         assert_eq!(dyn_et.dtype(), &<i32 as crate::dtype::Dtyped>::DTYPE);
     }

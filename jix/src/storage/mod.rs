@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(arc.shape(), &[2, 3]);
 
         let boxed: Array<Box<crate::storage::Compact<crate::TypeDyn>>> =
-            Array::from_storage(Box::new(compact())).into_type_dyn();
+            Array::from_storage(Box::new(compact())).into_typed_dyn();
         let typed = boxed.into_typed::<f32>().unwrap();
         assert_eq!(typed.to_ndarray().unwrap(), nd);
     }

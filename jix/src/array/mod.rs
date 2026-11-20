@@ -153,7 +153,7 @@ mod compact;
 /// Arrays built from typed sources are typed: `compact_ndarray(&array![1.0f32])` returns
 /// `Array<Compact<f32>>`. Use [`into_typed::<T>()`](Array::into_typed) to assert the element
 /// type - validated against the stored dtype at runtime - and recover `S::ElementType = T`. Use
-/// [`into_type_dyn()`](Array::into_type_dyn) to erase the static element type.
+/// [`into_typed_dyn()`](Array::into_typed_dyn) to erase the static element type.
 ///
 /// The number of dims is a runtime property, read from [`shape`](Array::shape).
 #[derive(Clone)]
@@ -464,7 +464,7 @@ pub(crate) mod tests {
         // Wrappers that do not change the data keep reporting the source as compact.
         assert!(make().is_compact());
         assert!(make().view().is_compact());
-        assert!(make().view().into_type_dyn().is_compact());
+        assert!(make().view().into_typed_dyn().is_compact());
         assert!(make().into_any().is_compact());
         assert!(make().into_any().into_any().is_compact());
         assert!(make().into_any().into_typed::<i32>().unwrap().is_compact());

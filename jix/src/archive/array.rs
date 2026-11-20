@@ -1530,7 +1530,7 @@ mod tests {
 
         assert_eq!(write(&make()), expected);
         assert_eq!(write(&make().view()), expected);
-        assert_eq!(write(&make().view().into_type_dyn()), expected);
+        assert_eq!(write(&make().view().into_typed_dyn()), expected);
         assert_eq!(write(&make().into_any()), expected);
         assert_eq!(write(&make().into_any().into_any()), expected);
         assert_eq!(

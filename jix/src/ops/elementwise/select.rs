@@ -1058,10 +1058,10 @@ mod tests {
         let cond = Array::compact_ndarray(&array![bool8::TRUE, bool8::FALSE, bool8::TRUE]).unwrap();
         let x = Array::compact_ndarray(&array![1i32, 2, 3])
             .unwrap()
-            .into_type_dyn();
+            .into_typed_dyn();
         let y = Array::compact_ndarray(&array![4.0f64, 5.0, 6.0])
             .unwrap()
-            .into_type_dyn();
+            .into_typed_dyn();
         assert!(Select::new_array(cond, x, y).is_err());
     }
 

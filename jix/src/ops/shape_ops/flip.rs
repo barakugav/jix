@@ -537,7 +537,7 @@ mod tests {
     fn element_type_change_into_type_dyn() {
         let a = make(arange(6), [2u64, 3]);
         let f = a.flip([1]);
-        let dyn_et = f.into_type_dyn();
+        let dyn_et = f.into_typed_dyn();
         assert_eq!(dyn_et.dtype(), &<i32 as crate::dtype::Dtyped>::DTYPE);
     }
 
