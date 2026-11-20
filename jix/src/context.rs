@@ -47,8 +47,7 @@ use crate::DimDyn;
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct ReadContext {
-    #[cfg(not(miri))]
-    pub(crate) decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
+    pub(crate) decompressor: UnsafeCell<Option<zstd::bulk::Decompressor<'static>>>,
     pub(crate) buffer_pool: BufferPool,
 
     /// The read cache of the current cache scope, `None` if the scope has no arrays to cache.
@@ -68,8 +67,7 @@ impl ReadContext {
     /// automatically uses the decoder parameters that match the array's stored codec configuration.
     pub(crate) fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
         Ok(Self {
-            #[cfg(not(miri))]
-            decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
+            decompressor: UnsafeCell::new(None),
             buffer_pool: BufferPool::new(),
 
             read_cache: RefCell::new(None),

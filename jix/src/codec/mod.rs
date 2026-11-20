@@ -229,8 +229,8 @@ pub(crate) struct DecoderCodecConfig {
 }
 
 pub(crate) struct Decoder<'a> {
-    #[cfg(not(miri))]
-    inner: &'a UnsafeCell<zstd::bulk::Decompressor<'static>>,
+    #[cfg_attr(miri, allow(unused))]
+    inner: &'a UnsafeCell<Option<zstd::bulk::Decompressor<'static>>>,
     context: &'a ReadContext,
 
     dtype: &'a Dtype,
@@ -240,7 +240,6 @@ impl<'a> Decoder<'a> {
     #[inline]
     pub(crate) fn new(context: &'a ReadContext, config: &'a DecoderCodecConfig) -> Self {
         Self {
-            #[cfg(not(miri))]
             inner: &context.decompressor,
             context,
             dtype: &config.dtype,
@@ -283,6 +282,7 @@ impl<'a> Decoder<'a> {
         #[cfg(not(miri))]
         let nbytes = {
             let inner = unsafe { &mut *self.inner.get() };
+            let inner = inner.get_or_insert_with(|| zstd::bulk::Decompressor::new().unwrap());
             inner
                 .decompress_to_buffer(src, decompress_out)
                 .map_err(|e| error!(InvalidArchive, "Failed to decompress data with Zstd: {e}"))?
