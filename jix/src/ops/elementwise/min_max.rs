@@ -227,12 +227,14 @@ where
                 .map(|spec| (spec.block_shape().as_slice(), spec.block_shape_fixed_dims())),
         );
         let cache_id = ArrayCacheId::new();
+        let encoder_params = specs.iter().find_map(|sp| sp.encoder_params()).cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
         spec.flags = spec
             .flags

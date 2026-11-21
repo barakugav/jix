@@ -252,8 +252,9 @@ impl ArrayParams {
 
     pub(crate) fn inherit_unset_from_storage(&mut self, storage: &impl StorageBase) {
         let spec = storage.spec();
-        self.encoder_params
-            .get_or_insert_with(|| spec.encoder_params().clone());
+        if self.encoder_params.is_none() {
+            self.encoder_params = spec.encoder_params().cloned();
+        }
         self.decoder_params
             .get_or_insert_with(|| spec.decoder_params().clone());
 
@@ -512,7 +513,10 @@ impl ArrayParams {
             params.block_shape_fixed_dims.unwrap(),
             params.block_size.unwrap(),
             params.read_size.unwrap(),
-            params.encoder_params.unwrap_or_default(),
+            // Only compact arrays have a codec
+            flags
+                .is_compact()
+                .then(|| params.encoder_params.unwrap_or_default()),
             params.decoder_params.unwrap_or_default(),
             flags,
         );
@@ -561,7 +565,6 @@ pub(crate) struct ArraySpecOwned {
 pub(crate) struct ArraySpecShared {
     block_size: u64,
     read_size: ReadSize,
-    encoder_params: EncoderParams,
     decoder_params: DecoderParams,
 }
 /// See [`ArraySpecOwned`] docs.
@@ -630,6 +633,10 @@ pub(crate) struct ArraySpecDynamic {
     /// changes which values a read produces, only the strides of a freshly allocated destination.
     pub(crate) read_layout_order: DimArray<DimIdx>,
 
+    /// The codec params of the first compact array reachable from this array, `None` if there is
+    /// none. [`Array::compact`](crate::Array::compact) inherits them.
+    pub(crate) encoder_params: Option<EncoderParams>,
+
     /// The set of array IDs reachable more than once from this array, that are accessed with the
     /// same index as this array, e.g. `x` in `x + x`.
     pub(crate) arrays_to_cache: Option<Arc<ArrayCacheIdSet>>,
@@ -646,14 +653,13 @@ impl ArraySpecOwned {
         block_shape_fixed_dims: DimBitmap,
         block_size: u64,
         read_size: ReadSize,
-        encoder_params: EncoderParams,
+        encoder_params: Option<EncoderParams>,
         decoder_params: DecoderParams,
         flags: ArraySpecFlags,
     ) -> Self {
         let shared = ArraySpecShared {
             block_size,
             read_size,
-            encoder_params,
             decoder_params,
         };
         let ndim = block_shape.len();
@@ -663,6 +669,7 @@ impl ArraySpecOwned {
             1.0,
             dim_arr(ndim, |_| ScaleWeight::NONE),
             dim_arr(ndim, |i| i as DimIdx), // default to C-order
+            encoder_params,
         );
         dynamic.flags = flags;
         Self {
@@ -717,8 +724,8 @@ impl<'a> ArraySpec<'a> {
         self.shared().read_size
     }
     #[inline(always)]
-    pub(crate) fn encoder_params(&self) -> &'a EncoderParams {
-        &self.shared().encoder_params
+    pub(crate) fn encoder_params(&self) -> Option<&'a EncoderParams> {
+        self.dynamic().encoder_params.as_ref()
     }
     #[inline(always)]
     pub(crate) fn decoder_params(&self) -> &'a DecoderParams {
@@ -796,6 +803,7 @@ impl ArraySpecDynamic {
         element_cost: f32,
         read_shape_scale_weight: DimArray<ScaleWeight>,
         read_layout_order: DimArray<DimIdx>,
+        encoder_params: Option<EncoderParams>,
     ) -> Self {
         debug_assert_eq!(read_shape_scale_weight.len(), block_shape.len());
         debug_assert_eq!(read_layout_order.len(), block_shape.len());
@@ -808,6 +816,7 @@ impl ArraySpecDynamic {
             read_shape_scale_weight,
             read_shape_scale_order,
             read_layout_order,
+            encoder_params,
 
             arrays_to_cache: None,
             arrays_to_cache_potentially: None,
@@ -1423,6 +1432,25 @@ mod tests {
         // is scaled first, i.e. last in the order.
         assert!(sp.read_shape_scale_weight()[1] > sp.read_shape_scale_weight()[0]);
         assert_eq!(*sp.read_shape_scale_order().last().unwrap(), 1);
+    }
+
+    #[test]
+    fn views_inherit_the_codec_of_the_first_compact_input() {
+        use crate::storage::{CompactArrayMethods, Filter};
+
+        let nd = ndarray::Array1::from_iter(0..16i32);
+        let params = ArrayParams::new().filters(&[Filter::BitShuffle]).unwrap();
+        let bit = Array::compact_ndarray_with(&nd, params).unwrap();
+        let byte = Array::compact_ndarray(&nd).unwrap();
+        let plain = Array::plain_ndarray(nd.clone()).unwrap();
+        assert!(plain.storage().spec().encoder_params().is_none());
+
+        let c = (plain.view() + bit.view()).compact().unwrap();
+        assert!(matches!(c.filters(), [Filter::BitShuffle]));
+        let c = (bit.view() + byte.view()).compact().unwrap();
+        assert!(matches!(c.filters(), [Filter::BitShuffle]));
+        let c = (-plain.view()).reshape(&[4, 4]).compact().unwrap();
+        assert!(matches!(c.filters(), [Filter::ByteShuffle]));
     }
 
     #[test]

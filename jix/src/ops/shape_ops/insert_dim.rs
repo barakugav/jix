@@ -112,12 +112,14 @@ where
                 read_layout_order_insert_dont_care_dim(&mut read_layout_order, d);
             }
         }
+        let encoder_params = orig_spec.encoder_params().cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             orig_spec.element_cost(),
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
         spec.flags = spec
             .flags

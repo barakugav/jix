@@ -110,12 +110,14 @@ where
             .filter(|&&d| !is_removed[d as usize])
             .map(|&d| out_dim(d as usize))
             .collect();
+        let encoder_params = inner_spec.encoder_params().cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             inner_spec.element_cost(),
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
         spec.flags = spec
             .flags

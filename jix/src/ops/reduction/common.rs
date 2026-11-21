@@ -189,6 +189,7 @@ impl<S: StorageBase, K> ReductionOp<S, K> {
             .filter(|&&d| !is_reduced[d as usize])
             .map(|&d| dim_orig2new(d as usize))
             .collect();
+        let encoder_params = inner_spec.encoder_params().cloned();
         let mut spec = ArraySpecDynamic::new(
             dim_new2orig
                 .iter()
@@ -203,6 +204,7 @@ impl<S: StorageBase, K> ReductionOp<S, K> {
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
 
         let cache_id = ArrayCacheId::new();

@@ -72,16 +72,11 @@ where
             y.shape()
         );
 
-        let c_spec = condition.spec();
         let x_spec = x.spec();
         let y_spec = y.spec();
+        let c_spec = condition.spec();
         let (element_cost, read_shape_scale_weight, read_layout_order) =
             combine_elementwise_hints(&[
-                (
-                    c_spec.element_cost(),
-                    c_spec.read_shape_scale_weight(),
-                    c_spec.read_layout_order(),
-                ),
                 (
                     x_spec.element_cost(),
                     x_spec.read_shape_scale_weight(),
@@ -92,19 +87,30 @@ where
                     y_spec.read_shape_scale_weight(),
                     y_spec.read_layout_order(),
                 ),
+                (
+                    c_spec.element_cost(),
+                    c_spec.read_shape_scale_weight(),
+                    c_spec.read_layout_order(),
+                ),
             ]);
         let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
-            (c_spec.block_shape(), c_spec.block_shape_fixed_dims()),
             (x_spec.block_shape(), x_spec.block_shape_fixed_dims()),
             (y_spec.block_shape(), y_spec.block_shape_fixed_dims()),
+            (c_spec.block_shape(), c_spec.block_shape_fixed_dims()),
         ]);
         let cache_id = ArrayCacheId::new();
+        let encoder_params = x_spec
+            .encoder_params()
+            .or(y_spec.encoder_params())
+            .or(c_spec.encoder_params())
+            .cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
         // read_data pulls condition and y, so it reads in one pass only if they are views
         let views = c_spec.read_tiling() == ReadTiling::ZeroCopy
@@ -114,7 +120,7 @@ where
         } else {
             ReadTiling::Tiled
         });
-        spec.add_cache_ids_from([&c_spec, &x_spec, &y_spec]);
+        spec.add_cache_ids_from([&x_spec, &y_spec, &c_spec]);
         spec.add_cache_id(cache_id);
         Ok(Self {
             condition,

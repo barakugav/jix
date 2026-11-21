@@ -78,6 +78,7 @@ impl<S: StorageBase> PermuteDims<S> {
         let inner_spec = array.spec();
         let block_shape = dim_arr(ndim, |i| inner_spec.block_shape()[dims[i]]);
         let inner_block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
+        let encoder_params = inner_spec.encoder_params().cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             (0..ndim)
@@ -90,6 +91,7 @@ impl<S: StorageBase> PermuteDims<S> {
                 .iter()
                 .map(|&old| inv_dims[old as usize])
                 .collect(),
+            encoder_params,
         );
         spec.flags = spec
             .flags

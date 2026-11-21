@@ -91,12 +91,14 @@ impl<S: StorageBase> Slice<S> {
                 // block_shape_fixed_dims is unchanged
             }
         }
+        let encoder_params = inner_spec.encoder_params().cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             inner_spec.block_shape_fixed_dims(),
             inner_spec.element_cost(),
             DimArray::from_slice(inner_spec.read_shape_scale_weight()).unwrap(),
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
+            encoder_params,
         );
         spec.flags = spec
             .flags
