@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
 use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
@@ -749,8 +750,9 @@ pub(crate) struct Operand<'a> {
     strides: DimArray<usize>,
     /// The pool buffer behind an input operand, kept until [`return_buf_to`](Self::return_buf_to)
     /// gives it back to the pool; empty for the output. In a `Cell` so `return_buf_to` can take it
-    /// through the shared references `to_buf` hands out.
-    buf: Cell<StridedBufBytes>,
+    /// through the shared references `to_buf` hands out, and in a `ManuallyDrop` so only the
+    /// out-of-line `Drop` of `Operand` drops it.
+    buf: Cell<ManuallyDrop<StridedBufBytes>>,
     /// `base_ptr` may point into memory borrowed for `'a`.
     _data: PhantomData<&'a [u8]>,
     dtype: &'a Dtype,
@@ -787,7 +789,7 @@ impl<'a> Operand<'a> {
         Self {
             base_ptr,
             strides,
-            buf: Cell::new(buf),
+            buf: Cell::new(ManuallyDrop::new(buf)),
             _data: PhantomData,
             dtype,
             // Both cursor fields are set by `to_buf` before every run; there is nothing to read
@@ -818,7 +820,15 @@ impl<'a> Operand<'a> {
     #[inline]
     fn return_buf_to(&self, context: &ReadContext) {
         self.current_ptr.set(std::ptr::null());
-        self.buf.take().return_to(&context.buffer_pool);
+        ManuallyDrop::into_inner(self.buf.take()).return_to(&context.buffer_pool);
+    }
+}
+
+impl Drop for Operand<'_> {
+    // Out of line, so dropping an operand in the pipeline-generic code is a single call.
+    #[inline(never)]
+    fn drop(&mut self) {
+        drop(ManuallyDrop::into_inner(self.buf.take()));
     }
 }
 
