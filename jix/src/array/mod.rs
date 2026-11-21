@@ -97,6 +97,11 @@ mod compact;
 /// assert_eq!(decompressed[[0, 0]], 1.5);
 /// assert_eq!(decompressed[[1, 1]], 6.17);
 ///
+/// // Read a single element and a sub-region. Only the blocks they touch are
+/// // decompressed, not the whole array, so random access reads are relatively fast.
+/// assert_eq!(array.get(&[1, 1])?, 6.17);
+/// assert_eq!(array.to_ndarray_sub(&[0..2, 1..3])?, array![[2.0, -9.0], [6.17, 0.0]]);
+///
 /// // Apply operations on a compressed array, creating lazy views
 /// let ones = Array::compact_ndarray(&ndarray::Array2::<f32>::ones((2, 3)))?;
 /// let scaled = array                               // Array<Compact>
