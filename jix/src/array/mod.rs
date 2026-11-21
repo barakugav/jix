@@ -216,7 +216,7 @@ impl<S: StorageBase> Array<S> {
             .unwrap_or_else(|| self.storage.dtype())
     }
 
-    /// Create a [`ReadContext`] with the decoder parameters and read size of this array.
+    /// Create a [`ReadContext`] with the read parameters of this array, e.g. its read size.
     ///
     /// A context holds reusable buffers and a decompressor instance; reuse one across repeated
     /// reads to share the allocation and setup cost. [`to_ndarray`](Array::to_ndarray) builds one
@@ -224,7 +224,7 @@ impl<S: StorageBase> Array<S> {
     /// and [`to_buf_strided`](Array::to_buf_strided) take one.
     ///
     /// Any context, e.g. `ReadContext::default()`, gives correct results; this one uses the
-    /// array's own decoder configuration.
+    /// array's own read parameters.
     ///
     /// # Panics
     ///
@@ -250,10 +250,7 @@ impl<S: StorageBase> Array<S> {
     }
     fn try_read_ctx(&self) -> Result<ReadContext> {
         let spec = self.storage.spec();
-        let mut context = ReadContext::new(spec.decoder_params())?;
-        let read_size = spec.read_size();
-        context.set_read_size((read_size.min, read_size.max));
-        Ok(context)
+        ReadContext::new(spec.read_params().clone())
     }
 
     /// Borrow this array as an `Array<&S>`, without cloning the storage.
@@ -344,8 +341,8 @@ impl<S: StorageBase> Array<S> {
                 .all(|(&b, &s)| b as u64 <= s.max(1)));
             debug_assert!(spec.block_size() > 0);
             debug_assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
-            debug_assert!(spec.read_size().min > 0);
-            debug_assert!(spec.read_size().min <= spec.read_size().max);
+            let read_size = spec.read_params().read_size;
+            debug_assert!(0 < read_size.min && read_size.min <= read_size.max);
             debug_assert!(
                 spec.read_shape_scale_order().len() == ndim
                     && (0..ndim).all(|d| spec.read_shape_scale_order().contains(&(d as DimIdx)))

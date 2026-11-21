@@ -1,11 +1,11 @@
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::sync::Arc;
 
-use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
+use crate::codec::{Decoder, DecoderCodecConfig};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
-use crate::storage::params::ReadSize;
+use crate::storage::params::{ReadParams, ReadSize};
 use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf};
 use crate::util::buf_pool::{BufferPool, PoolBuf};
 use crate::util::{DimArray, SliceExt};
@@ -60,16 +60,15 @@ pub struct ReadContext {
     #[allow(clippy::vec_box)]
     temp_cache_maps: RefCell<Vec<Box<CacheMap>>>,
 
-    /// The target byte range for a single read region.
-    read_size: ReadSize,
+    params: ReadParams,
 }
 
 impl ReadContext {
-    /// Creates a new `ReadContext` configured with the given decoder parameters.
+    /// Creates a new `ReadContext` configured with the given read parameters.
     ///
     /// Prefer [`Array::read_ctx()`](crate::Array::read_ctx) over calling this directly - it
-    /// automatically uses the decoder parameters that match the array's stored codec configuration.
-    pub(crate) fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
+    /// uses the read parameters of the array.
+    pub(crate) fn new(params: ReadParams) -> Result<Self> {
         Ok(Self {
             decompressor: UnsafeCell::new(None),
             buffer_pool: BufferPool::new(),
@@ -78,7 +77,7 @@ impl ReadContext {
             is_cache_enabled: Cell::new(false),
             temp_cache_maps: RefCell::new(Vec::new()),
 
-            read_size: ReadSize::default(),
+            params,
         })
     }
 
@@ -101,12 +100,12 @@ impl ReadContext {
     /// [`Array::read_ctx()`](crate::Array::read_ctx) starts from the array's read size,
     /// [`ReadContext::default()`] from a range chosen according to the CPU cache sizes.
     pub fn set_read_size(&mut self, size_hint: (u64, u64)) {
-        self.read_size = ReadSize::new(size_hint.0, size_hint.1);
+        self.params.read_size = ReadSize::new(size_hint.0, size_hint.1);
     }
 
     #[inline]
     pub(crate) fn read_size(&self) -> ReadSize {
-        self.read_size
+        self.params.read_size
     }
 
     #[inline]
@@ -136,7 +135,7 @@ const _: fn() = || {
 
 impl Default for ReadContext {
     fn default() -> Self {
-        Self::new(&DecoderParams::default()).unwrap()
+        Self::new(ReadParams::default()).unwrap()
     }
 }
 

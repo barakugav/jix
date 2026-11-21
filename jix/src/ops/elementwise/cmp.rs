@@ -958,8 +958,8 @@ mod tests {
         a.set_read_size((1 << 12, 1 << 13));
         let b = Array::plain_ndarray(f_order).unwrap();
         assert_ne!(
-            a.storage().spec().read_size(),
-            b.storage().spec().read_size()
+            a.storage().spec().read_params(),
+            b.storage().spec().read_params()
         );
 
         let check = |storage: &dyn StorageBase, name: &str| {
@@ -980,7 +980,7 @@ mod tests {
         // The base spec comes from `a`, and a tie in the read layout order goes to `a`: C order,
         // where the swapped `Less` alone would pick `b`'s F order.
         for spec in [gt.storage().spec(), ge.storage().spec()] {
-            assert_eq!(spec.read_size(), a.storage().spec().read_size());
+            assert_eq!(spec.read_params(), a.storage().spec().read_params());
             assert_eq!(spec.read_layout_order(), &[0, 1]);
         }
         let lt = b.view().less(a.view());

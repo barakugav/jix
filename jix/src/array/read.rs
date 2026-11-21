@@ -117,8 +117,8 @@ impl<S: StorageBase> Array<S> {
     ///
     /// `context` carries the decoder instance and scratch buffers. Creating these for every read
     /// is expensive, especially for small windows, so create one context with
-    /// [`read_ctx`](Array::read_ctx), which uses the array's decoder configuration, and pass it to
-    /// every call. `ReadContext::default()` works too, with default decoder parameters.
+    /// [`read_ctx`](Array::read_ctx), which uses the array's read parameters, and pass it to
+    /// every call. `ReadContext::default()` works too, with default read parameters.
     ///
     /// # Errors
     ///

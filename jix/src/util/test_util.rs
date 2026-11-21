@@ -5,7 +5,7 @@ use ndarray::IxDyn;
 
 use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
-use crate::storage::params::ReadSize;
+use crate::storage::params::{ReadParams, ReadSize};
 use crate::storage::{ArrayStorageExt, Compact, Index, PlainArrayMethods};
 use crate::util::{AlignedBytes, DimArray};
 use crate::{Array, CompactArray, CompactParams, StorageBase, TypeDyn};
@@ -603,8 +603,10 @@ where
         if let Some(block_size) = block_size {
             params = params.block_size(block_size);
         }
-        if let Some(read_size) = read_size {
-            params.read_size = Some(ReadSize::new(read_size.0, read_size.1));
+        if let Some((min, max)) = read_size {
+            params.read_params = Some(ReadParams {
+                read_size: ReadSize::new(min, max),
+            });
         }
         let arr = collapse_zero_stride_dims(arr, &layout.zero_stride_dims);
         let array = build_test_array(&arr, &layout, kind, params);
@@ -678,8 +680,10 @@ where
         if let Some(block_size) = block_size {
             params = params.block_size(block_size);
         }
-        if let Some(read_size) = read_size {
-            params.read_size = Some(ReadSize::new(read_size.0, read_size.1));
+        if let Some((min, max)) = read_size {
+            params.read_params = Some(ReadParams {
+                read_size: ReadSize::new(min, max),
+            });
         }
         let compact = Array::compact_ndarray_with(&arr, params).unwrap();
         (arr, compact)
@@ -885,7 +889,7 @@ fn build_test_array<T: Dtyped>(
             }
             .unwrap();
             let mut array = Array::from_storage(storage);
-            if let Some(read_size) = params.read_size {
+            if let Some(ReadParams { read_size }) = params.read_params {
                 array.set_read_size((read_size.min, read_size.max));
             }
             array.into_any()
@@ -990,7 +994,7 @@ fn assert_array_matches_dyn<T>(
         .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
     assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
     assert!(spec.block_size() > 0);
-    assert!(spec.read_size().min > 0);
+    assert!(spec.read_params().read_size.min > 0);
 
     let actual = actual.view().into_typed::<T>().unwrap();
     let full = actual.to_ndarray::<IxDyn>().unwrap();

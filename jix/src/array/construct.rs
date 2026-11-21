@@ -316,6 +316,7 @@ mod tests {
     use crate::dtype::Dtyped;
 
     use crate::storage::block::BlockSize;
+    use crate::storage::params::{ReadParams, ReadSize};
 
     use crate::util::arr_params;
     use crate::{CompactParams, StorageBase};
@@ -486,7 +487,9 @@ mod tests {
     /// called for regions that do not start at the origin.
     fn multi_chunk_params(block_shape: &[BlockSize]) -> CompactParams {
         let mut params = CompactParams::new().block_shape(block_shape).unwrap();
-        params.read_size = Some(crate::storage::params::ReadSize::new(8, 64));
+        params.read_params = Some(ReadParams {
+            read_size: ReadSize::new(8, 64),
+        });
         params
     }
 

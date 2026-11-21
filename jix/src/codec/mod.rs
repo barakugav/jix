@@ -9,7 +9,6 @@ mod bit_shuffle;
 mod byte_shuffle;
 
 use std::cell::UnsafeCell;
-use std::marker::PhantomData;
 
 use crate::dtype::{Alignment, Dtype};
 #[allow(unused_imports)]
@@ -201,17 +200,6 @@ impl Encoder {
             }
         }
     }
-}
-
-/// Decoder settings that can be chosen freely at read time, independent of the codec, filters
-/// and dtype the data was written with (those are in [`DecoderCodecConfig`]).
-///
-/// There are no options yet; future versions may add e.g. the number of block decompression
-/// threads or a memory budget for the block cache. [`ReadContext::new`] takes one; use
-/// [`DecoderParams::default()`].
-#[derive(Clone, Debug, Default)]
-pub(crate) struct DecoderParams {
-    _phantom: PhantomData<()>,
 }
 
 pub(crate) const MAX_FILTERS: usize = 4;

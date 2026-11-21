@@ -1,6 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
-use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
+use crate::codec::{Codec, EncoderParams, Filter};
 use crate::context::CacheScope;
 use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_ndim, check_shape_overflow, ensure, Result};
@@ -52,6 +52,13 @@ impl Default for ReadSize {
     }
 }
 
+/// Settings chosen freely at read time, independent of how the data was written. Future versions
+/// may add e.g. the number of block decompression threads.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ReadParams {
+    pub(crate) read_size: ReadSize,
+}
+
 /// Parameters for writing a block-compressed array: its block layout and codec.
 ///
 /// `CompactParams` groups two independent sets of configuration:
@@ -101,7 +108,7 @@ pub struct CompactParams {
     pub(crate) block_shape_fixed_dims: Option<DimBitmap>,
     pub(crate) block_size: Option<u64>,
     pub(crate) encoder_params: Option<EncoderParams>,
-    pub(crate) read_size: Option<ReadSize>, // inherited from a source array
+    pub(crate) read_params: Option<ReadParams>, // inherited from a source array
 }
 
 impl CompactParams {
@@ -253,7 +260,8 @@ impl CompactParams {
             self.block_shape_fixed_dims = Some(block_shape_fixed_dims);
         }
         self.block_size.get_or_insert(spec.block_size());
-        self.read_size.get_or_insert(spec.read_size());
+        self.read_params
+            .get_or_insert_with(|| spec.read_params().clone());
     }
 
     /// Resolve and validate the block geometry of `self` for an array of `shape` and `dtype`.
@@ -267,7 +275,7 @@ impl CompactParams {
     ///   toward `block_size`. See [`DimBitmap`].
     /// - `block_size` - the L1 data cache size when the block shape is not fully fixed, else the
     ///   block shape's size in bytes. Capped at `BLOCK_SIZE_BYTES_MAX`.
-    /// - `read_size` - a range derived from the L1 and L2 cache sizes.
+    /// - `read_params` - a read size derived from the L1 and L2 cache sizes, at least one block.
     ///
     /// # Errors
     ///
@@ -396,15 +404,15 @@ impl CompactParams {
                     * itemsize
             })
             .max(1);
-        let read_size = self.read_size.unwrap_or_else(|| {
+        self.read_params.get_or_insert_with(|| {
             let read_size = ReadSize::default(); // derived from cache sizes
-            ReadSize::new(read_size.min.max(block_size), read_size.max)
+            let read_size = ReadSize::new(read_size.min.max(block_size), read_size.max);
+            ReadParams { read_size }
         });
 
         self.block_shape = Some(block_shape);
         self.block_shape_fixed_dims = Some(block_shape_fixed_dims);
         self.block_size = Some(block_size);
-        self.read_size = Some(read_size);
         Ok(())
     }
 
@@ -484,12 +492,11 @@ impl CompactParams {
             params.block_shape.unwrap(),
             params.block_shape_fixed_dims.unwrap(),
             params.block_size.unwrap(),
-            params.read_size.unwrap(),
+            params.read_params.unwrap(),
             // Only compact arrays have a codec
             flags
                 .is_compact()
                 .then(|| params.encoder_params.unwrap_or_default()),
-            DecoderParams::default(),
             flags,
         );
 
@@ -504,7 +511,7 @@ impl CompactParams {
                 .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
             assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
             assert!(spec.block_size() > 0);
-            assert!(spec.read_size().min > 0);
+            assert!(spec.read_params().read_size.min > 0);
         }
 
         Ok(spec)
@@ -536,8 +543,7 @@ pub(crate) struct ArraySpecOwned {
 #[derive(Clone)]
 pub(crate) struct ArraySpecShared {
     block_size: u64,
-    read_size: ReadSize,
-    decoder_params: DecoderParams,
+    read_params: ReadParams,
 }
 /// See [`ArraySpecOwned`] docs.
 #[derive(Clone)]
@@ -624,15 +630,13 @@ impl ArraySpecOwned {
         block_shape: DimArray<BlockSize>,
         block_shape_fixed_dims: DimBitmap,
         block_size: u64,
-        read_size: ReadSize,
+        read_params: ReadParams,
         encoder_params: Option<EncoderParams>,
-        decoder_params: DecoderParams,
         flags: ArraySpecFlags,
     ) -> Self {
         let shared = ArraySpecShared {
             block_size,
-            read_size,
-            decoder_params,
+            read_params,
         };
         let ndim = block_shape.len();
         let mut dynamic = ArraySpecDynamic::new(
@@ -662,7 +666,8 @@ impl ArraySpecOwned {
         &mut self.dynamic
     }
     pub(crate) fn set_read_size(&mut self, size_hint: (u64, u64)) {
-        Arc::make_mut(&mut self.shared).read_size = ReadSize::new(size_hint.0, size_hint.1);
+        Arc::make_mut(&mut self.shared).read_params.read_size =
+            ReadSize::new(size_hint.0, size_hint.1);
     }
 }
 impl<'a> ArraySpec<'a> {
@@ -692,16 +697,12 @@ impl<'a> ArraySpec<'a> {
         self.shared().block_size
     }
     #[inline(always)]
-    pub(crate) fn read_size(&self) -> ReadSize {
-        self.shared().read_size
+    pub(crate) fn read_params(&self) -> &'a ReadParams {
+        &self.shared().read_params
     }
     #[inline(always)]
     pub(crate) fn encoder_params(&self) -> Option<&'a EncoderParams> {
         self.dynamic().encoder_params.as_ref()
-    }
-    #[inline(always)]
-    pub(crate) fn decoder_params(&self) -> &'a DecoderParams {
-        &self.shared().decoder_params
     }
     #[inline(always)]
     pub(crate) fn block_shape(&self) -> &'a DimArray<BlockSize> {
@@ -1971,7 +1972,7 @@ mod tests {
             .unwrap()
             .into_spec(&[8], &i32::DTYPE, ArraySpecFlags::default())
             .unwrap();
-        let rs = spec.as_ref().read_size();
+        let rs = spec.as_ref().read_params().read_size;
         let cs = cache_sizes();
         let block_size = 8 * i32::DTYPE.itemsize() as u64;
         // When unset, the read-size window is derived automatically from the CPU cache sizes:
