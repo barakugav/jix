@@ -408,14 +408,13 @@ mod tests {
         let za = Array::plain_ndarray(a).unwrap();
         let zb = Array::plain_ndarray(b).unwrap();
         let s = stack([za, zb], 1); // shape [2, 2, 2]
-        let ctx = s.read_ctx();
         let index = [0..2, 1..2, 0..2];
         assert_eq!(
-            s.to_ndarray_sub(&index, &ctx).unwrap(),
+            s.to_ndarray_sub(&index).unwrap(),
             array![[[5, 6]], [[7, 8]]]
         );
         // A pull read returns `b`'s own buffer, the stack dim given a 0 stride.
-        let buf = s.to_buf_strided(&index, &ctx).unwrap();
+        let buf = s.to_buf_strided(&index, None).unwrap();
         assert_eq!(buf.strides(), &[8, 0, 4]);
     }
 

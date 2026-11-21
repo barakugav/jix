@@ -36,10 +36,9 @@
 //!
 //! // Read a single element and a sub-region. Only the blocks they touch are
 //! // decompressed, not the whole array, so random access reads are relatively fast.
-//! let ctx = a.read_ctx();
-//! assert_eq!(a.get(&[1, 1], &ctx)?, 6.17);
+//! assert_eq!(a.get(&[1, 1])?, 6.17);
 //! assert_eq!(
-//!     a.to_ndarray_sub(&[0..2, 1..3], &ctx)?,
+//!     a.to_ndarray_sub(&[0..2, 1..3])?,
 //!     array![[2.0, -9.0], [6.17, 0.0]]
 //! );
 //!
@@ -288,12 +287,11 @@
 //! // Store with 64*64 blocks - one decompression per tile.
 //! let array = Array::compact_ndarray_with(&data, CompactParams::new().block_shape(&[64, 64])?)?;
 //!
-//! let context = array.read_ctx();
 //! for tile_row in 0..8 {
 //!     for tile_col in 0..8 {
 //!         let row_range = (tile_row * 64)..((tile_row + 1) * 64);
 //!         let col_range = (tile_col * 64)..((tile_col + 1) * 64);
-//!         let tile = array.to_ndarray_sub::<Ix2>(&[row_range, col_range], &context)?;
+//!         let tile = array.to_ndarray_sub::<Ix2>(&[row_range, col_range])?;
 //!         println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
 //!     }
 //! }
@@ -319,8 +317,7 @@
 //!
 //! // Transpose and re-encode with explicit 128*128 blocks.
 //! let out_params = CompactParams::new().block_shape(&[128, 128])?;
-//! let ctx = a.read_ctx();
-//! let transposed = a.permute_dims(&[1, 0]).compact_with(out_params, &ctx)?;
+//! let transposed = a.permute_dims(&[1, 0]).compact_with(out_params)?;
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
@@ -424,15 +421,16 @@ pub type PlainArray<T> = Array<storage::Plain<T>>;
 /// Plain (uncompressed) borrowed array (type alias).
 pub type PlainArrayView<'a, T> = Array<storage::PlainView<'a, T>>;
 
-/// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn StorageBase>`.
+/// An array whose storage backend is hidden behind an `Arc<dyn StorageBase>`.
 ///
 /// Use `ArrayAny` when you need to hold arrays of different concrete storage types in the same
 /// place - for example a `Vec<ArrayAny>` mixing on-disk, in-memory, and lazy views. All runtime
-/// metadata (shape, dtype) is available; element-wise operations that require a known scalar type
-/// at compile time are not.
+/// metadata (shape, dtype) is available. The element type `ET` is kept: an `ArrayAny<f32>` still
+/// supports element-wise operations, an `ArrayAny` (`ArrayAny<TypeDyn>`) needs
+/// [`into_typed`](Array::into_typed) first.
 ///
 /// Create one with [`Array::into_any`].
-pub type ArrayAny = Array<storage::StorageAny>;
+pub type ArrayAny<ET = TypeDyn> = Array<storage::StorageAny<ET>>;
 
 const BLOCK_SIZE_BYTES_MAX: u64 = 1 << 30;
 

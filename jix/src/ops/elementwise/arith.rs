@@ -1168,11 +1168,7 @@ mod tests {
             "integers to negative integer powers are not allowed"
         );
         // Only the elements read count.
-        let ctx = q.read_ctx();
-        assert_eq!(
-            q.to_ndarray_sub(&[2..4], &ctx).unwrap(),
-            ndarray::array![1, -125]
-        );
+        assert_eq!(q.to_ndarray_sub(&[2..4]).unwrap(), ndarray::array![1, -125]);
     }
 
     // Integer powers against repeated wrapping multiplication.

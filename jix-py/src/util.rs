@@ -1,7 +1,7 @@
 use std::mem::{ManuallyDrop, MaybeUninit};
 
-use jix_core::NDIM_MAX;
 use jix_core::error::ErrorKind;
+use jix_core::{Array, ArrayAny, NDIM_MAX, StorageBase};
 use numpy::npyffi::{PyArray_Dims, npy_intp};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{
@@ -58,6 +58,20 @@ pub(crate) fn check_ndim(ndim: usize) -> PyResult<()> {
         )))
     } else {
         Ok(())
+    }
+}
+
+pub(crate) trait IntoAnyDyn {
+    /// [`into_any`](jix_core::Array::into_any) followed by erasing the element type.
+    fn into_any_dyn(self) -> ArrayAny;
+}
+impl<S> IntoAnyDyn for Array<S>
+where
+    S: StorageBase + std::any::Any + Send + Sync + 'static,
+{
+    #[inline]
+    fn into_any_dyn(self) -> ArrayAny {
+        self.into_any().into_typed_dyn()
     }
 }
 

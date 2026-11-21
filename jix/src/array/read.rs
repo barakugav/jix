@@ -8,9 +8,10 @@ use crate::error::{
 };
 use crate::storage::params::ReadTiling;
 use crate::storage::{
-    ArrayStorageExt, Index, OutBuf, StridedBuf, alloc_out_buf, check_out_buf_dims,
-    check_out_buf_impl, split_ranges,
+    ArrayStorageExt, Index, OutBuf, StridedBuf, check_out_buf_dims, check_out_buf_impl,
+    split_ranges,
 };
+use crate::util::buf_pool::PoolBuf;
 use crate::util::iter::NdIter;
 use crate::util::{
     advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr,
@@ -24,10 +25,6 @@ impl<S: StorageBase> Array<S> {
     /// operation pipeline, and every call redoes the work. To read the result more than once,
     /// materialize it first with [`compact`](Array::compact) (or
     /// [`compact_with`](Array::compact_with) to control the block shape).
-    ///
-    /// `to_ndarray` creates its own [`ReadContext`]. For repeated reads (e.g. tile by tile) prefer
-    /// [`to_ndarray_sub`](Array::to_ndarray_sub) with a context from [`read_ctx`](Array::read_ctx),
-    /// which shares the decompressor and scratch buffers across calls.
     ///
     /// The returned array is not necessarily C-contiguous: the implementation picks the memory
     /// layout. For a specific layout, use [`to_buf_strided_into`](Array::to_buf_strided_into) with
@@ -77,7 +74,7 @@ impl<S: StorageBase> Array<S> {
     {
         let shape = self.shape();
         let full_range = dim_arr(shape.len(), |dim| 0..shape[dim]);
-        self.to_ndarray_sub(full_range.as_ref(), &self.read_ctx())
+        self.to_ndarray_sub(full_range.as_ref())
     }
 
     /// Read a rectangular sub-region of the array into a fresh heap-allocated [`ndarray::Array`].
@@ -113,10 +110,10 @@ impl<S: StorageBase> Array<S> {
     ///
     /// # `ReadContext` reuse
     ///
-    /// `context` carries the decoder instance and scratch buffers. Creating these for every read
-    /// is expensive, especially for small windows, so create one context with
-    /// [`read_ctx`](Array::read_ctx), which uses the array's read parameters, and pass it to
-    /// every call. `ReadContext::default()` works too, with default read parameters.
+    /// Each call reads with a [`ReadContext`] of its own, whose scratch buffers are allocated
+    /// new (the decompressor is kept per thread). For many small reads, read into buffers of
+    /// your own with [`to_buf_slice`](Array::to_buf_slice) or
+    /// [`to_buf_strided_into`](Array::to_buf_strided_into), passing them one shared context.
     ///
     /// # Errors
     ///
@@ -128,7 +125,7 @@ impl<S: StorageBase> Array<S> {
     ///
     /// # Examples
     ///
-    /// Stream a large array tile by tile, reusing a single `ReadContext`:
+    /// Stream a large array tile by tile:
     ///
     /// ```
     /// use jix::Array;
@@ -140,15 +137,12 @@ impl<S: StorageBase> Array<S> {
     /// let a = Array::compact_ndarray_with(&data, CompactParams::new().block_shape(&[32, 32])?)?;
     ///
     /// // Walk the array as 64x64 tiles. 32 divides 64, so each call decompresses exactly
-    /// // 2*2 = 4 blocks - no boundary waste. The same ReadContext is reused across all
-    /// // 16 reads, sharing decompressor and scratch buffers.
-    /// let ctx = a.read_ctx();
+    /// // 2*2 = 4 blocks - no boundary waste.
     /// let mut total = 0.0f32;
     /// for tr in 0..4 {
     ///     for tc in 0..4 {
     ///         let tile = a.to_ndarray_sub::<Ix2>(
     ///             &[(tr * 64)..((tr + 1) * 64), (tc * 64)..((tc + 1) * 64)],
-    ///             &ctx,
     ///         )?;
     ///         total += tile.sum();
     ///     }
@@ -167,19 +161,11 @@ impl<S: StorageBase> Array<S> {
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
     /// let scaled = a.map(|x| x * 10i32);
     ///
-    /// let ctx = scaled.read_ctx();
-    /// assert_eq!(
-    ///     scaled.to_ndarray_sub(&[1..3, 1..3], &ctx)?,
-    ///     array![[50, 60], [80, 90]],
-    /// );
+    /// assert_eq!(scaled.to_ndarray_sub(&[1..3, 1..3])?, array![[50, 60], [80, 90]]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     #[inline]
-    pub fn to_ndarray_sub<D>(
-        &self,
-        index: &[Range<u64>],
-        context: &ReadContext,
-    ) -> Result<ndarray::Array<S::Item, D>>
+    pub fn to_ndarray_sub<D>(&self, index: &[Range<u64>]) -> Result<ndarray::Array<S::Item, D>>
     where
         S: Storage,
         D: ndarray::Dimension,
@@ -235,7 +221,7 @@ impl<S: StorageBase> Array<S> {
                 ))
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides) };
-            self.to_buf_strided_checked(&index, context, OutBuf::push(&mut out))?;
+            self.to_buf_strided_checked(&index, OutBuf::push(&mut out), None)?;
         }
         Ok(unsafe { array.assume_init() })
     }
@@ -249,6 +235,14 @@ impl<S: StorageBase> Array<S> {
     ///
     /// Use [`to_buf_strided_into`](Array::to_buf_strided_into) for a strided destination, or
     /// [`to_buf_strided`](Array::to_buf_strided) to let the array hand back a buffer of its own.
+    ///
+    /// # Arguments
+    ///
+    /// - `index` - one half-open range (`start..end`) per dimension, within the array bounds.
+    /// - `buf` - the destination.
+    /// - `context` - read context carrying reusable buffers, decoder state and the read size.
+    ///   `None` creates one for this call, with the read parameters of the array; pass the same one
+    ///   to many reads to reuse its buffers (see [`ReadContext`]).
     ///
     /// # Errors
     ///
@@ -265,17 +259,17 @@ impl<S: StorageBase> Array<S> {
     /// # Examples
     ///
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, ReadContext};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
     ///
-    /// let context = a.read_ctx();
+    /// let context = ReadContext::new_for_array(&a)?;
     /// let mut buf = vec![0u32; 4];
     /// {
     ///     let buf =
     ///         unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 4) };
-    ///     a.to_buf_slice(&[1..3, 1..3], buf, &context)?;
+    ///     a.to_buf_slice(&[1..3, 1..3], buf, Some(&context))?;
     /// }
     /// assert_eq!(buf, vec![5, 6, 8, 9]);
     /// # Ok::<(), jix::Error>(())
@@ -285,7 +279,7 @@ impl<S: StorageBase> Array<S> {
         &self,
         index: &[Range<u64>],
         buf: &mut [u8],
-        context: &ReadContext,
+        context: Option<&ReadContext>,
     ) -> Result<()> {
         let dtype = self.dtype();
         check_ranges(self.shape(), index)?;
@@ -298,7 +292,7 @@ impl<S: StorageBase> Array<S> {
         let strides = default_strides_slice(&size, dtype.itemsize() as usize);
         let index = unsafe { Index::new_unchecked(&start, &size) };
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides) };
-        self.to_buf_strided_checked(&index, context, OutBuf::push(&mut out))?;
+        self.to_buf_strided_checked(&index, OutBuf::push(&mut out), context)?;
         Ok(())
     }
 
@@ -315,6 +309,8 @@ impl<S: StorageBase> Array<S> {
     ///
     /// - `index` - one half-open range (`start..end`) per dimension, within the array bounds.
     /// - `context` - read context carrying reusable buffers, decoder state and the read size.
+    ///   `None` creates one for this call, with the read parameters of the array; pass the same one
+    ///   to many reads to reuse its buffers (see [`ReadContext`]).
     ///
     /// # Alignment
     ///
@@ -335,13 +331,13 @@ impl<S: StorageBase> Array<S> {
     /// The array hands back a buffer, and the strides say where each element lives:
     ///
     /// ```
-    /// use jix::Array;
+    /// use jix::{Array, ReadContext};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
-    /// let context = a.read_ctx();
+    /// let context = ReadContext::new_for_array(&a)?;
     ///
-    /// let buf = a.to_buf_strided(&[1..3, 1..3], &context)?;
+    /// let buf = a.to_buf_strided(&[1..3, 1..3], Some(&context))?;
     /// let (base, strides) = (buf.data_ptr(), buf.strides());
     /// let mut values = Vec::new();
     /// for i in 0..2 {
@@ -357,24 +353,25 @@ impl<S: StorageBase> Array<S> {
     pub fn to_buf_strided<'a>(
         &'a self,
         index: &[Range<u64>],
-        context: &ReadContext,
+        context: Option<&ReadContext>,
     ) -> Result<StridedBuf<'a>> {
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
         check_alloc_size(&size, self.dtype().itemsize() as usize)?;
         if size.contains(&0) {
-            return Ok(self.alloc_empty(&size, context));
+            return Ok(self.alloc_empty(&size));
         }
         let index = unsafe { Index::new_unchecked(&start, &size) };
         let mut slot = None;
-        self.to_buf_strided_checked(&index, context, OutBuf::pull(&mut slot))?;
+        self.to_buf_strided_checked(&index, OutBuf::pull(&mut slot), context)?;
         Ok(slot.expect("a pull read puts its buffer in the slot"))
     }
 
     #[cold]
-    fn alloc_empty(&self, size: &[usize], context: &ReadContext) -> StridedBuf<'static> {
-        let spec = self.storage.spec();
-        alloc_out_buf(context, size, self.dtype(), spec.read_layout_order())
+    fn alloc_empty(&self, size: &[usize]) -> StridedBuf<'static> {
+        let buf = PoolBuf::empty();
+        let strides = dim_arr(size.len(), |_| 0);
+        unsafe { StridedBuf::from_pool(buf, strides) }
     }
 
     /// Read a rectangular sub-region into `out`, at `out`'s own strides.
@@ -389,6 +386,8 @@ impl<S: StorageBase> Array<S> {
     /// - `out` - the destination: writable, with one stride per array dimension, and holding the
     ///   region at its strides without overlap. No alignment is required of it.
     /// - `context` - read context carrying reusable buffers, decoder state and the read size.
+    ///   `None` creates one for this call, with the read parameters of the array; pass the same one
+    ///   to many reads to reuse its buffers (see [`ReadContext`]).
     ///
     /// # Errors
     ///
@@ -409,11 +408,11 @@ impl<S: StorageBase> Array<S> {
     ///
     /// ```
     /// use jix::storage::StridedBuf;
-    /// use jix::Array;
+    /// use jix::{Array, ReadContext};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
-    /// let context = a.read_ctx();
+    /// let context = ReadContext::new_for_array(&a)?;
     ///
     /// // 2x2 destination, column-major: stride 4 bytes down a column, 8 bytes across a row.
     /// let mut dst = [0i32; 4];
@@ -421,7 +420,7 @@ impl<S: StorageBase> Array<S> {
     ///     let mut out = unsafe {
     ///         StridedBuf::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), &[2, 2], &[4, 8], 4)
     ///     };
-    ///     a.to_buf_strided_into(&[1..3, 1..3], &mut out, &context)?;
+    ///     a.to_buf_strided_into(&[1..3, 1..3], &mut out, Some(&context))?;
     /// }
     /// assert_eq!(dst, [5, 8, 6, 9]);
     /// # Ok::<(), jix::Error>(())
@@ -431,7 +430,7 @@ impl<S: StorageBase> Array<S> {
         &self,
         index: &[Range<u64>],
         out: &mut StridedBuf<'_>,
-        context: &ReadContext,
+        context: Option<&ReadContext>,
     ) -> Result<()> {
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
@@ -442,7 +441,7 @@ impl<S: StorageBase> Array<S> {
         }
         let index = unsafe { Index::new_unchecked(&start, &size) };
         check_out_buf_impl(out, &index, itemsize)?;
-        self.to_buf_strided_checked(&index, context, OutBuf::push(&mut out.view_mut()))
+        self.to_buf_strided_checked(&index, OutBuf::push(&mut out.view_mut()), context)
     }
 
     // Like `to_buf_strided` / `to_buf_strided_into`, for an `index` the caller checked against the
@@ -451,10 +450,18 @@ impl<S: StorageBase> Array<S> {
     fn to_buf_strided_checked<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &ReadContext,
         out: OutBuf<'_, 'a>,
+        context: Option<&ReadContext>,
     ) -> Result<()> {
         let spec = self.storage.spec();
+        let thread_ctx;
+        let context = match context {
+            Some(context) => context,
+            None => {
+                thread_ctx = ReadContext::thread_ctx_with(spec.read_params())?;
+                thread_ctx.as_ref()
+            }
+        };
         let single_read = spec.flags().read_tiling() <= ReadTiling::SinglePass || {
             let dtype = self.dtype();
             let nitems = index.size().iter().product::<usize>();
@@ -581,11 +588,11 @@ impl<S: StorageBase> Array<S> {
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?;
-    /// assert_eq!(a.get(&[1, 2], &a.read_ctx())?, 6);
+    /// assert_eq!(a.get(&[1, 2])?, 6);
     /// # Ok::<(), jix::Error>(())
     /// ```
     #[inline]
-    pub fn get(&self, index: &[u64], context: &ReadContext) -> Result<S::Item>
+    pub fn get(&self, index: &[u64]) -> Result<S::Item>
     where
         S: Storage,
     {
@@ -596,7 +603,10 @@ impl<S: StorageBase> Array<S> {
             std::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<S::Item>())
         };
         let mut out = unsafe { StridedBuf::from_slice_mut(buf, dim_arr(index.ndim(), |_| 0)) };
-        let _cache_scope = context.cache_scope(&self.storage.spec().dynamic().arrays_to_cache);
+        let spec = self.storage.spec();
+        let context = ReadContext::thread_ctx_with(spec.read_params())?;
+        let context = context.as_ref();
+        let _cache_scope = context.cache_scope(&spec.dynamic().arrays_to_cache);
         self.storage
             .read_data(&index, context, OutBuf::push(&mut out))?;
         Ok(unsafe { value.assume_init() })
@@ -631,7 +641,7 @@ impl<S: StorageBase> Array<S> {
             InvalidShapeOperation,
             "Cannot take the item of an array of shape {shape:?}"
         );
-        self.get(&[0; NDIM_MAX][..self.ndim()], &self.read_ctx())
+        self.get(&[0; NDIM_MAX][..self.ndim()])
     }
 
     /// Read the entire array into a new heap-allocated `Array<Plain>`.
@@ -755,28 +765,28 @@ mod tests {
     #[test]
     fn to_ndarray_sub_1d_full_range() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], [6], &[3]);
-        let got = a.to_ndarray_sub(&[0..6], &a.read_ctx()).unwrap();
+        let got = a.to_ndarray_sub(&[0..6]).unwrap();
         assert_eq!(got, array![0, 1, 2, 3, 4, 5]);
     }
 
     #[test]
     fn to_ndarray_sub_1d_aligned_second_block() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], [6], &[3]);
-        let got = a.to_ndarray_sub(&[3..6], &a.read_ctx()).unwrap();
+        let got = a.to_ndarray_sub(&[3..6]).unwrap();
         assert_eq!(got, array![3, 4, 5]);
     }
 
     #[test]
     fn to_ndarray_sub_1d_cross_block_boundary() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], [6], &[3]);
-        let got = a.to_ndarray_sub(&[1..5], &a.read_ctx()).unwrap();
+        let got = a.to_ndarray_sub(&[1..5]).unwrap();
         assert_eq!(got, array![1, 2, 3, 4]);
     }
 
     #[test]
     fn to_ndarray_sub_1d_within_single_block() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], [6], &[3]);
-        let got = a.to_ndarray_sub(&[1..2], &a.read_ctx()).unwrap();
+        let got = a.to_ndarray_sub(&[1..2]).unwrap();
         assert_eq!(got, array![1]);
     }
 
@@ -787,18 +797,11 @@ mod tests {
             [2, 6],
             &[2, 3],
         );
-        let ctx = a.read_ctx();
-        assert_eq!(a.get(&[1, 4], &ctx).unwrap(), 10);
+        assert_eq!(a.get(&[1, 4]).unwrap(), 10);
+        assert_eq!(a.get(&[2, 0]).unwrap_err().kind(), ErrorKind::InvalidIndex);
+        assert_eq!(a.get(&[0]).unwrap_err().kind(), ErrorKind::InvalidIndex);
         assert_eq!(
-            a.get(&[2, 0], &ctx).unwrap_err().kind(),
-            ErrorKind::InvalidIndex
-        );
-        assert_eq!(
-            a.get(&[0], &ctx).unwrap_err().kind(),
-            ErrorKind::InvalidIndex
-        );
-        assert_eq!(
-            a.get(&[u64::MAX, 0], &ctx).unwrap_err().kind(),
+            a.get(&[u64::MAX, 0]).unwrap_err().kind(),
             ErrorKind::InvalidIndex
         );
     }
@@ -839,7 +842,7 @@ mod tests {
             [4, 6],
             &[2, 3],
         );
-        let got = a.to_ndarray_sub(&[1..3, 2..5], &a.read_ctx()).unwrap();
+        let got = a.to_ndarray_sub(&[1..3, 2..5]).unwrap();
         assert_eq!(got, array![[8u8, 9, 10], [14, 15, 16]]);
     }
 
@@ -848,12 +851,11 @@ mod tests {
         // A packed destination needs no particular alignment. Run under Miri to check the accesses.
         let src = ndarray::Array2::from_shape_fn((3, 4), |(r, c)| (r * 4 + c) as i32);
         let a = Array::compact_ndarray(&src).unwrap();
-        let ctx = a.read_ctx();
 
         // A byte window starting one byte past a 4-aligned address.
         let mut backing = [0u8; 12 * 4 + 4];
         let off = backing.as_ptr().align_offset(4) + 1;
-        a.to_buf_slice(&[0..3, 0..4], &mut backing[off..off + 12 * 4], &ctx)
+        a.to_buf_slice(&[0..3, 0..4], &mut backing[off..off + 12 * 4], None)
             .unwrap();
 
         let got = (0..12)
@@ -878,23 +880,16 @@ mod tests {
         // stride once any extent is 0 - so an empty read must not depend on them being dense.
         let a = Array::compact_ndarray(&ndarray::array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
         let t = a.view().permute_dims(&[1, 0]);
-        let ctx = t.read_ctx();
         assert_eq!(
-            t.to_ndarray_sub::<Ix2>(&[1..1, 0..2], &ctx)
-                .unwrap()
-                .shape(),
+            t.to_ndarray_sub::<Ix2>(&[1..1, 0..2]).unwrap().shape(),
             &[0, 2]
         );
         assert_eq!(
-            t.to_ndarray_sub::<Ix2>(&[0..3, 1..1], &ctx)
-                .unwrap()
-                .shape(),
+            t.to_ndarray_sub::<Ix2>(&[0..3, 1..1]).unwrap().shape(),
             &[3, 0]
         );
         assert_eq!(
-            t.to_ndarray_sub::<Ix2>(&[2..2, 1..1], &ctx)
-                .unwrap()
-                .shape(),
+            t.to_ndarray_sub::<Ix2>(&[2..2, 1..1]).unwrap().shape(),
             &[0, 0]
         );
     }
@@ -931,8 +926,7 @@ mod tests {
         // Shape [5, 4] with layout order [1, 0]. Flip forwards the layout and allocates its own
         // pull-mode buffer, which must follow it: dim 1 outermost, dim 0 contiguous.
         let f = a.view().permute_dims(&[1, 0]).flip(0);
-        let ctx = f.read_ctx();
-        let buf = f.to_buf_strided(&[0..5, 0..4], &ctx).unwrap();
+        let buf = f.to_buf_strided(&[0..5, 0..4], None).unwrap();
         assert_eq!(buf.strides(), &[4, 20]);
     }
 
@@ -944,7 +938,6 @@ mod tests {
         let params = CompactParams::new().block_shape(&[4, 5]).unwrap();
         let mut a = Array::compact_ndarray_with(&src, params).unwrap();
         a.read_params_mut().set_read_size((16, 64));
-        let ctx = a.read_ctx();
 
         let index = [2..11, 1..9];
         let (rows, cols) = (9usize, 8usize);
@@ -952,7 +945,7 @@ mod tests {
 
         // Pull mode: the array hands back a buffer, and its strides say where each element sits.
         {
-            let buf = a.to_buf_strided(&index, &ctx).unwrap();
+            let buf = a.to_buf_strided(&index, None).unwrap();
             let (base, strides) = (buf.data_ptr(), buf.strides());
             for r in 0..rows {
                 for c in 0..cols {
@@ -979,7 +972,7 @@ mod tests {
                     itemsize,
                 )
             };
-            a.to_buf_strided_into(&index, &mut out, &ctx).unwrap();
+            a.to_buf_strided_into(&index, &mut out, None).unwrap();
         }
         for r in 0..rows {
             for c in 0..cols {
@@ -993,7 +986,7 @@ mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), dst.len() * itemsize)
             };
-            a.to_buf_slice(&index, bytes, &ctx).unwrap();
+            a.to_buf_slice(&index, bytes, None).unwrap();
         }
         let expected = (0..rows)
             .flat_map(|r| (0..cols).map(move |c| at(r, c)))
@@ -1004,8 +997,7 @@ mod tests {
     #[test]
     fn to_buf_strided_empty_range() {
         let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
-        let ctx = a.read_ctx();
-        let buf = a.to_buf_strided(&[1..1, 0..3], &ctx).unwrap();
+        let buf = a.to_buf_strided(&[1..1, 0..3], None).unwrap();
         assert_eq!(buf.strides().len(), 2);
     }
 
@@ -1013,18 +1005,17 @@ mod tests {
     fn empty_reads_write_nothing() {
         let a = Array::plain_ndarray(array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
         let sum = a.view() + a.view();
-        let ctx = sum.read_ctx();
         for (index, shape) in [([1..1, 0..3], [0, 3]), ([0..2, 3..3], [2, 0])] {
-            let read = sum.to_ndarray_sub::<ndarray::Ix2>(&index, &ctx).unwrap();
+            let read = sum.to_ndarray_sub::<ndarray::Ix2>(&index).unwrap();
             assert_eq!(read.shape(), shape);
-            assert!(sum.to_buf_strided(&index, &ctx).is_ok());
-            sum.to_buf_slice(&index, &mut [], &ctx).unwrap();
+            assert!(sum.to_buf_strided(&index, None).is_ok());
+            sum.to_buf_slice(&index, &mut [], None).unwrap();
 
             let mut dst = [7i32; 6];
             let mut out = unsafe {
                 StridedBuf::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), &[2, 3], &[12, 4], 4)
             };
-            sum.to_buf_strided_into(&index, &mut out, &ctx).unwrap();
+            sum.to_buf_strided_into(&index, &mut out, None).unwrap();
             assert_eq!(dst, [7; 6]);
         }
     }
@@ -1032,7 +1023,6 @@ mod tests {
     #[test]
     fn to_buf_strided_rejects_a_bad_destination() {
         let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]]).unwrap();
-        let ctx = a.read_ctx();
         let itemsize = size_of::<i32>();
         let mut dst = [0i32; 4];
 
@@ -1046,7 +1036,7 @@ mod tests {
             )
         };
         let err = a
-            .to_buf_strided_into(&[0..2, 0..2], &mut out, &ctx)
+            .to_buf_strided_into(&[0..2, 0..2], &mut out, None)
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
 
@@ -1060,7 +1050,7 @@ mod tests {
             )
         };
         let err = a
-            .to_buf_strided_into(&[0..2, 0..2], &mut out, &ctx)
+            .to_buf_strided_into(&[0..2, 0..2], &mut out, None)
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
     }
@@ -1072,7 +1062,6 @@ mod tests {
         let mut a =
             Array::compact_ndarray_with(&ndarray::Array2::<i32>::ones((8, 8)), params).unwrap();
         a.read_params_mut().set_read_size((16, 64));
-        let ctx = a.read_ctx();
         let itemsize = size_of::<i32>();
         // A 4x8 destination for an 8x8 read: large enough for the first pieces only. It is
         // rejected before any piece is written.
@@ -1086,7 +1075,7 @@ mod tests {
             )
         };
         let err = a
-            .to_buf_strided_into(&[0..8, 0..8], &mut out, &ctx)
+            .to_buf_strided_into(&[0..8, 0..8], &mut out, None)
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
         assert_eq!(dst, [0; 32]);
@@ -1095,7 +1084,6 @@ mod tests {
     #[test]
     fn to_ndarray_checks_the_requested_ndim() {
         let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
-        let ctx = a.read_ctx();
 
         // A static ndim must match the array's; a dynamic one always does.
         assert_eq!(a.to_ndarray::<Ix2>().unwrap(), array![[1, 2, 3], [4, 5, 6]]);
@@ -1106,13 +1094,13 @@ mod tests {
         for err in [
             a.to_ndarray::<Ix1>().unwrap_err(),
             a.to_ndarray::<Ix3>().unwrap_err(),
-            a.to_ndarray_sub::<Ix1>(&[0..1, 0..2], &ctx).unwrap_err(),
+            a.to_ndarray_sub::<Ix1>(&[0..1, 0..2]).unwrap_err(),
         ] {
             assert_eq!(err.kind(), ErrorKind::InvalidShapeOperation);
         }
         // An invalid index is reported before the ndim mismatch.
         assert_eq!(
-            a.to_ndarray_sub::<Ix1>(&[0..1], &ctx).unwrap_err().kind(),
+            a.to_ndarray_sub::<Ix1>(&[0..1]).unwrap_err().kind(),
             ErrorKind::InvalidIndex
         );
     }
@@ -1122,17 +1110,16 @@ mod tests {
         let b = Array::compact_ndarray(&array![[[7u8]]])
             .unwrap()
             .broadcast(&[0, 1 << 20, 1 << 20]);
-        let ctx = b.read_ctx();
         let idx = [0..0, 0..(1u64 << 20), 0..(1 << 20)];
         let strided = b
-            .to_buf_strided(&idx, &ctx)
+            .to_buf_strided(&idx, None)
             .map(|_| ())
             .map_err(|e| e.kind());
         let sub = b
-            .to_ndarray_sub::<IxDyn>(&idx, &ctx)
+            .to_ndarray_sub::<IxDyn>(&idx)
             .map(|_| ())
             .map_err(|e| e.kind());
-        let slice = b.to_buf_slice(&idx, &mut [], &ctx).map_err(|e| e.kind());
+        let slice = b.to_buf_slice(&idx, &mut [], None).map_err(|e| e.kind());
         assert_eq!(strided, sub);
         assert_eq!(slice, sub);
     }
@@ -1144,8 +1131,7 @@ mod tests {
             .unwrap()
             .broadcast(&[m, m, m]);
         let s = x.view() + x.view();
-        let ctx = s.read_ctx();
-        let r = s.to_buf_strided(&[0..m, 0..m, 0..m], &ctx);
+        let r = s.to_buf_strided(&[0..m, 0..m, 0..m], None);
         assert_eq!(
             r.err().map(|e| e.kind()),
             Some(ErrorKind::InvalidShapeOperation)

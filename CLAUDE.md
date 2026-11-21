@@ -139,20 +139,26 @@ Nothing runs until you materialize via `.to_ndarray()`, `.compact()`, or `.write
   main backends).
 - `Plain<...>` - zero-copy view over a contiguous/strided in-memory buffer, so plain ndarrays can
   participate in the same op chains.
-- `ArrayAny` (= `Array<StorageAny>`) - type-erased (`Arc<dyn StorageBase>`) for holding mixed
-  storage types in one collection; loses compile-time element-wise ops.
+- `ArrayAny<ET = TypeDyn>` (= `Array<StorageAny<ET>>`) - storage-erased (`Arc<dyn StorageBase>`)
+  for holding mixed storage types in one collection; keeps the element type `ET`, so an
+  `ArrayAny<f32>` still has element-wise ops.
 
 ### Block storage & codec pipeline
 
 Arrays are an n-d grid of fixed-size blocks, each compressed independently; `BlockStorage`
 (`jix/src/storage/block.rs`) tracks per-block offsets for random access, and a `ReadContext` carries
-an optional block cache. When no block shape is given, one is auto-selected according to the CPU cache sizes.
+scratch buffers, a zstd decompressor, the read params and a read cache. `StorageBase::read_data`
+takes one explicitly; the `to_buf_*` methods take an `Option<&ReadContext>`, and with `None` (as do
+all other `Array` read/compact/write methods) create one per call that borrows a thread-local
+decompressor (`ReadContext::thread_ctx_with`). When no block shape is given, one is auto-selected
+according to the CPU cache sizes.
 Codec pipeline (`jix/src/codec/`): `raw bytes -> filters (byte-shuffle default, bit-shuffle) -> codec
 (zstd) -> stored bytes`, reversed on read. Write settings (block layout, codec, level, filters) live in
 `CompactParams`; the codec and filters are serialized into the archive, so readers never need to know
 them in advance. Read-time settings such as the read size (how much data one read pass pulls) live
 in `ReadParams` and are never stored: `ReadContext::read_params_mut`, or `read_params_mut` on a leaf
-array (`CompactArrayMethods` / `PlainArrayMethods`), whose `read_params()` `read_ctx()` starts from.
+array (`CompactArrayMethods` / `PlainArrayMethods`), whose `read_params()` the reads without a
+context use.
 
 ### Type system (`jix/src/dtype.rs`)
 

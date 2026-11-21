@@ -11,7 +11,7 @@ use crate::PyArray;
 use crate::dtype::dtype_from_numpy;
 use crate::ops::cast_impl;
 use crate::ops::common::{Precision, Rank};
-use crate::util::{DimArray, IntoPyResult, check_ndim, numpy_items};
+use crate::util::{DimArray, IntoAnyDyn, IntoPyResult, check_ndim, numpy_items};
 
 pub(crate) enum Operand {
     PyArray(Py<PyArray>),
@@ -197,7 +197,7 @@ impl Operand {
                     let array = jix_core::Array::from_storage(
                         jix_core::__private::Scalar::new(value, shape).into_py_result()?,
                     );
-                    Ok(array.into_any())
+                    Ok(array.into_any_dyn())
                 }
                 #[allow(clippy::unnecessary_cast)]
                 let array = match value {

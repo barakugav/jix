@@ -228,7 +228,7 @@ impl<S: StorageBase> Array<S> {
 mod tests {
     use ndarray::{Ix2, array};
 
-    use crate::{Array, CompactArray, IntoDimension, ReadContext, StorageBase};
+    use crate::{Array, CompactArray, IntoDimension, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -433,7 +433,7 @@ mod tests {
     fn sub_read_1d_partial() {
         let got = make(vec![10, 20, 30, 40, 50], [5u64])
             .flip([0])
-            .to_ndarray_sub(&[1..4], &ReadContext::default())
+            .to_ndarray_sub(&[1..4])
             .unwrap();
         assert_eq!(got, array![40, 30, 20]);
     }
@@ -442,7 +442,7 @@ mod tests {
     fn sub_read_2d_dim0_partial_rows() {
         let got = make(arange(9), [3u64, 3])
             .flip([0])
-            .to_ndarray_sub(&[0..2, 0..3], &ReadContext::default())
+            .to_ndarray_sub(&[0..2, 0..3])
             .unwrap();
         assert_eq!(got, array![[6, 7, 8], [3, 4, 5]]);
     }
@@ -451,7 +451,7 @@ mod tests {
     fn sub_read_2d_both_dims_corner() {
         let got = make(arange(12), [3u64, 4])
             .flip([0, 1])
-            .to_ndarray_sub(&[0..2, 1..3], &ReadContext::default())
+            .to_ndarray_sub(&[0..2, 1..3])
             .unwrap();
         assert_eq!(got, array![[10, 9], [6, 5]]);
     }
@@ -460,7 +460,7 @@ mod tests {
     fn sub_read_empty_range() {
         let got = make(arange(8), [2u64, 4])
             .flip([0])
-            .to_ndarray_sub::<Ix2>(&[1..1, 0..4], &ReadContext::default())
+            .to_ndarray_sub::<Ix2>(&[1..1, 0..4])
             .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
@@ -470,7 +470,7 @@ mod tests {
         // Single-element read still goes through the flip path.
         let got = make(arange(5), [5u64])
             .flip([0])
-            .to_ndarray_sub(&[0..1], &ReadContext::default())
+            .to_ndarray_sub(&[0..1])
             .unwrap();
         assert_eq!(got, array![4]);
     }

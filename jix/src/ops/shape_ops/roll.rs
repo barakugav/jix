@@ -205,7 +205,7 @@ impl<S: StorageBase> Array<S> {
 mod tests {
     use ndarray::{Ix2, array};
 
-    use crate::{Array, CompactArray, IntoDimension, ReadContext, StorageBase};
+    use crate::{Array, CompactArray, IntoDimension, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -369,7 +369,7 @@ mod tests {
         // [0,1,2,3,4] roll +2 -> [3, 4, 0, 1, 2]. Output [2..5) = [0, 1, 2] (no wrap).
         let got = make(arange(5), [5u64])
             .roll(2, 0)
-            .to_ndarray_sub(&[2..5], &ReadContext::default())
+            .to_ndarray_sub(&[2..5])
             .unwrap();
         assert_eq!(got, array![0, 1, 2]);
     }
@@ -379,7 +379,7 @@ mod tests {
         // [0,1,2,3,4] roll +2 -> [3, 4, 0, 1, 2]. Output [0..2) = [3, 4] (no wrap).
         let got = make(arange(5), [5u64])
             .roll(2, 0)
-            .to_ndarray_sub(&[0..2], &ReadContext::default())
+            .to_ndarray_sub(&[0..2])
             .unwrap();
         assert_eq!(got, array![3, 4]);
     }
@@ -389,7 +389,7 @@ mod tests {
         // [0,1,2,3,4] roll +2 -> [3, 4, 0, 1, 2]. Output [1..4) = [4, 0, 1] (wraps at i=2).
         let got = make(arange(5), [5u64])
             .roll(2, 0)
-            .to_ndarray_sub(&[1..4], &ReadContext::default())
+            .to_ndarray_sub(&[1..4])
             .unwrap();
         assert_eq!(got, array![4, 0, 1]);
     }
@@ -400,7 +400,7 @@ mod tests {
         // Sub rows [0..2), cols [0..3) -> [[6,7,8],[0,1,2]]. Wraps at i=1.
         let got = make(arange(9), [3u64, 3])
             .roll(1, 0)
-            .to_ndarray_sub(&[0..2, 0..3], &ReadContext::default())
+            .to_ndarray_sub(&[0..2, 0..3])
             .unwrap();
         assert_eq!(got, array![[6, 7, 8], [0, 1, 2]]);
     }
@@ -411,7 +411,7 @@ mod tests {
         // Sub rows [0..2), cols [0..3) -> [[3,0,1],[7,4,5]]. Wraps at i=1 on dim 1.
         let got = make(arange(8), [2u64, 4])
             .roll(1, 1)
-            .to_ndarray_sub(&[0..2, 0..3], &ReadContext::default())
+            .to_ndarray_sub(&[0..2, 0..3])
             .unwrap();
         assert_eq!(got, array![[3, 0, 1], [7, 4, 5]]);
     }
@@ -420,7 +420,7 @@ mod tests {
     fn sub_read_empty_range() {
         let got = make(arange(8), [2u64, 4])
             .roll(1, 0)
-            .to_ndarray_sub::<Ix2>(&[1..1, 0..4], &ReadContext::default())
+            .to_ndarray_sub::<Ix2>(&[1..1, 0..4])
             .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
@@ -430,7 +430,7 @@ mod tests {
         // [10,20,30,40,50] roll +2 -> [40, 50, 10, 20, 30]. Position 1 == 50.
         let got = make(vec![10, 20, 30, 40, 50], [5u64])
             .roll(2, 0)
-            .to_ndarray_sub(&[1..2], &ReadContext::default())
+            .to_ndarray_sub(&[1..2])
             .unwrap();
         assert_eq!(got, array![50]);
     }

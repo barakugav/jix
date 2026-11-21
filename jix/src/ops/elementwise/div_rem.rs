@@ -1435,13 +1435,12 @@ mod tests {
                     assert_eq!(err.message(), "integer division or modulo by zero");
                     // Each zero divisor alone: in the bulk part of the loop, and in its scalar
                     // tail.
-                    let ctx = q.read_ctx();
                     for range in [0..n as u64 - 1, 301..n as u64] {
-                        let err = q.to_ndarray_sub::<ndarray::Ix1>(&[range], &ctx).unwrap_err();
+                        let err = q.to_ndarray_sub::<ndarray::Ix1>(&[range]).unwrap_err();
                         assert_eq!(err.kind(), crate::error::ErrorKind::Arithmetic);
                     }
                     // Only the elements read count.
-                    let mid = q.to_ndarray_sub(&[301..n as u64 - 1], &ctx).unwrap();
+                    let mid = q.to_ndarray_sub(&[301..n as u64 - 1]).unwrap();
                     assert_eq!(mid, expected.slice(ndarray::s![301..n - 1]));
                 }
             }
@@ -1616,7 +1615,7 @@ mod tests {
 
             let q = za / zb;
             let index = q.shape().iter().map(|&d| 0..d).collect::<Vec<_>>();
-            let res = q.to_ndarray_sub::<IxDyn>(&index, &q.read_ctx());
+            let res = q.to_ndarray_sub::<IxDyn>(&index);
             if nd_b.iter().any(|&y| y == 0) {
                 proptest::prop_assert_eq!(res.unwrap_err().kind(), ErrorKind::Arithmetic);
             } else {

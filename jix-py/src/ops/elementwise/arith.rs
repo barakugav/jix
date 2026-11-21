@@ -8,6 +8,7 @@ use crate::ops::common::{
     CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar, broadcast_operands, define_op1,
     define_op1_desc, define_op1_table, define_op2, define_op2_table,
 };
+use crate::util::IntoAnyDyn;
 
 /// Arithmetic negation applied element-wise.
 ///
@@ -49,10 +50,10 @@ use crate::ops::common::{
 pub fn negative<'py>(array: &Bound<'py, PyAny>) -> PyResult<PyArray> {
     static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ()>> = LazyLock::new(|| {
         let mut fns = vec![
-            OpFnDescriptor::new1::<u8>(CastKind::None, |a| Ok((-a.cast::<i8>()).into_any())),
-            OpFnDescriptor::new1::<u16>(CastKind::None, |a| Ok((-a.cast::<i16>()).into_any())),
-            OpFnDescriptor::new1::<u32>(CastKind::None, |a| Ok((-a.cast::<i32>()).into_any())),
-            OpFnDescriptor::new1::<u64>(CastKind::None, |a| Ok((-a.cast::<i64>()).into_any())),
+            OpFnDescriptor::new1::<u8>(CastKind::None, |a| Ok((-a.cast::<i8>()).into_any_dyn())),
+            OpFnDescriptor::new1::<u16>(CastKind::None, |a| Ok((-a.cast::<i16>()).into_any_dyn())),
+            OpFnDescriptor::new1::<u32>(CastKind::None, |a| Ok((-a.cast::<i32>()).into_any_dyn())),
+            OpFnDescriptor::new1::<u64>(CastKind::None, |a| Ok((-a.cast::<i64>()).into_any_dyn())),
         ];
         fns.extend(define_op1_desc!(
             Neg,
@@ -226,7 +227,7 @@ macro_rules! unary_shortcut_desc {
                 crate::ops::common::OpFnDescriptor::new2::<$a_ty, $b_ty>(
                     crate::ops::common::CastKind::Safe,
                     |$x, _b| {
-                        let res = { $f }.map(|res| res.into_any());
+                        let res = { $f }.map(crate::util::IntoAnyDyn::into_any_dyn);
                         <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
                     },
                 ),

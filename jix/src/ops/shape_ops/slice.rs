@@ -610,7 +610,7 @@ mod tests {
     fn stepped_slice_pull_returns_strided_view_plain() {
         // Plain-backed inner (`ZeroCopy`), so a stepped slice lends a strided view.
         let s = plain6x4().slice((SliceItem::new(None, None, 2), ..)); // rows 0, 2, 4
-        let ctx = s.read_ctx();
+        let ctx = ReadContext::new_for_array(&s).unwrap();
         let view = s
             .storage()
             .read_data_pull(&Index::new(&[0, 0], &[3, 4]).unwrap(), &ctx)
@@ -636,7 +636,7 @@ mod tests {
     #[test]
     fn stepped_slice_pull_subregion_plain() {
         let s = plain6x4().slice((SliceItem::new(None, None, 2), ..)); // rows 0, 2, 4
-        let ctx = s.read_ctx();
+        let ctx = ReadContext::new_for_array(&s).unwrap();
         // Output sub-region [1..3, 1..3] -> orig rows 2 & 4, cols 1 & 2.
         let view = s
             .storage()
@@ -784,7 +784,7 @@ mod tests {
     fn sub_read_within_contiguous_slice() {
         let got = make2d(arange(12), 3, 4)
             .slice((1..3, ..))
-            .to_ndarray_sub(&[0..1, 0..4], &ReadContext::default())
+            .to_ndarray_sub(&[0..1, 0..4])
             .unwrap();
         assert_eq!(got, array![[4, 5, 6, 7]]);
     }
@@ -793,7 +793,7 @@ mod tests {
     fn sub_read_within_strided_slice() {
         let got = make2d(arange(48), 6, 8)
             .slice((.., SliceItem::new(None, None, 2)))
-            .to_ndarray_sub(&[0..1, 0..4], &ReadContext::default())
+            .to_ndarray_sub(&[0..1, 0..4])
             .unwrap();
         assert_eq!(got, array![[0, 2, 4, 6]]);
     }

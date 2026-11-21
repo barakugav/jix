@@ -481,6 +481,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::Select;
+    use crate::ReadContext;
     use crate::array::Array;
     use crate::dtype::Dtyped;
     use crate::scalar::bool8;
@@ -892,7 +893,7 @@ mod tests {
             Array::compact_ndarray_with(x, params()).unwrap(),
             Array::compact_ndarray_with(y, params()).unwrap(),
         );
-        let ctx = view.read_ctx();
+        let ctx = ReadContext::new_for_array(&view).unwrap();
         let storage = view.into_storage();
 
         // Destination byte strides: `inner_gap` slots on the innermost dim, propagated outward so

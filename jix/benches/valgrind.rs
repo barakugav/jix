@@ -42,7 +42,7 @@ fn plain_pair() -> (PlainArray<i32>, PlainArray<i32>) {
 #[library_benchmark]
 #[bench::default(setup = compact)]
 fn read_compact_item(a: CompactArray<i32>) -> i32 {
-    black_box(a.get(&ITEM, &a.read_ctx()).unwrap())
+    black_box(a.get(&ITEM).unwrap())
 }
 
 #[library_benchmark]
@@ -54,7 +54,7 @@ fn read_compact_full(a: CompactArray<i32>) -> ndarray::Array2<i32> {
 #[library_benchmark]
 #[bench::default(setup = plain)]
 fn read_plain_item(a: PlainArray<i32>) -> i32 {
-    black_box(a.get(&ITEM, &a.read_ctx()).unwrap())
+    black_box(a.get(&ITEM).unwrap())
 }
 
 #[library_benchmark]
@@ -66,7 +66,7 @@ fn read_plain_full(a: PlainArray<i32>) -> ndarray::Array2<i32> {
 #[library_benchmark]
 #[bench::default(setup = plain)]
 fn op1_neg_plain_item(a: PlainArray<i32>) -> i32 {
-    black_box(a.view().neg().get(&ITEM, &a.read_ctx()).unwrap())
+    black_box(a.view().neg().get(&ITEM).unwrap())
 }
 
 #[library_benchmark]
@@ -78,7 +78,7 @@ fn op1_neg_plain_full(a: PlainArray<i32>) -> ndarray::Array2<i32> {
 #[library_benchmark]
 #[bench::default(setup = plain_pair)]
 fn op2_add_plain_item((a, b): (PlainArray<i32>, PlainArray<i32>)) -> i32 {
-    black_box((a.view() + b.view()).get(&ITEM, &a.read_ctx()).unwrap())
+    black_box((a.view() + b.view()).get(&ITEM).unwrap())
 }
 
 #[library_benchmark]

@@ -1458,6 +1458,7 @@ pub(crate) mod tests {
 
     use proptest::prelude::*;
 
+    use crate::ReadContext;
     use crate::array::Array;
 
     /// Per-dtype comparison policy for the reduction property tests.
@@ -1931,7 +1932,7 @@ pub(crate) mod tests {
         let out_shape: Vec<u64> = reduced.shape().to_vec();
         let full_index: Vec<std::ops::Range<u64>> = out_shape.iter().map(|&s| 0..s).collect();
         let n_out: usize = out_shape.iter().product::<u64>() as usize;
-        let ctx = reduced.read_ctx();
+        let ctx = ReadContext::new_for_array(&reduced).unwrap();
         let storage = reduced.into_storage();
 
         let mut buf = vec![0i64; n_out.max(1)];
@@ -1969,7 +1970,7 @@ pub(crate) mod tests {
         let nd = ndarray::ArrayD::from_shape_vec(vec![3usize, 4], (0..12i32).collect()).unwrap();
         let za = Array::compact_ndarray(&nd).unwrap();
         let reduced = za.view().sum([1usize]);
-        let ctx = reduced.read_ctx();
+        let ctx = ReadContext::new_for_array(&reduced).unwrap();
         let storage = reduced.into_storage();
 
         // 3 i64 outputs, at `stride` bytes apart, starting `misalign` bytes past an 8-aligned
@@ -2027,9 +2028,8 @@ pub(crate) mod tests {
                 .unwrap();
         let za = Array::compact_ndarray(&nd).unwrap();
         let reduced = za.view().max(1usize); // output shape [5]
-        let ctx = reduced.read_ctx();
         // An empty sub-range along the (sole) output dim.
-        let got = reduced.to_ndarray_sub::<Ix1>(&[1..1], &ctx).unwrap();
+        let got = reduced.to_ndarray_sub::<Ix1>(&[1..1]).unwrap();
         assert_eq!(got.shape(), &[0]);
     }
 
@@ -2137,7 +2137,7 @@ pub(crate) mod tests {
         za.read_params_mut().set_read_size((32, 64));
         let reduced = za.view().sum(1usize); // [4, 4] i64
         let index = [0..4u64, 0..4];
-        let ctx = reduced.read_ctx();
+        let ctx = ReadContext::new_for_array(&reduced).unwrap();
         let storage = reduced.into_storage();
 
         // Reference: a plain contiguous read.
@@ -2203,7 +2203,7 @@ pub(crate) mod tests {
         let nd = ndarray::ArrayD::from_shape_vec(vec![3usize, 4], (0..12i32).collect()).unwrap();
         let za = Array::compact_ndarray(&nd).unwrap();
         let reduced = za.view().var(1usize, 0.0); // [3] f64
-        let ctx = reduced.read_ctx();
+        let ctx = ReadContext::new_for_array(&reduced).unwrap();
         let storage = reduced.into_storage();
 
         let mut expected = vec![0f64; 3];
@@ -2405,7 +2405,7 @@ pub(crate) mod tests {
         let n = (1u64 << 32) / 24 + 1;
         let a = Array::compact_ndarray(&array![[1.0f32]]).unwrap();
         let v = a.broadcast(&[n, 1]).var(1, 0.0);
-        let ctx = crate::ReadContext::default();
+        let ctx = ReadContext::default();
         let size = [n as usize];
         let index = crate::storage::Index::new(&[0], &size).unwrap();
         assert!(v.storage().read_data_pull(&index, &ctx).is_err());

@@ -100,6 +100,12 @@ impl BufferPool {
 /// [`BufferPool::return_buf`]. Dropping it frees the allocation instead.
 pub(crate) struct PoolBuf(RawAlignedBytes);
 impl PoolBuf {
+    pub(crate) fn empty() -> Self {
+        Self(unsafe {
+            RawAlignedBytes::new_unchecked(Alignment::new(CACHE_LINE_SIZE).unwrap().as_usize())
+        })
+    }
+
     #[inline(always)]
     pub(crate) fn as_slice(&self) -> &[u8] {
         // SAFETY: the allocation holds `capacity` bytes.

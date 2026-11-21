@@ -1,7 +1,6 @@
 use crate::dtype::Dtype;
-use crate::error::Result;
 use crate::storage::{ReadParams, StorageAny};
-use crate::{ArrayAny, ElementType, ReadContext, StorageBase};
+use crate::{ArrayAny, ElementType, StorageBase};
 
 mod construct;
 
@@ -219,47 +218,11 @@ impl<S: StorageBase> Array<S> {
             .unwrap_or_else(|| self.storage.dtype())
     }
 
-    /// Create a [`ReadContext`] with the read parameters of this array, e.g. its read size.
-    ///
-    /// A context holds reusable buffers and a decompressor instance; reuse one across repeated
-    /// reads to share the allocation and setup cost. [`to_ndarray`](Array::to_ndarray) builds one
-    /// internally; [`to_ndarray_sub`](Array::to_ndarray_sub), [`to_buf_slice`](Array::to_buf_slice)
-    /// and [`to_buf_strided`](Array::to_buf_strided) take one.
-    ///
-    /// Any context, e.g. `ReadContext::default()`, gives correct results; this one uses the
-    /// array's own read parameters.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the context cannot be created.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use jix::Array;
-    /// use ndarray::{array, Ix2};
-    ///
-    /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
-    /// let context = a.read_ctx();
-    /// // Reuse the same context for multiple reads, sharing buffers.
-    /// for row in 0..3 {
-    ///     let row_data = a.to_ndarray_sub::<Ix2>(&[row..(row + 1), 0..3], &context)?;
-    ///     println!("row sum: {}", row_data.sum());
-    /// }
-    /// # Ok::<(), jix::Error>(())
-    /// ```
-    pub fn read_ctx(&self) -> ReadContext {
-        self.try_read_ctx().expect("failed to create read context")
-    }
-    fn try_read_ctx(&self) -> Result<ReadContext> {
-        ReadContext::new(self.read_params().clone())
-    }
-
     /// The read parameters of this array, e.g. its read size.
     ///
-    /// [`read_ctx`](Array::read_ctx) starts from them, and [`compact`](Array::compact) keeps
-    /// them. A lazy view takes them from its input (a view over several arrays takes them from one
-    /// of them, usually the first). Change them on a compact or plain array with
+    /// Reads without a [`ReadContext`](crate::ReadContext) use them, and [`compact`](Array::compact)
+    /// keeps them. A lazy view takes them from its input (a view over several arrays takes them
+    /// from one of them, usually the first). Change them on a compact or plain array with
     /// `read_params_mut`, e.g.
     /// [`CompactArrayMethods::read_params_mut`](crate::storage::CompactArrayMethods::read_params_mut).
     #[inline]
@@ -292,8 +255,9 @@ impl<S: StorageBase> Array<S> {
     /// Convert this array into a type-erased [`ArrayAny`](crate::ArrayAny).
     ///
     /// The storage is wrapped in an `Arc` and hidden behind [`StorageAny`], so the
-    /// resulting array can be stored alongside arrays of other concrete storage types.
-    pub fn into_any(self) -> ArrayAny
+    /// resulting array can be stored alongside arrays of other concrete storage types. The
+    /// element type is kept; erase it with [`into_typed_dyn`](Array::into_typed_dyn).
+    pub fn into_any(self) -> ArrayAny<S::ElementType>
     where
         S: StorageBase + std::any::Any + Send + Sync + 'static,
     {
@@ -482,7 +446,7 @@ pub(crate) mod tests {
         assert!(make().view().into_typed_dyn().is_compact());
         assert!(make().into_any().is_compact());
         assert!(make().into_any().into_any().is_compact());
-        assert!(make().into_any().into_typed::<i32>().unwrap().is_compact());
+        assert!(make().into_any().into_typed_dyn().is_compact());
 
         // Lazy ops are not compact, also when type-erased.
         let a = make();

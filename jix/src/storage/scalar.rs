@@ -259,7 +259,7 @@ mod tests {
     fn broadcast_2d_subregion_read() {
         let got = plain_scalar(42i32, &[5, 5])
             .unwrap()
-            .to_ndarray_sub(&[1..3, 2..4], &ReadContext::default())
+            .to_ndarray_sub(&[1..3, 2..4])
             .unwrap();
         assert_eq!(got, array![[42i32, 42], [42, 42]]);
     }

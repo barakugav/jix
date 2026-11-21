@@ -208,7 +208,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
 ///         `.write(b)` must only access `b` during the call, and must not keep `b` or any view of
 ///         it (a slice, `np.frombuffer(b)`, ...) after it returns. `b` points into jix's memory and
 ///         its release after the call is best effort: a view kept past it reads freed memory.
-///     append: When `False` (default), the file is created anew and must not already exist.
+///     append: When `False` (default), the file is created and must not already exist.
 ///         When `True`, the array is appended to an existing file (or a new one is created).
 ///         Ignored when `path_or_writer` is a file-like object.
 ///     params: A dictionary with the optional keys `block_shape`, `block_shape_fixed_dims`,
@@ -320,11 +320,7 @@ fn write_array_impl(
     mut writer: impl Write + Seek,
     params: CompactParams,
 ) -> PyResult<()> {
-    let context = array.read_ctx()?;
-    array
-        .arr
-        .write_to(&mut writer, params, context.as_ref())
-        .into_py_result()?;
+    array.arr.write_to(&mut writer, params).into_py_result()?;
     Ok(writer.flush()?)
 }
 

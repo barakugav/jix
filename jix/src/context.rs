@@ -1,7 +1,6 @@
-use std::cell::{Cell, RefCell, UnsafeCell};
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
-use crate::DimDyn;
 use crate::codec::{Decoder, DecoderCodecConfig};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
@@ -10,31 +9,44 @@ use crate::storage::params::{ReadParams, ReadSize};
 use crate::storage::{Index, OutBuf, OutBufInner, StridedBuf, write_out_buf_slot};
 use crate::util::buf_pool::{BufferPool, PoolBuf};
 use crate::util::{DimArray, SliceExt};
+use crate::{Array, DimDyn, StorageBase};
 
 /// A context with reusable buffers and a long-lived decoder instance.
 ///
-/// Pass one `ReadContext` to many successive reads: it saves allocating scratch buffers and
-/// initializing a decoder on every block read, a cost that matters most for small blocks.
+/// Pass one `ReadContext` to many successive reads (the `to_buf_*` methods of [`Array`] take one):
+/// it saves allocating scratch buffers on every read, a cost that matters most for small reads.
+/// Reads without one, and the other read methods, create one per call with the read parameters of
+/// the array, borrowing the decompressor of the current thread (see [`ReadContext::thread_ctx`]).
+/// The read parameters of a context override the ones of the array.
 ///
 /// `ReadContext` is `!Sync`: for concurrent reads, create one per thread.
 ///
 /// # Obtaining a `ReadContext`
 ///
-/// The preferred way is [`Array::read_ctx()`](crate::Array::read_ctx), which picks up the read
-/// parameters of the array, such as its read size (see [`ReadParams`]):
+/// The preferred way is [`ReadContext::new_for_array`], which picks up the read parameters of the
+/// array, such as its read size (see [`ReadParams`]):
 ///
 /// ```
-/// use jix::Array;
+/// use jix::{Array, ReadContext};
 /// use ndarray::array;
 ///
 /// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 ///
-/// // read_ctx() takes the read size of the array.
-/// let ctx = za.read_ctx();
-/// let out = za.to_ndarray_sub(&[1..3], &ctx)?;
-/// assert_eq!(out, array![2, 3]);
+/// // new_for_array() takes the read size of the array.
+/// let ctx = ReadContext::new_for_array(&za)?;
+/// // Reuse it, and its scratch buffers, for many reads.
+/// for start in 0..3 {
+///     let mut out = [0u8; 8];
+///     za.to_buf_slice(&[start..start + 2], &mut out, Some(&ctx))?;
+///     assert_eq!(out[0] as u64, start + 1);
+/// }
 /// # Ok::<(), jix::Error>(())
 /// ```
+///
+/// A context made by [`new`](ReadContext::new), [`new_for_array`](ReadContext::new_for_array) or
+/// [`default`](ReadContext::default) creates its own decompressor on its first block read, and
+/// keeps it until dropped. [`ReadContext::thread_ctx`] borrows the one of the current thread
+/// instead.
 ///
 /// `ReadContext::default()` creates a context independent of any array:
 /// ```
@@ -42,12 +54,13 @@ use crate::util::{DimArray, SliceExt};
 /// use ndarray::array;
 ///
 /// let za = Array::compact_ndarray(&array![42i32, 17, 6, 99, 51])?;
-/// let out = za.to_ndarray_sub(&[0..3], &ReadContext::default())?;
-/// assert_eq!(out, array![42, 17, 6]);
+/// let mut out = [0u8; 4];
+/// za.to_buf_slice(&[2..3], &mut out, Some(&ReadContext::default()))?;
+/// assert_eq!(out, [6, 0, 0, 0]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct ReadContext {
-    pub(crate) decompressor: UnsafeCell<Option<zstd::bulk::Decompressor<'static>>>,
+    pub(crate) decompressor: RefCell<Option<zstd::bulk::Decompressor<'static>>>,
     pub(crate) buffer_pool: BufferPool,
 
     /// The read cache of the current cache scope, `None` if the scope has no arrays to cache.
@@ -65,11 +78,11 @@ pub struct ReadContext {
 impl ReadContext {
     /// Creates a new `ReadContext` configured with the given read parameters.
     ///
-    /// Prefer [`Array::read_ctx()`](crate::Array::read_ctx) over calling this directly - it
-    /// uses the read parameters of the array.
-    pub(crate) fn new(params: ReadParams) -> Result<Self> {
+    /// Prefer [`ReadContext::new_for_array`] over calling this directly - it uses the read
+    /// parameters of the array.
+    pub fn new(params: ReadParams) -> Result<Self> {
         Ok(Self {
-            decompressor: UnsafeCell::new(None),
+            decompressor: RefCell::new(None),
             buffer_pool: BufferPool::new(),
 
             read_cache: RefCell::new(None),
@@ -80,9 +93,43 @@ impl ReadContext {
         })
     }
 
+    /// Creates a new `ReadContext` with the [read parameters](Array::read_params) of `array`,
+    /// e.g. its read size.
+    pub fn new_for_array(array: &Array<impl StorageBase>) -> Result<Self> {
+        Self::new(array.read_params().clone())
+    }
+
+    /// A read context with the default read parameters, borrowing the decompressor of the current
+    /// thread until the returned handle is dropped.
+    ///
+    /// The read methods of [`Array`] create one like it, with the read parameters of the array,
+    /// when given no context. The thread keeps its decompressor between reads, so its setup is paid
+    /// once per thread. The scratch buffers are freed with the handle, so an idle thread holds no
+    /// large allocation.
+    ///
+    /// Pass the handle to many reads to also reuse its scratch buffers, without creating a second
+    /// decompressor. While it is alive, the other reads of the thread find no decompressor to
+    /// borrow and create their own.
+    pub fn thread_ctx() -> impl AsRef<ReadContext> {
+        Self::thread_ctx_with(&ReadParams::default()).unwrap()
+    }
+
+    /// A read context with `params`, borrowing the decompressor of the current thread until the
+    /// returned handle is dropped.
+    #[inline]
+    pub(crate) fn thread_ctx_with(params: &ReadParams) -> Result<impl AsRef<ReadContext> + use<>> {
+        let decompressor = THREAD_CTX
+            .try_with(|state| state.decompressor.take())
+            .ok()
+            .flatten();
+        let context = ReadContext::new(params.clone())?;
+        context.decompressor.replace(decompressor);
+        Ok(ThreadCtx(context))
+    }
+
     /// The read parameters of the reads using this context, e.g. the read size.
     ///
-    /// [`Array::read_ctx()`](crate::Array::read_ctx) starts from the array's
+    /// [`ReadContext::new_for_array`] starts from the array's
     /// [`read_params`](crate::Array::read_params), [`ReadContext::default()`] from the default
     /// ones.
     #[inline]
@@ -129,6 +176,30 @@ const _: fn() = || {
 impl Default for ReadContext {
     fn default() -> Self {
         Self::new(ReadParams::default()).unwrap()
+    }
+}
+
+struct ThreadLocalState {
+    decompressor: Cell<Option<zstd::bulk::Decompressor<'static>>>,
+}
+thread_local! {
+    static THREAD_CTX: ThreadLocalState = const { ThreadLocalState {
+        decompressor: Cell::new(None),
+    } };
+}
+struct ThreadCtx(ReadContext);
+impl AsRef<ReadContext> for ThreadCtx {
+    #[inline]
+    fn as_ref(&self) -> &ReadContext {
+        &self.0
+    }
+}
+impl Drop for ThreadCtx {
+    #[inline]
+    fn drop(&mut self) {
+        if let Some(decompressor) = self.0.decompressor.take() {
+            let _ = THREAD_CTX.try_with(|state| state.decompressor.replace(Some(decompressor)));
+        }
     }
 }
 
@@ -341,22 +412,55 @@ pub(crate) mod tests {
 }
 
 #[cfg(test)]
-mod read_size_tests {
+mod thread_ctx_tests {
+    use super::THREAD_CTX;
     use crate::storage::{PlainArrayMethods, ReadParams};
     use crate::{Array, ReadContext};
 
     #[test]
-    fn read_ctx_starts_from_the_array_read_size_and_can_override_it() {
+    fn contexts_take_the_read_params() {
         let mut a = Array::plain_ndarray(ndarray::Array1::<i32>::zeros(100)).unwrap();
         a.read_params_mut().set_read_size((64, 128));
-        assert_eq!(a.read_params().read_size(), (64, 128));
 
-        let mut context = a.read_ctx();
+        let context = ReadContext::thread_ctx_with(a.read_params()).unwrap();
+        assert_eq!(context.as_ref().read_params(), a.read_params());
+        assert_eq!(
+            ReadContext::thread_ctx().as_ref().read_params(),
+            &ReadParams::default()
+        );
+        assert_eq!(ReadContext::default().read_params(), &ReadParams::default());
+
+        let mut context = ReadContext::new_for_array(&a).unwrap();
         assert_eq!(context.read_params(), a.read_params());
         context.read_params_mut().set_read_size((16, 32));
         assert_eq!(context.read_params().read_size(), (16, 32));
         assert_eq!(a.read_params().read_size(), (64, 128));
+    }
 
-        assert_eq!(ReadContext::default().read_params(), &ReadParams::default());
+    #[test]
+    fn thread_ctx_lends_the_thread_decompressor() {
+        let has_thread_decompressor = || {
+            THREAD_CTX.with(|state| {
+                let decompressor = state.decompressor.take();
+                let has = decompressor.is_some();
+                state.decompressor.set(decompressor);
+                has
+            })
+        };
+        let a = Array::compact_ndarray(&ndarray::Array1::<i32>::from_elem(1000, 7)).unwrap();
+
+        // The first read creates the decompressor and hands it to the thread.
+        assert!(!has_thread_decompressor());
+        a.to_ndarray::<ndarray::Ix1>().unwrap();
+        assert!(has_thread_decompressor());
+        {
+            let context = ReadContext::thread_ctx();
+            assert!(!has_thread_decompressor());
+            assert!(context.as_ref().decompressor.borrow().is_some());
+            // A nested context finds none to borrow, and keeps the thread's when it is dropped.
+            let inner = ReadContext::thread_ctx();
+            assert!(inner.as_ref().decompressor.borrow().is_none());
+        }
+        assert!(has_thread_decompressor());
     }
 }

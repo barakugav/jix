@@ -85,12 +85,11 @@ impl<T> CompactArray<T> {
     /// let array = Array::compact_ndarray_with(&data, CompactParams::new().block_shape(&[64, 64])?)?;
     ///
     /// // Read tiles of 128*128 by decompressing 2*2 blocks at a time.
-    /// let context = array.read_ctx();
     /// for tile_row in 0..7 {
     ///     for tile_col in 0..7 {
     ///         let row_range = (tile_row * 64)..((tile_row + 2) * 64);
     ///         let col_range = (tile_col * 64)..((tile_col + 2) * 64);
-    ///         let tile = array.to_ndarray_sub::<Ix2>(&[row_range, col_range], &context)?;
+    ///         let tile = array.to_ndarray_sub::<Ix2>(&[row_range, col_range])?;
     ///         println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
     ///     }
     /// }
@@ -107,7 +106,7 @@ impl<T> CompactArray<T> {
     {
         let array = Array::plain_ndarray_ref(array)?;
         params.tune(array.shape(), array.dtype())?;
-        array.compact_with(params, &array.try_read_ctx()?)
+        array.compact_with(params)
     }
 }
 
@@ -146,7 +145,7 @@ impl Array<Compact<TypeDyn>> {
         check_ndim(shape.len())?;
         params.tune(shape, &dtype)?;
         let array = unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype)? };
-        array.compact_with(params, &array.try_read_ctx()?)
+        array.compact_with(params)
     }
 }
 
@@ -302,7 +301,7 @@ impl<T> CompactArray<T> {
             spec,
         });
 
-        array.compact_with(params, &array.try_read_ctx()?)
+        array.compact_with(params)
     }
 }
 
@@ -438,7 +437,7 @@ mod tests {
     fn compact_ndarray_then_to_ndarray_sub_1d() {
         let src = array![0u8, 1, 2, 3, 4, 5];
         let a = Array::compact_ndarray_with(&src, arr_params(&[3])).unwrap();
-        let got = a.to_ndarray_sub(&[1..5], &a.read_ctx()).unwrap();
+        let got = a.to_ndarray_sub(&[1..5]).unwrap();
         assert_eq!(got, array![1u8, 2, 3, 4]);
     }
 
@@ -452,7 +451,7 @@ mod tests {
             [18,  19, 20, 21, 22, 23],
         ];
         let a = Array::compact_ndarray_with(&src, arr_params(&[2, 3])).unwrap();
-        let got = a.to_ndarray_sub(&[1..3, 2..5], &a.read_ctx()).unwrap();
+        let got = a.to_ndarray_sub(&[1..3, 2..5]).unwrap();
         assert_eq!(got, array![[8u8, 9, 10], [14, 15, 16]]);
     }
 

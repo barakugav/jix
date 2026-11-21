@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 
 use crate::PyArray;
 use crate::ops::common::{CastKind, OpDescriptor, OpFnDescriptor, Operand, define_op1};
-use crate::util::IntoPyResult;
+use crate::util::{IntoAnyDyn, IntoPyResult};
 
 define_op1!(
     /// Computes the square root of each element.
@@ -134,16 +134,16 @@ pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> PyResult<PyArra
         use jix_core::ops::{Cast, Ln, Log2, Log10};
         OpFnDescriptor::new1_args::<T>(CastKind::Safe, |a, args: LogArgs| {
             Ok(match args.base {
-                core::f64::consts::E => Ln::new_array(a).into_py_result()?.into_any(),
-                2.0 => Log2::new_array(a).into_py_result()?.into_any(),
-                10.0 => Log10::new_array(a).into_py_result()?.into_any(),
+                core::f64::consts::E => Ln::new_array(a).into_py_result()?.into_any_dyn(),
+                2.0 => Log2::new_array(a).into_py_result()?.into_any_dyn(),
+                10.0 => Log10::new_array(a).into_py_result()?.into_any_dyn(),
                 base => {
                     let ln_base = base.ln();
                     let a = Cast::<_, f64>::new_array(a).into_py_result()?;
                     let res = Ln::new_array(a).into_py_result()?;
                     let res = res
                         .map(move |x: f64| <f64 as jix_core::scalar::Cast<T>>::cast(x / ln_base));
-                    res.into_any()
+                    res.into_any_dyn()
                 }
             })
         })

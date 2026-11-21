@@ -27,9 +27,8 @@ let a = Array::compact_ndarray(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
 
 // Read a single element and a sub-region. Only the blocks they touch are
 // decompressed, not the whole array, so random access reads are relatively fast.
-let ctx = a.read_ctx();
-assert_eq!(a.get(&[1, 2], &ctx)?, 6.0);
-assert_eq!(a.to_ndarray_sub(&[0..2, 1..3], &ctx)?, array![[2.0, 3.0], [5.0, 6.0]]);
+assert_eq!(a.get(&[1, 2])?, 6.0);
+assert_eq!(a.to_ndarray_sub(&[0..2, 1..3])?, array![[2.0, 3.0], [5.0, 6.0]]);
 
 // Build a lazy pipeline - no data is read yet.
 // The full chain is a single static type:

@@ -224,7 +224,7 @@ mod tests {
     use ndarray::array;
 
     use crate::util::{ScalarStrategy, shape_strategy};
-    use crate::{Array, CompactArray, IntoDimension, NDIM_MAX, ReadContext};
+    use crate::{Array, CompactArray, IntoDimension, NDIM_MAX};
 
     fn make(vals: Vec<i32>, shape: impl IntoDimension) -> CompactArray<i32> {
         let shape = shape.into_dimension().unwrap();
@@ -334,7 +334,7 @@ mod tests {
     fn sub_read_broadcast_dim0() {
         let got = make(arange(4), [1, 4])
             .broadcast(&[3, 4])
-            .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
+            .to_ndarray_sub(&[1..3, 1..3])
             .unwrap();
         assert_eq!(got, array![[1, 2], [1, 2]]);
     }
@@ -343,7 +343,7 @@ mod tests {
     fn sub_read_broadcast_dim1() {
         let got = make(arange(3), [3, 1])
             .broadcast(&[3, 5])
-            .to_ndarray_sub(&[0..2, 2..5], &ReadContext::default())
+            .to_ndarray_sub(&[0..2, 2..5])
             .unwrap();
         assert_eq!(got, array![[0, 0, 0], [1, 1, 1]]);
     }
@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(got.shape(), [0, 3]);
         let got = q
             .broadcast(&[5, 3])
-            .to_ndarray_sub::<ndarray::Ix2>(&[2..2, 0..3], &ReadContext::default())
+            .to_ndarray_sub::<ndarray::Ix2>(&[2..2, 0..3])
             .unwrap();
         assert_eq!(got.shape(), [0, 3]);
     }

@@ -9,7 +9,7 @@ use crate::ops::asarray_simple;
 use crate::ops::common::{
     CastKind, OpDescriptor, OpFnDescriptor, Operand, broadcast_operands, define_op2,
 };
-use crate::util::IntoPyResult;
+use crate::util::{IntoAnyDyn, IntoPyResult};
 
 define_op2!(
     /// Element-wise maximum of two arrays.
@@ -163,7 +163,7 @@ pub fn clamp<'py>(
     {
         OpFnDescriptor::new3::<T>(CastKind::Safe, |a, min, max| {
             let res = jix_core::ops::Clamp::new_array(a, min, max).into_py_result()?;
-            Ok(res.into_any())
+            Ok(res.into_any_dyn())
         })
     }
     static DISPATCH_TABLE: LazyLock<OpDescriptor<3, ()>> = LazyLock::new(|| {

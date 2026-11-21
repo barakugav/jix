@@ -52,10 +52,10 @@ impl Default for ReadSize {
     }
 }
 
-/// Parameters controlling how reads are performed., independent of how the data was written.
+/// Parameters controlling how reads are performed, independent of how the data was written.
 ///
 /// A [`ReadContext`](crate::ReadContext) holds the params its reads use. An array holds the params
-/// that [`Array::read_ctx`] starts from, see [`Array::read_params`]; set them on a compact or plain
+/// that its reads without a context use, see [`Array::read_params`]; set them on a compact or plain
 /// array with `read_params_mut` (e.g.
 /// [`CompactArrayMethods::read_params_mut`](crate::storage::CompactArrayMethods::read_params_mut)),
 /// and the lazy views built on it inherit them.
@@ -64,13 +64,13 @@ impl Default for ReadSize {
 ///
 /// ```
 /// use jix::storage::PlainArrayMethods;
-/// use jix::Array;
+/// use jix::{Array, ReadContext};
 ///
 /// let mut a = Array::plain_ndarray(ndarray::Array1::<i32>::zeros(100))?;
 /// a.read_params_mut().set_read_size((64, 128));
 ///
-/// // read_ctx() starts from the read params of the array, and can override them.
-/// let mut context = a.read_ctx();
+/// // new_for_array() starts from the read params of the array, and can override them.
+/// let mut context = ReadContext::new_for_array(&a)?;
 /// assert_eq!(context.read_params().read_size(), (64, 128));
 /// context.read_params_mut().set_read_size((16, 32));
 /// # Ok::<(), jix::Error>(())
@@ -153,8 +153,7 @@ impl ReadParams {
 ///
 /// // After a shape-changing op, pin the block shape explicitly.
 /// let out_params = CompactParams::new().block_shape(&[128, 128])?;
-/// let ctx = za.read_ctx();
-/// let transposed = za.permute_dims(&[1, 0]).compact_with(out_params, &ctx)?;
+/// let transposed = za.permute_dims(&[1, 0]).compact_with(out_params)?;
 /// # Ok::<(), jix::Error>(())
 /// ```
 #[derive(Clone, Default, Debug)]
@@ -1213,7 +1212,7 @@ mod tests {
             .block_shape_fixed_dims(&[true, false])
             .unwrap()
             .block_size(8 * 64 * 4);
-        let c = a.compact_with(params, &a.read_ctx()).unwrap();
+        let c = a.compact_with(params).unwrap();
         assert_eq!(c.storage().spec().block_shape()[..], [8, 64]);
     }
 
@@ -1226,7 +1225,7 @@ mod tests {
                 .broadcast(&[1 << 31])
         };
         let params = CompactParams::new().block_shape(&[1 << 31]).unwrap();
-        assert!(a().compact_with(params, &Default::default()).is_err());
+        assert!(a().compact_with(params).is_err());
     }
 
     fn bits(bm: DimBitmap) -> Vec<bool> {
@@ -1343,8 +1342,7 @@ mod tests {
         let x = Array::compact_ndarray(&ndarray::Array1::<f32>::zeros(0)).unwrap();
         let mut x = x.into_any();
         for _ in 0..130 {
-            let a = x.clone().into_typed::<f32>().unwrap();
-            x = (a + x.into_typed::<f32>().unwrap()).into_any();
+            x = (x.clone() + x).into_any();
         }
         assert_eq!(x.storage().spec().element_cost(), ELEMENT_COST_MAX);
         // A zero-length concatenate member weighs its cost by 0.
@@ -1990,11 +1988,7 @@ mod tests {
 
         // After a shape-changing op, pin the block shape explicitly.
         let out_params = CompactParams::new().block_shape(&[128, 128]).unwrap();
-        let ctx = za.read_ctx();
-        let transposed = za
-            .permute_dims(&[1, 0])
-            .compact_with(out_params, &ctx)
-            .unwrap();
+        let transposed = za.permute_dims(&[1, 0]).compact_with(out_params).unwrap();
         assert_eq!(transposed.shape(), &[1024, 1024]);
     }
 
@@ -2328,12 +2322,8 @@ mod tests {
         let a = a.broadcast(&[0, 3, 0x5555_5555_5555_5555]);
         assert!(a.compact().is_err());
         assert!(
-            a.write_to(
-                std::io::Cursor::new(vec![]),
-                CompactParams::default(),
-                &a.read_ctx()
-            )
-            .is_err()
+            a.write_to(std::io::Cursor::new(vec![]), CompactParams::default())
+                .is_err()
         );
     }
 
@@ -2438,11 +2428,8 @@ mod tests {
         // Type-erased, a parent reads it with `read_data`
         assert_eq!(kind(plain().into_any()), ZeroCopy);
         assert_eq!(kind((-plain()).into_any()), SinglePass);
-        assert_eq!(
-            kind(-plain().into_any().into_typed::<i32>().unwrap()),
-            Fusable
-        );
-        let any_neg = (-plain()).into_any().into_typed::<i32>().unwrap();
+        assert_eq!(kind(-plain().into_any()), Fusable);
+        let any_neg = (-plain()).into_any();
         assert_eq!(kind(any_neg + plain()), Tiled);
 
         // Reductions are left tiled for now

@@ -4,7 +4,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use crate::array::PyArray;
-use crate::util::IntoPyResult;
+use crate::util::{IntoAnyDyn, IntoPyResult};
 #[pyfunction]
 /// Casts each element of `array` to a new dtype.
 ///
@@ -69,7 +69,7 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
                 let array = array.into_typed::<$src_type>().unwrap();
                 let array =
                     jix_core::ops::Cast::<_, $dst_type>::new_array(array).into_py_result()?;
-                return Ok(array.into_any());
+                return Ok(array.into_any_dyn());
             }};
         }
         macro_rules! cast_num {
