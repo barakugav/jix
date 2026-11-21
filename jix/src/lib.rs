@@ -195,7 +195,7 @@
 //! let pixel_dtype = Pixel::DTYPE;
 //! assert_eq!(pixel_dtype.itemsize(), 3);
 //! let fields = pixel_dtype.fields().unwrap();
-//! assert_eq!(fields[0].0, "r");
+//! assert_eq!(fields[0].name, "r");
 //! ```
 //!
 //! **Compile-time - [`ElementType`], [`TypeDyn`]**

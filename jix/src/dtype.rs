@@ -271,9 +271,9 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 /// assert_eq!(d.itemsize(), 3);
 /// assert_eq!(d.alignment().as_usize(), 1);
 /// let fields = d.fields().unwrap();
-/// assert_eq!(fields[0].0, "r");
-/// assert_eq!(fields[1].0, "g");
-/// assert_eq!(fields[2].0, "b");
+/// assert_eq!(fields[0].name, "r");
+/// assert_eq!(fields[1].name, "g");
+/// assert_eq!(fields[2].name, "b");
 /// ```
 ///
 /// # Constraints
@@ -307,7 +307,7 @@ enum DtypeInner {
         alignment: Alignment,
         is_aligned: bool,
         shape: DtypeShape,
-        fields: &'static [(Cow<'static, str>, Itemsize, Dtype)],
+        fields: &'static [DtypeField],
     },
 }
 
@@ -316,6 +316,17 @@ const _: () = {
         assert!(size_of::<Dtype>() <= 32);
     }
 };
+
+/// A field of a struct dtype.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DtypeField {
+    /// The field name.
+    pub name: Cow<'static, str>,
+    /// The byte offset of the field from the start of the struct.
+    pub offset: Itemsize,
+    /// The dtype of the field.
+    pub dtype: Dtype,
+}
 
 /// The kind of a scalar dtype, representing all primitive scalar types supported by the library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -450,13 +461,15 @@ impl Dtype {
     /// .unwrap();
     /// assert_eq!(student_dtype.fields().unwrap().len(), 3);
     /// let fields = student_dtype.fields().unwrap();
-    /// let mut fields = fields.iter();
-    /// assert_eq!(*fields.next().unwrap(), ("id".into(), 0, u8::DTYPE));
-    /// assert_eq!(
-    ///     *fields.next().unwrap(),
-    ///     ("_pad".into(), 1, <[u8; 3]>::DTYPE)
-    /// );
-    /// assert_eq!(*fields.next().unwrap(), ("grade".into(), 4, f32::DTYPE));
+    /// assert_eq!(fields[0].name, "id");
+    /// assert_eq!(fields[0].offset, 0);
+    /// assert_eq!(fields[0].dtype, u8::DTYPE);
+    /// assert_eq!(fields[1].name, "_pad");
+    /// assert_eq!(fields[1].offset, 1);
+    /// assert_eq!(fields[1].dtype, <[u8; 3]>::DTYPE);
+    /// assert_eq!(fields[2].name, "grade");
+    /// assert_eq!(fields[2].offset, 4);
+    /// assert_eq!(fields[2].dtype, f32::DTYPE);
     /// assert_eq!(student_dtype.scalar_kind(), None);
     /// assert_eq!(student_dtype.itemsize(), 8);
     /// assert_eq!(student_dtype.alignment().as_usize(), 4);
@@ -486,13 +499,17 @@ impl Dtype {
         fields.sort_by_key(|(_name, offset, _dtype)| *offset);
         let fields = fields
             .into_iter()
-            .map(|(name, offset, dtype)| (Cow::Owned(name), offset, dtype))
+            .map(|(name, offset, dtype)| DtypeField {
+                name: Cow::Owned(name),
+                offset,
+                dtype,
+            })
             .collect::<Box<_>>();
 
         // No padding, so the fields end exactly at the itemsize.
-        let itemsize = fields.last().map_or(0, |(_name, offset, dtype)| {
-            offset.saturating_add(dtype.itemsize())
-        });
+        let itemsize = fields
+            .last()
+            .map_or(0, |f| f.offset.saturating_add(f.dtype.itemsize()));
         Self::check_fields(&fields, itemsize)?;
 
         let max_alignment = Self::max_field_alignment(&fields);
@@ -607,7 +624,11 @@ impl Dtype {
 
         let fields = fields
             .into_iter()
-            .map(|(name, offset, dtype)| (Cow::Owned(name), offset, dtype))
+            .map(|(name, offset, dtype)| DtypeField {
+                name: Cow::Owned(name),
+                offset,
+                dtype,
+            })
             .collect::<Box<_>>();
         Self::check_fields(&fields, element_itemsize)?;
 
@@ -634,7 +655,7 @@ impl Dtype {
 
     #[doc(hidden)]
     pub const unsafe fn new_struct_borrowed_unchecked(
-        fields: &'static [(Cow<'static, str>, Itemsize, Dtype)],
+        fields: &'static [DtypeField],
         itemsize: Itemsize,
         alignment: Alignment,
         is_aligned: bool,
@@ -653,13 +674,10 @@ impl Dtype {
         const { &T::DTYPE }
     }
 
-    fn check_fields(
-        fields: &[(Cow<'static, str>, Itemsize, Dtype)],
-        itemsize: Itemsize,
-    ) -> Result<()> {
+    fn check_fields(fields: &[DtypeField], itemsize: Itemsize) -> Result<()> {
         let depth = 1 + fields
             .iter()
-            .map(|(_, _, d)| d.nesting_depth())
+            .map(|f| f.dtype.nesting_depth())
             .max()
             .unwrap_or(0);
         ensure!(
@@ -669,21 +687,23 @@ impl Dtype {
         );
         let mut seen_names = HashSet::new();
         let mut expected_offset: Itemsize = 0;
-        for (name, offset, dtype) in fields {
+        for field in fields {
+            let name = &field.name;
             ensure!(
                 seen_names.insert(name),
                 InvalidArgument,
                 "duplicate field name `{name}` in struct dtype"
             );
             ensure!(
-                *offset == expected_offset,
+                field.offset == expected_offset,
                 InvalidArgument,
-                "struct dtype field `{name}` is at offset {offset}, expected {expected_offset}: \
+                "struct dtype field `{name}` is at offset {}, expected {expected_offset}: \
                  fields must be given in offset order, \
-                 and padding between fields is not supported, add an explicit padding field instead"
+                 and padding between fields is not supported, add an explicit padding field instead",
+                field.offset
             );
             expected_offset = expected_offset
-                .checked_add(dtype.itemsize())
+                .checked_add(field.dtype.itemsize())
                 .ok_or_else(|| error!(InvalidArgument, "struct dtype itemsize overflow"))?;
         }
         ensure!(
@@ -695,25 +715,21 @@ impl Dtype {
         Ok(())
     }
 
-    fn max_field_alignment(fields: &[(Cow<'static, str>, Itemsize, Dtype)]) -> Alignment {
+    fn max_field_alignment(fields: &[DtypeField]) -> Alignment {
         fields
             .iter()
-            .map(|(_name, _offset, dtype)| dtype.alignment())
+            .map(|f| f.dtype.alignment())
             .max()
             .unwrap_or(Alignment::new(1).unwrap())
     }
 
-    fn is_aligned_struct(
-        fields: &[(Cow<'static, str>, Itemsize, Dtype)],
-        itemsize: Itemsize,
-        alignment: Alignment,
-    ) -> bool {
+    fn is_aligned_struct(fields: &[DtypeField], itemsize: Itemsize, alignment: Alignment) -> bool {
         let align_of = |dtype: &Dtype| dtype.alignment().as_usize() as Itemsize;
         alignment == Self::max_field_alignment(fields)
             && itemsize.is_multiple_of(alignment.as_usize() as Itemsize)
             && fields
                 .iter()
-                .all(|(_name, offset, dtype)| offset.is_multiple_of(align_of(dtype)))
+                .all(|f| f.offset.is_multiple_of(align_of(&f.dtype)))
     }
 
     /// Get the scalar kind of the dtype, if it is a scalar dtype.
@@ -730,7 +746,7 @@ impl Dtype {
 
     /// Get the fields of the dtype, if it is a struct dtype.
     #[inline(always)]
-    pub fn fields(&self) -> Option<&[(Cow<'static, str>, Itemsize, Dtype)]> {
+    pub fn fields(&self) -> Option<&[DtypeField]> {
         match &self.0 {
             DtypeInner::Scalar { .. } => None,
             DtypeInner::StructOwned { fields, .. } => Some(fields),
@@ -743,7 +759,7 @@ impl Dtype {
         self.fields().map_or(0, |fields| {
             1 + fields
                 .iter()
-                .map(|(_, _, d)| d.nesting_depth())
+                .map(|f| f.dtype.nesting_depth())
                 .max()
                 .unwrap_or(0)
         })
@@ -1081,11 +1097,10 @@ impl Endianness {
 ///
 /// It exists only to make the drop `inline(never)`, which breaks the recursive drop of `Dtype`
 /// so that dropping `T::DTYPE` can be inlined.
-#[allow(clippy::type_complexity)]
-struct OwnedFields(ManuallyDrop<Box<[(Cow<'static, str>, Itemsize, Dtype)]>>);
+struct OwnedFields(ManuallyDrop<Box<[DtypeField]>>);
 
 impl OwnedFields {
-    fn new(fields: Box<[(Cow<'static, str>, Itemsize, Dtype)]>) -> Self {
+    fn new(fields: Box<[DtypeField]>) -> Self {
         Self(ManuallyDrop::new(fields))
     }
 }
@@ -1102,7 +1117,7 @@ impl Clone for OwnedFields {
     }
 }
 impl std::ops::Deref for OwnedFields {
-    type Target = [(Cow<'static, str>, Itemsize, Dtype)];
+    type Target = [DtypeField];
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -1236,6 +1251,14 @@ unsafe impl<T: Dtyped, const N: usize> Dtyped for [T; N] {
 mod tests {
     use super::*;
 
+    const fn field(name: &'static str, offset: Itemsize, dtype: Dtype) -> DtypeField {
+        DtypeField {
+            name: Cow::Borrowed(name),
+            offset,
+            dtype,
+        }
+    }
+
     // ---- Scalar dtype basics ----
 
     #[test]
@@ -1258,9 +1281,9 @@ mod tests {
             y: i32,
         }
 
-        static FIELDS: [(Cow<'static, str>, Itemsize, Dtype); 2] = [
-            (Cow::Borrowed("x"), 0, <i32 as Dtyped>::DTYPE),
-            (Cow::Borrowed("y"), 4, <i32 as Dtyped>::DTYPE),
+        static FIELDS: [DtypeField; 2] = [
+            field("x", 0, <i32 as Dtyped>::DTYPE),
+            field("y", 4, <i32 as Dtyped>::DTYPE),
         ];
         // This is what `#[derive(Dtyped)]` builds, but at run time rather than in a const.
         let built = unsafe {
@@ -1424,8 +1447,8 @@ mod tests {
         assert_eq!(dtype.itemsize(), 9);
         assert_eq!(dtype.alignment().as_usize(), 1);
         let fields = dtype.fields().unwrap();
-        assert_eq!(fields[0], ("a".into(), 0, u8::DTYPE));
-        assert_eq!(fields[1], ("b".into(), 1, f64::DTYPE));
+        assert_eq!(fields[0], field("a", 0, u8::DTYPE));
+        assert_eq!(fields[1], field("b", 1, f64::DTYPE));
     }
 
     #[test]
@@ -1507,10 +1530,10 @@ mod tests {
         ])
         .unwrap();
         let fields = dtype.fields().unwrap();
-        assert_eq!(fields[0].0, "a");
-        assert_eq!(fields[0].1, 0);
-        assert_eq!(fields[1].0, "b");
-        assert_eq!(fields[1].1, 1);
+        assert_eq!(fields[0].name, "a");
+        assert_eq!(fields[0].offset, 0);
+        assert_eq!(fields[1].name, "b");
+        assert_eq!(fields[1].offset, 1);
     }
 
     #[test]
@@ -1792,11 +1815,11 @@ mod tests {
         assert_eq!(dtype.shape(), &[]);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields.len(), 5);
-        assert_eq!(fields[0], ("a".into(), 0, u8::DTYPE));
-        assert_eq!(fields[1], ("_pad0".into(), 1, <[u8; 3]>::DTYPE));
-        assert_eq!(fields[2], ("b".into(), 4, f32::DTYPE));
-        assert_eq!(fields[3], ("c".into(), 8, i16::DTYPE));
-        assert_eq!(fields[4], ("_pad1".into(), 10, <[u8; 2]>::DTYPE));
+        assert_eq!(fields[0], field("a", 0, u8::DTYPE));
+        assert_eq!(fields[1], field("_pad0", 1, <[u8; 3]>::DTYPE));
+        assert_eq!(fields[2], field("b", 4, f32::DTYPE));
+        assert_eq!(fields[3], field("c", 8, i16::DTYPE));
+        assert_eq!(fields[4], field("_pad1", 10, <[u8; 2]>::DTYPE));
     }
 
     #[derive(Copy, Clone, Dtyped)]
@@ -1821,9 +1844,9 @@ mod tests {
         assert_eq!(dtype.shape(), &[]);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields.len(), 3);
-        assert_eq!(fields[0], ("a".into(), 0, u8::DTYPE));
-        assert_eq!(fields[1], ("b".into(), 1, f32::DTYPE));
-        assert_eq!(fields[2], ("c".into(), 5, i16::DTYPE));
+        assert_eq!(fields[0], field("a", 0, u8::DTYPE));
+        assert_eq!(fields[1], field("b", 1, f32::DTYPE));
+        assert_eq!(fields[2], field("c", 5, i16::DTYPE));
     }
 
     #[derive(Copy, Clone, Dtyped)]
@@ -1862,9 +1885,9 @@ mod tests {
         assert_eq!(dtype.itemsize(), 24);
         assert_eq!(dtype.alignment().as_usize(), 8);
         let fields = dtype.fields().unwrap();
-        assert_eq!(fields[0], ("a".into(), 0, SimpleStruct::DTYPE));
-        assert_eq!(fields[1], ("_pad".into(), 12, <[u8; 4]>::DTYPE));
-        assert_eq!(fields[2], ("b".into(), 16, f64::DTYPE));
+        assert_eq!(fields[0], field("a", 0, SimpleStruct::DTYPE));
+        assert_eq!(fields[1], field("_pad", 12, <[u8; 4]>::DTYPE));
+        assert_eq!(fields[2], field("b", 16, f64::DTYPE));
     }
 
     #[derive(Copy, Clone, Dtyped)]
@@ -1886,12 +1909,12 @@ mod tests {
         assert_eq!(dtype.alignment().as_usize(), 4);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].0, "a");
-        assert_eq!(fields[0].1, 0);
+        assert_eq!(fields[0].name, "a");
+        assert_eq!(fields[0].offset, 0);
         // The field dtype should carry the array shape.
-        assert_eq!(fields[0].2.shape(), &[3]);
-        assert_eq!(fields[0].2.itemsize(), 12);
-        assert_eq!(fields[0].2.scalar_kind(), Some(ScalarKind::I32));
+        assert_eq!(fields[0].dtype.shape(), &[3]);
+        assert_eq!(fields[0].dtype.itemsize(), 12);
+        assert_eq!(fields[0].dtype.scalar_kind(), Some(ScalarKind::I32));
     }
 
     #[derive(Copy, Clone, Dtyped)]
@@ -1916,9 +1939,9 @@ mod tests {
         assert_eq!(dtype.itemsize(), 32);
         assert_eq!(dtype.alignment().as_usize(), 8);
         let fields = dtype.fields().unwrap();
-        assert_eq!(fields[0], ("inner".into(), 0, NestedStruct::DTYPE));
-        assert_eq!(fields[1], ("x".into(), 24, u32::DTYPE));
-        assert_eq!(fields[2], ("_pad".into(), 28, <[u8; 4]>::DTYPE));
+        assert_eq!(fields[0], field("inner", 0, NestedStruct::DTYPE));
+        assert_eq!(fields[1], field("x", 24, u32::DTYPE));
+        assert_eq!(fields[2], field("_pad", 28, <[u8; 4]>::DTYPE));
     }
 
     // ---- set_shape ----

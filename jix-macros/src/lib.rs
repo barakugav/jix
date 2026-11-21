@@ -144,13 +144,13 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                 .collect::<Vec<_>>();
 
             quote::quote! {
-                const __JIX_DTYPED_FIELDS: &'static [(::std::borrow::Cow<'static, str>, #jix_crate::dtype::Itemsize, #jix_crate::dtype::Dtype)] = &[
+                const __JIX_DTYPED_FIELDS: &'static [#jix_crate::dtype::DtypeField] = &[
                     #(
-                        (
-                            ::std::borrow::Cow::Borrowed(#field_names),
-                            ::core::mem::offset_of!(#struct_name, #field_idents) as #jix_crate::dtype::Itemsize,
-                            <#field_types as #jix_crate::dtype::Dtyped>::DTYPE,
-                        )
+                        #jix_crate::dtype::DtypeField {
+                            name: ::std::borrow::Cow::Borrowed(#field_names),
+                            offset: ::core::mem::offset_of!(#struct_name, #field_idents) as #jix_crate::dtype::Itemsize,
+                            dtype: <#field_types as #jix_crate::dtype::Dtyped>::DTYPE,
+                        }
                     ),*
                 ];
 

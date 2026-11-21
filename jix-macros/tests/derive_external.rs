@@ -32,11 +32,11 @@ fn repr_c_named_fields() {
 
     let fields = d.fields().unwrap();
     assert_eq!(fields.len(), 3);
-    assert_eq!(fields[0].0, "r");
-    assert_eq!(fields[1].0, "g");
-    assert_eq!(fields[2].0, "b");
+    assert_eq!(fields[0].name, "r");
+    assert_eq!(fields[1].name, "g");
+    assert_eq!(fields[2].name, "b");
     assert_eq!(
-        fields.iter().map(|f| f.1).collect::<Vec<_>>(),
+        fields.iter().map(|f| f.offset).collect::<Vec<_>>(),
         vec![0, 1, 2]
     );
 }
@@ -58,9 +58,9 @@ fn repr_c_explicit_padding_field() {
     assert_eq!(d.itemsize() as usize, size_of::<Padded>());
     assert_eq!(d.alignment().as_usize(), 8);
     let fields = d.fields().unwrap();
-    assert_eq!(fields[0].1, 0);
-    assert_eq!(fields[1].1, 1);
-    assert_eq!(fields[2].1, 8);
+    assert_eq!(fields[0].offset, 0);
+    assert_eq!(fields[1].offset, 1);
+    assert_eq!(fields[2].offset, 8);
 }
 
 #[derive(Copy, Clone, Dtyped)]
@@ -72,7 +72,7 @@ struct RawIdent {
 
 #[test]
 fn raw_ident_field() {
-    assert_eq!(RawIdent::DTYPE.fields().unwrap()[0].0, "type");
+    assert_eq!(RawIdent::DTYPE.fields().unwrap()[0].name, "type");
 }
 
 // Names in the user's scope that the generated code used to pick up.
@@ -106,7 +106,12 @@ fn derive_is_hygienic() {
     let d = shadowed::Shadowed::DTYPE;
     assert_eq!(d.itemsize(), 8);
     assert_eq!(d.alignment().as_usize(), 4);
-    let offsets = d.fields().unwrap().iter().map(|f| f.1).collect::<Vec<_>>();
+    let offsets = d
+        .fields()
+        .unwrap()
+        .iter()
+        .map(|f| f.offset)
+        .collect::<Vec<_>>();
     assert_eq!(offsets, [0, 1, 4]);
 }
 
@@ -128,8 +133,8 @@ fn repr_packed_has_no_padding() {
     assert_eq!(d.alignment().as_usize(), 1);
     assert!(!d.is_aligned());
     let fields = d.fields().unwrap();
-    assert_eq!(fields[0].1, 0);
-    assert_eq!(fields[1].1, 1);
+    assert_eq!(fields[0].offset, 0);
+    assert_eq!(fields[1].offset, 1);
 }
 
 // ---- #[repr(transparent)] newtypes ----
@@ -178,9 +183,9 @@ fn array_field() {
     assert_eq!(d.itemsize(), 16);
     assert_eq!(d.itemsize() as usize, size_of::<Vertex>());
     let fields = d.fields().unwrap();
-    assert_eq!(fields[0].2, <[f32; 3] as Dtyped>::DTYPE);
-    assert_eq!(fields[0].2.shape(), &[3]);
-    assert_eq!(fields[1].1, 12);
+    assert_eq!(fields[0].dtype, <[f32; 3] as Dtyped>::DTYPE);
+    assert_eq!(fields[0].dtype.shape(), &[3]);
+    assert_eq!(fields[1].offset, 12);
 }
 
 // ---- nested derived structs ----
@@ -207,8 +212,8 @@ fn nested_struct_field() {
     assert_eq!(d.itemsize(), 16);
     assert_eq!(d.itemsize() as usize, size_of::<Segment>());
     let fields = d.fields().unwrap();
-    assert_eq!(fields[0].2, Point::DTYPE);
-    assert_eq!(fields[1].1, 8);
+    assert_eq!(fields[0].dtype, Point::DTYPE);
+    assert_eq!(fields[1].offset, 8);
 }
 
 // ---- generic transparent newtypes ----
