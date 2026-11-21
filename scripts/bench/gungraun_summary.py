@@ -50,11 +50,17 @@ def render_markdown(rows: list[Row], threshold: float) -> str:
             return "-"
         if cell.diff_pct is None:
             return f"{cell.new:,.0f} (-)"
-        pct = f"{cell.diff_pct:+.2f}%"
-        return f"{cell.new:,.0f} ({f'**{pct}**' if marked and abs(cell.diff_pct) > threshold else pct})"
+        pct = f"{cell.diff_pct:+.2f}"
+        if marked and abs(cell.diff_pct) > threshold:
+            # GitHub renders LaTeX colors in markdown: red for more instructions, green for fewer.
+            color = "red" if cell.diff_pct > 0 else "green"
+            return f"{cell.new:,.0f} ($\\color{{{color}}}{{\\text{{{pct}\\%}}}}$)"
+        return f"{cell.new:,.0f} ({pct}%)"
 
     changed = sum(1 for r in rows if "Ir" in r.metrics and abs(r.metrics["Ir"].diff_pct or 0) > threshold)
     lines = [
+        "### Instruction counts (Gungraun)",
+        "",
         f"{len(rows)} benchmarks, {changed} changed past +-{threshold:g}% (Ir)",
         "",
         "| bench | " + " | ".join(metrics) + " |",
