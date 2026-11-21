@@ -3,11 +3,11 @@ use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{
-    check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, Index, OutBuf, OutBufInner,
-    StorageBase, StridedBuf,
+    check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, CompactParams, Index, OutBuf,
+    OutBufInner, StorageBase, StridedBuf,
 };
 use crate::util::{cast_slice, cast_slice_mut, dim_arr};
-use crate::{CompactParams, DimDyn, Dimension, ReadContext};
+use crate::{DimDyn, Dimension, ReadContext};
 
 /// Storage that broadcasts a single scalar value across an arbitrary shape: a zero-copy
 /// constant array. A 0-D `Scalar` (empty `shape`) is a plain scalar value.

@@ -339,8 +339,9 @@ mod tests {
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::storage::{split_ranges, ArrayStorageExt, CompactArrayMethods, Index};
-    use crate::CompactParams;
+    use crate::storage::{
+        split_ranges, ArrayStorageExt, CompactArrayMethods, CompactParams, Index,
+    };
 
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]

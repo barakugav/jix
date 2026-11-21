@@ -1439,9 +1439,10 @@ pub(crate) mod tests {
     use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
-    use crate::storage::{split_ranges, ArrayStorageExt, CompactArrayMethods, Index};
+    use crate::storage::{
+        split_ranges, ArrayStorageExt, CompactArrayMethods, CompactParams, Index,
+    };
     use crate::util::DimArray;
-    use crate::CompactParams;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;

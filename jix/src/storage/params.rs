@@ -144,7 +144,8 @@ impl ReadParams {
 /// explicitly.
 ///
 /// ```
-/// use jix::{Array, CompactParams};
+/// use jix::Array;
+/// use jix::storage::CompactParams;
 ///
 /// // Construct an array with a specific block shape.
 /// let data = ndarray::Array2::<f32>::zeros((1024, 1024));
@@ -1197,8 +1198,9 @@ mod tests {
         combine_block_layout, combine_elementwise_hints, combine_select_hints, ArraySpecFlags,
         DimBitmap, ReadSize, ELEMENT_COST_MAX,
     };
+    use crate::storage::CompactParams;
     use crate::util::ScaleWeight;
-    use crate::{Array, CompactArray, CompactParams, StorageBase, BLOCK_SIZE_BYTES_MAX};
+    use crate::{Array, CompactArray, StorageBase, BLOCK_SIZE_BYTES_MAX};
 
     #[test]
     fn compact_with_keeps_caller_fixed_dims() {

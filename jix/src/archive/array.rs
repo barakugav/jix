@@ -11,9 +11,11 @@ use crate::archive::version::lib_version;
 use crate::codec::{DecoderCodecConfig, EncoderParams};
 use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::storage::{ArchiveValidation, ArrayBlockTableStorageBase, Compact, CompactMmap};
+use crate::storage::{
+    ArchiveValidation, ArrayBlockTableStorageBase, Compact, CompactMmap, CompactParams,
+};
 use crate::util::{dim_arr, IterExt};
-use crate::{Array, CompactParams, DimDyn, Dimension, ReadContext, StorageBase, TypeDyn};
+use crate::{Array, DimDyn, Dimension, ReadContext, StorageBase, TypeDyn};
 
 impl Array<Compact<TypeDyn>> {
     /// Load a compressed array from a `.jix` file, allocating storage on the heap.
@@ -67,7 +69,8 @@ impl Array<Compact<TypeDyn>> {
     ///
     /// ```
     /// use jix::storage::ArchiveValidation;
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -115,7 +118,8 @@ impl Array<Compact<TypeDyn>> {
     /// use std::io::Cursor;
     ///
     /// use jix::storage::ArchiveValidation;
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
     /// // Serialize to an in-memory buffer and read it back.
@@ -315,7 +319,8 @@ impl<S: StorageBase> Array<S> {
     /// use std::io::Cursor;
     ///
     /// use jix::storage::ArchiveValidation;
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3, 4], [5, 6, 7, 8]])?;
@@ -555,11 +560,9 @@ mod tests {
 
     use crate::archive::schema;
     use crate::dtype::Dtyped;
-    use crate::storage::{ArchiveValidation, Compact, CompactArrayMethods};
+    use crate::storage::{ArchiveValidation, Compact, CompactArrayMethods, CompactParams};
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{
-        Array, CompactArray, CompactParams, Dimension, IntoDimension, StorageBase, TypeDyn,
-    };
+    use crate::{Array, CompactArray, Dimension, IntoDimension, StorageBase, TypeDyn};
 
     #[test]
     fn read_back_to_back_archives() {

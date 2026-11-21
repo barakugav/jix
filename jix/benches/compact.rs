@@ -1,7 +1,8 @@
 mod common;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use jix::{Array, CompactParams};
+use jix::storage::CompactParams;
+use jix::Array;
 
 use crate::common::{create_data, Profile};
 

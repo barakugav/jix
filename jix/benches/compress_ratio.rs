@@ -1,6 +1,7 @@
 mod common;
 
-use jix::{Array, CompactParams};
+use jix::storage::CompactParams;
+use jix::Array;
 
 use crate::common::{create_data, Profile};
 

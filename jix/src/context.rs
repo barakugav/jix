@@ -342,8 +342,8 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod read_size_tests {
-    use crate::storage::PlainArrayMethods;
-    use crate::{Array, ReadContext, ReadParams};
+    use crate::storage::{PlainArrayMethods, ReadParams};
+    use crate::{Array, ReadContext};
 
     #[test]
     fn read_ctx_starts_from_the_array_read_size_and_can_override_it() {

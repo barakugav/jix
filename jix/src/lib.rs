@@ -252,12 +252,12 @@
 //! On read, the pipeline is reversed. The filters, byte shuffle (the default) and bit shuffle,
 //! improve the codec's ratio on numeric data.
 //!
-//! Codec settings are controlled via [`CompactParams`]:
+//! Codec settings are controlled via [`CompactParams`](storage::CompactParams):
 //!
-//! - [`codec`](CompactParams::codec) - the compression codec (e.g.
+//! - [`codec`](storage::CompactParams::codec) - the compression codec (e.g.
 //!   [`Codec::Zstd`](storage::Codec::Zstd)).
-//! - [`level`](CompactParams::level) - the compression level.
-//! - [`filters`](CompactParams::filters) - the pre-compression filter pipeline (e.g.
+//! - [`level`](storage::CompactParams::level) - the compression level.
+//! - [`filters`](storage::CompactParams::filters) - the pre-compression filter pipeline (e.g.
 //!   [`Filter::ByteShuffle`](storage::Filter::ByteShuffle)).
 //!
 //! The codec and filter configuration is serialized into the array archive, so readers never need
@@ -273,13 +273,14 @@
 //! When no block shape is specified, the library selects one automatically according to the CPU
 //! cache sizes.
 //!
-//! [`CompactParams`] groups all layout and codec settings. Unset fields are inherited from the
-//! source array when compacting or writing.
+//! [`CompactParams`](storage::CompactParams) groups all layout and codec settings. Unset fields
+//! are inherited from the source array when compacting or writing.
 //!
 //! For tile-at-a-time access patterns:
 //!
 //! ```
-//! use jix::{Array, CompactParams};
+//! use jix::Array;
+//! use jix::storage::CompactParams;
 //! use ndarray::Ix2;
 //!
 //! let data = ndarray::Array2::<f32>::zeros((512, 512));
@@ -309,7 +310,8 @@
 //! [`.compact_with()`](Array::compact_with) to choose the new block shape yourself:
 //!
 //! ```
-//! use jix::{Array, CompactParams};
+//! use jix::Array;
+//! use jix::storage::CompactParams;
 //!
 //! // Compress with 64*64 blocks.
 //! let params = CompactParams::new().block_shape(&[64, 64])?;
@@ -397,7 +399,6 @@ pub mod dtype;
 pub mod scalar;
 
 pub mod storage;
-pub use storage::params::{CompactParams, ReadParams};
 pub use storage::{Storage, StorageBase};
 
 mod archive;

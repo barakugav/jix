@@ -7,11 +7,11 @@ use crate::storage::params::{
     read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned, ReadTiling,
 };
 use crate::storage::{
-    check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, ElementType, Index, OutBuf,
-    OutBufInner, StridedBuf, TypeDyn,
+    check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, CompactParams, ElementType,
+    Index, OutBuf, OutBufInner, StridedBuf, TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, DimIdx, IterExt, SendSyncPtr};
-use crate::{Array, CompactParams, DimDyn, Dimension, PlainArray, ReadContext, StorageBase};
+use crate::{Array, DimDyn, Dimension, PlainArray, ReadContext, StorageBase};
 
 /// Uncompressed nd-array storage that owns its data in a `Vec<T>`.
 ///
@@ -829,7 +829,7 @@ pub trait PlainArrayMethods {
 
     /// Mutable access to the read parameters of this array, e.g. its read size. See
     /// [`Array::read_params`](crate::Array::read_params).
-    fn read_params_mut(&mut self) -> &mut crate::ReadParams;
+    fn read_params_mut(&mut self) -> &mut crate::storage::ReadParams;
 }
 
 macro_rules! impl_plain_array_methods {
@@ -882,7 +882,7 @@ macro_rules! impl_plain_array_methods {
             }
 
             #[inline]
-            fn read_params_mut(&mut self) -> &mut crate::ReadParams {
+            fn read_params_mut(&mut self) -> &mut crate::storage::ReadParams {
                 self.storage $(.$field)? .spec.read_params_mut()
             }
         }

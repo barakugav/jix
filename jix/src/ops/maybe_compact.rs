@@ -1,6 +1,5 @@
 use crate::ops::prelude::*;
-use crate::storage::Compact;
-use crate::CompactParams;
+use crate::storage::{Compact, CompactParams};
 
 /// Storage adaptor that guarantees the wrapped array is always in compact
 /// block-compressed form.
@@ -168,9 +167,9 @@ mod tests {
 
     use super::ToCompactInner;
     use crate::dtype::Dtyped;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, CompactParams};
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, CompactArray, CompactParams, ElementType, StorageBase};
+    use crate::{Array, CompactArray, ElementType, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers

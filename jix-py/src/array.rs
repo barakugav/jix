@@ -4,8 +4,8 @@ use std::ops::Range;
 use std::sync::Mutex;
 
 use jix_core::__private::ReadTiling;
-use jix_core::storage::{Codec, CompactArrayMethods, Filter, StridedBuf};
-use jix_core::{Array, ArrayAny, CompactParams, ReadContext, StorageBase};
+use jix_core::storage::{Codec, CompactArrayMethods, CompactParams, Filter, StridedBuf};
+use jix_core::{Array, ArrayAny, ReadContext, StorageBase};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
 use crate::type_hint::{

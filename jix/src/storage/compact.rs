@@ -17,10 +17,12 @@ use crate::error::Result;
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::cache_id::ArrayCacheId;
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
-use crate::storage::{check_out_buf, ArraySpec, ElementType, Index, OutBuf, StridedBuf};
+use crate::storage::{
+    check_out_buf, ArraySpec, CompactParams, ElementType, Index, OutBuf, StridedBuf,
+};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, NdCopier, PtrMutNoalias, PtrNoalias};
-use crate::{CompactParams, Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase, TypeDyn};
+use crate::{Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase, TypeDyn};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -61,9 +63,9 @@ use crate::{CompactParams, Dim, DimDyn, DimVec, Dimension, ReadContext, StorageB
 /// ## Configuration
 ///
 /// The codec, compression level, and filter pipeline are chosen at write time through
-/// [`CompactParams`](crate::CompactParams): [`codec`](crate::CompactParams::codec),
-/// [`level`](crate::CompactParams::level), and [`filters`](crate::CompactParams::filters). They are
-/// stored alongside the data, so readers never need to know them in advance.
+/// [`CompactParams`]: [`codec`](CompactParams::codec), [`level`](CompactParams::level), and
+/// [`filters`](CompactParams::filters). They are stored alongside the data, so readers never need
+/// to know them in advance.
 ///
 /// ## Filters
 ///
@@ -565,7 +567,8 @@ pub trait CompactArrayMethods {
     ///
     /// ```
     /// use jix::storage::CompactArrayMethods;
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::Array2;
     ///
     /// let data = Array2::<f32>::zeros((100, 100));
@@ -584,7 +587,8 @@ pub trait CompactArrayMethods {
     ///
     /// ```
     /// use jix::storage::CompactArrayMethods;
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::Array2;
     ///
     /// let data = Array2::<f32>::zeros((100, 100));
@@ -621,7 +625,8 @@ pub trait CompactArrayMethods {
     ///
     /// ```
     /// use jix::storage::{CompactArrayMethods, Filter};
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
     /// let data = array![1u32, 2, 3];
@@ -634,7 +639,7 @@ pub trait CompactArrayMethods {
 
     /// Mutable access to the read parameters of this array, e.g. its read size. See
     /// [`Array::read_params`](crate::Array::read_params).
-    fn read_params_mut(&mut self) -> &mut crate::ReadParams;
+    fn read_params_mut(&mut self) -> &mut crate::storage::ReadParams;
 
     /// Sets, per dimension, whether that dimension of [`block_shape`](Self::block_shape) is fixed
     /// when a later [`Array::compact`](crate::Array::compact) of this array, or of a view built on
@@ -668,7 +673,7 @@ macro_rules! impl_compact_array_methods {
                 self.storage.0.filters()
             }
 
-            fn read_params_mut(&mut self) -> &mut crate::ReadParams {
+            fn read_params_mut(&mut self) -> &mut crate::storage::ReadParams {
                 self.storage.0.spec.read_params_mut()
             }
 
@@ -703,9 +708,11 @@ mod tests {
     use crate::context::tests::context_read_cache_len;
     use crate::scalar::bool8;
     use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
-    use crate::storage::{split_ranges, ArraySpec, ArrayStorageExt, Index, OutBuf, StridedBuf};
+    use crate::storage::{
+        split_ranges, ArraySpec, ArrayStorageExt, CompactParams, Index, OutBuf, StridedBuf,
+    };
     use crate::util::DimArray;
-    use crate::{Array, CompactParams, Storage, StorageBase};
+    use crate::{Array, Storage, StorageBase};
 
     /// Read `index` from a compact `i32` array both into a plain contiguous buffer and into a
     /// *strided* destination whose inner spacing is doubled (a one-element gap between consecutive

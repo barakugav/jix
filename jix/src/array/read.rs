@@ -102,8 +102,8 @@ impl<S: StorageBase> Array<S> {
     ///   their elements outside `index` are discarded.
     ///
     /// To keep sub-region reads cheap, choose a `block_shape` (via
-    /// [`CompactParams::block_shape`](crate::CompactParams::block_shape) when creating the array)
-    /// that matches your access pattern.
+    /// [`CompactParams::block_shape`](crate::storage::CompactParams::block_shape) when creating
+    /// the array) that matches your access pattern.
     ///
     /// For lazy views (e.g. after `reshape`, `permute_dims`, `broadcast`, or element-wise
     /// ops), the index range is propagated inward through the chain and only the
@@ -131,7 +131,8 @@ impl<S: StorageBase> Array<S> {
     /// Stream a large array tile by tile, reusing a single `ReadContext`:
     ///
     /// ```
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::Ix2;
     ///
     /// // 256x256 f32 array stored as 32x32 blocks.
@@ -690,8 +691,7 @@ mod tests {
     use super::Array;
     use crate::array::tests::*;
     use crate::error::ErrorKind;
-    use crate::storage::{CompactArrayMethods, StridedBuf};
-    use crate::CompactParams;
+    use crate::storage::{CompactArrayMethods, CompactParams, StridedBuf};
 
     // -----------------------------------------------------------------------
     // to_ndarray - 1D

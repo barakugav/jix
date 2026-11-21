@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use fastrand::Rng;
-use jix::storage::CompactArrayMethods;
-use jix::{Array, CompactArray, CompactParams};
+use jix::storage::{CompactArrayMethods, CompactParams};
+use jix::{Array, CompactArray};
 
 pub fn create_data<T: Scalar>(profile: Profile, shape: &[u64], seed: u64) -> ndarray::ArrayD<T> {
     let dims = shape.iter().map(|&d| d as usize).collect::<Vec<_>>();

@@ -4,10 +4,10 @@ use super::Array;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, Index, OutBuf};
+use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, CompactParams, Index, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{dim_arr, SliceExt};
-use crate::{CompactArray, CompactParams, DimArray, DimDyn, ReadContext, StorageBase, TypeDyn};
+use crate::{CompactArray, DimArray, DimDyn, ReadContext, StorageBase, TypeDyn};
 
 impl<T> CompactArray<T> {
     /// Compress an ndarray into a block-compressed `Array<Compact>` with default encoding settings.
@@ -75,7 +75,8 @@ impl<T> CompactArray<T> {
     /// # Examples
     ///
     /// ```
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::Ix2;
     ///
     /// let data = ndarray::Array2::<f32>::zeros((512, 512));
@@ -194,7 +195,8 @@ impl<T> CompactArray<T> {
     /// access pattern (here, square 64x64 tiles):
     ///
     /// ```
-    /// # use jix::{Array, CompactParams};
+    /// # use jix::Array;
+    /// # use jix::storage::CompactParams;
     /// let params = CompactParams::new().block_shape(&[64, 64])?;
     ///
     /// let a = Array::compact_fn_with(&[256, 256], params, |i| (i[0] as f32) * 0.5 + (i[1] as f32))?;
@@ -314,8 +316,9 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::block::BlockSize;
     use crate::storage::params::{ReadParams, ReadSize};
+    use crate::storage::CompactParams;
     use crate::util::arr_params;
-    use crate::{CompactParams, StorageBase};
+    use crate::StorageBase;
 
     // -----------------------------------------------------------------------
     // compact_ndarray - 1D

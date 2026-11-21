@@ -1,7 +1,7 @@
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::StorageAny;
-use crate::{ArrayAny, ElementType, ReadContext, ReadParams, StorageBase};
+use crate::storage::{ReadParams, StorageAny};
+use crate::{ArrayAny, ElementType, ReadContext, StorageBase};
 
 mod construct;
 
@@ -138,8 +138,9 @@ mod compact;
 /// output indices translate to positions in the underlying blocks. When the new layout crosses
 /// block boundaries that the original respected, a single read may decompress many more blocks
 /// than necessary. To avoid this, materialize with [`compact`](Array::compact) (automatic block
-/// shape) or [`compact_with`](Array::compact_with) (explicit [`CompactParams`](crate::CompactParams),
-/// e.g. a block shape matching the expected access pattern) after a shape change.
+/// shape) or [`compact_with`](Array::compact_with) (explicit
+/// [`CompactParams`](crate::storage::CompactParams), e.g. a block shape matching the expected
+/// access pattern) after a shape change.
 ///
 /// # Element type tracking
 ///
@@ -397,9 +398,9 @@ pub(crate) mod tests {
     use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable};
-    use crate::storage::{ArrayBlockTableStorageBase, Compact};
+    use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactParams};
     use crate::util::{arr_params, cast_slice, DimArray};
-    use crate::{CompactArray, CompactParams, Dimension, IntoDimension};
+    use crate::{CompactArray, Dimension, IntoDimension};
 
     // -----------------------------------------------------------------------
     // compact_ndarray roundtrip helper

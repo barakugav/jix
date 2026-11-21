@@ -6,9 +6,9 @@ use ndarray::IxDyn;
 use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
 use crate::storage::params::{ReadParams, ReadSize};
-use crate::storage::{ArrayStorageExt, Compact, Index, PlainArrayMethods};
+use crate::storage::{ArrayStorageExt, Compact, CompactParams, Index, PlainArrayMethods};
 use crate::util::{AlignedBytes, DimArray};
-use crate::{Array, CompactArray, CompactParams, StorageBase, TypeDyn};
+use crate::{Array, CompactArray, StorageBase, TypeDyn};
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper

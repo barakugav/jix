@@ -3,14 +3,15 @@ use crate::codec::{DecoderCodecConfig, Encoder};
 use crate::error::{check_region_size, Result};
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorageExt, BlockSize, Compact, Index, StridedBuf,
+    ArrayBlockTableStorageBase, ArrayStorageExt, BlockSize, Compact, CompactParams, Index,
+    StridedBuf,
 };
 use crate::util::iter::NdIter;
 use crate::util::{
     default_logical_strides, default_strides, scale_read_shape, AlignedBytes, IterExt, NdCopier,
     PtrMutNoalias, PtrNoalias, SliceExt,
 };
-use crate::{CompactParams, Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase};
+use crate::{Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase};
 
 impl<S: StorageBase> Array<S> {
     /// Compress the data of this array into a new `Array<Compact>` with new blocks.
@@ -70,7 +71,8 @@ impl<S: StorageBase> Array<S> {
     ///   corrupt.
     ///
     /// ```
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
     /// let a_params = CompactParams::default().block_shape(&[1, 2])?;
@@ -385,7 +387,9 @@ mod tests {
         let a = Array::compact_ndarray(&array![1u8])
             .unwrap()
             .broadcast(&[1 << 62]);
-        let params = crate::CompactParams::new().block_shape(&[1]).unwrap();
+        let params = crate::storage::CompactParams::new()
+            .block_shape(&[1])
+            .unwrap();
         let ctx = a.read_ctx();
         let err = a.compact_with(params.clone(), &ctx).unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);

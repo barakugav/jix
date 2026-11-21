@@ -47,7 +47,7 @@ mod plain;
 pub use plain::*;
 
 pub(crate) mod params;
-pub use params::ArraySpec;
+pub use params::{ArraySpec, CompactParams, ReadParams};
 
 pub use crate::archive::ArchiveValidation;
 pub use crate::codec::{Codec, Filter};
