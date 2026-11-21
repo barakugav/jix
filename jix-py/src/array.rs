@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::sync::Mutex;
 
 use jix_core::__private::ReadTiling;
-use jix_core::storage::{Codec, Filter, StridedBuf};
+use jix_core::storage::{Codec, CompactArrayMethods, Filter, StridedBuf};
 use jix_core::{Array, ArrayAny, ReadContext, StorageBase};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
@@ -732,8 +732,7 @@ impl PyArray {
         index: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyArray>> {
         let np_arr = self.numpy(py, index, None)?.0;
-        let params = resolve_array_params(py, None)?;
-        let array = plain_from_numpy(np_arr, self.arr.dtype().clone(), params)?;
+        let array = plain_from_numpy(np_arr, self.arr.dtype().clone(), None)?;
         Bound::new(
             py,
             PyArray::from_core_with_np_dtype(array, self.numpy_dtype(py)?.unbind()),
@@ -1770,30 +1769,71 @@ pub fn compact<'py>(
     params: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Bound<'py, PyArray>> {
     let py = array.py();
-    let array = crate::asarray(array, dtype, params.clone())?;
-    let params = resolve_array_params(py, params)?;
+    let array = crate::asarray(array, dtype, None)?;
+    let params = resolve_array_params(
+        py,
+        params,
+        &[
+            "block_shape",
+            "block_shape_fixed_dims",
+            "block_size",
+            "read_size",
+            "codec",
+            "compression_level",
+            "filters",
+        ],
+    )?;
 
     let array = array.get();
-    let compacted = py.detach(|| {
+    let mut compacted = py.detach(|| {
         let context = array.read_ctx()?;
         array
             .arr
-            .compact_with(params, context.as_ref())
+            .compact_with(params.params, context.as_ref())
             .into_py_result()
     })?;
+    if let Some(read_size) = params.read_size {
+        compacted.set_read_size(read_size);
+    }
 
     Bound::new(py, PyArray::from_core(compacted.into_any()))
 }
 
+/// The `params` dict of a Python function, parsed.
+pub(crate) struct ResolvedParams {
+    /// Every key but `read_size`.
+    pub(crate) params: jix_core::ArrayParams,
+    pub(crate) read_size: Option<(u64, u64)>,
+    pub(crate) block_shape_fixed_dims: Option<Vec<bool>>,
+}
+
+/// Parses a `params` dict, raising `TypeError` on a key that is not in `allowed`.
 pub(crate) fn resolve_array_params(
     py: Python<'_>,
     params: Option<Bound<'_, PyDict>>,
-) -> PyResult<jix_core::ArrayParams> {
+    allowed: &[&str],
+) -> PyResult<ResolvedParams> {
+    let mut resolved = ResolvedParams {
+        params: jix_core::ArrayParams::default(),
+        read_size: None,
+        block_shape_fixed_dims: None,
+    };
     let Some(kwargs) = params else {
-        return Ok(jix_core::ArrayParams::default());
+        return Ok(resolved);
     };
 
     let mut kwargs = kwargs.extract::<BTreeMap<String, Py<PyAny>>>()?;
+    let unexpected = kwargs
+        .keys()
+        .filter(|key| !allowed.contains(&key.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unexpected.is_empty() {
+        return Err(PyTypeError::new_err(format!(
+            "Unexpected array params kwargs: {}",
+            unexpected.join(", ")
+        )));
+    }
     macro_rules! extract_arg {
         ($key:expr, $ty:ty) => {
             kwargs
@@ -1820,22 +1860,17 @@ pub(crate) fn resolve_array_params(
     let codec = extract_arg!("codec", String)?;
     let compression_level = extract_arg!("compression_level", i32)?;
     let filters = extract_arg!("filters", Vec<String>)?;
-    if !kwargs.is_empty() {
-        return Err(PyTypeError::new_err(format!(
-            "Unexpected array params kwargs: {}",
-            kwargs.into_keys().collect::<Vec<_>>().join(", ")
-        )));
-    }
 
     let mut params = jix_core::ArrayParams::default();
     if let Some(block_shape) = block_shape {
         params = params.block_shape(&block_shape).into_py_result()?;
     }
-    if let Some(block_shape_fixed_dims) = block_shape_fixed_dims {
+    if let Some(block_shape_fixed_dims) = &block_shape_fixed_dims {
         params = params
-            .block_shape_fixed_dims(&block_shape_fixed_dims)
+            .block_shape_fixed_dims(block_shape_fixed_dims)
             .into_py_result()?;
     }
+    resolved.block_shape_fixed_dims = block_shape_fixed_dims;
     if let Some(block_size) = block_size {
         params = params.block_size(block_size);
     }
@@ -1847,12 +1882,11 @@ pub(crate) fn resolve_array_params(
             )));
         }
         let read_size = read_size.into_dim_array()?;
-        let pair = match *read_size.as_slice() {
+        resolved.read_size = Some(match *read_size.as_slice() {
             [read_size] => (read_size, read_size),
             [min, max] => (min, max),
             _ => unreachable!(),
-        };
-        params = params.read_size(pair);
+        });
     }
 
     if let Some(codec) = codec {
@@ -1880,7 +1914,8 @@ pub(crate) fn resolve_array_params(
         params = params.filters(&filters).into_py_result()?;
     }
 
-    Ok(params)
+    resolved.params = params;
+    Ok(resolved)
 }
 
 fn binary_op_builtin(

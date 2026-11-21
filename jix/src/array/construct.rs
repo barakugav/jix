@@ -146,8 +146,7 @@ impl Array<Compact<TypeDyn>> {
     ) -> Result<Self> {
         check_ndim(shape.len())?;
         params.tune(shape, &dtype)?;
-        let array =
-            unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype, params.clone())? };
+        let array = unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype)? };
         array.compact_with(params, &array.try_read_ctx()?)
     }
 }

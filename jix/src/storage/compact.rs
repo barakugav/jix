@@ -627,6 +627,19 @@ pub trait CompactArrayMethods {
     /// # Ok::<(), jix::Error>(())
     /// ```
     fn filters(&self) -> &[crate::storage::Filter];
+
+    /// Sets the target byte range `(min, max)` for a single read region of this array and of
+    /// the lazy views built on it. See
+    /// [`ReadContext::set_read_size`](crate::ReadContext::set_read_size).
+    fn set_read_size(&mut self, size_hint: (u64, u64));
+
+    /// Sets, per dimension, whether that dimension of [`block_shape`](Self::block_shape) is fixed
+    /// when a later [`Array::compact`](crate::Array::compact) of this array, or of a view built on
+    /// it, inherits the block shape. A fixed dimension keeps its block length, a non-fixed one may
+    /// be resized toward the target block size.
+    ///
+    /// Fails with `InvalidArgument` if `fixed` does not have one entry per dimension.
+    fn set_block_shape_fixed_dims(&mut self, fixed: &[bool]) -> Result<()>;
 }
 
 macro_rules! impl_compact_array_methods {
@@ -650,6 +663,23 @@ macro_rules! impl_compact_array_methods {
             #[inline]
             fn filters(&self) -> &[crate::storage::Filter] {
                 self.storage.0.filters()
+            }
+
+            fn set_read_size(&mut self, size_hint: (u64, u64)) {
+                self.storage.0.spec.set_read_size(size_hint);
+            }
+
+            fn set_block_shape_fixed_dims(&mut self, fixed: &[bool]) -> crate::error::Result<()> {
+                let ndim = self.storage.0.block_shape().len();
+                crate::error::ensure!(
+                    fixed.len() == ndim,
+                    InvalidArgument,
+                    "ndim does not match block_shape_fixed_dims length: expected {ndim}, got {}",
+                    fixed.len()
+                );
+                self.storage.0.spec.dynamic_mut().block_shape_fixed_dims =
+                    fixed.iter().copied().collect();
+                Ok(())
             }
         }
     };
@@ -1528,23 +1558,24 @@ mod tests {
         assert_eq!(view.nblocks(), 2 * 3);
         assert!(matches!(view.filters(), [Filter::BitShuffle]));
 
-        // The block shape and filters come from the file, not from the params it is read with.
+        // The block shape and filters come from the file, and a later compact keeps the filters.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.jix");
         a.write_to_file(&path).unwrap();
         let len = path.metadata().unwrap().len();
-        let mmap = unsafe {
-            Array::read_from_file_mmap(
-                &path,
-                0,
-                len,
-                ArrayParams::default(),
-                crate::storage::ArchiveValidation::default(),
-            )
-        }
-        .unwrap();
+        let validation = crate::storage::ArchiveValidation::default();
+        let mut mmap = unsafe { Array::read_from_file_mmap(&path, 0, len, validation) }.unwrap();
         assert_eq!(mmap.block_shape(), &[4, 2]);
         assert_eq!(mmap.nblocks(), 2 * 3);
         assert!(matches!(mmap.filters(), [Filter::BitShuffle]));
+        assert!(matches!(
+            mmap.compact().unwrap().filters(),
+            [Filter::BitShuffle]
+        ));
+
+        assert!(mmap.set_block_shape_fixed_dims(&[true]).is_err());
+        mmap.set_block_shape_fixed_dims(&[true, false]).unwrap();
+        let fixed_dims = mmap.storage().0.spec.as_ref().block_shape_fixed_dims();
+        assert_eq!((fixed_dims.get(0), fixed_dims.get(1)), (true, false));
     }
 }

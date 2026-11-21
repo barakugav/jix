@@ -8,11 +8,11 @@ use crate::archive::block::{BlockArchiveWriter, BlockTableStorageRead};
 use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::archive::version::lib_version;
-use crate::codec::DecoderCodecConfig;
+use crate::codec::{DecoderCodecConfig, EncoderParams};
 use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArchiveValidation, ArrayBlockTableStorageBase, Compact, CompactMmap};
-use crate::util::{dim_arr, DimBitmap, IterExt};
+use crate::util::{dim_arr, IterExt};
 use crate::{Array, ArrayParams, DimDyn, Dimension, ReadContext, StorageBase, TypeDyn};
 
 impl Array<Compact<TypeDyn>> {
@@ -43,16 +43,10 @@ impl Array<Compact<TypeDyn>> {
     /// ```
     pub fn read_from_file(path: &Path) -> Result<Self> {
         let len = path.metadata().map_err(Error::io)?.len();
-        Self::read_from_file_with(
-            path,
-            0,
-            len,
-            ArrayParams::default(),
-            ArchiveValidation::default(),
-        )
+        Self::read_from_file_with(path, 0, len, ArchiveValidation::default())
     }
 
-    /// Load a compressed array from a byte range within a file with specified parameters.
+    /// Load a compressed array from a byte range within a file.
     ///
     /// Use this when several arrays, or an array and other data, are packed into one file and you
     /// know the byte `offset` and `len` of the array to read.
@@ -63,11 +57,6 @@ impl Array<Compact<TypeDyn>> {
     /// - `offset`: byte offset of the start of the array's archive section within the file.
     /// - `len`: byte length of the array's archive section. Must not run past the end of the
     ///   file.
-    /// - `params`: never changes the loaded data - the block shape and codec come from the file
-    ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
-    ///   where they seed arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size).
     /// - `validation`: how thoroughly the archive is checked, see [`ArchiveValidation`].
     ///
     /// # Examples
@@ -94,7 +83,6 @@ impl Array<Compact<TypeDyn>> {
     ///     &path,
     ///     offset,
     ///     total - offset,
-    ///     ArrayParams::default(),
     ///     ArchiveValidation::default(),
     /// )?;
     /// assert_eq!(b2.shape(), &[6]);
@@ -104,13 +92,12 @@ impl Array<Compact<TypeDyn>> {
         path: &Path,
         offset: u64,
         len: u64,
-        params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self> {
         let file = File::open(path).map_err(Error::io)?;
         let mut reader = BufReader::new(file);
         reader.seek(SeekFrom::Start(offset)).map_err(Error::io)?;
-        Self::read_from(reader, Some(len), params, validation)
+        Self::read_from(reader, Some(len), validation)
     }
 
     /// Load a compressed array from a generic reader.
@@ -120,11 +107,6 @@ impl Array<Compact<TypeDyn>> {
     /// - `reader`: any source implementing `Read` + `Seek` containing the array's archive section.
     /// - `len`: byte length of the archive section within the reader, used for bounds checking.
     ///   Must not run past the end of the reader. Pass `None` to read to the end of the reader.
-    /// - `params`: never changes the loaded data - the block shape and codec come from the file
-    ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
-    ///   where they seed arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size).
     /// - `validation`: how thoroughly the archive is checked, see [`ArchiveValidation`].
     ///
     /// # Examples
@@ -145,7 +127,6 @@ impl Array<Compact<TypeDyn>> {
     /// let loaded = Array::read_from(
     ///     Cursor::new(bytes),
     ///     None,
-    ///     ArrayParams::default(),
     ///     ArchiveValidation::default(),
     /// )?;
     /// let loaded = loaded.into_typed::<i32>()?;
@@ -155,14 +136,12 @@ impl Array<Compact<TypeDyn>> {
     pub fn read_from(
         reader: impl Read + Seek,
         len: Option<u64>,
-        params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self> {
         let storage = ArrayBlockTableStorageBase::read_from(
             reader,
             len,
             crate::storage::block::Owned(PhantomData),
-            params,
             validation,
         )?;
         Ok(Self {
@@ -187,11 +166,6 @@ impl Array<CompactMmap<TypeDyn>> {
     /// - `offset`: byte offset of the start of the array's archive section within the file.
     /// - `len`: byte length of the array's archive section. Must not run past the end of the
     ///   file.
-    /// - `params`: never changes the loaded data - the block shape and codec come from the file
-    ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
-    ///   where they seed arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size).
     /// - `validation`: how thoroughly the archive is checked, see [`ArchiveValidation`].
     ///
     /// # Safety
@@ -219,7 +193,6 @@ impl Array<CompactMmap<TypeDyn>> {
     ///         &path,
     ///         0,
     ///         len,
-    ///         ArrayParams::default(),
     ///         ArchiveValidation::default(),
     ///     )?
     /// };
@@ -230,7 +203,6 @@ impl Array<CompactMmap<TypeDyn>> {
         path: &Path,
         offset: u64,
         len: u64,
-        params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self> {
         let file = File::open(path).map_err(Error::io)?;
@@ -245,7 +217,6 @@ impl Array<CompactMmap<TypeDyn>> {
                 mmap: Arc::new(mmap),
                 base_offset: offset,
             },
-            params,
             validation,
         )?;
 
@@ -308,7 +279,6 @@ impl<S: StorageBase> Array<S> {
     ///         &path,
     ///         0,
     ///         len,
-    ///         ArrayParams::default(),
     ///         ArchiveValidation::default(),
     ///     )?
     /// };
@@ -382,7 +352,6 @@ impl<S: StorageBase> Array<S> {
     /// let scaled2 = Array::read_from(
     ///     Cursor::new(&bytes[..offset as usize]),
     ///     Some(offset),
-    ///     ArrayParams::default(),
     ///     ArchiveValidation::default(),
     /// )?;
     /// assert_eq!(
@@ -392,7 +361,6 @@ impl<S: StorageBase> Array<S> {
     /// let b2 = Array::read_from(
     ///     Cursor::new(&bytes[offset as usize..]),
     ///     None,
-    ///     ArrayParams::default(),
     ///     ArchiveValidation::default(),
     /// )?;
     /// assert_eq!(b2.into_typed::<u8>()?.to_ndarray()?, array![10u8, 20, 30].into_dyn());
@@ -450,7 +418,6 @@ where
         reader: impl Read + Seek,
         len: Option<u64>,
         storage: S,
-        params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self>
     where
@@ -458,7 +425,7 @@ where
     {
         let mut reader = ArchiveReader::new(reader, len)?;
         let f_meta = reader.read_file_meta()?;
-        Self::read_body(&mut reader, &f_meta, storage, params, validation).map_err(|mut err| {
+        Self::read_body(&mut reader, &f_meta, storage, validation).map_err(|mut err| {
             let version_str = f_meta.lib_version.as_ref().map(|v| v.to_string());
             let version_str = version_str.as_deref().unwrap_or("unknown");
 
@@ -477,7 +444,6 @@ where
         reader: &mut ArchiveReader<R>,
         f_meta: &schema::FileMetadata,
         storage: S,
-        mut params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self>
     where
@@ -576,23 +542,18 @@ where
             expected_nblocks
         );
 
-        // Tune with every dim fixed so the file's block shape is kept. The caller's flags are
-        // only hints for how downstream ops rescale it.
-        params.block_shape = Some(block_shape);
-        let fixed_dims = params
-            .block_shape_fixed_dims
-            .replace(DimBitmap::filled(ndim, true));
-        let mut array = Self::new(blocks, shape, params)?;
-        if let Some(fixed_dims) = fixed_dims {
-            ensure!(
-                fixed_dims.len() == ndim,
-                InvalidArgument,
-                "ndim does not match block_shape_fixed_dims length: expected {ndim}, got {}",
-                fixed_dims.len()
-            );
-            array.spec.dynamic_mut().block_shape_fixed_dims = fixed_dims;
-        }
-        Ok(array)
+        // Later compactions reuse the file's codec and filters. The level is not stored.
+        let decoder_config = blocks.decoder_config();
+        let params = ArrayParams {
+            block_shape: Some(block_shape),
+            encoder_params: Some(EncoderParams {
+                codec: decoder_config.codec.clone(),
+                filters: decoder_config.filters.clone(),
+                ..EncoderParams::default()
+            }),
+            ..ArrayParams::default()
+        };
+        Self::new(blocks, shape, params)
     }
 }
 
@@ -604,7 +565,7 @@ mod tests {
 
     use crate::archive::schema;
     use crate::dtype::Dtyped;
-    use crate::storage::{ArchiveValidation, Compact};
+    use crate::storage::{ArchiveValidation, Compact, CompactArrayMethods};
     use crate::util::{arr_params, carray_strategy_any};
     use crate::{Array, ArrayParams, CompactArray, Dimension, IntoDimension};
     use crate::{StorageBase, TypeDyn};
@@ -619,9 +580,8 @@ mod tests {
         b.write_to(&mut buf, ArrayParams::default(), &b.read_ctx())
             .unwrap();
         buf.rewind().unwrap();
-        let read = |buf: &mut Cursor<Vec<u8>>| {
-            Array::read_from(buf, None, ArrayParams::new(), ArchiveValidation::Strict)
-        };
+        let read =
+            |buf: &mut Cursor<Vec<u8>>| Array::read_from(buf, None, ArchiveValidation::Strict);
         let a2 = read(&mut buf).unwrap().into_typed::<i32>().unwrap();
         let b2 = read(&mut buf).unwrap().into_typed::<i64>().unwrap();
         assert_eq!(
@@ -641,21 +601,14 @@ mod tests {
         assert!(Dtype::from_fields(vec![("f".to_string(), 0, dtype.clone())]).is_err());
 
         let data = [7u8; 4];
-        let a: Array<crate::storage::PlainView<'_, TypeDyn>> = unsafe {
-            Array::plain_ndarray_ptr(data.as_ptr(), &[4], &[1], dtype.clone(), ArrayParams::new())
-                .unwrap()
-        };
+        let a: Array<crate::storage::PlainView<'_, TypeDyn>> =
+            unsafe { Array::plain_ndarray_ptr(data.as_ptr(), &[4], &[1], dtype.clone()).unwrap() };
         let mut buf = Cursor::new(Vec::new());
         a.write_to(&mut buf, ArrayParams::default(), &a.read_ctx())
             .unwrap();
         let len = buf.get_ref().len() as u64;
         buf.rewind().unwrap();
-        let b = Array::read_from(
-            buf,
-            Some(len),
-            ArrayParams::new(),
-            ArchiveValidation::Strict,
-        );
+        let b = Array::read_from(buf, Some(len), ArchiveValidation::Strict);
         assert_eq!(b.unwrap().dtype(), &dtype);
     }
 
@@ -695,13 +648,7 @@ mod tests {
         }
         out.extend_from_slice(&bytes[pos + 32..]);
         let len = out.len() as u64;
-        let params = ArrayParams::default();
-        Array::read_from(
-            Cursor::new(out),
-            Some(len),
-            params,
-            ArchiveValidation::Strict,
-        )
+        Array::read_from(Cursor::new(out), Some(len), ArchiveValidation::Strict)
     }
 
     #[test]
@@ -729,17 +676,13 @@ mod tests {
         a.write_to(&mut bytes, ArrayParams::default(), &a.read_ctx())
             .unwrap();
 
-        let p = ArrayParams::new()
-            .block_shape_fixed_dims(&[false, false])
-            .unwrap()
-            .block_size(1024);
-        let a = Array::read_from(
+        let mut a = Array::read_from(
             Cursor::new(bytes.into_inner()),
             None,
-            p,
             ArchiveValidation::Strict,
         )
         .unwrap();
+        a.set_block_shape_fixed_dims(&[false, false]).unwrap();
         assert_eq!(a.storage().0.block_shape(), &[8, 32]);
         let fixed_dims = a.storage().0.spec.as_ref().block_shape_fixed_dims();
         assert_eq!((fixed_dims.get(0), fixed_dims.get(1)), (false, false));
@@ -771,12 +714,7 @@ mod tests {
         for bad_size in [1u64 << 44, (1 << 32) + size] {
             let mut bytes = bytes.clone();
             bytes[toc + 24..toc + 32].copy_from_slice(&bad_size.to_le_bytes());
-            let result = Array::read_from(
-                Cursor::new(bytes),
-                None,
-                ArrayParams::default(),
-                ArchiveValidation::Strict,
-            );
+            let result = Array::read_from(Cursor::new(bytes), None, ArchiveValidation::Strict);
             assert!(result.is_err());
         }
     }
@@ -795,12 +733,7 @@ mod tests {
             toc += prost::length_delimiter_len(len) + len;
         }
         bytes[toc + 24..toc + 32].copy_from_slice(&(1u64 << 44).to_le_bytes());
-        let Err(err) = Array::read_from(
-            Cursor::new(bytes),
-            None,
-            ArrayParams::default(),
-            ArchiveValidation::Strict,
-        ) else {
+        let Err(err) = Array::read_from(Cursor::new(bytes), None, ArchiveValidation::Strict) else {
             panic!("expected an error");
         };
         let version = env!("CARGO_PKG_VERSION");
@@ -848,7 +781,7 @@ mod tests {
             .unwrap();
         drop(vec![0xA5u8; 4096]); // leave stale bytes in the allocator
         let mut snoop = Snoop(Cursor::new(bytes.into_inner()), false);
-        Array::read_from(&mut snoop, None, ArrayParams::default(), Default::default()).unwrap();
+        Array::read_from(&mut snoop, None, Default::default()).unwrap();
         assert!(!snoop.1);
     }
 
@@ -875,13 +808,8 @@ mod tests {
         a.write_to(&mut buf, ArrayParams::default(), &a.read_ctx())
             .unwrap();
         let bytes = buf.into_inner();
-        let array = Array::read_from(
-            Cursor::new(bytes),
-            None,
-            ArrayParams::default(),
-            ArchiveValidation::default(),
-        )
-        .unwrap();
+        let array =
+            Array::read_from(Cursor::new(bytes), None, ArchiveValidation::default()).unwrap();
         array.into_typed::<T>().unwrap().to_ndarray().unwrap()
     }
 
@@ -1059,7 +987,6 @@ mod tests {
         let r0 = Array::read_from(
             Cursor::new(&bytes),
             Some(end0),
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1072,7 +999,6 @@ mod tests {
         let r1 = Array::read_from(
             Cursor::new(&bytes[start1 as usize..]),
             Some(len1),
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1085,7 +1011,6 @@ mod tests {
         let r2 = Array::read_from(
             Cursor::new(&bytes[start2 as usize..]),
             Some(len2),
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1117,7 +1042,6 @@ mod tests {
         let got = Array::read_from(
             Cursor::new(buf.into_inner()),
             None,
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1141,7 +1065,6 @@ mod tests {
         let got = Array::read_from(
             Cursor::new(buf.into_inner()),
             None,
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1166,7 +1089,6 @@ mod tests {
         let got = Array::read_from(
             Cursor::new(buf.into_inner()),
             None,
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1252,24 +1174,12 @@ mod tests {
         let total = f.metadata().unwrap().len();
         drop(f);
 
-        let r0 = Array::read_from_file_with(
-            &path,
-            0,
-            off1,
-            ArrayParams::default(),
-            ArchiveValidation::default(),
-        )
-        .unwrap();
+        let r0 = Array::read_from_file_with(&path, 0, off1, ArchiveValidation::default()).unwrap();
         assert_eq!(r0.into_typed::<u8>().unwrap().to_ndarray().unwrap(), src0);
 
-        let r1 = Array::read_from_file_with(
-            &path,
-            off1,
-            total - off1,
-            ArrayParams::default(),
-            ArchiveValidation::default(),
-        )
-        .unwrap();
+        let r1 =
+            Array::read_from_file_with(&path, off1, total - off1, ArchiveValidation::default())
+                .unwrap();
         assert_eq!(
             r1.into_typed::<f32>().unwrap().to_ndarray().unwrap(),
             src1.into_dyn()
@@ -1291,24 +1201,13 @@ mod tests {
         let total = bytes.len() as u64;
 
         for (offset, len) in [(0, total + 1), (1, total), (total + 1, 1)] {
-            let err = Array::read_from_file_with(
-                tmp.path(),
-                offset,
-                len,
-                ArrayParams::default(),
-                ArchiveValidation::default(),
-            )
-            .unwrap_err();
+            let err =
+                Array::read_from_file_with(tmp.path(), offset, len, ArchiveValidation::default())
+                    .unwrap_err();
             assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArgument);
 
             let err = unsafe {
-                Array::read_from_file_mmap(
-                    tmp.path(),
-                    offset,
-                    len,
-                    ArrayParams::default(),
-                    ArchiveValidation::default(),
-                )
+                Array::read_from_file_mmap(tmp.path(), offset, len, ArchiveValidation::default())
             }
             .unwrap_err();
             assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArgument);
@@ -1317,7 +1216,6 @@ mod tests {
         let err = Array::read_from(
             std::io::Cursor::new(&bytes),
             Some(total + 1),
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap_err();
@@ -1344,14 +1242,7 @@ mod tests {
         let len = std::fs::metadata(tmp.path()).unwrap().len();
 
         let got = unsafe {
-            Array::read_from_file_mmap(
-                tmp.path(),
-                0,
-                len,
-                ArrayParams::default(),
-                ArchiveValidation::default(),
-            )
-            .unwrap()
+            Array::read_from_file_mmap(tmp.path(), 0, len, ArchiveValidation::default()).unwrap()
         }
         .into_typed::<i64>()
         .unwrap()
@@ -1383,14 +1274,7 @@ mod tests {
         drop(f);
 
         let got = unsafe {
-            Array::read_from_file_mmap(
-                &path,
-                offset,
-                len,
-                ArrayParams::default(),
-                ArchiveValidation::default(),
-            )
-            .unwrap()
+            Array::read_from_file_mmap(&path, offset, len, ArchiveValidation::default()).unwrap()
         }
         .into_typed::<f32>()
         .unwrap()
@@ -1418,7 +1302,6 @@ mod tests {
                     tmp.path(),
                     offset,
                     bytes.len() as u64,
-                    ArrayParams::default(),
                     ArchiveValidation::default(),
                 )
                 .unwrap()
@@ -1448,14 +1331,7 @@ mod tests {
         let len = std::fs::metadata(tmp.path()).unwrap().len();
 
         let got = unsafe {
-            Array::read_from_file_mmap(
-                tmp.path(),
-                0,
-                len,
-                ArrayParams::default(),
-                ArchiveValidation::default(),
-            )
-            .unwrap()
+            Array::read_from_file_mmap(tmp.path(), 0, len, ArchiveValidation::default()).unwrap()
         }
         .into_typed::<i32>()
         .unwrap()
@@ -1484,14 +1360,7 @@ mod tests {
         let len = std::fs::metadata(tmp.path()).unwrap().len();
 
         let mmap_arr = unsafe {
-            Array::read_from_file_mmap(
-                tmp.path(),
-                0,
-                len,
-                ArrayParams::default(),
-                ArchiveValidation::default(),
-            )
-            .unwrap()
+            Array::read_from_file_mmap(tmp.path(), 0, len, ArchiveValidation::default()).unwrap()
         };
         let mmap_arr = mmap_arr.into_typed::<i32>().unwrap();
         let ctx = mmap_arr.read_ctx();
@@ -1504,7 +1373,6 @@ mod tests {
         let got = Array::read_from(
             Cursor::new(out_buf.into_inner()),
             None,
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();

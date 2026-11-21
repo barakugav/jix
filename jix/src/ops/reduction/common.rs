@@ -1769,7 +1769,8 @@ pub(crate) mod tests {
 
     #[test]
     fn reduction_over_plain_with_hand_picked_strides() {
-        use crate::{Array, ArrayParams};
+        use crate::storage::PlainArrayMethods;
+        use crate::Array;
 
         // The reduction reads its source in pull mode, and `PlainBase::read_data` in pull mode hands
         // back a zero-copy view with exactly the strides it was built with. So a `Plain` array
@@ -1813,21 +1814,19 @@ pub(crate) mod tests {
             };
 
             for &window in windows {
-                let mut params = ArrayParams::new();
-                if let Some(w) = window {
-                    params = params.read_size(w);
-                }
-                let arr: Array<crate::storage::PlainView<'_, i32>> = unsafe {
+                let mut arr: Array<crate::storage::PlainView<'_, i32>> = unsafe {
                     // SAFETY: `backing` outlives `arr`, and every index combination stays in bounds.
                     Array::plain_ndarray_ptr(
                         backing.as_ptr().add(base),
                         &shape_u64,
                         &strides,
                         <i32 as crate::dtype::Dtyped>::DTYPE,
-                        params,
                     )
                 }
                 .unwrap();
+                if let Some(w) = window {
+                    arr.set_read_size(w);
+                }
 
                 for mask in 1u8..8 {
                     let dims = (0..3)

@@ -331,7 +331,7 @@
 //!
 //! ```
 //! use jix::storage::ArchiveValidation;
-//! use jix::{Array, ArrayParams};
+//! use jix::Array;
 //! use ndarray::array;
 //!
 //! let tmp_dir = tempfile::tempdir()?;
@@ -341,15 +341,7 @@
 //!
 //! // Memory-map the source - blocks are paged in on demand.
 //! // Safety: the file is not modified while `src` is live.
-//! let src = unsafe {
-//!     Array::read_from_file_mmap(
-//!         &path,
-//!         0,
-//!         len,
-//!         ArrayParams::default(),
-//!         ArchiveValidation::default(),
-//!     )?
-//! };
+//! let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArchiveValidation::default())? };
 //!
 //! // Build a lazy pipeline over the mmap'd data.
 //! let processed = src.into_typed::<f32>()?.exp().map(|x| x + 1.0f32);

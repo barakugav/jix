@@ -351,12 +351,13 @@ pub(crate) mod tests {
 #[cfg(test)]
 mod read_size_tests {
     use crate::storage::params::ReadSize;
-    use crate::{Array, ArrayParams, ReadContext};
+    use crate::storage::PlainArrayMethods;
+    use crate::{Array, ReadContext};
 
     #[test]
     fn read_ctx_starts_from_the_array_read_size_and_can_override_it() {
-        let params = ArrayParams::new().read_size((64, 128));
-        let a = Array::plain_ndarray_with(ndarray::Array1::<i32>::zeros(100), params).unwrap();
+        let mut a = Array::plain_ndarray(ndarray::Array1::<i32>::zeros(100)).unwrap();
+        a.set_read_size((64, 128));
 
         let mut context = a.read_ctx();
         assert_eq!(context.read_size(), ReadSize::new(64, 128));

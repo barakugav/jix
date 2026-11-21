@@ -16,13 +16,13 @@ use crate::{ArrayParams, DimDyn, Dimension};
 /// # Examples
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// # use jix::__private::Scalar;
 /// use ndarray::array;
 ///
 /// let arr = Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
 ///
-/// let scalar_arr = Array::from_storage(Scalar::new(5.0f32, &[2, 2], ArrayParams::default())?);
+/// let scalar_arr = Array::from_storage(Scalar::new(5.0f32, &[2, 2])?);
 /// let result = (arr * scalar_arr).to_ndarray()?;
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]]);
 /// # Ok::<(), jix::Error>(())
@@ -40,7 +40,7 @@ impl<T> Scalar<T> {
     /// Returns an error if `shape.len()` exceeds the maximum supported number
     /// of dimensions, if a dim of `shape` exceeds `i64::MAX` or its byte size
     /// overflows `u64`, or if `T` has a zero itemsize.
-    pub fn new(data: T, shape: &[u64], mut params: ArrayParams) -> Result<Self>
+    pub fn new(data: T, shape: &[u64]) -> Result<Self>
     where
         T: Dtyped,
     {
@@ -48,9 +48,7 @@ impl<T> Scalar<T> {
         let shape = DimDyn::from_slice(shape);
         let ndim = shape.ndim();
 
-        params.block_shape = None;
-        params.block_shape_fixed_dims = None;
-        let mut spec = params.into_spec(
+        let mut spec = ArrayParams::default().into_spec(
             shape.as_slice(),
             &T::DTYPE,
             ArraySpecFlags::new().with_read_tiling(ReadTiling::ZeroCopy),
@@ -184,18 +182,14 @@ mod tests {
     use crate::error::Result;
     use crate::storage::Index;
     use crate::util::DimArray;
+    use crate::Array;
     use crate::ReadContext;
-    use crate::{Array, ArrayParams};
 
     pub fn plain_scalar<T>(value: T, shape: &[u64]) -> Result<Array<Scalar<T>>>
     where
         T: Dtyped,
     {
-        Ok(Array::from_storage(Scalar::new(
-            value,
-            shape,
-            ArrayParams::default(),
-        )?))
+        Ok(Array::from_storage(Scalar::new(value, shape)?))
     }
 
     #[test]

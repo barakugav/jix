@@ -682,6 +682,9 @@ impl ArraySpecOwned {
     pub(crate) fn dynamic_mut(&mut self) -> &mut ArraySpecDynamic {
         &mut self.dynamic
     }
+    pub(crate) fn set_read_size(&mut self, size_hint: (u64, u64)) {
+        Arc::make_mut(&mut self.shared).read_size = ReadSize::new(size_hint.0, size_hint.1);
+    }
 }
 impl<'a> ArraySpec<'a> {
     #[inline]
@@ -1674,7 +1677,7 @@ mod tests {
         let params = ArrayParams::new().block_shape(&[1024, 1]).unwrap();
         let data = ndarray::Array2::<f32>::zeros((1024, 1024));
         let a = Array::compact_ndarray_with(&data, params).unwrap();
-        let scalar = crate::__private::Scalar::new(2.0f32, &[1024, 1024], ArrayParams::new());
+        let scalar = crate::__private::Scalar::new(2.0f32, &[1024, 1024]);
         let c = (a.view() * Array::from_storage(scalar.unwrap()))
             .compact()
             .unwrap();
@@ -2215,7 +2218,6 @@ mod tests {
                 &[4],
                 &[0usize],
                 zero_itemsize_dtype(),
-                ArrayParams::new(),
             )
         };
         assert_eq!(
@@ -2297,7 +2299,6 @@ mod tests {
                 &OVERFLOWING_EMPTY_SHAPE,
                 &[0usize; 3],
                 <i32 as crate::dtype::Dtyped>::DTYPE,
-                ArrayParams::new(),
             )
         };
         assert_eq!(
@@ -2308,9 +2309,7 @@ mod tests {
 
     #[test]
     fn scalar_rejects_overflowing_shape() {
-        let result =
-            crate::__private::Scalar::new(0i32, &OVERFLOWING_EMPTY_SHAPE, ArrayParams::new())
-                .map(|_| ());
+        let result = crate::__private::Scalar::new(0i32, &OVERFLOWING_EMPTY_SHAPE).map(|_| ());
         assert_eq!(
             result.unwrap_err().kind(),
             crate::error::ErrorKind::InvalidShapeOperation
@@ -2344,9 +2343,7 @@ mod tests {
         let plain = || Array::plain_ndarray(data.clone()).unwrap();
         let compact = || Array::compact_ndarray(&data).unwrap();
         let row = || Array::plain_ndarray(ndarray::Array2::<i32>::zeros((1, 6))).unwrap();
-        let scalar = |shape: &[u64]| {
-            Array::from_storage(Scalar::new(1i32, shape, ArrayParams::default()).unwrap())
-        };
+        let scalar = |shape: &[u64]| Array::from_storage(Scalar::new(1i32, shape).unwrap());
 
         // Leaves
         assert_eq!(kind(plain()), ZeroCopy);

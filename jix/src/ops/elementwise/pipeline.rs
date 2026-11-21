@@ -1132,24 +1132,10 @@ mod tests {
 
         let shape_u64 = shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
         let lhs_array: Array<crate::storage::PlainView<'_, T>> = unsafe {
-            Array::plain_ndarray_ptr(
-                lhs.ptr(),
-                &shape_u64,
-                &strides[1],
-                T::DTYPE,
-                Default::default(),
-            )
-            .unwrap()
+            Array::plain_ndarray_ptr(lhs.ptr(), &shape_u64, &strides[1], T::DTYPE).unwrap()
         };
         let rhs_array: Array<crate::storage::PlainView<'_, T>> = unsafe {
-            Array::plain_ndarray_ptr(
-                rhs.ptr(),
-                &shape_u64,
-                &strides[2],
-                T::DTYPE,
-                Default::default(),
-            )
-            .unwrap()
+            Array::plain_ndarray_ptr(rhs.ptr(), &shape_u64, &strides[2], T::DTYPE).unwrap()
         };
 
         let context = ReadContext::default();
@@ -1781,10 +1767,7 @@ mod tests {
 
     /// An `Array` broadcasting one `f32` across a 4x5 region.
     fn scalar_4x5(value: f32) -> Array<crate::storage::scalar::Scalar<f32>> {
-        Array::from_storage(
-            crate::storage::scalar::Scalar::new(value, &[4, 5], crate::ArrayParams::default())
-                .unwrap(),
-        )
+        Array::from_storage(crate::storage::scalar::Scalar::new(value, &[4, 5]).unwrap())
     }
 
     #[test]
@@ -2315,7 +2298,6 @@ mod tests {
                         &[LEN as u64][..],
                         &[gaps[k] * size_of::<T>()][..],
                         T::DTYPE,
-                        Default::default(),
                     )
                 }
                 .unwrap();

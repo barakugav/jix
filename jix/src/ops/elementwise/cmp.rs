@@ -948,17 +948,18 @@ mod tests {
     // still see the caller's order.
     #[test]
     fn swapped_cmp_reports_operands_in_caller_order() {
-        use crate::{Array, ArrayParams, StorageBase};
+        use crate::storage::PlainArrayMethods;
+        use crate::{Array, StorageBase};
         use ndarray::ShapeBuilder;
 
         let c_order = ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap();
         let f_order = ndarray::Array::from_shape_vec([3, 4].f(), (0..12i32).collect()).unwrap();
-        let params = ArrayParams::default().block_size(1 << 12);
-        let a = Array::plain_ndarray_with(c_order, params).unwrap();
+        let mut a = Array::plain_ndarray(c_order).unwrap();
+        a.set_read_size((1 << 12, 1 << 13));
         let b = Array::plain_ndarray(f_order).unwrap();
         assert_ne!(
-            a.storage().spec().block_size(),
-            b.storage().spec().block_size()
+            a.storage().spec().read_size(),
+            b.storage().spec().read_size()
         );
 
         let check = |storage: &dyn StorageBase, name: &str| {
@@ -979,7 +980,7 @@ mod tests {
         // The base spec comes from `a`, and a tie in the read layout order goes to `a`: C order,
         // where the swapped `Less` alone would pick `b`'s F order.
         for spec in [gt.storage().spec(), ge.storage().spec()] {
-            assert_eq!(spec.block_size(), a.storage().spec().block_size());
+            assert_eq!(spec.read_size(), a.storage().spec().read_size());
             assert_eq!(spec.read_layout_order(), &[0, 1]);
         }
         let lt = b.view().less(a.view());

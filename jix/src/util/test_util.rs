@@ -5,7 +5,7 @@ use ndarray::IxDyn;
 
 use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
-use crate::storage::{ArrayStorageExt, Compact, Index};
+use crate::storage::{ArrayStorageExt, Compact, Index, PlainArrayMethods};
 use crate::util::{AlignedBytes, DimArray};
 use crate::{Array, ArrayParams, CompactArray, StorageBase, TypeDyn};
 
@@ -880,11 +880,14 @@ fn build_test_array<T: Dtyped>(
                     &shape,
                     &strides,
                     T::DTYPE,
-                    params,
                 )
             }
             .unwrap();
-            Array::from_storage(storage).into_any()
+            let mut array = Array::from_storage(storage);
+            if let Some(read_size) = params.read_size {
+                array.set_read_size((read_size.min, read_size.max));
+            }
+            array.into_any()
         }
     };
     array.into_typed::<T>().unwrap()
@@ -1495,8 +1498,7 @@ fn every_storage_rejects_invalid_indices() {
         let a = Array::compact_ndarray(&data).unwrap();
         let plain = Array::plain_ndarray_view(data.view()).unwrap();
         let shape = shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
-        let scalar =
-            Array::from_storage(Scalar::new(1i32, shape.as_slice(), ArrayParams::new()).unwrap());
+        let scalar = Array::from_storage(Scalar::new(1i32, shape.as_slice()).unwrap());
 
         assert_read_rejects_invalid_index(a.storage());
         assert_read_rejects_invalid_index(plain.storage());
