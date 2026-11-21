@@ -1,0 +1,79 @@
+name: Bench regression
+
+# Instruction counts (Valgrind via Gungraun) of the core crate on the base and head commits, run on
+# the same runner and compared in the job summary. Report-only: regressions never fail the job.
+
+on:
+  pull_request:
+    paths:
+      - "jix/**"
+      - "scripts/bench/gungraun_summary.py"
+      - ".github/workflows/bench_regression.yaml"
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Branch to compare against"
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-regression-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  instructions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jix
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Install gungraun-runner
+        run: cargo install gungraun-runner --version 0.20.0 --locked
+      - name: Resolve commits
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ inputs.base_ref }}
+        run: |
+          echo "HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          if [ -n "$PR_BASE_SHA" ]; then
+            echo "BASE_SHA=$PR_BASE_SHA" >> "$GITHUB_ENV"
+          else
+            echo "BASE_SHA=$(git merge-base HEAD "origin/$BASE_REF")" >> "$GITHUB_ENV"
+          fi
+      - name: Bench base
+        env:
+          GUNGRAUN_HOME: ${{ runner.temp }}/gungraun
+        run: |
+          git checkout --quiet "$BASE_SHA"
+          if [ -f jix/benches/regression.rs ]; then
+            cargo bench --manifest-path jix/Cargo.toml --bench regression -- --save-baseline=base
+          else
+            echo "Base $BASE_SHA has no regression bench; reporting head counts only."
+          fi
+      - name: Bench head
+        env:
+          GUNGRAUN_HOME: ${{ runner.temp }}/gungraun
+        run: |
+          git checkout --quiet "$HEAD_SHA"
+          cargo bench --manifest-path jix/Cargo.toml --bench regression -- --baseline=base --output-format=json > "$RUNNER_TEMP/gungraun.jsonl"
+      - name: Summary
+        run: python3 scripts/bench/gungraun_summary.py "$RUNNER_TEMP/gungraun.jsonl" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gungraun-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/gungraun.jsonl
+            ${{ runner.temp }}/gungraun
+          retention-days: 30
