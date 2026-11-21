@@ -1,0 +1,44 @@
+name: Fetch merge base
+description: >
+  In a shallow checkout, fetch HEAD and a base branch deep enough to find their merge base, doubling
+  the depth on each try instead of fetching the whole history.
+
+inputs:
+  base-ref:
+    description: Base branch name, e.g. main
+    required: true
+  max-depth:
+    description: Give up once this many commits back from either tip have been fetched
+    default: "4096"
+
+outputs:
+  merge-base:
+    description: SHA of the merge base of HEAD and the base branch
+    value: ${{ steps.fetch.outputs.merge-base }}
+
+runs:
+  using: composite
+  steps:
+    - id: fetch
+      shell: python
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+        MAX_DEPTH: ${{ inputs.max-depth }}
+      run: |
+        import os, subprocess, sys
+
+        base, max_depth = os.environ["BASE_REF"], int(os.environ["MAX_DEPTH"])
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        refspec = f"+refs/heads/{base}:refs/remotes/origin/{base}"
+        depth = 16
+        while True:
+            subprocess.check_call(["git", "fetch", "--quiet", "--no-tags", f"--depth={depth}", "origin", head, refspec])
+            res = subprocess.run(["git", "merge-base", head, f"origin/{base}"], capture_output=True, text=True)
+            if res.returncode == 0:
+                break
+            if depth >= max_depth:
+                sys.exit(f"no merge base of HEAD and {base} within {max_depth} commits")
+            depth *= 2
+        print(f"merge base {res.stdout.strip()} found at depth {depth}")
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(f"merge-base={res.stdout.strip()}\n")

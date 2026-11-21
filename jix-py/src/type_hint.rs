@@ -11,7 +11,7 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyInt, PyTuple};
-use pyo3::{type_hint_identifier, type_hint_subscript, type_hint_union, PyClass, PyTypeInfo};
+use pyo3::{PyClass, PyTypeInfo, type_hint_identifier, type_hint_subscript, type_hint_union};
 
 use crate::util::DimArray;
 

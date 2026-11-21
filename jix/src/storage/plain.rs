@@ -2,15 +2,15 @@ use std::marker::PhantomData;
 
 use crate::dtype::{Dtype, Dtyped};
 use crate::element_type::check_element_type;
-use crate::error::{bail, check_ndim, ensure, error, Result};
+use crate::error::{Result, bail, check_ndim, ensure, error};
 use crate::storage::params::{
-    read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned, ReadTiling,
+    ArraySpecFlags, ArraySpecOwned, ReadTiling, read_layout_order_insert_dont_care_dim,
 };
 use crate::storage::{
-    check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, CompactParams, ElementType,
-    Index, OutBuf, OutBufInner, StridedBuf, TypeDyn,
+    ArraySpec, ArrayStorageInfo, CompactParams, ElementType, Index, OutBuf, OutBufInner,
+    StridedBuf, TypeDyn, check_out_buf, write_out_buf_slot,
 };
-use crate::util::{dim_arr, DimArray, DimIdx, IterExt, SendSyncPtr};
+use crate::util::{DimArray, DimIdx, IterExt, SendSyncPtr, dim_arr};
 use crate::{Array, DimDyn, Dimension, PlainArray, ReadContext, StorageBase};
 
 /// Uncompressed nd-array storage that owns its data in a `Vec<T>`.
@@ -895,7 +895,7 @@ impl_plain_array_methods!([A, ET: ElementType] PlainBase<A, ET>, ET);
 
 #[cfg(test)]
 mod tests {
-    use ndarray::{array, s, ArrayD, Ix3};
+    use ndarray::{ArrayD, Ix3, array, s};
 
     use crate::scalar::bool8;
     use crate::storage::PlainArrayMethods;
@@ -1462,9 +1462,9 @@ mod tests {
 
     #[test]
     fn methods_plain_base() {
+        use crate::TypeDyn;
         use crate::dtype::Dtyped;
         use crate::storage::PlainBase;
-        use crate::TypeDyn;
 
         let data = vec![1i32, 2, 3, 4, 5, 6];
         let ptr = data.as_ptr().cast::<u8>();

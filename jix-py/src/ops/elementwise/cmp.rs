@@ -1,16 +1,15 @@
 use std::sync::LazyLock;
 
 use jix_core::dtype::Dtyped;
-use jix_core::scalar::bool8;
-use jix_core::scalar::{f16, Complex};
+use jix_core::scalar::{Complex, bool8, f16};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
+use crate::PyArray;
 use crate::ops::common::{
-    broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
+    CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar, broadcast_operands, define_op2,
 };
 use crate::util::IntoPyResult;
-use crate::PyArray;
 
 define_op2!(
     /// Element-wise equality test (`a == b`).
@@ -355,7 +354,7 @@ pub fn isclose<'py>(
             Scalar::Complex(_) => {
                 return Err(PyTypeError::new_err(
                     "a complex can't be cast to a real type for rtol or atol",
-                ))
+                ));
             }
         })
     }

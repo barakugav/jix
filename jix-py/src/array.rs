@@ -7,23 +7,20 @@ use jix_core::__private::ReadTiling;
 use jix_core::storage::{Codec, CompactArrayMethods, CompactParams, Filter, StridedBuf};
 use jix_core::{Array, ArrayAny, ReadContext, StorageBase};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
-
-use crate::type_hint::{
-    Dim, ItemOrTuple, NumpyArray, NumpyDtype, Shape, ShapeLen, ValueOrUnimplemented,
-};
-use pyo3::prelude::*;
-use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyString, PyTuple};
-
 use pyo3::exceptions::{
     PyIndexError, PyNotImplementedError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
 };
-use pyo3::types::PyAnyMethods;
+use pyo3::prelude::*;
+use pyo3::types::{PyAnyMethods, PyComplex, PyDict, PyFloat, PyInt, PyString, PyTuple};
 
 use crate::dtype::dtype_to_numpy;
-use crate::ops::{plain_from_numpy, RoundingMode};
+use crate::ops::{RoundingMode, plain_from_numpy};
+use crate::type_hint::{
+    Dim, ItemOrTuple, NumpyArray, NumpyDtype, Shape, ShapeLen, ValueOrUnimplemented,
+};
 use crate::util::{
-    dim_arr, maybe_detach, numpy_empty_ordered, numpy_items, strided_span_bytes, DimArray,
-    IntoPyResult,
+    DimArray, IntoPyResult, dim_arr, maybe_detach, numpy_empty_ordered, numpy_items,
+    strided_span_bytes,
 };
 
 /// A multi-dimensional compressed array.

@@ -3,9 +3,9 @@ use std::mem::transmute;
 use std::num::NonZeroUsize;
 use std::ops::Range;
 
-use crate::error::{bail, check_ndim, Result};
-use crate::util::{dim_arr, DimArray};
 use crate::NDIM_MAX;
+use crate::error::{Result, bail, check_ndim};
+use crate::util::{DimArray, dim_arr};
 
 /// The region [`read_data`](crate::StorageBase::read_data) reads: a start and a size per
 /// dimension, covering `start[d]..start[d] + size[d]`.

@@ -4,7 +4,7 @@ use fearless_simd::{Simd, SimdBase, SimdElement};
 
 use crate::error::ArithmeticStatus;
 use crate::scalar::bool8;
-use crate::util::{array_from_fn_inline, ArrayExt};
+use crate::util::{ArrayExt, array_from_fn_inline};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]

@@ -5,11 +5,11 @@ pub(crate) mod traits {
     use fearless_simd::ExtractToken;
 
     use crate::error::{ArithmeticErrorKind, ArithmeticStatus};
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
-    #[cfg(feature = "num-complex")]
-    use crate::scalar::Complex;
 
     define_scalar_op2_trait!(
         /// Division operation, like [`core::ops::Div`] but without panicking.
@@ -304,11 +304,7 @@ pub(crate) mod traits {
                 let mut error = ArithmeticStatus::default();
                 error.set_if(ArithmeticErrorKind::DivideByZero, zero);
                 *status |= int_error_barrier::<T>(error);
-                if zero {
-                    T::default()
-                } else {
-                    a
-                }
+                if zero { T::default() } else { a }
             }
         }
     }
@@ -852,7 +848,7 @@ mod tests {
 
         use super::DivKernel;
         use crate::ops::elementwise::op2::Op2Kernel;
-        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use crate::util::{SimdTestValues, assert_same_elements, for_each_simd_level};
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {
@@ -1495,8 +1491,8 @@ mod tests {
 
     #[test]
     fn div_by_zero_in_fused_chain() {
-        use crate::error::ErrorKind;
         use crate::Array;
+        use crate::error::ErrorKind;
 
         // A fused chain runs as a single pipeline, whichever op runs it reports the error.
         let a = || Array::compact_ndarray(&ndarray::array![6i32, 7, 8]).unwrap();

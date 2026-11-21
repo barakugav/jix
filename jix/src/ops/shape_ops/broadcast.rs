@@ -223,8 +223,8 @@ impl<S: StorageBase> Array<S> {
 mod tests {
     use ndarray::array;
 
-    use crate::util::{shape_strategy, ScalarStrategy};
-    use crate::{Array, CompactArray, IntoDimension, ReadContext, NDIM_MAX};
+    use crate::util::{ScalarStrategy, shape_strategy};
+    use crate::{Array, CompactArray, IntoDimension, NDIM_MAX, ReadContext};
 
     fn make(vals: Vec<i32>, shape: impl IntoDimension) -> CompactArray<i32> {
         let shape = shape.into_dimension().unwrap();

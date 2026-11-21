@@ -1,4 +1,4 @@
-use crate::util::iter::{impl_merge_extension, NdIterExtension};
+use crate::util::iter::{NdIterExtension, impl_merge_extension};
 use crate::{DimVec, Dimension};
 
 /// [`NdIterExtension`] that tracks the per-block inner offset and active size for each dimension
@@ -145,7 +145,7 @@ mod tests {
     use super::*;
     use crate::dimension::DimDyn;
     use crate::util::iter::NdIter;
-    use crate::util::{calc_block_end, SliceExt};
+    use crate::util::{SliceExt, calc_block_end};
 
     fn make_iter(
         begin: &[u64],

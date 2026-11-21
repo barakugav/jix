@@ -205,8 +205,8 @@ mod tests {
     use ndarray::array;
     use proptest::prelude::*;
 
-    use crate::util::{shape_strategy, ScalarStrategy};
     use crate::Array;
+    use crate::util::{ScalarStrategy, shape_strategy};
 
     #[test]
     fn rejects_invalid_index() {
@@ -332,8 +332,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[allow(clippy::type_complexity)]
-    fn permute_dims_strategy<T>(
-    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<usize>)>
+    fn permute_dims_strategy<T>()
+    -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<usize>)>
     where
         T: ScalarStrategy,
     {

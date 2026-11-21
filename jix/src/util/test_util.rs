@@ -638,8 +638,8 @@ where
 
 /// Always [`Compact`] storage, row-major. Only for tests that need real compact storage -
 /// `as_compact()` and the archive's compact write path. Prefer [`array_strategy_any`] otherwise.
-pub(crate) fn carray_strategy_any<T>(
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, CompactArray<T>)>
+pub(crate) fn carray_strategy_any<T>()
+-> impl Strategy<Value = (ndarray::ArrayD<T>, CompactArray<T>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -987,11 +987,12 @@ fn assert_array_matches_dyn<T>(
     let spec = actual.storage.spec();
     let ndim = actual.shape().len();
     assert_eq!(spec.block_shape().len(), ndim);
-    assert!(spec
-        .block_shape()
-        .iter()
-        .zip(actual.shape())
-        .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
+    assert!(
+        spec.block_shape()
+            .iter()
+            .zip(actual.shape())
+            .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64)))
+    );
     assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
     assert!(spec.block_size() > 0);
     assert!(spec.read_params().read_size.min > 0);
@@ -1120,7 +1121,12 @@ mod tests {
         let pct = |n: usize| 100.0 * n as f64 / N as f64;
         eprintln!(
             "row-major {:.1}%  transposed {:.1}%  padded {:.1}%  unaligned-ptr {:.1}%  unaligned-strides {:.1}%  zero-stride {:.1}%",
-            pct(row_major), pct(transposed), pct(padded), pct(unaligned_ptr), pct(unaligned_strides), pct(zero_stride),
+            pct(row_major),
+            pct(transposed),
+            pct(padded),
+            pct(unaligned_ptr),
+            pct(unaligned_strides),
+            pct(zero_stride),
         );
 
         // Wide bands: the point is that every case is reachable and none dominates, not that the
@@ -1409,9 +1415,9 @@ pub(crate) fn assert_same_elements<T: PartialEq + Debug, const N: usize>(
 #[track_caller]
 #[allow(clippy::reversed_empty_ranges, clippy::single_range_in_vec_init)]
 pub(crate) fn assert_read_rejects_invalid_index(storage: &impl StorageBase) {
+    use crate::ReadContext;
     use crate::error::ErrorKind;
     use crate::storage::StridedBuf;
-    use crate::ReadContext;
 
     let shape = storage.shape().to_vec();
     let ndim = shape.len();

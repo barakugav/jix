@@ -169,8 +169,8 @@ where
 mod tests {
     use ndarray::array;
 
-    use crate::scalar::Complex;
     use crate::Array;
+    use crate::scalar::Complex;
 
     #[test]
     fn real_complex_f32() {

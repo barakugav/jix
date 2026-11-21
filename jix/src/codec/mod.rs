@@ -10,14 +10,14 @@ mod byte_shuffle;
 
 use std::cell::UnsafeCell;
 
+use crate::ReadContext;
 use crate::dtype::{Alignment, Dtype};
 #[allow(unused_imports)]
-use crate::error::{ensure, error, Result};
+use crate::error::{Result, ensure, error};
 use crate::util::arrayvec::ArrayVec;
 use crate::util::buf_pool::BufferPool;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
 use crate::util::{AlignedBytes, AlternatingBuffers};
-use crate::ReadContext;
 
 /// The compression algorithm applied to each block.
 #[derive(Clone, Debug)]
@@ -344,9 +344,9 @@ mod tests {
 
     #[test]
     fn a_two_filter_pipeline_round_trips() {
+        use crate::Array;
         use crate::codec::filter::Filter;
         use crate::storage::CompactParams;
-        use crate::Array;
 
         let nd = ndarray::Array2::from_shape_fn((16, 16), |(i, j)| (i * 16 + j) as i32);
         let params = CompactParams::new()

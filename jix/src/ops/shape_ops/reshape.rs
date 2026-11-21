@@ -429,9 +429,9 @@ mod tests {
     use ndarray::array;
     use proptest::prelude::*;
 
-    use crate::array::Array;
-    use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::CompactArray;
+    use crate::array::Array;
+    use crate::util::{ScalarStrategy, arr_params, shape_strategy};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -1052,8 +1052,8 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    fn reshape_strategy<T>(
-    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<u64>)>
+    fn reshape_strategy<T>()
+    -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<u64>)>
     where
         T: ScalarStrategy,
     {

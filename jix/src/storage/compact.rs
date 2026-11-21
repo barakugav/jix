@@ -18,10 +18,10 @@ use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::cache_id::ArrayCacheId;
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{
-    check_out_buf, ArraySpec, CompactParams, ElementType, Index, OutBuf, StridedBuf,
+    ArraySpec, CompactParams, ElementType, Index, OutBuf, StridedBuf, check_out_buf,
 };
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, default_strides, NdCopier, PtrMutNoalias, PtrNoalias};
+use crate::util::{NdCopier, PtrMutNoalias, PtrNoalias, calc_block_end, default_strides};
 use crate::{Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase, TypeDyn};
 
 /// Heap-allocated, block-compressed nd-array storage.
@@ -702,14 +702,14 @@ impl_compact_array_methods!([ET] CompactMmap<ET>);
 mod tests {
     use std::collections::HashSet;
     use std::ops::Range;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::context::tests::context_read_cache_len;
     use crate::scalar::bool8;
     use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
     use crate::storage::{
-        split_ranges, ArraySpec, ArrayStorageExt, CompactParams, Index, OutBuf, StridedBuf,
+        ArraySpec, ArrayStorageExt, CompactParams, Index, OutBuf, StridedBuf, split_ranges,
     };
     use crate::util::DimArray;
     use crate::{Array, Storage, StorageBase};

@@ -1,15 +1,15 @@
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::sync::Arc;
 
+use crate::DimDyn;
 use crate::codec::{Decoder, DecoderCodecConfig};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
 use crate::storage::params::{ReadParams, ReadSize};
-use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf};
+use crate::storage::{Index, OutBuf, OutBufInner, StridedBuf, write_out_buf_slot};
 use crate::util::buf_pool::{BufferPool, PoolBuf};
 use crate::util::{DimArray, SliceExt};
-use crate::DimDyn;
 
 /// A context with reusable buffers and a long-lived decoder instance.
 ///

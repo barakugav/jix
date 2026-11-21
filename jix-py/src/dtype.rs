@@ -1,6 +1,6 @@
 #![allow(clippy::assertions_on_constants)]
 
-use jix_core::dtype::{Alignment, Dtype, Itemsize, ScalarKind, DTYPE_NDIM_MAX};
+use jix_core::dtype::{Alignment, DTYPE_NDIM_MAX, Dtype, Itemsize, ScalarKind};
 use numpy::{PyArrayDescr, PyArrayDescrMethods};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;

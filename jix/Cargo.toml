@@ -53,6 +53,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
 fastrand = "2"
+gungraun = "=0.20.0"
 paste = "1"
 proptest = { version = "1", default-features = false, features = [
     "std",
@@ -92,6 +93,11 @@ harness = false
 [[bench]]
 name = "normalize"
 harness = false
+
+[[bench]]
+name = "valgrind"
+harness = false
+bench = false  # needs valgrind: run it explicitly with `--bench valgrind`
 
 [lib]
 bench = false

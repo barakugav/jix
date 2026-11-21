@@ -3,19 +3,19 @@ use std::ops::Range;
 
 use super::Array;
 use crate::error::{
-    check_alloc_size, check_get_buffer_size, check_ndim, check_ranges, check_region_size, ensure,
-    Result,
+    Result, check_alloc_size, check_get_buffer_size, check_ndim, check_ranges, check_region_size,
+    ensure,
 };
 use crate::storage::params::ReadTiling;
 use crate::storage::{
-    alloc_out_buf, check_out_buf_dims, check_out_buf_impl, split_ranges, ArrayStorageExt, Index,
-    OutBuf, StridedBuf,
+    ArrayStorageExt, Index, OutBuf, StridedBuf, alloc_out_buf, check_out_buf_dims,
+    check_out_buf_impl, split_ranges,
 };
 use crate::util::iter::NdIter;
 use crate::util::{
     advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr,
 };
-use crate::{Dim, DimDyn, Dimension, PlainArray, ReadContext, Storage, StorageBase, NDIM_MAX};
+use crate::{Dim, DimDyn, Dimension, NDIM_MAX, PlainArray, ReadContext, Storage, StorageBase};
 
 impl<S: StorageBase> Array<S> {
     /// Read the entire array into a new heap-allocated [`ndarray::Array`].
@@ -686,7 +686,7 @@ impl<S: StorageBase> Array<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use ndarray::{array, Ix1, Ix2, Ix3, IxDyn};
+    use ndarray::{Ix1, Ix2, Ix3, IxDyn, array};
 
     use super::Array;
     use crate::array::tests::*;

@@ -348,9 +348,9 @@ mod tests {
     use ndarray::array;
     use proptest::prelude::*;
 
-    use crate::ops::concatenate;
-    use crate::util::{shape_strategy, ScalarStrategy};
     use crate::Array;
+    use crate::ops::concatenate;
+    use crate::util::{ScalarStrategy, shape_strategy};
 
     #[test]
     fn test_overflowing_concat_dim_is_an_error() {

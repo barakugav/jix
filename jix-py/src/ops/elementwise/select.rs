@@ -1,8 +1,8 @@
 use pyo3::prelude::*;
 
-use crate::ops::common::{broadcast_operands, operands_dtype_promotion, Operand, Scalar};
-use crate::util::IntoPyResult;
 use crate::PyArray;
+use crate::ops::common::{Operand, Scalar, broadcast_operands, operands_dtype_promotion};
+use crate::util::IntoPyResult;
 
 /// Selects `x[i]` where `condition[i]` is `True` and `y[i]` elsewhere.
 ///

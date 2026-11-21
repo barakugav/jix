@@ -176,7 +176,7 @@ mod linux {
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use std::ffi::{c_void, CStr};
+    use std::ffi::{CStr, c_void};
     use std::{mem, ptr};
 
     use super::CacheSizes;

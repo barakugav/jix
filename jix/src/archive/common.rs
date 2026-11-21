@@ -5,7 +5,7 @@ use prost::Message;
 
 use crate::archive::schema::{self, ArchiveType};
 use crate::archive::version::lib_version;
-use crate::error::{bail, ensure, error, Error, Result};
+use crate::error::{Error, Result, bail, ensure, error};
 use crate::util::{value_as_bytes, value_from_io};
 
 const MAGIC: &[u8; 4] = b"jix1";
@@ -312,10 +312,12 @@ mod tests {
     #[test]
     fn reading_past_the_end_of_the_archive() {
         let mut reader = reader_after_metadata(&[]);
-        assert!(reader
-            .try_read_message::<schema::FileMetadata>()
-            .unwrap()
-            .is_none());
+        assert!(
+            reader
+                .try_read_message::<schema::FileMetadata>()
+                .unwrap()
+                .is_none()
+        );
 
         let mut reader = reader_after_metadata(&[]);
         let err = reader.read_message::<schema::FileMetadata>().unwrap_err();
@@ -362,16 +364,20 @@ mod tests {
             (-1, 1),
             (0, total_size + 1),
         ] {
-            assert!(reader
-                .check_section_bounds(&Section { offset, size })
-                .is_err());
+            assert!(
+                reader
+                    .check_section_bounds(&Section { offset, size })
+                    .is_err()
+            );
         }
-        assert!(reader
-            .check_section_bounds(&Section {
-                offset: 0,
-                size: total_size
-            })
-            .is_ok());
+        assert!(
+            reader
+                .check_section_bounds(&Section {
+                    offset: 0,
+                    size: total_size
+                })
+                .is_ok()
+        );
     }
 
     #[test]

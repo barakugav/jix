@@ -1,7 +1,7 @@
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use jix_core::storage::CompactParams;
+use jix_core::storage::{CompactArrayMethods, CompactParams};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::prelude::*;
@@ -9,12 +9,10 @@ use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
 use pyo3::{type_hint_identifier, type_hint_subscript};
 
-use jix_core::storage::CompactArrayMethods;
-
+use crate::PyArray;
 use crate::array::resolve_array_params;
 use crate::ops::asarray;
 use crate::util::IntoPyResult;
-use crate::PyArray;
 
 /// Load a compressed array from a `.jix` file or a file-like object.
 ///
@@ -161,9 +159,9 @@ pub fn read_array(
 
         Ok(PyArray::from_core(array.into_any()))
     } else {
-        Err(PyTypeError::new_err(
-            format!("Expected a file path or a file-like object with a 'read' method, got {path_or_reader:?}"),
-        ))
+        Err(PyTypeError::new_err(format!(
+            "Expected a file path or a file-like object with a 'read' method, got {path_or_reader:?}"
+        )))
     }
 }
 

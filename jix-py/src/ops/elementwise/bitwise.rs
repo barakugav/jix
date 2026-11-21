@@ -2,10 +2,10 @@ use jix_core::dtype::ScalarKind;
 use jix_core::scalar::bool8;
 use pyo3::prelude::*;
 
-use crate::ops::common::{
-    broadcast_operands, define_op1, define_op2, define_op2_table, Operand, Scalar,
-};
 use crate::PyArray;
+use crate::ops::common::{
+    Operand, Scalar, broadcast_operands, define_op1, define_op2, define_op2_table,
+};
 
 define_op2!(
     /// Element-wise logical AND of two arrays.

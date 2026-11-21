@@ -2,7 +2,7 @@ use fearless_simd::Simd;
 
 use crate::ops::prelude::*;
 use crate::ops::reduction::common::{
-    define_array_reduction_method, define_reduction_op, ReductionOpKernel,
+    ReductionOpKernel, define_array_reduction_method, define_reduction_op,
 };
 
 pub(crate) mod traits {
@@ -445,7 +445,7 @@ impl<S: StorageBase> Array<S> {
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
 
-    use ndarray::{array, IxDyn};
+    use ndarray::{IxDyn, array};
 
     use crate::array::Array;
     use crate::ops::reduction::common::tests::*;

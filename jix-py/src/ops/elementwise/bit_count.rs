@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 
-use crate::ops::common::{define_op1, define_op1_table, Operand, Precision, Rank};
 use crate::PyArray;
+use crate::ops::common::{Operand, Precision, Rank, define_op1, define_op1_table};
 
 define_op1!(
     /// Counts the number of set bits (`1`s) in each element (population count).

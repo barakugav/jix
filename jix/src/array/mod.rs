@@ -348,11 +348,12 @@ impl<S: StorageBase> Array<S> {
             let spec = storage.spec();
             debug_assert_eq!(spec.block_shape().len(), ndim);
             debug_assert!(spec.block_shape().iter().all(|&s| s > 0));
-            debug_assert!(spec
-                .block_shape()
-                .iter()
-                .zip(shape.iter())
-                .all(|(&b, &s)| b as u64 <= s.max(1)));
+            debug_assert!(
+                spec.block_shape()
+                    .iter()
+                    .zip(shape.iter())
+                    .all(|(&b, &s)| b as u64 <= s.max(1))
+            );
             debug_assert!(spec.block_size() > 0);
             debug_assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
             let read_size = spec.read_params().read_size;
@@ -399,7 +400,7 @@ pub(crate) mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable};
     use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactParams};
-    use crate::util::{arr_params, cast_slice, DimArray};
+    use crate::util::{DimArray, arr_params, cast_slice};
     use crate::{CompactArray, Dimension, IntoDimension};
 
     // -----------------------------------------------------------------------

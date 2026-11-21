@@ -1,5 +1,5 @@
-use crate::util::iter::{impl_merge_extension, NdIterExtension};
-use crate::util::{default_logical_strides_slice, Idx};
+use crate::util::iter::{NdIterExtension, impl_merge_extension};
+use crate::util::{Idx, default_logical_strides_slice};
 use crate::{DimVec, Dimension};
 
 /// An nd-iterator extension that tracks an offset into a strided array.

@@ -328,7 +328,7 @@ mod tests {
 
         use super::{CountOnesKernel, CountZerosKernel};
         use crate::ops::elementwise::op1::Op1Kernel;
-        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use crate::util::{SimdTestValues, assert_same_elements, for_each_simd_level};
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case1 {

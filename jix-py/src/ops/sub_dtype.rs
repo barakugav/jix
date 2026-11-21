@@ -1,8 +1,8 @@
 use jix_core::TypeDyn;
 use pyo3::prelude::*;
 
-use crate::util::IntoPyResult;
 use crate::PyArray;
+use crate::util::IntoPyResult;
 
 /// Extracts one named field from a struct dtype array.
 ///

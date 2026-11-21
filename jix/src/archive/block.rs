@@ -1,18 +1,18 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem::MaybeUninit;
 
-use crate::archive::common::{map_read_error, ArchiveReader, ArchiveWriter, Section};
+use crate::archive::common::{ArchiveReader, ArchiveWriter, Section, map_read_error};
 use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter, MAX_FILTERS};
-use crate::dtype::{Dtype, DTYPE_NESTING_MAX};
-use crate::error::{bail, ensure, error, Error, Result};
+use crate::dtype::{DTYPE_NESTING_MAX, Dtype};
+use crate::error::{Error, Result, bail, ensure, error};
+use crate::storage::ArchiveValidation;
 use crate::storage::block::{
     BlockLocation, BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage, Mmap, MmapData,
     Owned,
 };
-use crate::storage::ArchiveValidation;
 use crate::util::arrayvec::ArrayVec;
-use crate::util::{cast_slice, cast_slice_mut, value_as_bytes, value_from_io, SendSyncPtr};
+use crate::util::{SendSyncPtr, cast_slice, cast_slice_mut, value_as_bytes, value_from_io};
 use crate::{ElementType, TypeDyn};
 
 /// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
@@ -467,14 +467,14 @@ mod tests {
     use std::io::{Read, Seek, Write};
     use std::marker::PhantomData;
 
+    use crate::ReadContext;
     use crate::archive::common::{ArchiveReader, ArchiveWriter};
     use crate::archive::schema;
     use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
-    use crate::storage::block::{BlockSize, BlockTable, Owned};
     use crate::storage::ArchiveValidation;
+    use crate::storage::block::{BlockSize, BlockTable, Owned};
     use crate::util::cast_slice;
-    use crate::ReadContext;
 
     /// Build a table from `items`, write it into `stream` and read it back.
     fn round_trip<T: Dtyped>(

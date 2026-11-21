@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::hint::assert_unchecked;
 use std::ops::{Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 
-use crate::error::{assert_dim, check_ndim, Result};
+use crate::error::{Result, assert_dim, check_ndim};
 
 /// Maximum number of dimensions supported by the library for an array.
 pub const NDIM_MAX: usize = 8;

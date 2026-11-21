@@ -1,5 +1,5 @@
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, Result};
+use crate::error::{Result, check_dtype};
 
 /// Compile-time element-type tracking: the bound on the `ElementType` associated type of
 /// [`StorageBase`](crate::StorageBase). Its implementors:

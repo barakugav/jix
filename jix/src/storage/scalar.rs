@@ -1,10 +1,10 @@
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, check_get_range, check_ndim, Result};
+use crate::error::{Result, check_dtype, check_get_range, check_ndim};
 use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{
-    check_out_buf, write_out_buf_slot, ArraySpec, ArrayStorageInfo, CompactParams, Index, OutBuf,
-    OutBufInner, StorageBase, StridedBuf,
+    ArraySpec, ArrayStorageInfo, CompactParams, Index, OutBuf, OutBufInner, StorageBase,
+    StridedBuf, check_out_buf, write_out_buf_slot,
 };
 use crate::util::{cast_slice, cast_slice_mut, dim_arr};
 use crate::{DimDyn, Dimension, ReadContext};

@@ -101,10 +101,10 @@ impl_bool8_op2!(BitXor::bitxor, ^);
 
 #[cfg(test)]
 mod tests {
-    use ndarray::{array, Ix0, Ix1};
+    use ndarray::{Ix0, Ix1, array};
 
-    use crate::scalar::bool8;
     use crate::Array;
+    use crate::scalar::bool8;
 
     #[test]
     fn any_non_zero_byte_is_true() {

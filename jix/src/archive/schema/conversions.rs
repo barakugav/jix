@@ -1,10 +1,10 @@
 #![allow(clippy::assertions_on_constants)]
 
-use crate::archive::schema;
-use crate::dtype::{Alignment, Itemsize, DTYPE_NDIM_MAX};
-use crate::error::{bail, ensure, error, Result};
-use crate::util::{DimArray, IterExt};
 use crate::NDIM_MAX;
+use crate::archive::schema;
+use crate::dtype::{Alignment, DTYPE_NDIM_MAX, Itemsize};
+use crate::error::{Result, bail, ensure, error};
+use crate::util::{DimArray, IterExt};
 
 impl crate::dtype::Dtype {
     pub(crate) fn from_proto(dtype: &schema::Dtype) -> Result<Self> {

@@ -4,14 +4,14 @@ use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyEllipsis, PySlice, PyTuple};
 
+use crate::PyArray;
 use crate::ops::asarray_simple;
-use crate::ops::common::{operands_dtype_promotion_vec, Operand};
+use crate::ops::common::{Operand, operands_dtype_promotion_vec};
 use crate::type_hint::{Dim, ItemOrTuple, ShapeLen};
 use crate::util::{
-    normalize_dim, normalize_dim_optional, normalize_dims, normalize_dims_optional, slice_unpack,
-    DimArray, IntoPyResult,
+    DimArray, IntoPyResult, normalize_dim, normalize_dim_optional, normalize_dims,
+    normalize_dims_optional, slice_unpack,
 };
-use crate::PyArray;
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions.
 ///

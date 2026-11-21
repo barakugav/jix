@@ -2,16 +2,16 @@ use fearless_simd::Simd;
 
 use crate::ops::prelude::*;
 use crate::ops::reduction::common::{
-    define_array_reduction_method, define_reduction_op, ReductionOpKernel,
+    ReductionOpKernel, define_array_reduction_method, define_reduction_op,
 };
 
 pub(crate) mod traits {
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    #[cfg(feature = "num-complex")]
-    use crate::scalar::Complex;
-    use crate::util::{array2_map_inline, ArrayExt};
+    use crate::util::{ArrayExt, array2_map_inline};
 
     macro_rules! update_bulk_simd {
         ($Trait:ident, $Op:ident::$op_bulk:ident) => {
@@ -621,11 +621,11 @@ impl<S: StorageBase> Array<S> {
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
 
-    use ndarray::{array, Ix0, Ix1};
+    use ndarray::{Ix0, Ix1, array};
 
-    use crate::scalar::bool8;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    use crate::scalar::bool8;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;

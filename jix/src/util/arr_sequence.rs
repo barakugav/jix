@@ -3,9 +3,9 @@ use std::cell::UnsafeCell;
 use crate::array::Array;
 use crate::dtype::Dtype;
 use crate::error::{ArithmeticStatus, Result};
-use crate::ops::{max_itemsize, n_operands_mul, n_operands_sum, ElementwisePipelineImpl, Operand};
+use crate::ops::{ElementwisePipelineImpl, Operand, max_itemsize, n_operands_mul, n_operands_sum};
 use crate::storage::{ArraySpec, Index, OutBuf};
-use crate::util::{array_from_fn_inline, ArrayExt};
+use crate::util::{ArrayExt, array_from_fn_inline};
 use crate::{ElementType, ReadContext, Storage, StorageBase};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)

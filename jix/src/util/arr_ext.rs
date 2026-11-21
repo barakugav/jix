@@ -259,7 +259,7 @@ fn unwrap_infallible<T>(result: Result<T, Infallible>) -> T {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::rc::Rc;
 
     use super::*;
@@ -387,11 +387,7 @@ mod tests {
         let calls = Cell::new(0u32);
         let out: Result<[usize; 6], usize> = array_try_from_fn_inline(|i| {
             calls.set(calls.get() + 1);
-            if i == 3 {
-                Err(i)
-            } else {
-                Ok(i)
-            }
+            if i == 3 { Err(i) } else { Ok(i) }
         });
         assert_eq!(out, Err(3));
         // Called on indices 0, 1, 2, 3 only - never 4 or 5.
@@ -562,11 +558,7 @@ mod tests {
         let calls = Cell::new(0u32);
         let out: Result<[i32; 5], &str> = [1, 2, 3, 4, 5].try_map_inline(|x| {
             calls.set(calls.get() + 1);
-            if x == 3 {
-                Err("stop")
-            } else {
-                Ok(x * 10)
-            }
+            if x == 3 { Err("stop") } else { Ok(x * 10) }
         });
         assert_eq!(out, Err("stop"));
         // Called on 1, 2, 3 only - never on 4 or 5.
@@ -589,11 +581,7 @@ mod tests {
         let calls = Cell::new(0u32);
         let out: Result<[i32; 4], &str> = [1, 2, 3, 4].try_map_inline(|x| {
             calls.set(calls.get() + 1);
-            if x == 4 {
-                Err("last")
-            } else {
-                Ok(x)
-            }
+            if x == 4 { Err("last") } else { Ok(x) }
         });
         assert_eq!(out, Err("last"));
         assert_eq!(calls.get(), 4);
@@ -843,11 +831,7 @@ mod tests {
         let out: Result<[i32; 5], usize> =
             array2_try_map_inline([1, 2, 3, 4, 5], [5, 4, 3, 2, 1], |i, x, y| {
                 calls.set(calls.get() + 1);
-                if x == y {
-                    Err(i)
-                } else {
-                    Ok(x - y)
-                }
+                if x == y { Err(i) } else { Ok(x - y) }
             });
         assert_eq!(out, Err(2));
         assert_eq!(calls.get(), 3);
@@ -926,11 +910,7 @@ mod tests {
 
         let result: Result<[u32; 4], u32> =
             array2_try_map_inline([0u32, 1, 2, 3], ys, |_, x, y| {
-                if x == 1 {
-                    Err(y.id)
-                } else {
-                    Ok(x + y.id)
-                }
+                if x == 1 { Err(y.id) } else { Ok(x + y.id) }
             });
 
         assert_eq!(result.err(), Some(11));

@@ -1,7 +1,7 @@
 use jix_core::dtype::{Dtype, Itemsize, ScalarKind};
 use pyo3::prelude::*;
 
-use crate::ops::common::{scalar_kind_to_rank_precision, unsupported_dtype_error, Operand};
+use crate::ops::common::{Operand, scalar_kind_to_rank_precision, unsupported_dtype_error};
 use crate::util::array_try_map;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]

@@ -1,6 +1,5 @@
-use jix_core::scalar::bool8;
-use jix_core::scalar::{f16, Complex};
 use jix_core::ArrayAny;
+use jix_core::scalar::{Complex, bool8, f16};
 use pyo3::prelude::*;
 
 use crate::util::IntoPyResult;

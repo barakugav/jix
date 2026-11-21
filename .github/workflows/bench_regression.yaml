@@ -1,0 +1,88 @@
+name: Bench regression
+
+# Valgrind instruction counts of the core crate on the base and head commits, run on
+# the same runner and compared in the job summary. Report-only: regressions never fail the job.
+
+on:
+  pull_request:
+    paths:
+      - "jix/**"
+      - "scripts/bench/valgrind_summary.py"
+      - ".github/actions/fetch-merge-base/**"
+      - ".github/workflows/bench_regression.yaml"
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Branch to compare against"
+        type: string
+        default: main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  instructions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jix
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Install gungraun-runner
+        run: cargo install gungraun-runner --version 0.20.0 --locked
+      - name: Fetch merge base
+        id: merge-base
+        uses: ./.github/actions/fetch-merge-base
+        with:
+          base-ref: ${{ github.base_ref || inputs.base_ref }}
+      - name: Resolve commits
+        env:
+          MERGE_BASE: ${{ steps.merge-base.outputs.merge-base }}
+        run: |
+          echo "HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "BASE_SHA=$MERGE_BASE" >> "$GITHUB_ENV"
+      - name: Bench base
+        env:
+          GUNGRAUN_HOME: ${{ runner.temp }}/gungraun
+        run: |
+          git checkout --quiet "$BASE_SHA"
+          if [ -f jix/benches/valgrind.rs ]; then
+            cargo bench --manifest-path jix/Cargo.toml --bench valgrind -- --save-baseline=base
+          else
+            echo "Base $BASE_SHA has no valgrind bench; reporting head counts only."
+          fi
+      - name: Bench head
+        env:
+          GUNGRAUN_HOME: ${{ runner.temp }}/gungraun
+        run: |
+          git checkout --quiet "$HEAD_SHA"
+          cargo bench --manifest-path jix/Cargo.toml --bench valgrind -- --baseline=base --output-format=json > "$RUNNER_TEMP/valgrind.jsonl"
+      - name: Summary
+        run: |
+          python3 scripts/bench/valgrind_summary.py "$RUNNER_TEMP/valgrind.jsonl" > "$RUNNER_TEMP/summary.md"
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      # Fork PRs get a read-only token, so they only get the job summary.
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/summary.md" --edit-last --create-if-none
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: valgrind-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/valgrind.jsonl
+            ${{ runner.temp }}/gungraun
+          retention-days: 30

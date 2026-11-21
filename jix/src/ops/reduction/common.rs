@@ -3,9 +3,9 @@ use std::ops::Not;
 
 use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 
+use crate::Dim;
 use crate::ops::prelude::*;
 use crate::util::{array2_map_inline, const_max, const_min, prev_power_of_two};
-use crate::Dim;
 
 pub(crate) struct ReductionOp<S: StorageBase, K> {
     kernel: K,
@@ -505,10 +505,12 @@ where
             crate::util::default_strides_slice(out_shape, kernel_state_sizeof),
         )
     };
-    debug_assert!(state_strides
-        .as_ref()
-        .iter()
-        .all(|&s| s.is_multiple_of(kernel_state_alignof.as_usize())));
+    debug_assert!(
+        state_strides
+            .as_ref()
+            .iter()
+            .all(|&s| s.is_multiple_of(kernel_state_alignof.as_usize()))
+    );
     // The state strides lifted to the inner array's dims: zero on a reduced dim, since a reduced
     // dim does not index the state.
     let state_strides_inner = {
@@ -701,7 +703,11 @@ fn reduce_tile_impl(
     if inner_len == 0 {
         return; // empty tile
     }
-    let [_items_inner_stride, state_inner_stride, reduced_inner_stride] = iter.inner_strides();
+    let [
+        _items_inner_stride,
+        state_inner_stride,
+        reduced_inner_stride,
+    ] = iter.inner_strides();
     let [items_contiguous, state_contiguous, _] = *iter.is_contiguous();
     let [items_strides_aligned, state_strides_aligned, _] = *iter.is_strides_aligned();
     let items_aligned = !REQUIRE_ALIGNED
@@ -1432,15 +1438,15 @@ pub(crate) use {define_array_reduction_method, define_reduction_op};
 pub(crate) mod tests {
     use std::rc::Rc;
 
-    use ndarray::{array, ArrayD, Ix0, Ix1};
+    use ndarray::{ArrayD, Ix0, Ix1, array};
 
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    #[cfg(feature = "num-complex")]
-    use crate::scalar::Complex;
     use crate::storage::{
-        split_ranges, ArrayStorageExt, CompactArrayMethods, CompactParams, Index,
+        ArrayStorageExt, CompactArrayMethods, CompactParams, Index, split_ranges,
     };
     use crate::util::DimArray;
     #[cfg(feature = "num-complex")]
@@ -1770,8 +1776,8 @@ pub(crate) mod tests {
 
     #[test]
     fn reduction_over_plain_with_hand_picked_strides() {
-        use crate::storage::PlainArrayMethods;
         use crate::Array;
+        use crate::storage::PlainArrayMethods;
 
         // The reduction reads its source in pull mode, and `PlainBase::read_data` in pull mode hands
         // back a zero-copy view with exactly the strides it was built with. So a `Plain` array

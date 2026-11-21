@@ -9,12 +9,12 @@ use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::archive::version::lib_version;
 use crate::codec::{DecoderCodecConfig, EncoderParams};
-use crate::error::{check_ndim, ensure, error, Error, Result};
+use crate::error::{Error, Result, check_ndim, ensure, error};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{
     ArchiveValidation, ArrayBlockTableStorageBase, Compact, CompactMmap, CompactParams,
 };
-use crate::util::{dim_arr, IterExt};
+use crate::util::{IterExt, dim_arr};
 use crate::{Array, DimDyn, Dimension, ReadContext, StorageBase, TypeDyn};
 
 impl Array<Compact<TypeDyn>> {
@@ -484,11 +484,7 @@ where
             .map(|dim| {
                 let s = shape[dim];
                 let b = block_shape[dim] as u64;
-                if s == 0 {
-                    0
-                } else {
-                    s.next_multiple_of(b)
-                }
+                if s == 0 { 0 } else { s.next_multiple_of(b) }
             })
             .try_shape_product()
             .ok_or_else(|| {
@@ -587,7 +583,7 @@ mod tests {
 
     #[test]
     fn deepest_struct_dtype_round_trips() {
-        use crate::dtype::{Dtype, DTYPE_NESTING_MAX};
+        use crate::dtype::{DTYPE_NESTING_MAX, Dtype};
         let mut dtype = u8::DTYPE;
         for _ in 0..DTYPE_NESTING_MAX {
             dtype = Dtype::from_fields(vec![("f".to_string(), 0, dtype)]).unwrap();
@@ -748,9 +744,10 @@ mod tests {
             .append(true)
             .open(file.path())
             .unwrap();
-        assert!(a
-            .write_to(writer, CompactParams::default(), &a.read_ctx())
-            .is_err());
+        assert!(
+            a.write_to(writer, CompactParams::default(), &a.read_ctx())
+                .is_err()
+        );
     }
 
     #[test]

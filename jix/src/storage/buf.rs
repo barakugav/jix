@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use crate::dtype::Dtype;
-use crate::error::{bail, check_get_range, check_region_size, ensure, Result};
+use crate::error::{Result, bail, check_get_range, check_region_size, ensure};
 use crate::storage::{ArrayStorageExt, Index};
 use crate::util::buf_pool::{BufferPool, PoolBuf};
 use crate::util::{
-    default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
-    NdCopier, PtrMutNoalias, PtrNoalias, SliceExt,
+    DimArray, NdCopier, PtrMutNoalias, PtrNoalias, SliceExt, default_strides_slice, dim_arr,
+    strided_span_bytes, strides_for_layout_order,
 };
 use crate::{DimDyn, DimIdx, ReadContext, StorageBase};
 
@@ -611,10 +611,12 @@ mod tests {
         let big = || Array::plain_ndarray(array![1u8, 2, 3, 4]).unwrap();
         let ctx2 = ReadContext::default();
         assert!(big().to_buf_strided_into(&[0..4], &mut out, &ctx2).is_err());
-        assert!(big()
-            .flip(0)
-            .to_buf_strided_into(&[0..4], &mut out, &ctx2)
-            .is_err());
+        assert!(
+            big()
+                .flip(0)
+                .to_buf_strided_into(&[0..4], &mut out, &ctx2)
+                .is_err()
+        );
         assert!(big().to_buf_strided_into(&[1..2], &mut out, &ctx2).is_ok());
     }
 
@@ -627,12 +629,14 @@ mod tests {
         let mut out = a.to_buf_strided(&[0..1, 0..4], &ctx).unwrap();
         let big = Array::plain_ndarray(array![[10i32, 11, 12, 13], [20, 21, 22, 23]]).unwrap();
         let ctx2 = ReadContext::default();
-        assert!(big
-            .to_buf_strided_into(&[0..2, 0..4], &mut out, &ctx2)
-            .is_err());
-        assert!(big
-            .to_buf_strided_into(&[1..2, 0..4], &mut out, &ctx2)
-            .is_ok());
+        assert!(
+            big.to_buf_strided_into(&[0..2, 0..4], &mut out, &ctx2)
+                .is_err()
+        );
+        assert!(
+            big.to_buf_strided_into(&[1..2, 0..4], &mut out, &ctx2)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -652,10 +656,11 @@ mod tests {
         ] {
             assert!(out.data_ptr_mut().is_none());
             let ctx2 = ReadContext::default();
-            assert!(x
-                .view()
-                .to_buf_strided_into(&[0..2, 0..4], &mut out, &ctx2)
-                .is_err());
+            assert!(
+                x.view()
+                    .to_buf_strided_into(&[0..2, 0..4], &mut out, &ctx2)
+                    .is_err()
+            );
         }
     }
 }
