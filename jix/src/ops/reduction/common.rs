@@ -1434,9 +1434,10 @@ pub(crate) mod tests {
     use std::rc::Rc;
 
     use crate::scalar::bool8;
+    use crate::storage::CompactArrayMethods;
     use crate::storage::{split_ranges, Index};
     use crate::util::DimArray;
-    use crate::ArrayParams;
+    use crate::CompactParams;
 
     use ndarray::{array, ArrayD, Ix0, Ix1};
 
@@ -1918,11 +1919,9 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let params = ArrayParams::new()
-            .block_shape(block_shape)
-            .unwrap()
-            .read_size(read_size);
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let params = CompactParams::new().block_shape(block_shape).unwrap();
+        let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
+        za.set_read_size(read_size);
 
         let reduced = za.view().sum(dims);
         let out_shape: Vec<u64> = reduced.shape().to_vec();
@@ -2069,11 +2068,9 @@ pub(crate) mod tests {
         let nd = ndarray::ArrayD::from_shape_vec(vec![N], data).unwrap();
         // One block and one tile over the whole array, so the run reaches a single
         // `fold_pairwise` call rather than being split across tiles and merged sequentially.
-        let params = ArrayParams::new()
-            .block_shape(&[N as u32])
-            .unwrap()
-            .read_size((1 << 19, 1 << 20));
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let params = CompactParams::new().block_shape(&[N as u32]).unwrap();
+        let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
+        za.set_read_size((1 << 19, 1 << 20));
 
         let got = f64::from(za.view().sum(0usize).to_ndarray::<Ix0>().unwrap()[[]]);
         let err = (exact - got).abs();
@@ -2104,11 +2101,9 @@ pub(crate) mod tests {
             let exact = (0..n).map(|i| i % 7).sum::<usize>() as f32;
             let nd = ndarray::ArrayD::from_shape_vec(vec![n], data).unwrap();
             // One block and one tile: the whole run is one `fold_pairwise` call.
-            let params = ArrayParams::new()
-                .block_shape(&[n as u32])
-                .unwrap()
-                .read_size((1 << 19, 1 << 20));
-            let za = Array::compact_ndarray_with(&nd, params).unwrap();
+            let params = CompactParams::new().block_shape(&[n as u32]).unwrap();
+            let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
+            za.set_read_size((1 << 19, 1 << 20));
             assert_eq!(
                 za.view().sum(0usize).to_ndarray::<Ix0>().unwrap()[[]],
                 exact,
@@ -2133,11 +2128,9 @@ pub(crate) mod tests {
             (0..64i32).map(|x| (x % 97) as i8).collect(),
         )
         .unwrap();
-        let params = ArrayParams::new()
-            .block_shape(&[2, 2, 2])
-            .unwrap()
-            .read_size((32, 64));
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let params = CompactParams::new().block_shape(&[2, 2, 2]).unwrap();
+        let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
+        za.set_read_size((32, 64));
         let reduced = za.view().sum(1usize); // [4, 4] i64
         let index = [0..4u64, 0..4];
         let ctx = reduced.read_ctx();
@@ -2335,7 +2328,7 @@ pub(crate) mod tests {
         use crate::Array;
 
         // A reduction kernel picks its own output type, so it is another way a fresh dtype reaches an
-        // array without passing through `ArrayParams::tune` (a lazy view never re-tunes). `Empty`
+        // array without passing through `CompactParams::tune` (a lazy view never re-tunes). `Empty`
         // is a `Dtyped` type with itemsize 0.
         //
         // `Fold` is the user-facing op that exposes a caller-chosen accumulator, but it is commented

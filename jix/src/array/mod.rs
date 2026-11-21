@@ -139,7 +139,7 @@ mod compact;
 /// output indices translate to positions in the underlying blocks. When the new layout crosses
 /// block boundaries that the original respected, a single read may decompress many more blocks
 /// than necessary. To avoid this, materialize with [`compact`](Array::compact) (automatic block
-/// shape) or [`compact_with`](Array::compact_with) (explicit [`ArrayParams`](crate::ArrayParams),
+/// shape) or [`compact_with`](Array::compact_with) (explicit [`CompactParams`](crate::CompactParams),
 /// e.g. a block shape matching the expected access pattern) after a shape change.
 ///
 /// # Element type tracking
@@ -216,7 +216,7 @@ impl<S: StorageBase> Array<S> {
             .unwrap_or_else(|| self.storage.dtype())
     }
 
-    /// Create a [`ReadContext`] with the decoder parameters of this array.
+    /// Create a [`ReadContext`] with the decoder parameters and read size of this array.
     ///
     /// A context holds reusable buffers and a decompressor instance; reuse one across repeated
     /// reads to share the allocation and setup cost. [`to_ndarray`](Array::to_ndarray) builds one
@@ -391,7 +391,7 @@ pub(crate) mod tests {
     use crate::storage::block::{BlockSize, BlockTable};
 
     use crate::util::{arr_params, cast_slice, DimArray};
-    use crate::{ArrayParams, CompactArray, Dimension, IntoDimension};
+    use crate::{CompactArray, CompactParams, Dimension, IntoDimension};
 
     // -----------------------------------------------------------------------
     // compact_ndarray roundtrip helper
@@ -439,7 +439,7 @@ pub(crate) mod tests {
             .iter()
             .map(|&x| x as BlockSize)
             .collect::<DimArray<_>>();
-        let params = ArrayParams::default().block_shape(&block_shape).unwrap();
+        let params = CompactParams::default().block_shape(&block_shape).unwrap();
         Array::from_storage(Compact(
             ArrayBlockTableStorageBase::new(
                 make_block_table(blocks),

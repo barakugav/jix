@@ -24,7 +24,7 @@ use crate::DimDyn;
 /// parameters stored alongside the array data:
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::{Array, CompactParams};
 /// use ndarray::array;
 ///
 /// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;

@@ -337,8 +337,9 @@ mod tests {
     use crate::storage::ArrayStorageExt;
 
     use crate::scalar::bool8;
+    use crate::storage::CompactArrayMethods;
     use crate::storage::{split_ranges, Index};
-    use crate::ArrayParams;
+    use crate::CompactParams;
 
     use ndarray::{array, Ix0, Ix1};
 
@@ -579,11 +580,9 @@ mod tests {
         )
         .unwrap();
 
-        let params = ArrayParams::new()
-            .block_shape(block_shape)
-            .unwrap()
-            .read_size(read_size);
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let params = CompactParams::new().block_shape(block_shape).unwrap();
+        let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
+        za.set_read_size(read_size);
 
         let calls = Cell::new(0u64);
         let reduced = za.view().reduce_unordered(dims, |a: u8, b: u8| {

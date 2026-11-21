@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 
 use fastrand::Rng;
-use jix::{Array, ArrayParams, CompactArray};
+use jix::storage::CompactArrayMethods;
+use jix::{Array, CompactArray, CompactParams};
 
 pub fn create_data<T: Scalar>(profile: Profile, shape: &[u64], seed: u64) -> ndarray::ArrayD<T> {
     let dims = shape.iter().map(|&d| d as usize).collect::<Vec<_>>();
@@ -23,14 +24,15 @@ pub fn create_compact<'a>(
     rng: &mut Rng,
 ) -> CompactArray<i32> {
     let data = create_ndarray(shape, rng);
-    let mut params = ArrayParams::new();
+    let mut params = CompactParams::new();
     if let Some(block_shape) = block_shape.into() {
         params = params.block_shape(block_shape).unwrap();
     }
+    let mut array = Array::compact_ndarray_with(&data, params).unwrap();
     if let Some(read_size) = read_size.into() {
-        params = params.read_size(read_size);
+        array.set_read_size(read_size);
     }
-    Array::compact_ndarray_with(&data, params).unwrap()
+    array
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

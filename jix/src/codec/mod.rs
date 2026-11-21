@@ -1,7 +1,7 @@
 //! Internal block codec implementation: filter pipeline plus the codec (Zstd) used to compress and
 //! decompress each array block. The user-facing documentation lives on
 //! [`Compact`](crate::storage::Compact); configuration is exposed through
-//! [`ArrayParams`](crate::ArrayParams).
+//! [`CompactParams`](crate::CompactParams).
 
 mod filter;
 pub use filter::*;
@@ -25,7 +25,7 @@ use crate::ReadContext;
 #[non_exhaustive]
 pub enum Codec {
     /// [Zstandard](https://facebook.github.io/zstd/) - a fast general-purpose compressor.
-    /// Compression level is controlled by [`ArrayParams::level`](crate::ArrayParams::level).
+    /// Compression level is controlled by [`CompactParams::level`](crate::CompactParams::level).
     Zstd,
 }
 
@@ -356,10 +356,10 @@ mod tests {
     #[test]
     fn a_two_filter_pipeline_round_trips() {
         use crate::codec::filter::Filter;
-        use crate::{Array, ArrayParams};
+        use crate::{Array, CompactParams};
 
         let nd = ndarray::Array2::from_shape_fn((16, 16), |(i, j)| (i * 16 + j) as i32);
-        let params = ArrayParams::new()
+        let params = CompactParams::new()
             .block_shape(&[4, 4])
             .unwrap()
             .filters(&[Filter::ByteShuffle, Filter::BitShuffle])

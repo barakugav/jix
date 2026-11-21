@@ -5,18 +5,19 @@ use ndarray::IxDyn;
 
 use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
+use crate::storage::params::ReadSize;
 use crate::storage::{ArrayStorageExt, Compact, Index, PlainArrayMethods};
 use crate::util::{AlignedBytes, DimArray};
-use crate::{Array, ArrayParams, CompactArray, StorageBase, TypeDyn};
+use crate::{Array, CompactArray, CompactParams, StorageBase, TypeDyn};
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper
 // ---------------------------------------------------------------------------
 
-pub(crate) fn arr_params(block_shape: &[usize]) -> ArrayParams {
-    ArrayParams {
+pub(crate) fn arr_params(block_shape: &[usize]) -> CompactParams {
+    CompactParams {
         block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-        ..ArrayParams::default()
+        ..CompactParams::default()
     }
 }
 
@@ -533,7 +534,7 @@ pub(crate) fn block_shape_strategy(
     shape: &[usize],
 ) -> impl Strategy<Value = Vec<BlockSize>> + use<> {
     // Per-dim block size is clamped to [1, max(1, s)] to satisfy the invariant
-    // enforced by `ArrayParams::tune`: `1 <= b <= s.max(1)`.
+    // enforced by `CompactParams::tune`: `1 <= b <= s.max(1)`.
     shape
         .iter()
         .map(|&s| 1u32..=4u32.min(s.max(1) as u32))
@@ -598,12 +599,12 @@ where
         (Just(arr), block_shape, block_size, read_size, kind, layout)
     })
     .prop_map(|(arr, block_shape, block_size, read_size, kind, layout)| {
-        let mut params = ArrayParams::default().block_shape(&block_shape).unwrap();
+        let mut params = CompactParams::default().block_shape(&block_shape).unwrap();
         if let Some(block_size) = block_size {
             params = params.block_size(block_size);
         }
         if let Some(read_size) = read_size {
-            params = params.read_size(read_size);
+            params.read_size = Some(ReadSize::new(read_size.0, read_size.1));
         }
         let arr = collapse_zero_stride_dims(arr, &layout.zero_stride_dims);
         let array = build_test_array(&arr, &layout, kind, params);
@@ -673,12 +674,12 @@ where
         (Just(arr), block_shape, block_size, read_size)
     })
     .prop_map(|(arr, block_shape, block_size, read_size)| {
-        let mut params = ArrayParams::default().block_shape(&block_shape).unwrap();
+        let mut params = CompactParams::default().block_shape(&block_shape).unwrap();
         if let Some(block_size) = block_size {
             params = params.block_size(block_size);
         }
         if let Some(read_size) = read_size {
-            params = params.read_size(read_size);
+            params.read_size = Some(ReadSize::new(read_size.0, read_size.1));
         }
         let compact = Array::compact_ndarray_with(&arr, params).unwrap();
         (arr, compact)
@@ -856,7 +857,7 @@ fn build_test_array<T: Dtyped>(
     arr: &ndarray::ArrayD<T>,
     layout: &TestArrayLayout,
     kind: TestArrayKind,
-    params: ArrayParams,
+    params: CompactParams,
 ) -> TestArray<T> {
     let (buf, offset, strides) = build_strided_bytes(arr, layout);
     let shape: Vec<u64> = arr.shape().iter().map(|&s| s as u64).collect();
@@ -1275,7 +1276,7 @@ mod tests {
             let expected = collapse_zero_stride_dims(arr.clone(), &zero_stride_dims);
             for kind in [TestArrayKind::Compact, TestArrayKind::Plain] {
                 eprintln!("case {name} / {kind:?}: strides {strides:?}, offset {ptr_offset}");
-                let za = build_test_array(&expected, &layout, kind, ArrayParams::default());
+                let za = build_test_array(&expected, &layout, kind, CompactParams::default());
                 assert_array_matches(&za, &expected);
             }
         }

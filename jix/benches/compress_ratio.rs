@@ -1,6 +1,6 @@
 mod common;
 
-use jix::{Array, ArrayParams};
+use jix::{Array, CompactParams};
 
 use crate::common::{create_data, Profile};
 
@@ -33,7 +33,7 @@ fn main() {
             let raw_bytes = data.len() * std::mem::size_of::<i32>();
             for block_shape in block_shapes {
                 for level in levels {
-                    let params = ArrayParams::new()
+                    let params = CompactParams::new()
                         .block_shape(block_shape)
                         .unwrap()
                         .level(level)

@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use jix_core::__private::ReadTiling;
 use jix_core::storage::{Codec, CompactArrayMethods, Filter, StridedBuf};
-use jix_core::{Array, ArrayAny, ReadContext, StorageBase};
+use jix_core::{Array, ArrayAny, CompactParams, ReadContext, StorageBase};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
 use crate::type_hint::{
@@ -1802,7 +1802,7 @@ pub fn compact<'py>(
 /// The `params` dict of a Python function, parsed.
 pub(crate) struct ResolvedParams {
     /// Every key but `read_size`.
-    pub(crate) params: jix_core::ArrayParams,
+    pub(crate) params: CompactParams,
     pub(crate) read_size: Option<(u64, u64)>,
     pub(crate) block_shape_fixed_dims: Option<Vec<bool>>,
 }
@@ -1814,7 +1814,7 @@ pub(crate) fn resolve_array_params(
     allowed: &[&str],
 ) -> PyResult<ResolvedParams> {
     let mut resolved = ResolvedParams {
-        params: jix_core::ArrayParams::default(),
+        params: CompactParams::default(),
         read_size: None,
         block_shape_fixed_dims: None,
     };
@@ -1861,7 +1861,7 @@ pub(crate) fn resolve_array_params(
     let compression_level = extract_arg!("compression_level", i32)?;
     let filters = extract_arg!("filters", Vec<String>)?;
 
-    let mut params = jix_core::ArrayParams::default();
+    let mut params = CompactParams::default();
     if let Some(block_shape) = block_shape {
         params = params.block_shape(&block_shape).into_py_result()?;
     }

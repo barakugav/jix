@@ -9,7 +9,7 @@ use crate::util::{
     default_logical_strides, default_strides, scale_read_shape, AlignedBytes, IterExt, NdCopier,
     PtrMutNoalias, PtrNoalias, SliceExt,
 };
-use crate::{ArrayParams, Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase};
+use crate::{CompactParams, Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase};
 
 use super::Array;
 
@@ -53,10 +53,10 @@ impl<S: StorageBase> Array<S> {
     /// ```
     pub fn compact(&self) -> Result<Array<Compact<S::ElementType>>> {
         let context = self.read_ctx();
-        self.compact_with(ArrayParams::default(), &context)
+        self.compact_with(CompactParams::default(), &context)
     }
 
-    /// Compress the data of this array into a new `Array<Compact>` with explicit [`ArrayParams`].
+    /// Compress the data of this array into a new `Array<Compact>` with explicit [`CompactParams`].
     ///
     /// Like [`compact`](Array::compact). Fields not set in `params` are inherited from the source
     /// storage, except that setting any of the codec, level or filters resets the other two to
@@ -69,15 +69,15 @@ impl<S: StorageBase> Array<S> {
     ///   corrupt.
     ///
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::{Array, CompactParams};
     /// use ndarray::array;
     ///
-    /// let a_params = ArrayParams::default().block_shape(&[1, 2])?;
+    /// let a_params = CompactParams::default().block_shape(&[1, 2])?;
     /// let a = Array::compact_ndarray_with(&array![[1.5f32, 2.0], [3.14, 6.17]], a_params)?;
     ///
     /// // Let's say a is given to us, and we prepare to access it many times with a specific access
     /// // pattern. We re-compress it with a matching block shape.
-    /// let b = a.compact_with(ArrayParams::default().block_shape(&[2, 1])?, &a.read_ctx())?;
+    /// let b = a.compact_with(CompactParams::default().block_shape(&[2, 1])?, &a.read_ctx())?;
     ///
     /// assert_eq!(
     ///     b.to_ndarray_sub(&[0..2, 0..1], &b.read_ctx())?,
@@ -87,7 +87,7 @@ impl<S: StorageBase> Array<S> {
     /// ```
     pub fn compact_with(
         &self,
-        mut params: ArrayParams,
+        mut params: CompactParams,
         context: &ReadContext,
     ) -> Result<Array<Compact<S::ElementType>>> {
         fn builder_init(
@@ -123,7 +123,7 @@ impl<S: StorageBase> Array<S> {
     /// zero-padded to fill the full `block_shape` before compression.
     pub(crate) fn compact_into_builder<B>(
         &self,
-        params: &mut ArrayParams,
+        params: &mut CompactParams,
         context: &ReadContext,
         builder_init: impl FnOnce(
             /* nblocks */ u64,
@@ -143,7 +143,7 @@ impl<S: StorageBase> Array<S> {
 #[inline(never)]
 fn compact_into_builder_dyn_dispatch<B: BlockTableBuilder>(
     storage: &dyn StorageBase,
-    params: &mut ArrayParams,
+    params: &mut CompactParams,
     context: &ReadContext,
     builder_init: impl FnOnce(
         /* nblocks */ u64,
@@ -163,7 +163,7 @@ fn compact_into_builder_dyn_dispatch<B: BlockTableBuilder>(
 #[inline(never)]
 fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
     storage: &dyn StorageBase,
-    params: &mut ArrayParams,
+    params: &mut CompactParams,
     context: &ReadContext,
     builder_init: impl FnOnce(
         /* nblocks */ u64,
@@ -384,7 +384,7 @@ mod tests {
         let a = Array::compact_ndarray(&array![1u8])
             .unwrap()
             .broadcast(&[1 << 62]);
-        let params = crate::ArrayParams::new().block_shape(&[1]).unwrap();
+        let params = crate::CompactParams::new().block_shape(&[1]).unwrap();
         let ctx = a.read_ctx();
         let err = a.compact_with(params.clone(), &ctx).unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);

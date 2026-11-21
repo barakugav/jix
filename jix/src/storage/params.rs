@@ -52,9 +52,9 @@ impl Default for ReadSize {
     }
 }
 
-/// Parameters controlling the encoding/decoding configs of an [`Array`], and its block layout.
+/// Parameters for writing a block-compressed array: its block layout and codec.
 ///
-/// `ArrayParams` groups two independent sets of configuration:
+/// `CompactParams` groups two independent sets of configuration:
 ///
 /// - **Codec** - the compression configuration applied when encoding blocks for a new array, set
 ///   via [`codec`](Self::codec), [`level`](Self::level) and [`filters`](Self::filters). It affects
@@ -67,12 +67,10 @@ impl Default for ReadSize {
 ///
 /// - When a new array is constructed, such as via [`Array::compact_ndarray`]: the data is split
 ///   into blocks per the block layout, and each block is compressed with the encoder params.
-/// - When an array is read, such as via [`Array::to_ndarray`]: each block is decompressed with the
-///   decoder params. Readers may read smaller pieces aligned to the block shape (or preferred read
-///   shape) to avoid decompressing more data than necessary.
 /// - When an array is copied, such as via [`Array::compact`] or [`Array::compact_with`]: unset
 ///   params are inherited from the source array's storage spec. A compact source (not a lazy view)
-///   keeps its block shape and codec params by default. A lazy view (e.g. from `Add`, `Reshape`)
+///   keeps its block shape and codec params by default, and a lazy view takes the codec of the
+///   first compact array it reads. A lazy view (e.g. from `Add`, `Reshape`)
 ///   adjusts them by an approximate heuristic that tries to keep user-set params. Shape ops (e.g.
 ///   `Reshape`, `PermuteDims`) are especially likely to change the block layout - consider passing
 ///   explicit params to `compact_with` after them, or checking that the resulting block layout
@@ -80,38 +78,37 @@ impl Default for ReadSize {
 ///
 /// # Recommended usage
 ///
-/// Use `ArrayParams::new()` (equivalent to `ArrayParams::default()`) for most cases: the defaults
-/// select a block shape according to the CPU cache sizes and use Zstd level 3 with byte shuffling.
+/// Use `CompactParams::new()` (equivalent to `CompactParams::default()`) for most cases: the
+/// defaults select a block shape according to the CPU cache sizes and use Zstd level 3 with byte shuffling.
 /// For latency-sensitive workloads with a known access pattern, set `block_shape` explicitly.
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::{Array, CompactParams};
 ///
 /// // Construct an array with a specific block shape.
 /// let data = ndarray::Array2::<f32>::zeros((1024, 1024));
-/// let za = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[64, 64])?)?;
+/// let za = Array::compact_ndarray_with(&data, CompactParams::new().block_shape(&[64, 64])?)?;
 ///
 /// // After a shape-changing op, pin the block shape explicitly.
-/// let out_params = ArrayParams::new().block_shape(&[128, 128])?;
+/// let out_params = CompactParams::new().block_shape(&[128, 128])?;
 /// let ctx = za.read_ctx();
 /// let transposed = za.permute_dims(&[1, 0]).compact_with(out_params, &ctx)?;
 /// # Ok::<(), jix::Error>(())
 /// ```
 #[derive(Clone, Default, Debug)]
-pub struct ArrayParams {
+pub struct CompactParams {
     pub(crate) block_shape: Option<DimArray<BlockSize>>,
     pub(crate) block_shape_fixed_dims: Option<DimBitmap>,
     pub(crate) block_size: Option<u64>,
-    pub(crate) read_size: Option<ReadSize>,
     pub(crate) encoder_params: Option<EncoderParams>,
-    pub(crate) decoder_params: Option<DecoderParams>,
+    pub(crate) read_size: Option<ReadSize>, // inherited from a source array
 }
 
-impl ArrayParams {
-    /// Creates a new `ArrayParams` with all fields unset (equivalent to [`Default::default()`]).
+impl CompactParams {
+    /// Creates a new `CompactParams` with all fields unset (equivalent to [`Default::default()`]).
     ///
-    /// Block layout and other params are automatically selected according to cache size heuristics
-    /// when not set explicitly.
+    /// The block layout is automatically selected according to cache size heuristics when not set
+    /// explicitly.
     pub fn new() -> Self {
         Self::default()
     }
@@ -161,29 +158,6 @@ impl ArrayParams {
     #[must_use]
     pub fn block_size(mut self, size_hint: u64) -> Self {
         self.block_size = Some(size_hint);
-        self
-    }
-
-    /// Sets the target byte range `(min, max)` for a single read region.
-    ///
-    /// A read region is the rectangular slab the engine pulls and decompresses in one pass
-    /// when materializing a lazy pipeline or a sub-region read. Its shape is derived by
-    /// scaling the storage block shape toward this byte budget:
-    ///
-    /// - `max` is the *scale-down ceiling*: an oversized read shape is shrunk until it fits
-    ///   within `max`.
-    /// - `min` is the *scale-up floor*: a read shape is then grown up to `min`, or up to
-    ///   `2 * max` along a dimension the data is duplicated along (e.g. a broadcast one).
-    ///
-    /// When the source array's block grid differs from the output's, a read that straddles
-    /// source blocks decompresses whole blocks for a partial slice, and neighboring reads
-    /// decompress the same block again. Larger regions span more blocks per call and dilute that
-    /// waste; `max` bounds their cache footprint.
-    ///
-    /// When unset, the range is chosen automatically according to the CPU cache sizes.
-    #[must_use]
-    pub fn read_size(mut self, size_hint: (u64, u64)) -> Self {
-        self.read_size = Some(ReadSize::new(size_hint.0, size_hint.1));
         self
     }
 
@@ -255,8 +229,6 @@ impl ArrayParams {
         if self.encoder_params.is_none() {
             self.encoder_params = spec.encoder_params().cloned();
         }
-        self.decoder_params
-            .get_or_insert_with(|| spec.decoder_params().clone());
 
         if self.block_shape.is_none() {
             let block_shape = spec.block_shape();
@@ -517,7 +489,7 @@ impl ArrayParams {
             flags
                 .is_compact()
                 .then(|| params.encoder_params.unwrap_or_default()),
-            params.decoder_params.unwrap_or_default(),
+            DecoderParams::default(),
             flags,
         );
 
@@ -584,7 +556,7 @@ pub(crate) struct ArraySpecDynamic {
     /// Per-dimension "fixed" flags for [`block_shape`](Self::block_shape).
     ///
     /// A fixed dim keeps its exact block length when a **new Compact array** is materialized
-    /// (`ArrayParams::tune`/`scale_block_shape`); a non-fixed dim may be freely resized to fit the
+    /// (`CompactParams::tune`/`scale_block_shape`); a non-fixed dim may be freely resized to fit the
     /// target block size. This flag only affects Compact materialization - it does *not* enter the
     /// read path (`scale_read_shape` ignores it).
     pub(crate) block_shape_fixed_dims: DimBitmap,
@@ -1172,15 +1144,15 @@ mod tests {
 
     use super::scale_order_from_weights;
     use crate::util::ScaleWeight;
-    use crate::{Array, ArrayParams, CompactArray, StorageBase, BLOCK_SIZE_BYTES_MAX};
+    use crate::{Array, CompactArray, CompactParams, StorageBase, BLOCK_SIZE_BYTES_MAX};
 
     #[test]
     fn compact_with_keeps_caller_fixed_dims() {
         let data = ndarray::Array2::<i32>::zeros((64, 64));
-        let params = ArrayParams::new().block_shape(&[8, 32]).unwrap();
+        let params = CompactParams::new().block_shape(&[8, 32]).unwrap();
         let a = Array::compact_ndarray_with(&data, params).unwrap();
 
-        let params = ArrayParams::new()
+        let params = CompactParams::new()
             .block_shape_fixed_dims(&[true, false])
             .unwrap()
             .block_size(8 * 64 * 4);
@@ -1196,7 +1168,7 @@ mod tests {
                 .unwrap()
                 .broadcast(&[1 << 31])
         };
-        let params = ArrayParams::new().block_shape(&[1 << 31]).unwrap();
+        let params = CompactParams::new().block_shape(&[1 << 31]).unwrap();
         assert!(a().compact_with(params, &Default::default()).is_err());
     }
 
@@ -1285,10 +1257,10 @@ mod tests {
     fn widening_view_rescales_an_oversized_inherited_block_shape() {
         // One fixed block of 2^20 + 8 items, over 1 GiB as 1 KiB items.
         let n = (1 << 20) + 8;
-        let params = ArrayParams::new().block_shape(&[n as u32]).unwrap();
+        let params = CompactParams::new().block_shape(&[n as u32]).unwrap();
         let a = Array::compact_ndarray_with(&ndarray::Array1::<u8>::zeros(n), params).unwrap();
         let a = a.map(|x: u8| [x as f64; 128]);
-        let mut params = ArrayParams::new();
+        let mut params = CompactParams::new();
         params.inherit_unset_from_storage(a.storage());
         params.tune(a.shape(), a.dtype()).unwrap();
         let block_shape = params.block_shape.unwrap();
@@ -1298,10 +1270,10 @@ mod tests {
     #[test]
     fn wrong_length_fixed_dims_are_rejected_with_an_oversized_inherited_block() {
         let n = (1 << 20) + 8;
-        let params = ArrayParams::new().block_shape(&[n as u32]).unwrap();
+        let params = CompactParams::new().block_shape(&[n as u32]).unwrap();
         let a = Array::compact_ndarray_with(&ndarray::Array1::<u8>::zeros(n), params).unwrap();
         let a = a.map(|x: u8| [x as f64; 128]);
-        let mut params = ArrayParams::new()
+        let mut params = CompactParams::new()
             .block_shape_fixed_dims(&[true; 3])
             .unwrap();
         params.inherit_unset_from_storage(a.storage());
@@ -1439,7 +1411,7 @@ mod tests {
         use crate::storage::{CompactArrayMethods, Filter};
 
         let nd = ndarray::Array1::from_iter(0..16i32);
-        let params = ArrayParams::new().filters(&[Filter::BitShuffle]).unwrap();
+        let params = CompactParams::new().filters(&[Filter::BitShuffle]).unwrap();
         let bit = Array::compact_ndarray_with(&nd, params).unwrap();
         let byte = Array::compact_ndarray(&nd).unwrap();
         let plain = Array::plain_ndarray(nd.clone()).unwrap();
@@ -1702,7 +1674,7 @@ mod tests {
 
     #[test]
     fn scalar_and_plain_keep_the_compact_block_shape() {
-        let params = ArrayParams::new().block_shape(&[1024, 1]).unwrap();
+        let params = CompactParams::new().block_shape(&[1024, 1]).unwrap();
         let data = ndarray::Array2::<f32>::zeros((1024, 1024));
         let a = Array::compact_ndarray_with(&data, params).unwrap();
         let scalar = crate::__private::Scalar::new(2.0f32, &[1024, 1024]);
@@ -1714,7 +1686,7 @@ mod tests {
         let c = (a + plain).compact().unwrap();
         assert_eq!(c.storage().spec().block_shape()[..], [1024, 1]);
 
-        let params = ArrayParams::new().block_shape(&[64, 64]).unwrap();
+        let params = CompactParams::new().block_shape(&[64, 64]).unwrap();
         let a = Array::compact_ndarray_with(&data, params).unwrap();
         let plain = Array::plain_ndarray_view(data.view()).unwrap();
         let c = (a + plain).compact().unwrap();
@@ -1728,7 +1700,7 @@ mod tests {
         // "cover this dim" wish lives in `read_shape_scale_weight` instead.
         // The ops consume their receiver, so build two identical arrays.
         let mk = || {
-            let params = ArrayParams::new().block_shape(&[3, 2]).unwrap();
+            let params = CompactParams::new().block_shape(&[3, 2]).unwrap();
             Array::compact_ndarray_with(
                 &ndarray::Array::from_shape_vec([3, 4], (0..12i64).collect()).unwrap(),
                 params,
@@ -1888,7 +1860,7 @@ mod tests {
         use crate::dtype::Dtyped;
 
         // All dims fixed by default: the explicit block shape is preserved exactly.
-        let spec = ArrayParams::new()
+        let spec = CompactParams::new()
             .block_shape(&[4, 4])
             .unwrap()
             .into_spec(&[1024, 1024], &i32::DTYPE, ArraySpecFlags::default())
@@ -1897,7 +1869,7 @@ mod tests {
         assert!(spec.as_ref().block_shape_fixed_dims().all());
 
         // Release dim 1: it may grow to fill the block-size budget, while dim 0 stays pinned.
-        let spec = ArrayParams::new()
+        let spec = CompactParams::new()
             .block_shape(&[4, 4])
             .unwrap()
             .block_shape_fixed_dims(&[true, false])
@@ -1916,7 +1888,7 @@ mod tests {
     fn block_shape_larger_than_array_is_clamped() {
         use crate::dtype::Dtyped;
 
-        let spec = ArrayParams::new()
+        let spec = CompactParams::new()
             .block_shape(&[1024, 1, 8])
             .unwrap()
             .into_spec(&[4, 3, 0], &i32::DTYPE, ArraySpecFlags::default())
@@ -1927,7 +1899,9 @@ mod tests {
     #[test]
     fn block_shape_fixed_dims_without_block_shape_errors() {
         use crate::dtype::Dtyped;
-        let params = ArrayParams::new().block_shape_fixed_dims(&[false]).unwrap();
+        let params = CompactParams::new()
+            .block_shape_fixed_dims(&[false])
+            .unwrap();
         let result = params.into_spec(&[8], &i32::DTYPE, ArraySpecFlags::default());
         match result {
             Err(e) => assert!(matches!(e.kind(), crate::error::ErrorKind::InvalidArgument)),
@@ -1939,7 +1913,7 @@ mod tests {
     fn block_shape_fixed_dims_length_mismatch_errors() {
         use crate::dtype::Dtyped;
         // A 3-element fixed-dims mask on a 2-D array is a length mismatch.
-        let params = ArrayParams::new()
+        let params = CompactParams::new()
             .block_shape(&[4, 4])
             .unwrap()
             .block_shape_fixed_dims(&[true, false, true])
@@ -1954,11 +1928,11 @@ mod tests {
     #[test]
     fn example() {
         let data = ndarray::Array2::<f32>::zeros((1024, 1024));
-        let params = ArrayParams::new().block_shape(&[64, 64]).unwrap();
+        let params = CompactParams::new().block_shape(&[64, 64]).unwrap();
         let za = Array::compact_ndarray_with(&data, params).unwrap();
 
         // After a shape-changing op, pin the block shape explicitly.
-        let out_params = ArrayParams::new().block_shape(&[128, 128]).unwrap();
+        let out_params = CompactParams::new().block_shape(&[128, 128]).unwrap();
         let ctx = za.read_ctx();
         let transposed = za
             .permute_dims(&[1, 0])
@@ -1972,9 +1946,9 @@ mod tests {
         use crate::codec::{Codec, Filter};
 
         // Unset by default -> getters return None.
-        assert!(ArrayParams::new().encoder_params.is_none());
+        assert!(CompactParams::new().encoder_params.is_none());
 
-        let params = ArrayParams::new()
+        let params = CompactParams::new()
             .codec(Codec::Zstd)
             .level(7)
             .unwrap()
@@ -1992,7 +1966,7 @@ mod tests {
     fn read_size_defaults_to_cache_window() {
         use crate::dtype::Dtyped;
         use crate::util::cpu_cache::cache_sizes;
-        let spec = ArrayParams::new()
+        let spec = CompactParams::new()
             .block_shape(&[8])
             .unwrap()
             .into_spec(&[8], &i32::DTYPE, ArraySpecFlags::default())
@@ -2009,19 +1983,6 @@ mod tests {
         );
         assert!(rs.min <= rs.max, "min {} > max {}", rs.min, rs.max);
         assert!(rs.max <= cs.l2 as u64, "max {} > l2 {}", rs.max, cs.l2);
-    }
-
-    #[test]
-    fn read_size_setter_roundtrips_tuple() {
-        use crate::dtype::Dtyped;
-        let spec = ArrayParams::new()
-            .block_shape(&[8])
-            .unwrap()
-            .read_size((4096, 65536))
-            .into_spec(&[8], &i32::DTYPE, ArraySpecFlags::default())
-            .unwrap();
-        let rs = spec.as_ref().read_size();
-        assert_eq!((rs.min, rs.max), (4096, 65536));
     }
 
     // ---- block-shape scaling heuristics ----
@@ -2041,7 +2002,7 @@ mod tests {
         block_size_max: u64,
         shape: &[u64],
     ) -> Vec<BlockSize> {
-        ArrayParams::scale_block_shape(block_shape, scale_dim, block_size_max, shape).to_vec()
+        CompactParams::scale_block_shape(block_shape, scale_dim, block_size_max, shape).to_vec()
     }
 
     fn vol(block: &[BlockSize]) -> u64 {
@@ -2153,8 +2114,8 @@ mod tests {
 
     #[test]
     fn block_len_heuristic_returns_one_for_degenerate_dim() {
-        assert_eq!(ArrayParams::block_len_heuristic(5, 1, 1000, 1), 1);
-        assert_eq!(ArrayParams::block_len_heuristic(1, 0, 1000, 1), 1);
+        assert_eq!(CompactParams::block_len_heuristic(5, 1, 1000, 1), 1);
+        assert_eq!(CompactParams::block_len_heuristic(1, 0, 1000, 1), 1);
     }
 
     #[test]
@@ -2168,7 +2129,7 @@ mod tests {
             (8, 500, 4096, 2),
             (1, 10, 1_000_000, 1),
         ] {
-            let b = ArrayParams::block_len_heuristic(base, dim_len, max_volume, inner) as u64;
+            let b = CompactParams::block_len_heuristic(base, dim_len, max_volume, inner) as u64;
             assert!(b >= 1 && b <= dim_len, "block len {b} out of [1,{dim_len}]");
             let budget = (max_volume / inner).max(1);
             assert!(
@@ -2181,8 +2142,8 @@ mod tests {
     #[test]
     fn block_len_heuristic_budget_shrinks_with_inner_volume() {
         // A larger inner-block volume leaves less budget, so the chosen length cannot grow.
-        let big = ArrayParams::block_len_heuristic(1, 10_000, 4096, 1);
-        let small = ArrayParams::block_len_heuristic(1, 10_000, 4096, 64);
+        let big = CompactParams::block_len_heuristic(1, 10_000, 4096, 1);
+        let small = CompactParams::block_len_heuristic(1, 10_000, 4096, 64);
         assert!(
             small <= big,
             "expected {small} <= {big} as inner volume grows"
@@ -2203,14 +2164,14 @@ mod tests {
 
     #[test]
     fn tune_rejects_zero_itemsize() {
-        let mut params = ArrayParams::new();
+        let mut params = CompactParams::new();
         let err = params.tune(&[8], &zero_itemsize_dtype()).unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::UnsupportedDtype);
     }
 
     #[test]
     fn into_spec_rejects_zero_itemsize() {
-        let err = ArrayParams::new()
+        let err = CompactParams::new()
             .into_spec(&[8], &zero_itemsize_dtype(), ArraySpecFlags::default())
             .map(|_| ())
             .unwrap_err();
@@ -2228,7 +2189,7 @@ mod tests {
                 &[4],
                 &[0usize],
                 zero_itemsize_dtype(),
-                ArrayParams::new(),
+                CompactParams::new(),
             )
         };
         assert_eq!(
@@ -2276,7 +2237,7 @@ mod tests {
 
     #[test]
     fn into_spec_rejects_overflowing_shape() {
-        let err = ArrayParams::new()
+        let err = CompactParams::new()
             .into_spec(
                 &OVERFLOWING_EMPTY_SHAPE,
                 &<i32 as crate::dtype::Dtyped>::DTYPE,
@@ -2300,7 +2261,7 @@ mod tests {
     fn compact_rejects_overflowing_padded_shape() {
         // 3 * 0x5555_5555_5555_5555 == u64::MAX, and the block dim 2 pads the 3 to 4.
         let shape = [0, 3, 0x5555_5555_5555_5555];
-        let params = ArrayParams::new().block_shape(&[1, 2, 1]).unwrap();
+        let params = CompactParams::new().block_shape(&[1, 2, 1]).unwrap();
         let result = Array::compact_fn_with(&shape, params, |_| 0u8);
         assert_eq!(
             result.unwrap_err().kind(),
@@ -2312,7 +2273,7 @@ mod tests {
         assert!(a
             .write_to(
                 std::io::Cursor::new(vec![]),
-                ArrayParams::default(),
+                CompactParams::default(),
                 &a.read_ctx()
             )
             .is_err());

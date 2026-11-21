@@ -806,7 +806,7 @@ mod tests {
     //
     // A mapping op is the one place an array's dtype comes from a caller-chosen type rather than
     // from an input array, so the output dtype has to be checked here. Leaf storages are gated by
-    // `ArrayParams::tune`, but a lazy view never re-tunes.
+    // `CompactParams::tune`, but a lazy view never re-tunes.
 
     #[derive(Copy, Clone, crate::dtype::Dtyped)]
     #[dtyped(crate = "crate")]

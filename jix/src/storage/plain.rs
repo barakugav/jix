@@ -12,7 +12,7 @@ use crate::storage::{
 };
 use crate::util::{dim_arr, DimArray, DimIdx, IterExt, SendSyncPtr};
 use crate::ReadContext;
-use crate::{Array, ArrayParams, DimDyn, Dimension, PlainArray, StorageBase};
+use crate::{Array, CompactParams, DimDyn, Dimension, PlainArray, StorageBase};
 
 /// Uncompressed nd-array storage that owns its data in a `Vec<T>`.
 ///
@@ -162,7 +162,7 @@ impl<A> PlainBase<A, TypeDyn> {
             shape.as_slice()
         );
 
-        let mut spec = ArrayParams::default().into_spec(
+        let mut spec = CompactParams::default().into_spec(
             shape.as_slice(),
             &dtype,
             ArraySpecFlags::new().with_read_tiling(ReadTiling::ZeroCopy),

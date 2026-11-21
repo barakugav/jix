@@ -319,7 +319,7 @@ mod tests {
     fn zero_itemsize_field_is_rejected() {
         // A struct may legally carry a zero-sized field, and `SubDtype` hands that field's dtype back
         // verbatim. The resulting view reuses the parent's spec, so it never passes through
-        // `ArrayParams::tune` - the check has to live in `SubDtype::new`.
+        // `CompactParams::tune` - the check has to live in `SubDtype::new`.
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
         #[dtyped(crate = "crate")]
         #[repr(C)]

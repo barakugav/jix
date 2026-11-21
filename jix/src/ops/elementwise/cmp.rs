@@ -733,7 +733,7 @@ impl<S: StorageBase> Array<S> {
 #[cfg(test)]
 mod tests {
     use crate::scalar::bool8;
-    use crate::ArrayParams;
+    use crate::CompactParams;
     use ndarray::Ix1;
 
     #[cfg(feature = "half")]
@@ -1067,8 +1067,8 @@ mod tests {
         // block-boundary bug in the ordering kernel would still show up.
         let ba = ndarray::array![[bool8::FALSE, bool8::TRUE], [bool8::TRUE, bool8::FALSE]];
         let bb = ndarray::array![[bool8::TRUE, bool8::FALSE], [bool8::TRUE, bool8::TRUE]];
-        let params_a = ArrayParams::new().block_shape(&[1u32, 1]).unwrap();
-        let params_b = ArrayParams::new().block_shape(&[1u32, 1]).unwrap();
+        let params_a = CompactParams::new().block_shape(&[1u32, 1]).unwrap();
+        let params_b = CompactParams::new().block_shape(&[1u32, 1]).unwrap();
         let zba = Array::compact_ndarray_with(&ba, params_a).unwrap();
         let zbb = Array::compact_ndarray_with(&bb, params_b).unwrap();
         let bexp = ndarray::Zip::from(&ba)

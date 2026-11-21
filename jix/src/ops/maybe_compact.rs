@@ -1,6 +1,6 @@
 use crate::ops::prelude::*;
 use crate::storage::Compact;
-use crate::ArrayParams;
+use crate::CompactParams;
 
 /// Storage adaptor that guarantees the wrapped array is always in compact
 /// block-compressed form.
@@ -28,7 +28,7 @@ where
     S: StorageBase,
 {
     /// Constructs a [`MaybeCompact`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: S, params: ArrayParams, context: &ReadContext) -> Result<Self> {
+    pub fn new(array: S, params: CompactParams, context: &ReadContext) -> Result<Self> {
         Ok(Self(if array.spec().flags().is_compact() {
             ToCompactInner::Original(array)
         } else {
@@ -44,7 +44,7 @@ where
     /// semantics and examples.
     pub fn new_array(
         array: Array<S>,
-        params: ArrayParams,
+        params: CompactParams,
         context: &ReadContext,
     ) -> Result<Array<Self>> {
         Self::new(array.into_storage(), params, context).map(Array::from_storage)
@@ -122,7 +122,7 @@ impl<S: StorageBase> Array<S> {
     /// If the array is already compact, the storage is kept as-is - no data is
     /// copied or re-compressed. Otherwise the array is materialized block by
     /// block into a new [`Compact`](crate::storage::Compact) storage using
-    /// default [`ArrayParams`].
+    /// default [`CompactParams`].
     ///
     /// Use [`maybe_compact_with`](Self::maybe_compact_with) to control the block
     /// shape and codec parameters.
@@ -144,16 +144,16 @@ impl<S: StorageBase> Array<S> {
     /// ```
     pub fn maybe_compact(self) -> Result<Array<MaybeCompact<S>>> {
         let context = self.read_ctx();
-        self.maybe_compact_with(ArrayParams::default(), &context)
+        self.maybe_compact_with(CompactParams::default(), &context)
     }
 
-    /// Like [`maybe_compact`](Self::maybe_compact), with explicit [`ArrayParams`].
+    /// Like [`maybe_compact`](Self::maybe_compact), with explicit [`CompactParams`].
     ///
     /// `params` sets the block shape and compression settings of the new storage. It is
     /// **ignored when the array is already compact**.
     pub fn maybe_compact_with(
         self,
-        params: ArrayParams,
+        params: CompactParams,
         context: &ReadContext,
     ) -> Result<Array<MaybeCompact<S>>> {
         MaybeCompact::new_array(self, params, context)
@@ -170,7 +170,7 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams, CompactArray, ElementType, StorageBase};
+    use crate::{Array, CompactArray, CompactParams, ElementType, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -183,7 +183,7 @@ mod tests {
 
     fn to_bytes<ET: ElementType>(a: &Array<Compact<ET>>) -> Vec<u8> {
         let mut buf = Cursor::new(Vec::new());
-        a.write_to(&mut buf, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut buf, CompactParams::default(), &a.read_ctx())
             .unwrap();
         buf.into_inner()
     }
@@ -214,7 +214,7 @@ mod tests {
                         );
                         // No re-compression: serialized bytes must be identical.
                         let mut result_bytes = Cursor::new(Vec::new());
-                        result.write_to(&mut result_bytes, ArrayParams::default(), &result.read_ctx()).unwrap();
+                        result.write_to(&mut result_bytes, CompactParams::default(), &result.read_ctx()).unwrap();
                         proptest::prop_assert_eq!(result_bytes.into_inner(), original_bytes);
                     }
                 }
@@ -247,7 +247,7 @@ mod tests {
                         let expected = -&src;
                         let ctx = a.read_ctx();
                         let result = (-a.view())
-                            .maybe_compact_with(ArrayParams::default(), &ctx)
+                            .maybe_compact_with(CompactParams::default(), &ctx)
                             .unwrap();
                         proptest::prop_assert!(result.storage().as_compact().is_some());
                         proptest::prop_assert_eq!(
@@ -310,7 +310,7 @@ mod tests {
         result
             .write_to(
                 &mut result_bytes,
-                ArrayParams::default(),
+                CompactParams::default(),
                 &result.read_ctx(),
             )
             .unwrap();
@@ -338,7 +338,7 @@ mod tests {
         result
             .write_to(
                 &mut result_bytes,
-                ArrayParams::default(),
+                CompactParams::default(),
                 &result.read_ctx(),
             )
             .unwrap();

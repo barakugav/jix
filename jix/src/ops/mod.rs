@@ -35,7 +35,7 @@
 //! * [`.compact()`](crate::Array::compact) - re-encodes with a block shape derived automatically
 //!   from the new shape and the original block shape.
 //! * [`.compact_with(params, ...)`](crate::Array::compact_with) - re-encodes with an explicit
-//!   [`ArrayParams`](crate::ArrayParams), giving full control over the new block shape. Use this
+//!   [`CompactParams`](crate::CompactParams), giving full control over the new block shape. Use this
 //!   to guarantee your access pattern is well-aligned.
 //!
 //! [`Array::reshape`](crate::Array::reshape) is the operation most prone to this cost. Being a

@@ -21,7 +21,7 @@ use crate::storage::{check_out_buf, ArraySpec, ElementType, Index, OutBuf, Strid
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, NdCopier, PtrMutNoalias, PtrNoalias};
 use crate::ReadContext;
-use crate::{ArrayParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
+use crate::{CompactParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -62,8 +62,8 @@ use crate::{ArrayParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
 /// ## Configuration
 ///
 /// The codec, compression level, and filter pipeline are chosen at write time through
-/// [`ArrayParams`](crate::ArrayParams): [`codec`](crate::ArrayParams::codec),
-/// [`level`](crate::ArrayParams::level), and [`filters`](crate::ArrayParams::filters). They are
+/// [`CompactParams`](crate::CompactParams): [`codec`](crate::CompactParams::codec),
+/// [`level`](crate::CompactParams::level), and [`filters`](crate::CompactParams::filters). They are
 /// stored alongside the data, so readers never need to know them in advance.
 ///
 /// ## Filters
@@ -193,7 +193,11 @@ where
     ///
     /// The block shape resolved from `params` must match the block geometry already encoded in
     /// `blocks`.
-    pub(crate) fn new(blocks: BlockTable<S, ET>, shape: DimDyn, params: ArrayParams) -> Result<Self>
+    pub(crate) fn new(
+        blocks: BlockTable<S, ET>,
+        shape: DimDyn,
+        params: CompactParams,
+    ) -> Result<Self>
     where
         ET: ElementType,
     {
@@ -561,11 +565,11 @@ pub trait CompactArrayMethods {
     ///
     /// ```
     /// use jix::storage::CompactArrayMethods;
-    /// use jix::{Array, ArrayParams};
+    /// use jix::{Array, CompactParams};
     /// use ndarray::Array2;
     ///
     /// let data = Array2::<f32>::zeros((100, 100));
-    /// let params = ArrayParams::new().block_shape(&[32, 64])?;
+    /// let params = CompactParams::new().block_shape(&[32, 64])?;
     /// let a = Array::compact_ndarray_with(&data, params)?;
     /// assert_eq!(a.block_shape(), &[32, 64]);
     /// # Ok::<(), jix::Error>(())
@@ -580,11 +584,11 @@ pub trait CompactArrayMethods {
     ///
     /// ```
     /// use jix::storage::CompactArrayMethods;
-    /// use jix::{Array, ArrayParams};
+    /// use jix::{Array, CompactParams};
     /// use ndarray::Array2;
     ///
     /// let data = Array2::<f32>::zeros((100, 100));
-    /// let params = ArrayParams::new().block_shape(&[32, 64])?;
+    /// let params = CompactParams::new().block_shape(&[32, 64])?;
     /// let a = Array::compact_ndarray_with(&data, params)?;
     /// assert_eq!(a.nblocks(), 4 * 2);
     /// # Ok::<(), jix::Error>(())
@@ -617,11 +621,11 @@ pub trait CompactArrayMethods {
     ///
     /// ```
     /// use jix::storage::{CompactArrayMethods, Filter};
-    /// use jix::{Array, ArrayParams};
+    /// use jix::{Array, CompactParams};
     /// use ndarray::array;
     ///
     /// let data = array![1u32, 2, 3];
-    /// let params = ArrayParams::new().filters(&[Filter::BitShuffle])?;
+    /// let params = CompactParams::new().filters(&[Filter::BitShuffle])?;
     /// let a = Array::compact_ndarray_with(&data, params)?;
     /// assert!(matches!(a.filters(), [Filter::BitShuffle]));
     /// # Ok::<(), jix::Error>(())
@@ -703,7 +707,7 @@ mod tests {
     use crate::storage::{split_ranges, ArraySpec, ArrayStorageExt, Index, OutBuf, StridedBuf};
     use crate::util::DimArray;
     use crate::Storage;
-    use crate::{Array, ArrayParams, StorageBase};
+    use crate::{Array, CompactParams, StorageBase};
 
     /// Read `index` from a compact `i32` array both into a plain contiguous buffer and into a
     /// *strided* destination whose inner spacing is doubled (a one-element gap between consecutive
@@ -722,7 +726,7 @@ mod tests {
             (0..n as i32).map(|x| x * 7 - 11).collect(),
         )
         .unwrap();
-        let params = ArrayParams::new().block_shape(block_shape).unwrap();
+        let params = CompactParams::new().block_shape(block_shape).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -834,7 +838,7 @@ mod tests {
             (0..n as i32).map(|x| x * 13 - 7).collect(),
         )
         .unwrap();
-        let params = ArrayParams::new().block_shape(block_shape).unwrap();
+        let params = CompactParams::new().block_shape(block_shape).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -937,7 +941,7 @@ mod tests {
             (0..32i32).map(|x| x * 3 - 5).collect(),
         )
         .unwrap();
-        let params = ArrayParams::new().block_shape(&[1, 2, 4]).unwrap();
+        let params = CompactParams::new().block_shape(&[1, 2, 4]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -970,7 +974,7 @@ mod tests {
             ndarray::ArrayD::from_shape_vec(vec![2usize, 3], (0..6i32).map(|x| x + 1).collect())
                 .unwrap();
         // Single block covering the whole array.
-        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
+        let params = CompactParams::new().block_shape(&[2, 3]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -1010,7 +1014,7 @@ mod tests {
             ndarray::ArrayD::from_shape_vec(vec![2usize, 3], (0..6i32).map(|x| x + 1).collect())
                 .unwrap();
         // Single block covering the whole array.
-        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
+        let params = CompactParams::new().block_shape(&[2, 3]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -1049,7 +1053,7 @@ mod tests {
     /// A compact `0..64` i32 array with blocks of 8.
     fn arange64() -> Array<super::Compact<i32>> {
         let nd = ndarray::Array1::from_iter(0..64i32);
-        let params = ArrayParams::new().block_shape(&[8]).unwrap();
+        let params = CompactParams::new().block_shape(&[8]).unwrap();
         Array::compact_ndarray_with(&nd, params).unwrap()
     }
 
@@ -1348,7 +1352,7 @@ mod tests {
         calls: &'static AtomicUsize,
     ) -> (Array<impl Storage<Item = i32> + use<>>, usize) {
         let nd = ndarray::Array2::from_shape_fn((8, 8), |(i, j)| (8 * i + j) as i32);
-        let params = ArrayParams::new().block_shape(&[4, 4]).unwrap();
+        let params = CompactParams::new().block_shape(&[4, 4]).unwrap();
         let x = Array::compact_ndarray_with(&nd, params).unwrap();
         let max = x.reduce_unordered(1, |a: i32, b: i32| {
             calls.fetch_add(1, Ordering::Relaxed);
@@ -1475,7 +1479,7 @@ mod tests {
     #[test]
     fn read_cache_through_shape_ops() {
         let nd = ndarray::Array2::from_shape_fn((8, 8), |(i, j)| (8 * i + j) as i32);
-        let params = ArrayParams::new().block_shape(&[4, 4]).unwrap();
+        let params = CompactParams::new().block_shape(&[4, 4]).unwrap();
         let x = Array::compact_ndarray_with(&nd, params).unwrap();
         let t = || x.view().permute_dims(&[1, 0]);
         let check = |a: ndarray::Array2<i32>, b: ndarray::Array2<i32>| assert_eq!(a, b);
@@ -1516,14 +1520,14 @@ mod tests {
         use crate::storage::{Codec, CompactArrayMethods, Filter};
 
         let nd = ndarray::Array2::from_shape_fn((5, 7), |(i, j)| (i * 7 + j) as i32);
-        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
+        let params = CompactParams::new().block_shape(&[2, 3]).unwrap();
         let a = Array::compact_ndarray_with(&nd, params).unwrap();
         assert_eq!(a.block_shape(), &[2, 3]);
         assert_eq!(a.nblocks(), 3 * 3);
         assert!(matches!(a.codec(), Codec::Zstd));
         assert!(matches!(a.filters(), [Filter::ByteShuffle]));
 
-        let params = ArrayParams::new()
+        let params = CompactParams::new()
             .filters(&[Filter::BitShuffle, Filter::ByteShuffle])
             .unwrap();
         let b = Array::compact_ndarray_with(&nd, params).unwrap();
@@ -1546,7 +1550,7 @@ mod tests {
         use crate::storage::{CompactArrayMethods, Filter};
 
         let nd = ndarray::Array2::from_shape_fn((6, 5), |(i, j)| (i * 5 + j) as f64);
-        let params = ArrayParams::new()
+        let params = CompactParams::new()
             .block_shape(&[4, 2])
             .unwrap()
             .filters(&[Filter::BitShuffle])

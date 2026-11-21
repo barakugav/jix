@@ -104,7 +104,7 @@ impl<S: StorageBase> Array<S> {
     ///   their elements outside `index` are discarded.
     ///
     /// To keep sub-region reads cheap, choose a `block_shape` (via
-    /// [`ArrayParams::block_shape`](crate::ArrayParams::block_shape) when creating the array)
+    /// [`CompactParams::block_shape`](crate::CompactParams::block_shape) when creating the array)
     /// that matches your access pattern.
     ///
     /// For lazy views (e.g. after `reshape`, `permute_dims`, `broadcast`, or element-wise
@@ -133,12 +133,12 @@ impl<S: StorageBase> Array<S> {
     /// Stream a large array tile by tile, reusing a single `ReadContext`:
     ///
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::{Array, CompactParams};
     /// use ndarray::Ix2;
     ///
     /// // 256x256 f32 array stored as 32x32 blocks.
     /// let data = ndarray::Array2::<f32>::from_shape_fn((256, 256), |(i, j)| (i + j) as f32);
-    /// let a = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[32, 32])?)?;
+    /// let a = Array::compact_ndarray_with(&data, CompactParams::new().block_shape(&[32, 32])?)?;
     ///
     /// // Walk the array as 64x64 tiles. 32 divides 64, so each call decompresses exactly
     /// // 2*2 = 4 blocks - no boundary waste. The same ReadContext is reused across all
@@ -695,7 +695,8 @@ mod tests {
 
     use crate::storage::StridedBuf;
 
-    use crate::ArrayParams;
+    use crate::storage::CompactArrayMethods;
+    use crate::CompactParams;
 
     use crate::array::tests::*;
 
@@ -947,11 +948,9 @@ mod tests {
         let src = ndarray::Array2::from_shape_fn((12, 10), |(r, c)| (r * 100 + c) as i32);
         // A tiny read-size budget forces the read to be cut into several pieces, so the test
         // exercises the block-splitting path rather than a single forwarded read.
-        let params = ArrayParams::new()
-            .block_shape(&[4, 5])
-            .unwrap()
-            .read_size((16, 64));
-        let a = Array::compact_ndarray_with(&src, params).unwrap();
+        let params = CompactParams::new().block_shape(&[4, 5]).unwrap();
+        let mut a = Array::compact_ndarray_with(&src, params).unwrap();
+        a.set_read_size((16, 64));
         let ctx = a.read_ctx();
 
         let index = [2..11, 1..9];
@@ -1076,11 +1075,10 @@ mod tests {
     #[test]
     fn to_buf_strided_rejects_a_bad_destination_of_a_split_read() {
         // A tiny read-size budget cuts the read into pieces, each read into a view of `out`.
-        let params = ArrayParams::new()
-            .block_shape(&[4, 4])
-            .unwrap()
-            .read_size((16, 64));
-        let a = Array::compact_ndarray_with(&ndarray::Array2::<i32>::ones((8, 8)), params).unwrap();
+        let params = CompactParams::new().block_shape(&[4, 4]).unwrap();
+        let mut a =
+            Array::compact_ndarray_with(&ndarray::Array2::<i32>::ones((8, 8)), params).unwrap();
+        a.set_read_size((16, 64));
         let ctx = a.read_ctx();
         let itemsize = size_of::<i32>();
         // A 4x8 destination for an 8x8 read: large enough for the first pieces only. It is

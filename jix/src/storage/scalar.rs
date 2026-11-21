@@ -8,7 +8,7 @@ use crate::storage::{
 };
 use crate::util::{cast_slice, cast_slice_mut, dim_arr};
 use crate::ReadContext;
-use crate::{ArrayParams, DimDyn, Dimension};
+use crate::{CompactParams, DimDyn, Dimension};
 
 /// Storage that broadcasts a single scalar value across an arbitrary shape: a zero-copy
 /// constant array. A 0-D `Scalar` (empty `shape`) is a plain scalar value.
@@ -48,7 +48,7 @@ impl<T> Scalar<T> {
         let shape = DimDyn::from_slice(shape);
         let ndim = shape.ndim();
 
-        let mut spec = ArrayParams::default().into_spec(
+        let mut spec = CompactParams::default().into_spec(
             shape.as_slice(),
             &T::DTYPE,
             ArraySpecFlags::new().with_read_tiling(ReadTiling::ZeroCopy),

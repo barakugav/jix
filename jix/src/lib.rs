@@ -239,12 +239,12 @@
 //! On read, the pipeline is reversed. The filters, byte shuffle (the default) and bit shuffle,
 //! improve the codec's ratio on numeric data.
 //!
-//! Codec settings are controlled via [`ArrayParams`]:
+//! Codec settings are controlled via [`CompactParams`]:
 //!
-//! - [`codec`](ArrayParams::codec) - the compression codec (e.g.
+//! - [`codec`](CompactParams::codec) - the compression codec (e.g.
 //!   [`Codec::Zstd`](storage::Codec::Zstd)).
-//! - [`level`](ArrayParams::level) - the compression level.
-//! - [`filters`](ArrayParams::filters) - the pre-compression filter pipeline (e.g.
+//! - [`level`](CompactParams::level) - the compression level.
+//! - [`filters`](CompactParams::filters) - the pre-compression filter pipeline (e.g.
 //!   [`Filter::ByteShuffle`](storage::Filter::ByteShuffle)).
 //!
 //! The codec and filter configuration is serialized into the array archive, so readers never need
@@ -260,19 +260,19 @@
 //! When no block shape is specified, the library selects one automatically according to the CPU
 //! cache sizes.
 //!
-//! [`ArrayParams`] groups all layout and codec settings. Unset fields are inherited from the
+//! [`CompactParams`] groups all layout and codec settings. Unset fields are inherited from the
 //! source array when compacting or writing.
 //!
 //! For tile-at-a-time access patterns:
 //!
 //! ```
-//! use jix::{Array, ArrayParams};
+//! use jix::{Array, CompactParams};
 //! use ndarray::Ix2;
 //!
 //! let data = ndarray::Array2::<f32>::zeros((512, 512));
 //!
 //! // Store with 64*64 blocks - one decompression per tile.
-//! let array = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[64, 64])?)?;
+//! let array = Array::compact_ndarray_with(&data, CompactParams::new().block_shape(&[64, 64])?)?;
 //!
 //! let context = array.read_ctx();
 //! for tile_row in 0..8 {
@@ -296,14 +296,14 @@
 //! [`.compact_with()`](Array::compact_with) to choose the new block shape yourself:
 //!
 //! ```
-//! use jix::{Array, ArrayParams};
+//! use jix::{Array, CompactParams};
 //!
 //! // Compress with 64*64 blocks.
-//! let params = ArrayParams::new().block_shape(&[64, 64])?;
+//! let params = CompactParams::new().block_shape(&[64, 64])?;
 //! let a = Array::compact_ndarray_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
 //!
 //! // Transpose and re-encode with explicit 128*128 blocks.
-//! let out_params = ArrayParams::new().block_shape(&[128, 128])?;
+//! let out_params = CompactParams::new().block_shape(&[128, 128])?;
 //! let ctx = a.read_ctx();
 //! let transposed = a.permute_dims(&[1, 0]).compact_with(out_params, &ctx)?;
 //! # Ok::<(), jix::Error>(())
@@ -384,7 +384,7 @@ pub mod dtype;
 pub mod scalar;
 
 pub mod storage;
-pub use storage::params::ArrayParams;
+pub use storage::params::CompactParams;
 pub use storage::{Storage, StorageBase};
 
 mod archive;

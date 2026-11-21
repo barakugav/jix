@@ -147,7 +147,7 @@ Arrays are an n-d grid of fixed-size blocks, each compressed independently; `Blo
 (`jix/src/storage/block.rs`) tracks per-block offsets for random access, and a `ReadContext` carries
 an optional block cache. When no block shape is given, one is auto-selected according to the CPU cache sizes.
 Codec pipeline (`jix/src/codec/`): `raw bytes -> filters (byte-shuffle default, bit-shuffle) -> codec
-(zstd) -> stored bytes`, reversed on read. All settings live in `ArrayParams` and are serialized into
+(zstd) -> stored bytes`, reversed on read. All settings live in `CompactParams` and are serialized into
 the archive, so readers never need to know them in advance.
 
 ### Type system (`jix/src/dtype.rs`)

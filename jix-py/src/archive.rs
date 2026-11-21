@@ -1,6 +1,7 @@
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
+use jix_core::CompactParams;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::prelude::*;
@@ -317,7 +318,7 @@ pub fn write_array(
 fn write_array_impl(
     array: &PyArray,
     mut writer: impl Write + Seek,
-    params: jix_core::ArrayParams,
+    params: CompactParams,
 ) -> PyResult<()> {
     let context = array.read_ctx()?;
     array

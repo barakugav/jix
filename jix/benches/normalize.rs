@@ -1,7 +1,7 @@
 mod common;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use jix::{Array, ArrayParams, CompactArray};
+use jix::{Array, CompactArray, CompactParams};
 use ndarray::Ix2;
 
 use crate::common::{create_data, Profile};
@@ -10,7 +10,7 @@ const SIZES: [(u64, u64); 4] = [(4_000, 200), (40_000, 200), (200_000, 64), (20_
 
 fn compact_f32(shape: &[u64], seed: u64) -> CompactArray<f32> {
     let data = create_data::<f32>(Profile::Smooth, shape, seed);
-    Array::compact_ndarray_with(&data, ArrayParams::new()).unwrap()
+    Array::compact_ndarray_with(&data, CompactParams::new()).unwrap()
 }
 
 fn bench_normalize(c: &mut Criterion) {
