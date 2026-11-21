@@ -47,23 +47,15 @@ impl BufferPool {
     }
 
     pub(crate) fn return_buf(&self, buf: PoolBuf) {
-        self.return_buf_raw(buf.into_inner());
-    }
-
-    pub(crate) fn return_shared(&self, buf: PoolBufShared) {
-        self.return_shared_raw(buf.into_arc());
-    }
-
-    pub(crate) fn return_shared_raw(&self, buf: Arc<RawAlignedBytes>) {
-        if let Some(buf) = Arc::into_inner(buf) {
-            self.return_buf_raw(buf);
-        }
-    }
-
-    fn return_buf_raw(&self, buf: RawAlignedBytes) {
-        let (pool, _) = self.get_pool(buf.align().try_into().unwrap());
+        let (pool, _) = self.get_pool(buf.0.align().try_into().unwrap());
         let pool = unsafe { &mut *pool };
-        pool.push(buf);
+        pool.push(buf.0);
+    }
+
+    pub(crate) fn return_shared(&self, buf: Arc<PoolBuf>) {
+        if let Some(buf) = Arc::into_inner(buf) {
+            self.return_buf(buf);
+        }
     }
 
     /// Returns a raw pointer to the free list for `alignment` together with the actual alignment
@@ -116,31 +108,6 @@ impl PoolBuf {
     pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
         // SAFETY: the allocation holds `capacity` bytes.
         unsafe { std::slice::from_raw_parts_mut(self.0.as_mut_ptr(), self.0.capacity()) }
-    }
-
-    pub(crate) fn into_inner(self) -> RawAlignedBytes {
-        self.0
-    }
-}
-
-/// A pooled buffer shared by several readers, to give back with [`BufferPool::return_shared`] -
-/// the allocation goes back to the free list once the last holder returns it. Dropping it frees
-/// the allocation instead.
-pub(crate) struct PoolBufShared(Arc<RawAlignedBytes>);
-impl PoolBufShared {
-    #[inline]
-    pub(crate) fn new(buf: Arc<RawAlignedBytes>) -> Self {
-        Self(buf)
-    }
-
-    #[inline(always)]
-    pub(crate) fn as_slice(&self) -> &[u8] {
-        // SAFETY: the allocation holds `capacity` bytes.
-        unsafe { std::slice::from_raw_parts(self.0.as_ptr(), self.0.capacity()) }
-    }
-
-    pub(crate) fn into_arc(self) -> Arc<RawAlignedBytes> {
-        self.0
     }
 }
 

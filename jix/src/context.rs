@@ -6,8 +6,8 @@ use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
 use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf};
-use crate::util::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
-use crate::util::{DimArray, RawAlignedBytes, SliceExt};
+use crate::util::buf_pool::{BufferPool, PoolBuf};
+use crate::util::{DimArray, SliceExt};
 use crate::DimDyn;
 
 /// A context with reusable buffers and a long-lived decoder instance.
@@ -116,7 +116,7 @@ struct CacheEntry {
     start: DimArray<u64>,
     size: DimArray<usize>,
 
-    data: Arc<RawAlignedBytes>,
+    data: Arc<PoolBuf>,
     offset: usize,
     strides: DimArray<usize>,
 }
@@ -186,7 +186,7 @@ impl ReadContext {
         // Search for a matching cache entry for this array ID and index
         if let Some(entry) = cache.map.get(id) {
             if entry.start.as_slice() == index.start() && entry.size.as_slice() == index.size() {
-                let buf = PoolBufShared::new(entry.data.clone());
+                let buf = entry.data.clone();
                 let buf = unsafe {
                     StridedBuf::from_shared(buf, entry.strides.clone()).with_offset(entry.offset)
                 };
@@ -198,7 +198,7 @@ impl ReadContext {
                 if out.is_pull()
                     && let Some(stale) = cache.map.remove(id)
                 {
-                    self.buffer_pool.return_shared_raw(stale.data);
+                    self.buffer_pool.return_shared(stale.data);
                 }
             }
         }
@@ -220,7 +220,7 @@ impl ReadContext {
                 return Ok(());
             }
         };
-        let buf = PoolBufShared::new(data.clone());
+        let buf = data.clone();
         write_out_buf_slot(slot, unsafe {
             StridedBuf::from_shared(buf, strides.clone()).with_offset(offset)
         });
@@ -239,7 +239,7 @@ impl ReadContext {
             .map
             .insert(id, entry);
         if let Some(stale) = stale {
-            self.buffer_pool.return_shared_raw(stale.data);
+            self.buffer_pool.return_shared(stale.data);
         }
         Ok(())
     }
@@ -278,7 +278,7 @@ impl ReadContext {
         if let Some(mut ended) = ended {
             ended
                 .map
-                .clear_with(|entry| self.buffer_pool.return_shared_raw(entry.data));
+                .clear_with(|entry| self.buffer_pool.return_shared(entry.data));
             self.temp_cache_maps.borrow_mut().push(ended.map);
         }
     }

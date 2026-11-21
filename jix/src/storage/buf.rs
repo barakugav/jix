@@ -3,10 +3,10 @@ use std::sync::Arc;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_region_size, ensure, Result};
 use crate::storage::{ArrayStorageExt, Index};
-use crate::util::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
+use crate::util::buf_pool::{BufferPool, PoolBuf};
 use crate::util::{
     default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
-    NdCopier, PtrMutNoalias, PtrNoalias, RawAlignedBytes, SliceExt,
+    NdCopier, PtrMutNoalias, PtrNoalias, SliceExt,
 };
 use crate::{DimDyn, DimIdx, ReadContext, StorageBase};
 
@@ -54,7 +54,7 @@ enum StridedBufData<'a> {
     SliceMut(&'a mut [u8]),
     PoolBuf { buf: PoolBuf, offset: usize },
     PoolBufMut { buf: PoolBuf, offset: usize },
-    Shared { buf: PoolBufShared, offset: usize },
+    Shared { buf: Arc<PoolBuf>, offset: usize },
 }
 
 impl<'a> StridedBuf<'a> {
@@ -148,7 +148,7 @@ impl<'a> StridedBuf<'a> {
     ///
     /// Same contract as [`from_slice`](Self::from_slice).
     #[inline]
-    pub(crate) unsafe fn from_shared(buf: PoolBufShared, strides: DimArray<usize>) -> Self {
+    pub(crate) unsafe fn from_shared(buf: Arc<PoolBuf>, strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::Shared { buf, offset: 0 },
             strides,
@@ -340,15 +340,11 @@ impl<'a> StridedBuf<'a> {
         }
     }
 
-    pub(crate) fn into_shared(
-        self,
-    ) -> Result<(Arc<RawAlignedBytes>, usize, DimArray<usize>), Self> {
+    pub(crate) fn into_shared(self) -> Result<(Arc<PoolBuf>, usize, DimArray<usize>), Self> {
         Ok(match self.data {
             StridedBufData::PoolBuf { buf, offset }
-            | StridedBufData::PoolBufMut { buf, offset } => {
-                (Arc::new(buf.into_inner()), offset, self.strides)
-            }
-            StridedBufData::Shared { buf, offset } => (buf.into_arc(), offset, self.strides),
+            | StridedBufData::PoolBufMut { buf, offset } => (Arc::new(buf), offset, self.strides),
+            StridedBufData::Shared { buf, offset } => (buf, offset, self.strides),
             _ => return Err(self),
         })
     }
@@ -361,7 +357,7 @@ pub(crate) enum StridedBufBytes {
     #[default]
     None,
     Pool(PoolBuf),
-    Shared(PoolBufShared),
+    Shared(Arc<PoolBuf>),
 }
 
 impl StridedBufBytes {
@@ -600,6 +596,12 @@ mod tests {
 
     use crate::Array;
     use crate::ReadContext;
+
+    #[test]
+    fn strided_buf_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<super::StridedBuf<'static>>();
+    }
 
     #[test]
     fn out_smaller_than_the_region_is_rejected() {
