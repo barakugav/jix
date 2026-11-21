@@ -30,7 +30,7 @@ pub fn create_compact<'a>(
     }
     let mut array = Array::compact_ndarray_with(&data, params).unwrap();
     if let Some(read_size) = read_size.into() {
-        array.set_read_size(read_size);
+        array.read_params_mut().set_read_size(read_size);
     }
     array
 }

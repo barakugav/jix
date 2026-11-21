@@ -1,7 +1,7 @@
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::StorageAny;
-use crate::{ArrayAny, ElementType, ReadContext, StorageBase};
+use crate::{ArrayAny, ElementType, ReadContext, ReadParams, StorageBase};
 
 mod construct;
 
@@ -251,8 +251,19 @@ impl<S: StorageBase> Array<S> {
         self.try_read_ctx().expect("failed to create read context")
     }
     fn try_read_ctx(&self) -> Result<ReadContext> {
-        let spec = self.storage.spec();
-        ReadContext::new(spec.read_params().clone())
+        ReadContext::new(self.read_params().clone())
+    }
+
+    /// The read parameters of this array, e.g. its read size.
+    ///
+    /// [`read_ctx`](Array::read_ctx) starts from them, and [`compact`](Array::compact) keeps
+    /// them. A lazy view takes them from its input (a view over several arrays takes them from one
+    /// of them, usually the first). Change them on a compact or plain array with
+    /// `read_params_mut`, e.g.
+    /// [`CompactArrayMethods::read_params_mut`](crate::storage::CompactArrayMethods::read_params_mut).
+    #[inline]
+    pub fn read_params(&self) -> &ReadParams {
+        self.storage.spec().read_params()
     }
 
     /// Borrow this array as an `Array<&S>`, without cloning the storage.

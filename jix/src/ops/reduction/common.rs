@@ -1825,7 +1825,7 @@ pub(crate) mod tests {
                 }
                 .unwrap();
                 if let Some(w) = window {
-                    arr.set_read_size(w);
+                    arr.read_params_mut().set_read_size(w);
                 }
 
                 for mask in 1u8..8 {
@@ -1918,7 +1918,7 @@ pub(crate) mod tests {
 
         let params = CompactParams::new().block_shape(block_shape).unwrap();
         let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
-        za.set_read_size(read_size);
+        za.read_params_mut().set_read_size(read_size);
 
         let reduced = za.view().sum(dims);
         let out_shape: Vec<u64> = reduced.shape().to_vec();
@@ -2067,7 +2067,7 @@ pub(crate) mod tests {
         // `fold_pairwise` call rather than being split across tiles and merged sequentially.
         let params = CompactParams::new().block_shape(&[N as u32]).unwrap();
         let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
-        za.set_read_size((1 << 19, 1 << 20));
+        za.read_params_mut().set_read_size((1 << 19, 1 << 20));
 
         let got = f64::from(za.view().sum(0usize).to_ndarray::<Ix0>().unwrap()[[]]);
         let err = (exact - got).abs();
@@ -2100,7 +2100,7 @@ pub(crate) mod tests {
             // One block and one tile: the whole run is one `fold_pairwise` call.
             let params = CompactParams::new().block_shape(&[n as u32]).unwrap();
             let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
-            za.set_read_size((1 << 19, 1 << 20));
+            za.read_params_mut().set_read_size((1 << 19, 1 << 20));
             assert_eq!(
                 za.view().sum(0usize).to_ndarray::<Ix0>().unwrap()[[]],
                 exact,
@@ -2127,7 +2127,7 @@ pub(crate) mod tests {
         .unwrap();
         let params = CompactParams::new().block_shape(&[2, 2, 2]).unwrap();
         let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
-        za.set_read_size((32, 64));
+        za.read_params_mut().set_read_size((32, 64));
         let reduced = za.view().sum(1usize); // [4, 4] i64
         let index = [0..4u64, 0..4];
         let ctx = reduced.read_ctx();

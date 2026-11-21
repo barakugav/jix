@@ -943,7 +943,7 @@ mod tests {
         // exercises the block-splitting path rather than a single forwarded read.
         let params = CompactParams::new().block_shape(&[4, 5]).unwrap();
         let mut a = Array::compact_ndarray_with(&src, params).unwrap();
-        a.set_read_size((16, 64));
+        a.read_params_mut().set_read_size((16, 64));
         let ctx = a.read_ctx();
 
         let index = [2..11, 1..9];
@@ -1071,7 +1071,7 @@ mod tests {
         let params = CompactParams::new().block_shape(&[4, 4]).unwrap();
         let mut a =
             Array::compact_ndarray_with(&ndarray::Array2::<i32>::ones((8, 8)), params).unwrap();
-        a.set_read_size((16, 64));
+        a.read_params_mut().set_read_size((16, 64));
         let ctx = a.read_ctx();
         let itemsize = size_of::<i32>();
         // A 4x8 destination for an 8x8 read: large enough for the first pieces only. It is

@@ -957,7 +957,7 @@ mod tests {
         let c_order = ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap();
         let f_order = ndarray::Array::from_shape_vec([3, 4].f(), (0..12i32).collect()).unwrap();
         let mut a = Array::plain_ndarray(c_order).unwrap();
-        a.set_read_size((1 << 12, 1 << 13));
+        a.read_params_mut().set_read_size((1 << 12, 1 << 13));
         let b = Array::plain_ndarray(f_order).unwrap();
         assert_ne!(
             a.storage().spec().read_params(),

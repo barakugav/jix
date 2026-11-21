@@ -14,7 +14,7 @@ use crate::{dim_arr, Array, DimDyn, Dimension, StorageBase, BLOCK_SIZE_BYTES_MAX
 const ELEMENT_COST_MAX: f32 = u64::MAX as f32; // 2^64
 
 /// Target byte range `(min, max)` for a single read region: a hint for how much data a read pass
-/// pulls through memory.
+/// pulls through memory. See [`ReadParams::set_read_size`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ReadSize {
     pub(crate) min: u64,
@@ -52,11 +52,63 @@ impl Default for ReadSize {
     }
 }
 
-/// Settings chosen freely at read time, independent of how the data was written. Future versions
-/// may add e.g. the number of block decompression threads.
+/// Parameters controlling how reads are performed., independent of how the data was written.
+///
+/// A [`ReadContext`](crate::ReadContext) holds the params its reads use. An array holds the params
+/// that [`Array::read_ctx`] starts from, see [`Array::read_params`]; set them on a compact or plain
+/// array with `read_params_mut` (e.g.
+/// [`CompactArrayMethods::read_params_mut`](crate::storage::CompactArrayMethods::read_params_mut)),
+/// and the lazy views built on it inherit them.
+///
+/// # Examples
+///
+/// ```
+/// use jix::storage::PlainArrayMethods;
+/// use jix::Array;
+///
+/// let mut a = Array::plain_ndarray(ndarray::Array1::<i32>::zeros(100))?;
+/// a.read_params_mut().set_read_size((64, 128));
+///
+/// // read_ctx() starts from the read params of the array, and can override them.
+/// let mut context = a.read_ctx();
+/// assert_eq!(context.read_params().read_size(), (64, 128));
+/// context.read_params_mut().set_read_size((16, 32));
+/// # Ok::<(), jix::Error>(())
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct ReadParams {
+pub struct ReadParams {
     pub(crate) read_size: ReadSize,
+}
+
+impl ReadParams {
+    /// The target byte range `(min, max)` for a single read region, see
+    /// [`set_read_size`](Self::set_read_size).
+    #[inline]
+    pub fn read_size(&self) -> (u64, u64) {
+        (self.read_size.min, self.read_size.max)
+    }
+
+    /// Sets the target byte range `(min, max)` for a single read region. `min` is raised to at
+    /// least 1 and `max` to at least `min`.
+    ///
+    /// A read region is the rectangular slab the engine pulls and decompresses in one pass when
+    /// materializing a lazy pipeline or a sub-region read. Its shape is derived by scaling the
+    /// storage block shape toward this byte budget:
+    ///
+    /// - `max` is the *scale-down ceiling*: an oversized read shape is shrunk until it fits
+    ///   within `max`.
+    /// - `min` is the *scale-up floor*: a read shape is then grown up to `min`, or up to
+    ///   `2 * max` along a dimension the data is duplicated along (e.g. a broadcast one).
+    ///
+    /// When the source array's block grid differs from the output's, a read that straddles
+    /// source blocks decompresses whole blocks for a partial slice, and neighboring reads
+    /// decompress the same block again. Larger regions span more blocks per call and dilute that
+    /// waste; `max` bounds their cache footprint.
+    ///
+    /// The default is a range chosen according to the CPU cache sizes.
+    pub fn set_read_size(&mut self, size_hint: (u64, u64)) {
+        self.read_size = ReadSize::new(size_hint.0, size_hint.1);
+    }
 }
 
 /// Parameters for writing a block-compressed array: its block layout and codec.
@@ -82,7 +134,7 @@ pub(crate) struct ReadParams {
 ///   (e.g. `Reshape`, `PermuteDims`) are especially likely to change the block layout - consider
 ///   passing explicit params to `compact_with` after them, or checking that the resulting block
 ///   layout suits your access pattern. The new array also keeps the source's read size (see
-///   [`ReadContext::set_read_size`](crate::ReadContext::set_read_size)).
+///   [`ReadParams::set_read_size`]).
 ///
 /// # Recommended usage
 ///
@@ -667,9 +719,8 @@ impl ArraySpecOwned {
     pub(crate) fn dynamic_mut(&mut self) -> &mut ArraySpecDynamic {
         &mut self.dynamic
     }
-    pub(crate) fn set_read_size(&mut self, size_hint: (u64, u64)) {
-        Arc::make_mut(&mut self.shared).read_params.read_size =
-            ReadSize::new(size_hint.0, size_hint.1);
+    pub(crate) fn read_params_mut(&mut self) -> &mut ReadParams {
+        &mut Arc::make_mut(&mut self.shared).read_params
     }
 }
 impl<'a> ArraySpec<'a> {

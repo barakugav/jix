@@ -1797,7 +1797,7 @@ pub fn compact<'py>(
             .into_py_result()
     })?;
     if let Some(read_size) = params.read_size {
-        compacted.set_read_size(read_size);
+        compacted.read_params_mut().set_read_size(read_size);
     }
 
     Bound::new(py, PyArray::from_core(compacted.into_any()))

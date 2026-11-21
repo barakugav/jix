@@ -827,12 +827,9 @@ pub trait PlainArrayMethods {
         Self::ElementType: Dtyped,
         D: ndarray::Dimension;
 
-    /// Sets the target byte range `(min, max)` for a single read region of this array and of
-    /// the lazy views built on it (a view over several arrays takes it from one of them, usually
-    /// the first). [`Array::read_ctx`](crate::Array::read_ctx) starts from it, and
-    /// [`Array::compact`](crate::Array::compact) keeps it. See
-    /// [`ReadContext::set_read_size`](crate::ReadContext::set_read_size).
-    fn set_read_size(&mut self, size_hint: (u64, u64));
+    /// Mutable access to the read parameters of this array, e.g. its read size. See
+    /// [`Array::read_params`](crate::Array::read_params).
+    fn read_params_mut(&mut self) -> &mut crate::ReadParams;
 }
 
 macro_rules! impl_plain_array_methods {
@@ -885,8 +882,8 @@ macro_rules! impl_plain_array_methods {
             }
 
             #[inline]
-            fn set_read_size(&mut self, size_hint: (u64, u64)) {
-                self.storage $(.$field)? .spec.set_read_size(size_hint);
+            fn read_params_mut(&mut self) -> &mut crate::ReadParams {
+                self.storage $(.$field)? .spec.read_params_mut()
             }
         }
     };
@@ -1135,7 +1132,7 @@ mod tests {
         let nd = ArrayD::from_shape_vec(vec![4, 10], vals).unwrap();
         // for i32: a 4..8 item window, narrower than the 10-wide inner dim
         let mut a = Array::plain_ndarray(nd.clone()).unwrap();
-        a.set_read_size((16, 32));
+        a.read_params_mut().set_read_size((16, 32));
 
         let got = a.view().neg().to_ndarray().unwrap();
         let expected = nd.mapv(|x: i32| -x);
@@ -1152,7 +1149,7 @@ mod tests {
         let nd = ArrayD::from_shape_vec(vec![4, 10], vals).unwrap();
         let a = Array::plain_ndarray(nd.clone()).unwrap();
         let mut context = a.read_ctx();
-        context.set_read_size((16, 32));
+        context.read_params_mut().set_read_size((16, 32));
 
         let neg = a.view().neg();
         let got = neg.to_ndarray_sub(&[0..4, 0..10], &context).unwrap();

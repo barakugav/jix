@@ -502,7 +502,7 @@ pub(crate) fn plain_from_numpy(
     };
     let mut array = Array::from_storage(storage.into_py_result()?);
     if let Some(read_size) = read_size {
-        array.set_read_size(read_size);
+        array.read_params_mut().set_read_size(read_size);
     }
     Ok(array.into_any())
 }

@@ -632,12 +632,9 @@ pub trait CompactArrayMethods {
     /// ```
     fn filters(&self) -> &[crate::storage::Filter];
 
-    /// Sets the target byte range `(min, max)` for a single read region of this array and of
-    /// the lazy views built on it (a view over several arrays takes it from one of them, usually
-    /// the first). [`Array::read_ctx`](crate::Array::read_ctx) starts from it, and
-    /// [`Array::compact`](crate::Array::compact) keeps it. See
-    /// [`ReadContext::set_read_size`](crate::ReadContext::set_read_size).
-    fn set_read_size(&mut self, size_hint: (u64, u64));
+    /// Mutable access to the read parameters of this array, e.g. its read size. See
+    /// [`Array::read_params`](crate::Array::read_params).
+    fn read_params_mut(&mut self) -> &mut crate::ReadParams;
 
     /// Sets, per dimension, whether that dimension of [`block_shape`](Self::block_shape) is fixed
     /// when a later [`Array::compact`](crate::Array::compact) of this array, or of a view built on
@@ -671,8 +668,8 @@ macro_rules! impl_compact_array_methods {
                 self.storage.0.filters()
             }
 
-            fn set_read_size(&mut self, size_hint: (u64, u64)) {
-                self.storage.0.spec.set_read_size(size_hint);
+            fn read_params_mut(&mut self) -> &mut crate::ReadParams {
+                self.storage.0.spec.read_params_mut()
             }
 
             fn set_block_shape_fixed_dims(&mut self, fixed: &[bool]) -> crate::error::Result<()> {

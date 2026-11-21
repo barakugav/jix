@@ -889,8 +889,8 @@ fn build_test_array<T: Dtyped>(
             }
             .unwrap();
             let mut array = Array::from_storage(storage);
-            if let Some(ReadParams { read_size }) = params.read_params {
-                array.set_read_size((read_size.min, read_size.max));
+            if let Some(read_params) = params.read_params {
+                *array.read_params_mut() = read_params;
             }
             array.into_any()
         }

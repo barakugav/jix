@@ -397,7 +397,7 @@ pub mod dtype;
 pub mod scalar;
 
 pub mod storage;
-pub use storage::params::CompactParams;
+pub use storage::params::{CompactParams, ReadParams};
 pub use storage::{Storage, StorageBase};
 
 mod archive;

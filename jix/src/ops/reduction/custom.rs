@@ -577,7 +577,7 @@ mod tests {
 
         let params = CompactParams::new().block_shape(block_shape).unwrap();
         let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
-        za.set_read_size(read_size);
+        za.read_params_mut().set_read_size(read_size);
 
         let calls = Cell::new(0u64);
         let reduced = za.view().reduce_unordered(dims, |a: u8, b: u8| {

@@ -98,7 +98,7 @@ pub fn read_array(
     let validation = validation.map(|v| v.0).unwrap_or_default();
     let apply_params = |array: &mut dyn CompactArrayMethods| -> PyResult<()> {
         if let Some(read_size) = params.read_size {
-            array.set_read_size(read_size);
+            array.read_params_mut().set_read_size(read_size);
         }
         if let Some(fixed_dims) = &params.block_shape_fixed_dims {
             array

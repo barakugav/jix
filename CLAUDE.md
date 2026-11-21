@@ -149,9 +149,9 @@ an optional block cache. When no block shape is given, one is auto-selected acco
 Codec pipeline (`jix/src/codec/`): `raw bytes -> filters (byte-shuffle default, bit-shuffle) -> codec
 (zstd) -> stored bytes`, reversed on read. Write settings (block layout, codec, level, filters) live in
 `CompactParams`; the codec and filters are serialized into the archive, so readers never need to know
-them in advance. The read size (how much data one read pass pulls) is a read-time setting, never
-stored: `ReadContext::set_read_size`, or `set_read_size` on a leaf array (`CompactArrayMethods` /
-`PlainArrayMethods`), which `read_ctx()` starts from.
+them in advance. Read-time settings such as the read size (how much data one read pass pulls) live
+in `ReadParams` and are never stored: `ReadContext::read_params_mut`, or `read_params_mut` on a leaf
+array (`CompactArrayMethods` / `PlainArrayMethods`), whose `read_params()` `read_ctx()` starts from.
 
 ### Type system (`jix/src/dtype.rs`)
 

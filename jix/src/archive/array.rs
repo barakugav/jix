@@ -25,7 +25,7 @@ impl Array<Compact<TypeDyn>> {
     ///
     /// The array keeps the block shape, codec and filters of the file, and arrays later compacted
     /// from it inherit them. Its read size can be set with
-    /// [`CompactArrayMethods::set_read_size`](crate::storage::CompactArrayMethods::set_read_size).
+    /// [`CompactArrayMethods::read_params_mut`](crate::storage::CompactArrayMethods::read_params_mut).
     ///
     /// # Arguments
     ///

@@ -21,7 +21,7 @@ use crate::DimDyn;
 /// # Obtaining a `ReadContext`
 ///
 /// The preferred way is [`Array::read_ctx()`](crate::Array::read_ctx), which picks up the read
-/// parameters of the array, such as its read size (see [`set_read_size`](Self::set_read_size)):
+/// parameters of the array, such as its read size (see [`ReadParams`]):
 ///
 /// ```
 /// use jix::Array;
@@ -80,27 +80,20 @@ impl ReadContext {
         })
     }
 
-    /// Sets the target byte range `(min, max)` for a single read region.
+    /// The read parameters of the reads using this context, e.g. the read size.
     ///
-    /// A read region is the rectangular slab the engine pulls and decompresses in one pass
-    /// when materializing a lazy pipeline or a sub-region read. Its shape is derived by
-    /// scaling the storage block shape toward this byte budget:
-    ///
-    /// - `max` is the *scale-down ceiling*: an oversized read shape is shrunk until it fits
-    ///   within `max`.
-    /// - `min` is the *scale-up floor*: a read shape is then grown up to `min`, or up to
-    ///   `2 * max` along a dimension the data is duplicated along (e.g. a broadcast one).
-    ///
-    /// When the source array's block grid differs from the output's, a read that straddles
-    /// source blocks decompresses whole blocks for a partial slice, and neighboring reads
-    /// decompress the same block again. Larger regions span more blocks per call and dilute that
-    /// waste; `max` bounds their cache footprint.
-    ///
-    /// [`Array::read_ctx()`](crate::Array::read_ctx) starts from the array's read size (see
-    /// [`CompactArrayMethods::set_read_size`](crate::storage::CompactArrayMethods::set_read_size)),
-    /// [`ReadContext::default()`] from a range chosen according to the CPU cache sizes.
-    pub fn set_read_size(&mut self, size_hint: (u64, u64)) {
-        self.params.read_size = ReadSize::new(size_hint.0, size_hint.1);
+    /// [`Array::read_ctx()`](crate::Array::read_ctx) starts from the array's
+    /// [`read_params`](crate::Array::read_params), [`ReadContext::default()`] from the default
+    /// ones.
+    #[inline]
+    pub fn read_params(&self) -> &ReadParams {
+        &self.params
+    }
+
+    /// Mutable access to the read parameters, see [`read_params`](Self::read_params).
+    #[inline]
+    pub fn read_params_mut(&mut self) -> &mut ReadParams {
+        &mut self.params
     }
 
     #[inline]
@@ -349,20 +342,21 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod read_size_tests {
-    use crate::storage::params::ReadSize;
     use crate::storage::PlainArrayMethods;
-    use crate::{Array, ReadContext};
+    use crate::{Array, ReadContext, ReadParams};
 
     #[test]
     fn read_ctx_starts_from_the_array_read_size_and_can_override_it() {
         let mut a = Array::plain_ndarray(ndarray::Array1::<i32>::zeros(100)).unwrap();
-        a.set_read_size((64, 128));
+        a.read_params_mut().set_read_size((64, 128));
+        assert_eq!(a.read_params().read_size(), (64, 128));
 
         let mut context = a.read_ctx();
-        assert_eq!(context.read_size(), ReadSize::new(64, 128));
-        context.set_read_size((16, 32));
-        assert_eq!(context.read_size(), ReadSize::new(16, 32));
+        assert_eq!(context.read_params(), a.read_params());
+        context.read_params_mut().set_read_size((16, 32));
+        assert_eq!(context.read_params().read_size(), (16, 32));
+        assert_eq!(a.read_params().read_size(), (64, 128));
 
-        assert_eq!(ReadContext::default().read_size(), ReadSize::default());
+        assert_eq!(ReadContext::default().read_params(), &ReadParams::default());
     }
 }
