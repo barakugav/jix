@@ -13,8 +13,8 @@ use crate::scalar::Complex;
 ///
 /// # Examples
 /// ```
-/// use jix::scalar::Complex;
 /// use jix::Array;
+/// use jix::scalar::Complex;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![
@@ -85,8 +85,8 @@ where
 ///
 /// # Examples
 /// ```
-/// use jix::scalar::Complex;
 /// use jix::Array;
+/// use jix::scalar::Complex;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![

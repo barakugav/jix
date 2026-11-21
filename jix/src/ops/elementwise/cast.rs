@@ -395,9 +395,9 @@ pub(crate) mod traits {
 ///
 /// # Examples
 /// ```
+/// use jix::Array;
 /// use jix::dtype::Dtyped;
 /// use jix::scalar::bool8;
-/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;

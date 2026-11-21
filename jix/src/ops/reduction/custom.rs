@@ -58,7 +58,7 @@ use crate::ops::reduction::common::{ReductionOp, ReductionOpKernel};
 /// Multi-dim reduction with a closure that has no built-in equivalent:
 /// ```
 /// use jix::Array;
-/// use ndarray::{array, Ix0};
+/// use ndarray::{Ix0, array};
 ///
 /// let nd = array![[0b0011u8, 0b0101], [0b1001, 0b0001]];
 /// let xor = Array::compact_ndarray(&nd)?

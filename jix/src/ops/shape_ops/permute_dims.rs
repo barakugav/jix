@@ -13,7 +13,7 @@ use crate::ops::prelude::*;
 ///
 /// ```
 /// use jix::Array;
-/// use ndarray::{array, Ix2};
+/// use ndarray::{Ix2, array};
 ///
 /// // 2-D transpose: [2, 3] -> [3, 2]
 /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?;

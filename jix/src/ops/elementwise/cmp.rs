@@ -577,8 +577,8 @@ define_op2!(
 /// # Examples
 ///
 /// ```
-/// use jix::scalar::bool8;
 /// use jix::Array;
+/// use jix::scalar::bool8;
 /// use ndarray::array;
 ///
 /// // atol=0.02 covers the 0.01 gap; the 1.0 difference in the third element does not fit.

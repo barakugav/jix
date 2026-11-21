@@ -16,7 +16,7 @@ use crate::ops::prelude::*;
 ///
 /// ```
 /// use jix::Array;
-/// use ndarray::{array, Ix2};
+/// use ndarray::{Ix2, array};
 ///
 /// // Row vector [1, 3] -> matrix [2, 3]: every row is identical
 /// let a = Array::compact_ndarray(&array![[1i32, 2, 3]])?;

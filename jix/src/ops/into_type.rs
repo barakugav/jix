@@ -17,9 +17,9 @@ use crate::ops::prelude::*;
 /// Erase and recover the static element type:
 ///
 /// ```
-/// use jix::dtype::Dtyped;
 /// use jix::Array;
-/// use ndarray::{array, Ix1};
+/// use jix::dtype::Dtyped;
+/// use ndarray::{Ix1, array};
 ///
 /// // compact_ndarray infers f32 from the ndarray input type.
 /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;

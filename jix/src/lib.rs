@@ -21,9 +21,9 @@
 //! # Quick start
 //!
 //! ```
-//! use jix::dtype::Dtyped;
 //! use jix::Array;
-//! use ndarray::{array, Ix2};
+//! use jix::dtype::Dtyped;
+//! use ndarray::{Ix2, array};
 //!
 //! // Compress a 2-D f32 ndarray into a block-compressed Array<Compact>.
 //! let a = Array::compact_ndarray(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
@@ -101,8 +101,9 @@
 //! # Core type: `Array<S>`
 //!
 //! [`Array<S>`](Array) is generic over its storage backend [`S: StorageBase`](StorageBase). The
-//! storage trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else -
-//! slicing, arithmetic, reductions, serialization - is implemented on top of those three.
+//! storage trait has three main methods: `shape()`, `dtype()`, and `read_data(sub_range)`.
+//! Everything else - slicing, arithmetic, reductions, serialization - is implemented on top of
+//! those three.
 //!
 //! The type parameter `S` carries the full operation chain at compile time:
 //!
@@ -141,7 +142,9 @@
 //! `maximum`, ...
 //!
 //! For scaling, shifting, or any element-wise transform involving a constant value, use
-//! [`map`](Array::map) - e.g. `a.map(|x| x * 2.0f32)` rather than `a * 2.0f32`.
+//! [`map`](Array::map) - e.g. `a.map(|x| x * 2.0f32)` rather than `a * 2.0f32`. This is a
+//! deliberate design choice to avoid broadcasting of scalars and using the generic arrays flow
+//! path, as `.map` is faster.
 //!
 //! **Comparisons** - `equal`, `not_equal`, `greater`, `greater_equal`, `less`, ...
 //!
@@ -302,9 +305,10 @@
 //! that the original layout respected, a single read may decompress many more blocks than
 //! needed.
 //!
-//! To avoid this, call [`.compact()`](Array::compact)
-//! after a shape change to re-encode with a freshly derived block shape, or
-//! [`.compact_with()`](Array::compact_with) to choose the new block shape yourself:
+//! To avoid this, consider materializing the array with [`.compact()`](Array::compact) after a
+//! shape change to re-encode with a freshly derived block shape (or
+//! [`.to_plain()`](Array::to_plain)), or [`.compact_with()`](Array::compact_with) to choose the new
+//! block shape yourself:
 //!
 //! ```
 //! use jix::Array;
@@ -315,8 +319,9 @@
 //! let a = Array::compact_ndarray_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
 //!
 //! // Transpose and re-encode with explicit 128*128 blocks.
-//! let out_params = CompactParams::new().block_shape(&[128, 128])?;
-//! let transposed = a.permute_dims(&[1, 0]).compact_with(out_params)?;
+//! let transposed = a
+//!     .permute_dims(&[1, 0])
+//!     .compact_with(CompactParams::new().block_shape(&[128, 128])?)?;
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
@@ -341,8 +346,8 @@
 //! from the source lazily:
 //!
 //! ```
-//! use jix::storage::ArchiveValidation;
 //! use jix::Array;
+//! use jix::storage::ArchiveValidation;
 //! use ndarray::array;
 //!
 //! let tmp_dir = tempfile::tempdir()?;

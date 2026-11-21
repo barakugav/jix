@@ -128,8 +128,8 @@ a = jix.compact(data, params={"block_shape": [64, 64]})
 ```
 
 After shape-changing operations (`reshape`, `permute_dims`, etc.) the original block
-layout may no longer match the new access pattern. Call `jix.compact(arr, params=...)` to
-re-encode with a layout suited to the new shape.
+layout may no longer match the new access pattern. Consider materializing the array with
+`jix.compact(arr, params=...)` to re-encode with a layout suited to the new shape (or `.plain()`).
 
 
 # Operations

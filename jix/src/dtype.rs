@@ -213,11 +213,13 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 /// assert!(!packed.is_aligned());
 ///
 /// // Implicit padding is rejected: bytes 1..4 are not covered by any field.
-/// assert!(Dtype::from_fields(vec![
-///     ("id".to_string(), 0, u8::DTYPE),
-///     ("grade".to_string(), 4, f32::DTYPE),
-/// ])
-/// .is_err());
+/// assert!(
+///     Dtype::from_fields(vec![
+///         ("id".to_string(), 0, u8::DTYPE),
+///         ("grade".to_string(), 4, f32::DTYPE),
+///     ])
+///     .is_err()
+/// );
 /// ```
 ///
 /// # Inner Shape
@@ -568,16 +570,18 @@ impl Dtype {
     ///
     /// // The C struct `struct Person { float weight; uint8_t age; }` has 3 bytes of padding after
     /// // `age`. Padding is not supported, so this layout is rejected.
-    /// assert!(Dtype::new_struct(
-    ///     vec![
-    ///         ("weight".to_string(), 0, f32::DTYPE),
-    ///         ("age".to_string(), 4, u8::DTYPE),
-    ///     ],
-    ///     &[],
-    ///     8,
-    ///     Alignment::new(4).unwrap(),
-    /// )
-    /// .is_err());
+    /// assert!(
+    ///     Dtype::new_struct(
+    ///         vec![
+    ///             ("weight".to_string(), 0, f32::DTYPE),
+    ///             ("age".to_string(), 4, u8::DTYPE),
+    ///         ],
+    ///         &[],
+    ///         8,
+    ///         Alignment::new(4).unwrap(),
+    ///     )
+    ///     .is_err()
+    /// );
     ///
     /// // Adding the padding as an explicit field makes it valid.
     /// let person = Dtype::new_struct(

@@ -13,9 +13,9 @@ use crate::ops::prelude::*;
 ///
 /// # Examples
 /// ```
-/// use jix::scalar::bool8;
 /// use jix::Array;
-/// use ndarray::{array, Ix2};
+/// use jix::scalar::bool8;
+/// use ndarray::{Ix2, array};
 ///
 /// let cond = Array::compact_ndarray(&array![
 ///     bool8::TRUE,

@@ -52,7 +52,7 @@ impl<S: StorageBase> Array<S> {
     ///
     /// ```
     /// use jix::Array;
-    /// use ndarray::{array, Ix2};
+    /// use ndarray::{Ix2, array};
     ///
     /// let a = Array::compact_ndarray(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
     /// let b = Array::compact_ndarray(&ndarray::Array2::<f32>::ones((2, 3)))?;
@@ -141,9 +141,8 @@ impl<S: StorageBase> Array<S> {
     /// let mut total = 0.0f32;
     /// for tr in 0..4 {
     ///     for tc in 0..4 {
-    ///         let tile = a.to_ndarray_sub::<Ix2>(
-    ///             &[(tr * 64)..((tr + 1) * 64), (tc * 64)..((tc + 1) * 64)],
-    ///         )?;
+    ///         let tile =
+    ///             a.to_ndarray_sub::<Ix2>(&[(tr * 64)..((tr + 1) * 64), (tc * 64)..((tc + 1) * 64)])?;
     ///         total += tile.sum();
     ///     }
     /// }
@@ -161,7 +160,10 @@ impl<S: StorageBase> Array<S> {
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
     /// let scaled = a.map(|x| x * 10i32);
     ///
-    /// assert_eq!(scaled.to_ndarray_sub(&[1..3, 1..3])?, array![[50, 60], [80, 90]]);
+    /// assert_eq!(
+    ///     scaled.to_ndarray_sub(&[1..3, 1..3])?,
+    ///     array![[50, 60], [80, 90]]
+    /// );
     /// # Ok::<(), jix::Error>(())
     /// ```
     #[inline]

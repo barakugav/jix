@@ -143,12 +143,12 @@ use crate::util::{
 ///
 /// # Architecture overview
 ///
-/// Internally each `Array` holds a type-erased storage object that provides three things:
-/// the array's shape, its element dtype, and the ability to read any rectangular sub-region
-/// into a raw byte buffer. The primary concrete storage is a heap-allocated block-compressed
-/// backend; a memory-mapped variant is also available. Every operation constructs a new
-/// storage that wraps the input(s) and applies its transformation on each read request.
-/// Reads release the GIL while decompressing, so Python threads can run concurrently.
+/// Internally each `Array` holds a type-erased storage object that provides three main things: the
+/// array's shape, its element dtype, and the ability to read any rectangular sub-region into a raw
+/// byte buffer. The primary concrete storage is a heap-allocated block-compressed backend; a
+/// memory-mapped variant is also available. Every operation constructs a new storage that wraps the
+/// input(s) and applies its transformation on each read request. Reads release the GIL while
+/// decompressing, so Python threads can run concurrently.
 #[pyclass(name = "Array", module = "jix", frozen)]
 pub struct PyArray {
     pub(crate) arr: ArrayAny,

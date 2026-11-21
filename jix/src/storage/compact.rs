@@ -567,8 +567,8 @@ pub trait CompactArrayMethods {
     /// # Examples
     ///
     /// ```
-    /// use jix::storage::CompactArrayMethods;
     /// use jix::Array;
+    /// use jix::storage::CompactArrayMethods;
     /// use jix::storage::CompactParams;
     /// use ndarray::Array2;
     ///
@@ -587,8 +587,8 @@ pub trait CompactArrayMethods {
     /// # Examples
     ///
     /// ```
-    /// use jix::storage::CompactArrayMethods;
     /// use jix::Array;
+    /// use jix::storage::CompactArrayMethods;
     /// use jix::storage::CompactParams;
     /// use ndarray::Array2;
     ///
@@ -608,8 +608,8 @@ pub trait CompactArrayMethods {
     /// # Examples
     ///
     /// ```
-    /// use jix::storage::{Codec, CompactArrayMethods};
     /// use jix::Array;
+    /// use jix::storage::{Codec, CompactArrayMethods};
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
@@ -625,9 +625,9 @@ pub trait CompactArrayMethods {
     /// # Examples
     ///
     /// ```
-    /// use jix::storage::{CompactArrayMethods, Filter};
     /// use jix::Array;
     /// use jix::storage::CompactParams;
+    /// use jix::storage::{CompactArrayMethods, Filter};
     /// use ndarray::array;
     ///
     /// let data = array![1u32, 2, 3];
