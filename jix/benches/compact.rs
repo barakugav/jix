@@ -1,7 +1,8 @@
 mod common;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use jix::{Array, ArrayParams};
+use jix::storage::CompactParams;
+use jix::Array;
 
 use crate::common::{create_data, Profile};
 
@@ -47,7 +48,7 @@ fn bench_compact_array(c: &mut Criterion) {
         group.sample_size(20);
         for (block_shape, level, profile) in block_shapes {
             let data = create_data::<i32>(*profile, &shape, 0x52cd98c6eb78ed4b);
-            let params = ArrayParams::new()
+            let params = CompactParams::new()
                 .block_shape(block_shape.as_slice())
                 .unwrap()
                 .level(*level)

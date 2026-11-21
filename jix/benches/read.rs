@@ -4,9 +4,8 @@ use std::ops::Range;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use fastrand::Rng;
-use ndarray::Ix2;
-
 use jix::Array;
+use ndarray::Ix2;
 
 use crate::common::{create_compact, create_ndarray};
 

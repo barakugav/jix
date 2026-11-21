@@ -91,12 +91,14 @@ impl<S: StorageBase> Slice<S> {
                 // block_shape_fixed_dims is unchanged
             }
         }
+        let encoder_params = inner_spec.encoder_params().cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             inner_spec.block_shape_fixed_dims(),
             inner_spec.element_cost(),
             DimArray::from_slice(inner_spec.read_shape_scale_weight()).unwrap(),
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
+            encoder_params,
         );
         spec.flags = spec
             .flags
@@ -449,17 +451,14 @@ impl<S: StorageBase> Array<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::ArrayStorageExt;
     use ndarray::array;
     use proptest::prelude::*;
 
     use super::SliceItem;
     use crate::array::Array;
-    use crate::storage::Index;
-    use crate::ReadContext;
-
+    use crate::storage::{ArrayStorageExt, Index};
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{CompactArray, PlainArray, StorageBase};
+    use crate::{CompactArray, PlainArray, ReadContext, StorageBase};
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();

@@ -2,8 +2,7 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 use crate::ops::{ElementwisePipeline, OperandTyped};
 use crate::storage::{ArraySpec, ArrayStorageInfo, CompactView, Index, OutBuf, StridedBuf};
-use crate::ReadContext;
-use crate::{ElementType, TypeDyn};
+use crate::{ElementType, ReadContext, TypeDyn};
 
 mod sealed {
     /// Seals [`StorageBase`](super::StorageBase).

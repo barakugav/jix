@@ -2,13 +2,14 @@ use crate::ops::elementwise::op2::{define_array_op2_method, define_op2};
 use crate::ops::prelude::*;
 
 pub(crate) mod traits {
+    use fearless_simd::ExtractToken;
+
     use crate::error::{ArithmeticErrorKind, ArithmeticStatus};
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
-    use fearless_simd::ExtractToken;
 
     define_scalar_op2_trait!(
         /// Division operation, like [`core::ops::Div`] but without panicking.
@@ -847,10 +848,11 @@ mod tests {
     /// cases.
     #[test]
     fn simd_bodies_all_levels() {
+        use fearless_simd::Simd;
+
         use super::DivKernel;
         use crate::ops::elementwise::op2::Op2Kernel;
         use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
-        use fearless_simd::Simd;
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {
@@ -923,13 +925,14 @@ mod tests {
     /// bit, on every SIMD level of the CPU.
     #[test]
     fn div_rem_simd_bodies_all_levels() {
+        use fearless_simd::Simd;
+
         use super::{
             DivideEuclidKernel, DivideFloorKernel, DivideTruncKernel, RemainderEuclidKernel,
             RemainderFloorKernel, RemainderTruncKernel,
         };
         use crate::ops::elementwise::op2::Op2Kernel;
         use crate::util::for_each_simd_level;
-        use fearless_simd::Simd;
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {

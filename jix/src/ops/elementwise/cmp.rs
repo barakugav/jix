@@ -732,12 +732,12 @@ impl<S: StorageBase> Array<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::scalar::bool8;
-    use crate::ArrayParams;
     use ndarray::Ix1;
 
+    use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
+    use crate::storage::CompactParams;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;
@@ -787,10 +787,11 @@ mod tests {
     /// their scalar semantics, on every SIMD level of the CPU, over edge cases (NaN included).
     #[test]
     fn simd_bodies_all_levels() {
+        use fearless_simd::Simd;
+
         use super::{EqualKernel, LessEqualKernel, LessKernel, NotEqualKernel};
         use crate::ops::elementwise::op2::Op2Kernel;
         use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
-        use fearless_simd::Simd;
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {
@@ -948,17 +949,19 @@ mod tests {
     // still see the caller's order.
     #[test]
     fn swapped_cmp_reports_operands_in_caller_order() {
-        use crate::{Array, ArrayParams, StorageBase};
         use ndarray::ShapeBuilder;
+
+        use crate::storage::PlainArrayMethods;
+        use crate::{Array, StorageBase};
 
         let c_order = ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap();
         let f_order = ndarray::Array::from_shape_vec([3, 4].f(), (0..12i32).collect()).unwrap();
-        let params = ArrayParams::default().block_size(1 << 12);
-        let a = Array::plain_ndarray_with(c_order, params).unwrap();
+        let mut a = Array::plain_ndarray(c_order).unwrap();
+        a.read_params_mut().set_read_size((1 << 12, 1 << 13));
         let b = Array::plain_ndarray(f_order).unwrap();
         assert_ne!(
-            a.storage().spec().block_size(),
-            b.storage().spec().block_size()
+            a.storage().spec().read_params(),
+            b.storage().spec().read_params()
         );
 
         let check = |storage: &dyn StorageBase, name: &str| {
@@ -979,7 +982,7 @@ mod tests {
         // The base spec comes from `a`, and a tie in the read layout order goes to `a`: C order,
         // where the swapped `Less` alone would pick `b`'s F order.
         for spec in [gt.storage().spec(), ge.storage().spec()] {
-            assert_eq!(spec.block_size(), a.storage().spec().block_size());
+            assert_eq!(spec.read_params(), a.storage().spec().read_params());
             assert_eq!(spec.read_layout_order(), &[0, 1]);
         }
         let lt = b.view().less(a.view());
@@ -1066,8 +1069,8 @@ mod tests {
         // block-boundary bug in the ordering kernel would still show up.
         let ba = ndarray::array![[bool8::FALSE, bool8::TRUE], [bool8::TRUE, bool8::FALSE]];
         let bb = ndarray::array![[bool8::TRUE, bool8::FALSE], [bool8::TRUE, bool8::TRUE]];
-        let params_a = ArrayParams::new().block_shape(&[1u32, 1]).unwrap();
-        let params_b = ArrayParams::new().block_shape(&[1u32, 1]).unwrap();
+        let params_a = CompactParams::new().block_shape(&[1u32, 1]).unwrap();
+        let params_b = CompactParams::new().block_shape(&[1u32, 1]).unwrap();
         let zba = Array::compact_ndarray_with(&ba, params_a).unwrap();
         let zbb = Array::compact_ndarray_with(&bb, params_b).unwrap();
         let bexp = ndarray::Zip::from(&ba)

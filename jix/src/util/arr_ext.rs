@@ -258,10 +258,11 @@ fn unwrap_infallible<T>(result: Result<T, Infallible>) -> T {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::cell::{Cell, RefCell};
     use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::rc::Rc;
+
+    use super::*;
 
     // ---------------------------------------------------------------------
     // Drop-tracking harness.

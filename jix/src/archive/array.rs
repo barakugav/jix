@@ -8,12 +8,14 @@ use crate::archive::block::{BlockArchiveWriter, BlockTableStorageRead};
 use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::archive::version::lib_version;
-use crate::codec::DecoderCodecConfig;
+use crate::codec::{DecoderCodecConfig, EncoderParams};
 use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::storage::{ArchiveValidation, ArrayBlockTableStorageBase, Compact, CompactMmap};
-use crate::util::{dim_arr, DimBitmap, IterExt};
-use crate::{Array, ArrayParams, DimDyn, Dimension, ReadContext, StorageBase, TypeDyn};
+use crate::storage::{
+    ArchiveValidation, ArrayBlockTableStorageBase, Compact, CompactMmap, CompactParams,
+};
+use crate::util::{dim_arr, IterExt};
+use crate::{Array, DimDyn, Dimension, ReadContext, StorageBase, TypeDyn};
 
 impl Array<Compact<TypeDyn>> {
     /// Load a compressed array from a `.jix` file, allocating storage on the heap.
@@ -22,6 +24,10 @@ impl Array<Compact<TypeDyn>> {
     /// [`write_to`](Array::write_to). Use [`read_from_file_with`](Array::read_from_file_with) if
     /// the array occupies only part of a larger file, or
     /// [`read_from_file_mmap`](Array::read_from_file_mmap) for memory-mapped (zero-copy) loading.
+    ///
+    /// The array keeps the block shape, codec and filters of the file, and arrays later compacted
+    /// from it inherit them. Its read size can be set with
+    /// [`CompactArrayMethods::read_params_mut`](crate::storage::CompactArrayMethods::read_params_mut).
     ///
     /// # Arguments
     ///
@@ -43,16 +49,10 @@ impl Array<Compact<TypeDyn>> {
     /// ```
     pub fn read_from_file(path: &Path) -> Result<Self> {
         let len = path.metadata().map_err(Error::io)?.len();
-        Self::read_from_file_with(
-            path,
-            0,
-            len,
-            ArrayParams::default(),
-            ArchiveValidation::default(),
-        )
+        Self::read_from_file_with(path, 0, len, ArchiveValidation::default())
     }
 
-    /// Load a compressed array from a byte range within a file with specified parameters.
+    /// Load a compressed array from a byte range within a file.
     ///
     /// Use this when several arrays, or an array and other data, are packed into one file and you
     /// know the byte `offset` and `len` of the array to read.
@@ -63,18 +63,14 @@ impl Array<Compact<TypeDyn>> {
     /// - `offset`: byte offset of the start of the array's archive section within the file.
     /// - `len`: byte length of the array's archive section. Must not run past the end of the
     ///   file.
-    /// - `params`: never changes the loaded data - the block shape and codec come from the file
-    ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
-    ///   where they seed arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size).
     /// - `validation`: how thoroughly the archive is checked, see [`ArchiveValidation`].
     ///
     /// # Examples
     ///
     /// ```
     /// use jix::storage::ArchiveValidation;
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -84,19 +80,14 @@ impl Array<Compact<TypeDyn>> {
     /// let a = Array::compact_ndarray(&array![0u8, 1, 2, 3])?;
     /// let b = Array::compact_ndarray(&array![10u8, 20, 30, 40, 50, 60])?;
     /// let mut f = std::fs::File::create(&path)?;
-    /// a.write_to(&mut f, ArrayParams::default(), &a.read_ctx())?;
+    /// a.write_to(&mut f, CompactParams::default(), &a.read_ctx())?;
     /// let offset = f.metadata()?.len();
-    /// b.write_to(&mut f, ArrayParams::default(), &b.read_ctx())?;
+    /// b.write_to(&mut f, CompactParams::default(), &b.read_ctx())?;
     /// let total = f.metadata()?.len();
     ///
     /// // Read the second array back using its offset.
-    /// let b2 = Array::read_from_file_with(
-    ///     &path,
-    ///     offset,
-    ///     total - offset,
-    ///     ArrayParams::default(),
-    ///     ArchiveValidation::default(),
-    /// )?;
+    /// let b2 =
+    ///     Array::read_from_file_with(&path, offset, total - offset, ArchiveValidation::default())?;
     /// assert_eq!(b2.shape(), &[6]);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -104,13 +95,12 @@ impl Array<Compact<TypeDyn>> {
         path: &Path,
         offset: u64,
         len: u64,
-        params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self> {
         let file = File::open(path).map_err(Error::io)?;
         let mut reader = BufReader::new(file);
         reader.seek(SeekFrom::Start(offset)).map_err(Error::io)?;
-        Self::read_from(reader, Some(len), params, validation)
+        Self::read_from(reader, Some(len), validation)
     }
 
     /// Load a compressed array from a generic reader.
@@ -120,11 +110,6 @@ impl Array<Compact<TypeDyn>> {
     /// - `reader`: any source implementing `Read` + `Seek` containing the array's archive section.
     /// - `len`: byte length of the archive section within the reader, used for bounds checking.
     ///   Must not run past the end of the reader. Pass `None` to read to the end of the reader.
-    /// - `params`: never changes the loaded data - the block shape and codec come from the file
-    ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
-    ///   where they seed arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size).
     /// - `validation`: how thoroughly the archive is checked, see [`ArchiveValidation`].
     ///
     /// # Examples
@@ -133,21 +118,17 @@ impl Array<Compact<TypeDyn>> {
     /// use std::io::Cursor;
     ///
     /// use jix::storage::ArchiveValidation;
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
     /// // Serialize to an in-memory buffer and read it back.
     /// let original = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
     /// let mut buf = Cursor::new(Vec::new());
-    /// original.write_to(&mut buf, ArrayParams::default(), &original.read_ctx())?;
+    /// original.write_to(&mut buf, CompactParams::default(), &original.read_ctx())?;
     ///
     /// let bytes = buf.into_inner();
-    /// let loaded = Array::read_from(
-    ///     Cursor::new(bytes),
-    ///     None,
-    ///     ArrayParams::default(),
-    ///     ArchiveValidation::default(),
-    /// )?;
+    /// let loaded = Array::read_from(Cursor::new(bytes), None, ArchiveValidation::default())?;
     /// let loaded = loaded.into_typed::<i32>()?;
     /// assert_eq!(loaded.to_ndarray()?, array![1i32, 2, 3, 4].into_dyn());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -155,14 +136,12 @@ impl Array<Compact<TypeDyn>> {
     pub fn read_from(
         reader: impl Read + Seek,
         len: Option<u64>,
-        params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self> {
         let storage = ArrayBlockTableStorageBase::read_from(
             reader,
             len,
             crate::storage::block::Owned(PhantomData),
-            params,
             validation,
         )?;
         Ok(Self {
@@ -187,11 +166,6 @@ impl Array<CompactMmap<TypeDyn>> {
     /// - `offset`: byte offset of the start of the array's archive section within the file.
     /// - `len`: byte length of the array's archive section. Must not run past the end of the
     ///   file.
-    /// - `params`: never changes the loaded data - the block shape and codec come from the file
-    ///   (`params.block_shape` is ignored). The params are recorded in the array's storage spec,
-    ///   where they seed arrays derived from this one (e.g. the codec used by
-    ///   [`Array::compact`]/[`Array::compact_with`]) and steer read behavior such as
-    ///   [`read_size`](ArrayParams::read_size).
     /// - `validation`: how thoroughly the archive is checked, see [`ArchiveValidation`].
     ///
     /// # Safety
@@ -205,7 +179,7 @@ impl Array<CompactMmap<TypeDyn>> {
     ///
     /// ```
     /// use jix::storage::ArchiveValidation;
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -214,15 +188,7 @@ impl Array<CompactMmap<TypeDyn>> {
     ///
     /// let len = std::fs::metadata(&path)?.len();
     /// // Safety: the file is not modified after this point.
-    /// let array = unsafe {
-    ///     Array::read_from_file_mmap(
-    ///         &path,
-    ///         0,
-    ///         len,
-    ///         ArrayParams::default(),
-    ///         ArchiveValidation::default(),
-    ///     )?
-    /// };
+    /// let array = unsafe { Array::read_from_file_mmap(&path, 0, len, ArchiveValidation::default())? };
     /// assert_eq!(array.shape(), &[2, 2]);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -230,7 +196,6 @@ impl Array<CompactMmap<TypeDyn>> {
         path: &Path,
         offset: u64,
         len: u64,
-        params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self> {
         let file = File::open(path).map_err(Error::io)?;
@@ -245,7 +210,6 @@ impl Array<CompactMmap<TypeDyn>> {
                 mmap: Arc::new(mmap),
                 base_offset: offset,
             },
-            params,
             validation,
         )?;
 
@@ -293,7 +257,7 @@ impl<S: StorageBase> Array<S> {
     ///
     /// ```
     /// use jix::storage::ArchiveValidation;
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -303,15 +267,7 @@ impl<S: StorageBase> Array<S> {
     ///
     /// // Map the file - compressed blocks are paged in on demand, no heap copy.
     /// // Safety: the file is not modified while `src` is live.
-    /// let src = unsafe {
-    ///     Array::read_from_file_mmap(
-    ///         &path,
-    ///         0,
-    ///         len,
-    ///         ArrayParams::default(),
-    ///         ArchiveValidation::default(),
-    ///     )?
-    /// };
+    /// let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArchiveValidation::default())? };
     ///
     /// // Build a lazy view - no data is read yet
     /// let view = src.into_typed::<f32>()?.exp().map(|x| x + 1.0);
@@ -324,7 +280,7 @@ impl<S: StorageBase> Array<S> {
     pub fn write_to_file(&self, path: &Path) -> Result<()> {
         let path = std::path::absolute(path).map_err(Error::io)?;
         let writer = BufWriter::new(std::fs::File::create_new(&path).map_err(Error::io)?);
-        let result = self.write_to(writer, ArrayParams::default(), &self.read_ctx());
+        let result = self.write_to(writer, CompactParams::default(), &self.read_ctx());
         if result.is_err() {
             // Don't leave a partial archive behind
             let revert_result = std::fs::remove_file(&path);
@@ -346,7 +302,8 @@ impl<S: StorageBase> Array<S> {
     /// to the writer as-is and `params` is ignored.
     ///
     /// **For any other array** (lazy views, op chains, plain buffers), each block is read from
-    /// the source and compressed according to `params`.
+    /// the source and compressed according to `params`, with unset fields inherited from the
+    /// source as in [`compact_with`](Array::compact_with).
     ///
     /// # Arguments
     ///
@@ -362,7 +319,8 @@ impl<S: StorageBase> Array<S> {
     /// use std::io::Cursor;
     ///
     /// use jix::storage::ArchiveValidation;
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3, 4], [5, 6, 7, 8]])?;
@@ -372,17 +330,20 @@ impl<S: StorageBase> Array<S> {
     /// let mut buf = Cursor::new(Vec::new());
     /// // A lazy view is compressed on the fly, here into blocks of 1x2 items.
     /// let scaled = a.map(|x| x * 10);
-    /// scaled.write_to(&mut buf, ArrayParams::new().block_shape(&[1, 2])?, &scaled.read_ctx())?;
+    /// scaled.write_to(
+    ///     &mut buf,
+    ///     CompactParams::new().block_shape(&[1, 2])?,
+    ///     &scaled.read_ctx(),
+    /// )?;
     /// let offset = buf.position();
     /// // A compact array copies its compressed blocks as-is, so `params` is ignored.
-    /// b.write_to(&mut buf, ArrayParams::default(), &b.read_ctx())?;
+    /// b.write_to(&mut buf, CompactParams::default(), &b.read_ctx())?;
     ///
     /// // Read back each array from its byte range.
     /// let bytes = buf.into_inner();
     /// let scaled2 = Array::read_from(
     ///     Cursor::new(&bytes[..offset as usize]),
     ///     Some(offset),
-    ///     ArrayParams::default(),
     ///     ArchiveValidation::default(),
     /// )?;
     /// assert_eq!(
@@ -392,16 +353,18 @@ impl<S: StorageBase> Array<S> {
     /// let b2 = Array::read_from(
     ///     Cursor::new(&bytes[offset as usize..]),
     ///     None,
-    ///     ArrayParams::default(),
     ///     ArchiveValidation::default(),
     /// )?;
-    /// assert_eq!(b2.into_typed::<u8>()?.to_ndarray()?, array![10u8, 20, 30].into_dyn());
+    /// assert_eq!(
+    ///     b2.into_typed::<u8>()?.to_ndarray()?,
+    ///     array![10u8, 20, 30].into_dyn()
+    /// );
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn write_to(
         &self,
         writer: impl Write + Seek,
-        mut params: ArrayParams,
+        mut params: CompactParams,
         context: &ReadContext,
     ) -> Result<()> {
         let mut writer =
@@ -450,7 +413,6 @@ where
         reader: impl Read + Seek,
         len: Option<u64>,
         storage: S,
-        params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self>
     where
@@ -458,7 +420,7 @@ where
     {
         let mut reader = ArchiveReader::new(reader, len)?;
         let f_meta = reader.read_file_meta()?;
-        Self::read_body(&mut reader, &f_meta, storage, params, validation).map_err(|mut err| {
+        Self::read_body(&mut reader, &f_meta, storage, validation).map_err(|mut err| {
             let version_str = f_meta.lib_version.as_ref().map(|v| v.to_string());
             let version_str = version_str.as_deref().unwrap_or("unknown");
 
@@ -477,7 +439,6 @@ where
         reader: &mut ArchiveReader<R>,
         f_meta: &schema::FileMetadata,
         storage: S,
-        mut params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self>
     where
@@ -576,23 +537,18 @@ where
             expected_nblocks
         );
 
-        // Tune with every dim fixed so the file's block shape is kept. The caller's flags are
-        // only hints for how downstream ops rescale it.
-        params.block_shape = Some(block_shape);
-        let fixed_dims = params
-            .block_shape_fixed_dims
-            .replace(DimBitmap::filled(ndim, true));
-        let mut array = Self::new(blocks, shape, params)?;
-        if let Some(fixed_dims) = fixed_dims {
-            ensure!(
-                fixed_dims.len() == ndim,
-                InvalidArgument,
-                "ndim does not match block_shape_fixed_dims length: expected {ndim}, got {}",
-                fixed_dims.len()
-            );
-            array.spec.dynamic_mut().block_shape_fixed_dims = fixed_dims;
-        }
-        Ok(array)
+        // Later compactions reuse the file's codec and filters. The level is not stored.
+        let decoder_config = blocks.decoder_config();
+        let params = CompactParams {
+            block_shape: Some(block_shape),
+            encoder_params: Some(EncoderParams {
+                codec: decoder_config.codec.clone(),
+                filters: decoder_config.filters.clone(),
+                ..EncoderParams::default()
+            }),
+            ..CompactParams::default()
+        };
+        Self::new(blocks, shape, params)
     }
 }
 
@@ -604,24 +560,22 @@ mod tests {
 
     use crate::archive::schema;
     use crate::dtype::Dtyped;
-    use crate::storage::{ArchiveValidation, Compact};
+    use crate::storage::{ArchiveValidation, Compact, CompactArrayMethods, CompactParams};
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams, CompactArray, Dimension, IntoDimension};
-    use crate::{StorageBase, TypeDyn};
+    use crate::{Array, CompactArray, Dimension, IntoDimension, StorageBase, TypeDyn};
 
     #[test]
     fn read_back_to_back_archives() {
         let a = Array::compact_ndarray(&ndarray::array![1i32, 2, 3]).unwrap();
         let b = Array::compact_ndarray(&ndarray::array![4i64, 5]).unwrap();
         let mut buf = Cursor::new(Vec::new());
-        a.write_to(&mut buf, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut buf, CompactParams::default(), &a.read_ctx())
             .unwrap();
-        b.write_to(&mut buf, ArrayParams::default(), &b.read_ctx())
+        b.write_to(&mut buf, CompactParams::default(), &b.read_ctx())
             .unwrap();
         buf.rewind().unwrap();
-        let read = |buf: &mut Cursor<Vec<u8>>| {
-            Array::read_from(buf, None, ArrayParams::new(), ArchiveValidation::Strict)
-        };
+        let read =
+            |buf: &mut Cursor<Vec<u8>>| Array::read_from(buf, None, ArchiveValidation::Strict);
         let a2 = read(&mut buf).unwrap().into_typed::<i32>().unwrap();
         let b2 = read(&mut buf).unwrap().into_typed::<i64>().unwrap();
         assert_eq!(
@@ -641,21 +595,14 @@ mod tests {
         assert!(Dtype::from_fields(vec![("f".to_string(), 0, dtype.clone())]).is_err());
 
         let data = [7u8; 4];
-        let a: Array<crate::storage::PlainView<'_, TypeDyn>> = unsafe {
-            Array::plain_ndarray_ptr(data.as_ptr(), &[4], &[1], dtype.clone(), ArrayParams::new())
-                .unwrap()
-        };
+        let a: Array<crate::storage::PlainView<'_, TypeDyn>> =
+            unsafe { Array::plain_ndarray_ptr(data.as_ptr(), &[4], &[1], dtype.clone()).unwrap() };
         let mut buf = Cursor::new(Vec::new());
-        a.write_to(&mut buf, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut buf, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let len = buf.get_ref().len() as u64;
         buf.rewind().unwrap();
-        let b = Array::read_from(
-            buf,
-            Some(len),
-            ArrayParams::new(),
-            ArchiveValidation::Strict,
-        );
+        let b = Array::read_from(buf, Some(len), ArchiveValidation::Strict);
         assert_eq!(b.unwrap().dtype(), &dtype);
     }
 
@@ -666,7 +613,7 @@ mod tests {
     ) -> crate::error::Result<Array<Compact<TypeDyn>>> {
         use prost::Message;
         let mut bytes = Cursor::new(Vec::new());
-        a.write_to(&mut bytes, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut bytes, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let bytes = bytes.into_inner();
         // The magic, the file metadata, the two headers, then the [blocks_loc, block_data] TOC.
@@ -695,13 +642,7 @@ mod tests {
         }
         out.extend_from_slice(&bytes[pos + 32..]);
         let len = out.len() as u64;
-        let params = ArrayParams::default();
-        Array::read_from(
-            Cursor::new(out),
-            Some(len),
-            params,
-            ArchiveValidation::Strict,
-        )
+        Array::read_from(Cursor::new(out), Some(len), ArchiveValidation::Strict)
     }
 
     #[test]
@@ -723,23 +664,19 @@ mod tests {
     #[test]
     fn read_keeps_the_file_block_shape() {
         let src = ndarray::Array2::from_shape_fn((64, 64), |(i, j)| (i * 64 + j) as i32);
-        let params = ArrayParams::new().block_shape(&[8, 32]).unwrap();
+        let params = CompactParams::new().block_shape(&[8, 32]).unwrap();
         let a = Array::compact_ndarray_with(&src, params).unwrap();
         let mut bytes = Cursor::new(Vec::new());
-        a.write_to(&mut bytes, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut bytes, CompactParams::default(), &a.read_ctx())
             .unwrap();
 
-        let p = ArrayParams::new()
-            .block_shape_fixed_dims(&[false, false])
-            .unwrap()
-            .block_size(1024);
-        let a = Array::read_from(
+        let mut a = Array::read_from(
             Cursor::new(bytes.into_inner()),
             None,
-            p,
             ArchiveValidation::Strict,
         )
         .unwrap();
+        a.set_block_shape_fixed_dims(&[false, false]).unwrap();
         assert_eq!(a.storage().0.block_shape(), &[8, 32]);
         let fixed_dims = a.storage().0.spec.as_ref().block_shape_fixed_dims();
         assert_eq!((fixed_dims.get(0), fixed_dims.get(1)), (false, false));
@@ -756,7 +693,7 @@ mod tests {
     fn huge_section_size_without_len_is_an_error() {
         let a = Array::compact_ndarray(&ndarray::array![0u8, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         let mut bytes = Cursor::new(Vec::new());
-        a.write_to(&mut bytes, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut bytes, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let bytes = bytes.into_inner();
         // Skip the magic and the three messages to the [blocks_loc, block_data] sections.
@@ -771,12 +708,7 @@ mod tests {
         for bad_size in [1u64 << 44, (1 << 32) + size] {
             let mut bytes = bytes.clone();
             bytes[toc + 24..toc + 32].copy_from_slice(&bad_size.to_le_bytes());
-            let result = Array::read_from(
-                Cursor::new(bytes),
-                None,
-                ArrayParams::default(),
-                ArchiveValidation::Strict,
-            );
+            let result = Array::read_from(Cursor::new(bytes), None, ArchiveValidation::Strict);
             assert!(result.is_err());
         }
     }
@@ -785,7 +717,7 @@ mod tests {
     fn parse_error_names_the_lib_versions() {
         let a = Array::compact_ndarray(&ndarray::array![0u8, 1, 2, 3]).unwrap();
         let mut bytes = Cursor::new(Vec::new());
-        a.write_to(&mut bytes, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut bytes, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let mut bytes = bytes.into_inner();
         // Corrupt the block_data section size in the TOC, after the three messages.
@@ -795,12 +727,7 @@ mod tests {
             toc += prost::length_delimiter_len(len) + len;
         }
         bytes[toc + 24..toc + 32].copy_from_slice(&(1u64 << 44).to_le_bytes());
-        let Err(err) = Array::read_from(
-            Cursor::new(bytes),
-            None,
-            ArrayParams::default(),
-            ArchiveValidation::Strict,
-        ) else {
+        let Err(err) = Array::read_from(Cursor::new(bytes), None, ArchiveValidation::Strict) else {
             panic!("expected an error");
         };
         let version = env!("CARGO_PKG_VERSION");
@@ -822,7 +749,7 @@ mod tests {
             .open(file.path())
             .unwrap();
         assert!(a
-            .write_to(writer, ArrayParams::default(), &a.read_ctx())
+            .write_to(writer, CompactParams::default(), &a.read_ctx())
             .is_err());
     }
 
@@ -844,11 +771,11 @@ mod tests {
 
         let a = Array::compact_ndarray(&ndarray::array![1u8, 2, 3, 4]).unwrap();
         let mut bytes = Cursor::new(Vec::new());
-        a.write_to(&mut bytes, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut bytes, CompactParams::default(), &a.read_ctx())
             .unwrap();
         drop(vec![0xA5u8; 4096]); // leave stale bytes in the allocator
         let mut snoop = Snoop(Cursor::new(bytes.into_inner()), false);
-        Array::read_from(&mut snoop, None, ArrayParams::default(), Default::default()).unwrap();
+        Array::read_from(&mut snoop, None, Default::default()).unwrap();
         assert!(!snoop.1);
     }
 
@@ -872,16 +799,11 @@ mod tests {
 
     fn write_read<T: Dtyped, D: ndarray::Dimension>(a: &CompactArray<T>) -> ndarray::Array<T, D> {
         let mut buf = Cursor::new(Vec::new());
-        a.write_to(&mut buf, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut buf, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let bytes = buf.into_inner();
-        let array = Array::read_from(
-            Cursor::new(bytes),
-            None,
-            ArrayParams::default(),
-            ArchiveValidation::default(),
-        )
-        .unwrap();
+        let array =
+            Array::read_from(Cursor::new(bytes), None, ArchiveValidation::default()).unwrap();
         array.into_typed::<T>().unwrap().to_ndarray().unwrap()
     }
 
@@ -1034,14 +956,14 @@ mod tests {
         let mut buf = Cursor::new(Vec::<u8>::new());
 
         let a0 = compact(src0.iter().cloned().collect(), [6], &[3]);
-        a0.write_to(&mut buf, ArrayParams::default(), &a0.read_ctx())
+        a0.write_to(&mut buf, CompactParams::default(), &a0.read_ctx())
             .unwrap();
         let end0 = buf.stream_position().unwrap();
         buf.write_all(&[0u8; PAD]).unwrap();
         let start1 = buf.stream_position().unwrap();
 
         let a1 = compact(src1.iter().cloned().collect(), [3, 4], &[2, 2]);
-        a1.write_to(&mut buf, ArrayParams::default(), &a1.read_ctx())
+        a1.write_to(&mut buf, CompactParams::default(), &a1.read_ctx())
             .unwrap();
         let end1 = buf.stream_position().unwrap();
         let len1 = end1 - start1;
@@ -1049,7 +971,7 @@ mod tests {
         let start2 = buf.stream_position().unwrap();
 
         let a2 = compact(src2.iter().cloned().collect(), [2, 3, 5], &[1, 2, 3]);
-        a2.write_to(&mut buf, ArrayParams::default(), &a2.read_ctx())
+        a2.write_to(&mut buf, CompactParams::default(), &a2.read_ctx())
             .unwrap();
         let end2 = buf.stream_position().unwrap();
         let len2 = end2 - start2;
@@ -1059,7 +981,6 @@ mod tests {
         let r0 = Array::read_from(
             Cursor::new(&bytes),
             Some(end0),
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1072,7 +993,6 @@ mod tests {
         let r1 = Array::read_from(
             Cursor::new(&bytes[start1 as usize..]),
             Some(len1),
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1085,7 +1005,6 @@ mod tests {
         let r2 = Array::read_from(
             Cursor::new(&bytes[start2 as usize..]),
             Some(len2),
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1117,7 +1036,6 @@ mod tests {
         let got = Array::read_from(
             Cursor::new(buf.into_inner()),
             None,
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1141,7 +1059,6 @@ mod tests {
         let got = Array::read_from(
             Cursor::new(buf.into_inner()),
             None,
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1166,7 +1083,6 @@ mod tests {
         let got = Array::read_from(
             Cursor::new(buf.into_inner()),
             None,
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1183,7 +1099,7 @@ mod tests {
         let ctx = a.read_ctx();
 
         let mut plain = Cursor::new(Vec::new());
-        a.write_to(&mut plain, ArrayParams::default(), &ctx)
+        a.write_to(&mut plain, CompactParams::default(), &ctx)
             .unwrap();
 
         let mut with_different_params = Cursor::new(Vec::new());
@@ -1243,33 +1159,21 @@ mod tests {
 
         let mut f = std::fs::File::create(&path).unwrap();
         let a = compact(src0.iter().cloned().collect(), [6], &[3]);
-        a.write_to(&mut f, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut f, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let off1 = f.metadata().unwrap().len();
         let a = compact(src1.iter().cloned().collect(), [4, 5], &[2, 3]);
-        a.write_to(&mut f, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut f, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let total = f.metadata().unwrap().len();
         drop(f);
 
-        let r0 = Array::read_from_file_with(
-            &path,
-            0,
-            off1,
-            ArrayParams::default(),
-            ArchiveValidation::default(),
-        )
-        .unwrap();
+        let r0 = Array::read_from_file_with(&path, 0, off1, ArchiveValidation::default()).unwrap();
         assert_eq!(r0.into_typed::<u8>().unwrap().to_ndarray().unwrap(), src0);
 
-        let r1 = Array::read_from_file_with(
-            &path,
-            off1,
-            total - off1,
-            ArrayParams::default(),
-            ArchiveValidation::default(),
-        )
-        .unwrap();
+        let r1 =
+            Array::read_from_file_with(&path, off1, total - off1, ArchiveValidation::default())
+                .unwrap();
         assert_eq!(
             r1.into_typed::<f32>().unwrap().to_ndarray().unwrap(),
             src1.into_dyn()
@@ -1283,7 +1187,7 @@ mod tests {
         let a = compact((0..6u8).collect(), [6], &[3]);
         a.write_to(
             std::fs::File::create(tmp.path()).unwrap(),
-            ArrayParams::default(),
+            CompactParams::default(),
             &a.read_ctx(),
         )
         .unwrap();
@@ -1291,24 +1195,13 @@ mod tests {
         let total = bytes.len() as u64;
 
         for (offset, len) in [(0, total + 1), (1, total), (total + 1, 1)] {
-            let err = Array::read_from_file_with(
-                tmp.path(),
-                offset,
-                len,
-                ArrayParams::default(),
-                ArchiveValidation::default(),
-            )
-            .unwrap_err();
+            let err =
+                Array::read_from_file_with(tmp.path(), offset, len, ArchiveValidation::default())
+                    .unwrap_err();
             assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArgument);
 
             let err = unsafe {
-                Array::read_from_file_mmap(
-                    tmp.path(),
-                    offset,
-                    len,
-                    ArrayParams::default(),
-                    ArchiveValidation::default(),
-                )
+                Array::read_from_file_mmap(tmp.path(), offset, len, ArchiveValidation::default())
             }
             .unwrap_err();
             assert_eq!(err.kind(), crate::error::ErrorKind::InvalidArgument);
@@ -1317,7 +1210,6 @@ mod tests {
         let err = Array::read_from(
             std::io::Cursor::new(&bytes),
             Some(total + 1),
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap_err();
@@ -1337,21 +1229,14 @@ mod tests {
         let a = compact(vals, [4, 6], &[2, 3]);
         a.write_to(
             std::fs::File::create(tmp.path()).unwrap(),
-            ArrayParams::default(),
+            CompactParams::default(),
             &a.read_ctx(),
         )
         .unwrap();
         let len = std::fs::metadata(tmp.path()).unwrap().len();
 
         let got = unsafe {
-            Array::read_from_file_mmap(
-                tmp.path(),
-                0,
-                len,
-                ArrayParams::default(),
-                ArchiveValidation::default(),
-            )
-            .unwrap()
+            Array::read_from_file_mmap(tmp.path(), 0, len, ArchiveValidation::default()).unwrap()
         }
         .into_typed::<i64>()
         .unwrap()
@@ -1373,24 +1258,17 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         // Pad with an unrelated array first.
         let a = compact((0..4u8).collect(), [4], &[4]);
-        a.write_to(&mut f, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut f, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let offset = f.metadata().unwrap().len();
         let a = compact(src1.iter().cloned().collect(), [2, 3, 4], &[1, 2, 2]);
-        a.write_to(&mut f, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut f, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let len = f.metadata().unwrap().len() - offset;
         drop(f);
 
         let got = unsafe {
-            Array::read_from_file_mmap(
-                &path,
-                offset,
-                len,
-                ArrayParams::default(),
-                ArchiveValidation::default(),
-            )
-            .unwrap()
+            Array::read_from_file_mmap(&path, offset, len, ArchiveValidation::default()).unwrap()
         }
         .into_typed::<f32>()
         .unwrap()
@@ -1405,7 +1283,7 @@ mod tests {
         // An archive moved to any byte offset (embedded, concatenated) must still map in place.
         let mut bytes = std::io::Cursor::new(Vec::new());
         let a = compact((0..40).map(|x| x as f64).collect(), [40], &[8]);
-        a.write_to(&mut bytes, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut bytes, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let bytes = bytes.into_inner();
         for offset in 0..8u64 {
@@ -1418,7 +1296,6 @@ mod tests {
                     tmp.path(),
                     offset,
                     bytes.len() as u64,
-                    ArrayParams::default(),
                     ArchiveValidation::default(),
                 )
                 .unwrap()
@@ -1441,21 +1318,14 @@ mod tests {
         let a = compact(vals, [10, 11, 12], &[2, 3, 4]);
         a.write_to(
             std::fs::File::create(tmp.path()).unwrap(),
-            ArrayParams::default(),
+            CompactParams::default(),
             &a.read_ctx(),
         )
         .unwrap();
         let len = std::fs::metadata(tmp.path()).unwrap().len();
 
         let got = unsafe {
-            Array::read_from_file_mmap(
-                tmp.path(),
-                0,
-                len,
-                ArrayParams::default(),
-                ArchiveValidation::default(),
-            )
-            .unwrap()
+            Array::read_from_file_mmap(tmp.path(), 0, len, ArchiveValidation::default()).unwrap()
         }
         .into_typed::<i32>()
         .unwrap()
@@ -1477,21 +1347,14 @@ mod tests {
         let a = compact(vals, [4, 5, 6], &[2, 2, 3]);
         a.write_to(
             std::fs::File::create(tmp.path()).unwrap(),
-            ArrayParams::default(),
+            CompactParams::default(),
             &a.read_ctx(),
         )
         .unwrap();
         let len = std::fs::metadata(tmp.path()).unwrap().len();
 
         let mmap_arr = unsafe {
-            Array::read_from_file_mmap(
-                tmp.path(),
-                0,
-                len,
-                ArrayParams::default(),
-                ArchiveValidation::default(),
-            )
-            .unwrap()
+            Array::read_from_file_mmap(tmp.path(), 0, len, ArchiveValidation::default()).unwrap()
         };
         let mmap_arr = mmap_arr.into_typed::<i32>().unwrap();
         let ctx = mmap_arr.read_ctx();
@@ -1504,7 +1367,6 @@ mod tests {
         let got = Array::read_from(
             Cursor::new(out_buf.into_inner()),
             None,
-            ArrayParams::default(),
             ArchiveValidation::default(),
         )
         .unwrap();
@@ -1527,7 +1389,7 @@ mod tests {
         let make = || compact::<i32>((0..64).collect(), [8, 8], &[4, 4]);
         let mut expected = Cursor::new(Vec::new());
         let a = make();
-        a.write_to(&mut expected, ArrayParams::default(), &a.read_ctx())
+        a.write_to(&mut expected, CompactParams::default(), &a.read_ctx())
             .unwrap();
         let expected = expected.into_inner();
 

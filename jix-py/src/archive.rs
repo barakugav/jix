@@ -1,12 +1,15 @@
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
+use jix_core::storage::CompactParams;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
 use pyo3::{type_hint_identifier, type_hint_subscript};
+
+use jix_core::storage::CompactArrayMethods;
 
 use crate::array::resolve_array_params;
 use crate::ops::asarray;
@@ -32,12 +35,9 @@ use crate::PyArray;
 ///         the heap; blocks are paged in on demand. Defaults to `False`. **Caution:** modifying
 ///         the file while the returned array is live has undefined behavior. Not supported for
 ///         file-like objects.
-///     params: Block layout and codec configuration. See [`jix.compact()`][jix.compact] for
-///         details. These never change the loaded data: the block shape comes from the archive
-///         (`block_shape` is ignored) and the blocks are decoded with the codec they were written
-///         with. They mostly affect arrays later created from the result (e.g. via `compact()`,
-///         or `write_array()` of a lazy view of it), which inherit them, so their codec settings
-///         come from `params`.
+///     params: A dictionary with the optional keys `read_size` and `block_shape_fixed_dims`, see
+///         [`jix.compact()`][jix.compact]; other keys raise `TypeError`. The block shape, codec and
+///         filters come from the archive, and arrays later compacted from the result inherit them.
 ///     validation: How strictly the archive is validated:
 ///
 ///         - `None` (default): currently the same as `strict`; this may change.
@@ -94,8 +94,19 @@ pub fn read_array(
     mmap: bool,
     validation: Option<ArchiveValidation>,
 ) -> PyResult<PyArray> {
-    let params = resolve_array_params(py, params)?;
+    let params = resolve_array_params(py, params, &["read_size", "block_shape_fixed_dims"])?;
     let validation = validation.map(|v| v.0).unwrap_or_default();
+    let apply_params = |array: &mut dyn CompactArrayMethods| -> PyResult<()> {
+        if let Some(read_size) = params.read_size {
+            array.read_params_mut().set_read_size(read_size);
+        }
+        if let Some(fixed_dims) = &params.block_shape_fixed_dims {
+            array
+                .set_block_shape_fixed_dims(fixed_dims)
+                .into_py_result()?;
+        }
+        Ok(())
+    };
 
     if let Ok(path) = path_or_reader.extract::<PathBuf>() {
         py.detach(|| {
@@ -111,15 +122,17 @@ pub fn read_array(
             };
 
             Ok(if !mmap {
-                let array =
-                    jix_core::Array::read_from_file_with(&path, offset, len, params, validation)
+                let mut array =
+                    jix_core::Array::read_from_file_with(&path, offset, len, validation)
                         .into_py_result()?;
+                apply_params(&mut array)?;
                 PyArray::from_core(array.into_any())
             } else {
-                let array = unsafe {
-                    jix_core::Array::read_from_file_mmap(&path, offset, len, params, validation)
+                let mut array = unsafe {
+                    jix_core::Array::read_from_file_mmap(&path, offset, len, validation)
                         .into_py_result()?
                 };
+                apply_params(&mut array)?;
                 PyArray::from_core(array.into_any())
             })
         })
@@ -136,8 +149,9 @@ pub fn read_array(
         }
         // Can't detach the GIL since the reader is a Python object.
         let mut reader = BufReader::new(PyReader::new(path_or_reader.clone())?);
-        let array =
-            jix_core::Array::read_from(&mut reader, len, params, validation).into_py_result()?;
+        let mut array =
+            jix_core::Array::read_from(&mut reader, len, validation).into_py_result()?;
+        apply_params(&mut array)?;
 
         // Leave the reader at the current position after reading the array, BufReader may have read ahead
         let read_ahead = reader.buffer().len() as i64;
@@ -199,9 +213,11 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
 ///     append: When `False` (default), the file is created anew and must not already exist.
 ///         When `True`, the array is appended to an existing file (or a new one is created).
 ///         Ignored when `path_or_writer` is a file-like object.
-///     params: Controls the block layout and codec for encoding. Unset fields are
-///         inherited from the source array. Ignored when the source is already compact.
-///         See [`jix.compact()`][jix.compact] for details.
+///     params: A dictionary with the optional keys `block_shape`, `block_shape_fixed_dims`,
+///         `block_size`, `codec`, `compression_level` and `filters`, see
+///         [`jix.compact()`][jix.compact]; other keys raise `TypeError` (`read_size` too, as it is
+///         not stored in the file). Unset keys are inherited from the source array. Ignored when
+///         the source is already compact.
 ///
 /// Examples:
 ///     ```python
@@ -236,10 +252,22 @@ pub fn write_array(
     append: bool,
     params: Option<Bound<'_, PyDict>>,
 ) -> PyResult<()> {
-    let array = asarray(array, None, params.clone())?;
+    let array = asarray(array, None, None)?;
     let py = array.py();
     let array = array.get();
-    let params = resolve_array_params(py, params)?;
+    let params = resolve_array_params(
+        py,
+        params,
+        &[
+            "block_shape",
+            "block_shape_fixed_dims",
+            "block_size",
+            "codec",
+            "compression_level",
+            "filters",
+        ],
+    )?
+    .params;
 
     if let Ok(path) = path_or_writer.extract::<PathBuf>() {
         py.detach(|| {
@@ -292,7 +320,7 @@ pub fn write_array(
 fn write_array_impl(
     array: &PyArray,
     mut writer: impl Write + Seek,
-    params: jix_core::ArrayParams,
+    params: CompactParams,
 ) -> PyResult<()> {
     let context = array.read_ctx()?;
     array

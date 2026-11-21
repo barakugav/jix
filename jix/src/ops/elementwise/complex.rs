@@ -18,7 +18,10 @@ use crate::scalar::Complex;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![
-///     Complex { re: 1.0f32, im: 2.0 },
+///     Complex {
+///         re: 1.0f32,
+///         im: 2.0
+///     },
 ///     Complex { re: 3.0, im: -4.0 },
 /// ])?;
 /// let result = a.real().to_ndarray()?;
@@ -87,7 +90,10 @@ where
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![
-///     Complex { re: 1.0f32, im: 2.0 },
+///     Complex {
+///         re: 1.0f32,
+///         im: 2.0
+///     },
 ///     Complex { re: 3.0, im: -4.0 },
 /// ])?;
 /// let result = a.imag().to_ndarray()?;

@@ -189,6 +189,7 @@ impl<S: StorageBase, K> ReductionOp<S, K> {
             .filter(|&&d| !is_reduced[d as usize])
             .map(|&d| dim_orig2new(d as usize))
             .collect();
+        let encoder_params = inner_spec.encoder_params().cloned();
         let mut spec = ArraySpecDynamic::new(
             dim_new2orig
                 .iter()
@@ -203,6 +204,7 @@ impl<S: StorageBase, K> ReductionOp<S, K> {
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
 
         let cache_id = ArrayCacheId::new();
@@ -385,7 +387,7 @@ where
     //     reduced per bulk). Within a bulk the tile iterator sweeps the reduced dims in
     //     row-major order, so a tile is `bulk-non-reduced * tile-reduced`. Each
     //     `(bulk, tile)` pair produces *one* `self.array.read_data` call, sized to land
-    //     within the source's `read_size` `(min, max)` window.
+    //     within the context's read size `(min, max)` window.
     //
     // # Per-tile processing
     //
@@ -428,7 +430,7 @@ where
     let tile_shape = inner_array.spec().read_shape_heuristic::<InnerD>(
         inner_size_full.as_ref(),
         inner_shape,
-        item_dtype.itemsize(),
+        context.read_size().nitems(item_dtype.itemsize()),
     );
 
     // Bulk shape: full source extent on reduced dims (so an output's entire reduction
@@ -1428,20 +1430,19 @@ pub(crate) use {define_array_reduction_method, define_reduction_op};
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 pub(crate) mod tests {
-    use crate::storage::ArrayStorageExt;
     use std::rc::Rc;
-
-    use crate::scalar::bool8;
-    use crate::storage::{split_ranges, Index};
-    use crate::util::DimArray;
-    use crate::ArrayParams;
 
     use ndarray::{array, ArrayD, Ix0, Ix1};
 
+    use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    use crate::storage::{
+        split_ranges, ArrayStorageExt, CompactArrayMethods, CompactParams, Index,
+    };
+    use crate::util::DimArray;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;
@@ -1769,7 +1770,8 @@ pub(crate) mod tests {
 
     #[test]
     fn reduction_over_plain_with_hand_picked_strides() {
-        use crate::{Array, ArrayParams};
+        use crate::storage::PlainArrayMethods;
+        use crate::Array;
 
         // The reduction reads its source in pull mode, and `PlainBase::read_data` in pull mode hands
         // back a zero-copy view with exactly the strides it was built with. So a `Plain` array
@@ -1813,21 +1815,19 @@ pub(crate) mod tests {
             };
 
             for &window in windows {
-                let mut params = ArrayParams::new();
-                if let Some(w) = window {
-                    params = params.read_size(w);
-                }
-                let arr: Array<crate::storage::PlainView<'_, i32>> = unsafe {
+                let mut arr: Array<crate::storage::PlainView<'_, i32>> = unsafe {
                     // SAFETY: `backing` outlives `arr`, and every index combination stays in bounds.
                     Array::plain_ndarray_ptr(
                         backing.as_ptr().add(base),
                         &shape_u64,
                         &strides,
                         <i32 as crate::dtype::Dtyped>::DTYPE,
-                        params,
                     )
                 }
                 .unwrap();
+                if let Some(w) = window {
+                    arr.read_params_mut().set_read_size(w);
+                }
 
                 for mask in 1u8..8 {
                     let dims = (0..3)
@@ -1917,11 +1917,9 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let params = ArrayParams::new()
-            .block_shape(block_shape)
-            .unwrap()
-            .read_size(read_size);
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let params = CompactParams::new().block_shape(block_shape).unwrap();
+        let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
+        za.read_params_mut().set_read_size(read_size);
 
         let reduced = za.view().sum(dims);
         let out_shape: Vec<u64> = reduced.shape().to_vec();
@@ -2068,11 +2066,9 @@ pub(crate) mod tests {
         let nd = ndarray::ArrayD::from_shape_vec(vec![N], data).unwrap();
         // One block and one tile over the whole array, so the run reaches a single
         // `fold_pairwise` call rather than being split across tiles and merged sequentially.
-        let params = ArrayParams::new()
-            .block_shape(&[N as u32])
-            .unwrap()
-            .read_size((1 << 19, 1 << 20));
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let params = CompactParams::new().block_shape(&[N as u32]).unwrap();
+        let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
+        za.read_params_mut().set_read_size((1 << 19, 1 << 20));
 
         let got = f64::from(za.view().sum(0usize).to_ndarray::<Ix0>().unwrap()[[]]);
         let err = (exact - got).abs();
@@ -2103,11 +2099,9 @@ pub(crate) mod tests {
             let exact = (0..n).map(|i| i % 7).sum::<usize>() as f32;
             let nd = ndarray::ArrayD::from_shape_vec(vec![n], data).unwrap();
             // One block and one tile: the whole run is one `fold_pairwise` call.
-            let params = ArrayParams::new()
-                .block_shape(&[n as u32])
-                .unwrap()
-                .read_size((1 << 19, 1 << 20));
-            let za = Array::compact_ndarray_with(&nd, params).unwrap();
+            let params = CompactParams::new().block_shape(&[n as u32]).unwrap();
+            let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
+            za.read_params_mut().set_read_size((1 << 19, 1 << 20));
             assert_eq!(
                 za.view().sum(0usize).to_ndarray::<Ix0>().unwrap()[[]],
                 exact,
@@ -2132,11 +2126,9 @@ pub(crate) mod tests {
             (0..64i32).map(|x| (x % 97) as i8).collect(),
         )
         .unwrap();
-        let params = ArrayParams::new()
-            .block_shape(&[2, 2, 2])
-            .unwrap()
-            .read_size((32, 64));
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let params = CompactParams::new().block_shape(&[2, 2, 2]).unwrap();
+        let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
+        za.read_params_mut().set_read_size((32, 64));
         let reduced = za.view().sum(1usize); // [4, 4] i64
         let index = [0..4u64, 0..4];
         let ctx = reduced.read_ctx();
@@ -2334,7 +2326,7 @@ pub(crate) mod tests {
         use crate::Array;
 
         // A reduction kernel picks its own output type, so it is another way a fresh dtype reaches an
-        // array without passing through `ArrayParams::tune` (a lazy view never re-tunes). `Empty`
+        // array without passing through `CompactParams::tune` (a lazy view never re-tunes). `Empty`
         // is a `Dtyped` type with itemsize 0.
         //
         // `Fold` is the user-facing op that exposes a caller-chosen accumulator, but it is commented

@@ -334,16 +334,14 @@ impl<S: StorageBase> Array<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use crate::storage::ArrayStorageExt;
-
-    use crate::scalar::bool8;
-    use crate::storage::{split_ranges, Index};
-    use crate::ArrayParams;
-
     use ndarray::{array, Ix0, Ix1};
 
+    use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
+    use crate::storage::{
+        split_ranges, ArrayStorageExt, CompactArrayMethods, CompactParams, Index,
+    };
 
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
@@ -354,7 +352,6 @@ mod tests {
 
     use super::Reduce;
     use crate::array::Array;
-
     use crate::ops::reduction::common::tests::*;
 
     // --- Reduce ------------------------------------------------------------------
@@ -579,11 +576,9 @@ mod tests {
         )
         .unwrap();
 
-        let params = ArrayParams::new()
-            .block_shape(block_shape)
-            .unwrap()
-            .read_size(read_size);
-        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let params = CompactParams::new().block_shape(block_shape).unwrap();
+        let mut za = Array::compact_ndarray_with(&nd, params).unwrap();
+        za.read_params_mut().set_read_size(read_size);
 
         let calls = Cell::new(0u64);
         let reduced = za.view().reduce_unordered(dims, |a: u8, b: u8| {

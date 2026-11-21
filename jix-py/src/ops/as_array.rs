@@ -23,12 +23,9 @@ use crate::util::numpy_items;
 ///         (e.g. `'float32'`), or a Python type like `np.float32` - anything `numpy.dtype()`
 ///         accepts. When omitted, the input dtype is preserved. The cast is a lazy view (see
 ///         [`jix.cast()`][jix.cast]).
-///     params: Block layout and codec configuration. See [`jix.compact()`][jix.compact] for
-///         details. The returned array is never compressed, so these mostly affect only arrays
-///         later created from it (e.g. via `compact()` or `write_array()`), which inherit them.
-///         The block shape is ignored, pass it to `compact()` or `write_array()` instead.
-///         Only relevant when `value` is not already a jix array; an existing jix array is
-///         returned as-is.
+///     params: A dictionary with the optional key `read_size`, see [`jix.compact()`][jix.compact];
+///         other keys raise `TypeError`. Only relevant when `value` is not already a jix array;
+///         an existing jix array is returned as-is.
 ///
 /// Note:
 ///     - If `value` is already an `Array` and `dtype` is `None`, it is returned as-is with no copy.
@@ -56,7 +53,7 @@ pub fn asarray<'py>(
     params: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Bound<'py, PyArray>> {
     let py = value.py();
-    let params = resolve_array_params(py, params)?;
+    let read_size = resolve_array_params(py, params, &["read_size"])?.read_size;
     let np_dtype = dtype
         .map(|dtype| numpy_descr_from_any(py, dtype))
         .transpose()?;
@@ -72,7 +69,7 @@ pub fn asarray<'py>(
         }
         _ => value.clone(),
     };
-    let mut py_arr = Operand::from_any_with_params(&value, params, false)?.into_py_array(py)?;
+    let mut py_arr = Operand::from_any_with_params(&value, read_size, false)?.into_py_array(py)?;
 
     if let Some(np_dtype) = &np_dtype {
         let dtype = dtype_from_numpy(np_dtype)?;

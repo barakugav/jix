@@ -1,5 +1,4 @@
 use crate::ops::prelude::*;
-
 use crate::storage::{ArraySequence, ArraySequenceElementType};
 
 /// Joins a sequence of arrays along an existing dim. See [`Concatenate`] for details and examples.
@@ -147,12 +146,16 @@ where
                 .collect::<Vec<_>>();
             combine_block_layout(&inputs)
         };
+        let encoder_params = (0..narrays)
+            .find_map(|i| arrays.spec(i).encoder_params())
+            .cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
         spec.flags = spec.flags.with_read_tiling(ReadTiling::pushed_pieces(
             (0..narrays).map(|i| arrays.spec(i).read_tiling()),

@@ -1,7 +1,8 @@
+use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
+
 use crate::codec::filter::FilterImpl;
 use crate::dtype::Dtype;
 use crate::util::buf_pool::BufferPool;
-use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 
 // This code has been optimized by static analysis using cargo-asm and llvm-mca, for
 // - x86-64 SSE4.2 (Sandy Bridge, Jaguar)
@@ -282,8 +283,9 @@ mod tests {
     /// itemsize and lengths around the chunk sizes.
     #[test]
     fn decode_simd_all_levels() {
-        use super::{decode_impl_generic, decode_simd};
         use fearless_simd::{Level as SimdLevel, Simd};
+
+        use super::{decode_impl_generic, decode_simd};
 
         fn check<S: Simd>(simd: S) {
             fn one<S: Simd, const ITEMSIZE: usize>(simd: S) {
@@ -330,8 +332,9 @@ mod tests {
     /// itemsize and lengths around the chunk sizes.
     #[test]
     fn encode_simd_all_levels() {
-        use super::{encode_impl_generic, encode_simd};
         use fearless_simd::{Level as SimdLevel, Simd};
+
+        use super::{encode_impl_generic, encode_simd};
 
         fn check<S: Simd>(simd: S) {
             fn one<S: Simd, const ITEMSIZE: usize>(simd: S) {

@@ -74,12 +74,14 @@ impl<S1, S2, K> Op2<S1, S2, K> {
                 (a_spec.block_shape(), a_spec.block_shape_fixed_dims()),
                 (b_spec.block_shape(), b_spec.block_shape_fixed_dims()),
             ]);
+            let encoder_params = a_spec.encoder_params().or(b_spec.encoder_params()).cloned();
             let mut spec = ArraySpecDynamic::new(
                 block_shape,
                 block_shape_fixed_dims,
                 element_cost,
                 read_shape_scale_weight,
                 read_layout_order,
+                encoder_params,
             );
             spec.flags = spec.flags.with_read_tiling(ReadTiling::fused([
                 a_spec.read_tiling(),

@@ -35,8 +35,8 @@
 //! * [`.compact()`](crate::Array::compact) - re-encodes with a block shape derived automatically
 //!   from the new shape and the original block shape.
 //! * [`.compact_with(params, ...)`](crate::Array::compact_with) - re-encodes with an explicit
-//!   [`ArrayParams`](crate::ArrayParams), giving full control over the new block shape. Use this
-//!   to guarantee your access pattern is well-aligned.
+//!   [`CompactParams`](crate::storage::CompactParams), giving full control over the new block
+//!   shape. Use this to guarantee your access pattern is well-aligned.
 //!
 //! [`Array::reshape`](crate::Array::reshape) is the operation most prone to this cost. Being a
 //! lazy view, it pays the cost on every read, so call `.compact()` on the result when it will be
@@ -95,8 +95,9 @@
 //! `&[Array<S>]`, fixed-length arrays `[Array<S>; N]`, and heterogeneous tuples of up to 12
 //! arrays. See [`ArraySequence`](crate::storage::ArraySequence) for details.
 
+// Internal only, with no caller yet outside its tests.
+#[allow(dead_code)]
 mod maybe_compact;
-pub use maybe_compact::*;
 
 mod shape_ops;
 pub use shape_ops::*;
@@ -127,9 +128,9 @@ pub use into_type::*;
 pub(crate) mod prelude {
     pub(crate) use std::ops::Range;
 
-    pub(crate) use super::DimsArg;
     pub(crate) use super::{
-        max_itemsize, n_operands_sum, ElementwisePipeline, ElementwisePipelineImpl, Operand,
+        max_itemsize, n_operands_sum, DimsArg, ElementwisePipeline, ElementwisePipelineImpl,
+        Operand,
     };
     pub(crate) use crate::context::{CacheScope, ReadContext};
     pub(crate) use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
@@ -144,11 +145,12 @@ pub(crate) mod prelude {
         check_out_buf, read_data_and_map_strides, write_out_buf_slot, ArraySpec, ArrayStorageExt,
         ArrayStorageInfo, BlockSize, Index, OutBuf, OutBufInner, StridedBuf,
     };
+    pub(crate) use crate::util::iter::NdIter;
     pub(crate) use crate::util::{
         array_from_fn_inline, calc_block_end, default_logical_strides, default_strides,
-        default_strides_from_iter, dim_arr, iter::NdIter, try_dim_arr, ArrayExt, DimArray, DimIdx,
-        IterExt, NdCopier, NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias,
-        ScaleWeight, SliceExt, REQUIRE_ALIGNED,
+        default_strides_from_iter, dim_arr, try_dim_arr, ArrayExt, DimArray, DimIdx, IterExt,
+        NdCopier, NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, ScaleWeight,
+        SliceExt, REQUIRE_ALIGNED,
     };
     pub(crate) use crate::{
         Array, DimDyn, DimVec, Dimension, ElementType, Storage, StorageBase, TypeDyn, NDIM_MAX,

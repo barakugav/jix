@@ -594,8 +594,7 @@ pub(crate) unsafe fn read_data_and_map_strides<'a>(
 mod tests {
     use ndarray::array;
 
-    use crate::Array;
-    use crate::ReadContext;
+    use crate::{Array, ReadContext};
 
     #[test]
     fn strided_buf_is_send_and_sync() {

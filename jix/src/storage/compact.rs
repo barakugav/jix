@@ -17,11 +17,12 @@ use crate::error::Result;
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::cache_id::ArrayCacheId;
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
-use crate::storage::{check_out_buf, ArraySpec, ElementType, Index, OutBuf, StridedBuf};
+use crate::storage::{
+    check_out_buf, ArraySpec, CompactParams, ElementType, Index, OutBuf, StridedBuf,
+};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, NdCopier, PtrMutNoalias, PtrNoalias};
-use crate::ReadContext;
-use crate::{ArrayParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
+use crate::{Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase, TypeDyn};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -62,9 +63,9 @@ use crate::{ArrayParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
 /// ## Configuration
 ///
 /// The codec, compression level, and filter pipeline are chosen at write time through
-/// [`ArrayParams`](crate::ArrayParams): [`codec`](crate::ArrayParams::codec),
-/// [`level`](crate::ArrayParams::level), and [`filters`](crate::ArrayParams::filters). They are
-/// stored alongside the data, so readers never need to know them in advance.
+/// [`CompactParams`]: [`codec`](CompactParams::codec), [`level`](CompactParams::level), and
+/// [`filters`](CompactParams::filters). They are stored alongside the data, so readers never need
+/// to know them in advance.
 ///
 /// ## Filters
 ///
@@ -193,7 +194,11 @@ where
     ///
     /// The block shape resolved from `params` must match the block geometry already encoded in
     /// `blocks`.
-    pub(crate) fn new(blocks: BlockTable<S, ET>, shape: DimDyn, params: ArrayParams) -> Result<Self>
+    pub(crate) fn new(
+        blocks: BlockTable<S, ET>,
+        shape: DimDyn,
+        params: CompactParams,
+    ) -> Result<Self>
     where
         ET: ElementType,
     {
@@ -550,7 +555,8 @@ where
 /// Extension methods for arrays with block-compressed storage.
 ///
 /// Implemented for `Array` of [`Compact`], [`CompactView`] and [`CompactMmap`]. These describe how
-/// the array is split into blocks and compressed.
+/// the array is split into blocks and compressed, and set hints for reading it and for arrays
+/// later compacted from it.
 pub trait CompactArrayMethods {
     /// The shape of one block, in elements per dimension.
     ///
@@ -561,11 +567,12 @@ pub trait CompactArrayMethods {
     ///
     /// ```
     /// use jix::storage::CompactArrayMethods;
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::Array2;
     ///
     /// let data = Array2::<f32>::zeros((100, 100));
-    /// let params = ArrayParams::new().block_shape(&[32, 64])?;
+    /// let params = CompactParams::new().block_shape(&[32, 64])?;
     /// let a = Array::compact_ndarray_with(&data, params)?;
     /// assert_eq!(a.block_shape(), &[32, 64]);
     /// # Ok::<(), jix::Error>(())
@@ -580,11 +587,12 @@ pub trait CompactArrayMethods {
     ///
     /// ```
     /// use jix::storage::CompactArrayMethods;
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::Array2;
     ///
     /// let data = Array2::<f32>::zeros((100, 100));
-    /// let params = ArrayParams::new().block_shape(&[32, 64])?;
+    /// let params = CompactParams::new().block_shape(&[32, 64])?;
     /// let a = Array::compact_ndarray_with(&data, params)?;
     /// assert_eq!(a.nblocks(), 4 * 2);
     /// # Ok::<(), jix::Error>(())
@@ -617,16 +625,29 @@ pub trait CompactArrayMethods {
     ///
     /// ```
     /// use jix::storage::{CompactArrayMethods, Filter};
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
     /// let data = array![1u32, 2, 3];
-    /// let params = ArrayParams::new().filters(&[Filter::BitShuffle])?;
+    /// let params = CompactParams::new().filters(&[Filter::BitShuffle])?;
     /// let a = Array::compact_ndarray_with(&data, params)?;
     /// assert!(matches!(a.filters(), [Filter::BitShuffle]));
     /// # Ok::<(), jix::Error>(())
     /// ```
     fn filters(&self) -> &[crate::storage::Filter];
+
+    /// Mutable access to the read parameters of this array, e.g. its read size. See
+    /// [`Array::read_params`](crate::Array::read_params).
+    fn read_params_mut(&mut self) -> &mut crate::storage::ReadParams;
+
+    /// Sets, per dimension, whether that dimension of [`block_shape`](Self::block_shape) is fixed
+    /// when a later [`Array::compact`](crate::Array::compact) of this array, or of a view built on
+    /// it, inherits the block shape. A fixed dimension keeps its block length, a non-fixed one may
+    /// be resized toward the target block size.
+    ///
+    /// Fails with `InvalidArgument` if `fixed` does not have one entry per dimension.
+    fn set_block_shape_fixed_dims(&mut self, fixed: &[bool]) -> Result<()>;
 }
 
 macro_rules! impl_compact_array_methods {
@@ -651,6 +672,23 @@ macro_rules! impl_compact_array_methods {
             fn filters(&self) -> &[crate::storage::Filter] {
                 self.storage.0.filters()
             }
+
+            fn read_params_mut(&mut self) -> &mut crate::storage::ReadParams {
+                self.storage.0.spec.read_params_mut()
+            }
+
+            fn set_block_shape_fixed_dims(&mut self, fixed: &[bool]) -> crate::error::Result<()> {
+                let ndim = self.storage.0.block_shape().len();
+                crate::error::ensure!(
+                    fixed.len() == ndim,
+                    InvalidArgument,
+                    "ndim does not match block_shape_fixed_dims length: expected {ndim}, got {}",
+                    fixed.len()
+                );
+                self.storage.0.spec.dynamic_mut().block_shape_fixed_dims =
+                    fixed.iter().copied().collect();
+                Ok(())
+            }
         }
     };
 }
@@ -670,10 +708,11 @@ mod tests {
     use crate::context::tests::context_read_cache_len;
     use crate::scalar::bool8;
     use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
-    use crate::storage::{split_ranges, ArraySpec, ArrayStorageExt, Index, OutBuf, StridedBuf};
+    use crate::storage::{
+        split_ranges, ArraySpec, ArrayStorageExt, CompactParams, Index, OutBuf, StridedBuf,
+    };
     use crate::util::DimArray;
-    use crate::Storage;
-    use crate::{Array, ArrayParams, StorageBase};
+    use crate::{Array, Storage, StorageBase};
 
     /// Read `index` from a compact `i32` array both into a plain contiguous buffer and into a
     /// *strided* destination whose inner spacing is doubled (a one-element gap between consecutive
@@ -692,7 +731,7 @@ mod tests {
             (0..n as i32).map(|x| x * 7 - 11).collect(),
         )
         .unwrap();
-        let params = ArrayParams::new().block_shape(block_shape).unwrap();
+        let params = CompactParams::new().block_shape(block_shape).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -804,7 +843,7 @@ mod tests {
             (0..n as i32).map(|x| x * 13 - 7).collect(),
         )
         .unwrap();
-        let params = ArrayParams::new().block_shape(block_shape).unwrap();
+        let params = CompactParams::new().block_shape(block_shape).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -907,7 +946,7 @@ mod tests {
             (0..32i32).map(|x| x * 3 - 5).collect(),
         )
         .unwrap();
-        let params = ArrayParams::new().block_shape(&[1, 2, 4]).unwrap();
+        let params = CompactParams::new().block_shape(&[1, 2, 4]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -940,7 +979,7 @@ mod tests {
             ndarray::ArrayD::from_shape_vec(vec![2usize, 3], (0..6i32).map(|x| x + 1).collect())
                 .unwrap();
         // Single block covering the whole array.
-        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
+        let params = CompactParams::new().block_shape(&[2, 3]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -980,7 +1019,7 @@ mod tests {
             ndarray::ArrayD::from_shape_vec(vec![2usize, 3], (0..6i32).map(|x| x + 1).collect())
                 .unwrap();
         // Single block covering the whole array.
-        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
+        let params = CompactParams::new().block_shape(&[2, 3]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
         let ctx = za.read_ctx();
         let storage = za.into_storage();
@@ -1019,7 +1058,7 @@ mod tests {
     /// A compact `0..64` i32 array with blocks of 8.
     fn arange64() -> Array<super::Compact<i32>> {
         let nd = ndarray::Array1::from_iter(0..64i32);
-        let params = ArrayParams::new().block_shape(&[8]).unwrap();
+        let params = CompactParams::new().block_shape(&[8]).unwrap();
         Array::compact_ndarray_with(&nd, params).unwrap()
     }
 
@@ -1318,7 +1357,7 @@ mod tests {
         calls: &'static AtomicUsize,
     ) -> (Array<impl Storage<Item = i32> + use<>>, usize) {
         let nd = ndarray::Array2::from_shape_fn((8, 8), |(i, j)| (8 * i + j) as i32);
-        let params = ArrayParams::new().block_shape(&[4, 4]).unwrap();
+        let params = CompactParams::new().block_shape(&[4, 4]).unwrap();
         let x = Array::compact_ndarray_with(&nd, params).unwrap();
         let max = x.reduce_unordered(1, |a: i32, b: i32| {
             calls.fetch_add(1, Ordering::Relaxed);
@@ -1445,7 +1484,7 @@ mod tests {
     #[test]
     fn read_cache_through_shape_ops() {
         let nd = ndarray::Array2::from_shape_fn((8, 8), |(i, j)| (8 * i + j) as i32);
-        let params = ArrayParams::new().block_shape(&[4, 4]).unwrap();
+        let params = CompactParams::new().block_shape(&[4, 4]).unwrap();
         let x = Array::compact_ndarray_with(&nd, params).unwrap();
         let t = || x.view().permute_dims(&[1, 0]);
         let check = |a: ndarray::Array2<i32>, b: ndarray::Array2<i32>| assert_eq!(a, b);
@@ -1486,14 +1525,14 @@ mod tests {
         use crate::storage::{Codec, CompactArrayMethods, Filter};
 
         let nd = ndarray::Array2::from_shape_fn((5, 7), |(i, j)| (i * 7 + j) as i32);
-        let params = ArrayParams::new().block_shape(&[2, 3]).unwrap();
+        let params = CompactParams::new().block_shape(&[2, 3]).unwrap();
         let a = Array::compact_ndarray_with(&nd, params).unwrap();
         assert_eq!(a.block_shape(), &[2, 3]);
         assert_eq!(a.nblocks(), 3 * 3);
         assert!(matches!(a.codec(), Codec::Zstd));
         assert!(matches!(a.filters(), [Filter::ByteShuffle]));
 
-        let params = ArrayParams::new()
+        let params = CompactParams::new()
             .filters(&[Filter::BitShuffle, Filter::ByteShuffle])
             .unwrap();
         let b = Array::compact_ndarray_with(&nd, params).unwrap();
@@ -1516,7 +1555,7 @@ mod tests {
         use crate::storage::{CompactArrayMethods, Filter};
 
         let nd = ndarray::Array2::from_shape_fn((6, 5), |(i, j)| (i * 5 + j) as f64);
-        let params = ArrayParams::new()
+        let params = CompactParams::new()
             .block_shape(&[4, 2])
             .unwrap()
             .filters(&[Filter::BitShuffle])
@@ -1528,23 +1567,24 @@ mod tests {
         assert_eq!(view.nblocks(), 2 * 3);
         assert!(matches!(view.filters(), [Filter::BitShuffle]));
 
-        // The block shape and filters come from the file, not from the params it is read with.
+        // The block shape and filters come from the file, and a later compact keeps the filters.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.jix");
         a.write_to_file(&path).unwrap();
         let len = path.metadata().unwrap().len();
-        let mmap = unsafe {
-            Array::read_from_file_mmap(
-                &path,
-                0,
-                len,
-                ArrayParams::default(),
-                crate::storage::ArchiveValidation::default(),
-            )
-        }
-        .unwrap();
+        let validation = crate::storage::ArchiveValidation::default();
+        let mut mmap = unsafe { Array::read_from_file_mmap(&path, 0, len, validation) }.unwrap();
         assert_eq!(mmap.block_shape(), &[4, 2]);
         assert_eq!(mmap.nblocks(), 2 * 3);
         assert!(matches!(mmap.filters(), [Filter::BitShuffle]));
+        assert!(matches!(
+            mmap.compact().unwrap().filters(),
+            [Filter::BitShuffle]
+        ));
+
+        assert!(mmap.set_block_shape_fixed_dims(&[true]).is_err());
+        mmap.set_block_shape_fixed_dims(&[true, false]).unwrap();
+        let fixed_dims = mmap.storage().0.spec.as_ref().block_shape_fixed_dims();
+        assert_eq!((fixed_dims.get(0), fixed_dims.get(1)), (true, false));
     }
 }

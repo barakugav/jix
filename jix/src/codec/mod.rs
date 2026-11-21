@@ -1,7 +1,7 @@
 //! Internal block codec implementation: filter pipeline plus the codec (Zstd) used to compress and
 //! decompress each array block. The user-facing documentation lives on
 //! [`Compact`](crate::storage::Compact); configuration is exposed through
-//! [`ArrayParams`](crate::ArrayParams).
+//! [`CompactParams`](crate::storage::CompactParams).
 
 mod filter;
 pub use filter::*;
@@ -9,7 +9,6 @@ mod bit_shuffle;
 mod byte_shuffle;
 
 use std::cell::UnsafeCell;
-use std::marker::PhantomData;
 
 use crate::dtype::{Alignment, Dtype};
 #[allow(unused_imports)]
@@ -25,7 +24,8 @@ use crate::ReadContext;
 #[non_exhaustive]
 pub enum Codec {
     /// [Zstandard](https://facebook.github.io/zstd/) - a fast general-purpose compressor.
-    /// Compression level is controlled by [`ArrayParams::level`](crate::ArrayParams::level).
+    /// Compression level is controlled by
+    /// [`CompactParams::level`](crate::storage::CompactParams::level).
     Zstd,
 }
 
@@ -203,17 +203,6 @@ impl Encoder {
     }
 }
 
-/// Decoder settings that can be chosen freely at read time, independent of the codec, filters
-/// and dtype the data was written with (those are in [`DecoderCodecConfig`]).
-///
-/// There are no options yet; future versions may add e.g. the number of block decompression
-/// threads or a memory budget for the block cache. [`ReadContext::new`] takes one; use
-/// [`DecoderParams::default()`].
-#[derive(Clone, Debug, Default)]
-pub(crate) struct DecoderParams {
-    _phantom: PhantomData<()>,
-}
-
 pub(crate) const MAX_FILTERS: usize = 4;
 
 /// The codec configuration stored alongside the array data and required to decode it.
@@ -356,10 +345,11 @@ mod tests {
     #[test]
     fn a_two_filter_pipeline_round_trips() {
         use crate::codec::filter::Filter;
-        use crate::{Array, ArrayParams};
+        use crate::storage::CompactParams;
+        use crate::Array;
 
         let nd = ndarray::Array2::from_shape_fn((16, 16), |(i, j)| (i * 16 + j) as i32);
-        let params = ArrayParams::new()
+        let params = CompactParams::new()
             .block_shape(&[4, 4])
             .unwrap()
             .filters(&[Filter::ByteShuffle, Filter::BitShuffle])

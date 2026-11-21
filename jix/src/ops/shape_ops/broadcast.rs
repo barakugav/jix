@@ -89,12 +89,14 @@ where
                 read_shape_scale_weight[dim] = ScaleWeight::FULL;
             }
         }
+        let encoder_params = inner_spec.encoder_params().cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             inner_spec.element_cost(),
             read_shape_scale_weight,
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
+            encoder_params,
         );
         spec.flags = spec
             .flags
@@ -222,8 +224,7 @@ mod tests {
     use ndarray::array;
 
     use crate::util::{shape_strategy, ScalarStrategy};
-    use crate::ReadContext;
-    use crate::{Array, CompactArray, IntoDimension, NDIM_MAX};
+    use crate::{Array, CompactArray, IntoDimension, ReadContext, NDIM_MAX};
 
     fn make(vals: Vec<i32>, shape: impl IntoDimension) -> CompactArray<i32> {
         let shape = shape.into_dimension().unwrap();

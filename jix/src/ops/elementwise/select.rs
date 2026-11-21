@@ -17,14 +17,22 @@ use crate::ops::prelude::*;
 /// use jix::Array;
 /// use ndarray::{array, Ix2};
 ///
-/// let cond = Array::compact_ndarray(&array![bool8::TRUE, bool8::FALSE, bool8::TRUE, bool8::FALSE])?;
+/// let cond = Array::compact_ndarray(&array![
+///     bool8::TRUE,
+///     bool8::FALSE,
+///     bool8::TRUE,
+///     bool8::FALSE
+/// ])?;
 /// let x = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 /// let y = Array::compact_ndarray(&array![10i32, 20, 30, 40])?;
 /// let result = cond.select(x, y).to_ndarray()?;
 /// assert_eq!(result, array![1, 20, 3, 40]);
 ///
 /// // 2-D arrays
-/// let cond = Array::compact_ndarray(&array![[bool8::TRUE, bool8::FALSE], [bool8::FALSE, bool8::TRUE]])?;
+/// let cond = Array::compact_ndarray(&array![
+///     [bool8::TRUE, bool8::FALSE],
+///     [bool8::FALSE, bool8::TRUE]
+/// ])?;
 /// let x = Array::compact_ndarray(&array![[1.0f64, 2.0], [3.0, 4.0]])?;
 /// let y = Array::compact_ndarray(&array![[10.0f64, 20.0], [30.0, 40.0]])?;
 /// let result = cond.select(x, y).to_ndarray::<Ix2>()?;
@@ -72,16 +80,11 @@ where
             y.shape()
         );
 
-        let c_spec = condition.spec();
         let x_spec = x.spec();
         let y_spec = y.spec();
+        let c_spec = condition.spec();
         let (element_cost, read_shape_scale_weight, read_layout_order) =
             combine_elementwise_hints(&[
-                (
-                    c_spec.element_cost(),
-                    c_spec.read_shape_scale_weight(),
-                    c_spec.read_layout_order(),
-                ),
                 (
                     x_spec.element_cost(),
                     x_spec.read_shape_scale_weight(),
@@ -92,19 +95,30 @@ where
                     y_spec.read_shape_scale_weight(),
                     y_spec.read_layout_order(),
                 ),
+                (
+                    c_spec.element_cost(),
+                    c_spec.read_shape_scale_weight(),
+                    c_spec.read_layout_order(),
+                ),
             ]);
         let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
-            (c_spec.block_shape(), c_spec.block_shape_fixed_dims()),
             (x_spec.block_shape(), x_spec.block_shape_fixed_dims()),
             (y_spec.block_shape(), y_spec.block_shape_fixed_dims()),
+            (c_spec.block_shape(), c_spec.block_shape_fixed_dims()),
         ]);
         let cache_id = ArrayCacheId::new();
+        let encoder_params = x_spec
+            .encoder_params()
+            .or(y_spec.encoder_params())
+            .or(c_spec.encoder_params())
+            .cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
         // read_data pulls condition and y, so it reads in one pass only if they are views
         let views = c_spec.read_tiling() == ReadTiling::ZeroCopy
@@ -114,7 +128,7 @@ where
         } else {
             ReadTiling::Tiled
         });
-        spec.add_cache_ids_from([&c_spec, &x_spec, &y_spec]);
+        spec.add_cache_ids_from([&x_spec, &y_spec, &c_spec]);
         spec.add_cache_id(cache_id);
         Ok(Self {
             condition,
@@ -461,7 +475,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::ArrayStorageExt;
     use std::fmt::Debug;
 
     use ndarray::{array, Ix1};
@@ -473,7 +486,7 @@ mod tests {
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::storage::{split_ranges, Index};
+    use crate::storage::{split_ranges, ArrayStorageExt, Index};
     use crate::util::{DimArray, ScalarStrategy};
 
     #[test]
