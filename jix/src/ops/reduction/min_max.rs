@@ -9,7 +9,6 @@ pub(crate) mod traits {
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-
     use crate::util::array2_map_inline;
 
     macro_rules! define_arg_trait {
@@ -446,16 +445,13 @@ impl<S: StorageBase> Array<S> {
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
 
-    use crate::scalar::bool8;
-
     use ndarray::{array, IxDyn};
 
+    use crate::array::Array;
+    use crate::ops::reduction::common::tests::*;
+    use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-
-    use crate::array::Array;
-
-    use crate::ops::reduction::common::tests::*;
 
     test_reduction!(
         max,

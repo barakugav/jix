@@ -1,6 +1,7 @@
 use std::mem::MaybeUninit;
 use std::ops::Range;
 
+use super::Array;
 use crate::error::{
     check_alloc_size, check_get_buffer_size, check_ndim, check_ranges, check_region_size, ensure,
     Result,
@@ -14,10 +15,7 @@ use crate::util::iter::NdIter;
 use crate::util::{
     advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr,
 };
-use crate::{Dim, DimDyn, Dimension, PlainArray, StorageBase, NDIM_MAX};
-use crate::{ReadContext, Storage};
-
-use super::Array;
+use crate::{Dim, DimDyn, Dimension, PlainArray, ReadContext, Storage, StorageBase, NDIM_MAX};
 
 impl<S: StorageBase> Array<S> {
     /// Read the entire array into a new heap-allocated [`ndarray::Array`].
@@ -315,7 +313,7 @@ impl<S: StorageBase> Array<S> {
     /// # Arguments
     ///
     /// - `index` - one half-open range (`start..end`) per dimension, within the array bounds.
-    /// - `context` - read context carrying reusable buffers and decoder state.
+    /// - `context` - read context carrying reusable buffers, decoder state and the read size.
     ///
     /// # Alignment
     ///
@@ -389,7 +387,7 @@ impl<S: StorageBase> Array<S> {
     /// - `index` - one half-open range (`start..end`) per dimension, within the array bounds.
     /// - `out` - the destination: writable, with one stride per array dimension, and holding the
     ///   region at its strides without overlap. No alignment is required of it.
-    /// - `context` - read context carrying reusable buffers and decoder state.
+    /// - `context` - read context carrying reusable buffers, decoder state and the read size.
     ///
     /// # Errors
     ///
@@ -690,15 +688,10 @@ mod tests {
     use ndarray::{array, Ix1, Ix2, Ix3, IxDyn};
 
     use super::Array;
-
-    use crate::error::ErrorKind;
-
-    use crate::storage::StridedBuf;
-
-    use crate::storage::CompactArrayMethods;
-    use crate::CompactParams;
-
     use crate::array::tests::*;
+    use crate::error::ErrorKind;
+    use crate::storage::{CompactArrayMethods, StridedBuf};
+    use crate::CompactParams;
 
     // -----------------------------------------------------------------------
     // to_ndarray - 1D

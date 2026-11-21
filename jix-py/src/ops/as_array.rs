@@ -23,9 +23,9 @@ use crate::util::numpy_items;
 ///         (e.g. `'float32'`), or a Python type like `np.float32` - anything `numpy.dtype()`
 ///         accepts. When omitted, the input dtype is preserved. The cast is a lazy view (see
 ///         [`jix.cast()`][jix.cast]).
-///     params: A dictionary with the optional key `read_size`, see [`jix.compact()`][jix.compact].
-///         Only relevant when `value` is not already a jix array; an existing jix array is
-///         returned as-is.
+///     params: A dictionary with the optional key `read_size`, see [`jix.compact()`][jix.compact];
+///         other keys raise `TypeError`. Only relevant when `value` is not already a jix array;
+///         an existing jix array is returned as-is.
 ///
 /// Note:
 ///     - If `value` is already an `Array` and `dtype` is `None`, it is returned as-is with no copy.

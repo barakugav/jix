@@ -36,8 +36,8 @@ use crate::PyArray;
 ///         the file while the returned array is live has undefined behavior. Not supported for
 ///         file-like objects.
 ///     params: A dictionary with the optional keys `read_size` and `block_shape_fixed_dims`, see
-///         [`jix.compact()`][jix.compact]. The block shape and codec come from the archive, and
-///         arrays later compacted from the result inherit them.
+///         [`jix.compact()`][jix.compact]; other keys raise `TypeError`. The block shape, codec and
+///         filters come from the archive, and arrays later compacted from the result inherit them.
 ///     validation: How strictly the archive is validated:
 ///
 ///         - `None` (default): currently the same as `strict`; this may change.
@@ -213,9 +213,11 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ArchiveValidation {
 ///     append: When `False` (default), the file is created anew and must not already exist.
 ///         When `True`, the array is appended to an existing file (or a new one is created).
 ///         Ignored when `path_or_writer` is a file-like object.
-///     params: Controls the block layout and codec for encoding, with the keys of
-///         [`jix.compact()`][jix.compact] except `read_size`. Unset fields are inherited from the
-///         source array. Ignored when the source is already compact.
+///     params: A dictionary with the optional keys `block_shape`, `block_shape_fixed_dims`,
+///         `block_size`, `codec`, `compression_level` and `filters`, see
+///         [`jix.compact()`][jix.compact]; other keys raise `TypeError` (`read_size` too, as it is
+///         not stored in the file). Unset keys are inherited from the source array. Ignored when
+///         the source is already compact.
 ///
 /// Examples:
 ///     ```python

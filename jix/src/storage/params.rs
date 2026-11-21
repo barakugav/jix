@@ -13,8 +13,8 @@ use crate::{dim_arr, Array, DimDyn, Dimension, StorageBase, BLOCK_SIZE_BYTES_MAX
 
 const ELEMENT_COST_MAX: f32 = u64::MAX as f32; // 2^64
 
-/// Target byte range `(min, max)` for a single read region: a per-spec hint for how much data a
-/// read pass pulls through memory.
+/// Target byte range `(min, max)` for a single read region: a hint for how much data a read pass
+/// pulls through memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ReadSize {
     pub(crate) min: u64,
@@ -75,19 +75,21 @@ pub(crate) struct ReadParams {
 /// - When a new array is constructed, such as via [`Array::compact_ndarray`]: the data is split
 ///   into blocks per the block layout, and each block is compressed with the encoder params.
 /// - When an array is copied, such as via [`Array::compact`] or [`Array::compact_with`]: unset
-///   params are inherited from the source array's storage spec. A compact source (not a lazy view)
-///   keeps its block shape and codec params by default, and a lazy view takes the codec of the
-///   first compact array it reads. A lazy view (e.g. from `Add`, `Reshape`)
-///   adjusts them by an approximate heuristic that tries to keep user-set params. Shape ops (e.g.
-///   `Reshape`, `PermuteDims`) are especially likely to change the block layout - consider passing
-///   explicit params to `compact_with` after them, or checking that the resulting block layout
-///   suits your access pattern.
+///   params are inherited from the source array. A compact source (not a lazy view) keeps its
+///   block shape and codec. A lazy view (e.g. from `Add`, `Reshape`) takes the codec of the first
+///   compact array it reads (the default codec if it reads none), and derives its block layout
+///   from its inputs by an approximate heuristic that tries to keep user-set params. Shape ops
+///   (e.g. `Reshape`, `PermuteDims`) are especially likely to change the block layout - consider
+///   passing explicit params to `compact_with` after them, or checking that the resulting block
+///   layout suits your access pattern. The new array also keeps the source's read size (see
+///   [`ReadContext::set_read_size`](crate::ReadContext::set_read_size)).
 ///
 /// # Recommended usage
 ///
 /// Use `CompactParams::new()` (equivalent to `CompactParams::default()`) for most cases: the
-/// defaults select a block shape according to the CPU cache sizes and use Zstd level 3 with byte shuffling.
-/// For latency-sensitive workloads with a known access pattern, set `block_shape` explicitly.
+/// defaults select a block shape according to the CPU cache sizes and use Zstd level 3 with byte
+/// shuffling. For latency-sensitive workloads with a known access pattern, set `block_shape`
+/// explicitly.
 ///
 /// ```
 /// use jix::{Array, CompactParams};
@@ -218,7 +220,7 @@ impl CompactParams {
         Ok(self)
     }
 
-    /// Fills in any unset fields in `self` from `array`'s storage params.
+    /// Fills in any unset fields in `self` from `array`'s storage spec.
     ///
     /// Fields that are already set in `self` are not overwritten. This mirrors what
     /// [`Array::compact_with`] does internally, and is useful when building params that should
@@ -1137,13 +1139,13 @@ pub(crate) mod flags {
 
 #[cfg(test)]
 mod tests {
+    use ndarray::ShapeBuilder;
+
+    use super::scale_order_from_weights;
     use crate::storage::params::{
         combine_block_layout, combine_elementwise_hints, combine_select_hints, ArraySpecFlags,
         DimBitmap, ReadSize, ELEMENT_COST_MAX,
     };
-    use ndarray::ShapeBuilder;
-
-    use super::scale_order_from_weights;
     use crate::util::ScaleWeight;
     use crate::{Array, CompactArray, CompactParams, StorageBase, BLOCK_SIZE_BYTES_MAX};
 

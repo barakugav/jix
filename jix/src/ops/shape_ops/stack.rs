@@ -306,7 +306,6 @@ mod tests {
 
     use crate::array::Array;
     use crate::ops::stack;
-
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::{CompactArray, NDIM_MAX};
 

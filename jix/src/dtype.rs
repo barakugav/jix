@@ -157,7 +157,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 /// the [`Dtyped::DTYPE`] implementation of a Rust primitive:
 ///
 /// ```rust
-/// use jix::dtype::{Dtype, ScalarKind, Dtyped};
+/// use jix::dtype::{Dtype, Dtyped, ScalarKind};
 ///
 /// let d = Dtype::new_scalar(ScalarKind::F64);
 /// assert_eq!(d, f64::DTYPE);
@@ -196,7 +196,8 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 ///     ("id".to_string(), 0, u8::DTYPE),
 ///     ("_pad".to_string(), 1, <[u8; 3]>::DTYPE),
 ///     ("grade".to_string(), 4, f32::DTYPE),
-/// ]).unwrap();
+/// ])
+/// .unwrap();
 /// assert_eq!(aligned.itemsize(), 8);
 /// assert_eq!(aligned.alignment().as_usize(), 4);
 /// assert!(aligned.is_aligned());
@@ -205,7 +206,8 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 /// let packed = Dtype::from_fields(vec![
 ///     ("id".to_string(), 0, u8::DTYPE),
 ///     ("grade".to_string(), 1, f32::DTYPE),
-/// ]).unwrap();
+/// ])
+/// .unwrap();
 /// assert_eq!(packed.itemsize(), 5);
 /// assert_eq!(packed.alignment().as_usize(), 1);
 /// assert!(!packed.is_aligned());
@@ -214,7 +216,8 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_NDIM_MAX>;
 /// assert!(Dtype::from_fields(vec![
 ///     ("id".to_string(), 0, u8::DTYPE),
 ///     ("grade".to_string(), 4, f32::DTYPE),
-/// ]).is_err());
+/// ])
+/// .is_err());
 /// ```
 ///
 /// # Inner Shape
@@ -362,7 +365,7 @@ impl Dtype {
     /// The created dtype will use the native endianness.
     ///
     /// ```rust
-    /// use jix::dtype::{Dtype, ScalarKind, Dtyped};
+    /// use jix::dtype::{Dtype, Dtyped, ScalarKind};
     ///
     /// let i32_dtype = Dtype::new_scalar(ScalarKind::I32);
     /// assert_eq!(i32_dtype.scalar_kind(), Some(ScalarKind::I32));
@@ -435,20 +438,24 @@ impl Dtype {
     /// #[derive(Copy, Clone, Dtyped)]
     /// #[repr(C)]
     /// struct Student {
-    ///   id: u8,
-    ///   _pad: [u8; 3],
-    ///   grade: f32,
+    ///     id: u8,
+    ///     _pad: [u8; 3],
+    ///     grade: f32,
     /// }
     /// let student_dtype = Dtype::from_fields(vec![
-    ///   ("id".to_string(), 0, u8::DTYPE),
-    ///   ("_pad".to_string(), 1, <[u8; 3]>::DTYPE),
-    ///   ("grade".to_string(), 4, f32::DTYPE),
-    /// ]).unwrap();
+    ///     ("id".to_string(), 0, u8::DTYPE),
+    ///     ("_pad".to_string(), 1, <[u8; 3]>::DTYPE),
+    ///     ("grade".to_string(), 4, f32::DTYPE),
+    /// ])
+    /// .unwrap();
     /// assert_eq!(student_dtype.fields().unwrap().len(), 3);
     /// let fields = student_dtype.fields().unwrap();
     /// let mut fields = fields.iter();
     /// assert_eq!(*fields.next().unwrap(), ("id".into(), 0, u8::DTYPE));
-    /// assert_eq!(*fields.next().unwrap(), ("_pad".into(), 1, <[u8; 3]>::DTYPE));
+    /// assert_eq!(
+    ///     *fields.next().unwrap(),
+    ///     ("_pad".into(), 1, <[u8; 3]>::DTYPE)
+    /// );
     /// assert_eq!(*fields.next().unwrap(), ("grade".into(), 4, f32::DTYPE));
     /// assert_eq!(student_dtype.scalar_kind(), None);
     /// assert_eq!(student_dtype.itemsize(), 8);
@@ -462,13 +469,14 @@ impl Dtype {
     /// #[derive(Copy, Clone, Dtyped)]
     /// #[repr(C, packed)]
     /// struct StudentPacked {
-    ///   id: u8,
-    ///   grade: f32,
+    ///     id: u8,
+    ///     grade: f32,
     /// }
     /// let student_packed_dtype = Dtype::from_fields(vec![
-    ///  ("id".to_string(), 0, u8::DTYPE),
-    ///  ("grade".to_string(), 1, f32::DTYPE),
-    /// ]).unwrap();
+    ///     ("id".to_string(), 0, u8::DTYPE),
+    ///     ("grade".to_string(), 1, f32::DTYPE),
+    /// ])
+    /// .unwrap();
     /// assert_eq!(student_packed_dtype.itemsize(), 5);
     /// assert_eq!(student_packed_dtype.alignment().as_usize(), 1);
     /// assert_eq!(StudentPacked::DTYPE, student_packed_dtype);
@@ -523,46 +531,49 @@ impl Dtype {
     /// must be a valid aligned layout. See [`Self::is_aligned`] for details.
     ///
     /// ```rust
-    /// use jix::dtype::{Dtype, Dtyped, Alignment, Itemsize};
+    /// use jix::dtype::{Alignment, Dtype, Dtyped, Itemsize};
     ///
     /// // `{ a: i32 at 0, b: i32 at 4 }` is valid both as an aligned struct (alignment 4) and as a
     /// // packed one (alignment 1). `Dtype::from_fields` picks the aligned one, so build the packed
     /// // one by passing the itemsize and alignment explicitly.
     /// let packed = Dtype::new_struct(
-    ///   vec![
-    ///     ("a".to_string(), 0, i32::DTYPE),
-    ///     ("b".to_string(), 4, i32::DTYPE),
-    ///   ],
-    ///   &[],
-    ///   8,
-    ///   Alignment::new(1).unwrap(),
-    /// ).unwrap();
+    ///     vec![
+    ///         ("a".to_string(), 0, i32::DTYPE),
+    ///         ("b".to_string(), 4, i32::DTYPE),
+    ///     ],
+    ///     &[],
+    ///     8,
+    ///     Alignment::new(1).unwrap(),
+    /// )
+    /// .unwrap();
     /// assert_eq!(packed.alignment().as_usize(), 1);
     /// assert!(!packed.is_aligned());
     ///
     /// // The C struct `struct Person { float weight; uint8_t age; }` has 3 bytes of padding after
     /// // `age`. Padding is not supported, so this layout is rejected.
     /// assert!(Dtype::new_struct(
-    ///   vec![
-    ///     ("weight".to_string(), 0, f32::DTYPE),
-    ///     ("age".to_string(), 4, u8::DTYPE),
-    ///   ],
-    ///   &[],
-    ///   8,
-    ///   Alignment::new(4).unwrap(),
-    /// ).is_err());
+    ///     vec![
+    ///         ("weight".to_string(), 0, f32::DTYPE),
+    ///         ("age".to_string(), 4, u8::DTYPE),
+    ///     ],
+    ///     &[],
+    ///     8,
+    ///     Alignment::new(4).unwrap(),
+    /// )
+    /// .is_err());
     ///
     /// // Adding the padding as an explicit field makes it valid.
     /// let person = Dtype::new_struct(
-    ///   vec![
-    ///     ("weight".to_string(), 0, f32::DTYPE),
-    ///     ("age".to_string(), 4, u8::DTYPE),
-    ///     ("_pad".to_string(), 5, <[u8; 3]>::DTYPE),
-    ///   ],
-    ///   &[],
-    ///   8,
-    ///   Alignment::new(4).unwrap(),
-    /// ).unwrap();
+    ///     vec![
+    ///         ("weight".to_string(), 0, f32::DTYPE),
+    ///         ("age".to_string(), 4, u8::DTYPE),
+    ///         ("_pad".to_string(), 5, <[u8; 3]>::DTYPE),
+    ///     ],
+    ///     &[],
+    ///     8,
+    ///     Alignment::new(4).unwrap(),
+    /// )
+    /// .unwrap();
     /// assert_eq!(person.itemsize(), 8);
     /// assert!(person.is_aligned());
     /// ```

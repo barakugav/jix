@@ -334,17 +334,13 @@ impl<S: StorageBase> Array<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use crate::storage::ArrayStorageExt;
-
-    use crate::scalar::bool8;
-    use crate::storage::CompactArrayMethods;
-    use crate::storage::{split_ranges, Index};
-    use crate::CompactParams;
-
     use ndarray::{array, Ix0, Ix1};
 
+    use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
+    use crate::storage::{split_ranges, ArrayStorageExt, CompactArrayMethods, Index};
+    use crate::CompactParams;
 
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
@@ -355,7 +351,6 @@ mod tests {
 
     use super::Reduce;
     use crate::array::Array;
-
     use crate::ops::reduction::common::tests::*;
 
     // --- Reduce ------------------------------------------------------------------

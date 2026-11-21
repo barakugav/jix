@@ -23,6 +23,10 @@ impl Array<Compact<TypeDyn>> {
     /// the array occupies only part of a larger file, or
     /// [`read_from_file_mmap`](Array::read_from_file_mmap) for memory-mapped (zero-copy) loading.
     ///
+    /// The array keeps the block shape, codec and filters of the file, and arrays later compacted
+    /// from it inherit them. Its read size can be set with
+    /// [`CompactArrayMethods::set_read_size`](crate::storage::CompactArrayMethods::set_read_size).
+    ///
     /// # Arguments
     ///
     /// - `path`: path to the `.jix` file containing the array.
@@ -79,12 +83,8 @@ impl Array<Compact<TypeDyn>> {
     /// let total = f.metadata()?.len();
     ///
     /// // Read the second array back using its offset.
-    /// let b2 = Array::read_from_file_with(
-    ///     &path,
-    ///     offset,
-    ///     total - offset,
-    ///     ArchiveValidation::default(),
-    /// )?;
+    /// let b2 =
+    ///     Array::read_from_file_with(&path, offset, total - offset, ArchiveValidation::default())?;
     /// assert_eq!(b2.shape(), &[6]);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -124,11 +124,7 @@ impl Array<Compact<TypeDyn>> {
     /// original.write_to(&mut buf, CompactParams::default(), &original.read_ctx())?;
     ///
     /// let bytes = buf.into_inner();
-    /// let loaded = Array::read_from(
-    ///     Cursor::new(bytes),
-    ///     None,
-    ///     ArchiveValidation::default(),
-    /// )?;
+    /// let loaded = Array::read_from(Cursor::new(bytes), None, ArchiveValidation::default())?;
     /// let loaded = loaded.into_typed::<i32>()?;
     /// assert_eq!(loaded.to_ndarray()?, array![1i32, 2, 3, 4].into_dyn());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -179,7 +175,7 @@ impl Array<CompactMmap<TypeDyn>> {
     ///
     /// ```
     /// use jix::storage::ArchiveValidation;
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -188,14 +184,7 @@ impl Array<CompactMmap<TypeDyn>> {
     ///
     /// let len = std::fs::metadata(&path)?.len();
     /// // Safety: the file is not modified after this point.
-    /// let array = unsafe {
-    ///     Array::read_from_file_mmap(
-    ///         &path,
-    ///         0,
-    ///         len,
-    ///         ArchiveValidation::default(),
-    ///     )?
-    /// };
+    /// let array = unsafe { Array::read_from_file_mmap(&path, 0, len, ArchiveValidation::default())? };
     /// assert_eq!(array.shape(), &[2, 2]);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -264,7 +253,7 @@ impl<S: StorageBase> Array<S> {
     ///
     /// ```
     /// use jix::storage::ArchiveValidation;
-    /// use jix::{Array, CompactParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -274,14 +263,7 @@ impl<S: StorageBase> Array<S> {
     ///
     /// // Map the file - compressed blocks are paged in on demand, no heap copy.
     /// // Safety: the file is not modified while `src` is live.
-    /// let src = unsafe {
-    ///     Array::read_from_file_mmap(
-    ///         &path,
-    ///         0,
-    ///         len,
-    ///         ArchiveValidation::default(),
-    ///     )?
-    /// };
+    /// let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArchiveValidation::default())? };
     ///
     /// // Build a lazy view - no data is read yet
     /// let view = src.into_typed::<f32>()?.exp().map(|x| x + 1.0);
@@ -316,7 +298,8 @@ impl<S: StorageBase> Array<S> {
     /// to the writer as-is and `params` is ignored.
     ///
     /// **For any other array** (lazy views, op chains, plain buffers), each block is read from
-    /// the source and compressed according to `params`.
+    /// the source and compressed according to `params`, with unset fields inherited from the
+    /// source as in [`compact_with`](Array::compact_with).
     ///
     /// # Arguments
     ///
@@ -342,7 +325,11 @@ impl<S: StorageBase> Array<S> {
     /// let mut buf = Cursor::new(Vec::new());
     /// // A lazy view is compressed on the fly, here into blocks of 1x2 items.
     /// let scaled = a.map(|x| x * 10);
-    /// scaled.write_to(&mut buf, CompactParams::new().block_shape(&[1, 2])?, &scaled.read_ctx())?;
+    /// scaled.write_to(
+    ///     &mut buf,
+    ///     CompactParams::new().block_shape(&[1, 2])?,
+    ///     &scaled.read_ctx(),
+    /// )?;
     /// let offset = buf.position();
     /// // A compact array copies its compressed blocks as-is, so `params` is ignored.
     /// b.write_to(&mut buf, CompactParams::default(), &b.read_ctx())?;
@@ -363,7 +350,10 @@ impl<S: StorageBase> Array<S> {
     ///     None,
     ///     ArchiveValidation::default(),
     /// )?;
-    /// assert_eq!(b2.into_typed::<u8>()?.to_ndarray()?, array![10u8, 20, 30].into_dyn());
+    /// assert_eq!(
+    ///     b2.into_typed::<u8>()?.to_ndarray()?,
+    ///     array![10u8, 20, 30].into_dyn()
+    /// );
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn write_to(
@@ -567,8 +557,9 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::{ArchiveValidation, Compact, CompactArrayMethods};
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, CompactArray, CompactParams, Dimension, IntoDimension};
-    use crate::{StorageBase, TypeDyn};
+    use crate::{
+        Array, CompactArray, CompactParams, Dimension, IntoDimension, StorageBase, TypeDyn,
+    };
 
     #[test]
     fn read_back_to_back_archives() {

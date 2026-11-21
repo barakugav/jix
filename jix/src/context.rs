@@ -20,16 +20,16 @@ use crate::DimDyn;
 ///
 /// # Obtaining a `ReadContext`
 ///
-/// The preferred way is [`Array::read_ctx()`](crate::Array::read_ctx), which picks up the decoder
-/// parameters stored alongside the array data:
+/// The preferred way is [`Array::read_ctx()`](crate::Array::read_ctx), which picks up the read
+/// parameters of the array, such as its read size (see [`set_read_size`](Self::set_read_size)):
 ///
 /// ```
-/// use jix::{Array, CompactParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 ///
-/// // read_ctx() inherits the decoder config from the array.
+/// // read_ctx() takes the read size of the array.
 /// let ctx = za.read_ctx();
 /// let out = za.to_ndarray_sub(&[1..3], &ctx)?;
 /// assert_eq!(out, array![2, 3]);
@@ -38,8 +38,7 @@ use crate::DimDyn;
 ///
 /// `ReadContext::default()` creates a context independent of any array:
 /// ```
-/// use jix::ReadContext;
-/// use jix::Array;
+/// use jix::{Array, ReadContext};
 /// use ndarray::array;
 ///
 /// let za = Array::compact_ndarray(&array![42i32, 17, 6, 99, 51])?;
@@ -97,7 +96,8 @@ impl ReadContext {
     /// decompress the same block again. Larger regions span more blocks per call and dilute that
     /// waste; `max` bounds their cache footprint.
     ///
-    /// [`Array::read_ctx()`](crate::Array::read_ctx) starts from the array's read size,
+    /// [`Array::read_ctx()`](crate::Array::read_ctx) starts from the array's read size (see
+    /// [`CompactArrayMethods::set_read_size`](crate::storage::CompactArrayMethods::set_read_size)),
     /// [`ReadContext::default()`] from a range chosen according to the CPU cache sizes.
     pub fn set_read_size(&mut self, size_hint: (u64, u64)) {
         self.params.read_size = ReadSize::new(size_hint.0, size_hint.1);

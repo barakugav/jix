@@ -451,17 +451,14 @@ impl<S: StorageBase> Array<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::ArrayStorageExt;
     use ndarray::array;
     use proptest::prelude::*;
 
     use super::SliceItem;
     use crate::array::Array;
-    use crate::storage::Index;
-    use crate::ReadContext;
-
+    use crate::storage::{ArrayStorageExt, Index};
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{CompactArray, PlainArray, StorageBase};
+    use crate::{CompactArray, PlainArray, ReadContext, StorageBase};
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();

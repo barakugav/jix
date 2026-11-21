@@ -195,8 +195,8 @@ where
 /// let b = Array::compact_ndarray(&array![10i32, 20, 30])?;
 /// let c = Array::compact_ndarray(&array![100i32, 200, 300])?;
 ///
-/// let result = jix::ops::map_multiple([a, b, c], |xs: [i32; 3]| xs.iter().sum::<i32>())
-///     .to_ndarray()?;
+/// let result =
+///     jix::ops::map_multiple([a, b, c], |xs: [i32; 3]| xs.iter().sum::<i32>()).to_ndarray()?;
 /// assert_eq!(result, array![111, 222, 333]);
 /// # Ok::<(), jix::Error>(())
 /// ```
@@ -213,9 +213,13 @@ where
 /// let c = Array::compact_ndarray(&array![bool8::TRUE, bool8::FALSE, bool8::TRUE])?;
 ///
 /// let result = jix::ops::map_multiple((a, b, c), |(x, y, flag): (i32, f32, bool8)| {
-///     if flag.into() { x as f32 + y } else { x as f32 * y }
+///     if flag.into() {
+///         x as f32 + y
+///     } else {
+///         x as f32 * y
+///     }
 /// })
-///     .to_ndarray()?;
+/// .to_ndarray()?;
 /// assert_eq!(result, array![1.5f32, 3.0, 5.5]);
 /// # Ok::<(), jix::Error>(())
 /// ```

@@ -1,10 +1,10 @@
 use std::cell::Cell;
+use std::cmp::Reverse;
+use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
 use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
-use std::cmp::Reverse;
-use std::marker::PhantomData;
 
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{ArithmeticStatus, Result};
@@ -1016,11 +1016,10 @@ pub(crate) const fn n_operands_mul(count: Option<usize>, n: usize) -> Option<usi
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::storage::ArrayStorageExt;
     use std::ops::Range;
 
-    use crate::storage::{split_ranges, Index};
+    use super::*;
+    use crate::storage::{split_ranges, ArrayStorageExt, Index};
     use crate::util::{array_from_fn_inline, strided_span_bytes};
     use crate::{Array, CompactArray, StorageBase};
 

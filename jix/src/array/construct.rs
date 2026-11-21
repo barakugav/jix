@@ -1,15 +1,13 @@
 use std::marker::PhantomData;
 
+use super::Array;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, Index, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{dim_arr, SliceExt};
-use crate::ReadContext;
-use crate::{CompactArray, CompactParams, DimArray, DimDyn, StorageBase, TypeDyn};
-
-use super::Array;
+use crate::{CompactArray, CompactParams, DimArray, DimDyn, ReadContext, StorageBase, TypeDyn};
 
 impl<T> CompactArray<T> {
     /// Compress an ndarray into a block-compressed `Array<Compact>` with default encoding settings.
@@ -312,16 +310,12 @@ mod tests {
     use ndarray::array;
 
     use super::Array;
-
+    use crate::array::tests::*;
     use crate::dtype::Dtyped;
-
     use crate::storage::block::BlockSize;
     use crate::storage::params::{ReadParams, ReadSize};
-
     use crate::util::arr_params;
     use crate::{CompactParams, StorageBase};
-
-    use crate::array::tests::*;
 
     // -----------------------------------------------------------------------
     // compact_ndarray - 1D

@@ -106,7 +106,7 @@ pull mode - or end with `out.set(view, ...)`, which hands a view back or copies 
 
 `Array::to_buf_strided(index, ctx)` (pull) and `Array::to_buf_strided_into(index, out, ctx)`
 (push) are the array-level entry points: the same two modes, plus a heuristic that cuts an
-oversized request into cache-sized pieces read one at a time.
+oversized request into pieces sized by the context's read size, read one at a time.
 `Array::to_buf_slice(index, buf, ctx)` is the shorthand for a packed row-major destination.
 
 Every storage carries one piece of compile-time info as an associated type, **`ElementType`** -
@@ -147,8 +147,11 @@ Arrays are an n-d grid of fixed-size blocks, each compressed independently; `Blo
 (`jix/src/storage/block.rs`) tracks per-block offsets for random access, and a `ReadContext` carries
 an optional block cache. When no block shape is given, one is auto-selected according to the CPU cache sizes.
 Codec pipeline (`jix/src/codec/`): `raw bytes -> filters (byte-shuffle default, bit-shuffle) -> codec
-(zstd) -> stored bytes`, reversed on read. All settings live in `CompactParams` and are serialized into
-the archive, so readers never need to know them in advance.
+(zstd) -> stored bytes`, reversed on read. Write settings (block layout, codec, level, filters) live in
+`CompactParams`; the codec and filters are serialized into the archive, so readers never need to know
+them in advance. The read size (how much data one read pass pulls) is a read-time setting, never
+stored: `ReadContext::set_read_size`, or `set_read_size` on a leaf array (`CompactArrayMethods` /
+`PlainArrayMethods`), which `read_ctx()` starts from.
 
 ### Type system (`jix/src/dtype.rs`)
 

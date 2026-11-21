@@ -127,9 +127,9 @@ pub use into_type::*;
 pub(crate) mod prelude {
     pub(crate) use std::ops::Range;
 
-    pub(crate) use super::DimsArg;
     pub(crate) use super::{
-        max_itemsize, n_operands_sum, ElementwisePipeline, ElementwisePipelineImpl, Operand,
+        max_itemsize, n_operands_sum, DimsArg, ElementwisePipeline, ElementwisePipelineImpl,
+        Operand,
     };
     pub(crate) use crate::context::{CacheScope, ReadContext};
     pub(crate) use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
@@ -144,11 +144,12 @@ pub(crate) mod prelude {
         check_out_buf, read_data_and_map_strides, write_out_buf_slot, ArraySpec, ArrayStorageExt,
         ArrayStorageInfo, BlockSize, Index, OutBuf, OutBufInner, StridedBuf,
     };
+    pub(crate) use crate::util::iter::NdIter;
     pub(crate) use crate::util::{
         array_from_fn_inline, calc_block_end, default_logical_strides, default_strides,
-        default_strides_from_iter, dim_arr, iter::NdIter, try_dim_arr, ArrayExt, DimArray, DimIdx,
-        IterExt, NdCopier, NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias,
-        ScaleWeight, SliceExt, REQUIRE_ALIGNED,
+        default_strides_from_iter, dim_arr, try_dim_arr, ArrayExt, DimArray, DimIdx, IterExt,
+        NdCopier, NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, ScaleWeight,
+        SliceExt, REQUIRE_ALIGNED,
     };
     pub(crate) use crate::{
         Array, DimDyn, DimVec, Dimension, ElementType, Storage, StorageBase, TypeDyn, NDIM_MAX,

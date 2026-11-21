@@ -387,7 +387,7 @@ where
     //     reduced per bulk). Within a bulk the tile iterator sweeps the reduced dims in
     //     row-major order, so a tile is `bulk-non-reduced * tile-reduced`. Each
     //     `(bulk, tile)` pair produces *one* `self.array.read_data` call, sized to land
-    //     within the source's `read_size` `(min, max)` window.
+    //     within the context's read size `(min, max)` window.
     //
     // # Per-tile processing
     //
@@ -1430,21 +1430,18 @@ pub(crate) use {define_array_reduction_method, define_reduction_op};
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 pub(crate) mod tests {
-    use crate::storage::ArrayStorageExt;
     use std::rc::Rc;
-
-    use crate::scalar::bool8;
-    use crate::storage::CompactArrayMethods;
-    use crate::storage::{split_ranges, Index};
-    use crate::util::DimArray;
-    use crate::CompactParams;
 
     use ndarray::{array, ArrayD, Ix0, Ix1};
 
+    use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    use crate::storage::{split_ranges, ArrayStorageExt, CompactArrayMethods, Index};
+    use crate::util::DimArray;
+    use crate::CompactParams;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;

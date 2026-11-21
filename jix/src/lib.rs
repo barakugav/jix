@@ -38,7 +38,10 @@
 //! // decompressed, not the whole array, so random access reads are relatively fast.
 //! let ctx = a.read_ctx();
 //! assert_eq!(a.get(&[1, 1], &ctx)?, 6.17);
-//! assert_eq!(a.to_ndarray_sub(&[0..2, 1..3], &ctx)?, array![[2.0, -9.0], [6.17, 0.0]]);
+//! assert_eq!(
+//!     a.to_ndarray_sub(&[0..2, 1..3], &ctx)?,
+//!     array![[2.0, -9.0], [6.17, 0.0]]
+//! );
 //!
 //! // Build a lazy operation pipeline - no data is read yet.
 //! let ones = Array::compact_ndarray(&ndarray::Array2::<f32>::ones((2, 3)))?;
@@ -185,7 +188,11 @@
 //!
 //! #[derive(Copy, Clone, Dtyped)]
 //! #[repr(C)]
-//! struct Pixel { r: u8, g: u8, b: u8 }
+//! struct Pixel {
+//!     r: u8,
+//!     g: u8,
+//!     b: u8,
+//! }
 //!
 //! let pixel_dtype = Pixel::DTYPE;
 //! assert_eq!(pixel_dtype.itemsize(), 3);
@@ -432,7 +439,6 @@ const BLOCK_SIZE_BYTES_MAX: u64 = 1 << 30;
 pub mod __private {
     pub use crate::storage::params::flags::{ArraySpecFlags, ReadTiling};
     pub use crate::storage::scalar::Scalar;
-
     #[doc(hidden)]
     pub use crate::util::bench_util;
 }

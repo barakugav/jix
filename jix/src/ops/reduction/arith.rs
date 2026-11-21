@@ -621,10 +621,9 @@ impl<S: StorageBase> Array<S> {
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
 
-    use crate::scalar::bool8;
-
     use ndarray::{array, Ix0, Ix1};
 
+    use crate::scalar::bool8;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
     #[cfg(feature = "num-complex")]
@@ -635,7 +634,6 @@ mod tests {
     type complex_f64 = crate::scalar::Complex<f64>;
 
     use crate::array::Array;
-
     use crate::ops::reduction::common::tests::*;
 
     test_reduction!(

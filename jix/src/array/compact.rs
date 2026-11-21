@@ -1,3 +1,4 @@
+use super::Array;
 use crate::codec::{DecoderCodecConfig, Encoder};
 use crate::error::{check_region_size, Result};
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
@@ -11,8 +12,6 @@ use crate::util::{
 };
 use crate::{CompactParams, Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase};
 
-use super::Array;
-
 impl<S: StorageBase> Array<S> {
     /// Compress the data of this array into a new `Array<Compact>` with new blocks.
     ///
@@ -25,8 +24,9 @@ impl<S: StorageBase> Array<S> {
     /// misaligned with the logical layout, so reads decompress excess data. `compact` re-encodes
     /// the data with a block shape derived from the source storage(s) by a heuristic that tries to
     /// preserve the user's choices and match the new layout. It is not perfect: to set parameters
-    /// explicitly, use [`compact_with`](Array::compact_with). Codec settings (compression level,
-    /// filters, etc.) are also inherited from the source storage.
+    /// explicitly, use [`compact_with`](Array::compact_with). The codec settings (codec, level and
+    /// filters) are also inherited: from the source if it is compact, else from the first compact
+    /// array the lazy view reads, else the defaults. The read size is kept as well.
     ///
     /// To materialize a lazy chain straight into a file without holding the whole result
     /// (compressed or decompressed) in memory, see [`write_to_file`](Array::write_to_file) and its
@@ -60,7 +60,8 @@ impl<S: StorageBase> Array<S> {
     ///
     /// Like [`compact`](Array::compact). Fields not set in `params` are inherited from the source
     /// storage, except that setting any of the codec, level or filters resets the other two to
-    /// their defaults.
+    /// their defaults. `self` is read with `context`, whose read size sets how much of it is read
+    /// at a time.
     ///
     /// # Errors
     ///
@@ -77,7 +78,10 @@ impl<S: StorageBase> Array<S> {
     ///
     /// // Let's say a is given to us, and we prepare to access it many times with a specific access
     /// // pattern. We re-compress it with a matching block shape.
-    /// let b = a.compact_with(CompactParams::default().block_shape(&[2, 1])?, &a.read_ctx())?;
+    /// let b = a.compact_with(
+    ///     CompactParams::default().block_shape(&[2, 1])?,
+    ///     &a.read_ctx(),
+    /// )?;
     ///
     /// assert_eq!(
     ///     b.to_ndarray_sub(&[0..2, 0..1], &b.read_ctx())?,
@@ -116,11 +120,11 @@ impl<S: StorageBase> Array<S> {
     /// from `self` efficiently, data is fetched in larger *chunks* - each spanning a whole number
     /// of target blocks per dimension - with a single `read_data` call per chunk, then carved into
     /// individual target blocks in memory. The chunk shape is derived from `self`'s own block shape
-    /// and scaled toward its preferred read size (see `scale_read_shape`), keeping reads aligned to
-    /// how `self` is stored. Blocks are therefore produced in chunk-traversal order rather than
-    /// global C order, so each block is handed to the builder together with its logical (C-order)
-    /// `block_index`. Boundary blocks - those that extend beyond the array's shape - are
-    /// zero-padded to fill the full `block_shape` before compression.
+    /// and scaled toward the read size of `context` (see `scale_read_shape`), keeping reads
+    /// aligned to how `self` is stored. Blocks are therefore produced in chunk-traversal order
+    /// rather than global C order, so each block is handed to the builder together with its
+    /// logical (C-order) `block_index`. Boundary blocks - those that extend beyond the array's
+    /// shape - are zero-padded to fill the full `block_shape` before compression.
     pub(crate) fn compact_into_builder<B>(
         &self,
         params: &mut CompactParams,
@@ -356,13 +360,10 @@ mod tests {
     use ndarray::array;
 
     use super::Array;
-
+    use crate::array::tests::*;
     use crate::dtype::Dtyped;
-
     use crate::util::arr_params;
     use crate::StorageBase;
-
-    use crate::array::tests::*;
 
     // -----------------------------------------------------------------------
     // compact

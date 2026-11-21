@@ -1,7 +1,6 @@
 use crate::dtype::{Alignment, Itemsize};
-use crate::util::dims_sort_by;
 use crate::util::iter::NdIter;
-use crate::util::Idx;
+use crate::util::{dims_sort_by, Idx};
 use crate::{dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
 /// [`NdIterUnordered`](crate::util::NdIterUnordered) with the operand count known only at runtime.

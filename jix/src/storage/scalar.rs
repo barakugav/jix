@@ -7,8 +7,7 @@ use crate::storage::{
     StorageBase, StridedBuf,
 };
 use crate::util::{cast_slice, cast_slice_mut, dim_arr};
-use crate::ReadContext;
-use crate::{CompactParams, DimDyn, Dimension};
+use crate::{CompactParams, DimDyn, Dimension, ReadContext};
 
 /// Storage that broadcasts a single scalar value across an arbitrary shape: a zero-copy
 /// constant array. A 0-D `Scalar` (empty `shape`) is a plain scalar value.
@@ -174,16 +173,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::ArrayStorageExt;
     use ndarray::array;
 
     use crate::__private::Scalar;
     use crate::dtype::Dtyped;
     use crate::error::Result;
-    use crate::storage::Index;
+    use crate::storage::{ArrayStorageExt, Index};
     use crate::util::DimArray;
-    use crate::Array;
-    use crate::ReadContext;
+    use crate::{Array, ReadContext};
 
     pub fn plain_scalar<T>(value: T, shape: &[u64]) -> Result<Array<Scalar<T>>>
     where

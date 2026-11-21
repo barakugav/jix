@@ -20,8 +20,7 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{check_out_buf, ArraySpec, ElementType, Index, OutBuf, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, NdCopier, PtrMutNoalias, PtrNoalias};
-use crate::ReadContext;
-use crate::{CompactParams, Dim, DimDyn, DimVec, Dimension, StorageBase, TypeDyn};
+use crate::{CompactParams, Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase, TypeDyn};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -554,7 +553,8 @@ where
 /// Extension methods for arrays with block-compressed storage.
 ///
 /// Implemented for `Array` of [`Compact`], [`CompactView`] and [`CompactMmap`]. These describe how
-/// the array is split into blocks and compressed.
+/// the array is split into blocks and compressed, and set hints for reading it and for arrays
+/// later compacted from it.
 pub trait CompactArrayMethods {
     /// The shape of one block, in elements per dimension.
     ///
@@ -633,7 +633,9 @@ pub trait CompactArrayMethods {
     fn filters(&self) -> &[crate::storage::Filter];
 
     /// Sets the target byte range `(min, max)` for a single read region of this array and of
-    /// the lazy views built on it. See
+    /// the lazy views built on it (a view over several arrays takes it from one of them, usually
+    /// the first). [`Array::read_ctx`](crate::Array::read_ctx) starts from it, and
+    /// [`Array::compact`](crate::Array::compact) keeps it. See
     /// [`ReadContext::set_read_size`](crate::ReadContext::set_read_size).
     fn set_read_size(&mut self, size_hint: (u64, u64));
 
@@ -706,8 +708,7 @@ mod tests {
     use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
     use crate::storage::{split_ranges, ArraySpec, ArrayStorageExt, Index, OutBuf, StridedBuf};
     use crate::util::DimArray;
-    use crate::Storage;
-    use crate::{Array, CompactParams, StorageBase};
+    use crate::{Array, CompactParams, Storage, StorageBase};
 
     /// Read `index` from a compact `i32` array both into a plain contiguous buffer and into a
     /// *strided* destination whose inner spacing is doubled (a one-element gap between consecutive

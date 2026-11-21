@@ -732,12 +732,12 @@ impl<S: StorageBase> Array<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::scalar::bool8;
-    use crate::CompactParams;
     use ndarray::Ix1;
 
+    use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
+    use crate::CompactParams;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;
@@ -787,10 +787,11 @@ mod tests {
     /// their scalar semantics, on every SIMD level of the CPU, over edge cases (NaN included).
     #[test]
     fn simd_bodies_all_levels() {
+        use fearless_simd::Simd;
+
         use super::{EqualKernel, LessEqualKernel, LessKernel, NotEqualKernel};
         use crate::ops::elementwise::op2::Op2Kernel;
         use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
-        use fearless_simd::Simd;
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {
@@ -948,9 +949,10 @@ mod tests {
     // still see the caller's order.
     #[test]
     fn swapped_cmp_reports_operands_in_caller_order() {
+        use ndarray::ShapeBuilder;
+
         use crate::storage::PlainArrayMethods;
         use crate::{Array, StorageBase};
-        use ndarray::ShapeBuilder;
 
         let c_order = ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap();
         let f_order = ndarray::Array::from_shape_vec([3, 4].f(), (0..12i32).collect()).unwrap();

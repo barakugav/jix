@@ -17,14 +17,22 @@ use crate::ops::prelude::*;
 /// use jix::Array;
 /// use ndarray::{array, Ix2};
 ///
-/// let cond = Array::compact_ndarray(&array![bool8::TRUE, bool8::FALSE, bool8::TRUE, bool8::FALSE])?;
+/// let cond = Array::compact_ndarray(&array![
+///     bool8::TRUE,
+///     bool8::FALSE,
+///     bool8::TRUE,
+///     bool8::FALSE
+/// ])?;
 /// let x = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 /// let y = Array::compact_ndarray(&array![10i32, 20, 30, 40])?;
 /// let result = cond.select(x, y).to_ndarray()?;
 /// assert_eq!(result, array![1, 20, 3, 40]);
 ///
 /// // 2-D arrays
-/// let cond = Array::compact_ndarray(&array![[bool8::TRUE, bool8::FALSE], [bool8::FALSE, bool8::TRUE]])?;
+/// let cond = Array::compact_ndarray(&array![
+///     [bool8::TRUE, bool8::FALSE],
+///     [bool8::FALSE, bool8::TRUE]
+/// ])?;
 /// let x = Array::compact_ndarray(&array![[1.0f64, 2.0], [3.0, 4.0]])?;
 /// let y = Array::compact_ndarray(&array![[10.0f64, 20.0], [30.0, 40.0]])?;
 /// let result = cond.select(x, y).to_ndarray::<Ix2>()?;
@@ -467,7 +475,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::ArrayStorageExt;
     use std::fmt::Debug;
 
     use ndarray::{array, Ix1};
@@ -479,7 +486,7 @@ mod tests {
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::storage::{split_ranges, Index};
+    use crate::storage::{split_ranges, ArrayStorageExt, Index};
     use crate::util::{DimArray, ScalarStrategy};
 
     #[test]

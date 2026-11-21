@@ -11,8 +11,7 @@ use crate::storage::{
     OutBufInner, StridedBuf, TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, DimIdx, IterExt, SendSyncPtr};
-use crate::ReadContext;
-use crate::{Array, CompactParams, DimDyn, Dimension, PlainArray, StorageBase};
+use crate::{Array, CompactParams, DimDyn, Dimension, PlainArray, ReadContext, StorageBase};
 
 /// Uncompressed nd-array storage that owns its data in a `Vec<T>`.
 ///
@@ -659,7 +658,7 @@ impl<A, ET> PlainBase<A, ET> {
 /// Extension methods for arrays with plain (uncompressed) storage.
 ///
 /// Implemented for `Array` of [`Plain`], [`PlainView`] and [`PlainBase`]. These give direct,
-/// zero-copy access to the in-memory buffer behind the array.
+/// zero-copy access to the in-memory buffer behind the array, and set its read size.
 pub trait PlainArrayMethods {
     /// The compile-time element type: the [`ElementType`](StorageBase::ElementType) of the
     /// storage.
@@ -829,7 +828,9 @@ pub trait PlainArrayMethods {
         D: ndarray::Dimension;
 
     /// Sets the target byte range `(min, max)` for a single read region of this array and of
-    /// the lazy views built on it. See
+    /// the lazy views built on it (a view over several arrays takes it from one of them, usually
+    /// the first). [`Array::read_ctx`](crate::Array::read_ctx) starts from it, and
+    /// [`Array::compact`](crate::Array::compact) keeps it. See
     /// [`ReadContext::set_read_size`](crate::ReadContext::set_read_size).
     fn set_read_size(&mut self, size_hint: (u64, u64));
 }
@@ -901,8 +902,7 @@ mod tests {
 
     use crate::scalar::bool8;
     use crate::storage::PlainArrayMethods;
-    use crate::Array;
-    use crate::ReadContext;
+    use crate::{Array, ReadContext};
 
     // -----------------------------------------------------------------------
     /// Reading an empty region whose start sits at the end of a dim must not compute an

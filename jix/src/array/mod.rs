@@ -1,8 +1,7 @@
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::StorageAny;
-use crate::ReadContext;
-use crate::{ArrayAny, ElementType, StorageBase};
+use crate::{ArrayAny, ElementType, ReadContext, StorageBase};
 
 mod construct;
 
@@ -189,9 +188,9 @@ impl<S: StorageBase> Array<S> {
     /// See [`Dtype`] for details on the supported dtypes and their properties.
     ///
     /// ```rust
+    /// use jix::dtype::Dtyped;
     /// use jix::scalar::bool8;
     /// use jix::Array;
-    /// use jix::dtype::Dtyped;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
@@ -203,7 +202,10 @@ impl<S: StorageBase> Array<S> {
     ///
     /// #[derive(Copy, Clone, Dtyped)]
     /// #[repr(C)]
-    /// struct Point { x: f32, y: f32 }
+    /// struct Point {
+    ///     x: f32,
+    ///     y: f32,
+    /// }
     /// let points = array![Point { x: 1.0, y: 2.0 }];
     /// let c = Array::plain_ndarray_ref(&points)?;
     /// assert_eq!(c.dtype(), &Point::DTYPE);
@@ -383,10 +385,8 @@ pub(crate) mod tests {
     use super::Array;
     use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
-    use crate::storage::{ArrayBlockTableStorageBase, Compact};
-
     use crate::storage::block::{BlockSize, BlockTable};
-
+    use crate::storage::{ArrayBlockTableStorageBase, Compact};
     use crate::util::{arr_params, cast_slice, DimArray};
     use crate::{CompactArray, CompactParams, Dimension, IntoDimension};
 

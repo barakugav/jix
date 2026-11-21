@@ -430,7 +430,6 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::array::Array;
-
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::CompactArray;
 

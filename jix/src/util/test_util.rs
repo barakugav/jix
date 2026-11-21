@@ -1074,9 +1074,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
+
+    use super::*;
 
     /// Classifies a drawn layout into the buckets [`layout_strategy`] documents.
     fn classify(

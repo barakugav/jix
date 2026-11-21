@@ -676,10 +676,11 @@ mod tests {
     /// cases.
     #[test]
     fn simd_bodies_all_levels() {
+        use fearless_simd::Simd;
+
         use super::{AbsKernel, NegKernel, SquareKernel};
         use crate::ops::elementwise::op1::Op1Kernel;
         use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
-        use fearless_simd::Simd;
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {
@@ -833,10 +834,11 @@ mod tests {
     /// cases.
     #[test]
     fn simd_bodies_all_levels_binary() {
+        use fearless_simd::Simd;
+
         use super::{AddKernel, MulKernel, SubKernel};
         use crate::ops::elementwise::op2::Op2Kernel;
         use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
-        use fearless_simd::Simd;
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {

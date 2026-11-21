@@ -251,8 +251,7 @@ mod tests {
 
     use crate::ops::InsertDim;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::ReadContext;
-    use crate::{Array, CompactArray, NDIM_MAX};
+    use crate::{Array, CompactArray, ReadContext, NDIM_MAX};
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();

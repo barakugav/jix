@@ -1,9 +1,10 @@
 //! Building blocks of the SIMD `*_bulk` functions of the scalar traits.
 
+use fearless_simd::{Simd, SimdBase, SimdElement};
+
 use crate::error::ArithmeticStatus;
 use crate::scalar::bool8;
 use crate::util::{array_from_fn_inline, ArrayExt};
-use fearless_simd::{Simd, SimdBase, SimdElement};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
