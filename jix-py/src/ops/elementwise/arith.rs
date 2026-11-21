@@ -118,7 +118,6 @@ pub fn absolute<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyArray>>
         value,
         shape: _,
         precision: _,
-        params: _,
     } = &mut operand
     {
         *value = match *value {

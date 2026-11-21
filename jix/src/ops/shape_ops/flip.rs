@@ -228,8 +228,7 @@ impl<S: StorageBase> Array<S> {
 mod tests {
     use ndarray::{array, Ix2};
 
-    use crate::ReadContext;
-    use crate::{Array, CompactArray, IntoDimension, StorageBase};
+    use crate::{Array, CompactArray, IntoDimension, ReadContext, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers

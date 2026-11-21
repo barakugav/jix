@@ -16,7 +16,8 @@ import numpy as np
 # Compress a NumPy array into block-compressed storage.
 a = jix.compact(np.arange(1_000_000, dtype=np.float32).reshape(1000, 1000))
 
-# Accessing the data triggers decompression of the relevant blocks
+# Read single elements and a sub-region. Only the blocks they touch are
+# decompressed, not the whole array, so random access reads are relatively fast.
 assert a[0, 0] == 0
 assert a[999, 999] == 999_999
 assert a[0, 0:10].tolist() == list(range(10))

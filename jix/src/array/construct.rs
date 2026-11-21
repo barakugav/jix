@@ -1,15 +1,13 @@
 use std::marker::PhantomData;
 
+use super::Array;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, Index, OutBuf};
+use crate::storage::{check_out_buf, ArrayStorageInfo, Compact, CompactParams, Index, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{dim_arr, SliceExt};
-use crate::ReadContext;
-use crate::{ArrayParams, CompactArray, DimArray, DimDyn, StorageBase, TypeDyn};
-
-use super::Array;
+use crate::{CompactArray, DimArray, DimDyn, ReadContext, StorageBase, TypeDyn};
 
 impl<T> CompactArray<T> {
     /// Compress an ndarray into a block-compressed `Array<Compact>` with default encoding settings.
@@ -65,25 +63,26 @@ impl<T> CompactArray<T> {
         S: ndarray::Data<Elem = T>,
         T: Dtyped,
     {
-        Array::compact_ndarray_with(array, ArrayParams::default())
+        Array::compact_ndarray_with(array, CompactParams::default())
     }
 
-    /// Compress an ndarray into a block-compressed `Array<Compact>` with explicit `ArrayParams`.
+    /// Compress an ndarray into a block-compressed `Array<Compact>` with explicit `CompactParams`.
     ///
     /// Like [`compact_ndarray`](Array::compact_ndarray), which has more documentation, but with
-    /// explicit block shape, compression level, etc. See [`ArrayParams`] for the parameters and
+    /// explicit block shape, compression level, etc. See [`CompactParams`] for the parameters and
     /// their effects on performance.
     ///
     /// # Examples
     ///
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::Ix2;
     ///
     /// let data = ndarray::Array2::<f32>::zeros((512, 512));
     ///
     /// // Store with 64*64 blocks - good for tile-at-a-time access patterns.
-    /// let array = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[64, 64])?)?;
+    /// let array = Array::compact_ndarray_with(&data, CompactParams::new().block_shape(&[64, 64])?)?;
     ///
     /// // Read tiles of 128*128 by decompressing 2*2 blocks at a time.
     /// let context = array.read_ctx();
@@ -99,7 +98,7 @@ impl<T> CompactArray<T> {
     /// ```
     pub fn compact_ndarray_with<S, D>(
         array: &ndarray::ArrayBase<S, D>,
-        mut params: ArrayParams,
+        mut params: CompactParams,
     ) -> Result<Self>
     where
         D: ndarray::Dimension,
@@ -126,7 +125,7 @@ impl Array<Compact<TypeDyn>> {
     /// - `strides`: strides of the n-dimensional array, in bytes. Must be the same length as
     ///   `shape`.
     /// - `dtype`: element type of the buffer.
-    /// - `params`: block layout and codec parameters. See [`ArrayParams`] for details.
+    /// - `params`: block layout and codec parameters. See [`CompactParams`] for details.
     ///
     /// # Safety
     ///
@@ -142,12 +141,11 @@ impl Array<Compact<TypeDyn>> {
         shape: &[u64],
         strides: &[usize],
         dtype: Dtype,
-        mut params: ArrayParams,
+        mut params: CompactParams,
     ) -> Result<Self> {
         check_ndim(shape.len())?;
         params.tune(shape, &dtype)?;
-        let array =
-            unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype, params.clone())? };
+        let array = unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype)? };
         array.compact_with(params, &array.try_read_ctx()?)
     }
 }
@@ -181,11 +179,11 @@ impl<T> CompactArray<T> {
     where
         T: Dtyped,
     {
-        Self::compact_fn_with(shape, ArrayParams::default(), f)
+        Self::compact_fn_with(shape, CompactParams::default(), f)
     }
 
     /// Create a block-compressed array by evaluating a function `f` at each index, with explicit
-    /// [`ArrayParams`] for the block layout and codec.
+    /// [`CompactParams`] for the block layout and codec.
     ///
     /// `f` gets the index of each element and returns its value. Elements are visited in an
     /// arbitrary order, usually not row-major, so `f` should not rely on the order for correctness
@@ -197,8 +195,9 @@ impl<T> CompactArray<T> {
     /// access pattern (here, square 64x64 tiles):
     ///
     /// ```
-    /// # use jix::{Array, ArrayParams};
-    /// let params = ArrayParams::new().block_shape(&[64, 64])?;
+    /// # use jix::Array;
+    /// # use jix::storage::CompactParams;
+    /// let params = CompactParams::new().block_shape(&[64, 64])?;
     ///
     /// let a = Array::compact_fn_with(&[256, 256], params, |i| (i[0] as f32) * 0.5 + (i[1] as f32))?;
     /// assert_eq!(a.shape(), &[256, 256]);
@@ -206,7 +205,7 @@ impl<T> CompactArray<T> {
     /// ```
     pub fn compact_fn_with(
         shape: &[u64],
-        mut params: ArrayParams,
+        mut params: CompactParams,
         f: impl Fn(&[u64]) -> T,
     ) -> Result<Self>
     where
@@ -313,15 +312,13 @@ mod tests {
     use ndarray::array;
 
     use super::Array;
-
-    use crate::dtype::Dtyped;
-
-    use crate::storage::block::BlockSize;
-
-    use crate::util::arr_params;
-    use crate::{ArrayParams, StorageBase};
-
     use crate::array::tests::*;
+    use crate::dtype::Dtyped;
+    use crate::storage::block::BlockSize;
+    use crate::storage::params::{ReadParams, ReadSize};
+    use crate::storage::CompactParams;
+    use crate::util::arr_params;
+    use crate::StorageBase;
 
     // -----------------------------------------------------------------------
     // compact_ndarray - 1D
@@ -485,11 +482,12 @@ mod tests {
 
     /// Params whose small read size makes compaction read the array in many chunks, so `f` is
     /// called for regions that do not start at the origin.
-    fn multi_chunk_params(block_shape: &[BlockSize]) -> ArrayParams {
-        ArrayParams::new()
-            .block_shape(block_shape)
-            .unwrap()
-            .read_size((8, 64))
+    fn multi_chunk_params(block_shape: &[BlockSize]) -> CompactParams {
+        let mut params = CompactParams::new().block_shape(block_shape).unwrap();
+        params.read_params = Some(ReadParams {
+            read_size: ReadSize::new(8, 64),
+        });
+        params
     }
 
     #[test]

@@ -1,5 +1,7 @@
 """Tests for read_size kwarg accepting scalar int or (min, max) tuple."""
 
+import io
+
 import numpy as np
 import pytest
 
@@ -38,3 +40,28 @@ def test_read_size_rejects_bad_input(bad, exc):
     a = np.arange(64, dtype=np.int32).reshape(8, 8)
     with pytest.raises(exc):
         jix.compact(a, params={"read_size": bad})
+
+
+def test_read_size_on_asarray_and_read_array(tmp_path):
+    a = np.arange(64, dtype=np.int32).reshape(8, 8)
+    np.testing.assert_array_equal(jix.asarray(a, params={"read_size": 16}).numpy(), a)
+
+    path = tmp_path / "a.jix"
+    jix.write_array(jix.compact(a), path)
+    params = {"read_size": 16, "block_shape_fixed_dims": [True, False]}
+    np.testing.assert_array_equal(jix.read_array(path, params=params).numpy(), a)
+
+
+@pytest.mark.parametrize(
+    "fn,params",
+    [
+        (jix.asarray, {"codec": "zstd"}),
+        (jix.asarray, {"block_size": 1024}),
+        (lambda a, params: jix.write_array(a, io.BytesIO(), params=params), {"read_size": 16}),
+        (lambda a, params: jix.read_array(io.BytesIO(), params=params), {"codec": "zstd"}),
+    ],
+)
+def test_unused_params_are_rejected(fn, params):
+    a = np.arange(64, dtype=np.int32).reshape(8, 8)
+    with pytest.raises(TypeError, match="Unexpected array params"):
+        fn(a, params=params)

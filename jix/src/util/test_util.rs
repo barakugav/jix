@@ -5,18 +5,19 @@ use ndarray::IxDyn;
 
 use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
-use crate::storage::{ArrayStorageExt, Compact, Index};
+use crate::storage::params::{ReadParams, ReadSize};
+use crate::storage::{ArrayStorageExt, Compact, CompactParams, Index, PlainArrayMethods};
 use crate::util::{AlignedBytes, DimArray};
-use crate::{Array, ArrayParams, CompactArray, StorageBase, TypeDyn};
+use crate::{Array, CompactArray, StorageBase, TypeDyn};
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper
 // ---------------------------------------------------------------------------
 
-pub(crate) fn arr_params(block_shape: &[usize]) -> ArrayParams {
-    ArrayParams {
+pub(crate) fn arr_params(block_shape: &[usize]) -> CompactParams {
+    CompactParams {
         block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-        ..ArrayParams::default()
+        ..CompactParams::default()
     }
 }
 
@@ -533,7 +534,7 @@ pub(crate) fn block_shape_strategy(
     shape: &[usize],
 ) -> impl Strategy<Value = Vec<BlockSize>> + use<> {
     // Per-dim block size is clamped to [1, max(1, s)] to satisfy the invariant
-    // enforced by `ArrayParams::tune`: `1 <= b <= s.max(1)`.
+    // enforced by `CompactParams::tune`: `1 <= b <= s.max(1)`.
     shape
         .iter()
         .map(|&s| 1u32..=4u32.min(s.max(1) as u32))
@@ -598,12 +599,14 @@ where
         (Just(arr), block_shape, block_size, read_size, kind, layout)
     })
     .prop_map(|(arr, block_shape, block_size, read_size, kind, layout)| {
-        let mut params = ArrayParams::default().block_shape(&block_shape).unwrap();
+        let mut params = CompactParams::default().block_shape(&block_shape).unwrap();
         if let Some(block_size) = block_size {
             params = params.block_size(block_size);
         }
-        if let Some(read_size) = read_size {
-            params = params.read_size(read_size);
+        if let Some((min, max)) = read_size {
+            params.read_params = Some(ReadParams {
+                read_size: ReadSize::new(min, max),
+            });
         }
         let arr = collapse_zero_stride_dims(arr, &layout.zero_stride_dims);
         let array = build_test_array(&arr, &layout, kind, params);
@@ -673,12 +676,14 @@ where
         (Just(arr), block_shape, block_size, read_size)
     })
     .prop_map(|(arr, block_shape, block_size, read_size)| {
-        let mut params = ArrayParams::default().block_shape(&block_shape).unwrap();
+        let mut params = CompactParams::default().block_shape(&block_shape).unwrap();
         if let Some(block_size) = block_size {
             params = params.block_size(block_size);
         }
-        if let Some(read_size) = read_size {
-            params = params.read_size(read_size);
+        if let Some((min, max)) = read_size {
+            params.read_params = Some(ReadParams {
+                read_size: ReadSize::new(min, max),
+            });
         }
         let compact = Array::compact_ndarray_with(&arr, params).unwrap();
         (arr, compact)
@@ -856,7 +861,7 @@ fn build_test_array<T: Dtyped>(
     arr: &ndarray::ArrayD<T>,
     layout: &TestArrayLayout,
     kind: TestArrayKind,
-    params: ArrayParams,
+    params: CompactParams,
 ) -> TestArray<T> {
     let (buf, offset, strides) = build_strided_bytes(arr, layout);
     let shape: Vec<u64> = arr.shape().iter().map(|&s| s as u64).collect();
@@ -880,11 +885,14 @@ fn build_test_array<T: Dtyped>(
                     &shape,
                     &strides,
                     T::DTYPE,
-                    params,
                 )
             }
             .unwrap();
-            Array::from_storage(storage).into_any()
+            let mut array = Array::from_storage(storage);
+            if let Some(read_params) = params.read_params {
+                *array.read_params_mut() = read_params;
+            }
+            array.into_any()
         }
     };
     array.into_typed::<T>().unwrap()
@@ -986,7 +994,7 @@ fn assert_array_matches_dyn<T>(
         .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
     assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
     assert!(spec.block_size() > 0);
-    assert!(spec.read_size().min > 0);
+    assert!(spec.read_params().read_size.min > 0);
 
     let actual = actual.view().into_typed::<T>().unwrap();
     let full = actual.to_ndarray::<IxDyn>().unwrap();
@@ -1066,9 +1074,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
+
+    use super::*;
 
     /// Classifies a drawn layout into the buckets [`layout_strategy`] documents.
     fn classify(
@@ -1272,7 +1281,7 @@ mod tests {
             let expected = collapse_zero_stride_dims(arr.clone(), &zero_stride_dims);
             for kind in [TestArrayKind::Compact, TestArrayKind::Plain] {
                 eprintln!("case {name} / {kind:?}: strides {strides:?}, offset {ptr_offset}");
-                let za = build_test_array(&expected, &layout, kind, ArrayParams::default());
+                let za = build_test_array(&expected, &layout, kind, CompactParams::default());
                 assert_array_matches(&za, &expected);
             }
         }
@@ -1495,8 +1504,7 @@ fn every_storage_rejects_invalid_indices() {
         let a = Array::compact_ndarray(&data).unwrap();
         let plain = Array::plain_ndarray_view(data.view()).unwrap();
         let shape = shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
-        let scalar =
-            Array::from_storage(Scalar::new(1i32, shape.as_slice(), ArrayParams::new()).unwrap());
+        let scalar = Array::from_storage(Scalar::new(1i32, shape.as_slice()).unwrap());
 
         assert_read_rejects_invalid_index(a.storage());
         assert_read_rejects_invalid_index(plain.storage());

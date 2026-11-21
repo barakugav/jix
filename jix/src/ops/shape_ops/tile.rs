@@ -89,12 +89,14 @@ impl<S: StorageBase> Tile<S> {
         let mut read_shape_scale_weight =
             inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>();
         read_shape_scale_weight[dim] = ScaleWeight::FULL;
+        let encoder_params = inner_spec.encoder_params().cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             inner_spec.element_cost(),
             read_shape_scale_weight,
             inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
+            encoder_params,
         );
         spec.flags = spec
             .flags
@@ -350,9 +352,7 @@ impl<S: StorageBase> Array<S> {
 mod tests {
     use ndarray::{array, Ix2};
 
-    use crate::ReadContext;
-
-    use crate::{Array, CompactArray, IntoDimension, StorageBase, NDIM_MAX};
+    use crate::{Array, CompactArray, IntoDimension, ReadContext, StorageBase, NDIM_MAX};
 
     // -----------------------------------------------------------------------
     // Helpers

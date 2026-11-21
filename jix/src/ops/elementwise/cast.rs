@@ -324,12 +324,12 @@ pub(crate) mod traits {
 
     // Building blocks for SIMD cast_bulk
     mod simd {
-        use crate::util::{array_from_fn_inline, ArrayExt};
         use fearless_simd::{Simd, SimdNarrow, SimdWiden};
 
         pub(super) use crate::scalar::simd::{
             map_vectors_different_width, simd_level, SimdElementExt, SimdLevel,
         };
+        use crate::util::{array_from_fn_inline, ArrayExt};
 
         /// Widen `K` vectors to `2K` vectors of lanes twice as wide
         pub(super) trait WidenVectors<S> {
@@ -407,7 +407,10 @@ pub(crate) mod traits {
 /// // Zero -> false, non-zero -> true
 /// let zb = Array::compact_ndarray(&array![0i32, 1, -2, 0])?;
 /// let result = zb.cast::<bool8>().to_ndarray()?;
-/// assert_eq!(result, array![bool8::FALSE, bool8::TRUE, bool8::TRUE, bool8::FALSE]);
+/// assert_eq!(
+///     result,
+///     array![bool8::FALSE, bool8::TRUE, bool8::TRUE, bool8::FALSE]
+/// );
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct Cast<S, T>(crate::ops::elementwise::op1::Op1<S, CastKernel<T>>);
@@ -966,9 +969,10 @@ mod tests {
     /// `cast_bulk` of every pair of integer and float types, at every SIMD level, matches `cast`.
     #[test]
     fn cast_bulk_all_levels() {
+        use fearless_simd::Simd;
+
         use crate::scalar::Cast;
         use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
-        use fearless_simd::Simd;
 
         fn check<S: Simd>(simd: S) {
             macro_rules! cases {

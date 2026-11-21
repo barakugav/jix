@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::sync::Mutex;
 
 use jix_core::__private::ReadTiling;
-use jix_core::storage::{Codec, Filter, StridedBuf};
+use jix_core::storage::{Codec, CompactArrayMethods, CompactParams, Filter, StridedBuf};
 use jix_core::{Array, ArrayAny, ReadContext, StorageBase};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 
@@ -155,7 +155,7 @@ impl PyArray {
         Array::from_storage(self.arr.storage().clone())
     }
 
-    /// Borrows the array's cached decoder context, lazily creating it on first use.
+    /// Borrows the array's cached read context, lazily creating it on first use.
     ///
     /// The context is taken out of the cache for the lifetime of the returned guard and
     /// returned to it on drop, so successive reads of the same array reuse the same
@@ -732,8 +732,7 @@ impl PyArray {
         index: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyArray>> {
         let np_arr = self.numpy(py, index, None)?.0;
-        let params = resolve_array_params(py, None)?;
-        let array = plain_from_numpy(np_arr, self.arr.dtype().clone(), params)?;
+        let array = plain_from_numpy(np_arr, self.arr.dtype().clone(), None)?;
         Bound::new(
             py,
             PyArray::from_core_with_np_dtype(array, self.numpy_dtype(py)?.unbind()),
@@ -1679,12 +1678,13 @@ impl PyArray {
 ///         [`numpy.asarray`](https://numpy.org/doc/stable/reference/generated/numpy.asarray.html).
 ///     dtype: Optional dtype to cast the array to before compressing. Accepts anything
 ///         `numpy.dtype()` accepts. When omitted the input dtype is preserved.
-///     params: A dictionary of block layout and codec settings, with the optional keys below.
-///         Unset keys are inherited from the source storage if `array` is a jix array, and
-///         chosen automatically otherwise, except that setting any of `codec`,
-///         `compression_level` or `filters` resets the other two to their defaults. The block
-///         layout is critical for performance and should match your access pattern; the codec
-///         defaults suit most workloads.
+///     params: A dictionary of block layout, codec and read settings, with the optional keys
+///         below; other keys raise `TypeError`. Unset keys are inherited from `array` if it is a
+///         jix array (a lazy one takes the codec of the first compact array it reads), and chosen
+///         automatically otherwise, except that setting any of `codec`, `compression_level` or
+///         `filters` resets the other two to their defaults. The block layout is critical for
+///         performance and should match your access pattern; the codec defaults suit most
+///         workloads.
 ///
 ///         - `block_shape`: The block shape, as a list of integers (one per dimension), each
 ///             clamped to the array boundary. For example, if you always read row slices,
@@ -1694,13 +1694,15 @@ impl PyArray {
 ///             scaled when a downstream operation auto-computes a new block shape: `True` pins the
 ///             block length of that dimension (the default for every dimension when `block_shape`
 ///             is set); `False` lets it be freely resized (used when an op makes the original
-///             length irrelevant, e.g. a broadcast dimension). Requires `block_shape`.
+///             length irrelevant, e.g. a broadcast dimension). Requires `block_shape`, set or
+///             inherited from `array`.
 ///         - `block_size`: Target block size in bytes, used when auto-computing or scaling the
 ///             block shape for dimensions that are not fixed. Ignored when all dimensions are
 ///             fixed. Defaults to a size chosen automatically according to the CPU cache sizes.
-///         - `read_size`: The target byte range for a single preferred read region as
-///             `(min, max)`, given as either a scalar `s` (treated as `(s, s)`) or a 2-element
-///             `(min, max)` tuple of non-negative ints.
+///         - `read_size`: The target byte range for a single read region of the returned array
+///             and of the lazy arrays built on it, as `(min, max)`, given as either a scalar `s`
+///             (treated as `(s, s)`) or a 2-element `(min, max)` tuple of non-negative ints. It
+///             only affects reads, and is not stored by `write_array()`.
 ///
 ///             A read region is the rectangular slab the engine pulls and decompresses in one
 ///             pass when materializing a lazy pipeline or a sub-region read. Its shape is derived
@@ -1720,7 +1722,8 @@ impl PyArray {
 ///             wasted work (no alignment guarantee, but the waste shrinks as the region grows);
 ///             the counter-pressure is cache residency, which the `max` ceiling bounds.
 ///
-///             When unset, the range is chosen automatically according to the CPU cache sizes.
+///             When unset, the range is inherited from `array`, or chosen automatically according
+///             to the CPU cache sizes.
 ///         - `codec`: Compression algorithm applied to each block. The only accepted value, and
 ///             the default, is `"zstd"`.
 ///         - `compression_level`: Compression level passed to the codec.
@@ -1770,30 +1773,71 @@ pub fn compact<'py>(
     params: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Bound<'py, PyArray>> {
     let py = array.py();
-    let array = crate::asarray(array, dtype, params.clone())?;
-    let params = resolve_array_params(py, params)?;
+    let array = crate::asarray(array, dtype, None)?;
+    let params = resolve_array_params(
+        py,
+        params,
+        &[
+            "block_shape",
+            "block_shape_fixed_dims",
+            "block_size",
+            "read_size",
+            "codec",
+            "compression_level",
+            "filters",
+        ],
+    )?;
 
     let array = array.get();
-    let compacted = py.detach(|| {
+    let mut compacted = py.detach(|| {
         let context = array.read_ctx()?;
         array
             .arr
-            .compact_with(params, context.as_ref())
+            .compact_with(params.params, context.as_ref())
             .into_py_result()
     })?;
+    if let Some(read_size) = params.read_size {
+        compacted.read_params_mut().set_read_size(read_size);
+    }
 
     Bound::new(py, PyArray::from_core(compacted.into_any()))
 }
 
+/// The `params` dict of a Python function, parsed.
+pub(crate) struct ResolvedParams {
+    /// Every key but `read_size`.
+    pub(crate) params: CompactParams,
+    pub(crate) read_size: Option<(u64, u64)>,
+    pub(crate) block_shape_fixed_dims: Option<Vec<bool>>,
+}
+
+/// Parses a `params` dict, raising `TypeError` on a key that is not in `allowed`.
 pub(crate) fn resolve_array_params(
     py: Python<'_>,
     params: Option<Bound<'_, PyDict>>,
-) -> PyResult<jix_core::ArrayParams> {
+    allowed: &[&str],
+) -> PyResult<ResolvedParams> {
+    let mut resolved = ResolvedParams {
+        params: CompactParams::default(),
+        read_size: None,
+        block_shape_fixed_dims: None,
+    };
     let Some(kwargs) = params else {
-        return Ok(jix_core::ArrayParams::default());
+        return Ok(resolved);
     };
 
     let mut kwargs = kwargs.extract::<BTreeMap<String, Py<PyAny>>>()?;
+    let unexpected = kwargs
+        .keys()
+        .filter(|key| !allowed.contains(&key.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unexpected.is_empty() {
+        return Err(PyTypeError::new_err(format!(
+            "Unexpected array params kwargs: {}",
+            unexpected.join(", ")
+        )));
+    }
     macro_rules! extract_arg {
         ($key:expr, $ty:ty) => {
             kwargs
@@ -1820,22 +1864,17 @@ pub(crate) fn resolve_array_params(
     let codec = extract_arg!("codec", String)?;
     let compression_level = extract_arg!("compression_level", i32)?;
     let filters = extract_arg!("filters", Vec<String>)?;
-    if !kwargs.is_empty() {
-        return Err(PyTypeError::new_err(format!(
-            "Unexpected array params kwargs: {}",
-            kwargs.into_keys().collect::<Vec<_>>().join(", ")
-        )));
-    }
 
-    let mut params = jix_core::ArrayParams::default();
+    let mut params = CompactParams::default();
     if let Some(block_shape) = block_shape {
         params = params.block_shape(&block_shape).into_py_result()?;
     }
-    if let Some(block_shape_fixed_dims) = block_shape_fixed_dims {
+    if let Some(block_shape_fixed_dims) = &block_shape_fixed_dims {
         params = params
-            .block_shape_fixed_dims(&block_shape_fixed_dims)
+            .block_shape_fixed_dims(block_shape_fixed_dims)
             .into_py_result()?;
     }
+    resolved.block_shape_fixed_dims = block_shape_fixed_dims;
     if let Some(block_size) = block_size {
         params = params.block_size(block_size);
     }
@@ -1847,12 +1886,11 @@ pub(crate) fn resolve_array_params(
             )));
         }
         let read_size = read_size.into_dim_array()?;
-        let pair = match *read_size.as_slice() {
+        resolved.read_size = Some(match *read_size.as_slice() {
             [read_size] => (read_size, read_size),
             [min, max] => (min, max),
             _ => unreachable!(),
-        };
-        params = params.read_size(pair);
+        });
     }
 
     if let Some(codec) = codec {
@@ -1880,7 +1918,8 @@ pub(crate) fn resolve_array_params(
         params = params.filters(&filters).into_py_result()?;
     }
 
-    Ok(params)
+    resolved.params = params;
+    Ok(resolved)
 }
 
 fn binary_op_builtin(

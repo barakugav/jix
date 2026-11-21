@@ -129,12 +129,14 @@ where
             .map(|&d| if d as usize >= dim { d + 1 } else { d })
             .collect::<DimArray<_>>();
         read_layout_order_insert_dont_care_dim(&mut read_layout_order, dim);
+        let encoder_params = specs.iter().find_map(|sp| sp.encoder_params()).cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
         spec.flags = spec.flags.with_read_tiling(ReadTiling::pushed_pieces(
             specs.iter().map(|sp| sp.read_tiling()),
@@ -304,7 +306,6 @@ mod tests {
 
     use crate::array::Array;
     use crate::ops::stack;
-
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::{CompactArray, NDIM_MAX};
 

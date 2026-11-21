@@ -1,10 +1,11 @@
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::sync::Arc;
 
-use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
+use crate::codec::{Decoder, DecoderCodecConfig};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
+use crate::storage::params::{ReadParams, ReadSize};
 use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf};
 use crate::util::buf_pool::{BufferPool, PoolBuf};
 use crate::util::{DimArray, SliceExt};
@@ -19,16 +20,16 @@ use crate::DimDyn;
 ///
 /// # Obtaining a `ReadContext`
 ///
-/// The preferred way is [`Array::read_ctx()`](crate::Array::read_ctx), which picks up the decoder
-/// parameters stored alongside the array data:
+/// The preferred way is [`Array::read_ctx()`](crate::Array::read_ctx), which picks up the read
+/// parameters of the array, such as its read size (see [`ReadParams`]):
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 ///
-/// // read_ctx() inherits the decoder config from the array.
+/// // read_ctx() takes the read size of the array.
 /// let ctx = za.read_ctx();
 /// let out = za.to_ndarray_sub(&[1..3], &ctx)?;
 /// assert_eq!(out, array![2, 3]);
@@ -37,8 +38,7 @@ use crate::DimDyn;
 ///
 /// `ReadContext::default()` creates a context independent of any array:
 /// ```
-/// use jix::ReadContext;
-/// use jix::Array;
+/// use jix::{Array, ReadContext};
 /// use ndarray::array;
 ///
 /// let za = Array::compact_ndarray(&array![42i32, 17, 6, 99, 51])?;
@@ -58,14 +58,16 @@ pub struct ReadContext {
     /// Reusable cache maps for cache scopes.
     #[allow(clippy::vec_box)]
     temp_cache_maps: RefCell<Vec<Box<CacheMap>>>,
+
+    params: ReadParams,
 }
 
 impl ReadContext {
-    /// Creates a new `ReadContext` configured with the given decoder parameters.
+    /// Creates a new `ReadContext` configured with the given read parameters.
     ///
     /// Prefer [`Array::read_ctx()`](crate::Array::read_ctx) over calling this directly - it
-    /// automatically uses the decoder parameters that match the array's stored codec configuration.
-    pub(crate) fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
+    /// uses the read parameters of the array.
+    pub(crate) fn new(params: ReadParams) -> Result<Self> {
         Ok(Self {
             decompressor: UnsafeCell::new(None),
             buffer_pool: BufferPool::new(),
@@ -73,7 +75,30 @@ impl ReadContext {
             read_cache: RefCell::new(None),
             is_cache_enabled: Cell::new(false),
             temp_cache_maps: RefCell::new(Vec::new()),
+
+            params,
         })
+    }
+
+    /// The read parameters of the reads using this context, e.g. the read size.
+    ///
+    /// [`Array::read_ctx()`](crate::Array::read_ctx) starts from the array's
+    /// [`read_params`](crate::Array::read_params), [`ReadContext::default()`] from the default
+    /// ones.
+    #[inline]
+    pub fn read_params(&self) -> &ReadParams {
+        &self.params
+    }
+
+    /// Mutable access to the read parameters, see [`read_params`](Self::read_params).
+    #[inline]
+    pub fn read_params_mut(&mut self) -> &mut ReadParams {
+        &mut self.params
+    }
+
+    #[inline]
+    pub(crate) fn read_size(&self) -> ReadSize {
+        self.params.read_size
     }
 
     #[inline]
@@ -103,7 +128,7 @@ const _: fn() = || {
 
 impl Default for ReadContext {
     fn default() -> Self {
-        Self::new(&DecoderParams::default()).unwrap()
+        Self::new(ReadParams::default()).unwrap()
     }
 }
 
@@ -312,5 +337,26 @@ pub(crate) mod tests {
             Some(cache) => cache.map.keys().count(),
             None => 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod read_size_tests {
+    use crate::storage::{PlainArrayMethods, ReadParams};
+    use crate::{Array, ReadContext};
+
+    #[test]
+    fn read_ctx_starts_from_the_array_read_size_and_can_override_it() {
+        let mut a = Array::plain_ndarray(ndarray::Array1::<i32>::zeros(100)).unwrap();
+        a.read_params_mut().set_read_size((64, 128));
+        assert_eq!(a.read_params().read_size(), (64, 128));
+
+        let mut context = a.read_ctx();
+        assert_eq!(context.read_params(), a.read_params());
+        context.read_params_mut().set_read_size((16, 32));
+        assert_eq!(context.read_params().read_size(), (16, 32));
+        assert_eq!(a.read_params().read_size(), (64, 128));
+
+        assert_eq!(ReadContext::default().read_params(), &ReadParams::default());
     }
 }

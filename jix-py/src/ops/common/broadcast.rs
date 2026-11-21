@@ -61,13 +61,11 @@ fn broadcast_operand(operand: Operand, shape: &[u64]) -> PyResult<Operand> {
             value,
             precision,
             shape: _,
-            params,
         } => {
             return Ok(Operand::Scalar {
                 value,
                 precision,
                 shape: shape.try_into().unwrap(),
-                params,
             });
         }
     };

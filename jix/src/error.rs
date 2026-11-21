@@ -347,14 +347,17 @@ pub(crate) enum ArithmeticErrorKind {
 /// the status into `Ok` or an error with [`ErrorKind::Arithmetic`].
 ///
 /// ```
-/// use jix::scalar::Div;
 /// use jix::error::{ArithmeticStatus, ErrorKind};
+/// use jix::scalar::Div;
 ///
 /// let mut status = ArithmeticStatus::default();
 /// assert_eq!(7i32.div(2, &mut status), 3);
 /// assert!(status.into_result().is_ok());
 /// assert_eq!(7i32.div(0, &mut status), 0);
-/// assert_eq!(status.into_result().unwrap_err().kind(), ErrorKind::Arithmetic);
+/// assert_eq!(
+///     status.into_result().unwrap_err().kind(),
+///     ErrorKind::Arithmetic
+/// );
 /// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ArithmeticStatus(u8);

@@ -270,7 +270,6 @@ pub(crate) fn unsupported_dtype_error(name: &str, inputs: &[Operand]) -> PyErr {
                 value,
                 shape: _,
                 precision,
-                params: _,
             } => Cow::Borrowed(match (value, precision) {
                 (Scalar::Bool(_), _) => "bool",
                 (Scalar::UInt(_), None) => "uint",

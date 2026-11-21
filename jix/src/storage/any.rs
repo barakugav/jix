@@ -5,8 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{ArraySpec, ArrayStorageInfo, CompactView, Index, OutBuf};
-use crate::ReadContext;
-use crate::{DimDyn, Dimension, StorageBase, TypeDyn, NDIM_MAX};
+use crate::{DimDyn, Dimension, ReadContext, StorageBase, TypeDyn, NDIM_MAX};
 
 /// A type-erased storage: any storage behind an `Arc`, with reads forwarded to it dynamically.
 ///
@@ -27,7 +26,7 @@ struct AnyMeta {
     spec: ArraySpecOwned,
 }
 impl StorageAny {
-    pub(crate) fn new(storage: impl StorageBase + Send + Sync + 'static) -> Self {
+    pub(crate) fn new(storage: impl StorageBase + std::any::Any + Send + Sync + 'static) -> Self {
         let meta = AnyMeta::new(&storage);
         Self::from_inner_box(Box::new(AnyInnerImpl { storage, meta }))
     }

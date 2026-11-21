@@ -154,16 +154,14 @@ impl<S: StorageBase> Array<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use crate::storage::ArrayStorageExt;
     use ndarray::Ix1;
 
     use super::Transmute;
     use crate::dtype::Dtyped;
     use crate::storage::params::ReadTiling;
-    use crate::storage::{Index, StridedBuf};
+    use crate::storage::{ArrayStorageExt, Index, StridedBuf};
     use crate::util::assert_array_matches;
-    use crate::ReadContext;
-    use crate::{Array, StorageBase};
+    use crate::{Array, ReadContext, StorageBase};
 
     /// An 8-byte struct dtype, to check that a transmute handles a composite element type and not
     /// just scalars.

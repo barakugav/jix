@@ -112,12 +112,14 @@ where
                 read_layout_order_insert_dont_care_dim(&mut read_layout_order, d);
             }
         }
+        let encoder_params = orig_spec.encoder_params().cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             orig_spec.element_cost(),
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
         spec.flags = spec
             .flags
@@ -249,8 +251,7 @@ mod tests {
 
     use crate::ops::InsertDim;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::ReadContext;
-    use crate::{Array, CompactArray, NDIM_MAX};
+    use crate::{Array, CompactArray, ReadContext, NDIM_MAX};
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();

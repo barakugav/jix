@@ -1,6 +1,7 @@
 use std::mem::MaybeUninit;
 use std::ops::Range;
 
+use super::Array;
 use crate::error::{
     check_alloc_size, check_get_buffer_size, check_ndim, check_ranges, check_region_size, ensure,
     Result,
@@ -14,10 +15,7 @@ use crate::util::iter::NdIter;
 use crate::util::{
     advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr,
 };
-use crate::{Dim, DimDyn, Dimension, PlainArray, StorageBase, NDIM_MAX};
-use crate::{ReadContext, Storage};
-
-use super::Array;
+use crate::{Dim, DimDyn, Dimension, PlainArray, ReadContext, Storage, StorageBase, NDIM_MAX};
 
 impl<S: StorageBase> Array<S> {
     /// Read the entire array into a new heap-allocated [`ndarray::Array`].
@@ -104,8 +102,8 @@ impl<S: StorageBase> Array<S> {
     ///   their elements outside `index` are discarded.
     ///
     /// To keep sub-region reads cheap, choose a `block_shape` (via
-    /// [`ArrayParams::block_shape`](crate::ArrayParams::block_shape) when creating the array)
-    /// that matches your access pattern.
+    /// [`CompactParams::block_shape`](crate::storage::CompactParams::block_shape) when creating
+    /// the array) that matches your access pattern.
     ///
     /// For lazy views (e.g. after `reshape`, `permute_dims`, `broadcast`, or element-wise
     /// ops), the index range is propagated inward through the chain and only the
@@ -117,8 +115,8 @@ impl<S: StorageBase> Array<S> {
     ///
     /// `context` carries the decoder instance and scratch buffers. Creating these for every read
     /// is expensive, especially for small windows, so create one context with
-    /// [`read_ctx`](Array::read_ctx), which uses the array's decoder configuration, and pass it to
-    /// every call. `ReadContext::default()` works too, with default decoder parameters.
+    /// [`read_ctx`](Array::read_ctx), which uses the array's read parameters, and pass it to
+    /// every call. `ReadContext::default()` works too, with default read parameters.
     ///
     /// # Errors
     ///
@@ -133,12 +131,13 @@ impl<S: StorageBase> Array<S> {
     /// Stream a large array tile by tile, reusing a single `ReadContext`:
     ///
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
+    /// use jix::storage::CompactParams;
     /// use ndarray::Ix2;
     ///
     /// // 256x256 f32 array stored as 32x32 blocks.
     /// let data = ndarray::Array2::<f32>::from_shape_fn((256, 256), |(i, j)| (i + j) as f32);
-    /// let a = Array::compact_ndarray_with(&data, ArrayParams::new().block_shape(&[32, 32])?)?;
+    /// let a = Array::compact_ndarray_with(&data, CompactParams::new().block_shape(&[32, 32])?)?;
     ///
     /// // Walk the array as 64x64 tiles. 32 divides 64, so each call decompresses exactly
     /// // 2*2 = 4 blocks - no boundary waste. The same ReadContext is reused across all
@@ -315,7 +314,7 @@ impl<S: StorageBase> Array<S> {
     /// # Arguments
     ///
     /// - `index` - one half-open range (`start..end`) per dimension, within the array bounds.
-    /// - `context` - read context carrying reusable buffers and decoder state.
+    /// - `context` - read context carrying reusable buffers, decoder state and the read size.
     ///
     /// # Alignment
     ///
@@ -389,7 +388,7 @@ impl<S: StorageBase> Array<S> {
     /// - `index` - one half-open range (`start..end`) per dimension, within the array bounds.
     /// - `out` - the destination: writable, with one stride per array dimension, and holding the
     ///   region at its strides without overlap. No alignment is required of it.
-    /// - `context` - read context carrying reusable buffers and decoder state.
+    /// - `context` - read context carrying reusable buffers, decoder state and the read size.
     ///
     /// # Errors
     ///
@@ -459,7 +458,7 @@ impl<S: StorageBase> Array<S> {
         let single_read = spec.flags().read_tiling() <= ReadTiling::SinglePass || {
             let dtype = self.dtype();
             let nitems = index.size().iter().product::<usize>();
-            let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
+            let (min_nitems, _) = context.read_size().nitems(dtype.itemsize());
             nitems as u64 <= min_nitems
         };
         let _cache_scope = context.cache_scope(&spec.dynamic().arrays_to_cache);
@@ -523,7 +522,11 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     let out = out.materialize(context, out_shape, dtype, spec.read_layout_order());
     debug_assert!(!out_shape.contains(&0));
     let max_shape = D::vec(ndim, |dim| out_shape[dim] as u64);
-    let read_shape = spec.read_shape_heuristic::<D>(max_shape.as_ref(), shape, dtype.itemsize());
+    let read_shape = spec.read_shape_heuristic::<D>(
+        max_shape.as_ref(),
+        shape,
+        context.read_size().nitems(dtype.itemsize()),
+    );
     // Block-space begin/end for NdIter.
     let block_begin = D::vec(ndim, |dim| index.start()[dim] / read_shape[dim]);
     let block_end = D::vec(ndim, |dim| {
@@ -686,14 +689,9 @@ mod tests {
     use ndarray::{array, Ix1, Ix2, Ix3, IxDyn};
 
     use super::Array;
-
-    use crate::error::ErrorKind;
-
-    use crate::storage::StridedBuf;
-
-    use crate::ArrayParams;
-
     use crate::array::tests::*;
+    use crate::error::ErrorKind;
+    use crate::storage::{CompactArrayMethods, CompactParams, StridedBuf};
 
     // -----------------------------------------------------------------------
     // to_ndarray - 1D
@@ -943,11 +941,9 @@ mod tests {
         let src = ndarray::Array2::from_shape_fn((12, 10), |(r, c)| (r * 100 + c) as i32);
         // A tiny read-size budget forces the read to be cut into several pieces, so the test
         // exercises the block-splitting path rather than a single forwarded read.
-        let params = ArrayParams::new()
-            .block_shape(&[4, 5])
-            .unwrap()
-            .read_size((16, 64));
-        let a = Array::compact_ndarray_with(&src, params).unwrap();
+        let params = CompactParams::new().block_shape(&[4, 5]).unwrap();
+        let mut a = Array::compact_ndarray_with(&src, params).unwrap();
+        a.read_params_mut().set_read_size((16, 64));
         let ctx = a.read_ctx();
 
         let index = [2..11, 1..9];
@@ -1072,11 +1068,10 @@ mod tests {
     #[test]
     fn to_buf_strided_rejects_a_bad_destination_of_a_split_read() {
         // A tiny read-size budget cuts the read into pieces, each read into a view of `out`.
-        let params = ArrayParams::new()
-            .block_shape(&[4, 4])
-            .unwrap()
-            .read_size((16, 64));
-        let a = Array::compact_ndarray_with(&ndarray::Array2::<i32>::ones((8, 8)), params).unwrap();
+        let params = CompactParams::new().block_shape(&[4, 4]).unwrap();
+        let mut a =
+            Array::compact_ndarray_with(&ndarray::Array2::<i32>::ones((8, 8)), params).unwrap();
+        a.read_params_mut().set_read_size((16, 64));
         let ctx = a.read_ctx();
         let itemsize = size_of::<i32>();
         // A 4x8 destination for an 8x8 read: large enough for the first pieces only. It is

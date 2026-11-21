@@ -20,7 +20,10 @@ use crate::ops::prelude::*;
 ///
 /// #[derive(Copy, Clone, jix::dtype::Dtyped)]
 /// #[repr(C)]
-/// struct Point { x: i32, y: i32 }
+/// struct Point {
+///     x: i32,
+///     y: i32,
+/// }
 ///
 /// let pts = array![
 ///     Point { x: 1, y: 10 },
@@ -199,11 +202,10 @@ impl<S: StorageBase> Array<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use crate::storage::ArrayStorageExt;
     use ndarray::array;
 
     use crate::dtype::Dtyped;
-    use crate::storage::Index;
+    use crate::storage::{ArrayStorageExt, Index};
     use crate::{Array, TypeDyn};
 
     #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
@@ -319,7 +321,7 @@ mod tests {
     fn zero_itemsize_field_is_rejected() {
         // A struct may legally carry a zero-sized field, and `SubDtype` hands that field's dtype back
         // verbatim. The resulting view reuses the parent's spec, so it never passes through
-        // `ArrayParams::tune` - the check has to live in `SubDtype::new`.
+        // `CompactParams::tune` - the check has to live in `SubDtype::new`.
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
         #[dtyped(crate = "crate")]
         #[repr(C)]

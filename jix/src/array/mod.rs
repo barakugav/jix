@@ -1,8 +1,7 @@
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::StorageAny;
-use crate::ReadContext;
-use crate::{ArrayAny, ElementType, StorageBase};
+use crate::storage::{ReadParams, StorageAny};
+use crate::{ArrayAny, ElementType, ReadContext, StorageBase};
 
 mod construct;
 
@@ -139,8 +138,9 @@ mod compact;
 /// output indices translate to positions in the underlying blocks. When the new layout crosses
 /// block boundaries that the original respected, a single read may decompress many more blocks
 /// than necessary. To avoid this, materialize with [`compact`](Array::compact) (automatic block
-/// shape) or [`compact_with`](Array::compact_with) (explicit [`ArrayParams`](crate::ArrayParams),
-/// e.g. a block shape matching the expected access pattern) after a shape change.
+/// shape) or [`compact_with`](Array::compact_with) (explicit
+/// [`CompactParams`](crate::storage::CompactParams), e.g. a block shape matching the expected
+/// access pattern) after a shape change.
 ///
 /// # Element type tracking
 ///
@@ -189,9 +189,9 @@ impl<S: StorageBase> Array<S> {
     /// See [`Dtype`] for details on the supported dtypes and their properties.
     ///
     /// ```rust
+    /// use jix::dtype::Dtyped;
     /// use jix::scalar::bool8;
     /// use jix::Array;
-    /// use jix::dtype::Dtyped;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
@@ -203,7 +203,10 @@ impl<S: StorageBase> Array<S> {
     ///
     /// #[derive(Copy, Clone, Dtyped)]
     /// #[repr(C)]
-    /// struct Point { x: f32, y: f32 }
+    /// struct Point {
+    ///     x: f32,
+    ///     y: f32,
+    /// }
     /// let points = array![Point { x: 1.0, y: 2.0 }];
     /// let c = Array::plain_ndarray_ref(&points)?;
     /// assert_eq!(c.dtype(), &Point::DTYPE);
@@ -216,7 +219,7 @@ impl<S: StorageBase> Array<S> {
             .unwrap_or_else(|| self.storage.dtype())
     }
 
-    /// Create a [`ReadContext`] with the decoder parameters of this array.
+    /// Create a [`ReadContext`] with the read parameters of this array, e.g. its read size.
     ///
     /// A context holds reusable buffers and a decompressor instance; reuse one across repeated
     /// reads to share the allocation and setup cost. [`to_ndarray`](Array::to_ndarray) builds one
@@ -224,7 +227,7 @@ impl<S: StorageBase> Array<S> {
     /// and [`to_buf_strided`](Array::to_buf_strided) take one.
     ///
     /// Any context, e.g. `ReadContext::default()`, gives correct results; this one uses the
-    /// array's own decoder configuration.
+    /// array's own read parameters.
     ///
     /// # Panics
     ///
@@ -249,7 +252,19 @@ impl<S: StorageBase> Array<S> {
         self.try_read_ctx().expect("failed to create read context")
     }
     fn try_read_ctx(&self) -> Result<ReadContext> {
-        ReadContext::new(self.storage.spec().decoder_params())
+        ReadContext::new(self.read_params().clone())
+    }
+
+    /// The read parameters of this array, e.g. its read size.
+    ///
+    /// [`read_ctx`](Array::read_ctx) starts from them, and [`compact`](Array::compact) keeps
+    /// them. A lazy view takes them from its input (a view over several arrays takes them from one
+    /// of them, usually the first). Change them on a compact or plain array with
+    /// `read_params_mut`, e.g.
+    /// [`CompactArrayMethods::read_params_mut`](crate::storage::CompactArrayMethods::read_params_mut).
+    #[inline]
+    pub fn read_params(&self) -> &ReadParams {
+        self.storage.spec().read_params()
     }
 
     /// Borrow this array as an `Array<&S>`, without cloning the storage.
@@ -280,7 +295,7 @@ impl<S: StorageBase> Array<S> {
     /// resulting array can be stored alongside arrays of other concrete storage types.
     pub fn into_any(self) -> ArrayAny
     where
-        S: StorageBase + Send + Sync + 'static,
+        S: StorageBase + std::any::Any + Send + Sync + 'static,
     {
         Array::from_storage(StorageAny::new(self.into_storage()))
     }
@@ -340,8 +355,8 @@ impl<S: StorageBase> Array<S> {
                 .all(|(&b, &s)| b as u64 <= s.max(1)));
             debug_assert!(spec.block_size() > 0);
             debug_assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
-            debug_assert!(spec.read_size().min > 0);
-            debug_assert!(spec.read_size().min <= spec.read_size().max);
+            let read_size = spec.read_params().read_size;
+            debug_assert!(0 < read_size.min && read_size.min <= read_size.max);
             debug_assert!(
                 spec.read_shape_scale_order().len() == ndim
                     && (0..ndim).all(|d| spec.read_shape_scale_order().contains(&(d as DimIdx)))
@@ -382,12 +397,10 @@ pub(crate) mod tests {
     use super::Array;
     use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
-    use crate::storage::{ArrayBlockTableStorageBase, Compact};
-
     use crate::storage::block::{BlockSize, BlockTable};
-
+    use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactParams};
     use crate::util::{arr_params, cast_slice, DimArray};
-    use crate::{ArrayParams, CompactArray, Dimension, IntoDimension};
+    use crate::{CompactArray, Dimension, IntoDimension};
 
     // -----------------------------------------------------------------------
     // compact_ndarray roundtrip helper
@@ -435,7 +448,7 @@ pub(crate) mod tests {
             .iter()
             .map(|&x| x as BlockSize)
             .collect::<DimArray<_>>();
-        let params = ArrayParams::default().block_shape(&block_shape).unwrap();
+        let params = CompactParams::default().block_shape(&block_shape).unwrap();
         Array::from_storage(Compact(
             ArrayBlockTableStorageBase::new(
                 make_block_table(blocks),

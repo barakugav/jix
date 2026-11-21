@@ -227,12 +227,14 @@ where
                 .map(|spec| (spec.block_shape().as_slice(), spec.block_shape_fixed_dims())),
         );
         let cache_id = ArrayCacheId::new();
+        let encoder_params = specs.iter().find_map(|sp| sp.encoder_params()).cloned();
         let mut spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_weight,
             read_layout_order,
+            encoder_params,
         );
         spec.flags = spec
             .flags
@@ -400,22 +402,22 @@ impl<S: StorageBase> Array<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::scalar::bool8;
     use ndarray::Ix1;
 
     use crate::ops::elementwise::op2::tests::test_op2;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::scalar::{Maximum, Minimum};
+    use crate::scalar::{bool8, Maximum, Minimum};
 
     /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
     /// their scalar semantics, on every SIMD level of the CPU, over edge cases (NaN included).
     #[test]
     fn simd_bodies_all_levels() {
+        use fearless_simd::Simd;
+
         use super::{MaximumKernel, MinimumKernel};
         use crate::ops::elementwise::op2::Op2Kernel;
         use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
-        use fearless_simd::Simd;
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {

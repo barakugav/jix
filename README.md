@@ -25,6 +25,12 @@ use ndarray::array;
 // Compress a 2-D f32 ndarray into block-compressed storage.
 let a = Array::compact_ndarray(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
 
+// Read a single element and a sub-region. Only the blocks they touch are
+// decompressed, not the whole array, so random access reads are relatively fast.
+let ctx = a.read_ctx();
+assert_eq!(a.get(&[1, 2], &ctx)?, 6.0);
+assert_eq!(a.to_ndarray_sub(&[0..2, 1..3], &ctx)?, array![[2.0, 3.0], [5.0, 6.0]]);
+
 // Build a lazy pipeline - no data is read yet.
 // The full chain is a single static type:
 //     Array<Map<Sum<Exp<Compact>>>>
@@ -51,9 +57,11 @@ result = (a - a.mean(dim=0)) / a.std(dim=1)
 # Materialize: decompress, transform, and write to disk in one pass.
 result.write_to("normalized.jix")
 
-# Load and read a sub-region; only the touched blocks are decompressed.
+# Load and read a single element and a sub-region. Only the blocks they touch are
+# decompressed, not the whole array, so random access reads are relatively fast.
 b = jix.read_array("normalized.jix")
-row = b[42]  # only the blocks covering row 42 are decompressed
+x = b[42, 7]
+rows = b[42:45, 0:10]
 ```
 
 ## When should I use this library?

@@ -144,9 +144,8 @@ where
 mod tests {
     use super::*;
     use crate::dimension::DimDyn;
-    use crate::util::calc_block_end;
     use crate::util::iter::NdIter;
-    use crate::util::SliceExt;
+    use crate::util::{calc_block_end, SliceExt};
 
     fn make_iter(
         begin: &[u64],
