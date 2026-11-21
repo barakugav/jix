@@ -34,6 +34,12 @@
 //! let decompressed = a.to_ndarray::<Ix2>()?;
 //! assert_eq!(decompressed[[0, 0]], 1.5);
 //!
+//! // Read a single element and a sub-region. Only the blocks they touch are
+//! // decompressed, not the whole array, so random access reads are relatively fast.
+//! let ctx = a.read_ctx();
+//! assert_eq!(a.get(&[1, 1], &ctx)?, 6.17);
+//! assert_eq!(a.to_ndarray_sub(&[0..2, 1..3], &ctx)?, array![[2.0, -9.0], [6.17, 0.0]]);
+//!
 //! // Build a lazy operation pipeline - no data is read yet.
 //! let ones = Array::compact_ndarray(&ndarray::Array2::<f32>::ones((2, 3)))?;
 //! let result = a                  // Array<Compact>
