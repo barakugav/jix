@@ -124,7 +124,7 @@ impl<S: StorageBase> StorageBase for Broadcast<S> {
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
@@ -168,6 +168,7 @@ impl<S: StorageBase> StorageBase for Broadcast<S> {
                 let (src, src_strides) = inner.data();
                 let strides = broadcast_strides(src_strides);
                 unsafe { out.copy_from(src, strides.as_ref(), index.size(), self.dtype()) };
+                context.return_buf_strided(inner);
             }
         }
         Ok(())

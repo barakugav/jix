@@ -80,7 +80,7 @@ where
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
-        _context: &'a ReadContext,
+        _context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
@@ -119,7 +119,7 @@ where
     fn read_as_elementwise_pipeline<'a, T2>(
         &'a self,
         index: &Index<'_>,
-        _context: &'a ReadContext,
+        _context: &ReadContext,
     ) -> Result<impl ElementwisePipeline<T2> + use<'a, T2, T>>
     where
         T2: Dtyped,

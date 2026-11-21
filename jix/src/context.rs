@@ -6,8 +6,8 @@ use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
 use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf};
-use crate::util::buf_pool::{BufferPool, PoolBuf, PoolBufShared};
-use crate::util::{DimArray, RawAlignedBytes, SliceExt};
+use crate::util::buf_pool::{BufferPool, PoolBuf};
+use crate::util::{DimArray, SliceExt};
 use crate::DimDyn;
 
 /// A context with reusable buffers and a long-lived decoder instance.
@@ -47,8 +47,7 @@ use crate::DimDyn;
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct ReadContext {
-    #[cfg(not(miri))]
-    pub(crate) decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
+    pub(crate) decompressor: UnsafeCell<Option<zstd::bulk::Decompressor<'static>>>,
     pub(crate) buffer_pool: BufferPool,
 
     /// The read cache of the current cache scope, `None` if the scope has no arrays to cache.
@@ -68,8 +67,7 @@ impl ReadContext {
     /// automatically uses the decoder parameters that match the array's stored codec configuration.
     pub(crate) fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
         Ok(Self {
-            #[cfg(not(miri))]
-            decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
+            decompressor: UnsafeCell::new(None),
             buffer_pool: BufferPool::new(),
 
             read_cache: RefCell::new(None),
@@ -84,8 +82,18 @@ impl ReadContext {
     }
 
     #[inline]
-    pub(crate) fn allocate_buf(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
-        self.buffer_pool.get(size, alignment)
+    pub(crate) fn allocate_buf(&self, size: usize, alignment: Alignment) -> PoolBuf {
+        self.buffer_pool.allocate(size, alignment)
+    }
+
+    #[inline]
+    pub(crate) fn return_buf(&self, buf: PoolBuf) {
+        self.buffer_pool.return_buf(buf);
+    }
+
+    #[inline]
+    pub(crate) fn return_buf_strided(&self, buf: StridedBuf<'_>) {
+        buf.return_to(&self.buffer_pool);
     }
 }
 const _: fn() = || {
@@ -108,7 +116,7 @@ struct CacheEntry {
     start: DimArray<u64>,
     size: DimArray<usize>,
 
-    data: Arc<RawAlignedBytes>,
+    data: Arc<PoolBuf>,
     offset: usize,
     strides: DimArray<usize>,
 }
@@ -144,7 +152,7 @@ impl ReadContext {
     /// if `id` is one of the arrays to cache of the current cache scope.
     #[inline(always)]
     pub(crate) fn read_cached<'a>(
-        &'a self,
+        &self,
         id: ArrayCacheId,
         index: &Index<'_>,
         dtype: &Dtype,
@@ -159,7 +167,7 @@ impl ReadContext {
 
     #[inline(never)]
     fn read_cached_impl<'a>(
-        &'a self,
+        &self,
         id: ArrayCacheId,
         index: &Index<'_>,
         dtype: &Dtype,
@@ -178,13 +186,13 @@ impl ReadContext {
         // Search for a matching cache entry for this array ID and index
         if let Some(entry) = cache.map.get(id) {
             if entry.start.as_slice() == index.start() && entry.size.as_slice() == index.size() {
-                let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
+                let buf = entry.data.clone();
                 let buf = unsafe {
                     StridedBuf::from_shared(buf, entry.strides.clone()).with_offset(entry.offset)
                 };
                 drop(cache_guard);
                 // return the cached buffer itself if this is a pull read, or a copy in push mode.
-                return out.set(buf, index, dtype);
+                return out.set(buf, index, dtype, self);
             } else {
                 // Evict before reading, so the read can reuse the buffer.
                 if out.is_pull()
@@ -212,7 +220,7 @@ impl ReadContext {
                 return Ok(());
             }
         };
-        let buf = PoolBufShared::new(data.clone(), &self.buffer_pool);
+        let buf = data.clone();
         write_out_buf_slot(slot, unsafe {
             StridedBuf::from_shared(buf, strides.clone()).with_offset(offset)
         });

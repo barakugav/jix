@@ -239,7 +239,7 @@ where
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
@@ -286,7 +286,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-fn read_data_dispatch<'a>(
+fn read_data_dispatch(
     inner_array: &dyn StorageBase,
     outer_shape: &[u64],
     output_dtype: &Dtype,
@@ -298,8 +298,8 @@ fn read_data_dispatch<'a>(
     finalize_state_fn: &dyn Fn(Finalize1DArgs),
     finalize_state_empty_fn: &dyn Fn(*mut u8, usize, usize),
     index: &Index<'_>,
-    context: &'a ReadContext,
-    out: OutBuf<'_, 'a>,
+    context: &ReadContext,
+    out: OutBuf<'_, '_>,
     read_layout_order: &[DimIdx],
 ) -> Result<()> {
     let read_data_fn = match is_reduced.len() {
@@ -329,7 +329,7 @@ fn read_data_dispatch<'a>(
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-fn read_data_impl<'a, InnerD>(
+fn read_data_impl<InnerD>(
     inner_array: &dyn StorageBase,
     outer_shape: &[u64],
     output_dtype: &Dtype,
@@ -341,8 +341,8 @@ fn read_data_impl<'a, InnerD>(
     finalize_state_fn: &dyn Fn(Finalize1DArgs),
     finalize_state_empty_fn: &dyn Fn(*mut u8, usize, usize),
     index: &Index<'_>,
-    context: &'a ReadContext,
-    out: OutBuf<'_, 'a>,
+    context: &ReadContext,
+    out: OutBuf<'_, '_>,
     read_layout_order: &[DimIdx],
 ) -> Result<()>
 where
@@ -487,7 +487,7 @@ where
             .all(|&s| s.is_multiple_of(output_align));
     let out_ptr = out_buf.as_mut_ptr();
     let out_buf_len = out_buf.len();
-    let mut tmp_state_buf;
+    let mut tmp_state_buf = None;
     // CAREFUL: state_buf and out_ptr may alias
     let (state_buf, state_strides) = if state_in_out_buf {
         // Reuse the output bytes as the state buffer
@@ -496,7 +496,8 @@ where
     } else {
         check_region_size(index.size(), kernel_state_sizeof)?; // states may be bigger than the output
         let state_buf_len = out_nitems * kernel_state_sizeof;
-        tmp_state_buf = context.allocate_buf(state_buf_len, kernel_state_alignof);
+        let tmp_state_buf =
+            tmp_state_buf.insert(context.allocate_buf(state_buf_len, kernel_state_alignof));
         (
             &mut tmp_state_buf.as_mut_slice()[..state_buf_len],
             crate::util::default_strides_slice(out_shape, kernel_state_sizeof),
@@ -582,6 +583,7 @@ where
                 tile_base_reduced_idx,
                 reduced_shape_logical_strides: reduced_shape_logical_strides.as_ref(),
             });
+            context.return_buf_strided(items);
         }
     }
 
@@ -604,6 +606,9 @@ where
         finalize_state_fn,
         finalize_state_empty_fn,
     );
+    if let Some(tmp_state_buf) = tmp_state_buf {
+        context.return_buf(tmp_state_buf);
+    }
     Ok(())
 }
 

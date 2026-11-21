@@ -17,7 +17,9 @@ pub struct ArrayVec<T, const CAP: usize> {
 impl<T, const CAP: usize> Drop for ArrayVec<T, CAP> {
     #[inline]
     fn drop(&mut self) {
-        self.clear();
+        if mem::needs_drop::<T>() {
+            self.clear();
+        }
     }
 }
 

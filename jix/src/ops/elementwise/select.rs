@@ -136,7 +136,7 @@ where
     fn read_data_uncached<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
@@ -218,6 +218,8 @@ where
                 )
             },
         );
+        context.return_buf_strided(condition_view);
+        context.return_buf_strided(y_view);
 
         #[inline(never)]
         unsafe fn inner_loop<T: Copy, const LANES: usize, const CONTIGUOUS: bool>(
@@ -329,7 +331,7 @@ where
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
@@ -341,7 +343,7 @@ where
     fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
     ) -> Result<impl ElementwisePipeline<T> + use<'a, T, SC, SX, SY>>
     where
         T: Dtyped,

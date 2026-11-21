@@ -109,7 +109,7 @@ impl<S: StorageBase> StorageBase for Repeat<S> {
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;
@@ -137,8 +137,8 @@ impl<S: StorageBase> StorageBase for Repeat<S> {
             }
         });
         let inner_index = unsafe { Index::new_unchecked(&inner_start, &inner_size) };
-        let inner_buf = self.array.read_data_pull(&inner_index, context)?;
-        let (inner_buf, inner_strides) = inner_buf.data();
+        let inner = self.array.read_data_pull(&inner_index, context)?;
+        let (inner_buf, inner_strides) = inner.data();
 
         let out = out.materialize(context, out_shape, dtype, self.spec().read_layout_order());
         let (out_buf, out_strides) = out.data_mut();
@@ -230,6 +230,7 @@ impl<S: StorageBase> StorageBase for Repeat<S> {
                 copy_region((g_count - 1)..g_count, 0..p_end_tail);
             }
         }
+        context.return_buf_strided(inner);
         Ok(())
     }
 

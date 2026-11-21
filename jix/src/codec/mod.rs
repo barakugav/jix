@@ -229,8 +229,8 @@ pub(crate) struct DecoderCodecConfig {
 }
 
 pub(crate) struct Decoder<'a> {
-    #[cfg(not(miri))]
-    inner: &'a UnsafeCell<zstd::bulk::Decompressor<'static>>,
+    #[cfg_attr(miri, allow(unused))]
+    inner: &'a UnsafeCell<Option<zstd::bulk::Decompressor<'static>>>,
     context: &'a ReadContext,
 
     dtype: &'a Dtype,
@@ -240,7 +240,6 @@ impl<'a> Decoder<'a> {
     #[inline]
     pub(crate) fn new(context: &'a ReadContext, config: &'a DecoderCodecConfig) -> Self {
         Self {
-            #[cfg(not(miri))]
             inner: &context.decompressor,
             context,
             dtype: &config.dtype,
@@ -251,13 +250,14 @@ impl<'a> Decoder<'a> {
     pub(crate) fn decode(&self, src: &[u8], dst: &mut [u8]) -> Result<()> {
         let dst_len = dst.len();
         let mut buffers = None;
-        let mut tmp_buf;
+        let mut tmp_buf = None;
         let decompress_out = if self.filters.is_empty() {
             dst
         } else {
-            tmp_buf = self
-                .context
-                .allocate_buf(dst.len(), Alignment::new(CACHE_LINE_SIZE).unwrap());
+            let tmp_buf = tmp_buf.insert(
+                self.context
+                    .allocate_buf(dst.len(), Alignment::new(CACHE_LINE_SIZE).unwrap()),
+            );
             let tmp_buf = &mut tmp_buf.as_mut_slice()[..dst.len()];
 
             let dst_ptr = dst.as_mut_ptr();
@@ -283,6 +283,7 @@ impl<'a> Decoder<'a> {
         #[cfg(not(miri))]
         let nbytes = {
             let inner = unsafe { &mut *self.inner.get() };
+            let inner = inner.get_or_insert_with(|| zstd::bulk::Decompressor::new().unwrap());
             inner
                 .decompress_to_buffer(src, decompress_out)
                 .map_err(|e| error!(InvalidArchive, "Failed to decompress data with Zstd: {e}"))?
@@ -302,6 +303,9 @@ impl<'a> Decoder<'a> {
         for filter in self.filters.iter().rev() {
             let (data, buf) = buffers.as_mut().unwrap().edit();
             filter.decode(data, buf, self.dtype, &self.context.buffer_pool);
+        }
+        if let Some(tmp_buf) = tmp_buf {
+            self.context.return_buf(tmp_buf);
         }
 
         Ok(())

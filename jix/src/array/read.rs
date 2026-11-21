@@ -2,7 +2,8 @@ use std::mem::MaybeUninit;
 use std::ops::Range;
 
 use crate::error::{
-    check_alloc_size, check_get_buffer_size, check_ranges, check_region_size, ensure, Result,
+    check_alloc_size, check_get_buffer_size, check_ndim, check_ranges, check_region_size, ensure,
+    Result,
 };
 use crate::storage::params::ReadTiling;
 use crate::storage::{
@@ -13,7 +14,7 @@ use crate::util::iter::NdIter;
 use crate::util::{
     advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr,
 };
-use crate::{Dim, DimDyn, Dimension, PlainArray, StorageBase};
+use crate::{Dim, DimDyn, Dimension, PlainArray, StorageBase, NDIM_MAX};
 use crate::{ReadContext, Storage};
 
 use super::Array;
@@ -357,7 +358,7 @@ impl<S: StorageBase> Array<S> {
     pub fn to_buf_strided<'a>(
         &'a self,
         index: &[Range<u64>],
-        context: &'a ReadContext,
+        context: &ReadContext,
     ) -> Result<StridedBuf<'a>> {
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
@@ -369,6 +370,12 @@ impl<S: StorageBase> Array<S> {
         let mut slot = None;
         self.to_buf_strided_checked(&index, context, OutBuf::pull(&mut slot))?;
         Ok(slot.expect("a pull read puts its buffer in the slot"))
+    }
+
+    #[cold]
+    fn alloc_empty(&self, size: &[usize], context: &ReadContext) -> StridedBuf<'static> {
+        let spec = self.storage.spec();
+        alloc_out_buf(context, size, self.dtype(), spec.read_layout_order())
     }
 
     /// Read a rectangular sub-region into `out`, at `out`'s own strides.
@@ -439,19 +446,13 @@ impl<S: StorageBase> Array<S> {
         self.to_buf_strided_checked(&index, context, OutBuf::push(&mut out.view_mut()))
     }
 
-    #[cold]
-    fn alloc_empty<'a>(&'a self, size: &[usize], context: &'a ReadContext) -> StridedBuf<'a> {
-        let spec = self.storage.spec();
-        alloc_out_buf(context, size, self.dtype(), spec.read_layout_order())
-    }
-
     // Like `to_buf_strided` / `to_buf_strided_into`, for an `index` the caller checked against the
     // shape and the region size, and an `out` that passes `check_out_buf_impl`.
     #[inline(always)]
     fn to_buf_strided_checked<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         let spec = self.storage.spec();
@@ -475,7 +476,7 @@ impl<S: StorageBase> Array<S> {
 fn to_buf_strided_slow<'a, S: StorageBase>(
     storage: &'a S,
     index: &Index<'_>,
-    context: &'a ReadContext,
+    context: &ReadContext,
     out: OutBuf<'_, 'a>,
 ) -> Result<()> {
     // Erase the storage so the body is monomorphized once
@@ -487,7 +488,7 @@ fn to_buf_strided_slow<'a, S: StorageBase>(
 fn to_buf_strided_slow_dyn_dispatch<'a>(
     storage: &'a dyn StorageBase,
     index: &Index<'_>,
-    context: &'a ReadContext,
+    context: &ReadContext,
     out: OutBuf<'_, 'a>,
 ) -> Result<()> {
     let to_ndarray_fn = match storage.shape().len() {
@@ -510,7 +511,7 @@ fn to_buf_strided_slow_dyn_dispatch<'a>(
 fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     storage: &'a dyn StorageBase,
     index: &Index<'_>,
-    context: &'a ReadContext,
+    context: &ReadContext,
     out: OutBuf<'_, 'a>,
 ) -> Result<()> {
     let shape = storage.shape();
@@ -559,6 +560,77 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
 }
 
 impl<S: StorageBase> Array<S> {
+    /// Read a single element at `index`.
+    ///
+    /// Each call decompresses every block it touches, so use
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub) to read many elements in bulk.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) - `index` is out of bounds or
+    ///   has a different number of dimensions than the array.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?;
+    /// assert_eq!(a.get(&[1, 2], &a.read_ctx())?, 6);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    #[inline]
+    pub fn get(&self, index: &[u64], context: &ReadContext) -> Result<S::Item>
+    where
+        S: Storage,
+    {
+        check_ndim(index.len())?;
+        let index = Index::new(index, &[1; NDIM_MAX][..index.len()])?;
+        let mut value = MaybeUninit::<S::Item>::zeroed();
+        let buf = unsafe {
+            std::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<S::Item>())
+        };
+        let mut out = unsafe { StridedBuf::from_slice_mut(buf, dim_arr(index.ndim(), |_| 0)) };
+        let _cache_scope = context.cache_scope(&self.storage.spec().dynamic().arrays_to_cache);
+        self.storage
+            .read_data(&index, context, OutBuf::push(&mut out))?;
+        Ok(unsafe { value.assume_init() })
+    }
+
+    /// Read the only element of an array with a single element, like NumPy's `ndarray.item()`.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidShapeOperation`](crate::error::ErrorKind::InvalidShapeOperation) - the array
+    ///   does not have exactly one element.
+    /// - [`InvalidArchive`](crate::error::ErrorKind::InvalidArchive) - a stored block is corrupt.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?;
+    /// assert_eq!(a.sum((0, 1)).item()?, 21);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    #[inline]
+    pub fn item(&self) -> Result<S::Item>
+    where
+        S: Storage,
+    {
+        let shape = self.shape();
+        ensure!(
+            shape.iter().all(|&dim| dim == 1),
+            InvalidShapeOperation,
+            "Cannot take the item of an array of shape {shape:?}"
+        );
+        self.get(&[0; NDIM_MAX][..self.ndim()], &self.read_ctx())
+    }
+
     /// Read the entire array into a new heap-allocated `Array<Plain>`.
     ///
     /// Equivalent to `Array::plain_ndarray(self.to_ndarray()?)`.
@@ -708,6 +780,44 @@ mod tests {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], [6], &[3]);
         let got = a.to_ndarray_sub(&[1..2], &a.read_ctx()).unwrap();
         assert_eq!(got, array![1]);
+    }
+
+    #[test]
+    fn get_reads_one_element() {
+        let a = array(
+            &[&[0u8, 1, 2, 6, 7, 8], &[3, 4, 5, 9, 10, 11]],
+            [2, 6],
+            &[2, 3],
+        );
+        let ctx = a.read_ctx();
+        assert_eq!(a.get(&[1, 4], &ctx).unwrap(), 10);
+        assert_eq!(
+            a.get(&[2, 0], &ctx).unwrap_err().kind(),
+            ErrorKind::InvalidIndex
+        );
+        assert_eq!(
+            a.get(&[0], &ctx).unwrap_err().kind(),
+            ErrorKind::InvalidIndex
+        );
+        assert_eq!(
+            a.get(&[u64::MAX, 0], &ctx).unwrap_err().kind(),
+            ErrorKind::InvalidIndex
+        );
+    }
+
+    #[test]
+    fn item_reads_the_only_element() {
+        let a = array(
+            &[&[0u8, 1, 2, 6, 7, 8], &[3, 4, 5, 9, 10, 11]],
+            [2, 6],
+            &[2, 3],
+        );
+        assert_eq!(a.view().slice((1..2, 4..5)).item().unwrap(), 10);
+        assert_eq!(a.view().sum((0, 1)).item().unwrap(), 66);
+        assert_eq!(
+            a.item().unwrap_err().kind(),
+            ErrorKind::InvalidShapeOperation
+        );
     }
 
     // -----------------------------------------------------------------------

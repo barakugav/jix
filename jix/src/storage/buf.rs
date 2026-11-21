@@ -3,10 +3,10 @@ use std::sync::Arc;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_region_size, ensure, Result};
 use crate::storage::{ArrayStorageExt, Index};
-use crate::util::buf_pool::{PoolBuf, PoolBufShared};
+use crate::util::buf_pool::{BufferPool, PoolBuf};
 use crate::util::{
     default_strides_slice, dim_arr, strided_span_bytes, strides_for_layout_order, DimArray,
-    NdCopier, PtrMutNoalias, PtrNoalias, RawAlignedBytes, SliceExt,
+    NdCopier, PtrMutNoalias, PtrNoalias, SliceExt,
 };
 use crate::{DimDyn, DimIdx, ReadContext, StorageBase};
 
@@ -52,18 +52,9 @@ pub struct StridedBuf<'a> {
 enum StridedBufData<'a> {
     Slice(&'a [u8]),
     SliceMut(&'a mut [u8]),
-    PoolBuf {
-        buf: PoolBuf<'a>,
-        offset: usize,
-    },
-    PoolBufMut {
-        buf: PoolBuf<'a>,
-        offset: usize,
-    },
-    Shared {
-        buf: PoolBufShared<'a>,
-        offset: usize,
-    },
+    PoolBuf { buf: PoolBuf, offset: usize },
+    PoolBufMut { buf: PoolBuf, offset: usize },
+    Shared { buf: Arc<PoolBuf>, offset: usize },
 }
 
 impl<'a> StridedBuf<'a> {
@@ -144,7 +135,7 @@ impl<'a> StridedBuf<'a> {
     ///
     /// Same contract as [`from_slice_mut`](Self::from_slice_mut).
     #[inline]
-    pub(crate) unsafe fn from_pool(buf: PoolBuf<'a>, strides: DimArray<usize>) -> Self {
+    pub(crate) unsafe fn from_pool(buf: PoolBuf, strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::PoolBufMut { buf, offset: 0 },
             strides,
@@ -157,7 +148,7 @@ impl<'a> StridedBuf<'a> {
     ///
     /// Same contract as [`from_slice`](Self::from_slice).
     #[inline]
-    pub(crate) unsafe fn from_shared(buf: PoolBufShared<'a>, strides: DimArray<usize>) -> Self {
+    pub(crate) unsafe fn from_shared(buf: Arc<PoolBuf>, strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::Shared { buf, offset: 0 },
             strides,
@@ -334,17 +325,48 @@ impl<'a> StridedBuf<'a> {
         }
     }
 
-    pub(crate) fn into_shared(
-        self,
-    ) -> Result<(Arc<RawAlignedBytes>, usize, DimArray<usize>), Self> {
+    pub(crate) fn return_to(self, pool: &BufferPool) {
+        self.into_bytes().return_to(pool);
+    }
+
+    #[inline]
+    pub(crate) fn into_bytes(self) -> StridedBufBytes {
+        match self.data {
+            StridedBufData::Slice(_) | StridedBufData::SliceMut(_) => StridedBufBytes::None,
+            StridedBufData::PoolBuf { buf, .. } | StridedBufData::PoolBufMut { buf, .. } => {
+                StridedBufBytes::Pool(buf)
+            }
+            StridedBufData::Shared { buf, .. } => StridedBufBytes::Shared(buf),
+        }
+    }
+
+    pub(crate) fn into_shared(self) -> Result<(Arc<PoolBuf>, usize, DimArray<usize>), Self> {
         Ok(match self.data {
             StridedBufData::PoolBuf { buf, offset }
-            | StridedBufData::PoolBufMut { buf, offset } => {
-                (Arc::new(buf.into_inner()), offset, self.strides)
-            }
-            StridedBufData::Shared { buf, offset } => (buf.into_arc(), offset, self.strides),
+            | StridedBufData::PoolBufMut { buf, offset } => (Arc::new(buf), offset, self.strides),
+            StridedBufData::Shared { buf, offset } => (buf, offset, self.strides),
             _ => return Err(self),
         })
+    }
+}
+
+/// The pooled buffer behind a [`StridedBuf`], if any.
+#[derive(Default)]
+pub(crate) enum StridedBufBytes {
+    /// The view borrowed memory outside the pool.
+    #[default]
+    None,
+    Pool(PoolBuf),
+    Shared(Arc<PoolBuf>),
+}
+
+impl StridedBufBytes {
+    pub(crate) fn return_to(self, pool: &BufferPool) {
+        match self {
+            StridedBufBytes::None => {}
+            StridedBufBytes::Pool(buf) => pool.return_buf(buf),
+            StridedBufBytes::Shared(buf) => pool.return_shared(buf),
+        }
     }
 }
 
@@ -431,12 +453,12 @@ pub(crate) fn check_out_buf_impl(
 }
 
 #[inline]
-pub(crate) fn alloc_out_buf<'a>(
-    context: &'a ReadContext,
+pub(crate) fn alloc_out_buf(
+    context: &ReadContext,
     shape: &[usize],
     dtype: &Dtype,
     layout_order: &[DimIdx],
-) -> StridedBuf<'a> {
+) -> StridedBuf<'static> {
     let itemsize = dtype.itemsize() as usize;
     let buf = context.allocate_buf(
         shape.iter().product::<usize>() * itemsize,
@@ -474,7 +496,7 @@ impl<'s, 'a> OutBuf<'s, 'a> {
     #[inline]
     pub(crate) fn materialize(
         self,
-        context: &'a ReadContext,
+        context: &ReadContext,
         shape: &[usize],
         dtype: &Dtype,
         layout_order: &[DimIdx],
@@ -488,7 +510,13 @@ impl<'s, 'a> OutBuf<'s, 'a> {
     }
 
     #[inline]
-    pub(crate) fn set(self, data: StridedBuf<'a>, index: &Index<'_>, dtype: &Dtype) -> Result<()> {
+    pub(crate) fn set(
+        self,
+        data: StridedBuf<'a>,
+        index: &Index<'_>,
+        dtype: &Dtype,
+        context: &ReadContext,
+    ) -> Result<()> {
         match self.0 {
             OutBufInner::Pull(slot) => _ = write_out_buf_slot(slot, data),
             OutBufInner::Push(out) => {
@@ -501,6 +529,7 @@ impl<'s, 'a> OutBuf<'s, 'a> {
                 );
                 // SAFETY: both the source and the destination hold the region, checked above.
                 unsafe { out.copy_from(src, src_strides, index.size(), dtype) };
+                context.return_buf_strided(data);
             }
         }
         Ok(())
@@ -539,7 +568,7 @@ pub(crate) fn write_out_buf_slot<'a, 'b>(
 pub(crate) unsafe fn read_data_and_map_strides<'a>(
     inner: &'a impl StorageBase,
     inner_index: &Index<'_>,
-    context: &'a ReadContext,
+    context: &ReadContext,
     out: OutBuf<'_, 'a>,
     inner2outer_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
     outer2inner_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
@@ -567,6 +596,12 @@ mod tests {
 
     use crate::Array;
     use crate::ReadContext;
+
+    #[test]
+    fn strided_buf_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<super::StridedBuf<'static>>();
+    }
 
     #[test]
     fn out_smaller_than_the_region_is_rejected() {
