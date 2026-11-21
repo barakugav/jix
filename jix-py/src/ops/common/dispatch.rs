@@ -1,9 +1,7 @@
 use std::borrow::Cow;
 
+use jix_core::ArrayAny;
 use jix_core::dtype::{Dtyped, ScalarKind};
-use jix_core::ops::IntoType;
-use jix_core::storage::StorageAny;
-use jix_core::{Array, ArrayAny};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
@@ -13,8 +11,6 @@ use crate::ops::common::{
 };
 use crate::type_hint::ItemOrTuple;
 use crate::util::IterExt;
-
-type TypedOperand<T> = Array<IntoType<StorageAny, T>>;
 
 /// Runtime dtype-dispatch table for an op with `IN_N` array inputs.
 ///
@@ -75,7 +71,7 @@ impl<const IN_N: usize, ExtraArgs> OpFnDescriptor<IN_N, ExtraArgs> {
 impl<ExtraArgs> OpFnDescriptor<1, ExtraArgs> {
     pub(crate) fn new1_args<T>(
         allowed_cast: CastKind,
-        f: impl Fn(TypedOperand<T>, ExtraArgs) -> PyResult<ArrayAny> + Send + Sync + 'static,
+        f: impl Fn(ArrayAny<T>, ExtraArgs) -> PyResult<ArrayAny> + Send + Sync + 'static,
     ) -> Self
     where
         T: Dtyped,
@@ -95,7 +91,7 @@ impl<ExtraArgs> OpFnDescriptor<1, ExtraArgs> {
 impl OpFnDescriptor<1, ()> {
     pub(crate) fn new1<T>(
         allowed_cast: CastKind,
-        f: impl Fn(TypedOperand<T>) -> PyResult<ArrayAny> + Send + Sync + 'static,
+        f: impl Fn(ArrayAny<T>) -> PyResult<ArrayAny> + Send + Sync + 'static,
     ) -> Self
     where
         T: Dtyped,
@@ -106,7 +102,7 @@ impl OpFnDescriptor<1, ()> {
 impl OpFnDescriptor<2, ()> {
     pub(crate) fn new2<T1, T2>(
         allowed_cast: impl Into<ItemOrTuple<CastKind>>,
-        f: impl Fn(TypedOperand<T1>, TypedOperand<T2>) -> PyResult<ArrayAny> + Send + Sync + 'static,
+        f: impl Fn(ArrayAny<T1>, ArrayAny<T2>) -> PyResult<ArrayAny> + Send + Sync + 'static,
     ) -> Self
     where
         T1: Dtyped,
@@ -141,10 +137,7 @@ impl OpFnDescriptor<2, ()> {
 impl OpFnDescriptor<3, ()> {
     pub(crate) fn new3<T>(
         allowed_cast: CastKind,
-        f: impl Fn(TypedOperand<T>, TypedOperand<T>, TypedOperand<T>) -> PyResult<ArrayAny>
-        + Send
-        + Sync
-        + 'static,
+        f: impl Fn(ArrayAny<T>, ArrayAny<T>, ArrayAny<T>) -> PyResult<ArrayAny> + Send + Sync + 'static,
     ) -> Self
     where
         T: Dtyped,
@@ -164,10 +157,7 @@ impl<ExtraArgs> OpFnDescriptor<2, ExtraArgs> {
     /// Both inputs must have the same dtype `T`.
     pub(crate) fn new2_args<T>(
         allowed_cast: CastKind,
-        f: impl Fn(TypedOperand<T>, TypedOperand<T>, ExtraArgs) -> PyResult<ArrayAny>
-        + Send
-        + Sync
-        + 'static,
+        f: impl Fn(ArrayAny<T>, ArrayAny<T>, ExtraArgs) -> PyResult<ArrayAny> + Send + Sync + 'static,
     ) -> Self
     where
         T: Dtyped,

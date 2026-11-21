@@ -1343,8 +1343,7 @@ mod tests {
         let x = Array::compact_ndarray(&ndarray::Array1::<f32>::zeros(0)).unwrap();
         let mut x = x.into_any();
         for _ in 0..130 {
-            let a = x.clone().into_typed::<f32>().unwrap();
-            x = (a + x.into_typed::<f32>().unwrap()).into_any();
+            x = (x.clone() + x).into_any();
         }
         assert_eq!(x.storage().spec().element_cost(), ELEMENT_COST_MAX);
         // A zero-length concatenate member weighs its cost by 0.
@@ -2438,11 +2437,8 @@ mod tests {
         // Type-erased, a parent reads it with `read_data`
         assert_eq!(kind(plain().into_any()), ZeroCopy);
         assert_eq!(kind((-plain()).into_any()), SinglePass);
-        assert_eq!(
-            kind(-plain().into_any().into_typed::<i32>().unwrap()),
-            Fusable
-        );
-        let any_neg = (-plain()).into_any().into_typed::<i32>().unwrap();
+        assert_eq!(kind(-plain().into_any()), Fusable);
+        let any_neg = (-plain()).into_any();
         assert_eq!(kind(any_neg + plain()), Tiled);
 
         // Reductions are left tiled for now

@@ -139,8 +139,9 @@ Nothing runs until you materialize via `.to_ndarray()`, `.compact()`, or `.write
   main backends).
 - `Plain<...>` - zero-copy view over a contiguous/strided in-memory buffer, so plain ndarrays can
   participate in the same op chains.
-- `ArrayAny` (= `Array<StorageAny>`) - type-erased (`Arc<dyn StorageBase>`) for holding mixed
-  storage types in one collection; loses compile-time element-wise ops.
+- `ArrayAny<ET = TypeDyn>` (= `Array<StorageAny<ET>>`) - storage-erased (`Arc<dyn StorageBase>`)
+  for holding mixed storage types in one collection; keeps the element type `ET`, so an
+  `ArrayAny<f32>` still has element-wise ops.
 
 ### Block storage & codec pipeline
 

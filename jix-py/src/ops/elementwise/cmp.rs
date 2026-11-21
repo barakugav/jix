@@ -9,7 +9,7 @@ use crate::PyArray;
 use crate::ops::common::{
     CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar, broadcast_operands, define_op2,
 };
-use crate::util::IntoPyResult;
+use crate::util::{IntoAnyDyn, IntoPyResult};
 
 define_op2!(
     /// Element-wise equality test (`a == b`).
@@ -371,7 +371,7 @@ pub fn isclose<'py>(
             let rtol = cast_tol::<T>(args.rtol)?;
             let atol = cast_tol::<T>(args.atol)?;
             let res = jix_core::ops::ApproxEq::new_array(a, b, rtol, atol).into_py_result()?;
-            Ok(res.into_any())
+            Ok(res.into_any_dyn())
         })
     }
 
@@ -398,7 +398,7 @@ pub fn isclose<'py>(
                 },
             };
             let res = jix_core::ops::ApproxEq::new_array(a, b, rtol, atol).into_py_result()?;
-            Ok(res.into_any())
+            Ok(res.into_any_dyn())
         })
     }
 

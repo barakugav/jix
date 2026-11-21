@@ -424,15 +424,16 @@ pub type PlainArray<T> = Array<storage::Plain<T>>;
 /// Plain (uncompressed) borrowed array (type alias).
 pub type PlainArrayView<'a, T> = Array<storage::PlainView<'a, T>>;
 
-/// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn StorageBase>`.
+/// An array whose storage backend is hidden behind an `Arc<dyn StorageBase>`.
 ///
 /// Use `ArrayAny` when you need to hold arrays of different concrete storage types in the same
 /// place - for example a `Vec<ArrayAny>` mixing on-disk, in-memory, and lazy views. All runtime
-/// metadata (shape, dtype) is available; element-wise operations that require a known scalar type
-/// at compile time are not.
+/// metadata (shape, dtype) is available. The element type `ET` is kept: an `ArrayAny<f32>` still
+/// supports element-wise operations, an `ArrayAny` (`ArrayAny<TypeDyn>`) needs
+/// [`into_typed`](Array::into_typed) first.
 ///
 /// Create one with [`Array::into_any`].
-pub type ArrayAny = Array<storage::StorageAny>;
+pub type ArrayAny<ET = TypeDyn> = Array<storage::StorageAny<ET>>;
 
 const BLOCK_SIZE_BYTES_MAX: u64 = 1 << 30;
 

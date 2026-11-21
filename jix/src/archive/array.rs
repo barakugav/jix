@@ -1395,10 +1395,7 @@ mod tests {
         assert_eq!(write(&make().view().into_typed_dyn()), expected);
         assert_eq!(write(&make().into_any()), expected);
         assert_eq!(write(&make().into_any().into_any()), expected);
-        assert_eq!(
-            write(&make().into_any().into_typed::<i32>().unwrap()),
-            expected
-        );
+        assert_eq!(write(&make().into_any().into_typed_dyn()), expected);
 
         // A lazy op with the same values is re-encoded with the given params.
         assert_ne!(write(&(-(-make())).into_any()), expected);

@@ -292,8 +292,9 @@ impl<S: StorageBase> Array<S> {
     /// Convert this array into a type-erased [`ArrayAny`](crate::ArrayAny).
     ///
     /// The storage is wrapped in an `Arc` and hidden behind [`StorageAny`], so the
-    /// resulting array can be stored alongside arrays of other concrete storage types.
-    pub fn into_any(self) -> ArrayAny
+    /// resulting array can be stored alongside arrays of other concrete storage types. The
+    /// element type is kept; erase it with [`into_typed_dyn`](Array::into_typed_dyn).
+    pub fn into_any(self) -> ArrayAny<S::ElementType>
     where
         S: StorageBase + std::any::Any + Send + Sync + 'static,
     {
@@ -482,7 +483,7 @@ pub(crate) mod tests {
         assert!(make().view().into_typed_dyn().is_compact());
         assert!(make().into_any().is_compact());
         assert!(make().into_any().into_any().is_compact());
-        assert!(make().into_any().into_typed::<i32>().unwrap().is_compact());
+        assert!(make().into_any().into_typed_dyn().is_compact());
 
         // Lazy ops are not compact, also when type-erased.
         let a = make();
