@@ -78,6 +78,37 @@ use crate::util::{
 /// result = (a.cast('float64') - a.mean()).abs().sum(dim=0).numpy()
 /// ```
 ///
+/// A longer example, from compression through a lazy pipeline to a file:
+///
+/// ```python
+/// import jix
+/// import numpy as np
+///
+/// # Compress a 2-D float32 NumPy array.
+/// a = jix.compact(np.array([[1.5, 2.0, -9.0], [3.14, 6.17, 0.0]], dtype=np.float32))
+/// assert a.shape == (2, 3)
+/// assert a.dtype == np.float32
+///
+/// # Read a single element and a sub-region. Only the blocks they touch are
+/// # decompressed, not the whole array, so random access reads are relatively fast.
+/// assert a[1, 1] == np.float32(6.17)
+/// assert np.array_equal(a[0:2, 1:3], np.array([[2.0, -9.0], [6.17, 0.0]], dtype=np.float32))
+///
+/// # Apply operations, creating lazy views. Operands can be jix arrays, NumPy arrays or
+/// # Python scalars, and broadcast against each other as in NumPy.
+/// scaled = a.exp().floor() * 2 + np.ones(3, dtype=np.float32)
+/// # Lazy views are still arrays: reading data runs the pipeline on demand, possibly on a
+/// # subset of the original array.
+/// assert scaled.shape == (2, 3)
+/// assert scaled[1, 1] == 957.0
+///
+/// # Reduce, cast, and materialize the pipeline by recompressing.
+/// result = scaled.argmax(dim=1).cast("int16").compact()
+/// assert result.shape == (2,)
+/// assert result.dtype == np.int16
+/// result.write_to("result.jix")
+/// ```
+///
 /// ## Shape operations
 ///
 /// Shape operations remap the array's indices without copying data, returning lazy views.
@@ -112,12 +143,12 @@ use crate::util::{
 ///
 /// # Architecture overview
 ///
-/// Internally each `Array` holds a type-erased storage object that provides three things:
-/// the array's shape, its element dtype, and the ability to read any rectangular sub-region
-/// into a raw byte buffer. The primary concrete storage is a heap-allocated block-compressed
-/// backend; a memory-mapped variant is also available. Every operation constructs a new
-/// storage that wraps the input(s) and applies its transformation on each read request.
-/// Reads release the GIL while decompressing, so Python threads can run concurrently.
+/// Internally each `Array` holds a type-erased storage object that provides three main things: the
+/// array's shape, its element dtype, and the ability to read any rectangular sub-region into a raw
+/// byte buffer. The primary concrete storage is a heap-allocated block-compressed backend; a
+/// memory-mapped variant is also available. Every operation constructs a new storage that wraps the
+/// input(s) and applies its transformation on each read request. Reads release the GIL while
+/// decompressing, so Python threads can run concurrently.
 #[pyclass(name = "Array", module = "jix", frozen)]
 pub struct PyArray {
     pub(crate) arr: ArrayAny,

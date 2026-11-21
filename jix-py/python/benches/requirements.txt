@@ -1,4 +1,6 @@
-pytest-benchmark~=5.2
+pytest-benchmark~=5.3
 matplotlib~=3.11
-blosc2~=4.9
-zarr~=3.2
+blosc2~=4.14
+numexpr~=2.14
+psutil~=7.2
+zarr~=3.4

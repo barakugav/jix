@@ -1,7 +1,7 @@
 //! Storage backends for [`Array`](crate::Array).
 //!
 //! Every `Array<S>` is backed by a storage `S` implementing [`StorageBase`], which exposes three
-//! things: the array's shape, its element dtype, and [`read_data`](StorageBase::read_data),
+//! main things: the array's shape, its element dtype, and [`read_data`](StorageBase::read_data),
 //! which reads any rectangular sub-region as a [`StridedBuf`] - a borrowed view, a freshly
 //! materialized buffer, or bytes written into a caller-supplied destination. All other operations
 //! are built on these three.

@@ -673,8 +673,8 @@ pub trait PlainArrayMethods {
     /// # Examples
     ///
     /// ```
-    /// use jix::storage::PlainArrayMethods;
     /// use jix::Array;
+    /// use jix::storage::PlainArrayMethods;
     /// use ndarray::{array, s};
     ///
     /// let nd = array![[1u8, 2, 3], [4, 5, 6]];
@@ -715,9 +715,9 @@ pub trait PlainArrayMethods {
     /// # Examples
     ///
     /// ```
-    /// use jix::storage::PlainArrayMethods;
     /// use jix::Array;
-    /// use ndarray::{s, Array2};
+    /// use jix::storage::PlainArrayMethods;
+    /// use ndarray::{Array2, s};
     ///
     /// let nd = Array2::<f32>::zeros((3, 4));
     /// assert!(Array::plain_ndarray_ref(&nd)?.is_standard_layout());
@@ -757,8 +757,8 @@ pub trait PlainArrayMethods {
     /// # Examples
     ///
     /// ```
-    /// use jix::storage::PlainArrayMethods;
     /// use jix::Array;
+    /// use jix::storage::PlainArrayMethods;
     /// use ndarray::array;
     ///
     /// let a = Array::plain_ndarray(array![[1u16, 2], [3, 4]])?;
@@ -778,8 +778,8 @@ pub trait PlainArrayMethods {
     /// # Examples
     ///
     /// ```
-    /// use jix::storage::PlainArrayMethods;
     /// use jix::Array;
+    /// use jix::storage::PlainArrayMethods;
     /// use ndarray::array;
     ///
     /// let a = Array::plain_ndarray(array![[1.0f32, 2.0], [3.0, 4.0]])?;

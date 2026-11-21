@@ -15,8 +15,8 @@ use crate::util::ElementwisePipelineTuple;
 ///
 /// # Examples
 /// ```
-/// use jix::scalar::bool8;
 /// use jix::Array;
+/// use jix::scalar::bool8;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
@@ -204,8 +204,8 @@ where
 /// Combine a heterogeneous tuple of inputs (the closure receives `(i32, f32, bool8)`):
 ///
 /// ```
-/// use jix::scalar::bool8;
 /// use jix::Array;
+/// use jix::scalar::bool8;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;

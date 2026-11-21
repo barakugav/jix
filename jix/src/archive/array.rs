@@ -68,8 +68,8 @@ impl Array<Compact<TypeDyn>> {
     /// # Examples
     ///
     /// ```
-    /// use jix::storage::ArchiveValidation;
     /// use jix::Array;
+    /// use jix::storage::ArchiveValidation;
     /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
@@ -117,8 +117,8 @@ impl Array<Compact<TypeDyn>> {
     /// ```
     /// use std::io::Cursor;
     ///
-    /// use jix::storage::ArchiveValidation;
     /// use jix::Array;
+    /// use jix::storage::ArchiveValidation;
     /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///
@@ -178,8 +178,8 @@ impl Array<CompactMmap<TypeDyn>> {
     /// # Examples
     ///
     /// ```
-    /// use jix::storage::ArchiveValidation;
     /// use jix::Array;
+    /// use jix::storage::ArchiveValidation;
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -256,8 +256,8 @@ impl<S: StorageBase> Array<S> {
     /// array (compressed or decompressed) in memory:
     ///
     /// ```
-    /// use jix::storage::ArchiveValidation;
     /// use jix::Array;
+    /// use jix::storage::ArchiveValidation;
     /// use ndarray::array;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
@@ -317,8 +317,8 @@ impl<S: StorageBase> Array<S> {
     /// ```
     /// use std::io::Cursor;
     ///
-    /// use jix::storage::ArchiveValidation;
     /// use jix::Array;
+    /// use jix::storage::ArchiveValidation;
     /// use jix::storage::CompactParams;
     /// use ndarray::array;
     ///

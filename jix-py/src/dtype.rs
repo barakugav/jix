@@ -39,10 +39,10 @@ pub(crate) fn dtype_to_numpy<'py>(
         let mut names = Vec::with_capacity(fields.len());
         let mut offsets = Vec::with_capacity(fields.len());
         let mut dtypes = Vec::with_capacity(fields.len());
-        for (name, offset, sub_dtype) in fields {
-            names.push(name.clone());
-            offsets.push(*offset as usize);
-            dtypes.push(dtype_to_numpy(py, sub_dtype)?);
+        for field in fields {
+            names.push(field.name.clone());
+            offsets.push(field.offset as usize);
+            dtypes.push(dtype_to_numpy(py, &field.dtype)?);
         }
 
         let dtype_dict = PyDict::new(py);

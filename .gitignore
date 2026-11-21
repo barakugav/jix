@@ -21,9 +21,8 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 
-# Local benchmark run output (see scripts/bench/run.py)
 scripts/bench/.results/
-
+scripts/bench/artifacts/
 
 jix/Cargo.lock
 jix-macros/Cargo.lock

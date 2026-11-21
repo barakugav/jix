@@ -12,7 +12,7 @@ pub(crate) use sealed::ArrayStorageImpl;
 
 /// The backing data source of an [`Array<S>`](crate::Array).
 ///
-/// `Array<S>` is generic over its storage `S: StorageBase`, which provides three things: the
+/// `Array<S>` is generic over its storage `S: StorageBase`, which provides three main things: the
 /// array's shape, its element dtype, and reading any rectangular sub-region into a byte buffer.
 /// Everything else - slicing, reshaping, arithmetic, reductions - is built on these three methods.
 ///

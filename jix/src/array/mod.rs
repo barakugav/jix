@@ -10,10 +10,11 @@ mod compact;
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
 ///
-/// `Array<S>` is the central type in jix. It behaves like a regular n-dimensional array, but
-/// its data is stored in a compressed format and decoded on demand. Its core functionality is
-/// provided by [`shape()`](Array::shape), [`dtype()`](Array::dtype) and
-/// [`to_buf_strided()`](Array::to_buf_strided); all other functions are built on top of those.
+/// `Array<S>` is the central type in jix. It behaves like a regular n-dimensional array, but its
+/// data is stored in a compressed format and decoded on demand. Its core functionality is provided
+/// by [`shape()`](Array::shape), [`dtype()`](Array::dtype) and
+/// [`to_buf_strided(sub_range)`](Array::to_buf_strided); all other functions are built on top of
+/// those.
 ///
 /// An array is generic over `S: StorageBase`, which provides the implementation of the three core
 /// methods. The main concrete storage backend is the block-compressed
@@ -85,7 +86,7 @@ mod compact;
 /// ```
 /// use jix::Array;
 /// use jix::dtype::Dtyped;
-/// use ndarray::{array, Ix2};
+/// use ndarray::{Ix2, array};
 ///
 /// // Compress a 2-D f32 ndarray.
 /// let array = Array::compact_ndarray(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
@@ -96,6 +97,14 @@ mod compact;
 /// let decompressed = array.to_ndarray::<Ix2>()?;
 /// assert_eq!(decompressed[[0, 0]], 1.5);
 /// assert_eq!(decompressed[[1, 1]], 6.17);
+///
+/// // Read a single element and a sub-region. Only the blocks they touch are
+/// // decompressed, not the whole array, so random access reads are relatively fast.
+/// assert_eq!(array.get(&[1, 1])?, 6.17);
+/// assert_eq!(
+///     array.to_ndarray_sub(&[0..2, 1..3])?,
+///     array![[2.0, -9.0], [6.17, 0.0]]
+/// );
 ///
 /// // Apply operations on a compressed array, creating lazy views
 /// let ones = Array::compact_ndarray(&ndarray::Array2::<f32>::ones((2, 3)))?;
@@ -132,14 +141,14 @@ mod compact;
 /// heuristic that tries to preserve the user's block shape while respecting the new shape and
 /// layout.
 ///
-/// Shape-changing operations - [`reshape`](Array::reshape),
-/// [`broadcast`](Array::broadcast), [`permute_dims`](Array::permute_dims) - remap how
-/// output indices translate to positions in the underlying blocks. When the new layout crosses
-/// block boundaries that the original respected, a single read may decompress many more blocks
-/// than necessary. To avoid this, materialize with [`compact`](Array::compact) (automatic block
-/// shape) or [`compact_with`](Array::compact_with) (explicit
+/// Shape-changing operations - [`reshape`](Array::reshape), [`broadcast`](Array::broadcast),
+/// [`permute_dims`](Array::permute_dims) - remap how output indices translate to positions in the
+/// underlying blocks. When the new layout crosses block boundaries that the original respected, a
+/// single read may decompress many more blocks than necessary. To avoid this, consider
+/// materializing with [`compact`](Array::compact) (automatic block shape),
+/// [`compact_with`](Array::compact_with) (explicit
 /// [`CompactParams`](crate::storage::CompactParams), e.g. a block shape matching the expected
-/// access pattern) after a shape change.
+/// access pattern) or [`to_plain`](Array::to_plain) after a shape change.
 ///
 /// # Element type tracking
 ///
@@ -188,9 +197,9 @@ impl<S: StorageBase> Array<S> {
     /// See [`Dtype`] for details on the supported dtypes and their properties.
     ///
     /// ```rust
+    /// use jix::Array;
     /// use jix::dtype::Dtyped;
     /// use jix::scalar::bool8;
-    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
@@ -239,7 +248,7 @@ impl<S: StorageBase> Array<S> {
     ///
     /// ```
     /// use jix::Array;
-    /// use ndarray::{array, Ix2};
+    /// use ndarray::{Ix2, array};
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
     /// let b = a.view().map(|x| x + 1.0f32); // Array<Map<&Compact>>

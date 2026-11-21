@@ -30,13 +30,14 @@
 //! original layout respected, a single read request may decompress many more blocks than necessary,
 //! each discarding most of their data.
 //!
-//! To avoid this, materialize the array after a shape change:
+//! To avoid this, consider materializing the array after a shape change:
 //!
 //! * [`.compact()`](crate::Array::compact) - re-encodes with a block shape derived automatically
 //!   from the new shape and the original block shape.
 //! * [`.compact_with(params, ...)`](crate::Array::compact_with) - re-encodes with an explicit
 //!   [`CompactParams`](crate::storage::CompactParams), giving full control over the new block
 //!   shape. Use this to guarantee your access pattern is well-aligned.
+//! * [`.to_plain()`](crate::Array::to_plain) - materializes into an uncompressed in-memory buffer.
 //!
 //! [`Array::reshape`](crate::Array::reshape) is the operation most prone to this cost. Being a
 //! lazy view, it pays the cost on every read, so call `.compact()` on the result when it will be

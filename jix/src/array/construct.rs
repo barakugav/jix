@@ -31,9 +31,9 @@ impl<T> CompactArray<T> {
     /// # Examples
     ///
     /// ```
-    /// use jix::dtype::Dtyped;
     /// use jix::Array;
-    /// use ndarray::{array, Ix2};
+    /// use jix::dtype::Dtyped;
+    /// use ndarray::{Ix2, array};
     ///
     /// // Compress a 2-D f32 ndarray.
     /// let array = Array::compact_ndarray(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;

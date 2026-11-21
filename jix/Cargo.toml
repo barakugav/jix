@@ -99,5 +99,9 @@ name = "valgrind"
 harness = false
 bench = false  # needs valgrind: run it explicitly with `--bench valgrind`
 
+[[bench]]
+name = "vs_ndarray"
+harness = false
+
 [lib]
 bench = false

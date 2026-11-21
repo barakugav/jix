@@ -21,9 +21,9 @@
 //! # Quick start
 //!
 //! ```
-//! use jix::dtype::Dtyped;
 //! use jix::Array;
-//! use ndarray::{array, Ix2};
+//! use jix::dtype::Dtyped;
+//! use ndarray::{Ix2, array};
 //!
 //! // Compress a 2-D f32 ndarray into a block-compressed Array<Compact>.
 //! let a = Array::compact_ndarray(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
@@ -77,33 +77,33 @@
 //!   to keep their combined footprint low.
 //!   A classic example is a machine-learning data loader that randomly samples chunks from
 //!   a large dataset. This use case needs only the compact array - no lazy pipeline required.
-//!   Note that if you want to compress an array but always read it in full, you don't need jix
-//!   at all - just zip and unzip the whole array with a general-purpose compressor.
+//! - **Reducing peak memory usage of array ops**
+//!   Usually, in crates like `ndarray` or the `NumPy` library, a full intermediate array is
+//!   allocated for every step in a chain of operations, which can lead to high peak memory usage.
+//!   Jix's lazy operation chains avoid this by building a pipeline that compute each output block
+//!   one by one, so the peak memory is bounded by O(block_size). This also has the benefit of
+//!   better cache locality, but most of the times this alone doesn't achieve better performance
+//!   than the common eager libraries.
 //! - **Computation on arrays that don't fit in memory.**
 //!   For arrays too large to hold in memory, jix's lazy operation chains let you mmap an array
 //!   from disk, apply a pipeline of operations on top of it, and stream the result back to
 //!   disk - without ever holding the full array in memory, not even in its compressed form.
 //!   This use case needs only the lazy pipeline; you can build it on a plain array backed
 //!   by an mmap'd file, without using the compact format.
-//! - **Long and/or complex pipelines of operations.**
-//!   Plain iterators over regular ndarrays already
-//!   give you lazy element-wise evaluation for free (although naive use of the `ndarray` crate may
-//!   still produce NumPy-style intermediates), so for simple `map`/`zip`-style pipelines jix offers
-//!   little over hand-written iterator code. The advantage shows up once the pipeline includes
-//!   operations that change the shape or the access pattern - reductions, broadcasts, dim
-//!   permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on. These are
-//!   awkward or impractical to express as plain iterator chains, especially when combined with
-//!   element-wise operations. Jix composes element-wise and shape-changing operations uniformly in
-//!   the same operation chain, all as lazy views, and because the full chain is encoded in the
-//!   static type the compiler is able to inline the whole pipeline into a single read loop - no
-//!   virtual dispatch, no runtime scheduler, no (large) intermediate allocations beyond the final
-//!   output.
+//!
+//! ## When NOT to use jix
+//!
+//! - if you want to compress an array but always read it in full, you don't need jix at all - just
+//!   zip and unzip the whole array with a general-purpose compressor. Although some of jix filters
+//!   are dtype aware, so you may want to test the compression ratio and speed for your specific
+//!   data.
 //!
 //! # Core type: `Array<S>`
 //!
 //! [`Array<S>`](Array) is generic over its storage backend [`S: StorageBase`](StorageBase). The
-//! storage trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else -
-//! slicing, arithmetic, reductions, serialization - is implemented on top of those three.
+//! storage trait has three main methods: `shape()`, `dtype()`, and `read_data(sub_range)`.
+//! Everything else - slicing, arithmetic, reductions, serialization - is implemented on top of
+//! those three.
 //!
 //! The type parameter `S` carries the full operation chain at compile time:
 //!
@@ -142,7 +142,9 @@
 //! `maximum`, ...
 //!
 //! For scaling, shifting, or any element-wise transform involving a constant value, use
-//! [`map`](Array::map) - e.g. `a.map(|x| x * 2.0f32)` rather than `a * 2.0f32`.
+//! [`map`](Array::map) - e.g. `a.map(|x| x * 2.0f32)` rather than `a * 2.0f32`. This is a
+//! deliberate design choice to avoid broadcasting of scalars and using the generic arrays flow
+//! path, as `.map` is faster.
 //!
 //! **Comparisons** - `equal`, `not_equal`, `greater`, `greater_equal`, `less`, ...
 //!
@@ -196,7 +198,7 @@
 //! let pixel_dtype = Pixel::DTYPE;
 //! assert_eq!(pixel_dtype.itemsize(), 3);
 //! let fields = pixel_dtype.fields().unwrap();
-//! assert_eq!(fields[0].0, "r");
+//! assert_eq!(fields[0].name, "r");
 //! ```
 //!
 //! **Compile-time - [`ElementType`], [`TypeDyn`]**
@@ -303,9 +305,10 @@
 //! that the original layout respected, a single read may decompress many more blocks than
 //! needed.
 //!
-//! To avoid this, call [`.compact()`](Array::compact)
-//! after a shape change to re-encode with a freshly derived block shape, or
-//! [`.compact_with()`](Array::compact_with) to choose the new block shape yourself:
+//! To avoid this, consider materializing the array with [`.compact()`](Array::compact) after a
+//! shape change to re-encode with a freshly derived block shape (or
+//! [`.to_plain()`](Array::to_plain)), or [`.compact_with()`](Array::compact_with) to choose the new
+//! block shape yourself:
 //!
 //! ```
 //! use jix::Array;
@@ -316,8 +319,9 @@
 //! let a = Array::compact_ndarray_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
 //!
 //! // Transpose and re-encode with explicit 128*128 blocks.
-//! let out_params = CompactParams::new().block_shape(&[128, 128])?;
-//! let transposed = a.permute_dims(&[1, 0]).compact_with(out_params)?;
+//! let transposed = a
+//!     .permute_dims(&[1, 0])
+//!     .compact_with(CompactParams::new().block_shape(&[128, 128])?)?;
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
@@ -342,8 +346,8 @@
 //! from the source lazily:
 //!
 //! ```
-//! use jix::storage::ArchiveValidation;
 //! use jix::Array;
+//! use jix::storage::ArchiveValidation;
 //! use ndarray::array;
 //!
 //! let tmp_dir = tempfile::tempdir()?;

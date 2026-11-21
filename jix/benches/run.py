@@ -33,13 +33,19 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--out", default=DEFAULT_OUT, type=Path, help="output directory for PNGs and the table")
     parser.add_argument("--fast", action="store_true", help="quick, low-fidelity run for dev cycles")
     parser.add_argument("--no-bench", action="store_true", help="skip cargo bench; plot existing results only")
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="run only the vs_ndarray target, which is the one the published report uses",
+    )
     args = parser.parse_args(own)
 
     if not args.no_bench:
         # Args after `--`, then the fast-sampling flags when --fast is set.
         bench_args = list(harness_args) + (FAST_CRITERION_ARGS if args.fast else [])
+        target = ["--bench", "vs_ndarray"] if args.report else []
         subprocess.check_call(
-            ["cargo", "bench", *(["--", *bench_args] if bench_args else [])],
+            ["cargo", "bench", *target, *(["--", *bench_args] if bench_args else [])],
             cwd=CRATE_DIR,
         )
     written = report.report_criterion(CRITERION_ROOT, args.out)

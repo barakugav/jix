@@ -57,8 +57,8 @@ where
         );
         let sub_field_spec = src_dtype
             .fields()
-            .and_then(|fields| fields.iter().find(|f| f.0 == sub_field))
-            .map(|(_f_name, offset, sub_dtype)| (*offset, sub_dtype));
+            .and_then(|fields| fields.iter().find(|f| f.name == sub_field))
+            .map(|f| (f.offset, &f.dtype));
         ensure!(
             sub_field_spec.is_some(),
             UnsupportedDtype,

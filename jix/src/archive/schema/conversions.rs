@@ -161,10 +161,10 @@ impl crate::dtype::Dtype {
             let fields = self.fields().unwrap();
             let fields = fields
                 .iter()
-                .map(|(name, offset, dtype)| schema::dtype_struct::Field {
-                    name: name.to_string(),
-                    offset: *offset as u32,
-                    dtype: Some(dtype.to_proto()),
+                .map(|f| schema::dtype_struct::Field {
+                    name: f.name.to_string(),
+                    offset: f.offset as u32,
+                    dtype: Some(f.dtype.to_proto()),
                 })
                 .collect::<Vec<_>>();
             schema::dtype::Kind::Struct(schema::DtypeStruct { fields })
