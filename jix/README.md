@@ -2,12 +2,15 @@
 
 A multi-dimensional array library with block-compressed storage and lazy-evaluated operations.
 
-**Block-based compression.** An array is split into a grid of fixed-size nd-blocks, each compressed independently.
-Only the blocks that overlap a read request are decompressed, so random access into large arrays is relatively cheap.
+**Block-based compression.** An array is split into a grid of fixed-size nd-blocks, each
+compressed independently. On a read request for a sub-region of the array, only the blocks that
+overlap the requested region are decompressed, so random access into large arrays is relatively
+cheap.
 
-**Lazy operation chains.** Every operation - arithmetic, shape change, reduction, type cast - returns a new view that wraps the
-input(s) and records the transformation; nothing is computed until data is explicitly requested.
-A chain of such operations builds a pipeline that runs in a single decompression pass the moment you ask for output.
+**Lazy operation chains.** Every operation - arithmetic, shape change, reduction, type cast -
+returns a new view that wraps the input(s) and records the transformation; nothing is computed
+until data is explicitly requested. A chain of such operations builds a pipeline that runs in a
+single decompression pass the moment you ask for output (read an element or a sub-region).
 
 ```rust
 use std::path::Path;
@@ -61,25 +64,23 @@ can be used independently, and each fits a different scenario.
     to keep their combined footprint low.
     A classic example is a machine-learning data loader that randomly samples chunks from
     a large dataset. This use case needs only the compact array - no lazy pipeline required.
-    Note that if you want to compress an array but always read it in full, you don't need jix
-    at all - just zip and unzip the whole array with a general-purpose compressor.
+- **Reducing peak memory usage of array ops**
+    Usually, in crates like `ndarray` or the `NumPy` library, a full intermediate array is
+    allocated for every step in a chain of operations, which can lead to high peak memory usage.
+    Jix's lazy operation chains avoid this by building a pipeline that compute each output block
+    one by one, so the peak memory is bounded by O(block_size). This also has the benefit of
+    better cache locality, but most of the times this alone doesn't achieve better performance
+    than the common eager libraries.
 - **Computation on arrays that don't fit in memory.**
     For arrays too large to hold in memory, jix's lazy operation chains let you mmap an array
     from disk, apply a pipeline of operations on top of it, and stream the result back to
     disk - without ever holding the full array in memory, not even in its compressed form.
     This use case needs only the lazy pipeline; you can build it on a plain array backed
     by an mmap'd file, without using the compact format.
-- **Long and/or complex pipelines of operations.**
-    Plain iterators over regular ndarrays already
-    give you lazy element-wise evaluation for free (although naive use of the `ndarray` crate may still
-    produce NumPy-style intermediates), so for simple `map`/`zip`-style pipelines
-    jix offers little over hand-written iterator code.
-    The advantage shows up once the pipeline includes
-    operations that change the shape or the access pattern - reductions, broadcasts,
-    dim permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on.
-    These are awkward or impractical to express as plain iterator chains,
-    especially when combined with element-wise operations.
-    Jix composes element-wise and shape-changing operations uniformly in the same operation chain,
-    all as lazy views, and because the full chain is encoded in the static type the compiler is able to
-    inline the whole pipeline into a single read loop - no virtual dispatch, no runtime scheduler,
-    no (large) intermediate allocations beyond the final output.
+
+### When NOT to use jix
+
+- if you want to compress an array but always read it in full, you don't need jix at all - just
+    zip and unzip the whole array with a general-purpose compressor. Although some of jix filters
+    are dtype aware, so you may want to test the compression ratio and speed for your specific
+    data.
