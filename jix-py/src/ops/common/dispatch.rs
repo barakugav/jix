@@ -8,8 +8,8 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use crate::ops::common::{
-    cast_python_scalars_to_default_precision, has_float16_input, CastKind, Operand, Precision,
-    Rank, Scalar,
+    CastKind, Operand, Precision, Rank, Scalar, cast_python_scalars_to_default_precision,
+    has_float16_input,
 };
 use crate::type_hint::ItemOrTuple;
 use crate::util::IterExt;
@@ -142,9 +142,9 @@ impl OpFnDescriptor<3, ()> {
     pub(crate) fn new3<T>(
         allowed_cast: CastKind,
         f: impl Fn(TypedOperand<T>, TypedOperand<T>, TypedOperand<T>) -> PyResult<ArrayAny>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> Self
     where
         T: Dtyped,
@@ -165,9 +165,9 @@ impl<ExtraArgs> OpFnDescriptor<2, ExtraArgs> {
     pub(crate) fn new2_args<T>(
         allowed_cast: CastKind,
         f: impl Fn(TypedOperand<T>, TypedOperand<T>, ExtraArgs) -> PyResult<ArrayAny>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> Self
     where
         T: Dtyped,

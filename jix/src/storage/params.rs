@@ -3,13 +3,13 @@ use std::sync::{Arc, LazyLock};
 use crate::codec::{Codec, EncoderParams, Filter};
 use crate::context::CacheScope;
 use crate::dtype::{Dtype, Itemsize};
-use crate::error::{check_dtype_size_nonzero, check_ndim, check_shape_overflow, ensure, Result};
+use crate::error::{Result, check_dtype_size_nonzero, check_ndim, check_shape_overflow, ensure};
 use crate::storage::block::BlockSize;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdSet};
 use crate::util::{
-    scale_read_shape, DimArray, DimBitmap, DimIdx, Idx, IterExt, ScaleWeight, SliceExt,
+    DimArray, DimBitmap, DimIdx, Idx, IterExt, ScaleWeight, SliceExt, scale_read_shape,
 };
-use crate::{dim_arr, Array, DimDyn, Dimension, StorageBase, BLOCK_SIZE_BYTES_MAX};
+use crate::{Array, BLOCK_SIZE_BYTES_MAX, DimDyn, Dimension, StorageBase, dim_arr};
 
 const ELEMENT_COST_MAX: f32 = u64::MAX as f32; // 2^64
 
@@ -559,11 +559,12 @@ impl CompactParams {
             let spec = spec.as_ref();
             let ndim = shape.len();
             assert_eq!(spec.block_shape().len(), ndim);
-            assert!(spec
-                .block_shape()
-                .iter()
-                .zip(shape)
-                .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
+            assert!(
+                spec.block_shape()
+                    .iter()
+                    .zip(shape)
+                    .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64)))
+            );
             assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
             assert!(spec.block_size() > 0);
             assert!(spec.read_params().read_size.min > 0);
@@ -1194,13 +1195,13 @@ mod tests {
     use ndarray::ShapeBuilder;
 
     use super::scale_order_from_weights;
-    use crate::storage::params::{
-        combine_block_layout, combine_elementwise_hints, combine_select_hints, ArraySpecFlags,
-        DimBitmap, ReadSize, ELEMENT_COST_MAX,
-    };
     use crate::storage::CompactParams;
+    use crate::storage::params::{
+        ArraySpecFlags, DimBitmap, ELEMENT_COST_MAX, ReadSize, combine_block_layout,
+        combine_elementwise_hints, combine_select_hints,
+    };
     use crate::util::ScaleWeight;
-    use crate::{Array, CompactArray, StorageBase, BLOCK_SIZE_BYTES_MAX};
+    use crate::{Array, BLOCK_SIZE_BYTES_MAX, CompactArray, StorageBase};
 
     #[test]
     fn compact_with_keeps_caller_fixed_dims() {
@@ -2326,13 +2327,14 @@ mod tests {
         let a = Array::compact_ndarray(&ndarray::Array3::<u8>::zeros((0, 1, 1))).unwrap();
         let a = a.broadcast(&[0, 3, 0x5555_5555_5555_5555]);
         assert!(a.compact().is_err());
-        assert!(a
-            .write_to(
+        assert!(
+            a.write_to(
                 std::io::Cursor::new(vec![]),
                 CompactParams::default(),
                 &a.read_ctx()
             )
-            .is_err());
+            .is_err()
+        );
     }
 
     #[test]
@@ -2377,9 +2379,9 @@ mod tests {
     #[test]
     fn read_tiling_of_expressions() {
         use super::ReadTiling::{self, Fusable, SinglePass, Tiled, ZeroCopy};
+        use crate::StorageBase;
         use crate::ops::{concatenate, stack};
         use crate::storage::scalar::Scalar;
-        use crate::StorageBase;
 
         fn kind<S: StorageBase>(a: Array<S>) -> ReadTiling {
             a.storage().spec().read_tiling()

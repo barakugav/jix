@@ -448,10 +448,10 @@ impl<S: StorageBase> Array<S> {
 mod tests {
     use ndarray::array;
 
+    use crate::CompactArray;
     use crate::array::Array;
     use crate::scalar::bool8;
     use crate::util::arr_params;
-    use crate::CompactArray;
 
     #[test]
     fn map_multiple_widening_shape_overflow_is_an_error() {

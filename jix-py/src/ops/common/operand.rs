@@ -1,19 +1,17 @@
+use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
+use jix_core::scalar::{Complex, bool8, f16};
+use jix_core::storage::PlainArrayMethods;
+use jix_core::{Array, ArrayAny};
 use numpy::{PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 
-use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
-use jix_core::scalar::bool8;
-use jix_core::scalar::{f16, Complex};
-use jix_core::storage::PlainArrayMethods;
-use jix_core::{Array, ArrayAny};
-
+use crate::PyArray;
 use crate::dtype::dtype_from_numpy;
 use crate::ops::cast_impl;
 use crate::ops::common::{Precision, Rank};
-use crate::util::{check_ndim, numpy_items, DimArray, IntoPyResult};
-use crate::PyArray;
+use crate::util::{DimArray, IntoPyResult, check_ndim, numpy_items};
 
 pub(crate) enum Operand {
     PyArray(Py<PyArray>),
@@ -360,7 +358,7 @@ impl Scalar {
                         "Unsupported cast from {} to {}",
                         Dtype::new_scalar(ScalarKind::ComplexF64),
                         Dtype::new_scalar(kind)
-                    )))
+                    )));
                 }
             },
         })

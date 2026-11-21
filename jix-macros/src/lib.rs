@@ -55,7 +55,7 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use syn::ext::IdentExt;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, Meta};
+use syn::{Data, DeriveInput, Fields, Meta, parse_macro_input};
 
 /// Derive macro generating an impl of the trait `Dtyped`.
 ///

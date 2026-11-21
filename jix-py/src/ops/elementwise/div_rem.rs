@@ -1,10 +1,11 @@
-use jix_core::scalar::{f16, Complex};
+use jix_core::scalar::{Complex, f16};
 use pyo3::exceptions::PyValueError;
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
-use pyo3::{prelude::*, type_hint_identifier, type_hint_subscript};
+use pyo3::prelude::*;
+use pyo3::{type_hint_identifier, type_hint_subscript};
 
-use crate::ops::common::{broadcast_operands, define_op2_table, Operand};
 use crate::PyArray;
+use crate::ops::common::{Operand, broadcast_operands, define_op2_table};
 
 /// Element-wise division of two arrays (`a / b`), with the quotient optionally rounded to an
 /// integer.

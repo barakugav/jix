@@ -28,14 +28,14 @@ use std::collections::HashSet;
 use std::hint::assert_unchecked;
 use std::mem::ManuallyDrop;
 
-use crate::error::{bail, ensure, error, Error, Result};
+use crate::error::{Error, Result, bail, ensure, error};
+#[cfg(feature = "num-complex")]
+use crate::scalar::Complex;
 use crate::scalar::bool8;
 #[cfg(feature = "half")]
 use crate::scalar::f16;
-#[cfg(feature = "num-complex")]
-use crate::scalar::Complex;
-use crate::util::arrayvec::ArrayVec;
 use crate::util::IterExt;
+use crate::util::arrayvec::ArrayVec;
 
 /// A type alignment in bytes.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -1599,48 +1599,54 @@ mod tests {
     #[test]
     fn new_struct_trailing_padding_errors() {
         // The C layout of { i32, u8 } has 3 bytes of tail padding that no field covers.
-        assert!(Dtype::new_struct(
-            vec![
-                ("a".to_string(), 0, i32::DTYPE),
-                ("b".to_string(), 4, u8::DTYPE),
-            ],
-            &[],
-            8,
-            4.try_into().unwrap(),
-        )
-        .is_err());
+        assert!(
+            Dtype::new_struct(
+                vec![
+                    ("a".to_string(), 0, i32::DTYPE),
+                    ("b".to_string(), 4, u8::DTYPE),
+                ],
+                &[],
+                8,
+                4.try_into().unwrap(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn new_struct_padding_between_fields_errors() {
         // u8 at 0, f32 at 4: bytes 1..4 are padding.
-        assert!(Dtype::new_struct(
-            vec![
-                ("a".to_string(), 0, u8::DTYPE),
-                ("b".to_string(), 4, f32::DTYPE),
-            ],
-            &[],
-            8,
-            4.try_into().unwrap(),
-        )
-        .is_err());
+        assert!(
+            Dtype::new_struct(
+                vec![
+                    ("a".to_string(), 0, u8::DTYPE),
+                    ("b".to_string(), 4, f32::DTYPE),
+                ],
+                &[],
+                8,
+                4.try_into().unwrap(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn new_struct_aligned_with_misaligned_field_errors() {
         // No padding, but `b` at offset 1 is not a multiple of its alignment, so the layout is
         // only valid as packed.
-        assert!(Dtype::new_struct(
-            vec![
-                ("a".to_string(), 0, u8::DTYPE),
-                ("b".to_string(), 1, f32::DTYPE),
-                ("_pad".to_string(), 5, <[u8; 3]>::DTYPE),
-            ],
-            &[],
-            8,
-            4.try_into().unwrap(),
-        )
-        .is_err());
+        assert!(
+            Dtype::new_struct(
+                vec![
+                    ("a".to_string(), 0, u8::DTYPE),
+                    ("b".to_string(), 1, f32::DTYPE),
+                    ("_pad".to_string(), 5, <[u8; 3]>::DTYPE),
+                ],
+                &[],
+                8,
+                4.try_into().unwrap(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1658,25 +1664,29 @@ mod tests {
 
     #[test]
     fn new_struct_shape_zero_errors() {
-        assert!(Dtype::new_struct(
-            vec![("a".to_string(), 0, u8::DTYPE)],
-            &[0],
-            0,
-            1.try_into().unwrap()
-        )
-        .is_err());
+        assert!(
+            Dtype::new_struct(
+                vec![("a".to_string(), 0, u8::DTYPE)],
+                &[0],
+                0,
+                1.try_into().unwrap()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn new_struct_too_many_dims_errors() {
         // DTYPE_NDIM_MAX = 4; five dimensions must be rejected.
-        assert!(Dtype::new_struct(
-            vec![("a".to_string(), 0, u8::DTYPE)],
-            &[1, 1, 1, 1, 1],
-            1,
-            1.try_into().unwrap(),
-        )
-        .is_err());
+        assert!(
+            Dtype::new_struct(
+                vec![("a".to_string(), 0, u8::DTYPE)],
+                &[1, 1, 1, 1, 1],
+                1,
+                1.try_into().unwrap(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1696,56 +1706,64 @@ mod tests {
     #[test]
     fn new_struct_itemsize_not_multiple_of_shape_errors() {
         // shape=[3], element must be 4 bytes (i32), total must be 12; 10 is not valid.
-        assert!(Dtype::new_struct(
-            vec![("a".to_string(), 0, i32::DTYPE)],
-            &[3],
-            10,
-            4.try_into().unwrap()
-        )
-        .is_err());
+        assert!(
+            Dtype::new_struct(
+                vec![("a".to_string(), 0, i32::DTYPE)],
+                &[3],
+                10,
+                4.try_into().unwrap()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn new_struct_wrong_alignment_errors() {
         // f64 field requires alignment 8; declaring alignment 4 is rejected as invalid offsets
         // (alignment 4 matches neither packed=1 nor aligned=8 layout).
-        assert!(Dtype::new_struct(
-            vec![("a".to_string(), 0, f64::DTYPE)],
-            &[],
-            8,
-            4.try_into().unwrap()
-        )
-        .is_err());
+        assert!(
+            Dtype::new_struct(
+                vec![("a".to_string(), 0, f64::DTYPE)],
+                &[],
+                8,
+                4.try_into().unwrap()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn new_struct_packed_wrong_offset_errors() {
         // Packed struct (alignment=1): b must be at offset 4, not 5.
-        assert!(Dtype::new_struct(
-            vec![
-                ("a".to_string(), 0, i32::DTYPE),
-                ("b".to_string(), 5, u8::DTYPE),
-            ],
-            &[],
-            6,
-            1.try_into().unwrap(),
-        )
-        .is_err());
+        assert!(
+            Dtype::new_struct(
+                vec![
+                    ("a".to_string(), 0, i32::DTYPE),
+                    ("b".to_string(), 5, u8::DTYPE),
+                ],
+                &[],
+                6,
+                1.try_into().unwrap(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn new_struct_itemsize_too_small_errors() {
         // Packed i32+u8 must be exactly 5; declaring 4 makes the fields overrun the itemsize.
-        assert!(Dtype::new_struct(
-            vec![
-                ("a".to_string(), 0, i32::DTYPE),
-                ("b".to_string(), 4, u8::DTYPE),
-            ],
-            &[],
-            4,
-            1.try_into().unwrap(),
-        )
-        .is_err());
+        assert!(
+            Dtype::new_struct(
+                vec![
+                    ("a".to_string(), 0, i32::DTYPE),
+                    ("b".to_string(), 4, u8::DTYPE),
+                ],
+                &[],
+                4,
+                1.try_into().unwrap(),
+            )
+            .is_err()
+        );
     }
 
     // ---- Derive macro ----

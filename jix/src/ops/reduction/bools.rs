@@ -1,6 +1,6 @@
 use crate::ops::prelude::*;
 use crate::ops::reduction::common::{
-    define_array_reduction_method, define_reduction_op, ReductionOpKernel,
+    ReductionOpKernel, define_array_reduction_method, define_reduction_op,
 };
 
 define_reduction_op!(

@@ -1,8 +1,8 @@
 use std::mem::{ManuallyDrop, MaybeUninit};
 
-use jix_core::error::ErrorKind;
 use jix_core::NDIM_MAX;
-use numpy::npyffi::{npy_intp, PyArray_Dims};
+use jix_core::error::ErrorKind;
+use numpy::npyffi::{PyArray_Dims, npy_intp};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{
     PyArithmeticError, PyIndexError, PyOSError, PyRuntimeError, PyTypeError, PyValueError,
@@ -10,8 +10,8 @@ use pyo3::exceptions::{
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::slice::PySliceIndices;
 use pyo3::types::PySlice;
+use pyo3::types::slice::PySliceIndices;
 
 use crate::type_hint::Dim;
 
@@ -113,11 +113,7 @@ where
     F: Ungil + FnOnce() -> T,
     T: Ungil,
 {
-    if detach {
-        py.detach(f)
-    } else {
-        f()
-    }
+    if detach { py.detach(f) } else { f() }
 }
 
 #[inline]

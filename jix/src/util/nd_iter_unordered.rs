@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 
 use crate::dtype::{Alignment, Itemsize};
 use crate::util::iter::NdIter;
-use crate::util::{array_from_fn_inline, Idx};
-use crate::{dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
+use crate::util::{Idx, array_from_fn_inline};
+use crate::{Dim, DimArray, DimDyn, DimIdx, Dimension, dim_arr};
 
 /// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d
 /// regions, described only by their common `shape` (in elements), each operand's `strides`, and

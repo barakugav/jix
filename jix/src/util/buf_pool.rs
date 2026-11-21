@@ -2,8 +2,8 @@ use std::cell::UnsafeCell;
 use std::sync::Arc;
 
 use crate::dtype::Alignment;
-use crate::util::cpu_cache::CACHE_LINE_SIZE;
 use crate::util::RawAlignedBytes;
+use crate::util::cpu_cache::CACHE_LINE_SIZE;
 
 /// A pool of aligned byte buffers.
 ///
@@ -72,10 +72,12 @@ impl BufferPool {
             (self.align_standard.get(), standard_alignment)
         } else {
             let align_other = unsafe { &mut *self.align_other.get() };
-            debug_assert!(align_other
-                .iter()
-                .zip(align_other.iter().skip(1))
-                .all(|((align1, _pool1), (align2, _pool2))| align1 < align2));
+            debug_assert!(
+                align_other
+                    .iter()
+                    .zip(align_other.iter().skip(1))
+                    .all(|((align1, _pool1), (align2, _pool2))| align1 < align2)
+            );
 
             let (idx, exists) = align_other
                 .iter()

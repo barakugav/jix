@@ -1,10 +1,10 @@
 mod common;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use jix::Array;
 use ndarray::{Ix0, Ix1, Ix2};
 
-use crate::common::{create_data, Profile};
+use crate::common::{Profile, create_data};
 
 fn bench_sum_plain(c: &mut Criterion) {
     fn bench_sum_plain_impl(c: &mut Criterion, size: u64, all_dtypes: bool) {

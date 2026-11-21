@@ -457,7 +457,7 @@ mod tests {
     use super::SliceItem;
     use crate::array::Array;
     use crate::storage::{ArrayStorageExt, Index};
-    use crate::util::{arr_params, shape_strategy, ScalarStrategy};
+    use crate::util::{ScalarStrategy, arr_params, shape_strategy};
     use crate::{CompactArray, PlainArray, ReadContext, StorageBase};
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> CompactArray<i32> {
@@ -498,11 +498,13 @@ mod tests {
         let a = make2d(arange(12), 3, 4).slice((.., ..));
         assert!(!a.is_compact());
         assert!(a.storage().as_compact().is_some());
-        assert!(make2d(arange(12), 3, 4)
-            .slice((.., 1..))
-            .storage()
-            .as_compact()
-            .is_none());
+        assert!(
+            make2d(arange(12), 3, 4)
+                .slice((.., 1..))
+                .storage()
+                .as_compact()
+                .is_none()
+        );
     }
 
     /// An identity view does not read as an element-wise pipeline, so it cannot fuse.

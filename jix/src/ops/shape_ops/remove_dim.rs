@@ -245,8 +245,8 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::array::Array;
-    use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{CompactArray, ReadContext, NDIM_MAX};
+    use crate::util::{ScalarStrategy, arr_params, shape_strategy};
+    use crate::{CompactArray, NDIM_MAX, ReadContext};
 
     #[test]
     fn rejects_invalid_index() {

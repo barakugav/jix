@@ -346,10 +346,11 @@ mod tests {
         for (n, &id) in ids.iter().enumerate() {
             assert!(set.insert(id));
             assert!(!set.insert(id));
-            assert!(ids
-                .iter()
-                .enumerate()
-                .all(|(m, &id)| set.contains(id) == (m <= n)));
+            assert!(
+                ids.iter()
+                    .enumerate()
+                    .all(|(m, &id)| set.contains(id) == (m <= n))
+            );
             let all = set.iter().collect::<HashSet<_>>();
             assert_eq!(all, ids[..=n].iter().copied().collect());
         }

@@ -1,6 +1,6 @@
 use super::Array;
 use crate::codec::{DecoderCodecConfig, Encoder};
-use crate::error::{check_region_size, Result};
+use crate::error::{Result, check_region_size};
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageExt, BlockSize, Compact, CompactParams, Index,
@@ -8,8 +8,8 @@ use crate::storage::{
 };
 use crate::util::iter::NdIter;
 use crate::util::{
-    default_logical_strides, default_strides, scale_read_shape, AlignedBytes, IterExt, NdCopier,
-    PtrMutNoalias, PtrNoalias, SliceExt,
+    AlignedBytes, IterExt, NdCopier, PtrMutNoalias, PtrNoalias, SliceExt, default_logical_strides,
+    default_strides, scale_read_shape,
 };
 use crate::{Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase};
 
@@ -362,10 +362,10 @@ mod tests {
     use ndarray::array;
 
     use super::Array;
+    use crate::StorageBase;
     use crate::array::tests::*;
     use crate::dtype::Dtyped;
     use crate::util::arr_params;
-    use crate::StorageBase;
 
     // -----------------------------------------------------------------------
     // compact

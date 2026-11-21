@@ -8,14 +8,14 @@ use fearless_simd::{Level as SimdLevel, Simd, SimdBase};
 
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{ArithmeticStatus, Result};
-use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf, StridedBufBytes};
+use crate::storage::{Index, OutBuf, OutBufInner, StridedBuf, StridedBufBytes, write_out_buf_slot};
 use crate::util::buf_pool::PoolBuf;
 use crate::util::{
-    array_from_fn_inline, const_min, default_strides_slice, fill_contiguous, prev_power_of_two,
-    strided_span_bytes, ArrayExt, DimBitmap, NdCopier, NdIterUnordered, NdIterUnorderedDyn, PtrExt,
-    PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED,
+    ArrayExt, DimBitmap, NdCopier, NdIterUnordered, NdIterUnorderedDyn, PtrExt, PtrMutExt,
+    PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED, array_from_fn_inline, const_min,
+    default_strides_slice, fill_contiguous, prev_power_of_two, strided_span_bytes,
 };
-use crate::{dim_arr, DimArray, DimIdx, ReadContext};
+use crate::{DimArray, DimIdx, ReadContext, dim_arr};
 
 /// A lazy pipeline of element-wise operations over a rectangular region.
 ///
@@ -1019,7 +1019,7 @@ mod tests {
     use std::ops::Range;
 
     use super::*;
-    use crate::storage::{split_ranges, ArrayStorageExt, Index};
+    use crate::storage::{ArrayStorageExt, Index, split_ranges};
     use crate::util::{array_from_fn_inline, strided_span_bytes};
     use crate::{Array, CompactArray, StorageBase};
 
@@ -1158,10 +1158,10 @@ mod tests {
             rhs: P2,
         }
         impl<
-                T: Dtyped + std::ops::Add<Output = T>,
-                P1: ElementwisePipelineImpl<T>,
-                P2: ElementwisePipelineImpl<T>,
-            > ElementwisePipelineImpl<T> for AddNode<P1, P2>
+            T: Dtyped + std::ops::Add<Output = T>,
+            P1: ElementwisePipelineImpl<T>,
+            P2: ElementwisePipelineImpl<T>,
+        > ElementwisePipelineImpl<T> for AddNode<P1, P2>
         {
             const N_OPERANDS: Option<usize> = Some(2);
             const MAX_ITEMSIZE: usize =
@@ -1758,10 +1758,11 @@ mod tests {
         let index = full_index(sum.storage.shape());
         let context = ReadContext::default();
         let (start, size) = split_ranges(&index);
-        assert!(sum
-            .storage
-            .read_as_elementwise_pipeline::<i64>(&Index::new(&start, &size).unwrap(), &context)
-            .is_err());
+        assert!(
+            sum.storage
+                .read_as_elementwise_pipeline::<i64>(&Index::new(&start, &size).unwrap(), &context)
+                .is_err()
+        );
     }
 
     /// An `Array` broadcasting one `f32` across a 4x5 region.
@@ -2024,11 +2025,7 @@ mod tests {
                 Array::compact_ndarray(&nd_b).unwrap(),
             ),
             |(x, y, flag): (i32, f32, crate::scalar::bool8)| {
-                if flag.into() {
-                    x as f32 + y
-                } else {
-                    y
-                }
+                if flag.into() { x as f32 + y } else { y }
             },
         );
         assert_eq!(operand_count::<_, f32>(&mixed.storage, &index), 3);

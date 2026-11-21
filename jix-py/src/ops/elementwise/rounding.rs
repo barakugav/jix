@@ -1,8 +1,8 @@
 use jix_core::scalar::f16;
 use pyo3::prelude::*;
 
-use crate::ops::common::{define_op1_table, Operand, Rank};
 use crate::PyArray;
+use crate::ops::common::{Operand, Rank, define_op1_table};
 
 /// Rounds each element down to the nearest integer (towards -inf).
 ///

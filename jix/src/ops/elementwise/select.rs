@@ -477,7 +477,7 @@ where
 mod tests {
     use std::fmt::Debug;
 
-    use ndarray::{array, Ix1};
+    use ndarray::{Ix1, array};
     use proptest::prelude::*;
 
     use super::Select;
@@ -486,7 +486,7 @@ mod tests {
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::storage::{split_ranges, ArrayStorageExt, Index};
+    use crate::storage::{ArrayStorageExt, Index, split_ranges};
     use crate::util::{DimArray, ScalarStrategy};
 
     #[test]
@@ -1156,8 +1156,8 @@ mod tests {
 
     #[test]
     fn read_tiling_is_not_fusable() {
-        use crate::storage::params::ReadTiling::{SinglePass, Tiled};
         use crate::StorageBase;
+        use crate::storage::params::ReadTiling::{SinglePass, Tiled};
         let (c, x) = (array![bool8::TRUE, bool8::FALSE], array![1i32, 2]);
         let c = Array::plain_ndarray_ref(&c).unwrap();
         let x = || Array::plain_ndarray_ref(&x).unwrap();

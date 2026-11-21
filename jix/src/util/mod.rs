@@ -38,7 +38,7 @@ pub(crate) use sealed::Sealed;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
-pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray, DimIdx};
+pub(crate) use crate::dimension::{DimArray, DimIdx, dim_arr, try_dim_arr};
 use crate::{DimVec, Dimension};
 
 pub(crate) trait Idx:
@@ -801,35 +801,23 @@ impl<T> PtrMutExt<T> for *mut T {
 
 #[inline]
 pub(crate) const fn prev_power_of_two(x: usize) -> usize {
-    if x == 0 {
-        1
-    } else {
-        1 << x.ilog2()
-    }
+    if x == 0 { 1 } else { 1 << x.ilog2() }
 }
 
 #[inline]
 pub(crate) const fn const_min(a: usize, b: usize) -> usize {
-    if a < b {
-        a
-    } else {
-        b
-    }
+    if a < b { a } else { b }
 }
 
 #[inline]
 pub(crate) const fn const_max(a: usize, b: usize) -> usize {
-    if a > b {
-        a
-    } else {
-        b
-    }
+    if a > b { a } else { b }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        calc_block_end, default_strides_slice, scale_read_shape, AlternatingBuffers, ScaleWeight,
+        AlternatingBuffers, ScaleWeight, calc_block_end, default_strides_slice, scale_read_shape,
     };
     use crate::DimDyn;
 

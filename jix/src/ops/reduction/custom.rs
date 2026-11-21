@@ -334,13 +334,13 @@ impl<S: StorageBase> Array<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use ndarray::{array, Ix0, Ix1};
+    use ndarray::{Ix0, Ix1, array};
 
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::storage::{
-        split_ranges, ArrayStorageExt, CompactArrayMethods, CompactParams, Index,
+        ArrayStorageExt, CompactArrayMethods, CompactParams, Index, split_ranges,
     };
 
     #[cfg(feature = "num-complex")]
@@ -363,11 +363,7 @@ mod tests {
         a ^ b
     }
     fn maximum<T: PartialOrd>(a: T, b: T) -> T {
-        if a > b {
-            a
-        } else {
-            b
-        }
+        if a > b { a } else { b }
     }
     #[cfg(feature = "num-complex")]
     fn add<T: std::ops::Add<Output = T>>(a: T, b: T) -> T {

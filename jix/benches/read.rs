@@ -2,7 +2,7 @@ mod common;
 
 use std::ops::Range;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use fastrand::Rng;
 use jix::Array;
 use ndarray::Ix2;

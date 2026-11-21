@@ -1,9 +1,9 @@
+use crate::util::Idx;
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{
-    nd_iter_ext_logical_global_index, NdIterExtStridesOffset, NdIterExtStridesOffsetMulti,
-    NdIterExtStridesOffsetMultiDyn,
+    NdIterExtStridesOffset, NdIterExtStridesOffsetMulti, NdIterExtStridesOffsetMultiDyn,
+    nd_iter_ext_logical_global_index,
 };
-use crate::util::Idx;
 use crate::{DimVec, Dimension};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
@@ -769,12 +769,14 @@ mod tests {
     #[test]
     fn new_with_begin_empty_when_one_dim_degenerate() {
         // begin[0] == end[0] -> no elements even though other dims are non-empty
-        assert!(collect_indices(NdIter::<Dim<2>, _>::new_with_begin(
-            [2u64, 0],
-            [2u64, 5],
-            ()
-        ))
-        .is_empty());
+        assert!(
+            collect_indices(NdIter::<Dim<2>, _>::new_with_begin(
+                [2u64, 0],
+                [2u64, 5],
+                ()
+            ))
+            .is_empty()
+        );
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use jix_core::scalar::Complex;
 use pyo3::prelude::*;
 
-use crate::ops::common::{define_op1, define_op1_table, Operand, Rank};
 use crate::PyArray;
+use crate::ops::common::{Operand, Rank, define_op1, define_op1_table};
 
 /// Extracts the real part of each complex element.
 ///

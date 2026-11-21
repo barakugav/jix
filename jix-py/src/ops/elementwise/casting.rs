@@ -1,5 +1,5 @@
-use jix_core::dtype::{Dtype, ScalarKind};
 use jix_core::ArrayAny;
+use jix_core::dtype::{Dtype, ScalarKind};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
@@ -57,8 +57,7 @@ pub(crate) fn cast_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
         return Ok(array); // no-op, same dtype
     }
     if let Some((src, dst)) = array.dtype().try_to_scalar().zip(dtype.try_to_scalar()) {
-        use jix_core::scalar::bool8;
-        use jix_core::scalar::{f16, Complex};
+        use jix_core::scalar::{Complex, bool8, f16};
 
         if src.is_integer() && dst.is_integer() && src.itemsize() == dst.itemsize() {
             let array = array.transmute_elements_dyn(dtype.clone());

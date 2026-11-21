@@ -4,13 +4,13 @@ use crate::ops::prelude::*;
 
 pub(crate) mod traits {
     use crate::error::ArithmeticErrorKind;
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{
         define_scalar_op1_trait, define_scalar_op2_trait, impl_scalar_op1, impl_scalar_op2,
     };
-    #[cfg(feature = "num-complex")]
-    use crate::scalar::Complex;
 
     define_scalar_op1_trait!(
         /// Sign operation. The output dtype is the input dtype.
@@ -680,7 +680,7 @@ mod tests {
 
         use super::{AbsKernel, NegKernel, SquareKernel};
         use crate::ops::elementwise::op1::Op1Kernel;
-        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use crate::util::{SimdTestValues, assert_same_elements, for_each_simd_level};
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {
@@ -838,7 +838,7 @@ mod tests {
 
         use super::{AddKernel, MulKernel, SubKernel};
         use crate::ops::elementwise::op2::Op2Kernel;
-        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use crate::util::{SimdTestValues, assert_same_elements, for_each_simd_level};
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {
@@ -1040,8 +1040,8 @@ mod tests {
     #[cfg(feature = "num-complex")]
     #[test]
     fn mul_concrete_complex() {
-        use crate::scalar::Complex;
         use crate::Array;
+        use crate::scalar::Complex;
 
         let nd_a = ndarray::array![
             [
@@ -1155,8 +1155,8 @@ mod tests {
 
     #[test]
     fn int_pow_negative_exponent_read() {
-        use crate::error::ErrorKind;
         use crate::Array;
+        use crate::error::ErrorKind;
 
         let a = Array::compact_ndarray(&ndarray::array![2i32, 3, 4, -5]).unwrap();
         let b = Array::compact_ndarray(&ndarray::array![3i32, -1, 0, 3]).unwrap();

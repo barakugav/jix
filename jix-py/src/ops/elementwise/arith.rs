@@ -1,13 +1,13 @@
 use std::sync::LazyLock;
 
-use jix_core::scalar::{f16, Complex};
+use jix_core::scalar::{Complex, f16};
 use pyo3::prelude::*;
 
-use crate::ops::common::{
-    broadcast_operands, define_op1, define_op1_desc, define_op1_table, define_op2,
-    define_op2_table, CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar,
-};
 use crate::PyArray;
+use crate::ops::common::{
+    CastKind, OpDescriptor, OpFnDescriptor, Operand, Rank, Scalar, broadcast_operands, define_op1,
+    define_op1_desc, define_op1_table, define_op2, define_op2_table,
+};
 
 /// Arithmetic negation applied element-wise.
 ///

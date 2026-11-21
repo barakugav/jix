@@ -1,11 +1,11 @@
 mod common;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use jix::storage::CompactParams;
 use jix::{Array, CompactArray};
 use ndarray::Ix2;
 
-use crate::common::{create_data, Profile};
+use crate::common::{Profile, create_data};
 
 const SIZES: [(u64, u64); 4] = [(4_000, 200), (40_000, 200), (200_000, 64), (20_000, 2_000)];
 

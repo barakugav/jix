@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams};
 use crate::dtype::Dtype;
 use crate::element_type::check_element_type;
-use crate::error::{ensure, error, Result};
+use crate::error::{Result, ensure, error};
 use crate::util::{SendSyncPtr, Unaligned};
 use crate::{ElementType, ReadContext};
 
@@ -467,13 +467,13 @@ impl BlockTableStorage for Mmap {
 #[cfg(test)]
 mod tests {
     use super::{BlockSize, BlockTable};
+    use crate::ReadContext;
     use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
     use crate::error::Result;
-    use crate::storage::block::{BlockTableStorage, Owned};
     use crate::storage::ElementType;
-    use crate::util::{cast_slice, AlignedBytes};
-    use crate::ReadContext;
+    use crate::storage::block::{BlockTableStorage, Owned};
+    use crate::util::{AlignedBytes, cast_slice};
 
     fn decode_block<S, ET>(
         table: &BlockTable<S, ET>,
@@ -568,9 +568,10 @@ mod tests {
         let bad = bad.unwrap();
         assert!(bad.block_bytes(0).is_err());
         let mut buf = [0u8; 4];
-        assert!(bad
-            .read_block(0, &mut buf, &ReadContext::default())
-            .is_err());
+        assert!(
+            bad.read_block(0, &mut buf, &ReadContext::default())
+                .is_err()
+        );
     }
 
     fn make_storage<T: Dtyped>(

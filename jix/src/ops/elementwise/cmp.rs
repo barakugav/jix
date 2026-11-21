@@ -3,12 +3,12 @@ use crate::ops::prelude::*;
 use crate::ops::{Op2, Op2Kernel};
 
 pub(crate) mod traits {
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::scalar::traits_util::{define_scalar_op2_trait, impl_scalar_op2};
-    #[cfg(feature = "num-complex")]
-    use crate::scalar::Complex;
 
     macro_rules! cmp_op2 {
         (
@@ -750,8 +750,8 @@ mod tests {
     fn u64_vs_i64_is_exact() {
         use ndarray::Array1;
 
-        use crate::ops::{Equal, Greater, GreaterEqual, Less, LessEqual, NotEqual};
         use crate::Array;
+        use crate::ops::{Equal, Greater, GreaterEqual, Less, LessEqual, NotEqual};
 
         let us = [
             0,
@@ -791,7 +791,7 @@ mod tests {
 
         use super::{EqualKernel, LessEqualKernel, LessKernel, NotEqualKernel};
         use crate::ops::elementwise::op2::Op2Kernel;
-        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use crate::util::{SimdTestValues, assert_same_elements, for_each_simd_level};
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {
@@ -991,8 +991,8 @@ mod tests {
 
     #[test]
     fn swapped_cmp_shape_mismatch_names_operands_in_caller_order() {
-        use crate::ops::Greater;
         use crate::Array;
+        use crate::ops::Greater;
 
         let a = Array::compact_ndarray(&ndarray::Array2::<i32>::zeros([2, 3])).unwrap();
         let b = Array::compact_ndarray(&ndarray::Array2::<i32>::zeros([3, 2])).unwrap();

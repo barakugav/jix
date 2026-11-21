@@ -215,7 +215,7 @@ mod tests {
 
         use super::SqrtKernel;
         use crate::ops::elementwise::op1::Op1Kernel;
-        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use crate::util::{SimdTestValues, assert_same_elements, for_each_simd_level};
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn log2_log10_of_exact_powers_are_exact() {
-        use crate::scalar::{Log10, Log2};
+        use crate::scalar::{Log2, Log10};
         for k in -60..=60 {
             assert_eq!(Log2::log2(2f64.powi(k)), k as f64);
             assert_eq!(Log2::log2(2f32.powi(k / 3)), (k / 3) as f32);

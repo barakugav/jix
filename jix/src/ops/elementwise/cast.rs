@@ -1,11 +1,11 @@
 use crate::ops::prelude::*;
 
 pub(crate) mod traits {
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
     use crate::scalar::bool8;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    #[cfg(feature = "num-complex")]
-    use crate::scalar::Complex;
 
     /// Cast a scalar value to another scalar type.
     ///
@@ -327,9 +327,9 @@ pub(crate) mod traits {
         use fearless_simd::{Simd, SimdNarrow, SimdWiden};
 
         pub(super) use crate::scalar::simd::{
-            map_vectors_different_width, simd_level, SimdElementExt, SimdLevel,
+            SimdElementExt, SimdLevel, map_vectors_different_width, simd_level,
         };
-        use crate::util::{array_from_fn_inline, ArrayExt};
+        use crate::util::{ArrayExt, array_from_fn_inline};
 
         /// Widen `K` vectors to `2K` vectors of lanes twice as wide
         pub(super) trait WidenVectors<S> {
@@ -501,10 +501,10 @@ mod tests {
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
     }
 
-    #[cfg(feature = "half")]
-    use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;
@@ -972,7 +972,7 @@ mod tests {
         use fearless_simd::Simd;
 
         use crate::scalar::Cast;
-        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use crate::util::{SimdTestValues, assert_same_elements, for_each_simd_level};
 
         fn check<S: Simd>(simd: S) {
             macro_rules! cases {

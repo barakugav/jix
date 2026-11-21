@@ -3,7 +3,7 @@ use numpy::PyUntypedArray;
 use pyo3::prelude::*;
 use pyo3::types::{IntoPyDict, PyDict};
 
-use crate::array::{resolve_array_params, PyArray};
+use crate::array::{PyArray, resolve_array_params};
 use crate::dtype::{dtype_from_numpy, numpy_descr_from_any};
 use crate::ops::cast_impl;
 use crate::ops::common::Operand;

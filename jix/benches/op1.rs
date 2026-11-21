@@ -2,11 +2,11 @@ mod common;
 
 use std::ops::Neg;
 
-use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion};
+use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use jix::{Array, Storage};
 use ndarray::Ix2;
 
-use crate::common::{create_data, Profile};
+use crate::common::{Profile, create_data};
 
 fn bench_op1_compact(c: &mut Criterion) {
     let mut group = c.benchmark_group("op1 compact");

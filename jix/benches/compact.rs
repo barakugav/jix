@@ -1,10 +1,10 @@
 mod common;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use jix::storage::CompactParams;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use jix::Array;
+use jix::storage::CompactParams;
 
-use crate::common::{create_data, Profile};
+use crate::common::{Profile, create_data};
 
 fn bench_compact_array(c: &mut Criterion) {
     let args: [(_, &[_]); _] = [

@@ -68,8 +68,8 @@ mod buf;
 pub use buf::*;
 
 mod index;
-pub(crate) use index::split_ranges;
 pub use index::Index;
+pub(crate) use index::split_ranges;
 
 mod info;
 pub use info::*;

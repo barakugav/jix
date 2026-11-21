@@ -203,7 +203,7 @@ impl<S: StorageBase> Array<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use ndarray::{array, Ix2};
+    use ndarray::{Ix2, array};
 
     use crate::{Array, CompactArray, IntoDimension, ReadContext, StorageBase};
 
@@ -285,11 +285,13 @@ mod tests {
         let a = make(arange(12), [3u64, 4]).roll(3, 0);
         assert!(!a.is_compact());
         assert!(a.storage().as_compact().is_some());
-        assert!(make(arange(12), [3u64, 4])
-            .roll(1, 0)
-            .storage()
-            .as_compact()
-            .is_none());
+        assert!(
+            make(arange(12), [3u64, 4])
+                .roll(1, 0)
+                .storage()
+                .as_compact()
+                .is_none()
+        );
     }
 
     #[test]

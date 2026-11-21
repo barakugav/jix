@@ -1,11 +1,11 @@
-use jix_core::error::ErrorKind;
 use jix_core::NDIM_MAX;
+use jix_core::error::ErrorKind;
 use pyo3::prelude::*;
 
+use crate::PyArray;
 use crate::ops::broadcast_array_impl;
 use crate::ops::common::Operand;
-use crate::util::{array_try_map, DimArray, IntoPyResult};
-use crate::PyArray;
+use crate::util::{DimArray, IntoPyResult, array_try_map};
 
 pub(crate) fn broadcast_operands<const N: usize>(
     mut operands: [Operand; N],

@@ -1,9 +1,9 @@
 mod common;
 
-use jix::storage::CompactParams;
 use jix::Array;
+use jix::storage::CompactParams;
 
-use crate::common::{create_data, Profile};
+use crate::common::{Profile, create_data};
 
 fn main() {
     let args = [

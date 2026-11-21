@@ -5,9 +5,9 @@ use jix_core::scalar::f16;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use crate::ops::common::{define_op1, CastKind, OpDescriptor, OpFnDescriptor, Operand};
-use crate::util::IntoPyResult;
 use crate::PyArray;
+use crate::ops::common::{CastKind, OpDescriptor, OpFnDescriptor, Operand, define_op1};
+use crate::util::IntoPyResult;
 
 define_op1!(
     /// Computes the square root of each element.
@@ -131,7 +131,7 @@ pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> PyResult<PyArra
             + jix_core::scalar::Log10<Output = T>,
         f64: jix_core::scalar::Cast<T>,
     {
-        use jix_core::ops::{Cast, Ln, Log10, Log2};
+        use jix_core::ops::{Cast, Ln, Log2, Log10};
         OpFnDescriptor::new1_args::<T>(CastKind::Safe, |a, args: LogArgs| {
             Ok(match args.base {
                 core::f64::consts::E => Ln::new_array(a).into_py_result()?.into_any(),

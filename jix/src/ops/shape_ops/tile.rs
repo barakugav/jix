@@ -350,9 +350,9 @@ impl<S: StorageBase> Array<S> {
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use ndarray::{array, Ix2};
+    use ndarray::{Ix2, array};
 
-    use crate::{Array, CompactArray, IntoDimension, ReadContext, StorageBase, NDIM_MAX};
+    use crate::{Array, CompactArray, IntoDimension, NDIM_MAX, ReadContext, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers

@@ -1,5 +1,5 @@
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, Result};
+use crate::error::{Result, check_dtype};
 use crate::ops::{ElementwisePipeline, OperandTyped};
 use crate::storage::{ArraySpec, ArrayStorageInfo, CompactView, Index, OutBuf, StridedBuf};
 use crate::{ElementType, ReadContext, TypeDyn};

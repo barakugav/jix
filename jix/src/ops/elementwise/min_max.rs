@@ -407,7 +407,7 @@ mod tests {
     use crate::ops::elementwise::op2::tests::test_op2;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::scalar::{bool8, Maximum, Minimum};
+    use crate::scalar::{Maximum, Minimum, bool8};
 
     /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
     /// their scalar semantics, on every SIMD level of the CPU, over edge cases (NaN included).
@@ -417,7 +417,7 @@ mod tests {
 
         use super::{MaximumKernel, MinimumKernel};
         use crate::ops::elementwise::op2::Op2Kernel;
-        use crate::util::{assert_same_elements, for_each_simd_level, SimdTestValues};
+        use crate::util::{SimdTestValues, assert_same_elements, for_each_simd_level};
 
         fn check<S: Simd>(simd: S) {
             macro_rules! case {

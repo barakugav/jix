@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{ArraySpec, ArrayStorageInfo, CompactView, Index, OutBuf};
-use crate::{DimDyn, Dimension, ReadContext, StorageBase, TypeDyn, NDIM_MAX};
+use crate::{DimDyn, Dimension, NDIM_MAX, ReadContext, StorageBase, TypeDyn};
 
 /// A type-erased storage: any storage behind an `Arc`, with reads forwarded to it dynamically.
 ///
