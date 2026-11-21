@@ -53,16 +53,15 @@ impl<S: StorageBase> Array<S> {
     /// # Ok::<(), jix::Error>(())
     /// ```
     pub fn compact(&self) -> Result<Array<Compact<S::ElementType>>> {
-        let context = self.read_ctx();
-        self.compact_with(CompactParams::default(), &context)
+        self.compact_with(CompactParams::default())
     }
 
     /// Compress the data of this array into a new `Array<Compact>` with explicit [`CompactParams`].
     ///
     /// Like [`compact`](Array::compact). Fields not set in `params` are inherited from the source
     /// storage, except that setting any of the codec, level or filters resets the other two to
-    /// their defaults. `self` is read with `context`, whose read size sets how much of it is read
-    /// at a time.
+    /// their defaults. The [read size](Array::read_params) of `self` sets how much of it is read at
+    /// a time.
     ///
     /// # Errors
     ///
@@ -80,21 +79,14 @@ impl<S: StorageBase> Array<S> {
     ///
     /// // Let's say a is given to us, and we prepare to access it many times with a specific access
     /// // pattern. We re-compress it with a matching block shape.
-    /// let b = a.compact_with(
-    ///     CompactParams::default().block_shape(&[2, 1])?,
-    ///     &a.read_ctx(),
-    /// )?;
+    /// let b = a.compact_with(CompactParams::default().block_shape(&[2, 1])?)?;
     ///
-    /// assert_eq!(
-    ///     b.to_ndarray_sub(&[0..2, 0..1], &b.read_ctx())?,
-    ///     array![[1.5], [3.14]]
-    /// );
+    /// assert_eq!(b.to_ndarray_sub(&[0..2, 0..1])?, array![[1.5], [3.14]]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     pub fn compact_with(
         &self,
         mut params: CompactParams,
-        context: &ReadContext,
     ) -> Result<Array<Compact<S::ElementType>>> {
         fn builder_init(
             nblocks: u64,
@@ -105,7 +97,7 @@ impl<S: StorageBase> Array<S> {
             OwnedBlockTableBuilder::start(nblocks, block_size, decoder_config)
         }
 
-        let builder = self.compact_into_builder(&mut params, context, builder_init)?;
+        let builder = self.compact_into_builder(&mut params, builder_init)?;
         let blocks = unsafe { builder.into_table::<S::ElementType>()? };
         let shape = DimDyn::from_slice(self.shape());
         Ok(Array {
@@ -122,7 +114,7 @@ impl<S: StorageBase> Array<S> {
     /// from `self` efficiently, data is fetched in larger *chunks* - each spanning a whole number
     /// of target blocks per dimension - with a single `read_data` call per chunk, then carved into
     /// individual target blocks in memory. The chunk shape is derived from `self`'s own block shape
-    /// and scaled toward the read size of `context` (see `scale_read_shape`), keeping reads
+    /// and scaled toward the read size of `self` (see `scale_read_shape`), keeping reads
     /// aligned to how `self` is stored. Blocks are therefore produced in chunk-traversal order
     /// rather than global C order, so each block is handed to the builder together with its
     /// logical (C-order) `block_index`. Boundary blocks - those that extend beyond the array's
@@ -130,7 +122,6 @@ impl<S: StorageBase> Array<S> {
     pub(crate) fn compact_into_builder<B>(
         &self,
         params: &mut CompactParams,
-        context: &ReadContext,
         builder_init: impl FnOnce(
             /* nblocks */ u64,
             /* block_shape */ &[BlockSize],
@@ -142,7 +133,8 @@ impl<S: StorageBase> Array<S> {
     {
         // Erase the storage to reduce monomorphization bloat
         let storage: &dyn StorageBase = &self.storage;
-        compact_into_builder_dyn_dispatch(storage, params, context, builder_init)
+        let context = ReadContext::thread_ctx_with(self.read_params())?;
+        compact_into_builder_dyn_dispatch(storage, params, context.as_ref(), builder_init)
     }
 }
 
@@ -390,11 +382,10 @@ mod tests {
         let params = crate::storage::CompactParams::new()
             .block_shape(&[1])
             .unwrap();
-        let ctx = a.read_ctx();
-        let err = a.compact_with(params.clone(), &ctx).unwrap_err();
+        let err = a.compact_with(params.clone()).unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
         let mut out = std::io::Cursor::new(Vec::new());
-        let err = a.write_to(&mut out, params, &ctx).unwrap_err();
+        let err = a.write_to(&mut out, params).unwrap_err();
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidShapeOperation);
     }
 

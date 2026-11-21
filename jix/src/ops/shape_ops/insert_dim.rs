@@ -251,7 +251,7 @@ mod tests {
 
     use crate::ops::InsertDim;
     use crate::util::{ScalarStrategy, arr_params, shape_strategy};
-    use crate::{Array, CompactArray, NDIM_MAX, ReadContext};
+    use crate::{Array, CompactArray, NDIM_MAX};
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> CompactArray<i32> {
         let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();
@@ -404,7 +404,7 @@ mod tests {
     fn sub_read_inserted_dim_is_stripped() {
         let got = make1d(arange(6), 6)
             .insert_dim([0])
-            .to_ndarray_sub(&[0..1, 2..5], &ReadContext::default())
+            .to_ndarray_sub(&[0..1, 2..5])
             .unwrap();
         assert_eq!(got, array![[2, 3, 4]]);
     }
@@ -413,7 +413,7 @@ mod tests {
     fn sub_read_2d_with_inserted_middle() {
         let got = make2d(arange(12), 3, 4)
             .insert_dim([1])
-            .to_ndarray_sub(&[1..3, 0..1, 0..2], &ReadContext::default())
+            .to_ndarray_sub(&[1..3, 0..1, 0..2])
             .unwrap();
         assert_eq!(got, array![[[4, 5]], [[8, 9]]]);
     }

@@ -27,13 +27,13 @@ where
     S: StorageBase,
 {
     /// Constructs a [`MaybeCompact`] storage. See the struct docs for semantics and examples.
-    pub(crate) fn new(array: S, params: CompactParams, context: &ReadContext) -> Result<Self> {
+    pub(crate) fn new(array: S, params: CompactParams) -> Result<Self> {
         Ok(Self(if array.spec().flags().is_compact() {
             ToCompactInner::Original(array)
         } else {
             ToCompactInner::Compact(
                 Array::from_storage(array)
-                    .compact_with(params, context)?
+                    .compact_with(params)?
                     .into_storage(),
             )
         }))
@@ -41,12 +41,8 @@ where
 
     /// Constructs an array with [`MaybeCompact`] storage. See the storage struct docs for
     /// semantics and examples.
-    pub(crate) fn new_array(
-        array: Array<S>,
-        params: CompactParams,
-        context: &ReadContext,
-    ) -> Result<Array<Self>> {
-        Self::new(array.into_storage(), params, context).map(Array::from_storage)
+    pub(crate) fn new_array(array: Array<S>, params: CompactParams) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), params).map(Array::from_storage)
     }
 }
 impl<S> crate::storage::ArrayStorageImpl for MaybeCompact<S> where S: StorageBase {}
@@ -142,8 +138,7 @@ impl<S: StorageBase> Array<S> {
     /// # Ok::<(), jix::Error>(())
     /// ```
     pub(crate) fn maybe_compact(self) -> Result<Array<MaybeCompact<S>>> {
-        let context = self.read_ctx();
-        self.maybe_compact_with(CompactParams::default(), &context)
+        self.maybe_compact_with(CompactParams::default())
     }
 
     /// Like [`maybe_compact`](Self::maybe_compact), with explicit [`CompactParams`].
@@ -153,9 +148,8 @@ impl<S: StorageBase> Array<S> {
     pub(crate) fn maybe_compact_with(
         self,
         params: CompactParams,
-        context: &ReadContext,
     ) -> Result<Array<MaybeCompact<S>>> {
-        MaybeCompact::new_array(self, params, context)
+        MaybeCompact::new_array(self, params)
     }
 }
 
@@ -182,8 +176,7 @@ mod tests {
 
     fn to_bytes<ET: ElementType>(a: &Array<Compact<ET>>) -> Vec<u8> {
         let mut buf = Cursor::new(Vec::new());
-        a.write_to(&mut buf, CompactParams::default(), &a.read_ctx())
-            .unwrap();
+        a.write_to(&mut buf, CompactParams::default()).unwrap();
         buf.into_inner()
     }
 
@@ -213,7 +206,7 @@ mod tests {
                         );
                         // No re-compression: serialized bytes must be identical.
                         let mut result_bytes = Cursor::new(Vec::new());
-                        result.write_to(&mut result_bytes, CompactParams::default(), &result.read_ctx()).unwrap();
+                        result.write_to(&mut result_bytes, CompactParams::default()).unwrap();
                         proptest::prop_assert_eq!(result_bytes.into_inner(), original_bytes);
                     }
                 }
@@ -244,9 +237,8 @@ mod tests {
                         (src, a) in carray_strategy_any::<$dtype>()
                     ) {
                         let expected = -&src;
-                        let ctx = a.read_ctx();
                         let result = (-a.view())
-                            .maybe_compact_with(CompactParams::default(), &ctx)
+                            .maybe_compact_with(CompactParams::default())
                             .unwrap();
                         proptest::prop_assert!(result.storage().as_compact().is_some());
                         proptest::prop_assert_eq!(
@@ -273,11 +265,8 @@ mod tests {
         let vals: Vec<i32> = (1..=12i32).collect();
         let src = ArrayD::from_shape_vec(vec![3, 4], vals.clone()).unwrap();
         let a = compact::<i32>(vals, &[3, 4], &[3, 4]);
-        let ctx = a.read_ctx();
 
-        let result = (-a.view())
-            .maybe_compact_with(arr_params(&[2, 2]), &ctx)
-            .unwrap();
+        let result = (-a.view()).maybe_compact_with(arr_params(&[2, 2])).unwrap();
 
         assert_eq!(result.to_ndarray().unwrap(), -&src);
         let bs = result
@@ -300,18 +289,13 @@ mod tests {
         // maybe_compact_with is called with a different block shape.
         let vals: Vec<i32> = (0..16i32).collect();
         let a = compact::<i32>(vals, &[16], &[4]);
-        let ctx = a.read_ctx();
         let original_bytes = to_bytes(&a);
 
         // Pass a different block shape - it must be ignored.
-        let result = a.maybe_compact_with(arr_params(&[8]), &ctx).unwrap();
+        let result = a.maybe_compact_with(arr_params(&[8])).unwrap();
         let mut result_bytes = Cursor::new(Vec::new());
         result
-            .write_to(
-                &mut result_bytes,
-                CompactParams::default(),
-                &result.read_ctx(),
-            )
+            .write_to(&mut result_bytes, CompactParams::default())
             .unwrap();
 
         assert_eq!(result_bytes.into_inner(), original_bytes);
@@ -327,19 +311,14 @@ mod tests {
         let a = compact::<i32>(vals.clone(), &[16], &[4]);
         let original_bytes = to_bytes(&a);
         let a = a.into_any();
-        let ctx = a.read_ctx();
 
-        let result = a.maybe_compact_with(arr_params(&[8]), &ctx).unwrap();
+        let result = a.maybe_compact_with(arr_params(&[8])).unwrap();
         assert!(matches!(result.storage().0, ToCompactInner::Original(_)));
         assert!(result.storage().as_compact().is_some());
         // No re-compression: serialized bytes must be identical.
         let mut result_bytes = Cursor::new(Vec::new());
         result
-            .write_to(
-                &mut result_bytes,
-                CompactParams::default(),
-                &result.read_ctx(),
-            )
+            .write_to(&mut result_bytes, CompactParams::default())
             .unwrap();
         assert_eq!(result_bytes.into_inner(), original_bytes);
 
@@ -357,10 +336,9 @@ mod tests {
         let src = ArrayD::from_shape_vec(vec![3, 4, 5], vals.clone()).unwrap();
         let expected = &src + &src;
         let a = compact::<i32>(vals, &[3, 4, 5], &[2, 2, 3]);
-        let ctx = a.read_ctx();
 
         let result = (a.view() + a.view())
-            .maybe_compact_with(arr_params(&[2, 2, 3]), &ctx)
+            .maybe_compact_with(arr_params(&[2, 2, 3]))
             .unwrap();
 
         assert!(result.storage().as_compact().is_some());

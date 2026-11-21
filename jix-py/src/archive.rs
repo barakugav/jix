@@ -320,11 +320,7 @@ fn write_array_impl(
     mut writer: impl Write + Seek,
     params: CompactParams,
 ) -> PyResult<()> {
-    let context = array.read_ctx()?;
-    array
-        .arr
-        .write_to(&mut writer, params, context.as_ref())
-        .into_py_result()?;
+    array.arr.write_to(&mut writer, params).into_py_result()?;
     Ok(writer.flush()?)
 }
 

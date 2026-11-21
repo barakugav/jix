@@ -77,8 +77,9 @@ use crate::{Dim, DimDyn, DimVec, Dimension, ReadContext, StorageBase, TypeDyn};
 /// ## Read context
 ///
 /// [`ReadContext`](crate::ReadContext) holds a long-lived decompressor and reusable scratch
-/// buffers. Create one per thread with [`Array::read_ctx()`](crate::Array::read_ctx) and pass it to
-/// every read, to amortize its setup across many block reads.
+/// buffers. Reads without one create one per call, borrowing the decompressor of the thread; pass
+/// one to the `to_buf_*` reads (e.g. [`Array::to_buf_slice`](crate::Array::to_buf_slice)) to also
+/// reuse the scratch buffers across many block reads.
 pub struct Compact<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned, ET>);
 
 /// Borrowed, block-compressed nd-array storage.
@@ -712,7 +713,7 @@ mod tests {
         ArraySpec, ArrayStorageExt, CompactParams, Index, OutBuf, StridedBuf, split_ranges,
     };
     use crate::util::DimArray;
-    use crate::{Array, Storage, StorageBase};
+    use crate::{Array, ReadContext, Storage, StorageBase};
 
     /// Read `index` from a compact `i32` array both into a plain contiguous buffer and into a
     /// *strided* destination whose inner spacing is doubled (a one-element gap between consecutive
@@ -733,7 +734,7 @@ mod tests {
         .unwrap();
         let params = CompactParams::new().block_shape(block_shape).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
-        let ctx = za.read_ctx();
+        let ctx = ReadContext::new_for_array(&za).unwrap();
         let storage = za.into_storage();
 
         let ndim = index.len();
@@ -845,7 +846,7 @@ mod tests {
         .unwrap();
         let params = CompactParams::new().block_shape(block_shape).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
-        let ctx = za.read_ctx();
+        let ctx = ReadContext::new_for_array(&za).unwrap();
         let storage = za.into_storage();
 
         let ndim = index.len();
@@ -948,7 +949,7 @@ mod tests {
         .unwrap();
         let params = CompactParams::new().block_shape(&[1, 2, 4]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
-        let ctx = za.read_ctx();
+        let ctx = ReadContext::new_for_array(&za).unwrap();
         let storage = za.into_storage();
 
         // C-order byte strides for [1, 8, 4] i32 are [128, 16, 4]; give dim 0 (length 1) a bogus
@@ -981,7 +982,7 @@ mod tests {
         // Single block covering the whole array.
         let params = CompactParams::new().block_shape(&[2, 3]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
-        let ctx = za.read_ctx();
+        let ctx = ReadContext::new_for_array(&za).unwrap();
         let storage = za.into_storage();
 
         // Byte buffer whose window starts one byte past a 4-aligned address.
@@ -1021,7 +1022,7 @@ mod tests {
         // Single block covering the whole array.
         let params = CompactParams::new().block_shape(&[2, 3]).unwrap();
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
-        let ctx = za.read_ctx();
+        let ctx = ReadContext::new_for_array(&za).unwrap();
         let storage = za.into_storage();
 
         // C-contiguous byte strides for [2, 3] i32: [3*4, 4] = [12, 4]. Backing has trailing slack.
@@ -1066,7 +1067,7 @@ mod tests {
     fn read_cache_reuses_repeated_pull_reads() {
         let index = Index::new(&[4], &[16]).unwrap();
         let za = arange64();
-        let ctx = za.read_ctx();
+        let ctx = ReadContext::new_for_array(&za).unwrap();
         // `x` is reached twice from `x + x`, so it is cached.
         let xx = za.view() + za.view();
         let storage = za.storage();
@@ -1187,7 +1188,7 @@ mod tests {
         let (x, y) = (arange64(), arange64());
         let xy = x.view() + y.view();
         let sq = xy.view() * xy.view();
-        let ctx = x.read_ctx();
+        let ctx = ReadContext::new_for_array(&x).unwrap();
         {
             let _scope = ctx.cache_scope(&sq.storage().spec().dynamic().arrays_to_cache);
             let a = xy.storage().read_data_pull(&index, &ctx).unwrap();
@@ -1210,7 +1211,7 @@ mod tests {
         let max = x.view().max(0);
         // `x` is reached twice, but not from the reduction.
         let expr = (x.view() + max.view().insert_dim(0).broadcast(&[64])) * x.view();
-        let ctx = x.read_ctx();
+        let ctx = ReadContext::new_for_array(&x).unwrap();
         {
             let _scope = ctx.cache_scope(&expr.storage().spec().dynamic().arrays_to_cache);
             let a = x.storage().read_data_pull(&index, &ctx).unwrap();
@@ -1231,7 +1232,7 @@ mod tests {
     fn reduction_drops_its_entries() {
         let x = arange64();
         let max = (x.view() * x.view()).max(0);
-        let ctx = x.read_ctx();
+        let ctx = ReadContext::new_for_array(&x).unwrap();
         {
             let _scope = ctx.cache_scope(&max.storage().spec().dynamic().arrays_to_cache);
             let max = max
@@ -1254,7 +1255,7 @@ mod tests {
         // `x` is reached twice outside of the flip, which reads it at another region.
         let flipped = x.view().flip(0);
         let expr = (x.view() + flipped.view()) * x.view();
-        let ctx = x.read_ctx();
+        let ctx = ReadContext::new_for_array(&x).unwrap();
         {
             let _scope = ctx.cache_scope(&expr.storage().spec().dynamic().arrays_to_cache);
             let a = x.storage().read_data_pull(&index, &ctx).unwrap();
@@ -1275,12 +1276,14 @@ mod tests {
         let index = Index::new(&[4], &[16]).unwrap();
         let x = arange64();
         let xx = x.view() + x.view();
-        let ctx = x.read_ctx();
+        let ctx = ReadContext::new_for_array(&x).unwrap();
         let scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
         let a = x.storage().read_data_pull(&index, &ctx).unwrap();
         // The nested read caches `x` at another region, replacing the entry until it ends.
         let sq = x.view() * x.view();
-        let nested = sq.to_ndarray_sub::<ndarray::Ix1>(&[20..36], &ctx).unwrap();
+        let mut nested = [0i32; 16];
+        let bytes = unsafe { std::slice::from_raw_parts_mut(nested.as_mut_ptr().cast::<u8>(), 64) };
+        sq.to_buf_slice(&[20..36], bytes, Some(&ctx)).unwrap();
         assert_eq!(nested.to_vec(), (20..36).map(|i| i * i).collect::<Vec<_>>());
         let b = x.storage().read_data_pull(&index, &ctx).unwrap();
         assert_eq!(a.data_ptr(), b.data_ptr());
@@ -1294,7 +1297,7 @@ mod tests {
         let x = arange64();
         let xx = x.view() + x.view();
         let to_cache = &xx.storage().spec().dynamic().arrays_to_cache;
-        let ctx = x.read_ctx();
+        let ctx = ReadContext::new_for_array(&x).unwrap();
         let _scope = ctx.cache_scope(to_cache);
         let read = || {
             x.storage()
@@ -1316,7 +1319,7 @@ mod tests {
     fn read_cache_shares_views_of_cached_reads() {
         let index = Index::new(&[4], &[16]).unwrap();
         let x = arange64();
-        let ctx = x.read_ctx();
+        let ctx = ReadContext::new_for_array(&x).unwrap();
         // A storage whose read passes the read of `x` through, as a shape op would.
         let pass_id = ArrayCacheId::new();
         let mut ids = ArrayCacheIdSet::default();
@@ -1377,7 +1380,7 @@ mod tests {
         let index = Index::new(&[2], &[4]).unwrap();
         let (max, per_read) = counted_row_max(&CALLS);
         let twice = max.view() + max.view();
-        let ctx = max.read_ctx();
+        let ctx = ReadContext::new_for_array(&max).unwrap();
         const SENTINEL: i32 = -1;
         let mut backing = [SENTINEL; 16];
         {
@@ -1405,7 +1408,7 @@ mod tests {
         let index = Index::new(&[4], &[16]).unwrap();
         let x = arange64();
         let xx = x.view() + x.view();
-        let ctx = x.read_ctx();
+        let ctx = ReadContext::new_for_array(&x).unwrap();
         let _scope = ctx.cache_scope(&xx.storage().spec().dynamic().arrays_to_cache);
         x.storage().read_data_pull(&index, &ctx).unwrap();
         // A push read of the cached region into a too small `out` fails, as an uncached one does.

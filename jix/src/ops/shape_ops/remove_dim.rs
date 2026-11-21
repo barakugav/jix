@@ -246,7 +246,7 @@ mod tests {
 
     use crate::array::Array;
     use crate::util::{ScalarStrategy, arr_params, shape_strategy};
-    use crate::{CompactArray, NDIM_MAX, ReadContext};
+    use crate::{CompactArray, NDIM_MAX};
 
     #[test]
     fn rejects_invalid_index() {
@@ -387,7 +387,7 @@ mod tests {
         let got = make1d(arange(6), 6)
             .insert_dim([0])
             .remove_dim([0])
-            .to_ndarray_sub(&[2..5], &ReadContext::default())
+            .to_ndarray_sub(&[2..5])
             .unwrap();
         assert_eq!(got, array![2, 3, 4]);
     }
@@ -397,7 +397,7 @@ mod tests {
         let got = make2d(arange(12), 3, 4)
             .insert_dim([1])
             .remove_dim([1])
-            .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
+            .to_ndarray_sub(&[1..3, 0..2])
             .unwrap();
         assert_eq!(got, array![[4, 5], [8, 9]]);
     }

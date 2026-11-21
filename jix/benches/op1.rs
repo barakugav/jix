@@ -3,7 +3,7 @@ mod common;
 use std::ops::Neg;
 
 use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
-use jix::{Array, Storage};
+use jix::{Array, ReadContext, Storage};
 use ndarray::Ix2;
 
 use crate::common::{Profile, create_data};
@@ -58,7 +58,7 @@ fn bench_op1_plain_transposed(c: &mut Criterion) {
 
             let index = neg.shape().iter().map(|&n| 0..n).collect::<Vec<_>>();
             let nitems = neg.shape().iter().product::<u64>() as usize;
-            let ctx = neg.read_ctx();
+            let ctx = ReadContext::new_for_array(&neg).unwrap();
 
             let id = format!("{shape:?} output_transpose={output_transpose}");
             group.bench_function(&id, |b| {
@@ -67,7 +67,7 @@ fn bench_op1_plain_transposed(c: &mut Criterion) {
                     let buf = unsafe {
                         std::slice::from_raw_parts_mut(out.as_mut_ptr().cast::<u8>(), nitems * 4)
                     };
-                    neg.to_buf_slice(&index, buf, &ctx).unwrap();
+                    neg.to_buf_slice(&index, buf, Some(&ctx)).unwrap();
                     out[0]
                 });
             });

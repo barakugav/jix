@@ -753,7 +753,7 @@ mod tests {
     fn sub_read_first_row() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[3, 4]);
-        let got = r.to_ndarray_sub(&[0..1, 0..4], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[0..1, 0..4]).unwrap();
         assert_eq!(got, array![[0, 1, 2, 3]]);
     }
 
@@ -761,7 +761,7 @@ mod tests {
     fn sub_read_middle_row() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[3, 4]);
-        let got = r.to_ndarray_sub(&[1..2, 0..4], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[1..2, 0..4]).unwrap();
         assert_eq!(got, array![[4, 5, 6, 7]]);
     }
 
@@ -769,7 +769,7 @@ mod tests {
     fn sub_read_last_row() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[3, 4]);
-        let got = r.to_ndarray_sub(&[2..3, 0..4], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[2..3, 0..4]).unwrap();
         assert_eq!(got, array![[8, 9, 10, 11]]);
     }
 
@@ -777,7 +777,7 @@ mod tests {
     fn sub_read_first_two_rows() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[3, 4]);
-        let got = r.to_ndarray_sub(&[0..2, 0..4], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[0..2, 0..4]).unwrap();
         assert_eq!(got, array![[0, 1, 2, 3], [4, 5, 6, 7]]);
     }
 
@@ -785,7 +785,7 @@ mod tests {
     fn sub_read_first_two_columns() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[3, 4]);
-        let got = r.to_ndarray_sub(&[0..3, 0..2], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[0..3, 0..2]).unwrap();
         assert_eq!(got, array![[0, 1], [4, 5], [8, 9]]);
     }
 
@@ -793,7 +793,7 @@ mod tests {
     fn sub_read_last_two_columns() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[3, 4]);
-        let got = r.to_ndarray_sub(&[0..3, 2..4], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[0..3, 2..4]).unwrap();
         assert_eq!(got, array![[2, 3], [6, 7], [10, 11]]);
     }
 
@@ -801,7 +801,7 @@ mod tests {
     fn sub_read_inner_2x2() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[3, 4]);
-        let got = r.to_ndarray_sub(&[1..3, 1..3], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[1..3, 1..3]).unwrap();
         assert_eq!(got, array![[5, 6], [9, 10]]);
     }
 
@@ -809,7 +809,7 @@ mod tests {
     fn sub_read_single_element_center() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[3, 4]);
-        let got = r.to_ndarray_sub(&[1..2, 2..3], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[1..2, 2..3]).unwrap();
         assert_eq!(got, array![[6]]);
     }
 
@@ -817,7 +817,7 @@ mod tests {
     fn sub_read_single_element_corner() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[3, 4]);
-        let got = r.to_ndarray_sub(&[2..3, 3..4], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[2..3, 3..4]).unwrap();
         assert_eq!(got, array![[11]]);
     }
 
@@ -830,7 +830,7 @@ mod tests {
     fn sub_read_flatten_middle_range() {
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
         let r = a.reshape(&[12]);
-        let got = r.to_ndarray_sub(&[3..9], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[3..9]).unwrap();
         assert_eq!(got, array![3, 4, 5, 6, 7, 8]);
     }
 
@@ -839,7 +839,7 @@ mod tests {
         // Flat [2..6) spans the last 2 of row-0 and first 2 of row-1 (in orig [3,4])
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
         let r = a.reshape(&[12]);
-        let got = r.to_ndarray_sub(&[2..6], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[2..6]).unwrap();
         assert_eq!(got, array![2, 3, 4, 5]);
     }
 
@@ -855,7 +855,7 @@ mod tests {
     fn sub_read_2x6_row0_partial() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[2, 6]);
-        let got = r.to_ndarray_sub(&[0..1, 1..4], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[0..1, 1..4]).unwrap();
         assert_eq!(got, array![[1, 2, 3]]);
     }
 
@@ -863,7 +863,7 @@ mod tests {
     fn sub_read_2x6_both_rows_partial_cols() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape(&[2, 6]);
-        let got = r.to_ndarray_sub(&[0..2, 2..5], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[0..2, 2..5]).unwrap();
         assert_eq!(got, array![[2, 3, 4], [8, 9, 10]]);
     }
 
@@ -879,9 +879,7 @@ mod tests {
     fn sub_read_3d_single_row() {
         let a = make1d(u8s(24), 24);
         let r = a.reshape(&[2, 3, 4]);
-        let got = r
-            .to_ndarray_sub(&[0..1, 1..2, 0..4], &r.read_ctx())
-            .unwrap();
+        let got = r.to_ndarray_sub(&[0..1, 1..2, 0..4]).unwrap();
         assert_eq!(got, array![[[4, 5, 6, 7]]]);
     }
 
@@ -889,9 +887,7 @@ mod tests {
     fn sub_read_3d_inner_block() {
         let a = make1d(u8s(24), 24);
         let r = a.reshape(&[2, 3, 4]);
-        let got = r
-            .to_ndarray_sub(&[0..2, 1..3, 1..3], &r.read_ctx())
-            .unwrap();
+        let got = r.to_ndarray_sub(&[0..2, 1..3, 1..3]).unwrap();
         assert_eq!(got, array![[[5, 6], [9, 10]], [[17, 18], [21, 22]]]);
     }
 
@@ -899,9 +895,7 @@ mod tests {
     fn sub_read_3d_second_slab() {
         let a = make1d(u8s(24), 24);
         let r = a.reshape(&[2, 3, 4]);
-        let got = r
-            .to_ndarray_sub(&[1..2, 0..3, 0..4], &r.read_ctx())
-            .unwrap();
+        let got = r.to_ndarray_sub(&[1..2, 0..3, 0..4]).unwrap();
         assert_eq!(
             got,
             ndarray::Array::from_shape_vec([1, 3, 4], (12u8..24).collect()).unwrap()
@@ -930,7 +924,7 @@ mod tests {
         // flat [0..4) = one full original block -> [0, 1, 2, 3]
         let a = make1d(u8s(12), 4);
         let r = a.reshape(&[3, 4]);
-        let got = r.to_ndarray_sub(&[0..1, 0..4], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[0..1, 0..4]).unwrap();
         assert_eq!(got, array![[0, 1, 2, 3]]);
     }
 
@@ -940,7 +934,7 @@ mod tests {
         //   row 0: [0..6) spans block0 (0-3) and part of block1 (4-5)
         let a = make1d(u8s(12), 4);
         let r = a.reshape(&[2, 6]);
-        let got = r.to_ndarray_sub(&[0..1, 0..6], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[0..1, 0..6]).unwrap();
         assert_eq!(got, array![[0, 1, 2, 3, 4, 5]]);
     }
 
@@ -967,7 +961,7 @@ mod tests {
     fn multiblock_2d_orig_reshape_sub_read() {
         let a = make2d(u8s(12), 3, 4, &[2, 2]);
         let r = a.reshape(&[2, 6]);
-        let got = r.to_ndarray_sub(&[1..2, 0..6], &r.read_ctx()).unwrap();
+        let got = r.to_ndarray_sub(&[1..2, 0..6]).unwrap();
         assert_eq!(got, array![[6, 7, 8, 9, 10, 11]]);
     }
 
@@ -976,9 +970,7 @@ mod tests {
         // 24 elements, block_size=3 -> 8 blocks; reshape to [2, 3, 4]
         let a = make1d(u8s(24), 3);
         let r = a.reshape(&[2, 3, 4]);
-        let got = r
-            .to_ndarray_sub(&[0..2, 0..3, 0..4], &r.read_ctx())
-            .unwrap();
+        let got = r.to_ndarray_sub(&[0..2, 0..3, 0..4]).unwrap();
         assert_eq!(
             got,
             ndarray::Array::from_shape_vec([2, 3, 4], u8s(24)).unwrap()

@@ -8,8 +8,6 @@ pub use filter::*;
 mod bit_shuffle;
 mod byte_shuffle;
 
-use std::cell::UnsafeCell;
-
 use crate::ReadContext;
 use crate::dtype::{Alignment, Dtype};
 #[allow(unused_imports)]
@@ -218,8 +216,6 @@ pub(crate) struct DecoderCodecConfig {
 }
 
 pub(crate) struct Decoder<'a> {
-    #[cfg_attr(miri, allow(unused))]
-    inner: &'a UnsafeCell<Option<zstd::bulk::Decompressor<'static>>>,
     context: &'a ReadContext,
 
     dtype: &'a Dtype,
@@ -229,7 +225,6 @@ impl<'a> Decoder<'a> {
     #[inline]
     pub(crate) fn new(context: &'a ReadContext, config: &'a DecoderCodecConfig) -> Self {
         Self {
-            inner: &context.decompressor,
             context,
             dtype: &config.dtype,
             filters: &config.filters,
@@ -271,7 +266,7 @@ impl<'a> Decoder<'a> {
 
         #[cfg(not(miri))]
         let nbytes = {
-            let inner = unsafe { &mut *self.inner.get() };
+            let mut inner = self.context.decompressor.borrow_mut();
             let inner = inner.get_or_insert_with(|| zstd::bulk::Decompressor::new().unwrap());
             inner
                 .decompress_to_buffer(src, decompress_out)

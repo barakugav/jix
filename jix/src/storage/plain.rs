@@ -908,10 +908,9 @@ mod tests {
     fn read_empty_subrange_at_end_of_dim() {
         let nd = ndarray::Array3::<i32>::from_shape_vec((2, 3, 4), (0..24).collect()).unwrap();
         let a = Array::plain_ndarray(nd).unwrap();
-        let ctx = a.read_ctx();
         // `2..2` is the whole of dim 0, so the start offset alone runs to the end of the
         // allocation; the non-zero start on dim 2 then pushes it past.
-        let got = a.to_ndarray_sub::<Ix3>(&[2..2, 0..3, 1..4], &ctx).unwrap();
+        let got = a.to_ndarray_sub::<Ix3>(&[2..2, 0..3, 1..4]).unwrap();
         assert_eq!(got.shape(), &[0, 3, 3]);
         assert_eq!(got.len(), 0);
     }
@@ -992,7 +991,7 @@ mod tests {
         let nd = array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
         let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
+            .to_ndarray_sub(&[1..3, 0..2])
             .unwrap();
         assert_eq!(got, array![[4i32, 5], [7, 8]]);
     }
@@ -1071,7 +1070,7 @@ mod tests {
     fn view_2d_subregion_read() {
         let nd = array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
         let a = Array::plain_ndarray_ref(&nd).unwrap();
-        let got = a.to_ndarray_sub(&[1..3, 1..3], &a.read_ctx()).unwrap();
+        let got = a.to_ndarray_sub(&[1..3, 1..3]).unwrap();
         assert_eq!(got, array![[5i32, 6], [8, 9]]);
     }
 
@@ -1148,12 +1147,16 @@ mod tests {
         let vals = (0..4 * 10).collect::<Vec<i32>>();
         let nd = ArrayD::from_shape_vec(vec![4, 10], vals).unwrap();
         let a = Array::plain_ndarray(nd.clone()).unwrap();
-        let mut context = a.read_ctx();
+        let mut context = ReadContext::new_for_array(&a).unwrap();
         context.read_params_mut().set_read_size((16, 32));
 
         let neg = a.view().neg();
-        let got = neg.to_ndarray_sub(&[0..4, 0..10], &context).unwrap();
-        let expected = nd.mapv(|x: i32| -x);
+        let mut got = vec![0i32; 4 * 10];
+        let bytes =
+            unsafe { std::slice::from_raw_parts_mut(got.as_mut_ptr().cast::<u8>(), got.len() * 4) };
+        neg.to_buf_slice(&[0..4, 0..10], bytes, Some(&context))
+            .unwrap();
+        let expected = nd.mapv(|x: i32| -x).into_raw_vec_and_offset().0;
         assert_eq!(got, expected);
     }
 
@@ -1208,10 +1211,9 @@ mod tests {
 
         // Straight materialization, and a sub-range of it.
         let arr = make();
-        let ctx = arr.read_ctx();
         assert_eq!(as_vec(arr.to_ndarray().unwrap()), expected);
         assert_eq!(
-            as_vec(arr.to_ndarray_sub(&[1..3, 1..4], &ctx).unwrap()),
+            as_vec(arr.to_ndarray_sub(&[1..3, 1..4]).unwrap()),
             sub(&expected, cols, 1..3, 1..4)
         );
 

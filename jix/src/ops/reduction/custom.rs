@@ -351,6 +351,7 @@ mod tests {
     type complex_f64 = crate::scalar::Complex<f64>;
 
     use super::Reduce;
+    use crate::ReadContext;
     use crate::array::Array;
     use crate::ops::reduction::common::tests::*;
 
@@ -584,7 +585,7 @@ mod tests {
         let out_shape: Vec<u64> = reduced.shape().to_vec();
         let full_index: Vec<std::ops::Range<u64>> = out_shape.iter().map(|&s| 0..s).collect();
         let n_out: usize = out_shape.iter().product::<u64>() as usize;
-        let ctx = reduced.read_ctx();
+        let ctx = ReadContext::new_for_array(&reduced).unwrap();
         let storage = reduced.into_storage();
 
         let mut buf = vec![0u8; n_out.max(1)];

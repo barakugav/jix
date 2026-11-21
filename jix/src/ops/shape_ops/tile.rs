@@ -352,7 +352,7 @@ impl<S: StorageBase> Array<S> {
 mod tests {
     use ndarray::{Ix2, array};
 
-    use crate::{Array, CompactArray, IntoDimension, NDIM_MAX, ReadContext, StorageBase};
+    use crate::{Array, CompactArray, IntoDimension, NDIM_MAX, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -447,7 +447,7 @@ mod tests {
     fn identity_sub_read_correct() {
         let got = make(arange(12), [3u64, 4])
             .tile(1, 1)
-            .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
+            .to_ndarray_sub(&[1..3, 1..3])
             .unwrap();
         assert_eq!(got, array![[5, 6], [9, 10]]);
     }
@@ -466,7 +466,7 @@ mod tests {
     fn empty_subrange_returns_ok() {
         let got = make(arange(12), [3u64, 4])
             .tile(2, 0)
-            .to_ndarray_sub::<Ix2>(&[2..2, 0..4], &ReadContext::default())
+            .to_ndarray_sub::<Ix2>(&[2..2, 0..4])
             .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
@@ -530,80 +530,56 @@ mod tests {
     #[test]
     fn sub_read_case_a_within_period_no_wrap() {
         // Case A: s=1, e=4 -> s_in=1, total=3, s_in+total=4 <= L. Single inner read.
-        let got = make_1d_tile3()
-            .tile(3, 0)
-            .to_ndarray_sub(&[1..4], &ReadContext::default())
-            .unwrap();
+        let got = make_1d_tile3().tile(3, 0).to_ndarray_sub(&[1..4]).unwrap();
         assert_eq!(got, array![20, 30, 40]);
     }
 
     #[test]
     fn sub_read_case_a_period_aligned() {
         // Case A: s=4, e=8 -> s_in=0, total=4 == L. Single read at offset 0.
-        let got = make_1d_tile3()
-            .tile(3, 0)
-            .to_ndarray_sub(&[4..8], &ReadContext::default())
-            .unwrap();
+        let got = make_1d_tile3().tile(3, 0).to_ndarray_sub(&[4..8]).unwrap();
         assert_eq!(got, array![10, 20, 30, 40]);
     }
 
     #[test]
     fn sub_read_case_b_wrap_once_within_period() {
         // Case B: s=2, e=5 -> s_in=2, total=3, s_in+total=5 > L=4, total<=L. Two reads.
-        let got = make_1d_tile3()
-            .tile(3, 0)
-            .to_ndarray_sub(&[2..5], &ReadContext::default())
-            .unwrap();
+        let got = make_1d_tile3().tile(3, 0).to_ndarray_sub(&[2..5]).unwrap();
         assert_eq!(got, array![30, 40, 10]);
     }
 
     #[test]
     fn sub_read_case_b_wrap_spans_period_boundary() {
         // Case B: s=3, e=6 -> s_in=3, total=3, s_in+total=6 > L. Two reads.
-        let got = make_1d_tile3()
-            .tile(3, 0)
-            .to_ndarray_sub(&[3..6], &ReadContext::default())
-            .unwrap();
+        let got = make_1d_tile3().tile(3, 0).to_ndarray_sub(&[3..6]).unwrap();
         assert_eq!(got, array![40, 10, 20]);
     }
 
     #[test]
     fn sub_read_case_c_spans_multiple_periods_aligned() {
         // Case C: s=0, e=8 -> total=8 > L. s_in=0, head_len=L, num_full=1, tail=0.
-        let got = make_1d_tile3()
-            .tile(3, 0)
-            .to_ndarray_sub(&[0..8], &ReadContext::default())
-            .unwrap();
+        let got = make_1d_tile3().tile(3, 0).to_ndarray_sub(&[0..8]).unwrap();
         assert_eq!(got, array![10, 20, 30, 40, 10, 20, 30, 40]);
     }
 
     #[test]
     fn sub_read_case_c_unaligned_with_tail() {
         // Case C: s=1, e=10 -> s_in=1, total=9 > L. head_len=3, num_full=1, tail=2.
-        let got = make_1d_tile3()
-            .tile(3, 0)
-            .to_ndarray_sub(&[1..10], &ReadContext::default())
-            .unwrap();
+        let got = make_1d_tile3().tile(3, 0).to_ndarray_sub(&[1..10]).unwrap();
         assert_eq!(got, array![20, 30, 40, 10, 20, 30, 40, 10, 20]);
     }
 
     #[test]
     fn sub_read_case_c_full_output() {
         // Case C: full read of the tiled output (s=0, e=12 = repeats*L).
-        let got = make_1d_tile3()
-            .tile(3, 0)
-            .to_ndarray_sub(&[0..12], &ReadContext::default())
-            .unwrap();
+        let got = make_1d_tile3().tile(3, 0).to_ndarray_sub(&[0..12]).unwrap();
         assert_eq!(got, array![10, 20, 30, 40, 10, 20, 30, 40, 10, 20, 30, 40]);
     }
 
     #[test]
     fn sub_read_single_element_at_wrap_point() {
         // s=4 -> s_in=0, total=1. Single read of input[0..1].
-        let got = make_1d_tile3()
-            .tile(3, 0)
-            .to_ndarray_sub(&[4..5], &ReadContext::default())
-            .unwrap();
+        let got = make_1d_tile3().tile(3, 0).to_ndarray_sub(&[4..5]).unwrap();
         assert_eq!(got, array![10]);
     }
 
@@ -613,7 +589,7 @@ mod tests {
         // = [[3,4,5],[0,1,2],[3,4,5],[0,1,2]]
         let got = make(arange(6), [2u64, 3])
             .tile(3, 0)
-            .to_ndarray_sub(&[1..5, 0..3], &ReadContext::default())
+            .to_ndarray_sub(&[1..5, 0..3])
             .unwrap();
         assert_eq!(got, array![[3, 4, 5], [0, 1, 2], [3, 4, 5], [0, 1, 2]]);
     }
@@ -625,7 +601,7 @@ mod tests {
         // sub-read cols [3..6) -> [[3,0,1],[7,4,5]]  (case B: wraps once)
         let got = make(arange(8), [2u64, 4])
             .tile(2, 1)
-            .to_ndarray_sub(&[0..2, 3..6], &ReadContext::default())
+            .to_ndarray_sub(&[0..2, 3..6])
             .unwrap();
         assert_eq!(got, array![[3, 0, 1], [7, 4, 5]]);
     }
@@ -637,7 +613,7 @@ mod tests {
         // cols 1..11: [[1,2,3,0,1,2,3,0,1,2],[5,6,7,4,5,6,7,4,5,6]]
         let got = make(arange(8), [2u64, 4])
             .tile(3, 1)
-            .to_ndarray_sub(&[0..2, 1..11], &ReadContext::default())
+            .to_ndarray_sub(&[0..2, 1..11])
             .unwrap();
         assert_eq!(
             got,

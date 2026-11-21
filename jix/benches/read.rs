@@ -4,10 +4,28 @@ use std::ops::Range;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use fastrand::Rng;
-use jix::Array;
+use jix::{Array, ReadContext, StorageBase};
 use ndarray::Ix2;
 
 use crate::common::{create_compact, create_ndarray};
+
+// `to_ndarray_sub` of a C-order array, with a context created once outside the timed loop rather
+// than one per read.
+fn to_ndarray_sub_ctx(
+    array: &Array<impl StorageBase>,
+    region: &[Range<u64>; 2],
+    ctx: &ReadContext,
+) -> ndarray::Array2<i32> {
+    let shape = region
+        .clone()
+        .map(|range| (range.end - range.start) as usize);
+    let mut out = ndarray::Array2::<i32>::uninit(shape);
+    let buf = unsafe {
+        std::slice::from_raw_parts_mut(out.as_mut_ptr().cast::<u8>(), out.len() * size_of::<i32>())
+    };
+    array.to_buf_slice(region, buf, Some(ctx)).unwrap();
+    unsafe { out.assume_init() }
+}
 
 fn bench_compact_read_region(c: &mut Criterion) {
     let mut rng = Rng::with_seed(0xfacc5ed5f7466613);
@@ -92,14 +110,14 @@ fn bench_compact_read_region(c: &mut Criterion) {
                         shuffled
                     });
 
-                    let ctx = array.read_ctx();
+                    let ctx = ReadContext::new_for_array(&array).unwrap();
                     b.iter_batched(
                         || {
                             let region = region_iter.next().unwrap();
                             let region: [_; 2] = region.try_into().unwrap();
                             region
                         },
-                        |region| array.to_ndarray_sub::<Ix2>(&region, &ctx).unwrap(),
+                        |region| to_ndarray_sub_ctx(&array, &region, &ctx),
                         criterion::BatchSize::SmallInput,
                     );
                 },
@@ -175,15 +193,14 @@ fn bench_compact_read_transposed(c: &mut Criterion) {
         let param = format!("shape={shape:?}, block={block_shape:?}");
 
         group.bench_function(BenchmarkId::new("hinted", &param), |b| {
-            let ctx = t.read_ctx();
-            b.iter(|| t.to_ndarray_sub::<Ix2>(&full, &ctx).unwrap());
+            b.iter(|| t.to_ndarray_sub::<Ix2>(&full).unwrap());
         });
         // The pre-hint baseline: allocate a packed row-major destination per read (exactly what
         // `to_ndarray_sub` used to do) and push into it, paying a transposing copy. Allocating
         // inside the loop keeps this comparable to `hinted`, which allocates internally - at these
-        // sizes first-touch page faults on the fresh allocation are a real part of the cost.
+        // sizes first-touch page faults on the fresh allocation are a real part of the cost. Like
+        // `hinted`, each read creates its own context.
         group.bench_function(BenchmarkId::new("forced_c_order", &param), |b| {
-            let ctx = t.read_ctx();
             let nitems = (shape[0] * shape[1]) as usize;
             b.iter(|| {
                 let mut arr =
@@ -194,7 +211,7 @@ fn bench_compact_read_transposed(c: &mut Criterion) {
                         nitems * size_of::<i32>(),
                     )
                 };
-                t.to_buf_slice(&full, buf, &ctx).unwrap();
+                t.to_buf_slice(&full, buf, None).unwrap();
                 unsafe { arr.assume_init() }
             });
         });
@@ -209,7 +226,7 @@ fn bench_plain_read(c: &mut Criterion) {
     let mut run_buf_nocopy = true;
     for &(shape, nregions) in configs {
         let array = Array::plain_ndarray(create_ndarray(&shape, &mut rng)).unwrap();
-        let ctx = array.read_ctx();
+        let ctx = ReadContext::new_for_array(&array).unwrap();
 
         let mut group = c.benchmark_group(format!("plain_read_tiny {shape:?}"));
         for read_shape in read_shapes {
@@ -228,7 +245,7 @@ fn bench_plain_read(c: &mut Criterion) {
                 b.iter(|| {
                     let region = &regions[i % regions.len()];
                     i += 1;
-                    array.to_ndarray_sub::<Ix2>(region, &ctx).unwrap()
+                    to_ndarray_sub_ctx(&array, region, &ctx)
                 });
             });
 
@@ -241,7 +258,7 @@ fn bench_plain_read(c: &mut Criterion) {
                 b.iter(|| {
                     let region = &regions[i % regions.len()];
                     i += 1;
-                    array.to_buf_strided(region, &ctx).unwrap()
+                    array.to_buf_strided(region, Some(&ctx)).unwrap()
                 });
             });
         }

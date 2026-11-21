@@ -330,7 +330,7 @@ mod tests {
         let arr =
             Array::compact_ndarray(&ndarray::array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]]).unwrap();
         let t = arr.transmute_elements::<u32>();
-        let ctx = t.read_ctx();
+        let ctx = ReadContext::new_for_array(&t).unwrap();
 
         // 4 bytes down a column, 8 bytes across a row, plus one slot of slack to catch a write
         // that spills past the region.
@@ -365,9 +365,8 @@ mod tests {
         let src = ndarray::Array2::from_shape_fn((4, 5), |(r, c)| (r * 5 + c) as i32);
         let arr = Array::compact_ndarray(&src).unwrap();
         let t = arr.transmute_elements::<u32>();
-        let ctx = t.read_ctx();
 
-        let window = t.to_ndarray_sub(&[1..3, 2..5], &ctx).unwrap();
+        let window = t.to_ndarray_sub(&[1..3, 2..5]).unwrap();
         assert_eq!(
             window,
             src.slice(ndarray::s![1..3, 2..5]).mapv(|v| v as u32)
@@ -408,8 +407,7 @@ mod tests {
     fn empty_reads_are_fine() {
         let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
         let t = arr.transmute_elements::<f32>();
-        let ctx = t.read_ctx();
 
-        assert_eq!(t.to_ndarray_sub::<Ix1>(&[1..1], &ctx).unwrap().len(), 0);
+        assert_eq!(t.to_ndarray_sub::<Ix1>(&[1..1]).unwrap().len(), 0);
     }
 }

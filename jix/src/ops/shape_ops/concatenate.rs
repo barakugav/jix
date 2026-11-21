@@ -469,12 +469,8 @@ mod tests {
         let empty = ndarray::Array2::<i32>::zeros((0, 2));
         let z = |nd: &ndarray::Array2<i32>| Array::compact_ndarray(nd).unwrap();
         let c = concatenate(vec![z(&empty), z(&a), z(&empty), z(&b)], 0);
-        let ctx = c.read_ctx();
-        assert_eq!(
-            c.to_ndarray_sub(&[1..2, 0..2], &ctx).unwrap(),
-            array![[3, 4]]
-        );
-        assert_eq!(c.to_ndarray_sub(&[2..3, 1..2], &ctx).unwrap(), array![[6]]);
+        assert_eq!(c.to_ndarray_sub(&[1..2, 0..2]).unwrap(), array![[3, 4]]);
+        assert_eq!(c.to_ndarray_sub(&[2..3, 1..2]).unwrap(), array![[6]]);
         // a single non-empty array serves every read
         let c = concatenate(vec![z(&empty), z(&a), z(&empty)], 0);
         assert_eq!(c.to_ndarray().unwrap(), a);

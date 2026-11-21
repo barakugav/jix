@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use jix_core::__private::ReadTiling;
 use jix_core::storage::{Codec, CompactArrayMethods, CompactParams, Filter, StridedBuf};
-use jix_core::{Array, ArrayAny, ReadContext, StorageBase};
+use jix_core::{Array, ArrayAny, StorageBase};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{
     PyIndexError, PyNotImplementedError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
@@ -125,7 +125,6 @@ pub struct PyArray {
 }
 struct ArrayCache {
     numpy_dtype: Option<Py<PyArrayDescr>>,
-    context: Option<Box<ReadContext>>,
 }
 impl PyArray {
     #[inline]
@@ -140,36 +139,13 @@ impl PyArray {
     fn from_core_impl(array: ArrayAny, numpy_dtype: Option<Py<PyArrayDescr>>) -> Self {
         Self {
             arr: array,
-            cache: Mutex::new(ArrayCache {
-                numpy_dtype,
-                context: None,
-            }),
+            cache: Mutex::new(ArrayCache { numpy_dtype }),
         }
     }
 
     #[inline(always)]
     pub(crate) fn to_core(&self) -> ArrayAny {
         Array::from_storage(self.arr.storage().clone())
-    }
-
-    /// Borrows the array's cached read context, lazily creating it on first use.
-    ///
-    /// The context is taken out of the cache for the lifetime of the returned guard and
-    /// returned to it on drop, so successive reads of the same array reuse the same
-    /// decompressor state instead of re-initializing it on every call.
-    pub(crate) fn read_ctx(&self) -> PyResult<ContextGuard<'_>> {
-        let mut cache = self
-            .cache
-            .lock()
-            .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))?;
-        let context = cache
-            .context
-            .take()
-            .unwrap_or_else(|| Box::new(self.arr.read_ctx()));
-        Ok(ContextGuard {
-            array: self,
-            context: Some(context),
-        })
     }
 
     #[allow(clippy::type_complexity)]
@@ -634,9 +610,6 @@ impl PyArray {
             !single_read || read_cost > 4096.0
         };
         maybe_detach(py, should_detach, || {
-            let context = self.read_ctx()?;
-            let context = context.as_ref();
-
             let mut out = unsafe {
                 StridedBuf::from_raw_parts_mut(
                     data.as_mut_ptr(),
@@ -646,7 +619,7 @@ impl PyArray {
                 )
             };
             self.arr
-                .to_buf_strided_into(&index, &mut out, context)
+                .to_buf_strided_into(&index, &mut out, None)
                 .into_py_result()
         })?;
 
@@ -1786,13 +1759,7 @@ pub fn compact<'py>(
     )?;
 
     let array = array.get();
-    let mut compacted = py.detach(|| {
-        let context = array.read_ctx()?;
-        array
-            .arr
-            .compact_with(params.params, context.as_ref())
-            .into_py_result()
-    })?;
+    let mut compacted = py.detach(|| array.arr.compact_with(params.params).into_py_result())?;
     if let Some(read_size) = params.read_size {
         compacted.read_params_mut().set_read_size(read_size);
     }
@@ -1943,21 +1910,4 @@ fn binary_op_builtin(
     }
 
     op().map(ValueOrUnimplemented::Value)
-}
-
-pub(crate) struct ContextGuard<'a> {
-    array: &'a PyArray,
-    context: Option<Box<ReadContext>>,
-}
-impl Drop for ContextGuard<'_> {
-    fn drop(&mut self) {
-        if let Ok(mut cache) = self.array.cache.lock() {
-            cache.context = self.context.take();
-        }
-    }
-}
-impl ContextGuard<'_> {
-    pub(crate) fn as_ref(&self) -> &ReadContext {
-        self.context.as_ref().unwrap()
-    }
 }

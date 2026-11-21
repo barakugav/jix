@@ -289,7 +289,7 @@ impl<S: StorageBase> Array<S> {
 mod tests {
     use ndarray::{Ix2, array};
 
-    use crate::{Array, CompactArray, IntoDimension, NDIM_MAX, ReadContext, StorageBase};
+    use crate::{Array, CompactArray, IntoDimension, NDIM_MAX, StorageBase};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -301,7 +301,6 @@ mod tests {
         let a = Array::compact_ndarray(&array![[1u8, 2, 3, 4]]).unwrap();
         let r = a.repeat(1u64 << 50, 0);
         let mut backing = vec![0u8; 1 << 14];
-        let ctx = ReadContext::default();
         // SAFETY: shape [1, 4] at strides [16384, 1] touches bytes 0..4 of `backing`.
         let mut out = unsafe {
             crate::storage::StridedBuf::from_raw_parts_mut(
@@ -311,7 +310,7 @@ mod tests {
                 1,
             )
         };
-        r.to_buf_strided_into(&[5..6, 0..4], &mut out, &ctx)
+        r.to_buf_strided_into(&[5..6, 0..4], &mut out, None)
             .unwrap();
         assert_eq!(&backing[..4], &[1, 2, 3, 4]);
     }
@@ -410,7 +409,7 @@ mod tests {
     fn identity_sub_read_correct() {
         let got = make(arange(12), [3u64, 4])
             .repeat(1, 1)
-            .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
+            .to_ndarray_sub(&[1..3, 1..3])
             .unwrap();
         // rows 1..3, cols 1..3 of [[0..3],[4..7],[8..11]] = [[5,6],[9,10]]
         assert_eq!(got, array![[5, 6], [9, 10]]);
@@ -431,7 +430,7 @@ mod tests {
         // Even with repeats > 1, an empty output sub-range short-circuits.
         let got = make(arange(12), [3u64, 4])
             .repeat(2, 0)
-            .to_ndarray_sub::<Ix2>(&[2..2, 0..4], &ReadContext::default())
+            .to_ndarray_sub::<Ix2>(&[2..2, 0..4])
             .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
@@ -501,7 +500,7 @@ mod tests {
         // s=3, e=9 -> [20,20,20, 30,30,30]; both ends aligned to 3.
         let got = make_1d_repeat3()
             .repeat(3, 0)
-            .to_ndarray_sub(&[3..9], &ReadContext::default())
+            .to_ndarray_sub(&[3..9])
             .unwrap();
         assert_eq!(got, array![20, 20, 20, 30, 30, 30]);
     }
@@ -511,7 +510,7 @@ mod tests {
         // s=1, e=3 -> within group 0 (10,10,10), positions 1..3 -> [10, 10].
         let got = make_1d_repeat3()
             .repeat(3, 0)
-            .to_ndarray_sub(&[1..3], &ReadContext::default())
+            .to_ndarray_sub(&[1..3])
             .unwrap();
         assert_eq!(got, array![10, 10]);
     }
@@ -521,7 +520,7 @@ mod tests {
         // s=9, e=11 -> within group 3 (40,40,40), positions 0..2 -> [40, 40].
         let got = make_1d_repeat3()
             .repeat(3, 0)
-            .to_ndarray_sub(&[9..11], &ReadContext::default())
+            .to_ndarray_sub(&[9..11])
             .unwrap();
         assert_eq!(got, array![40, 40]);
     }
@@ -531,7 +530,7 @@ mod tests {
         // s=4, e=5 -> within group 1, single element [20].
         let got = make_1d_repeat3()
             .repeat(3, 0)
-            .to_ndarray_sub(&[4..5], &ReadContext::default())
+            .to_ndarray_sub(&[4..5])
             .unwrap();
         assert_eq!(got, array![20]);
     }
@@ -541,7 +540,7 @@ mod tests {
         // s=1, e=6 -> [10,10, 20,20,20]: head (g=0, p=1..3) + middle (g=1, p=0..3).
         let got = make_1d_repeat3()
             .repeat(3, 0)
-            .to_ndarray_sub(&[1..6], &ReadContext::default())
+            .to_ndarray_sub(&[1..6])
             .unwrap();
         assert_eq!(got, array![10, 10, 20, 20, 20]);
     }
@@ -551,7 +550,7 @@ mod tests {
         // s=6, e=11 -> [30,30,30, 40,40]: middle (g=2 full) + tail (g=3, p=0..2).
         let got = make_1d_repeat3()
             .repeat(3, 0)
-            .to_ndarray_sub(&[6..11], &ReadContext::default())
+            .to_ndarray_sub(&[6..11])
             .unwrap();
         assert_eq!(got, array![30, 30, 30, 40, 40]);
     }
@@ -561,7 +560,7 @@ mod tests {
         // s=1, e=11 -> [10,10, 20,20,20, 30,30,30, 40,40]: head + middle + tail.
         let got = make_1d_repeat3()
             .repeat(3, 0)
-            .to_ndarray_sub(&[1..11], &ReadContext::default())
+            .to_ndarray_sub(&[1..11])
             .unwrap();
         assert_eq!(got, array![10, 10, 20, 20, 20, 30, 30, 30, 40, 40]);
     }
@@ -572,7 +571,7 @@ mod tests {
         // sub-region cols 2..3 -> still within group 0 (the "1" or "3" group), single column.
         let got = make(vec![1, 2, 3, 4], [2u64, 2])
             .repeat(4, 1)
-            .to_ndarray_sub(&[0..2, 2..3], &ReadContext::default())
+            .to_ndarray_sub(&[0..2, 2..3])
             .unwrap();
         assert_eq!(got, array![[1], [3]]);
     }

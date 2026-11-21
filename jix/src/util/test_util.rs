@@ -1003,7 +1003,6 @@ fn assert_array_matches_dyn<T>(
         unreachable!("full array mismatch: {msg}");
     }
 
-    let ctx = actual.read_ctx();
     let shape = actual.shape();
     let mut runner = TestRunner::new(Config {
         cases: 16,
@@ -1013,7 +1012,7 @@ fn assert_array_matches_dyn<T>(
     runner
         .run(&sub_range_strategy(shape), |ranges| {
             let actual_sub = actual
-                .to_ndarray_sub::<IxDyn>(&ranges, &ctx)
+                .to_ndarray_sub::<IxDyn>(&ranges)
                 .map_err(|e| TestCaseError::fail(e.to_string()))?;
             let ranges_usize: Vec<Range<usize>> = ranges
                 .iter()
