@@ -8,9 +8,10 @@ use crate::error::{
 };
 use crate::storage::params::ReadTiling;
 use crate::storage::{
-    ArrayStorageExt, Index, OutBuf, StridedBuf, alloc_out_buf, check_out_buf_dims,
-    check_out_buf_impl, split_ranges,
+    ArrayStorageExt, Index, OutBuf, StridedBuf, check_out_buf_dims, check_out_buf_impl,
+    split_ranges,
 };
+use crate::util::buf_pool::PoolBuf;
 use crate::util::iter::NdIter;
 use crate::util::{
     advise_huge_pages, calc_block_end, cast_slice_mut, default_strides_slice, dim_arr,
@@ -363,7 +364,7 @@ impl<S: StorageBase> Array<S> {
         let (start, size) = split_ranges(index);
         check_alloc_size(&size, self.dtype().itemsize() as usize)?;
         if size.contains(&0) {
-            return Ok(self.alloc_empty(&size, context));
+            return Ok(self.alloc_empty(&size));
         }
         let index = unsafe { Index::new_unchecked(&start, &size) };
         let mut slot = None;
@@ -372,9 +373,10 @@ impl<S: StorageBase> Array<S> {
     }
 
     #[cold]
-    fn alloc_empty(&self, size: &[usize], context: &ReadContext) -> StridedBuf<'static> {
-        let spec = self.storage.spec();
-        alloc_out_buf(context, size, self.dtype(), spec.read_layout_order())
+    fn alloc_empty(&self, size: &[usize]) -> StridedBuf<'static> {
+        let buf = PoolBuf::empty();
+        let strides = dim_arr(size.len(), |_| 0);
+        unsafe { StridedBuf::from_pool(buf, strides) }
     }
 
     /// Read a rectangular sub-region into `out`, at `out`'s own strides.
