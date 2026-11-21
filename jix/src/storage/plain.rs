@@ -1256,6 +1256,24 @@ mod tests {
         assert_eq!(got, expected);
     }
 
+    // Same as `strided_scatter_path_negation`, with the read window set on the context instead of
+    // the array.
+    #[test]
+    fn strided_scatter_path_negation_context_read_size() {
+        use std::ops::Neg;
+
+        let vals = (0..4 * 10).collect::<Vec<i32>>();
+        let nd = ArrayD::from_shape_vec(vec![4, 10], vals).unwrap();
+        let a = Array::plain_ndarray(nd.clone()).unwrap();
+        let mut context = a.read_ctx();
+        context.set_read_size((16, 32));
+
+        let neg = a.view().neg();
+        let got = neg.to_ndarray_sub(&[0..4, 0..10], &context).unwrap();
+        let expected = nd.mapv(|x: i32| -x);
+        assert_eq!(got, expected);
+    }
+
     // -----------------------------------------------------------------------
     // Under-aligned views
     // -----------------------------------------------------------------------

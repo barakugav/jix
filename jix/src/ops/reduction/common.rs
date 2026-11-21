@@ -428,7 +428,7 @@ where
     let tile_shape = inner_array.spec().read_shape_heuristic::<InnerD>(
         inner_size_full.as_ref(),
         inner_shape,
-        item_dtype.itemsize(),
+        context.read_size().nitems(item_dtype.itemsize()),
     );
 
     // Bulk shape: full source extent on reduced dims (so an output's entire reduction

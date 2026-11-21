@@ -459,7 +459,7 @@ impl<S: StorageBase> Array<S> {
         let single_read = spec.flags().read_tiling() <= ReadTiling::SinglePass || {
             let dtype = self.dtype();
             let nitems = index.size().iter().product::<usize>();
-            let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
+            let (min_nitems, _) = context.read_size().nitems(dtype.itemsize());
             nitems as u64 <= min_nitems
         };
         let _cache_scope = context.cache_scope(&spec.dynamic().arrays_to_cache);
@@ -523,7 +523,11 @@ fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     let out = out.materialize(context, out_shape, dtype, spec.read_layout_order());
     debug_assert!(!out_shape.contains(&0));
     let max_shape = D::vec(ndim, |dim| out_shape[dim] as u64);
-    let read_shape = spec.read_shape_heuristic::<D>(max_shape.as_ref(), shape, dtype.itemsize());
+    let read_shape = spec.read_shape_heuristic::<D>(
+        max_shape.as_ref(),
+        shape,
+        context.read_size().nitems(dtype.itemsize()),
+    );
     // Block-space begin/end for NdIter.
     let block_begin = D::vec(ndim, |dim| index.start()[dim] / read_shape[dim]);
     let block_end = D::vec(ndim, |dim| {

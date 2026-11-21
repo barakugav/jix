@@ -15,9 +15,10 @@
 - deep type-erased op chains (x = x + 1 in a Python loop) recurse once per op on read and drop, and overflow the stack
 - Plain::read_data and numpy(out=) build &[u8]/&mut [u8] over the whole strided span, element-disjoint views alias (UB)
 - support writes to Compact and Plain
-- review inlines
+- review inlines, remove inline from alloc_out_buf
 - route power(float, PyInt > i32) to (float, float)
 - variance of finite data with deviations that overflow returns NaN instead of inf
 - f64 -> f16 cast round twice
 - every op copies the cache-ids of everything below it, so a deep chain of n ops holds n^2/2 ids
 - should scalar traits accept &T or T?
+- add callgrid measurements to CI

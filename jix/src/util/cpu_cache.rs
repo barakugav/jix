@@ -23,7 +23,7 @@
 //!   cache blocking on L3 may want to divide by `shared_cpu_list`'s cardinality
 //!   (Linux) or the number of performance cores (macOS).
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 /// Sizes of the caches visible to one thread, in bytes.
 ///
@@ -54,8 +54,8 @@ impl CacheSizes {
 
 /// Returns the cache sizes for the current CPU, detecting them on first call.
 pub fn cache_sizes() -> &'static CacheSizes {
-    static CACHE: OnceLock<CacheSizes> = OnceLock::new();
-    CACHE.get_or_init(detect)
+    static CACHE: LazyLock<CacheSizes> = LazyLock::new(detect);
+    &CACHE
 }
 
 fn detect() -> CacheSizes {

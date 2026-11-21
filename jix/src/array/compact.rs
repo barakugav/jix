@@ -219,7 +219,7 @@ fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(
     let mut chunk_shape_in_blocks = D::from_fn(ndim, |dim| {
         (current_block_shape[dim] / block_shape[dim]).max(1) as u64
     });
-    let read_size = spec.read_size();
+    let read_size = context.read_size();
     let (min_chunk, max_chunk) = (
         (read_size.min / block_size_bytes as u64).max(1),
         (read_size.max / block_size_bytes as u64).max(1),

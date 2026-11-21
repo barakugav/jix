@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
 use crate::context::CacheScope;
@@ -35,6 +35,20 @@ impl ReadSize {
         debug_assert!(itemsize > 0, "itemsize must be non-zero");
         let itemsize = itemsize as u64;
         ((self.min / itemsize).max(1), (self.max / itemsize).max(1))
+    }
+}
+
+/// A range derived from the L1 and L2 cache sizes.
+impl Default for ReadSize {
+    fn default() -> Self {
+        static DEFAULT: LazyLock<ReadSize> = LazyLock::new(|| {
+            let cache_sizes = crate::util::cpu_cache::cache_sizes();
+            let l2 = cache_sizes.l2 as u64;
+            let read_size_min = std::cmp::max(cache_sizes.l1_data as u64 / 2, l2 / 16);
+            let read_size_max = l2 / 2;
+            ReadSize::new(read_size_min, read_size_max)
+        });
+        *DEFAULT
     }
 }
 
@@ -409,13 +423,9 @@ impl ArrayParams {
                     * itemsize
             })
             .max(1);
-        // read_size defaults to a window derived from the cache sizes.
         let read_size = self.read_size.unwrap_or_else(|| {
-            let l2 = cache_sizes.l2 as u64;
-            let read_size_min =
-                std::cmp::max(cache_sizes.l1_data as u64 / 2, l2 / 16).max(block_size);
-            let read_size_max = l2 / 2;
-            ReadSize::new(read_size_min, read_size_max)
+            let read_size = ReadSize::default(); // derived from cache sizes
+            ReadSize::new(read_size.min.max(block_size), read_size.max)
         });
 
         self.block_shape = Some(block_shape);
@@ -749,14 +759,14 @@ impl<'a> ArraySpec<'a> {
         self.flags().read_tiling()
     }
 
-    /// Scale a read tile to the preferred read size for `itemsize`. Seeds every dim from
-    /// `block_shape` and scales them in order by
+    /// Scale a read tile to the `(min, max)` read size in items (see [`ReadSize::nitems`]). Seeds
+    /// every dim from `block_shape` and scales them in order by
     /// [`read_shape_scale_order`](ArraySpecDynamic::read_shape_scale_order).
     pub(crate) fn read_shape_heuristic<D>(
         &self,
         max_shape: &[u64],
         array_shape: &[u64],
-        itemsize: Itemsize,
+        read_size_nitems: (u64, u64),
     ) -> D
     where
         D: Dimension,
@@ -768,7 +778,7 @@ impl<'a> ArraySpec<'a> {
             read_shape.as_mut_slice(),
             max_shape,
             array_shape,
-            self.read_size().nitems(itemsize),
+            read_size_nitems,
             self.read_shape_scale_weight(),
             order.iter().map(|&d| d as usize),
         );

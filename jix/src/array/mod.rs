@@ -249,7 +249,11 @@ impl<S: StorageBase> Array<S> {
         self.try_read_ctx().expect("failed to create read context")
     }
     fn try_read_ctx(&self) -> Result<ReadContext> {
-        ReadContext::new(self.storage.spec().decoder_params())
+        let spec = self.storage.spec();
+        let mut context = ReadContext::new(spec.decoder_params())?;
+        let read_size = spec.read_size();
+        context.set_read_size((read_size.min, read_size.max));
+        Ok(context)
     }
 
     /// Borrow this array as an `Array<&S>`, without cloning the storage.

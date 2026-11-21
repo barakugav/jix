@@ -5,6 +5,7 @@ use crate::codec::{Decoder, DecoderCodecConfig, DecoderParams};
 use crate::dtype::{Alignment, Dtype};
 use crate::error::Result;
 use crate::storage::cache_id::{ArrayCacheId, ArrayCacheIdMap, ArrayCacheIdSet};
+use crate::storage::params::ReadSize;
 use crate::storage::{write_out_buf_slot, Index, OutBuf, OutBufInner, StridedBuf};
 use crate::util::buf_pool::{BufferPool, PoolBuf};
 use crate::util::{DimArray, SliceExt};
@@ -58,6 +59,9 @@ pub struct ReadContext {
     /// Reusable cache maps for cache scopes.
     #[allow(clippy::vec_box)]
     temp_cache_maps: RefCell<Vec<Box<CacheMap>>>,
+
+    /// The target byte range for a single read region.
+    read_size: ReadSize,
 }
 
 impl ReadContext {
@@ -73,7 +77,36 @@ impl ReadContext {
             read_cache: RefCell::new(None),
             is_cache_enabled: Cell::new(false),
             temp_cache_maps: RefCell::new(Vec::new()),
+
+            read_size: ReadSize::default(),
         })
+    }
+
+    /// Sets the target byte range `(min, max)` for a single read region.
+    ///
+    /// A read region is the rectangular slab the engine pulls and decompresses in one pass
+    /// when materializing a lazy pipeline or a sub-region read. Its shape is derived by
+    /// scaling the storage block shape toward this byte budget:
+    ///
+    /// - `max` is the *scale-down ceiling*: an oversized read shape is shrunk until it fits
+    ///   within `max`.
+    /// - `min` is the *scale-up floor*: a read shape is then grown up to `min`, or up to
+    ///   `2 * max` along a dimension the data is duplicated along (e.g. a broadcast one).
+    ///
+    /// When the source array's block grid differs from the output's, a read that straddles
+    /// source blocks decompresses whole blocks for a partial slice, and neighboring reads
+    /// decompress the same block again. Larger regions span more blocks per call and dilute that
+    /// waste; `max` bounds their cache footprint.
+    ///
+    /// [`Array::read_ctx()`](crate::Array::read_ctx) starts from the array's read size,
+    /// [`ReadContext::default()`] from a range chosen according to the CPU cache sizes.
+    pub fn set_read_size(&mut self, size_hint: (u64, u64)) {
+        self.read_size = ReadSize::new(size_hint.0, size_hint.1);
+    }
+
+    #[inline]
+    pub(crate) fn read_size(&self) -> ReadSize {
+        self.read_size
     }
 
     #[inline]
@@ -312,5 +345,24 @@ pub(crate) mod tests {
             Some(cache) => cache.map.keys().count(),
             None => 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod read_size_tests {
+    use crate::storage::params::ReadSize;
+    use crate::{Array, ArrayParams, ReadContext};
+
+    #[test]
+    fn read_ctx_starts_from_the_array_read_size_and_can_override_it() {
+        let params = ArrayParams::new().read_size((64, 128));
+        let a = Array::plain_ndarray_with(ndarray::Array1::<i32>::zeros(100), params).unwrap();
+
+        let mut context = a.read_ctx();
+        assert_eq!(context.read_size(), ReadSize::new(64, 128));
+        context.set_read_size((16, 32));
+        assert_eq!(context.read_size(), ReadSize::new(16, 32));
+
+        assert_eq!(ReadContext::default().read_size(), ReadSize::default());
     }
 }
