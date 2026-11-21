@@ -1,0 +1,41 @@
+<figure class="diagram">
+<div class="diagram__scroll">
+<svg class="dg" viewBox="0 0 680 310" role="img" aria-label="How lazy ops turn a read into reads of their input. Reading s[10:20] of s = a.sum(dim=0) reads a[0:100, 10:20], split into 4 reads of 25 rows that are summed as they arrive. Reading t[5:15, 60:90] of t = a.T reads a[60:90, 5:15] and swaps the strides back, with no copy.">
+<defs>
+<marker id="b5-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-acc" d="M0 0L10 5L0 10z"/></marker>
+</defs>
+<text class="b mono" x="20" y="20">s = a.sum(dim=0)</text>
+<text class="sm muted" x="120" y="42">s (40,)</text>
+<rect class="zip" x="120" y="48" width="60" height="12"/>
+<rect class="hot" x="135" y="48" width="15" height="12"/>
+<text class="sm acc" x="190" y="58">s[10:20]</text>
+<line class="ln-acc" x1="142.5" y1="62" x2="142.5" y2="127" marker-end="url(#b5-acc)"/>
+<text class="sm muted" x="152" y="90">inner read</text>
+<text class="sm mono" x="152" y="106">a[0:100, 10:20]</text>
+<text class="sm muted" x="112" y="140" text-anchor="end">a (100, 40)</text>
+<rect class="zip" x="120" y="130" width="60" height="150"/>
+<rect class="hot" x="135" y="130" width="15" height="150"/>
+<g class="ln-acc"><line x1="135" y1="167.5" x2="150" y2="167.5"/><line x1="135" y1="205" x2="150" y2="205"/><line x1="135" y1="242.5" x2="150" y2="242.5"/></g>
+<rect class="region" x="135" y="130" width="15" height="150"/>
+<text class="sm muted" x="190" y="196">split into 4 reads</text>
+<text class="sm muted" x="190" y="212">of 25 rows, summed</text>
+<text class="sm muted" x="190" y="228">as they arrive</text>
+<line class="ln-m" x1="340" y1="8" x2="340" y2="300"/>
+<text class="b mono" x="370" y="20">t = a.T</text>
+<text class="sm muted" x="380" y="40">t (40, 100)</text>
+<rect class="zip" x="380" y="46" width="150" height="60"/>
+<rect class="hot" x="470" y="53.5" width="45" height="15"/>
+<rect class="region" x="470" y="53.5" width="45" height="15"/>
+<text class="sm acc" x="540" y="66">t[5:15, 60:90]</text>
+<path class="ln-acc" d="M492.5 70V242.5H557" marker-end="url(#b5-acc)"/>
+<text class="sm muted" x="484" y="170" text-anchor="end">inner read</text>
+<text class="sm mono" x="484" y="186" text-anchor="end">a[60:90, 5:15]</text>
+<text class="sm muted" x="590" y="124" text-anchor="middle">a (100, 40)</text>
+<rect class="zip" x="560" y="130" width="60" height="150"/>
+<rect class="hot" x="567.5" y="220" width="15" height="45"/>
+<rect class="region" x="567.5" y="220" width="15" height="45"/>
+<text class="sm muted" x="380" y="300">then swap the strides back, no copy</text>
+</svg>
+</div>
+<figcaption>A lazy op answers <code>read_data(region)</code> by working out which region of its input it needs and reading that. A reduction reads a bigger region and may cut it into smaller reads to keep memory low; <code>a.T</code> just swaps the coordinates.</figcaption>
+</figure>

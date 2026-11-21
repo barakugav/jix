@@ -1,0 +1,52 @@
+title: jix
+tagline: Block-compressed, lazy nd-arrays for Rust and Python
+description: >-
+  A multi-dimensional array library with block-compressed storage and
+  lazy-evaluated operations - written in Rust, with Python bindings.
+author: Barak Ugav
+lang: en
+
+url: https://barakugav.github.io
+baseurl: /jix
+
+# Shown in the header link row and the footer.
+links:
+  - name: GitHub
+    detail: Source code
+    url: https://github.com/barakugav/jix
+  - name: crates.io
+    detail: Rust crate
+    url: https://crates.io/crates/jix
+  - name: docs.rs
+    detail: Rust API docs
+    url: https://docs.rs/jix/latest/jix/
+  - name: PyPI
+    detail: Python package
+    url: https://pypi.org/project/jix/
+  - name: Read the Docs
+    detail: Python docs
+    url: https://jix.readthedocs.io/en/stable/
+
+github:
+  repo: https://github.com/barakugav/jix
+  pages_branch: gh-pages
+
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter: rouge
+
+plugins:
+  - jekyll-seo-tag
+
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - preview.py
+  # general gitignore
+  - target
+  - "**/target"
+  - "**/__pycache__"

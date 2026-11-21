@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="{{ site.lang | default: 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  {% seo %}
+  <link rel="icon" href="{{ '/assets/favicon.svg' | relative_url }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+  <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap site-header__inner">
+      <a class="wordmark" href="{{ '/' | relative_url }}">{{ site.title }}</a>
+      <a class="site-header__repo" href="{{ site.github.repo }}">GitHub</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <article class="post">
+      <header class="post__header">
+        {% if page.kicker %}<p class="post__kicker">{{ page.kicker }}</p>{% endif %}
+        <h1 class="post__title">{{ page.title }}</h1>
+        {% if page.subtitle %}<p class="post__subtitle">{{ page.subtitle }}</p>{% endif %}
+        <p class="post__meta">
+          {% assign author = page.author | default: site.author %}
+          {% if author %}<span>{{ author }}</span>{% endif %}
+          {% if page.date %}<time datetime="{{ page.date | date_to_xmlschema }}">{{ page.date | date: "%B %-d, %Y" }}</time>{% endif %}
+          {% comment %} Count prose only: drop diagram (svg) and code (pre) text. {% endcomment %}
+          {% assign prose = content %}
+          {% assign tags = "svg,pre" | split: "," %}
+          {% for tag in tags %}
+            {% assign open = "<" | append: tag %}
+            {% assign close = "</" | append: tag | append: ">" %}
+            {% assign parts = prose | split: open %}
+            {% assign prose = parts.first %}
+            {% for part in parts offset: 1 %}
+              {% assign tail = part | split: close | last %}
+              {% assign prose = prose | append: tail %}
+            {% endfor %}
+          {% endfor %}
+          {% assign minutes = prose | number_of_words | divided_by: 200 | at_least: 1 %}
+          <span>{{ minutes }} min read</span>
+        </p>
+      </header>
+
+      <nav class="links" aria-label="Project links">
+        {% for link in site.links %}
+        <a class="link-card" href="{{ link.url }}">
+          <span class="link-card__name">{{ link.name }}</span>
+          <span class="link-card__detail">{{ link.detail }}</span>
+        </a>
+        {% endfor %}
+      </nav>
+
+      <div class="post__body">
+        {{ content }}
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap site-footer__inner">
+      <p class="site-footer__links">
+        {% for link in site.links %}<a href="{{ link.url }}">{{ link.name }}</a>{% endfor %}
+      </p>
+      <p class="site-footer__small">
+        jix is dual-licensed under MIT and Apache-2.0.
+        <a href="{{ site.github.repo }}/edit/{{ site.github.pages_branch }}/{{ page.path }}">Edit this page</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    // Turn each `.code-tabs` block (one rust and one python snippet) into tabs. Picking a
+    // language switches every snippet on the page and is remembered for the next visit.
+    (function () {
+      var groups = document.querySelectorAll(".code-tabs");
+      if (!groups.length) return;
+      var key = "jix-blog-lang";
+      var names = { rust: "Rust", python: "Python" };
+
+      function setLang(lang, anchor) {
+        var before = anchor && anchor.getBoundingClientRect().top;
+        document.documentElement.setAttribute("data-lang", lang);
+        document.querySelectorAll(".code-tabs__bar button").forEach(function (b) {
+          b.setAttribute("aria-selected", String(b.dataset.lang === lang));
+        });
+        // Snippets above the clicked one change height; keep the clicked tab where it was.
+        if (anchor) window.scrollBy(0, anchor.getBoundingClientRect().top - before);
+        try { localStorage.setItem(key, lang); } catch (e) {}
+      }
+
+      groups.forEach(function (group) {
+        var bar = document.createElement("div");
+        bar.className = "code-tabs__bar";
+        bar.setAttribute("role", "tablist");
+        Object.keys(names).forEach(function (lang) {
+          if (!group.querySelector(":scope > div.language-" + lang)) return;
+          var b = document.createElement("button");
+          b.type = "button";
+          b.setAttribute("role", "tab");
+          b.dataset.lang = lang;
+          b.textContent = names[lang];
+          b.addEventListener("click", function () { setLang(lang, b); });
+          bar.appendChild(b);
+        });
+        group.insertBefore(bar, group.firstChild);
+        group.classList.add("is-tabbed");
+      });
+
+      var saved = null;
+      try { saved = localStorage.getItem(key); } catch (e) {}
+      setLang(names[saved] ? saved : "python");
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+<figure class="diagram">
+<div class="diagram__scroll">
+<svg class="dg" viewBox="0 0 680 678" role="img" aria-label="Computing (a + b) * c. Eager: pass 1 decompresses every block of a and b, adds them and compresses a whole temporary array t; pass 2 decompresses every block of t and c, multiplies and compresses the output, 4 decompressions and 2 compressions per block. Lazy, fused: for each block, decompress a, b and c, add, multiply and compress the output once, 3 decompressions and 1 compression per block.">
+<defs>
+<marker id="b4-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0L10 5L0 10z"/></marker>
+<marker id="b4-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-warn" d="M0 0L10 5L0 10z"/></marker>
+<marker id="b4-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-acc" d="M0 0L10 5L0 10z"/></marker>
+</defs>
+<text class="b" x="18" y="22">eager: t = a + b, then out = t * c</text>
+<g class="ln-m"><path d="M18 58V52H342V58"/><path d="M346 58V52H670V58"/></g>
+<text class="sm muted" x="180" y="45" text-anchor="middle">pass 1, over every block</text>
+<text class="sm muted" x="508" y="45" text-anchor="middle">pass 2, over every block</text>
+<text class="b mono" x="48" y="72" text-anchor="middle">a</text>
+<g>
+<rect class="zip" x="18" y="80" width="60" height="60"/>
+<rect class="hot" x="58" y="100" width="20" height="20"/>
+<g class="ln-m"><line x1="38" y1="80" x2="38" y2="140"/><line x1="58" y1="80" x2="58" y2="140"/><line x1="18" y1="100" x2="78" y2="100"/><line x1="18" y1="120" x2="78" y2="120"/></g>
+<rect class="hot-edge" x="58" y="100" width="20" height="20"/>
+</g>
+<text class="b mono" x="48" y="162" text-anchor="middle">b</text>
+<g>
+<rect class="zip" x="18" y="170" width="60" height="60"/>
+<rect class="hot" x="58" y="190" width="20" height="20"/>
+<g class="ln-m"><line x1="38" y1="170" x2="38" y2="230"/><line x1="58" y1="170" x2="58" y2="230"/><line x1="18" y1="190" x2="78" y2="190"/><line x1="18" y1="210" x2="78" y2="210"/></g>
+<rect class="hot-edge" x="58" y="190" width="20" height="20"/>
+</g>
+<line class="ln" x1="80" y1="110" x2="150" y2="110" marker-end="url(#b4-arr)"/>
+<text class="sm" x="115" y="103" text-anchor="middle">decompress</text>
+<line class="ln" x1="80" y1="200" x2="150" y2="200" marker-end="url(#b4-arr)"/>
+<text class="sm" x="115" y="193" text-anchor="middle">decompress</text>
+<rect class="raw" x="152" y="93" width="48" height="34"/><text class="sm mono" x="176" y="114" text-anchor="middle">a[i]</text>
+<rect class="raw" x="152" y="183" width="48" height="34"/><text class="sm mono" x="176" y="204" text-anchor="middle">b[i]</text>
+<line class="ln" x1="201" y1="110" x2="228" y2="144" marker-end="url(#b4-arr)"/>
+<line class="ln" x1="201" y1="200" x2="228" y2="166" marker-end="url(#b4-arr)"/>
+<circle class="op" cx="240" cy="155" r="16"/><text class="b" x="240" y="160" text-anchor="middle" style="font-size:15px">+</text>
+<line class="ln-warn" x1="257" y1="155" x2="312" y2="155" marker-end="url(#b4-warn)"/>
+<text class="sm" x="284.5" y="148" text-anchor="middle">compress</text>
+<text class="b mono warn-t" x="344" y="117" text-anchor="middle">t = a + b</text>
+<g>
+<rect class="zip" x="314" y="125" width="60" height="60"/>
+<rect class="warn" x="314" y="125" width="20" height="20"/>
+<rect class="warn" x="334" y="125" width="20" height="20"/>
+<rect class="warn" x="354" y="125" width="20" height="20"/>
+<rect class="warn" x="314" y="145" width="20" height="20"/>
+<rect class="warn" x="334" y="145" width="20" height="20"/>
+<rect class="warn" x="354" y="145" width="20" height="20"/>
+<rect class="warn" x="314" y="165" width="20" height="20"/>
+<rect class="warn" x="334" y="165" width="20" height="20"/>
+<rect class="warn" x="354" y="165" width="20" height="20"/>
+<rect class="hot" x="354" y="145" width="20" height="20"/>
+<g class="ln-m"><line x1="334" y1="125" x2="334" y2="185"/><line x1="354" y1="125" x2="354" y2="185"/><line x1="314" y1="145" x2="374" y2="145"/><line x1="314" y1="165" x2="374" y2="165"/></g>
+<rect class="hot-edge" x="354" y="145" width="20" height="20"/>
+</g>
+<text class="b mono" x="344" y="207" text-anchor="middle">c</text>
+<g>
+<rect class="zip" x="314" y="215" width="60" height="60"/>
+<rect class="hot" x="354" y="235" width="20" height="20"/>
+<g class="ln-m"><line x1="334" y1="215" x2="334" y2="275"/><line x1="354" y1="215" x2="354" y2="275"/><line x1="314" y1="235" x2="374" y2="235"/><line x1="314" y1="255" x2="374" y2="255"/></g>
+<rect class="hot-edge" x="354" y="235" width="20" height="20"/>
+</g>
+<line class="ln-warn" x1="376" y1="155" x2="450" y2="155" marker-end="url(#b4-warn)"/>
+<text class="sm" x="413" y="148" text-anchor="middle">decompress</text>
+<line class="ln" x1="376" y1="245" x2="450" y2="245" marker-end="url(#b4-arr)"/>
+<text class="sm" x="413" y="238" text-anchor="middle">decompress</text>
+<rect class="warn" x="452" y="138" width="48" height="34"/><text class="sm mono" x="476" y="159" text-anchor="middle">t[i]</text>
+<rect class="raw" x="452" y="228" width="48" height="34"/><text class="sm mono" x="476" y="249" text-anchor="middle">c[i]</text>
+<line class="ln" x1="501" y1="155" x2="522" y2="189" marker-end="url(#b4-arr)"/>
+<line class="ln" x1="501" y1="245" x2="522" y2="211" marker-end="url(#b4-arr)"/>
+<circle class="op" cx="534" cy="200" r="16"/><text class="b" x="534" y="205" text-anchor="middle" style="font-size:15px">*</text>
+<line class="ln" x1="551" y1="200" x2="608" y2="200" marker-end="url(#b4-arr)"/>
+<text class="sm" x="579.5" y="193" text-anchor="middle">compress</text>
+<text class="b mono" x="640" y="162" text-anchor="middle">out</text>
+<g>
+<rect class="cell" x="610" y="170" width="60" height="60"/>
+<rect class="done" x="610" y="170" width="20" height="20"/>
+<rect class="done" x="630" y="170" width="20" height="20"/>
+<rect class="done" x="650" y="170" width="20" height="20"/>
+<rect class="done" x="610" y="190" width="20" height="20"/>
+<rect class="done" x="630" y="190" width="20" height="20"/>
+<rect class="hot" x="650" y="190" width="20" height="20"/>
+<g class="ln-m"><line x1="630" y1="170" x2="630" y2="230"/><line x1="650" y1="170" x2="650" y2="230"/><line x1="610" y1="190" x2="670" y2="190"/><line x1="610" y1="210" x2="670" y2="210"/></g>
+<rect class="hot-edge" x="650" y="190" width="20" height="20"/>
+</g>
+<g class="sm"><rect class="done" x="610" y="248" width="12" height="12"/><text x="628" y="258">done</text><rect class="hot" x="610" y="266" width="12" height="12"/><text x="628" y="276">block i</text><rect class="cell" x="610" y="284" width="12" height="12"/><text x="628" y="294">next</text></g>
+<text class="warn-t" x="18" y="312">per block: 4 decompress, 2 compress, and t is a whole extra array</text>
+<line class="ln-m" x1="18" y1="330" x2="670" y2="332"/>
+<text class="b" x="18" y="364">jix, lazy: out = (a + b) * c in one pass</text>
+<text class="b mono" x="48" y="384" text-anchor="middle">a</text>
+<g>
+<rect class="zip" x="18" y="392" width="60" height="60"/>
+<rect class="hot" x="58" y="412" width="20" height="20"/>
+<g class="ln-m"><line x1="38" y1="392" x2="38" y2="452"/><line x1="58" y1="392" x2="58" y2="452"/><line x1="18" y1="412" x2="78" y2="412"/><line x1="18" y1="432" x2="78" y2="432"/></g>
+<rect class="hot-edge" x="58" y="412" width="20" height="20"/>
+</g>
+<text class="b mono" x="48" y="464" text-anchor="middle">b</text>
+<g>
+<rect class="zip" x="18" y="472" width="60" height="60"/>
+<rect class="hot" x="58" y="492" width="20" height="20"/>
+<g class="ln-m"><line x1="38" y1="472" x2="38" y2="532"/><line x1="58" y1="472" x2="58" y2="532"/><line x1="18" y1="492" x2="78" y2="492"/><line x1="18" y1="512" x2="78" y2="512"/></g>
+<rect class="hot-edge" x="58" y="492" width="20" height="20"/>
+</g>
+<text class="b mono" x="48" y="544" text-anchor="middle">c</text>
+<g>
+<rect class="zip" x="18" y="552" width="60" height="60"/>
+<rect class="hot" x="58" y="572" width="20" height="20"/>
+<g class="ln-m"><line x1="38" y1="552" x2="38" y2="612"/><line x1="58" y1="552" x2="58" y2="612"/><line x1="18" y1="572" x2="78" y2="572"/><line x1="18" y1="592" x2="78" y2="592"/></g>
+<rect class="hot-edge" x="58" y="572" width="20" height="20"/>
+</g>
+<line class="ln" x1="80" y1="422" x2="150" y2="422" marker-end="url(#b4-arr)"/>
+<text class="sm" x="115" y="415" text-anchor="middle">decompress</text>
+<rect class="raw" x="152" y="405" width="48" height="34"/><text class="sm mono" x="176" y="426" text-anchor="middle">a[i]</text>
+<line class="ln" x1="80" y1="502" x2="150" y2="502" marker-end="url(#b4-arr)"/>
+<text class="sm" x="115" y="495" text-anchor="middle">decompress</text>
+<rect class="raw" x="152" y="485" width="48" height="34"/><text class="sm mono" x="176" y="506" text-anchor="middle">b[i]</text>
+<line class="ln" x1="80" y1="582" x2="150" y2="582" marker-end="url(#b4-arr)"/>
+<text class="sm" x="115" y="575" text-anchor="middle">decompress</text>
+<rect class="raw" x="152" y="565" width="48" height="34"/><text class="sm mono" x="176" y="586" text-anchor="middle">c[i]</text>
+<line class="ln" x1="201" y1="422" x2="228" y2="451" marker-end="url(#b4-arr)"/>
+<line class="ln" x1="201" y1="502" x2="228" y2="473" marker-end="url(#b4-arr)"/>
+<circle class="op" cx="240" cy="462" r="16"/><text class="b" x="240" y="467" text-anchor="middle" style="font-size:15px">+</text>
+<line class="ln" x1="252" y1="473" x2="302" y2="511" marker-end="url(#b4-arr)"/>
+<line class="ln" x1="201" y1="582" x2="301" y2="531" marker-end="url(#b4-arr)"/>
+<circle class="op" cx="314" cy="522" r="16"/><text class="b" x="314" y="527" text-anchor="middle" style="font-size:15px">*</text>
+<line class="ln" x1="331" y1="522" x2="450" y2="522" marker-end="url(#b4-arr)"/>
+<rect class="raw" x="452" y="505" width="48" height="34"/><text class="sm mono" x="476" y="526" text-anchor="middle">out[i]</text>
+<line class="ln-acc" x1="501" y1="522" x2="608" y2="522" marker-end="url(#b4-acc)"/>
+<text class="sm" x="554.5" y="515" text-anchor="middle">compress</text>
+<text class="b mono" x="640" y="484" text-anchor="middle">out</text>
+<g>
+<rect class="cell" x="610" y="492" width="60" height="60"/>
+<rect class="done" x="610" y="492" width="20" height="20"/>
+<rect class="done" x="630" y="492" width="20" height="20"/>
+<rect class="done" x="650" y="492" width="20" height="20"/>
+<rect class="done" x="610" y="512" width="20" height="20"/>
+<rect class="done" x="630" y="512" width="20" height="20"/>
+<rect class="hot" x="650" y="512" width="20" height="20"/>
+<g class="ln-m"><line x1="630" y1="492" x2="630" y2="552"/><line x1="650" y1="492" x2="650" y2="552"/><line x1="610" y1="512" x2="670" y2="512"/><line x1="610" y1="532" x2="670" y2="532"/></g>
+<rect class="hot-edge" x="650" y="512" width="20" height="20"/>
+</g>
+<text class="acc" x="18" y="642">per block: 3 decompress, 1 compress, no temporary array</text>
+<text class="sm mono muted" x="18" y="664">out: Array&lt;Mul&lt;Add&lt;Compact, Compact&gt;, Compact&gt;&gt;</text>
+</svg>
+</div>
+<figcaption>Top: done eagerly, pass 1 writes all of <code>t = a + b</code> before pass 2 starts, so every block of <code>t</code> is compressed only to be decompressed again. Bottom: fused, each output block comes out of a single pass over <code>a</code>, <code>b</code> and <code>c</code>. The lazy type of <code>out</code> is the plan for that pass.</figcaption>
+</figure>

@@ -1,0 +1,67 @@
+<figure class="diagram">
+<div class="diagram__scroll">
+<svg class="dg" viewBox="0 0 680 270" role="img" aria-label="A 1000-element array split into 10 blocks of 100. Each block is compressed on its own and stored back to back, with a block table of byte offsets. Reading a[512] looks up block 5 in the table and decompresses only that block.">
+<defs>
+<marker id="b1-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-m" d="M0 0L10 5L0 10z"/></marker>
+<marker id="b1-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-acc" d="M0 0L10 5L0 10z"/></marker>
+</defs>
+<text class="muted" x="60" y="40">array: 1000 elements, 10 blocks of 100</text>
+<text class="acc b" x="367" y="18" text-anchor="middle">read a[512]</text>
+<line class="ln-acc" x1="367" y1="24" x2="367" y2="47" marker-end="url(#b1-acc)"/>
+<g class="sm">
+<rect class="cell" x="60" y="50" width="60" height="30"/><text x="90" y="69" text-anchor="middle">0-99</text>
+<rect class="cell" x="120" y="50" width="60" height="30"/><text x="150" y="69" text-anchor="middle">100-199</text>
+<rect class="cell" x="180" y="50" width="60" height="30"/><text x="210" y="69" text-anchor="middle">200-299</text>
+<rect class="cell" x="240" y="50" width="60" height="30"/><text x="270" y="69" text-anchor="middle">300-399</text>
+<rect class="cell" x="300" y="50" width="60" height="30"/><text x="330" y="69" text-anchor="middle">400-499</text>
+<rect class="hot" x="360" y="50" width="60" height="30"/><text x="390" y="69" text-anchor="middle">500-599</text>
+<rect class="cell" x="420" y="50" width="60" height="30"/><text x="450" y="69" text-anchor="middle">600-699</text>
+<rect class="cell" x="480" y="50" width="60" height="30"/><text x="510" y="69" text-anchor="middle">700-799</text>
+<rect class="cell" x="540" y="50" width="60" height="30"/><text x="570" y="69" text-anchor="middle">800-899</text>
+<rect class="cell" x="600" y="50" width="60" height="30"/><text x="630" y="69" text-anchor="middle">900-999</text>
+</g>
+<g class="ln-m">
+<line x1="90" y1="82" x2="82" y2="131" marker-end="url(#b1-arr)"/>
+<line x1="150" y1="82" x2="123" y2="131" marker-end="url(#b1-arr)"/>
+<line x1="210" y1="82" x2="168" y2="131" marker-end="url(#b1-arr)"/>
+<line x1="270" y1="82" x2="209" y2="131" marker-end="url(#b1-arr)"/>
+<line x1="330" y1="82" x2="247" y2="131" marker-end="url(#b1-arr)"/>
+<line x1="450" y1="82" x2="328" y2="131" marker-end="url(#b1-arr)"/>
+<line x1="510" y1="82" x2="371" y2="131" marker-end="url(#b1-arr)"/>
+<line x1="570" y1="82" x2="417" y2="131" marker-end="url(#b1-arr)"/>
+<line x1="630" y1="82" x2="454" y2="131" marker-end="url(#b1-arr)"/>
+</g>
+<line class="ln-acc" x1="390" y1="82" x2="292" y2="131" marker-end="url(#b1-acc)"/>
+<text class="muted" x="660" y="126" text-anchor="end">zstd, each block alone</text>
+<g class="sm">
+<rect class="zip" x="60" y="134" width="44" height="26"/><text x="82" y="151" text-anchor="middle">0</text>
+<rect class="zip" x="104" y="134" width="38" height="26"/><text x="123" y="151" text-anchor="middle">1</text>
+<rect class="zip" x="142" y="134" width="52" height="26"/><text x="168" y="151" text-anchor="middle">2</text>
+<rect class="zip" x="194" y="134" width="30" height="26"/><text x="209" y="151" text-anchor="middle">3</text>
+<rect class="zip" x="224" y="134" width="47" height="26"/><text x="247" y="151" text-anchor="middle">4</text>
+<rect class="hot" x="271" y="134" width="40" height="26"/><text x="291" y="151" text-anchor="middle">5</text>
+<rect class="zip" x="311" y="134" width="35" height="26"/><text x="328" y="151" text-anchor="middle">6</text>
+<rect class="zip" x="346" y="134" width="50" height="26"/><text x="371" y="151" text-anchor="middle">7</text>
+<rect class="zip" x="396" y="134" width="42" height="26"/><text x="417" y="151" text-anchor="middle">8</text>
+<rect class="zip" x="438" y="134" width="33" height="26"/><text x="454" y="151" text-anchor="middle">9</text>
+</g>
+<text class="muted" x="484" y="152">compressed, back to back</text>
+<g class="sm mono">
+<rect class="cell" x="60" y="206" width="40" height="22"/><text x="80" y="221" text-anchor="middle">0</text>
+<rect class="cell" x="100" y="206" width="40" height="22"/><text x="120" y="221" text-anchor="middle">440</text>
+<rect class="cell" x="140" y="206" width="40" height="22"/><text x="160" y="221" text-anchor="middle">820</text>
+<rect class="cell" x="180" y="206" width="40" height="22"/><text x="200" y="221" text-anchor="middle">1340</text>
+<rect class="cell" x="220" y="206" width="40" height="22"/><text x="240" y="221" text-anchor="middle">1640</text>
+<rect class="hot" x="260" y="206" width="40" height="22"/><text x="280" y="221" text-anchor="middle">2110</text>
+<rect class="cell" x="300" y="206" width="40" height="22"/><text x="320" y="221" text-anchor="middle">2510</text>
+<rect class="cell" x="340" y="206" width="40" height="22"/><text x="360" y="221" text-anchor="middle">2860</text>
+<rect class="cell" x="380" y="206" width="40" height="22"/><text x="400" y="221" text-anchor="middle">3360</text>
+<rect class="cell" x="420" y="206" width="40" height="22"/><text x="440" y="221" text-anchor="middle">3780</text>
+</g>
+<text class="muted" x="474" y="222">block table (byte offsets)</text>
+<line class="ln-acc" x1="280" y1="204" x2="276" y2="164" marker-end="url(#b1-acc)"/>
+<text class="acc" x="60" y="256">a[512]: 512 / 100 = block 5, at offset 2110, decompress 1 block out of 10</text>
+</svg>
+</div>
+<figcaption>Each block of 100 elements is compressed on its own. Compressed blocks have different sizes, so a small table keeps where each one starts. Reading <code>a[512]</code> only needs block 5.</figcaption>
+</figure>

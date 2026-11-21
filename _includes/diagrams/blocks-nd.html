@@ -1,0 +1,31 @@
+<figure class="diagram">
+<div class="diagram__scroll">
+<svg class="dg" viewBox="0 0 680 310" role="img" aria-label="A 600 by 800 array split into a 6 by 8 grid of 100 by 100 blocks. A read of rows 150 to 250 and columns 380 to 520 overlaps 6 blocks, and only those 6 of the 48 blocks are decompressed.">
+<text class="muted" x="210" y="20" text-anchor="middle">dim 1 (800)</text>
+<text class="muted" transform="translate(16 170) rotate(-90)" text-anchor="middle">dim 0 (600)</text>
+<g class="sm muted" text-anchor="middle">
+<text x="50" y="42">0</text><text x="90" y="42">100</text><text x="130" y="42">200</text><text x="170" y="42">300</text><text x="210" y="42">400</text><text x="250" y="42">500</text><text x="290" y="42">600</text><text x="330" y="42">700</text><text x="370" y="42">800</text>
+</g>
+<g class="sm muted" text-anchor="end">
+<text x="44" y="54">0</text><text x="44" y="94">100</text><text x="44" y="134">200</text><text x="44" y="174">300</text><text x="44" y="214">400</text><text x="44" y="254">500</text><text x="44" y="294">600</text>
+</g>
+<rect class="zip" x="50" y="50" width="320" height="240"/>
+<rect class="hot" x="170" y="90" width="120" height="80"/>
+<g class="ln-m">
+<line x1="90" y1="50" x2="90" y2="290"/><line x1="130" y1="50" x2="130" y2="290"/><line x1="170" y1="50" x2="170" y2="290"/><line x1="210" y1="50" x2="210" y2="290"/><line x1="250" y1="50" x2="250" y2="290"/><line x1="290" y1="50" x2="290" y2="290"/><line x1="330" y1="50" x2="330" y2="290"/>
+<line x1="50" y1="90" x2="370" y2="90"/><line x1="50" y1="130" x2="370" y2="130"/><line x1="50" y1="170" x2="370" y2="170"/><line x1="50" y1="210" x2="370" y2="210"/><line x1="50" y1="250" x2="370" y2="250"/>
+</g>
+<rect class="hot-edge" x="170" y="90" width="120" height="80"/>
+<rect class="region" x="202" y="110" width="56" height="40"/>
+<text class="b" x="410" y="72">read a[150:250, 380:520]</text>
+<text class="mono" x="410" y="102">rows 150..250 -&gt; blocks 1, 2</text>
+<text class="mono" x="410" y="122">cols 380..520 -&gt; blocks 3, 4, 5</text>
+<text class="acc b" x="410" y="152">2 x 3 = 6 of 48 blocks decompressed</text>
+<text class="muted" x="410" y="176">copy the overlap of each into the output</text>
+<rect class="zip" x="410" y="214" width="16" height="16"/><text x="436" y="227">compressed, never touched</text>
+<rect class="hot" x="410" y="240" width="16" height="16"/><text x="436" y="253">decompressed</text>
+<rect class="region" x="410" y="266" width="16" height="16"/><text x="436" y="279">requested region</text>
+</svg>
+</div>
+<figcaption>Same idea in 2D: a 600x800 array in 100x100 blocks. The block range on each dim is just <code>start / 100</code> to <code>(end - 1) / 100</code>, so a read finds its blocks with a bit of integer math and leaves the other 42 compressed.</figcaption>
+</figure>
