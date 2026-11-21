@@ -1,0 +1,156 @@
+name: Regression check
+
+# Measures the base and head commits on the same runner and posts a comment on the PR with stats
+# like CPU instructions, binary size, etc, to detect regressions before they merge
+
+on:
+  pull_request: {}
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Branch to compare against"
+        type: string
+        default: main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  instructions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jix
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Install gungraun-runner
+        run: cargo install gungraun-runner --version 0.20.0 --locked
+      - name: Fetch merge base
+        id: merge-base
+        uses: ./.github/actions/fetch-merge-base
+        with:
+          base-ref: ${{ github.base_ref || inputs.base_ref }}
+      - name: Resolve commits
+        env:
+          MERGE_BASE: ${{ steps.merge-base.outputs.merge-base }}
+        run: |
+          echo "HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "BASE_SHA=$MERGE_BASE" >> "$GITHUB_ENV"
+      - name: Bench base
+        env:
+          GUNGRAUN_HOME: ${{ runner.temp }}/gungraun
+        run: |
+          git checkout --quiet "$BASE_SHA"
+          if [ -f jix/benches/valgrind.rs ]; then
+            cargo bench --manifest-path jix/Cargo.toml --bench valgrind -- --save-baseline=base
+          else
+            echo "Base $BASE_SHA has no valgrind bench; reporting head counts only."
+          fi
+      - name: Bench head
+        env:
+          GUNGRAUN_HOME: ${{ runner.temp }}/gungraun
+        run: |
+          git checkout --quiet "$HEAD_SHA"
+          cargo bench --manifest-path jix/Cargo.toml --bench valgrind -- --baseline=base --output-format=json > "$RUNNER_TEMP/valgrind.jsonl"
+      - name: Summary
+        run: |
+          mkdir -p "$RUNNER_TEMP/report"
+          python3 scripts/bench/valgrind_summary.py "$RUNNER_TEMP/valgrind.jsonl" > "$RUNNER_TEMP/report/1_instructions.md"
+          cat "$RUNNER_TEMP/report/1_instructions.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: report-instructions
+          path: ${{ runner.temp }}/report
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: valgrind-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/valgrind.jsonl
+            ${{ runner.temp }}/gungraun
+          retention-days: 30
+
+  py-binary-size:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jix-py
+      - name: Fetch merge base
+        id: merge-base
+        uses: ./.github/actions/fetch-merge-base
+        with:
+          base-ref: ${{ github.base_ref || inputs.base_ref }}
+      - name: Resolve commits
+        env:
+          MERGE_BASE: ${{ steps.merge-base.outputs.merge-base }}
+        run: |
+          echo "HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "BASE_SHA=$MERGE_BASE" >> "$GITHUB_ENV"
+      - name: Build base
+        run: |
+          git checkout --quiet "$BASE_SHA"
+          cargo build --release --manifest-path jix-py/Cargo.toml
+          cp jix-py/target/release/libjix.so "$RUNNER_TEMP/base.so"
+      - name: Build head
+        run: |
+          git checkout --quiet "$HEAD_SHA"
+          cargo build --release --manifest-path jix-py/Cargo.toml
+          cp jix-py/target/release/libjix.so "$RUNNER_TEMP/head.so"
+      - name: Summary
+        run: |
+          mkdir -p "$RUNNER_TEMP/report"
+          python3 scripts/bench/binary_size_summary.py "$RUNNER_TEMP/base.so" "$RUNNER_TEMP/head.so" > "$RUNNER_TEMP/report/0_binary_size.md"
+          cat "$RUNNER_TEMP/report/0_binary_size.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: report-binary-size
+          path: ${{ runner.temp }}/report
+
+  comment:
+    needs: [instructions, py-binary-size]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: report-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/report
+      - name: Comment on PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          NEEDS: ${{ toJSON(needs) }}
+        shell: python
+        run: |
+          import json, os, subprocess
+          from pathlib import Path
+
+          report = Path(os.environ["RUNNER_TEMP"], "report")
+          parts = [p.read_text() for p in sorted(report.glob("*.md"))]
+          failed = [job for job, res in json.loads(os.environ["NEEDS"]).items() if res["result"] != "success"]
+          if failed:
+              parts.append(f"Jobs without a report: {', '.join(failed)} ([run]({os.environ['RUN_URL']})).\n")
+          body = report / "comment.md"
+          body.write_text("\n".join(parts))
+          subprocess.check_call(
+              ["gh", "pr", "comment", os.environ["PR_NUMBER"], "--body-file", body, "--edit-last", "--create-if-none"]
+          )

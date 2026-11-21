@@ -1,4 +1,4 @@
-//! Instruction-count benchmarks run under Valgrind by Gungraun, for the bench_regression CI job.
+//! Instruction-count benchmarks run under Valgrind by Gungraun, for the pr_report CI job.
 //!
 //! Counts are stable between runs, unlike wall-clock times, so a base and head run on the same
 //! machine can be compared directly. Needs Linux, valgrind and `gungraun-runner` matching the
