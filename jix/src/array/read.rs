@@ -111,7 +111,7 @@ impl<S: StorageBase> Array<S> {
     /// # `ReadContext` reuse
     ///
     /// Each call reads with a [`ReadContext`] of its own, whose scratch buffers are allocated
-    /// anew (the decompressor is kept per thread). For many small reads, read into buffers of
+    /// new (the decompressor is kept per thread). For many small reads, read into buffers of
     /// your own with [`to_buf_slice`](Array::to_buf_slice) or
     /// [`to_buf_strided_into`](Array::to_buf_strided_into), passing them one shared context.
     ///

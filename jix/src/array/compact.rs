@@ -4,7 +4,7 @@ use crate::error::{Result, check_region_size};
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageExt, BlockSize, Compact, CompactParams, Index,
-    StridedBuf,
+    ReadParams, StridedBuf,
 };
 use crate::util::iter::NdIter;
 use crate::util::{
@@ -133,8 +133,7 @@ impl<S: StorageBase> Array<S> {
     {
         // Erase the storage to reduce monomorphization bloat
         let storage: &dyn StorageBase = &self.storage;
-        let context = ReadContext::thread_ctx_with(self.read_params())?;
-        compact_into_builder_dyn_dispatch(storage, params, context.as_ref(), builder_init)
+        compact_into_builder_dyn_dispatch(storage, params, self.read_params(), builder_init)
     }
 }
 
@@ -142,13 +141,14 @@ impl<S: StorageBase> Array<S> {
 fn compact_into_builder_dyn_dispatch<B: BlockTableBuilder>(
     storage: &dyn StorageBase,
     params: &mut CompactParams,
-    context: &ReadContext,
+    read_params: &ReadParams,
     builder_init: impl FnOnce(
         /* nblocks */ u64,
         /* block_shape */ &[BlockSize],
         /* decoder_config */ DecoderCodecConfig,
     ) -> Result<B>,
 ) -> Result<B::Output> {
+    let context = ReadContext::thread_ctx_with(read_params)?;
     let compact_fn = match storage.shape().len() {
         1 => compact_into_builder_dyn::<_, Dim<1>>,
         2 => compact_into_builder_dyn::<_, Dim<2>>,
@@ -156,7 +156,7 @@ fn compact_into_builder_dyn_dispatch<B: BlockTableBuilder>(
         4 => compact_into_builder_dyn::<_, Dim<4>>,
         _ => compact_into_builder_dyn::<_, DimDyn>,
     };
-    compact_fn(storage, params, context, builder_init)
+    compact_fn(storage, params, context.as_ref(), builder_init)
 }
 #[inline(never)]
 fn compact_into_builder_dyn<B: BlockTableBuilder, D: Dimension>(

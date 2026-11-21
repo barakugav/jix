@@ -183,9 +183,9 @@ struct ThreadLocalState {
     decompressor: Cell<Option<zstd::bulk::Decompressor<'static>>>,
 }
 thread_local! {
-    static THREAD_CTX: ThreadLocalState = ThreadLocalState {
+    static THREAD_CTX: ThreadLocalState = const { ThreadLocalState {
         decompressor: Cell::new(None),
-    };
+    } };
 }
 struct ThreadCtx(ReadContext);
 impl AsRef<ReadContext> for ThreadCtx {
