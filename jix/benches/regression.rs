@@ -1,0 +1,99 @@
+//! Instruction-count benchmarks run under Valgrind by Gungraun, for the bench regression CI job.
+//!
+//! Counts are stable between runs, unlike wall-clock times, so a base and head run on the same
+//! machine can be compared directly. Needs Linux, valgrind and `gungraun-runner` matching the
+//! `gungraun` version in Cargo.toml.
+
+mod common;
+
+use std::hint::black_box;
+use std::ops::Neg;
+
+use gungraun::{library_benchmark, library_benchmark_group, main};
+use jix::{Array, ArrayParams, CompactArray, PlainArray};
+use ndarray::Ix2;
+
+use crate::common::{create_data, Profile};
+
+const SHAPE: [u64; 2] = [256, 256];
+const ITEM: [u64; 2] = [100, 100];
+
+fn compact() -> CompactArray<i32> {
+    let data = create_data::<i32>(Profile::Smooth, &SHAPE, 0x2d1f5c8e9a3b7064);
+    let params = ArrayParams::new().block_shape(&[30, 30]).unwrap();
+    Array::compact_ndarray_with(&data, params).unwrap()
+}
+
+fn plain() -> PlainArray<i32> {
+    let data = create_data::<i32>(Profile::Smooth, &SHAPE, 0x2d1f5c8e9a3b7064);
+    Array::plain_ndarray(data).unwrap()
+}
+
+fn plain_pair() -> (PlainArray<i32>, PlainArray<i32>) {
+    let other = create_data::<i32>(Profile::Smooth, &SHAPE, 0x51a9e04c7d2f3816);
+    (plain(), Array::plain_ndarray(other).unwrap())
+}
+
+#[library_benchmark]
+#[bench::default(setup = compact)]
+fn read_compact_item(a: CompactArray<i32>) -> i32 {
+    black_box(a.get(&ITEM, &a.read_ctx()).unwrap())
+}
+
+#[library_benchmark]
+#[bench::default(setup = compact)]
+fn read_compact_full(a: CompactArray<i32>) -> ndarray::Array2<i32> {
+    black_box(a.to_ndarray::<Ix2>().unwrap())
+}
+
+#[library_benchmark]
+#[bench::default(setup = plain)]
+fn read_plain_item(a: PlainArray<i32>) -> i32 {
+    black_box(a.get(&ITEM, &a.read_ctx()).unwrap())
+}
+
+#[library_benchmark]
+#[bench::default(setup = plain)]
+fn read_plain_full(a: PlainArray<i32>) -> ndarray::Array2<i32> {
+    black_box(a.to_ndarray::<Ix2>().unwrap())
+}
+
+#[library_benchmark]
+#[bench::default(setup = plain)]
+fn op1_neg_plain_item(a: PlainArray<i32>) -> i32 {
+    black_box(a.view().neg().get(&ITEM, &a.read_ctx()).unwrap())
+}
+
+#[library_benchmark]
+#[bench::default(setup = plain)]
+fn op1_neg_plain_full(a: PlainArray<i32>) -> ndarray::Array2<i32> {
+    black_box(a.view().neg().to_ndarray::<Ix2>().unwrap())
+}
+
+#[library_benchmark]
+#[bench::default(setup = plain_pair)]
+fn op2_add_plain_item((a, b): (PlainArray<i32>, PlainArray<i32>)) -> i32 {
+    black_box((a.view() + b.view()).get(&ITEM, &a.read_ctx()).unwrap())
+}
+
+#[library_benchmark]
+#[bench::default(setup = plain_pair)]
+fn op2_add_plain_full((a, b): (PlainArray<i32>, PlainArray<i32>)) -> ndarray::Array2<i32> {
+    black_box((a.view() + b.view()).to_ndarray::<Ix2>().unwrap())
+}
+
+library_benchmark_group!(
+    name = core,
+    benchmarks = [
+        read_compact_item,
+        read_compact_full,
+        read_plain_item,
+        read_plain_full,
+        op1_neg_plain_item,
+        op1_neg_plain_full,
+        op2_add_plain_item,
+        op2_add_plain_full
+    ]
+);
+
+main!(library_benchmark_groups = core);
