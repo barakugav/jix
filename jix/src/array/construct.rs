@@ -230,7 +230,7 @@ impl<T> CompactArray<T> {
             fn read_data<'a>(
                 &'a self,
                 index: &Index<'_>,
-                context: &'a ReadContext,
+                context: &ReadContext,
                 out: OutBuf<'_, 'a>,
             ) -> Result<()> {
                 check_out_buf(&out, self.shape(), index, self.dtype().itemsize() as usize)?;

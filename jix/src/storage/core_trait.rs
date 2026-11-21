@@ -93,7 +93,7 @@ pub trait StorageBase: sealed::ArrayStorageImpl {
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()>;
 
@@ -113,7 +113,7 @@ pub trait StorageBase: sealed::ArrayStorageImpl {
     fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
     ) -> Result<impl ElementwisePipeline<T> + use<'a, T, Self>>
     where
         T: Dtyped,
@@ -188,7 +188,7 @@ pub(crate) trait ArrayStorageExt: StorageBase {
     fn read_data_pull<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
     ) -> Result<StridedBuf<'a>> {
         let mut slot = None;
         self.read_data_pull_in(index, context, &mut slot)?;
@@ -199,7 +199,7 @@ pub(crate) trait ArrayStorageExt: StorageBase {
     fn read_data_pull_in<'s, 'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         slot: &'s mut Option<StridedBuf<'a>>,
     ) -> Result<&'s mut StridedBuf<'a>> {
         self.read_data(index, context, OutBuf::pull(slot))?;
@@ -212,7 +212,7 @@ pub(crate) trait ArrayStorageExt: StorageBase {
     fn read_data_push<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: &mut StridedBuf<'a>,
     ) -> Result<()> {
         self.read_data(index, context, OutBuf::push(out))

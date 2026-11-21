@@ -15,7 +15,6 @@ unsafe impl Send for RawAlignedBytes {}
 unsafe impl Sync for RawAlignedBytes {}
 
 impl Drop for RawAlignedBytes {
-    #[inline]
     fn drop(&mut self) {
         if self.capacity > 0 {
             // SAFETY: memory was allocated with alloc::alloc::alloc

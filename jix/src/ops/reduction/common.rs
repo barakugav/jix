@@ -239,7 +239,7 @@ where
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         context.read_cached(self.cache_id, index, self.dtype(), out, |out| {
@@ -286,7 +286,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-fn read_data_dispatch<'a>(
+fn read_data_dispatch(
     inner_array: &dyn StorageBase,
     outer_shape: &[u64],
     output_dtype: &Dtype,
@@ -298,8 +298,8 @@ fn read_data_dispatch<'a>(
     finalize_state_fn: &dyn Fn(Finalize1DArgs),
     finalize_state_empty_fn: &dyn Fn(*mut u8, usize, usize),
     index: &Index<'_>,
-    context: &'a ReadContext,
-    out: OutBuf<'_, 'a>,
+    context: &ReadContext,
+    out: OutBuf<'_, '_>,
     read_layout_order: &[DimIdx],
 ) -> Result<()> {
     let read_data_fn = match is_reduced.len() {
@@ -329,7 +329,7 @@ fn read_data_dispatch<'a>(
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-fn read_data_impl<'a, InnerD>(
+fn read_data_impl<InnerD>(
     inner_array: &dyn StorageBase,
     outer_shape: &[u64],
     output_dtype: &Dtype,
@@ -341,8 +341,8 @@ fn read_data_impl<'a, InnerD>(
     finalize_state_fn: &dyn Fn(Finalize1DArgs),
     finalize_state_empty_fn: &dyn Fn(*mut u8, usize, usize),
     index: &Index<'_>,
-    context: &'a ReadContext,
-    out: OutBuf<'_, 'a>,
+    context: &ReadContext,
+    out: OutBuf<'_, '_>,
     read_layout_order: &[DimIdx],
 ) -> Result<()>
 where

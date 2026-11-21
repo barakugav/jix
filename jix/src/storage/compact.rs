@@ -115,7 +115,7 @@ macro_rules! impl_array_storage {
             fn read_data<'rd>(
                 &'rd self,
                 index: &Index<'_>,
-                context: &'rd ReadContext,
+                context: &ReadContext,
                 out: crate::storage::OutBuf<'_, 'rd>,
             ) -> Result<()> {
                 self.0.read_data(index, context, out)
@@ -245,7 +245,7 @@ where
     fn read_data<'rd>(
         &'rd self,
         index: &Index<'_>,
-        context: &'rd ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'rd>,
     ) -> Result<()>
     where
@@ -306,7 +306,7 @@ where
     fn read_data_uncached<'rd>(
         &'rd self,
         index: &Index<'_>,
-        context: &'rd ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'rd>,
     ) -> Result<()>
     where

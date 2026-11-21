@@ -85,7 +85,7 @@ impl<S: StorageBase> StorageBase for Roll<S> {
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         if self.is_identity() {

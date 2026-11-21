@@ -383,7 +383,7 @@ macro_rules! define_swapped_cmp {
             fn read_data<'a>(
                 &'a self,
                 index: &Index<'_>,
-                context: &'a ReadContext,
+                context: &ReadContext,
                 out: OutBuf<'_, 'a>,
             ) -> Result<()> {
                 self.0.read_data(index, context, out)
@@ -394,7 +394,7 @@ macro_rules! define_swapped_cmp {
             fn read_as_elementwise_pipeline<'a, T>(
                 &'a self,
                 index: &Index<'_>,
-                context: &'a ReadContext,
+                context: &ReadContext,
             ) -> Result<impl ElementwisePipeline<T> + use<'a, T, S1, S2>>
             where
                 T: Dtyped,

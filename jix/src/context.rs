@@ -152,7 +152,7 @@ impl ReadContext {
     /// if `id` is one of the arrays to cache of the current cache scope.
     #[inline(always)]
     pub(crate) fn read_cached<'a>(
-        &'a self,
+        &self,
         id: ArrayCacheId,
         index: &Index<'_>,
         dtype: &Dtype,
@@ -167,7 +167,7 @@ impl ReadContext {
 
     #[inline(never)]
     fn read_cached_impl<'a>(
-        &'a self,
+        &self,
         id: ArrayCacheId,
         index: &Index<'_>,
         dtype: &Dtype,

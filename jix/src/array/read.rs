@@ -358,7 +358,7 @@ impl<S: StorageBase> Array<S> {
     pub fn to_buf_strided<'a>(
         &'a self,
         index: &[Range<u64>],
-        context: &'a ReadContext,
+        context: &ReadContext,
     ) -> Result<StridedBuf<'a>> {
         check_ranges(self.shape(), index)?;
         let (start, size) = split_ranges(index);
@@ -370,6 +370,12 @@ impl<S: StorageBase> Array<S> {
         let mut slot = None;
         self.to_buf_strided_checked(&index, context, OutBuf::pull(&mut slot))?;
         Ok(slot.expect("a pull read puts its buffer in the slot"))
+    }
+
+    #[cold]
+    fn alloc_empty(&self, size: &[usize], context: &ReadContext) -> StridedBuf<'static> {
+        let spec = self.storage.spec();
+        alloc_out_buf(context, size, self.dtype(), spec.read_layout_order())
     }
 
     /// Read a rectangular sub-region into `out`, at `out`'s own strides.
@@ -440,19 +446,13 @@ impl<S: StorageBase> Array<S> {
         self.to_buf_strided_checked(&index, context, OutBuf::push(&mut out.view_mut()))
     }
 
-    #[cold]
-    fn alloc_empty<'a>(&'a self, size: &[usize], context: &'a ReadContext) -> StridedBuf<'a> {
-        let spec = self.storage.spec();
-        alloc_out_buf(context, size, self.dtype(), spec.read_layout_order())
-    }
-
     // Like `to_buf_strided` / `to_buf_strided_into`, for an `index` the caller checked against the
     // shape and the region size, and an `out` that passes `check_out_buf_impl`.
     #[inline(always)]
     fn to_buf_strided_checked<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         let spec = self.storage.spec();
@@ -476,7 +476,7 @@ impl<S: StorageBase> Array<S> {
 fn to_buf_strided_slow<'a, S: StorageBase>(
     storage: &'a S,
     index: &Index<'_>,
-    context: &'a ReadContext,
+    context: &ReadContext,
     out: OutBuf<'_, 'a>,
 ) -> Result<()> {
     // Erase the storage so the body is monomorphized once
@@ -488,7 +488,7 @@ fn to_buf_strided_slow<'a, S: StorageBase>(
 fn to_buf_strided_slow_dyn_dispatch<'a>(
     storage: &'a dyn StorageBase,
     index: &Index<'_>,
-    context: &'a ReadContext,
+    context: &ReadContext,
     out: OutBuf<'_, 'a>,
 ) -> Result<()> {
     let to_ndarray_fn = match storage.shape().len() {
@@ -511,7 +511,7 @@ fn to_buf_strided_slow_dyn_dispatch<'a>(
 fn to_buf_strided_slow_dyn<'a, D: Dimension>(
     storage: &'a dyn StorageBase,
     index: &Index<'_>,
-    context: &'a ReadContext,
+    context: &ReadContext,
     out: OutBuf<'_, 'a>,
 ) -> Result<()> {
     let shape = storage.shape();

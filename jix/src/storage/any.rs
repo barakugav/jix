@@ -47,7 +47,7 @@ impl StorageBase for StorageAny {
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         self.inner.storage().read_data(index, context, out)

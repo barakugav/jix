@@ -36,13 +36,6 @@
 //! [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
 //! type and regain compile-time tracking.
 
-use std::rc::Rc;
-use std::sync::Arc;
-
-use crate::dtype::Dtyped;
-use crate::ops::ElementwisePipeline;
-use crate::{ElementType, TypeDyn};
-
 mod core_trait;
 pub(crate) use core_trait::{ArrayStorageExt, ArrayStorageImpl};
 pub use core_trait::{Storage, StorageBase};
@@ -81,6 +74,14 @@ pub use index::Index;
 mod info;
 pub use info::*;
 
+use std::rc::Rc;
+use std::sync::Arc;
+
+use crate::dtype::{Dtype, Dtyped};
+use crate::error::Result;
+use crate::ops::ElementwisePipeline;
+use crate::{ElementType, ReadContext, TypeDyn};
+
 macro_rules! impl_array_storage_smart_ptr {
     (<$($gen:tt),*>, $ptr:ty) => {
         impl_array_storage_smart_ptr!(<$($gen),*>, $ptr, {
@@ -96,7 +97,7 @@ macro_rules! impl_array_storage_smart_ptr {
             fn read_data<'a>(
                 &'a self,
                 index: &crate::storage::Index<'_>,
-                context: &'a crate::ReadContext,
+                context: &crate::ReadContext,
                 out: OutBuf<'_, 'a>,
             ) -> crate::error::Result<()> {
                 (**self).read_data(index, context, out)
@@ -107,7 +108,7 @@ macro_rules! impl_array_storage_smart_ptr {
             fn read_as_elementwise_pipeline<'a, T>(
                 &'a self,
                 index: &crate::storage::Index<'_>,
-                context: &'a crate::ReadContext,
+                context: &crate::ReadContext,
             ) -> crate::error::Result<impl ElementwisePipeline<T> + use<'a, T, S>>
             where
                 T: Dtyped,
@@ -165,10 +166,10 @@ impl StorageBase for &dyn StorageBase {
     #[inline(always)]
     fn read_data<'a>(
         &'a self,
-        index: &crate::storage::Index<'_>,
-        context: &'a crate::ReadContext,
-        out: crate::storage::OutBuf<'_, 'a>,
-    ) -> crate::error::Result<()> {
+        index: &Index<'_>,
+        context: &ReadContext,
+        out: OutBuf<'_, 'a>,
+    ) -> Result<()> {
         (**self).read_data(index, context, out)
     }
 
@@ -178,16 +179,16 @@ impl StorageBase for &dyn StorageBase {
     }
 
     #[inline(always)]
-    fn dtype(&self) -> &crate::dtype::Dtype {
+    fn dtype(&self) -> &Dtype {
         (**self).dtype()
     }
 
     #[inline]
-    fn spec(&self) -> crate::storage::ArraySpec<'_> {
+    fn spec(&self) -> ArraySpec<'_> {
         (**self).spec()
     }
 
-    fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+    fn info(&self) -> ArrayStorageInfo<'_> {
         (**self).info()
     }
 
@@ -209,7 +210,7 @@ macro_rules! impl_array_storage_forward {
         fn read_data<'rd>(
             &'rd self,
             index: &crate::storage::Index<'_>,
-            context: &'rd crate::ReadContext,
+            context: &crate::ReadContext,
             out: crate::storage::OutBuf<'_, 'rd>,
         ) -> crate::error::Result<()> {
             self.0.read_data(index, context, out)
@@ -220,7 +221,7 @@ macro_rules! impl_array_storage_forward {
         fn read_as_elementwise_pipeline<$lifetime, $generic>(
             &$lifetime self,
             index: &crate::storage::Index<'_>,
-            context: &$lifetime crate::ReadContext,
+            context: &crate::ReadContext,
         ) -> crate::error::Result<impl crate::ops::ElementwisePipeline<$generic> + use<$lifetime, $generic, $($generics),*>>
         where
             $generic: crate::dtype::Dtyped,

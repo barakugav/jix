@@ -482,7 +482,7 @@ where
     fn read_data<'a>(
         &'a self,
         index: &Index<'_>,
-        _context: &'a ReadContext,
+        _context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         let dtype = self.dtype();
@@ -554,7 +554,7 @@ macro_rules! forward_plain_storage {
         fn read_data<'rd>(
             &'rd self,
             index: &crate::storage::Index<'_>,
-            context: &'rd crate::ReadContext,
+            context: &crate::ReadContext,
             out: crate::storage::OutBuf<'_, 'rd>,
         ) -> crate::error::Result<()> {
             self.0.read_data(index, context, out)

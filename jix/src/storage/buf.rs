@@ -457,12 +457,12 @@ pub(crate) fn check_out_buf_impl(
 }
 
 #[inline]
-pub(crate) fn alloc_out_buf<'a>(
-    context: &'a ReadContext,
+pub(crate) fn alloc_out_buf(
+    context: &ReadContext,
     shape: &[usize],
     dtype: &Dtype,
     layout_order: &[DimIdx],
-) -> StridedBuf<'a> {
+) -> StridedBuf<'static> {
     let itemsize = dtype.itemsize() as usize;
     let buf = context.allocate_buf(
         shape.iter().product::<usize>() * itemsize,
@@ -500,7 +500,7 @@ impl<'s, 'a> OutBuf<'s, 'a> {
     #[inline]
     pub(crate) fn materialize(
         self,
-        context: &'a ReadContext,
+        context: &ReadContext,
         shape: &[usize],
         dtype: &Dtype,
         layout_order: &[DimIdx],
@@ -572,7 +572,7 @@ pub(crate) fn write_out_buf_slot<'a, 'b>(
 pub(crate) unsafe fn read_data_and_map_strides<'a>(
     inner: &'a impl StorageBase,
     inner_index: &Index<'_>,
-    context: &'a ReadContext,
+    context: &ReadContext,
     out: OutBuf<'_, 'a>,
     inner2outer_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
     outer2inner_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,

@@ -64,7 +64,7 @@ pub(crate) trait ArraySequenceImpl {
         &'a self,
         arr: usize,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()>;
     fn shape(&self, arr: usize) -> &[u64];
@@ -109,7 +109,7 @@ pub(crate) trait ArraySequenceTypedImpl<ArraysT: ArraySequenceTyped + ?Sized = S
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
     ) -> Result<impl ElementwisePipelineTuple<ArraysT> + use<'a, ArraysT, Self>>;
 }
 
@@ -165,7 +165,7 @@ where
         &'a self,
         arr: usize,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         self[arr].storage.read_data(index, context, out)
@@ -203,7 +203,7 @@ impl<S: Storage, const N: usize> ArraySequenceTypedImpl for [Array<S>; N] {
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
     ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, S, N>> {
         let inners = self.each_ref().try_map_inline(|arr| {
             arr.storage
@@ -265,7 +265,7 @@ where
         &'a self,
         arr: usize,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         self[arr].storage.read_data(index, context, out)
@@ -302,7 +302,7 @@ impl<'b, S: Storage, const N: usize> ArraySequenceTypedImpl for &'b [Array<S>; N
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
     ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, 'b, S, N>> {
         let inners = self.each_ref().try_map_inline(|arr| {
             arr.storage
@@ -364,7 +364,7 @@ where
         &'a self,
         arr: usize,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         self[arr].storage.read_data(index, context, out)
@@ -400,7 +400,7 @@ impl<S: Storage> ArraySequenceTypedImpl for Vec<Array<S>> {
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
     ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, S>> {
         let inners = self
             .iter()
@@ -487,7 +487,7 @@ where
         &'a self,
         arr: usize,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
         out: OutBuf<'_, 'a>,
     ) -> Result<()> {
         self[arr].storage.read_data(index, context, out)
@@ -523,7 +523,7 @@ impl<'b, S: Storage> ArraySequenceTypedImpl for &'b [Array<S>] {
     fn read_as_elementwise_pipeline<'a>(
         &'a self,
         index: &Index<'_>,
-        context: &'a ReadContext,
+        context: &ReadContext,
     ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, 'b, S>> {
         let inners = self
             .iter()
@@ -615,7 +615,7 @@ macro_rules! impl_array_sequence_for_tuple {
                 &'read self,
                 arr: usize,
                 index: &Index<'_>,
-                context: &'read ReadContext,
+                context: &ReadContext,
                 out: OutBuf<'_, 'read>,
             ) -> Result<()> {
                 match arr {
@@ -677,7 +677,7 @@ macro_rules! impl_array_sequence_for_tuple {
             fn read_as_elementwise_pipeline<'a>(
                 &'a self,
                 index: &Index<'_>,
-                context: &'a ReadContext,
+                context: &ReadContext,
             ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, $($S),+>> {
                 struct PipelineTupleImpl<$($D),+>($($D),+);
                 impl<$($S),+, $($D),+> ElementwisePipelineTuple<($(Array<$S>,)+)> for PipelineTupleImpl<$($D),+>

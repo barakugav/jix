@@ -59,11 +59,11 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         simd: S,
     ) -> [T; N];
 
-    fn to_buf<'b>(
+    fn to_buf(
         &mut self,
         index: &Index<'_>,
-        context: &'b ReadContext,
-        out: OutBuf<'_, 'b>,
+        context: &ReadContext,
+        out: OutBuf<'_, '_>,
     ) -> Result<()>
     where
         T: Dtyped,
@@ -887,7 +887,7 @@ fn materialize_pipeline_out_buf<'o, 'b, 's>(
     index: &Index<'_>,
     operands: &mut dyn Iterator<Item = &'s Operand<'s>>,
     output_dtype: &Dtype,
-    context: &'b ReadContext,
+    context: &ReadContext,
     out: OutBuf<'o, 'b>,
 ) -> &'o mut StridedBuf<'b> {
     let slot = match out.0 {
