@@ -295,7 +295,7 @@ impl<S: StorageBase> Array<S> {
     /// resulting array can be stored alongside arrays of other concrete storage types.
     pub fn into_any(self) -> ArrayAny
     where
-        S: StorageBase + Send + Sync + 'static,
+        S: StorageBase + std::any::Any + Send + Sync + 'static,
     {
         Array::from_storage(StorageAny::new(self.into_storage()))
     }

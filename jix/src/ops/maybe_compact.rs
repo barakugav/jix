@@ -12,7 +12,7 @@ use crate::storage::{Compact, CompactParams};
 ///
 /// All [`StorageBase`] methods delegate to the inner storage, and the element type
 /// `S::ElementType` is preserved.
-pub struct MaybeCompact<S: StorageBase>(pub(crate) ToCompactInner<S>);
+pub(crate) struct MaybeCompact<S: StorageBase>(pub(crate) ToCompactInner<S>);
 
 /// The two internal states of a [`MaybeCompact<S>`] storage.
 #[allow(clippy::large_enum_variant)]
@@ -27,7 +27,7 @@ where
     S: StorageBase,
 {
     /// Constructs a [`MaybeCompact`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: S, params: CompactParams, context: &ReadContext) -> Result<Self> {
+    pub(crate) fn new(array: S, params: CompactParams, context: &ReadContext) -> Result<Self> {
         Ok(Self(if array.spec().flags().is_compact() {
             ToCompactInner::Original(array)
         } else {
@@ -41,7 +41,7 @@ where
 
     /// Constructs an array with [`MaybeCompact`] storage. See the storage struct docs for
     /// semantics and examples.
-    pub fn new_array(
+    pub(crate) fn new_array(
         array: Array<S>,
         params: CompactParams,
         context: &ReadContext,
@@ -127,7 +127,7 @@ impl<S: StorageBase> Array<S> {
     /// shape and codec parameters.
     ///
     /// # Example
-    /// ```
+    /// ```rust,ignore
     /// use jix::Array;
     /// use ndarray::array;
     ///
@@ -141,7 +141,7 @@ impl<S: StorageBase> Array<S> {
     /// assert!(b.is_compact());
     /// # Ok::<(), jix::Error>(())
     /// ```
-    pub fn maybe_compact(self) -> Result<Array<MaybeCompact<S>>> {
+    pub(crate) fn maybe_compact(self) -> Result<Array<MaybeCompact<S>>> {
         let context = self.read_ctx();
         self.maybe_compact_with(CompactParams::default(), &context)
     }
@@ -150,7 +150,7 @@ impl<S: StorageBase> Array<S> {
     ///
     /// `params` sets the block shape and compression settings of the new storage. It is
     /// **ignored when the array is already compact**.
-    pub fn maybe_compact_with(
+    pub(crate) fn maybe_compact_with(
         self,
         params: CompactParams,
         context: &ReadContext,

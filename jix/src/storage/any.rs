@@ -26,7 +26,7 @@ struct AnyMeta {
     spec: ArraySpecOwned,
 }
 impl StorageAny {
-    pub(crate) fn new(storage: impl StorageBase + Send + Sync + 'static) -> Self {
+    pub(crate) fn new(storage: impl StorageBase + std::any::Any + Send + Sync + 'static) -> Self {
         let meta = AnyMeta::new(&storage);
         Self::from_inner_box(Box::new(AnyInnerImpl { storage, meta }))
     }

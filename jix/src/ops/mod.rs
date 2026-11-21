@@ -95,8 +95,9 @@
 //! `&[Array<S>]`, fixed-length arrays `[Array<S>; N]`, and heterogeneous tuples of up to 12
 //! arrays. See [`ArraySequence`](crate::storage::ArraySequence) for details.
 
+// Internal only, with no caller yet outside its tests.
+#[allow(dead_code)]
 mod maybe_compact;
-pub use maybe_compact::*;
 
 mod shape_ops;
 pub use shape_ops::*;
