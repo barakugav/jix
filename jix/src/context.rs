@@ -82,12 +82,12 @@ impl ReadContext {
     }
 
     #[inline]
-    pub(crate) fn allocate_buf(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
-        self.buffer_pool.get(size, alignment)
+    pub(crate) fn allocate_buf(&self, size: usize, alignment: Alignment) -> PoolBuf {
+        self.buffer_pool.allocate(size, alignment)
     }
 
     #[inline]
-    pub(crate) fn return_buf(&self, buf: PoolBuf<'_>) {
+    pub(crate) fn return_buf(&self, buf: PoolBuf) {
         self.buffer_pool.return_buf(buf);
     }
 
@@ -186,7 +186,7 @@ impl ReadContext {
         // Search for a matching cache entry for this array ID and index
         if let Some(entry) = cache.map.get(id) {
             if entry.start.as_slice() == index.start() && entry.size.as_slice() == index.size() {
-                let buf = PoolBufShared::new(entry.data.clone(), &self.buffer_pool);
+                let buf = PoolBufShared::new(entry.data.clone());
                 let buf = unsafe {
                     StridedBuf::from_shared(buf, entry.strides.clone()).with_offset(entry.offset)
                 };
@@ -220,7 +220,7 @@ impl ReadContext {
                 return Ok(());
             }
         };
-        let buf = PoolBufShared::new(data.clone(), &self.buffer_pool);
+        let buf = PoolBufShared::new(data.clone());
         write_out_buf_slot(slot, unsafe {
             StridedBuf::from_shared(buf, strides.clone()).with_offset(offset)
         });

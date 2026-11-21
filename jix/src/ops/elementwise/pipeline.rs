@@ -509,18 +509,18 @@ fn compute_need_staging(
 }
 
 /// A temporary buffer used to stage a chunk of an operand's data during a pipeline run.
-struct Staging<'a> {
-    buf: PoolBuf<'a>,
+struct Staging {
+    buf: PoolBuf,
     copier: NdCopier,
 
     // last (src, n, stride) used to fill the buffer
     filled_with: Option<(NonNull<u8>, usize, usize)>,
 }
 
-impl<'a> Staging<'a> {
+impl Staging {
     const BUFFER_SIZE: usize = 8192;
 
-    fn new(context: &'a ReadContext, dtype: &'a Dtype, chunk_len_max: usize) -> Self {
+    fn new(context: &ReadContext, dtype: &Dtype, chunk_len_max: usize) -> Self {
         Self {
             buf: context.allocate_buf(chunk_len_max * dtype.itemsize() as usize, dtype.alignment()),
             copier: NdCopier::new(dtype),
@@ -747,11 +747,12 @@ type InnerLoop<'a> =
 pub(crate) struct Operand<'a> {
     base_ptr: *mut u8,
     strides: DimArray<usize>,
-    /// hack to erase the lifetime to keep `Operand` covariant in `'a`
-    /// (`operands()` shortens it to `'s`), which is sound as the cell is only ever emptied, never
-    /// set to a buffer of a shorter lifetime.
-    buf: Cell<StridedBufBytes<'static>>,
-    _buf_lifetime: PhantomData<StridedBufBytes<'a>>,
+    /// The pool buffer behind an input operand, kept until [`return_buf_to`](Self::return_buf_to)
+    /// gives it back to the pool; empty for the output. In a `Cell` so `return_buf_to` can take it
+    /// through the shared references `to_buf` hands out.
+    buf: Cell<StridedBufBytes>,
+    /// `base_ptr` may point into memory borrowed for `'a`.
+    _data: PhantomData<&'a [u8]>,
     dtype: &'a Dtype,
 
     /// The first element of the current run: null until `to_buf` positions it.
@@ -766,11 +767,7 @@ impl<'a> Operand<'a> {
         data.make_readonly();
         let base_ptr = data.data_ptr().cast_mut();
         let strides = DimArray::from_slice(data.strides()).unwrap();
-        // SAFETY: only the lifetime changes, and `_buf_lifetime` keeps `'a` alive.
-        let buf = unsafe {
-            std::mem::transmute::<StridedBufBytes<'a>, StridedBufBytes<'static>>(data.into_bytes())
-        };
-        Self::new_impl(base_ptr, strides, buf, dtype)
+        Self::new_impl(base_ptr, strides, data.into_bytes(), dtype)
     }
 
     #[inline(never)]
@@ -784,14 +781,14 @@ impl<'a> Operand<'a> {
     fn new_impl(
         base_ptr: *mut u8,
         strides: DimArray<usize>,
-        buf: StridedBufBytes<'static>,
+        buf: StridedBufBytes,
         dtype: &'a Dtype,
     ) -> Self {
         Self {
             base_ptr,
             strides,
             buf: Cell::new(buf),
-            _buf_lifetime: PhantomData,
+            _data: PhantomData,
             dtype,
             // Both cursor fields are set by `to_buf` before every run; there is nothing to read
             // here until then.

@@ -52,18 +52,9 @@ pub struct StridedBuf<'a> {
 enum StridedBufData<'a> {
     Slice(&'a [u8]),
     SliceMut(&'a mut [u8]),
-    PoolBuf {
-        buf: PoolBuf<'a>,
-        offset: usize,
-    },
-    PoolBufMut {
-        buf: PoolBuf<'a>,
-        offset: usize,
-    },
-    Shared {
-        buf: PoolBufShared<'a>,
-        offset: usize,
-    },
+    PoolBuf { buf: PoolBuf, offset: usize },
+    PoolBufMut { buf: PoolBuf, offset: usize },
+    Shared { buf: PoolBufShared, offset: usize },
 }
 
 impl<'a> StridedBuf<'a> {
@@ -144,7 +135,7 @@ impl<'a> StridedBuf<'a> {
     ///
     /// Same contract as [`from_slice_mut`](Self::from_slice_mut).
     #[inline]
-    pub(crate) unsafe fn from_pool(buf: PoolBuf<'a>, strides: DimArray<usize>) -> Self {
+    pub(crate) unsafe fn from_pool(buf: PoolBuf, strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::PoolBufMut { buf, offset: 0 },
             strides,
@@ -157,7 +148,7 @@ impl<'a> StridedBuf<'a> {
     ///
     /// Same contract as [`from_slice`](Self::from_slice).
     #[inline]
-    pub(crate) unsafe fn from_shared(buf: PoolBufShared<'a>, strides: DimArray<usize>) -> Self {
+    pub(crate) unsafe fn from_shared(buf: PoolBufShared, strides: DimArray<usize>) -> Self {
         Self {
             data: StridedBufData::Shared { buf, offset: 0 },
             strides,
@@ -339,8 +330,14 @@ impl<'a> StridedBuf<'a> {
     }
 
     #[inline]
-    pub(crate) fn into_bytes(self) -> StridedBufBytes<'a> {
-        StridedBufBytes(self.data)
+    pub(crate) fn into_bytes(self) -> StridedBufBytes {
+        match self.data {
+            StridedBufData::Slice(_) | StridedBufData::SliceMut(_) => StridedBufBytes::None,
+            StridedBufData::PoolBuf { buf, .. } | StridedBufData::PoolBufMut { buf, .. } => {
+                StridedBufBytes::Pool(buf)
+            }
+            StridedBufData::Shared { buf, .. } => StridedBufBytes::Shared(buf),
+        }
     }
 
     pub(crate) fn into_shared(
@@ -357,24 +354,22 @@ impl<'a> StridedBuf<'a> {
     }
 }
 
-pub(crate) struct StridedBufBytes<'a>(StridedBufData<'a>);
-
-/// No bytes.
-impl Default for StridedBufBytes<'_> {
-    #[inline]
-    fn default() -> Self {
-        Self(StridedBufData::Slice(&[]))
-    }
+/// The pooled buffer behind a [`StridedBuf`], if any.
+#[derive(Default)]
+pub(crate) enum StridedBufBytes {
+    /// The view borrowed memory outside the pool.
+    #[default]
+    None,
+    Pool(PoolBuf),
+    Shared(PoolBufShared),
 }
 
-impl StridedBufBytes<'_> {
+impl StridedBufBytes {
     pub(crate) fn return_to(self, pool: &BufferPool) {
-        match self.0 {
-            StridedBufData::Slice(_) | StridedBufData::SliceMut(_) => {}
-            StridedBufData::PoolBuf { buf, .. } | StridedBufData::PoolBufMut { buf, .. } => {
-                pool.return_buf(buf)
-            }
-            StridedBufData::Shared { buf, .. } => pool.return_shared(buf),
+        match self {
+            StridedBufBytes::None => {}
+            StridedBufBytes::Pool(buf) => pool.return_buf(buf),
+            StridedBufBytes::Shared(buf) => pool.return_shared(buf),
         }
     }
 }
