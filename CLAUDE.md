@@ -202,7 +202,12 @@ family, with the same file names:
 
 - `ops/elementwise/` - `op1.rs` / `op2.rs` hold only the `Op1` / `Op2` engines and their macros
   (`define_op1!` / `define_op2!` for the op structs, `define_array_op1_method!` /
-  `define_array_op2_method!` for the `Array` methods); the ops live in family files (`arith`,
+  `define_array_op2_method!` for the `Array` methods), and `op2_scalar.rs` holds
+  `define_op2_scalar!` for an op's scalar storage, e.g. `DivScalar<S, T, Rhs>` for `a / 2.0`
+  and `DivScalar<S, T, Lhs>` for `2.0 / a` (a commutative op maps both to `Rhs`), its operators,
+  and `ScalarKernel`: an `Op1` kernel running the op's kernel with the scalar splatted, so no extra
+  inner loop;
+  the ops live in family files (`arith`,
   `div_rem`, `rounding`, `exp_log`, `trig`, `cmp`, `min_max`, `bitwise`, `bit_count`,
   `float_special`, `cast`, `complex`, `map`, `select`).
 - `ops/reduction/` - `common.rs` holds the reduction engine and macros; the ops live in

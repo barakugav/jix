@@ -1,5 +1,6 @@
 use crate::ops::elementwise::op1::{define_array_op1_method, define_op1};
 use crate::ops::elementwise::op2::{define_array_op2_method, define_op2};
+use crate::ops::elementwise::op2_scalar::define_op2_scalar;
 use crate::ops::prelude::*;
 
 pub(crate) mod traits {
@@ -536,8 +537,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Add`](crate::scalar::Add) scalar trait for the per-element semantics.
     ///
-    /// Available via the `+` operator on arrays. For adding a constant to every element, use
-    /// [`Array::map`]: `a.map(|x| x + 1i32)`.
+    /// Available via the `+` operator on arrays. For adding a scalar, see [`AddScalar`].
     ///
     /// The result is a lazy view.
     ///
@@ -558,13 +558,42 @@ define_op2!(
     simd: add_bulk,
     core_op: core::ops::Add::add,
 );
+define_op2_scalar!(
+    /// Element-wise addition of an array and a scalar.
+    ///
+    /// See [`jix::scalar::Add`](crate::scalar::Add) scalar trait for the per-element
+    /// semantics.
+    ///
+    /// Available via the `+` operator with a scalar on either side: `a + 3.0` and `3.0 + a` are
+    /// both an `AddScalar<S, T, Rhs>`, as the op is commutative.
+    ///
+    /// The result is a lazy view.
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use jix::ops::{AddScalar, Rhs};
+    /// use jix::storage::Compact;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
+    /// assert_eq!((0.5 + a.view()).to_ndarray()?, array![1.5, 2.5, 3.5]);
+    /// let result: Array<AddScalar<Compact<f32>, f32>> = a + 0.5;
+    /// assert_eq!(result.to_ndarray()?, array![1.5, 2.5, 3.5]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    AddScalar,
+    AddKernel,
+    crate::scalar::Add,
+    core_op: core::ops::Add::add,
+    commutative: true,
+);
 define_op2!(
     /// Element-wise subtraction of two arrays (`a - b`).
     ///
     /// See [`jix::scalar::Sub`](crate::scalar::Sub) scalar trait for the per-element semantics.
     ///
-    /// Available via the `-` operator on arrays. For subtracting a constant from every element,
-    /// use [`Array::map`]: `a.map(|x| x - 1i32)`.
+    /// Available via the `-` operator on arrays. For subtracting a scalar, see [`SubScalar`].
     ///
     /// The result is a lazy view.
     ///
@@ -585,13 +614,39 @@ define_op2!(
     simd: sub_bulk,
     core_op: core::ops::Sub::sub,
 );
+define_op2_scalar!(
+    /// Element-wise subtraction of an array and a scalar.
+    ///
+    /// See [`jix::scalar::Sub`](crate::scalar::Sub) scalar trait for the per-element
+    /// semantics.
+    ///
+    /// Available via the `-` operator with a scalar on either side: `a - 3.0` is a
+    /// `SubScalar<S, T, Rhs>`, and `3.0 - a` a `SubScalar<S, T, Lhs>`.
+    ///
+    /// The result is a lazy view.
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
+    /// assert_eq!((a.view() - 0.5).to_ndarray()?, array![0.5, 1.5, 2.5]);
+    /// assert_eq!((0.5 - a).to_ndarray()?, array![-0.5, -1.5, -2.5]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    SubScalar,
+    SubKernel,
+    crate::scalar::Sub,
+    core_op: core::ops::Sub::sub,
+    commutative: false,
+);
 define_op2!(
     /// Element-wise multiplication of two arrays.
     ///
     /// See [`jix::scalar::Mul`](crate::scalar::Mul) scalar trait for the per-element semantics.
     ///
-    /// Available via the `*` operator on arrays. For scaling every element by a constant, use
-    /// [`Array::map`]: `a.map(|x| x * 2i32)`.
+    /// Available via the `*` operator on arrays. For multiplying by a scalar, see [`MulScalar`].
     ///
     /// The result is a lazy view.
     ///
@@ -611,6 +666,33 @@ define_op2!(
     crate::scalar::Mul::mul,
     simd: mul_bulk,
     core_op: core::ops::Mul::mul,
+);
+define_op2_scalar!(
+    /// Element-wise multiplication of an array and a scalar.
+    ///
+    /// See [`jix::scalar::Mul`](crate::scalar::Mul) scalar trait for the per-element
+    /// semantics.
+    ///
+    /// Available via the `*` operator with a scalar on either side: `a * 2.0` and `2.0 * a` are
+    /// both a `MulScalar<S, T, Rhs>`, as the op is commutative.
+    ///
+    /// The result is a lazy view.
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
+    /// assert_eq!((a.view() * 2.0).to_ndarray()?, array![2.0, 4.0, 6.0]);
+    /// assert_eq!((2.0 * a).to_ndarray()?, array![2.0, 4.0, 6.0]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    MulScalar,
+    MulKernel,
+    crate::scalar::Mul,
+    core_op: core::ops::Mul::mul,
+    commutative: true,
 );
 
 define_op2!(
@@ -918,6 +1000,48 @@ mod tests {
         #[cfg(feature = "num-complex")]
         [complex_f32, complex_f64]
     );
+
+    use crate::ops::elementwise::op2_scalar::tests::test_op2_scalar;
+
+    test_op2_scalar!(
+        add_scalar, +, |a, b| a.wrapping_add(b),
+        [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy
+    );
+    test_op2_scalar!(add_scalar, +, |a, b| a + b, [f32, f64], op_safe_strategy);
+    test_op2_scalar!(
+        mul_scalar, *, |a, b| a.wrapping_mul(b),
+        [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy
+    );
+    test_op2_scalar!(mul_scalar, *, |a, b| a * b, [f32, f64], op_safe_strategy);
+    test_op2_scalar!(
+        sub_scalar, -, |a, b| a.wrapping_sub(b),
+        [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy
+    );
+    test_op2_scalar!(sub_scalar, -, |a, b| a - b, [f32, f64], op_safe_strategy);
+    #[cfg(feature = "half")]
+    test_op2_scalar!(add_scalar, +, |a, b| a + b, [f16], op_safe_strategy);
+    #[cfg(feature = "half")]
+    test_op2_scalar!(mul_scalar, *, |a, b| a * b, [f16], op_safe_strategy);
+    #[cfg(feature = "half")]
+    test_op2_scalar!(sub_scalar, -, |a, b| a - b, [f16], op_safe_strategy);
+    #[cfg(feature = "num-complex")]
+    test_op2_scalar!(add_scalar, +, |a, b| a + b, [complex_f32, complex_f64], op_safe_strategy);
+    #[cfg(feature = "num-complex")]
+    test_op2_scalar!(mul_scalar, *, |a, b| a * b, [complex_f32, complex_f64], op_safe_strategy);
+    #[cfg(feature = "num-complex")]
+    test_op2_scalar!(sub_scalar, -, |a, b| a - b, [complex_f32, complex_f64], op_safe_strategy);
+
+    #[test]
+    fn scalar_op_chain() {
+        use crate::Array;
+
+        // Untyped literals: inference picks the impl of the array's element type.
+        let nd = ndarray::array![[1.5f32, -2.0, 0.0], [100.0, -0.25, 3.0]];
+        let a = Array::compact_ndarray_with(&nd, crate::util::arr_params(&[1, 2])).unwrap();
+        let result = (a.view() + 1.0) * 2.0 + 0.5 * a.view() - 3.0 / (a.view() + 4.0);
+        let expected = nd.mapv(|x| (x + 1.0) * 2.0 + 0.5 * x - 3.0 / (x + 4.0));
+        crate::util::assert_array_matches(&result, &expected);
+    }
 
     #[test]
     fn sub_concrete() {

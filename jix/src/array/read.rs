@@ -158,7 +158,7 @@ impl<S: StorageBase> Array<S> {
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
-    /// let scaled = a.map(|x| x * 10i32);
+    /// let scaled = a * 10;
     ///
     /// assert_eq!(
     ///     scaled.to_ndarray_sub(&[1..3, 1..3])?,

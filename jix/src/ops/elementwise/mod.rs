@@ -9,6 +9,9 @@ pub(crate) use op1::*;
 mod op2;
 pub(crate) use op2::*;
 
+mod op2_scalar;
+pub use op2_scalar::{Lhs, Rhs};
+
 mod arith;
 pub use arith::*;
 
