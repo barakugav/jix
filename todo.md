@@ -3,7 +3,6 @@
 - resolve TODOs across the repo
 - add read benchmark of the whole array, also for low entropy data
 - optimize reshape and its flags propagation
-- document archive compatibility
 - examine the asm of [T;4].into_iter().next().unwrap() and make sure llvm optimize it away
 - optimize nd copy of structs
 - i686: alignment of f64/i64/u64/c128 is hard-coded to 8, the ABI says 4

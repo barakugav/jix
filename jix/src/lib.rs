@@ -333,6 +333,10 @@
 //! Multiple arrays can be packed into a single file back-to-back; each is read back
 //! independently using a byte offset and length.
 //!
+//! **Compatibility:** the `.jix` format may change, but jix guarantees future versions will be
+//! able to read files by earlier versions. Older versions are not guaranteed to read files
+//! written by newer ones.
+//!
 //! The primary I/O methods are on [`Array`]:
 //!
 //! | Method | Description |
