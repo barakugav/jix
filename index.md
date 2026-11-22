@@ -3,7 +3,7 @@ layout: default
 title: "jix: compressed nd-arrays for Rust and Python"
 subtitle: "Block-compressed, lazy nd-arrays for Rust and Python - read only the blocks you touch, and run a whole op chain in one pass."
 kicker: "Rust + Python"
-date: 2026-11-21
+date: 2026-11-22
 # author: defaults to `author` in _config.yml
 ---
 
@@ -14,9 +14,13 @@ saves space but makes random access expensive as you have to decompress the enti
 small region. [jix](https://github.com/barakugav/jix) is a library that comes to solve this problem
 efficiently.
 
+{% include bench-figure.html plot="read.png"
+  alt="Reading a random region: jix, jix-plain, Blosc2 and Zarr against NumPy, for different block and read shapes"
+  caption="Time to read a random region, relative to NumPy (lower is faster)." %}
+
 ## 1D Blocks
 
-So how can you be smart about it? Let's say you have a 1D array (vector), so you come up with the
+So how can we be smart about it? Let's say you have a 1D array (vector), so you come up with the
 idea of dividing it into blocks, of some fixed length (say 100 elements), compress each block
 independently and store them in a table. When you want to read an element, you only need to
 decompress the block that contains it, rather than the entire array. Cool, right?
@@ -77,6 +81,10 @@ decompressing them entirely. A classical use case is a machine learning dataload
 random sample out of a large dataset, for example a random audio or weather measurement segment out of
 a long recording. The next sections are focused on operations, but the `Compact` storage alone can
 benefit many use cases on its own.
+
+{% include bench-figure.html plot="compress_ratio.png"
+  alt="Compressed size of jix, Blosc2 and Zarr, with and without byte shuffle, relative to the raw array, for random, smooth and few-unique-value data"
+  caption="Stored size of a 104 MB i32 array, relative to the raw bytes (lower is smaller). Random data doesn't compress; smooth data shrinks to about 3% with jix's default byte-shuffle filter." %}
 
 
 ## Elementwise Operations
@@ -158,9 +166,9 @@ expr.write_to("out.jix")  # or write to a compressed .jix file
 jix arrays are built on a generic abstract `Storage` which has a main function
 `read_data(sub_region)`. Lazy elementwise operations implement this function by reading the
 corresponding sub-regions from their input arrays and applying the operation block by block, but you
-can imagine how `broadcast`, `insert_dim`, `permute_dims`, and even `reshape` can be implemented
-lazily as well - every such op does some playing around with the sub-region coordinates before
-calling once or more to the inner (original) storage.
+can imagine how `broadcast`, `insert_dim`, `permute_dims`, and even generic `reshape` can be
+implemented lazily as well - every such op does some playing around with the sub-region coordinates
+before calling once or more to the inner (original) storage.
 
 Reduction ops are also lazy. For example for an array `a` of shape `(100, 40)`, the lazy array
 `a.sum(axis=0)` is a lazy array of shape `(40,)` that implements `read_data` by reading the larger
@@ -263,14 +271,14 @@ src.sum(dim=1).write_to("row_sums.jix")
 
 ## Performance
 
-A cliche, but I can easily fill a couple of full blog posts on performance optimizations. This was
+I can write a full blog post only on performance optimizations (i know, a cliche). This was
 easily 75% of the time I developed the library, finding more and more ways NumPy is smarter than me
 and battle tested. I'll list a few buzzwords:
 - Specialized inner loops for different contiguous/strided arrays, for example jix has 4 different
   implementations for the `Add` operation (not counting SIMD variants), depending on the inputs and
   output layout: `<all-contiguous/any-strided for inputs> x <contiguous/strided for output>`.
-  The variants are the same function with generics of course, but the Python
-  wheels contain all pre-compiled versions.
+  The variants are the same function with generics of course, but the layout of arrays is a
+  runtime property so all variants are always pre-compiled.
 - SIMD kernels for vectorized operations, using
   [fearless_simd](https://github.com/linebender/fearless_simd).
 - Caching decompressed blocks of arrays that appear more than once in the same expression, like
@@ -284,7 +292,7 @@ And many, many other small optimizations, such as examining asm and llvm-mca to 
 compiler doesn't do what I want, doing weird tricks to reduce binary size and compile times,
 minimizing overhead using Callgrind with fast paths for small reads, etc.
 The fact that the mainstream library for this kind of data
-structure, blosc2, is (mostly) using NumPy under the hood for its expression engine, forced me to
+structure, blosc2, is using (mostly) NumPy under the hood for its expression engine, forced me to
 optimize the library again and again just to achieve a close to comparable runtime. Honestly, this
 was quite a journey and it made me value NumPy much more, seeing the level of optimization and
 thought that went into it, even when its basic concept and ndarray is pretty straightforward (it's
@@ -292,12 +300,15 @@ just a shape, data pointer and strides, how hard could it be, right??).
 
 The [benchmark report](https://github.com/barakugav/jix/blob/f85a47beaf8d34082dbcc554876ea8a7f3d38a53/scripts/bench/report/report.md)
 compares jix against a few libraries in Python and Rust, on reads, compression, elementwise ops,
-reductions and lazy chains, etc. For example, reading a random region:
+reductions and lazy chains, etc. For example, elementwise add and reductions:
 
-<figure>
-<a href="https://github.com/barakugav/jix/blob/f85a47beaf8d34082dbcc554876ea8a7f3d38a53/scripts/bench/report/report.md"><img src="https://raw.githubusercontent.com/barakugav/jix/f85a47beaf8d34082dbcc554876ea8a7f3d38a53/scripts/bench/report/plots/read.png" alt="Reading a random region: jix, jix-plain, Blosc2 and Zarr against NumPy, for different block and read shapes"></a>
-<figcaption>Time to read a random region, relative to NumPy (lower is faster). From the <a href="https://github.com/barakugav/jix/blob/f85a47beaf8d34082dbcc554876ea8a7f3d38a53/scripts/bench/report/report.md">benchmark report</a>.</figcaption>
-</figure>
+{% include bench-figure.html plot="add.png"
+  alt="Adding two arrays: jix, jix-plain, Blosc2 and Zarr against NumPy, for f32 and i32, on x86_64 and aarch64"
+  caption="Adding two 104 MB arrays, relative to NumPy (lower is faster). jix-plain runs the same ops on uncompressed in-memory arrays." %}
+
+{% include bench-figure.html plot="reduction.png"
+  alt="Sums and standard deviations: jix, jix-plain, Blosc2 and Zarr against NumPy, on x86_64 and aarch64"
+  caption="Sums and standard deviations over a 104 MB array, relative to NumPy (lower is faster)." %}
 
 ## Thanks and misc
 
@@ -307,11 +318,11 @@ it. jix can be seen as a port of ideas and natural evolution of these concepts, 
 C) and for specific design and performance choices.
 
 I use AI freely, in a way I judge as reasonable and helpful for my work. This project is far, far,
-from AI slop, and I'm afraid to admit how many hours I put into it. I used AI mostly for scripts,
+from slop, and I'm afraid to admit how many hours I put into it. I used AI mostly for scripts,
 benches, quick experiments, docs and large refactors, and since Opus 5.5 I use it more freely. If
 you want to judge for yourself, take a look at the commits.
 
 If you want to use the library, you can find it on [crates.io](https://crates.io/crates/jix/) and
 [PyPI](https://pypi.org/project/jix/). If you have any feedback, questions or
-requests, feel free to reach out to me *barakugav@gmail.com* or open an issue on the [GitHub
+requests, feel free to reach out to me at [barakugav@gmail.com](mailto:barakugav@gmail.com) or open an issue on the [GitHub
 repository](https://github.com/barakugav/jix).

@@ -1,0 +1,8 @@
+{% comment %} A plot from the benchmark report, pinned to `bench_report_commit` in _config.yml.
+Params: plot (file under scripts/bench/report/plots/), alt, caption. {% endcomment %}
+{% assign commit = site.bench_report_commit %}
+{% assign report = site.github.repo | append: "/blob/" | append: commit | append: "/scripts/bench/report/report.md" %}
+<figure>
+<a href="{{ report }}"><img src="https://raw.githubusercontent.com/barakugav/jix/{{ commit }}/scripts/bench/report/plots/{{ include.plot }}" alt="{{ include.alt }}" loading="lazy"></a>
+<figcaption>{{ include.caption }} From the <a href="{{ report }}">benchmark report</a>.</figcaption>
+</figure>

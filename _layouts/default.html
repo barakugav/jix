@@ -49,10 +49,7 @@
 
       <nav class="links" aria-label="Project links">
         {% for link in site.links %}
-        <a class="link-card" href="{{ link.url }}">
-          <span class="link-card__name">{{ link.name }}</span>
-          <span class="link-card__detail">{{ link.detail }}</span>
-        </a>
+        <a class="link-card" href="{{ link.url }}" title="{{ link.detail }}">{{ link.name }}</a>
         {% endfor %}
       </nav>
 
@@ -75,6 +72,14 @@
   </footer>
 
   <script>
+    // Rouge misses some calls: Python calls are plain names, and a Rust method call with a turbofish
+    // (`a.f::<T>()`) is a field. Color a name followed by "(" and a field followed by "::" as functions.
+    document.querySelectorAll(".highlight .n, .highlight .py").forEach(function (n) {
+      var next = n.nextSibling;
+      var call = n.classList.contains("n") ? "(" : "::";
+      if (next && next.nodeType === 1 && next.textContent.indexOf(call) === 0) n.classList.add("nf");
+    });
+
     // Turn each `.code-tabs` block (one rust and one python snippet) into tabs. Picking a
     // language switches every snippet on the page and is remembered for the next visit.
     (function () {

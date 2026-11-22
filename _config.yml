@@ -17,19 +17,22 @@ links:
   - name: crates.io
     detail: Rust crate
     url: https://crates.io/crates/jix
-  - name: docs.rs
-    detail: Rust API docs
-    url: https://docs.rs/jix/latest/jix/
   - name: PyPI
     detail: Python package
     url: https://pypi.org/project/jix/
-  - name: Read the Docs
+  - name: docs.rs
+    detail: Rust API docs
+    url: https://docs.rs/jix/latest/jix/
+  - name: readthedocs
     detail: Python docs
     url: https://jix.readthedocs.io/en/stable/
 
 github:
   repo: https://github.com/barakugav/jix
   pages_branch: gh-pages
+
+# Commit the benchmark report plots in the post are taken from.
+bench_report_commit: f85a47beaf8d34082dbcc554876ea8a7f3d38a53
 
 markdown: kramdown
 highlighter: rouge
