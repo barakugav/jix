@@ -1,0 +1,237 @@
+<figure class="diagram">
+<div class="diagram__scroll">
+<svg class="dg" viewBox="0 0 680 300" role="img" aria-label="Negating a Fortran-order 4 by 5 array. Left: the output is C-order, so the inner loop steps 1 in dst but jumps 4 in src, touching src offsets 0, 4, 8, 12, 16. Right: the output is also Fortran-order, the inner loop runs over dim 0 with stride 1 in both, and NdIter merges both dims into a single loop over offsets 0 to 19.">
+<defs>
+<marker id="b6-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-acc" d="M0 0L10 5L0 10z"/></marker>
+<marker id="b6-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-warn" d="M0 0L10 5L0 10z"/></marker>
+</defs>
+<text class="b warn-t" x="20" y="20">dst allocated in C-order</text>
+<text class="sm muted" x="20" y="38">inner loop on dim 1: dst steps 1, src jumps</text>
+<text class="sm b" x="30" y="62">src, F-order</text>
+<rect class="warn" x="30" y="70" width="22" height="22"/>
+<text class="sm mono" x="41.0" y="85" text-anchor="middle">0</text>
+<rect class="warn" x="52" y="70" width="22" height="22"/>
+<text class="sm mono" x="63.0" y="85" text-anchor="middle">4</text>
+<rect class="warn" x="74" y="70" width="22" height="22"/>
+<text class="sm mono" x="85.0" y="85" text-anchor="middle">8</text>
+<rect class="warn" x="96" y="70" width="22" height="22"/>
+<text class="sm mono" x="107.0" y="85" text-anchor="middle">12</text>
+<rect class="warn" x="118" y="70" width="22" height="22"/>
+<text class="sm mono" x="129.0" y="85" text-anchor="middle">16</text>
+<rect class="cell" x="30" y="92" width="22" height="22"/>
+<text class="sm mono" x="41.0" y="107" text-anchor="middle">1</text>
+<rect class="cell" x="52" y="92" width="22" height="22"/>
+<text class="sm mono" x="63.0" y="107" text-anchor="middle">5</text>
+<rect class="cell" x="74" y="92" width="22" height="22"/>
+<text class="sm mono" x="85.0" y="107" text-anchor="middle">9</text>
+<rect class="cell" x="96" y="92" width="22" height="22"/>
+<text class="sm mono" x="107.0" y="107" text-anchor="middle">13</text>
+<rect class="cell" x="118" y="92" width="22" height="22"/>
+<text class="sm mono" x="129.0" y="107" text-anchor="middle">17</text>
+<rect class="cell" x="30" y="114" width="22" height="22"/>
+<text class="sm mono" x="41.0" y="129" text-anchor="middle">2</text>
+<rect class="cell" x="52" y="114" width="22" height="22"/>
+<text class="sm mono" x="63.0" y="129" text-anchor="middle">6</text>
+<rect class="cell" x="74" y="114" width="22" height="22"/>
+<text class="sm mono" x="85.0" y="129" text-anchor="middle">10</text>
+<rect class="cell" x="96" y="114" width="22" height="22"/>
+<text class="sm mono" x="107.0" y="129" text-anchor="middle">14</text>
+<rect class="cell" x="118" y="114" width="22" height="22"/>
+<text class="sm mono" x="129.0" y="129" text-anchor="middle">18</text>
+<rect class="cell" x="30" y="136" width="22" height="22"/>
+<text class="sm mono" x="41.0" y="151" text-anchor="middle">3</text>
+<rect class="cell" x="52" y="136" width="22" height="22"/>
+<text class="sm mono" x="63.0" y="151" text-anchor="middle">7</text>
+<rect class="cell" x="74" y="136" width="22" height="22"/>
+<text class="sm mono" x="85.0" y="151" text-anchor="middle">11</text>
+<rect class="cell" x="96" y="136" width="22" height="22"/>
+<text class="sm mono" x="107.0" y="151" text-anchor="middle">15</text>
+<rect class="cell" x="118" y="136" width="22" height="22"/>
+<text class="sm mono" x="129.0" y="151" text-anchor="middle">19</text>
+<text class="sm mono muted" x="30" y="174">strides (1, 4)</text>
+<text class="sm b" x="200" y="62">dst, C-order</text>
+<rect class="hot" x="200" y="70" width="22" height="22"/>
+<text class="sm mono" x="211.0" y="85" text-anchor="middle">0</text>
+<rect class="hot" x="222" y="70" width="22" height="22"/>
+<text class="sm mono" x="233.0" y="85" text-anchor="middle">1</text>
+<rect class="hot" x="244" y="70" width="22" height="22"/>
+<text class="sm mono" x="255.0" y="85" text-anchor="middle">2</text>
+<rect class="hot" x="266" y="70" width="22" height="22"/>
+<text class="sm mono" x="277.0" y="85" text-anchor="middle">3</text>
+<rect class="hot" x="288" y="70" width="22" height="22"/>
+<text class="sm mono" x="299.0" y="85" text-anchor="middle">4</text>
+<rect class="cell" x="200" y="92" width="22" height="22"/>
+<text class="sm mono" x="211.0" y="107" text-anchor="middle">5</text>
+<rect class="cell" x="222" y="92" width="22" height="22"/>
+<text class="sm mono" x="233.0" y="107" text-anchor="middle">6</text>
+<rect class="cell" x="244" y="92" width="22" height="22"/>
+<text class="sm mono" x="255.0" y="107" text-anchor="middle">7</text>
+<rect class="cell" x="266" y="92" width="22" height="22"/>
+<text class="sm mono" x="277.0" y="107" text-anchor="middle">8</text>
+<rect class="cell" x="288" y="92" width="22" height="22"/>
+<text class="sm mono" x="299.0" y="107" text-anchor="middle">9</text>
+<rect class="cell" x="200" y="114" width="22" height="22"/>
+<text class="sm mono" x="211.0" y="129" text-anchor="middle">10</text>
+<rect class="cell" x="222" y="114" width="22" height="22"/>
+<text class="sm mono" x="233.0" y="129" text-anchor="middle">11</text>
+<rect class="cell" x="244" y="114" width="22" height="22"/>
+<text class="sm mono" x="255.0" y="129" text-anchor="middle">12</text>
+<rect class="cell" x="266" y="114" width="22" height="22"/>
+<text class="sm mono" x="277.0" y="129" text-anchor="middle">13</text>
+<rect class="cell" x="288" y="114" width="22" height="22"/>
+<text class="sm mono" x="299.0" y="129" text-anchor="middle">14</text>
+<rect class="cell" x="200" y="136" width="22" height="22"/>
+<text class="sm mono" x="211.0" y="151" text-anchor="middle">15</text>
+<rect class="cell" x="222" y="136" width="22" height="22"/>
+<text class="sm mono" x="233.0" y="151" text-anchor="middle">16</text>
+<rect class="cell" x="244" y="136" width="22" height="22"/>
+<text class="sm mono" x="255.0" y="151" text-anchor="middle">17</text>
+<rect class="cell" x="266" y="136" width="22" height="22"/>
+<text class="sm mono" x="277.0" y="151" text-anchor="middle">18</text>
+<rect class="cell" x="288" y="136" width="22" height="22"/>
+<text class="sm mono" x="299.0" y="151" text-anchor="middle">19</text>
+<text class="sm mono muted" x="200" y="174">strides (5, 1)</text>
+<text class="sm muted" x="30" y="200">src memory, offsets 0..19</text>
+<rect class="warn" x="30" y="206" width="14" height="16"/>
+<rect class="cell" x="44" y="206" width="14" height="16"/>
+<rect class="cell" x="58" y="206" width="14" height="16"/>
+<rect class="cell" x="72" y="206" width="14" height="16"/>
+<rect class="warn" x="86" y="206" width="14" height="16"/>
+<rect class="cell" x="100" y="206" width="14" height="16"/>
+<rect class="cell" x="114" y="206" width="14" height="16"/>
+<rect class="cell" x="128" y="206" width="14" height="16"/>
+<rect class="warn" x="142" y="206" width="14" height="16"/>
+<rect class="cell" x="156" y="206" width="14" height="16"/>
+<rect class="cell" x="170" y="206" width="14" height="16"/>
+<rect class="cell" x="184" y="206" width="14" height="16"/>
+<rect class="warn" x="198" y="206" width="14" height="16"/>
+<rect class="cell" x="212" y="206" width="14" height="16"/>
+<rect class="cell" x="226" y="206" width="14" height="16"/>
+<rect class="cell" x="240" y="206" width="14" height="16"/>
+<rect class="warn" x="254" y="206" width="14" height="16"/>
+<rect class="cell" x="268" y="206" width="14" height="16"/>
+<rect class="cell" x="282" y="206" width="14" height="16"/>
+<rect class="cell" x="296" y="206" width="14" height="16"/>
+<path class="ln-warn" d="M37.0 224Q65.0 242 92.0 225" marker-end="url(#b6-warn)"/>
+<path class="ln-warn" d="M93.0 224Q121.0 242 148.0 225" marker-end="url(#b6-warn)"/>
+<path class="ln-warn" d="M149.0 224Q177.0 242 204.0 225" marker-end="url(#b6-warn)"/>
+<path class="ln-warn" d="M205.0 224Q233.0 242 260.0 225" marker-end="url(#b6-warn)"/>
+<text class="sm" x="30" y="262">src jumps 4 cells a step (100 B in a [100, 40] i8),</text>
+<text class="sm" x="30" y="277">so each read pulls in a new 64 B cache line.</text>
+<text class="sm" x="30" y="292">Loop on dim 0 instead, and dst jumps by 5.</text>
+<line class="ln-m" x1="340" y1="8" x2="340" y2="300"/>
+<text class="b acc" x="360" y="20">dst matches src (F-order)</text>
+<text class="sm muted" x="360" y="38">inner loop on dim 0, the smallest stride</text>
+<text class="sm b" x="370" y="62">src, F-order</text>
+<rect class="hot" x="370" y="70" width="22" height="22"/>
+<text class="sm mono" x="381.0" y="85" text-anchor="middle">0</text>
+<rect class="cell" x="392" y="70" width="22" height="22"/>
+<text class="sm mono" x="403.0" y="85" text-anchor="middle">4</text>
+<rect class="cell" x="414" y="70" width="22" height="22"/>
+<text class="sm mono" x="425.0" y="85" text-anchor="middle">8</text>
+<rect class="cell" x="436" y="70" width="22" height="22"/>
+<text class="sm mono" x="447.0" y="85" text-anchor="middle">12</text>
+<rect class="cell" x="458" y="70" width="22" height="22"/>
+<text class="sm mono" x="469.0" y="85" text-anchor="middle">16</text>
+<rect class="hot" x="370" y="92" width="22" height="22"/>
+<text class="sm mono" x="381.0" y="107" text-anchor="middle">1</text>
+<rect class="cell" x="392" y="92" width="22" height="22"/>
+<text class="sm mono" x="403.0" y="107" text-anchor="middle">5</text>
+<rect class="cell" x="414" y="92" width="22" height="22"/>
+<text class="sm mono" x="425.0" y="107" text-anchor="middle">9</text>
+<rect class="cell" x="436" y="92" width="22" height="22"/>
+<text class="sm mono" x="447.0" y="107" text-anchor="middle">13</text>
+<rect class="cell" x="458" y="92" width="22" height="22"/>
+<text class="sm mono" x="469.0" y="107" text-anchor="middle">17</text>
+<rect class="hot" x="370" y="114" width="22" height="22"/>
+<text class="sm mono" x="381.0" y="129" text-anchor="middle">2</text>
+<rect class="cell" x="392" y="114" width="22" height="22"/>
+<text class="sm mono" x="403.0" y="129" text-anchor="middle">6</text>
+<rect class="cell" x="414" y="114" width="22" height="22"/>
+<text class="sm mono" x="425.0" y="129" text-anchor="middle">10</text>
+<rect class="cell" x="436" y="114" width="22" height="22"/>
+<text class="sm mono" x="447.0" y="129" text-anchor="middle">14</text>
+<rect class="cell" x="458" y="114" width="22" height="22"/>
+<text class="sm mono" x="469.0" y="129" text-anchor="middle">18</text>
+<rect class="hot" x="370" y="136" width="22" height="22"/>
+<text class="sm mono" x="381.0" y="151" text-anchor="middle">3</text>
+<rect class="cell" x="392" y="136" width="22" height="22"/>
+<text class="sm mono" x="403.0" y="151" text-anchor="middle">7</text>
+<rect class="cell" x="414" y="136" width="22" height="22"/>
+<text class="sm mono" x="425.0" y="151" text-anchor="middle">11</text>
+<rect class="cell" x="436" y="136" width="22" height="22"/>
+<text class="sm mono" x="447.0" y="151" text-anchor="middle">15</text>
+<rect class="cell" x="458" y="136" width="22" height="22"/>
+<text class="sm mono" x="469.0" y="151" text-anchor="middle">19</text>
+<text class="sm mono muted" x="370" y="174">strides (1, 4)</text>
+<text class="sm b" x="540" y="62">dst, F-order</text>
+<rect class="hot" x="540" y="70" width="22" height="22"/>
+<text class="sm mono" x="551.0" y="85" text-anchor="middle">0</text>
+<rect class="cell" x="562" y="70" width="22" height="22"/>
+<text class="sm mono" x="573.0" y="85" text-anchor="middle">4</text>
+<rect class="cell" x="584" y="70" width="22" height="22"/>
+<text class="sm mono" x="595.0" y="85" text-anchor="middle">8</text>
+<rect class="cell" x="606" y="70" width="22" height="22"/>
+<text class="sm mono" x="617.0" y="85" text-anchor="middle">12</text>
+<rect class="cell" x="628" y="70" width="22" height="22"/>
+<text class="sm mono" x="639.0" y="85" text-anchor="middle">16</text>
+<rect class="hot" x="540" y="92" width="22" height="22"/>
+<text class="sm mono" x="551.0" y="107" text-anchor="middle">1</text>
+<rect class="cell" x="562" y="92" width="22" height="22"/>
+<text class="sm mono" x="573.0" y="107" text-anchor="middle">5</text>
+<rect class="cell" x="584" y="92" width="22" height="22"/>
+<text class="sm mono" x="595.0" y="107" text-anchor="middle">9</text>
+<rect class="cell" x="606" y="92" width="22" height="22"/>
+<text class="sm mono" x="617.0" y="107" text-anchor="middle">13</text>
+<rect class="cell" x="628" y="92" width="22" height="22"/>
+<text class="sm mono" x="639.0" y="107" text-anchor="middle">17</text>
+<rect class="hot" x="540" y="114" width="22" height="22"/>
+<text class="sm mono" x="551.0" y="129" text-anchor="middle">2</text>
+<rect class="cell" x="562" y="114" width="22" height="22"/>
+<text class="sm mono" x="573.0" y="129" text-anchor="middle">6</text>
+<rect class="cell" x="584" y="114" width="22" height="22"/>
+<text class="sm mono" x="595.0" y="129" text-anchor="middle">10</text>
+<rect class="cell" x="606" y="114" width="22" height="22"/>
+<text class="sm mono" x="617.0" y="129" text-anchor="middle">14</text>
+<rect class="cell" x="628" y="114" width="22" height="22"/>
+<text class="sm mono" x="639.0" y="129" text-anchor="middle">18</text>
+<rect class="hot" x="540" y="136" width="22" height="22"/>
+<text class="sm mono" x="551.0" y="151" text-anchor="middle">3</text>
+<rect class="cell" x="562" y="136" width="22" height="22"/>
+<text class="sm mono" x="573.0" y="151" text-anchor="middle">7</text>
+<rect class="cell" x="584" y="136" width="22" height="22"/>
+<text class="sm mono" x="595.0" y="151" text-anchor="middle">11</text>
+<rect class="cell" x="606" y="136" width="22" height="22"/>
+<text class="sm mono" x="617.0" y="151" text-anchor="middle">15</text>
+<rect class="cell" x="628" y="136" width="22" height="22"/>
+<text class="sm mono" x="639.0" y="151" text-anchor="middle">19</text>
+<text class="sm mono muted" x="540" y="174">strides (1, 4)</text>
+<text class="sm muted" x="370" y="200">src memory, offsets 0..19</text>
+<rect class="hot" x="370" y="206" width="14" height="16"/>
+<rect class="hot" x="384" y="206" width="14" height="16"/>
+<rect class="hot" x="398" y="206" width="14" height="16"/>
+<rect class="hot" x="412" y="206" width="14" height="16"/>
+<rect class="hot" x="426" y="206" width="14" height="16"/>
+<rect class="hot" x="440" y="206" width="14" height="16"/>
+<rect class="hot" x="454" y="206" width="14" height="16"/>
+<rect class="hot" x="468" y="206" width="14" height="16"/>
+<rect class="hot" x="482" y="206" width="14" height="16"/>
+<rect class="hot" x="496" y="206" width="14" height="16"/>
+<rect class="hot" x="510" y="206" width="14" height="16"/>
+<rect class="hot" x="524" y="206" width="14" height="16"/>
+<rect class="hot" x="538" y="206" width="14" height="16"/>
+<rect class="hot" x="552" y="206" width="14" height="16"/>
+<rect class="hot" x="566" y="206" width="14" height="16"/>
+<rect class="hot" x="580" y="206" width="14" height="16"/>
+<rect class="hot" x="594" y="206" width="14" height="16"/>
+<rect class="hot" x="608" y="206" width="14" height="16"/>
+<rect class="hot" x="622" y="206" width="14" height="16"/>
+<rect class="hot" x="636" y="206" width="14" height="16"/>
+<line class="ln-acc" x1="377.0" y1="232" x2="643.0" y2="232" marker-end="url(#b6-acc)"/>
+<text class="sm" x="370" y="262">Both step 1, so every byte of a cache line is used.</text>
+<text class="sm" x="370" y="277">NdIter then merges the two dims into one loop</text>
+<text class="sm" x="370" y="292">over all 20 cells (4000 in a [100, 40] array).</text>
+</svg>
+</div>
+<figcaption>A small 4x5 version of the example, each cell showing its byte offset in memory. With a C-order output, one of the two arrays jumps on every step of the inner loop, whichever dim it runs on. With an output that matches the input, both read straight through memory, and the whole array becomes one flat loop.</figcaption>
+</figure>

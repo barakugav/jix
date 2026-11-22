@@ -580,13 +580,13 @@ approaches) are the most consistent. Relying on the compiler to automatically ge
 is fragile and unreliable.
 
 I hope this example gives you a sense of the detail and effort involved in optimizing jix's
-low-level array operations. If you are curious, the real jix code can be found at
+low-level array operations. If you are curious, the real code can be found at
 [jix/src/ops/elementwise/pipeline.rs](https://github.com/barakugav/jix/blob/1c82e1f1de5bb104d6c1cd588d595cf09a9b57ad/jix/src/ops/elementwise/pipeline.rs#L602),
 and it's a common engine for all elementwise operations, including all unary ops, binary or N-ary
 elementwise operations, and fused operations.
 
 
-## Thanks and misc
+## Thanks and miscellaneous
 
 I didn't invent any of these ideas from scratch, and specifically I want to say a huge thanks to
 [c-blosc2](https://github.com/Blosc/c-blosc2) for developing these approaches and mastering a lot of
@@ -621,6 +621,8 @@ have matching layout or not, we always prefer to iterate over the dimension with
 as the inner loop, to maximize cache efficiency. A general purpose NdIter is used in jix, which
 sorts dimensions by their strides, deletes dimensions of size 1, and merges consecutive dimensions
 when possible if the resulting merged dimension maintains a contiguous memory layout.
+
+{% include diagrams/strides.html %}
 
 This optimization alone can x40 improve performance in certain scenarios. For some reason, Rust's
 ndarray crate doesn't perform this optimization (as far as I know) and only supports special cases
