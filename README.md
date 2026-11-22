@@ -8,7 +8,7 @@ with Jekyll straight from this branch.
 | `index.md` | The post. Front matter sets the title, subtitle, kicker and date |
 | `_config.yml` | Site title, author and the link cards (GitHub, crates.io, docs.rs, PyPI, Read the Docs) |
 | `_layouts/default.html` | Page layout: header, link cards, post, footer |
-| `assets/css/style.css` | All styling, with light and dark themes |
+| `assets/css/main.css` | All styling, with light and dark themes |
 
 Writing tips:
 
