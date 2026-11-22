@@ -3,7 +3,6 @@
 - resolve TODOs across the repo
 - add read benchmark of the whole array, also for low entropy data
 - optimize reshape and its flags propagation
-- document archive compatibility
 - examine the asm of [T;4].into_iter().next().unwrap() and make sure llvm optimize it away
 - optimize nd copy of structs
 - i686: alignment of f64/i64/u64/c128 is hard-coded to 8, the ABI says 4
@@ -21,3 +20,4 @@
 - every op copies the cache-ids of everything below it, so a deep chain of n ops holds n^2/2 ids
 - provide ops on dyn arrays in core, not just in jix-py
 - make Python Array support un/pickle
+- add jix-py binary size as PR comment

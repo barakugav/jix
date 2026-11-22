@@ -22,6 +22,8 @@ use crate::util::IntoPyResult;
 /// notably the per-block offset table, one entry per block) can be costly for very large arrays,
 /// and run only in `strict` mode.
 ///
+/// Files written by earlier version of jix are readable.
+///
 /// Args:
 ///     path_or_reader: A file path or any seekable binary file-like object with `.read()`,
 ///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle).

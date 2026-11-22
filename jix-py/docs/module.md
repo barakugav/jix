@@ -176,6 +176,10 @@ c = jix.read_array("data.jix", mmap=True)
 `write_array` and `read_array` accept a file path or any seekable binary file-like
 object.
 
+**Compatibility:** the `.jix` format may change, but jix guarantees future versions will be able to
+read files by earlier versions. Older versions are not guaranteed to read files written by newer
+ones.
+
 A key property: **a lazy array can be written directly without fully materializing it in
 memory**. The write path compresses block by block, pulling data from the lazy chain on
 demand.

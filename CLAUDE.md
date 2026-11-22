@@ -44,7 +44,7 @@ pytest python/tests --numprocesses auto   # Python tests - ALWAYS use --numproce
 # --- Benchmarks ---
 cd jix-py && python python/benches/run_all.py   # Python comparison suite (jix vs numpy/blosc2/zarr) -> results/
 cd jix && cargo bench                            # Rust benchmarks (criterion; HTML at target/criterion/report/index.html)
-cd jix && cargo bench --bench valgrind           # Valgrind instruction counts (Linux + valgrind + gungraun-runner 0.20.0); used by the bench_regression CI job
+cd jix && cargo bench --bench valgrind           # Valgrind instruction counts (Linux + valgrind + gungraun-runner 0.20.0); used by the pr_report CI job
 
 # --- Static analysis of the hot loops (llvm-mca, every wheel platform; setup in the script's docstring) ---
 python scripts/analyze_llvm_mca/analyze.py --out <dir> [--platform x86_64-v3] [--fn 'add_*']
