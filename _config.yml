@@ -31,8 +31,8 @@ github:
   repo: https://github.com/barakugav/jix
   pages_branch: gh-pages
 
-# Commit the benchmark report plots in the post are taken from.
-bench_report_commit: 35dddca718675f3ad020f6beea9423353a5a79d4
+# Commit that all links into the source repo (and the benchmark plots) are pinned to.
+source_commit: d6005d4857e74e3d4f54ceb8c29c7a1b85c4131e
 
 markdown: kramdown
 highlighter: rouge

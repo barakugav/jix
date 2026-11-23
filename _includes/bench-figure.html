@@ -1,6 +1,6 @@
-{% comment %} A plot from the benchmark report, pinned to `bench_report_commit` in _config.yml.
+{% comment %} A plot from the benchmark report, pinned to `source_commit` in _config.yml.
 Params: plot (file under assets/plots/, an SVG render of scripts/bench/report/plots/), alt, caption. {% endcomment %}
-{% assign commit = site.bench_report_commit %}
+{% assign commit = site.source_commit %}
 {% assign report = site.github.repo | append: "/blob/" | append: commit | append: "/scripts/bench/report/report.md" %}
 {% assign src = "/assets/plots/" | append: include.plot | relative_url %}
 <figure>
