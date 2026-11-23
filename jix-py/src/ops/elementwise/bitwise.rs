@@ -40,7 +40,7 @@ define_op2!(
     ///     assert np.array_equal(jix.logical_and(c, d).numpy(), [False, False])
     ///     ```
     logical_and,
-    And,
+    BitAnd,
     dispatch = {
         [bool8],
         Unsafe
@@ -72,7 +72,7 @@ define_op2!(
     ///     assert np.array_equal(result.numpy(), [False, True, False, True])
     ///     ```
     logical_or,
-    Or,
+    BitOr,
     dispatch = {
         [bool8],
         Unsafe
@@ -104,7 +104,7 @@ define_op2!(
     ///     assert np.array_equal(result.numpy(), [False, False, True, True])
     ///     ```
     logical_xor,
-    Xor,
+    BitXor,
     dispatch = {
         [bool8],
         Unsafe
@@ -174,7 +174,7 @@ define_op2!(
     ///     assert np.array_equal(result.numpy(), [0b1000, 0b0000, 0b0000])
     ///     ```
     bitwise_and,
-    And,
+    BitAnd,
     dispatch = {
         [bool8, u8, i8, u16, i16, u32, i32, u64, i64],
         Safe
@@ -212,7 +212,7 @@ define_op2!(
     ///     assert np.array_equal(result.numpy(), [0b1110, 0b1111, 0b1111])
     ///     ```
     bitwise_or,
-    Or,
+    BitOr,
     dispatch = {
         [bool8, u8, i8, u16, i16, u32, i32, u64, i64],
         Safe
@@ -250,7 +250,7 @@ define_op2!(
     ///     assert np.array_equal(result.numpy(), [0b0110, 0b0000, 0b0000])
     ///     ```
     bitwise_xor,
-    Xor,
+    BitXor,
     dispatch = {
         [bool8, u8, i8, u16, i16, u32, i32, u64, i64],
         Safe

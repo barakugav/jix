@@ -219,8 +219,8 @@ define_op2!(
     /// assert_eq!(result, array![0xA0, 0xC0]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    And,
-    AndKernel,
+    BitAnd,
+    BitAndKernel,
     crate::scalar::BitAnd::bitand,
     simd: bitand_bulk,
     core_op: core::ops::BitAnd::bitand,
@@ -252,8 +252,8 @@ define_op2!(
     /// assert_eq!(result, array![0xFF, 0xF0]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    Or,
-    OrKernel,
+    BitOr,
+    BitOrKernel,
     crate::scalar::BitOr::bitor,
     simd: bitor_bulk,
     core_op: core::ops::BitOr::bitor,
@@ -286,8 +286,8 @@ define_op2!(
     /// assert_eq!(result, array![0xF0, 0x00]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    Xor,
-    XorKernel,
+    BitXor,
+    BitXorKernel,
     crate::scalar::BitXor::bitxor,
     simd: bitxor_bulk,
     core_op: core::ops::BitXor::bitxor,
@@ -479,7 +479,7 @@ mod tests {
     fn simd_bodies_all_levels() {
         use fearless_simd::Simd;
 
-        use super::{AndKernel, BitwiseShiftRightKernel, NotKernel, OrKernel, XorKernel};
+        use super::{BitAndKernel, BitOrKernel, BitXorKernel, BitwiseShiftRightKernel, NotKernel};
         use crate::ops::elementwise::op1::Op1Kernel;
         use crate::ops::elementwise::op2::Op2Kernel;
         use crate::util::{SimdTestValues, assert_same_elements, for_each_simd_level};
@@ -538,9 +538,9 @@ mod tests {
                 };
             }
             simd.vectorize(|| {
-                ints!(case!(AndKernel, |x, y| x & y));
-                ints!(case!(OrKernel, |x, y| x | y));
-                ints!(case!(XorKernel, |x, y| x ^ y));
+                ints!(case!(BitAndKernel, |x, y| x & y));
+                ints!(case!(BitOrKernel, |x, y| x | y));
+                ints!(case!(BitXorKernel, |x, y| x ^ y));
                 macro_rules! not {
                     ($kernel:ident, $t:ty, $_t:ty, $f:expr) => {
                         case1!($kernel, $t, |x: $t| !x)
