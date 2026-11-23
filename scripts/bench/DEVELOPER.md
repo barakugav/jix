@@ -97,5 +97,8 @@ otherwise-odd choices in the code.
 - **Compare against a competitor at its best.** `blosc2-chunked` exists because blosc2's default
   chunking is far worse than what it can do; the report shows both.
 - **Losses are plotted, not written around.** `std` sits in the reduction plot next to `sum`.
-- **Palette.** One hue per library family, one shade per variant (`LIBRARY_COLORS` in
-  `report_bars.py`), baselines in neutral gray. A new library needs an entry there.
+- **Palette.** jix is the one saturated hue; every other library is a soft tone, baselines in
+  light stone (`LIBRARY_COLORS` in `report_bars.py`). `-noshuffle` variants reuse their library's
+  color, hatched. A new library needs an entry there.
+- **Higher is better.** Relative plots show speed, not time, so the baseline's bar tops out at 1x
+  and a 600x loss is the shortest bar, never the tallest.

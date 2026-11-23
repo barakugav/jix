@@ -19,10 +19,11 @@ ARRAY = f"[{SHAPE[0]}, {SHAPE[1]}] = {RAW_BYTES / 1e6:.0f} MB"
 
 PLATFORMS = ["linux-x86_64", "linux-aarch64"]
 
-# Every non-compression plot draws these, plus whatever else that plot is about.
-CORE = ["numpy", "jix-plain", "jix", "blosc2", "zarr"]
-READ_LIBRARIES = ["numpy", "jix-plain", "jix", "blosc2", "blosc2-chunked", "zarr"]
-COMPRESS_LIBRARIES = ["numpy", "jix-noshuffle", "jix", "blosc2-noshuffle", "blosc2", "zarr"]
+# Every non-compression plot draws these, plus whatever else that plot is about. Bars always run
+# baseline, zarr, blosc2, jix, jix-plain, so jix closes every group.
+CORE = ["numpy", "zarr", "blosc2", "jix", "jix-plain"]
+READ_LIBRARIES = ["numpy", "zarr", "blosc2", "blosc2-chunked", "jix", "jix-plain"]
+COMPRESS_LIBRARIES = ["numpy", "zarr", "blosc2-noshuffle", "blosc2", "jix-noshuffle", "jix"]
 
 # Data distributions. `smooth` is a sampled sine-plus-gradient field; `random` is uniform over the
 # whole dtype range; the rest are literal distinct-value counts.
@@ -161,7 +162,7 @@ SECTIONS = [
         "baseline": "numpy",
         "metric": "time",
         "cases": [chain_label(case) for case in CHAIN_CASES],
-        "libraries": ["numpy", "jix-plain", "jix"],
+        "libraries": ["numpy", "jix", "jix-plain"],
     },
     {
         "key": "chain_memory",
@@ -172,7 +173,7 @@ SECTIONS = [
         "log": False,
         "unit": "MB",
         "cases": [chain_label(case) for case in CHAIN_CASES if case != "exp/log"],
-        "libraries": ["numpy", "jix-plain", "jix", "blosc2"],
+        "libraries": ["numpy", "blosc2", "jix", "jix-plain"],
     },
     {
         "key": "rust_read",
@@ -182,7 +183,7 @@ SECTIONS = [
         "metric": "time",
         "cases": [read_label(*case) for case in RUST_READ_CASES],
         "case_ids": ["b32x32_r32x32", "b32x32_r1x200", "b512x32_r128x200"],
-        "libraries": ["ndarray", "jix-plain", "jix"],
+        "libraries": ["ndarray", "jix", "jix-plain"],
     },
     {
         "key": "rust_op",
@@ -208,7 +209,7 @@ SECTIONS = [
             "sum_f32_dim1",
             "sum_i32_all",
         ],
-        "libraries": ["ndarray", "jix-plain", "jix"],
+        "libraries": ["ndarray", "jix", "jix-plain"],
     },
     {
         "key": "rust_chain",
@@ -218,7 +219,7 @@ SECTIONS = [
         "metric": "time",
         "cases": ["1 op", "2 ops", "4 ops", "8 ops", "16 ops"],
         "case_ids": ["1op", "2op", "4op", "8op", "16op"],
-        "libraries": ["ndarray", "jix-plain", "jix"],
+        "libraries": ["ndarray", "jix", "jix-plain"],
     },
     {
         # Same Criterion group as rust_chain, but a plot of its own: a reduction inside a broadcast
@@ -232,7 +233,7 @@ SECTIONS = [
         "metric": "time",
         "cases": ["normalize\ndim 0", "normalize\ndim 1"],
         "case_ids": ["normalize_dim0", "normalize_dim1"],
-        "libraries": ["ndarray", "jix-plain", "jix"],
+        "libraries": ["ndarray", "jix", "jix-plain"],
     },
     {
         "key": "rust_dim_order",
