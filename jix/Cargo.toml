@@ -1,6 +1,6 @@
 [package]
 name = "jix"
-version = "0.0.7"
+version = "0.1.0"
 authors = ["Barak Ugav <barakugav@gmail.com>"]
 edition = "2024"
 rust-version = "1.89.0"
@@ -21,7 +21,7 @@ include = [
 ]
 
 [dependencies]
-jix-macros = { path = "../jix-macros", version = "=0.0.7" }
+jix-macros = { path = "../jix-macros", version = "=0.1.0" }
 ndarray = ">=0.16,<0.18"
 memmap2 = "0.9"
 zstd = { version = "0.14", default-features = false }
@@ -97,7 +97,7 @@ harness = false
 [[bench]]
 name = "valgrind"
 harness = false
-bench = false  # needs valgrind: run it explicitly with `--bench valgrind`
+bench = false     # needs valgrind: run it explicitly with `--bench valgrind`
 
 [[bench]]
 name = "vs_ndarray"
