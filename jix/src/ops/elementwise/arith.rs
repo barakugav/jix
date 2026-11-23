@@ -578,7 +578,7 @@ define_op2_scalar!(
     ///
     /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
     /// assert_eq!((0.5 + a.view()).to_ndarray()?, array![1.5, 2.5, 3.5]);
-    /// let result: Array<AddScalar<Compact<f32>, f32>> = a + 0.5;
+    /// let result: Array<AddScalar<Compact<f32>, f32, _>> = a + 0.5;
     /// assert_eq!(result.to_ndarray()?, array![1.5, 2.5, 3.5]);
     /// # Ok::<(), jix::Error>(())
     /// ```
