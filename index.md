@@ -1,9 +1,11 @@
 ---
 layout: default
-title: "jix: compressed nd-arrays for Rust and Python"
+title: "jix: compressed nd-arrays with fast random access"
 subtitle: "Block-compressed, lazy nd-arrays for Rust and Python - read only the blocks you touch, and run a whole op chain in one pass."
+description: "Block-compressed, lazy nd-arrays for Rust and Python - read only the blocks you touch, and run a whole op chain in one pass."
+image: /assets/og-image.png
 kicker: "Rust + Python"
-date: 2026-11-22
+date: 2026-11-23
 # author: defaults to `author` in _config.yml
 ---
 
@@ -12,12 +14,16 @@ random access to it efficiently.
 Without any libraries, you have to choose between a regular Python-NumPy/Rust-ndarray array,
 which is fast but memory-hungry, or a compressed format (like zip/zstd of the whole array), which
 saves space but makes random access expensive as you have to decompress the entire array to read a
-small region. [jix](https://github.com/barakugav/jix) is a library that compress an ndarray
-in a format that support reads and operations efficiently.
+small region. [jix](https://github.com/barakugav/jix) is a library that compresses an ndarray
+in a format that supports reads and operations efficiently.
 
-{% include bench-figure.html plot="read.png"
+{% include bench-figure.html plot="read.svg"
   alt="Reading a random region: jix, jix-plain, Blosc2 and Zarr against NumPy, for different block and read shapes"
-  caption="Time to read a random region, relative to NumPy (lower is faster)." %}
+  caption="Reading a random region, speed relative to NumPy (higher is faster)." %}
+
+{% include bench-figure.html plot="compress_ratio.svg"
+  alt="Compressed size of jix, Blosc2 and Zarr, with and without byte shuffle, relative to the raw array, for random, smooth and few-unique-value data"
+  caption="How many times smaller a 104 MB i32 array gets when stored (higher is smaller). Random data doesn't compress; smooth data gets about 34x smaller with jix's default byte-shuffle filter." %}
 
 ## 1D Blocks
 
@@ -77,14 +83,10 @@ Congrats! You now have a block-compressed array that allows efficient random acc
 without decompressing the entire array. This is jix's `Compact` storage, and you can support any
 indexing reads to it.
 
-A classical use case is a machine learning dataloader that samples a random sample out of a large
+A classical use case is a machine learning dataloader that picks a random sample out of a large
 dataset, for example an audio or weather measurement segment out of a long recording.
 The next sections are focused on operations, which are built on top of the `Compact` storage,
 but if all you need is reads this storage is sufficient on its own.
-
-{% include bench-figure.html plot="compress_ratio.png"
-  alt="Compressed size of jix, Blosc2 and Zarr, with and without byte shuffle, relative to the raw array, for random, smooth and few-unique-value data"
-  caption="Stored size of a 104 MB i32 array, relative to the raw bytes (lower is smaller). Random data doesn't compress; smooth data shrinks to about 3% with jix's default byte-shuffle filter." %}
 
 
 ## Elementwise Operations
@@ -119,6 +121,10 @@ c = (a + b).compact()
 
 </div>
 
+{% include bench-figure.html plot="compress.svg"
+  alt="Compression throughput of jix, Blosc2 and Zarr, with and without byte shuffle, for random, smooth and few-unique-value data, on x86_64 and aarch64"
+  caption="Compressing a 104 MB i32 array, in MB/s (higher is faster). On data that compresses, jix's byte shuffle makes compression faster, not slower: zstd handles long runs of similar bytes better and faster." %}
+
 
 ## Elementwise Operation Chains
 
@@ -126,7 +132,7 @@ Now instead of two, suppose you have three block-compressed arrays, all of the s
 dtype, `a`, `b`, and `c`, and you want to perform `(a+b)*c`. Using the approach above naively, we
 iterate block by block of `a+b` and decompress, process and compress, and then again iterate block
 by block of the intermediate result `(a+b)` and `c` to decompress and compute `(a+b)*c` and compress
-again. That it wasteful. A better approach is to "fuse" the chain, iterate over blocks
+again. That is wasteful. A better approach is to "fuse" the chain, iterate over blocks
 of `a`, `b`, and `c` simultaneously, compute `(a+b)*c` block by block, and compress once. For this,
 our execution model must become lazy, because `a+b` doesn't "know" `c` is going to multiply the
 result. In jix, every operation is lazy, so `a+b` is of type `Array<Add<Compact, Compact>>` and
@@ -172,7 +178,7 @@ implemented lazily as well - every such op does some playing around with the sub
 before calling once or more to the inner (original) storage.
 
 Reduction ops are also lazy. For example for an array `a` of shape `(100, 40)`, the lazy array
-`a.sum(axis=0)` is a lazy array of shape `(40,)` that implements `read_data` by reading the larger
+`a.sum(dim=0)` is a lazy array of shape `(40,)` that implements `read_data` by reading the larger
 corresponding sub-region from `a` and summing along the first axis. A reduction op may split the
 inner read to small read operations to keep the peak memory usage low.
 
@@ -219,7 +225,7 @@ centered = (a - a.mean(dim=0)).compact()
 
 A cool unlock of the lazy evaluation model is that it allows us to process very large arrays, even
 if they are bigger than RAM (even in their compressed form). The way you would go about it, is if
-you have a large array saved to disk, whether a plain buf or in `.jix` compressed format, you can
+you have a large array saved to disk, whether a raw binary file or in `.jix` compressed format, you can
 load the array using memory map, build a pipeline of operations, and write the result back to disk
 directly. The pipeline will run block by block, never materializing the entire array into RAM.
 
@@ -277,21 +283,21 @@ cliche). This was easily 75% of the time I developed the library. The fact that 
 library for this kind of data structure, blosc2, is using (mostly) NumPy under the hood for its
 expression engine, forced me to optimize the library again and again just to achieve a close to
 comparable runtime. Honestly, this was quite a journey and it made me value NumPy much more, seeing
-the level of optimization and thought that went into it, even when its basic concept and ndarray is
+the level of optimization and thought that went into it, even though its basic concept and ndarray is
 pretty straightforward (it's just a shape, data pointer and strides, how hard could it be, right??).
 
 The [benchmark
-report](https://github.com/barakugav/jix/blob/f85a47beaf8d34082dbcc554876ea8a7f3d38a53/scripts/bench/report/report.md)
+report](https://github.com/barakugav/jix/blob/{{ site.bench_report_commit }}/scripts/bench/report/report.md)
 compares jix against a few libraries in Python and Rust, on reads, compression, elementwise ops,
 reductions and lazy chains, etc. For example, elementwise add and reductions:
 
-{% include bench-figure.html plot="add.png"
+{% include bench-figure.html plot="add.svg"
   alt="Adding two arrays: jix, jix-plain, Blosc2 and Zarr against NumPy, for f32 and i32, on x86_64 and aarch64"
-  caption="Adding two 104 MB arrays, relative to NumPy (lower is faster). jix-plain runs the same ops on uncompressed in-memory arrays." %}
+  caption="Adding two 104 MB arrays, speed relative to NumPy (higher is faster). jix-plain runs the same ops on uncompressed in-memory arrays." %}
 
-{% include bench-figure.html plot="reduction.png"
+{% include bench-figure.html plot="reduction.svg"
   alt="Sums and standard deviations: jix, jix-plain, Blosc2 and Zarr against NumPy, on x86_64 and aarch64"
-  caption="Sums and standard deviations over a 104 MB array, relative to NumPy (lower is faster)." %}
+  caption="Sums and standard deviations over a 104 MB array, speed relative to NumPy (higher is faster)." %}
 
 
 ### Optimizing Elementwise Negation
@@ -299,7 +305,7 @@ reductions and lazy chains, etc. For example, elementwise add and reductions:
 I'll now take you through my journey of optimizing one of these operations as an example for
 optimizations that are included in jix. We will try to optimize the simplest elementwise
 op: negating an array. This function is the bare operation, operating on uncompressed data
-without dividing into blocks, and can be used by an outer loop that iterate over blocks,
+without dividing into blocks, and can be used by an outer loop that iterates over blocks,
 decompress, call this function, compress again.
 The function accepts a preallocated destination array and a source array,
 along with their shapes and strides. We will start with the most straightforward implementation.
@@ -445,7 +451,7 @@ unsafe fn negative_v3_inner_loop<
 
 There is still something that can block auto-vectorization, and that's aliasing. The compiler cannot
 prove that `dst` and `src` do not alias, so writes may change the contents of `src`, which prevents
-certain optimizations. In Rust there isn't a built in way to express that two raw pointers do not
+certain optimizations. In Rust there isn't a built-in way to express that two raw pointers do not
 alias, like C++ `__restrict`, so we use a hack - a mut reference is noalias. We use two wrapper
 types `PtrNoalias` and `PtrMutNoalias`, create them around the raw pointers outside the inner loop,
 and extract the pointers right away inside it.
@@ -577,6 +583,7 @@ loop is in its "steady state" (long running inner loop), on Ice Lake, using llvm
 - v2: 6835 cycles
 - v3-v6: 437~522 cycles
 
+That's a **~140x speedup** from v1 to v6.
 The reason we don't see a difference between v3 and v6 is that the compiler already generates the
 best optimized code for the earlier versions, sometimes gated by alignment/noalias checks
 (that later versions eliminate). But, that is not true for all kernels/ops, and
@@ -613,8 +620,8 @@ repository](https://github.com/barakugav/jix).
 
 When optimizing code, it's important to remember memory access is (almost) always the bottleneck,
 especially when dealing with large arrays, and especially when the computation per element is
-trivial from the perspective of the CPU. The single most effective optimization in jix, is to
-prioritize small strides for inner loops, and to match existing arrays memory layout when allocating
+trivial from the perspective of the CPU. The single most effective optimization in jix is to
+prioritize small strides for inner loops, and to match existing arrays' memory layout when allocating
 new arrays.
 
 Given an input i8 array of size [100, 40], stored in Fortran (column-major) order, meaning its
@@ -622,7 +629,7 @@ strides are [1, 100]. When computing `negative`, if we allocate a C-order array 
 strides will be [40, 1], and no matter how we choose to iterate over the data, the inner loop
 will have a large stride (100) for one of the arrays,
 causing cache misses and poor performance. That's why when jix allocates output arrays, it always
-tries to match the inputs layouts. In addition, when iterating over a set of arrays, whether they
+tries to match the inputs' layouts. In addition, when iterating over a set of arrays, whether they
 have matching layout or not, we always prefer to iterate over the dimension with the smallest stride
 as the inner loop, to maximize cache efficiency. A general purpose NdIter is used in jix, which
 sorts dimensions by their strides, deletes dimensions of size 1, and merges consecutive dimensions
@@ -630,7 +637,7 @@ when possible if the resulting merged dimension maintains a contiguous memory la
 
 {% include diagrams/strides.html %}
 
-This optimization alone can x40 improve performance in certain scenarios. For some reason, Rust's
+This optimization alone can improve performance up to 40x in certain scenarios. For some reason, Rust's
 ndarray crate doesn't perform this optimization (as far as I know) and only supports special cases
 (C-order, F-order, contiguous, etc).
 

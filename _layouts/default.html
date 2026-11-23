@@ -80,6 +80,41 @@
       if (next && next.nodeType === 1 && next.textContent.indexOf(call) === 0) n.classList.add("nf");
     });
 
+    // Clicking a plot or diagram shows it large over the page; any click or Esc closes it.
+    (function () {
+      var box = document.createElement("dialog");
+      box.className = "lightbox";
+      document.body.appendChild(box);
+      box.addEventListener("click", function () { box.close(); });
+      function show(el) {
+        box.replaceChildren(el);
+        box.showModal();
+      }
+
+      document.querySelectorAll("a.zoom").forEach(function (a) {
+        a.addEventListener("click", function (e) {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // keep open-in-new-tab
+          e.preventDefault();
+          var src = a.querySelector("img");
+          var img = document.createElement("img");
+          img.src = src.currentSrc || src.src;
+          img.alt = src.alt;
+          show(img);
+        });
+      });
+
+      // A copy of the inline svg, so the page styles still apply. Its arrow markers point at the
+      // original's ids, which draw the same.
+      document.querySelectorAll(".diagram .dg").forEach(function (svg) {
+        svg.addEventListener("click", function () {
+          var copy = svg.cloneNode(true);
+          var vb = svg.viewBox.baseVal;
+          copy.style.width = "min(96vw, calc(94vh * " + vb.width / vb.height + "))";
+          show(copy);
+        });
+      });
+    })();
+
     // Turn each `.code-tabs` block (one rust and one python snippet) into tabs. Picking a
     // language switches every snippet on the page and is remembered for the next visit.
     (function () {

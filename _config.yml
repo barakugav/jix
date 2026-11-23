@@ -32,7 +32,7 @@ github:
   pages_branch: gh-pages
 
 # Commit the benchmark report plots in the post are taken from.
-bench_report_commit: f85a47beaf8d34082dbcc554876ea8a7f3d38a53
+bench_report_commit: 35dddca718675f3ad020f6beea9423353a5a79d4
 
 markdown: kramdown
 highlighter: rouge
