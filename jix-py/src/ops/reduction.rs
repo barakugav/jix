@@ -25,7 +25,7 @@ fn keepdim_after_reduction(array: ArrayAny, original_reduced_dim: usize) -> PyRe
 macro_rules! define_reduction_op {
     (
         $(#[$meta:meta])* $name:ident,
-        $core_op:ident,
+        $CoreOp:ident,
         dispatch = { $($dispatch:tt)* }
         $(, extra_args = ($($extra_arg:ident : $extra_ty:ty = $extra_default:tt),+))?
     ) => {
@@ -52,7 +52,7 @@ macro_rules! define_reduction_op {
                 crate::ops::common::OpDescriptor::new(
                     stringify!($name),
                     crate::ops::common::define_op1_desc!(
-                        $core_op,
+                        $CoreOp,
                         extra_args = DispatchArgs as args { args.dims.as_slice() $($(, args.$extra_arg)+)? },
                         $($dispatch)*
                     ),
@@ -76,7 +76,7 @@ macro_rules! define_reduction_op {
 
     (
         $(#[$meta:meta])* $name:ident,
-        $core_op:ident,
+        $CoreOp:ident,
         single_dim = true,
         dispatch = { $($dispatch:tt)* }
     ) => {
@@ -100,7 +100,7 @@ macro_rules! define_reduction_op {
                 crate::ops::common::OpDescriptor::new(
                     stringify!($name),
                     crate::ops::common::define_op1_desc!(
-                        $core_op,
+                        $CoreOp,
                         extra_args = DispatchArgs as args { args.dim },
                         $($dispatch)*
                     ),

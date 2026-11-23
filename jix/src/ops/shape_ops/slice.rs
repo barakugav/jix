@@ -290,12 +290,12 @@ where
 }
 
 macro_rules! impl_from_tuple_for_slice_spec {
-    ($($ty:ident),+ ; $n:expr ; $($idx:tt),+) => {
-        impl<$($ty),+> From<($($ty,)+)> for SliceSpec
+    ($($T:ident),+ ; $n:expr ; $($idx:tt),+) => {
+        impl<$($T),+> From<($($T,)+)> for SliceSpec
         where
-            $($ty: Into<SliceItem>,)+
+            $($T: Into<SliceItem>,)+
         {
-            fn from(slice: ($($ty,)+)) -> Self {
+            fn from(slice: ($($T,)+)) -> Self {
                 let items: [SliceItem; $n] = [$(slice.$idx.into()),+];
                 Self { slice: items.into_iter().collect() }
             }

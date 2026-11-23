@@ -270,7 +270,7 @@ impl<S: StorageBase> Array<S> {
     /// let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArchiveValidation::default())? };
     ///
     /// // Build a lazy view - no data is read yet
-    /// let view = src.into_typed::<f32>()?.exp().map(|x| x + 1.0);
+    /// let view = src.into_typed::<f32>()?.exp() + 1.0;
     ///
     /// // Write to a new file: blocks are decompressed, modified by ops, and re-compressed one at
     /// // a time. The full array is never held in memory, not even in its compressed form.
@@ -328,7 +328,7 @@ impl<S: StorageBase> Array<S> {
     /// // Write two arrays into a single buffer and record where the second one starts.
     /// let mut buf = Cursor::new(Vec::new());
     /// // A lazy view is compressed on the fly, here into blocks of 1x2 items.
-    /// let scaled = a.map(|x| x * 10);
+    /// let scaled = a * 10;
     /// scaled.write_to(&mut buf, CompactParams::new().block_shape(&[1, 2])?)?;
     /// let offset = buf.position();
     /// // A compact array copies its compressed blocks as-is, so `params` is ignored.

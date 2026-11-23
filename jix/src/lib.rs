@@ -47,8 +47,8 @@
 //! let result = a                  // Array<Compact>
 //!     .exp()                      // Array<Exp<Compact>>
 //!     .floor()                    // Array<Floor<Exp<Compact>>>
-//!     .map(|x| x * 2.0f32)        // Array<Map<Floor<...>>>
-//!     + ones;                     // Array<Add<Map<...>, Compact>>
+//!     * 2.0                       // Array<MulScalar<Floor<...>, f32>>
+//!     + ones;                     // Array<Add<MulScalar<...>, Compact>>
 //!
 //! // materialize the pipeline into a new compressed Array<Compact>
 //! let result_compressed = result.compact()?;
@@ -137,14 +137,21 @@
 //! **Element-wise unary** - `neg`, `abs`, `exp`, `ln`, `sqrt`, `floor`, `ceil`,
 //! `round`, `sign`, `sin`, `cos`, `tan`, ...
 //!
-//! **Element-wise binary** (array op array, via `+`, `-`, `*`, `/`, `%`,
-//! operator overloads and named methods) - `add`, `sub`, `mul`, `div`, `pow`, `minimum`,
-//! `maximum`, ...
+//! **Element-wise binary** (via `+`, `-`, `*`, `/`, `%` operator overloads and named methods) -
+//! `add`, `sub`, `mul`, `div`, `pow`, `minimum`, `maximum`, ...
 //!
-//! For scaling, shifting, or any element-wise transform involving a constant value, use
-//! [`map`](Array::map) - e.g. `a.map(|x| x * 2.0f32)` rather than `a * 2.0f32`. This is a
-//! deliberate design choice to avoid broadcasting of scalars and using the generic arrays flow
-//! path, as `.map` is faster.
+//! The `+`, `-`, `*`, `/`, `%`, `&`, `|` and `^` operators also take a scalar on either side.
+//! It is passed to the op's kernel as is, without building a constant array:
+//!
+//! ```
+//! use jix::Array;
+//! use ndarray::array;
+//!
+//! let a = Array::compact_ndarray(&array![1.0f32, 2.0, 4.0])?;
+//! let result = 1.0 - a * 0.5; // Array<SubScalar<MulScalar<Compact, f32>, f32>>
+//! assert_eq!(result.to_ndarray()?, array![0.5, 0.0, -1.0]);
+//! # Ok::<(), jix::Error>(())
+//! ```
 //!
 //! **Comparisons** - `equal`, `not_equal`, `greater`, `greater_equal`, `less`, ...
 //!

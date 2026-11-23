@@ -205,7 +205,7 @@ macro_rules! impl_array_storage_forward {
         crate::storage::impl_array_storage_forward!('a, T, <$($generics),*>);
     };
 
-    ($lifetime:tt, $generic:ident, <$($generics:tt),* $(,)?>) => {
+    ($lifetime:tt, $T:ident, <$($generics:tt),* $(,)?>) => {
         #[inline(always)]
         fn read_data<'rd>(
             &'rd self,
@@ -218,13 +218,13 @@ macro_rules! impl_array_storage_forward {
 
         #[allow(refining_impl_trait)]
         #[inline(always)]
-        fn read_as_elementwise_pipeline<$lifetime, $generic>(
+        fn read_as_elementwise_pipeline<$lifetime, $T>(
             &$lifetime self,
             index: &crate::storage::Index<'_>,
             context: &crate::ReadContext,
-        ) -> crate::error::Result<impl crate::ops::ElementwisePipeline<$generic> + use<$lifetime, $generic, $($generics),*>>
+        ) -> crate::error::Result<impl crate::ops::ElementwisePipeline<$T> + use<$lifetime, $T, $($generics),*>>
         where
-            $generic: crate::dtype::Dtyped,
+            $T: crate::dtype::Dtyped,
         {
             self.0.read_as_elementwise_pipeline(index, context)
         }

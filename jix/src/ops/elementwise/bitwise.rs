@@ -1,5 +1,6 @@
 use crate::ops::elementwise::op1::define_op1;
 use crate::ops::elementwise::op2::{define_array_op2_method, define_op2};
+use crate::ops::elementwise::op2_scalar::define_op2_scalar;
 use crate::ops::prelude::*;
 
 pub(crate) mod traits {
@@ -200,7 +201,8 @@ define_op2!(
     /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// the `&` operator or [`Array::bitand()`](core::ops::BitAnd::bitand).
+    /// the `&` operator or [`Array::bitand()`](core::ops::BitAnd::bitand). For a scalar operand,
+    /// see [`BitAndScalar`].
     ///
     /// # Examples
     /// ```
@@ -212,18 +214,44 @@ define_op2!(
     /// let result = (a & b).to_ndarray()?;
     /// assert_eq!(result, array![0b1000, 0b0000, 0b0000]);
     ///
-    /// // Mask out the lower nibble.
+    /// // Mask out the lower nibble with a scalar, a `BitAndScalar`.
     /// let c = Array::compact_ndarray(&array![0xABu8, 0xCDu8])?;
-    /// let d = Array::compact_ndarray(&array![0xF0u8, 0xF0u8])?;
-    /// let result = (c & d).to_ndarray()?;
+    /// let result = (c & 0xF0).to_ndarray()?;
     /// assert_eq!(result, array![0xA0, 0xC0]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    And,
-    AndKernel,
+    BitAnd,
+    BitAndKernel,
     crate::scalar::BitAnd::bitand,
     simd: bitand_bulk,
     core_op: core::ops::BitAnd::bitand,
+);
+define_op2_scalar!(
+    /// Element-wise bitwise AND of an array and a scalar.
+    ///
+    /// See [`jix::scalar::BitAnd`](crate::scalar::BitAnd) scalar trait for the per-element
+    /// semantics.
+    ///
+    /// Available via the `&` operator with a scalar on either side: `a & 0xF0` and `0xF0 & a` are
+    /// both a `BitAndScalar<S, T, Rhs>`, as the op is commutative.
+    ///
+    /// The result is a lazy view.
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![0xABu8, 0xCD])?;
+    /// assert_eq!((a.view() & 0xF0).to_ndarray()?, array![0xA0, 0xC0]);
+    /// assert_eq!((0xF0 & a).to_ndarray()?, array![0xA0, 0xC0]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    BitAndScalar,
+    BitAndKernel,
+    crate::scalar::BitAnd,
+    core_op: core::ops::BitAnd::bitand,
+    commutative: true,
 );
 define_op2!(
     /// Element-wise bitwise OR of two arrays.
@@ -233,7 +261,8 @@ define_op2!(
     /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// the `|` operator or [`Array::bitor()`](core::ops::BitOr::bitor).
+    /// the `|` operator or [`Array::bitor()`](core::ops::BitOr::bitor). For a scalar operand,
+    /// see [`BitOrScalar`].
     ///
     /// # Examples
     /// ```
@@ -245,18 +274,43 @@ define_op2!(
     /// let result = (a | b).to_ndarray()?;
     /// assert_eq!(result, array![0b1110, 0b1111, 0b1111]);
     ///
-    /// // Set a specific bit pattern.
+    /// // Set a specific bit pattern with a scalar, a `BitOrScalar`.
     /// let c = Array::compact_ndarray(&array![0x0Fu8, 0x00u8])?;
-    /// let d = Array::compact_ndarray(&array![0xF0u8, 0xF0u8])?;
-    /// let result = (c | d).to_ndarray()?;
+    /// let result = (c | 0xF0).to_ndarray()?;
     /// assert_eq!(result, array![0xFF, 0xF0]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    Or,
-    OrKernel,
+    BitOr,
+    BitOrKernel,
     crate::scalar::BitOr::bitor,
     simd: bitor_bulk,
     core_op: core::ops::BitOr::bitor,
+);
+define_op2_scalar!(
+    /// Element-wise bitwise OR of an array and a scalar.
+    ///
+    /// See [`jix::scalar::BitOr`](crate::scalar::BitOr) scalar trait for the per-element
+    /// semantics.
+    ///
+    /// Available via the `|` operator with a scalar on either side: `a | 0x0F` and `0x0F | a` are
+    /// both a `BitOrScalar<S, T, Rhs>`, as the op is commutative.
+    ///
+    /// The result is a lazy view.
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![0xA0u8, 0xC3])?;
+    /// assert_eq!((a | 0x0F).to_ndarray()?, array![0xAF, 0xCF]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    BitOrScalar,
+    BitOrKernel,
+    crate::scalar::BitOr,
+    core_op: core::ops::BitOr::bitor,
+    commutative: true,
 );
 define_op2!(
     /// Element-wise bitwise XOR of two arrays.
@@ -267,7 +321,8 @@ define_op2!(
     /// The result is a lazy view.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// the `^` operator or [`Array::bitxor()`](core::ops::BitXor::bitxor).
+    /// the `^` operator or [`Array::bitxor()`](core::ops::BitXor::bitxor). For a scalar operand,
+    /// see [`BitXorScalar`].
     ///
     /// # Examples
     /// ```
@@ -279,18 +334,43 @@ define_op2!(
     /// let result = (a ^ b).to_ndarray()?;
     /// assert_eq!(result, array![0b0110, 0b0000, 0b0000]);
     ///
-    /// // Toggle bits using a mask.
+    /// // Toggle bits using a scalar mask, a `BitXorScalar`.
     /// let c = Array::compact_ndarray(&array![0xFFu8, 0x0Fu8])?;
-    /// let d = Array::compact_ndarray(&array![0x0Fu8, 0x0Fu8])?;
-    /// let result = (c ^ d).to_ndarray()?;
+    /// let result = (c ^ 0x0F).to_ndarray()?;
     /// assert_eq!(result, array![0xF0, 0x00]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    Xor,
-    XorKernel,
+    BitXor,
+    BitXorKernel,
     crate::scalar::BitXor::bitxor,
     simd: bitxor_bulk,
     core_op: core::ops::BitXor::bitxor,
+);
+define_op2_scalar!(
+    /// Element-wise bitwise XOR of an array and a scalar.
+    ///
+    /// See [`jix::scalar::BitXor`](crate::scalar::BitXor) scalar trait for the per-element
+    /// semantics.
+    ///
+    /// Available via the `^` operator with a scalar on either side: `a ^ 0xFF` and `0xFF ^ a` are
+    /// both a `BitXorScalar<S, T, Rhs>`, as the op is commutative.
+    ///
+    /// The result is a lazy view.
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![0x0Fu8, 0xA5])?;
+    /// assert_eq!((a ^ 0xFF).to_ndarray()?, array![0xF0, 0x5A]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    BitXorScalar,
+    BitXorKernel,
+    crate::scalar::BitXor,
+    core_op: core::ops::BitXor::bitxor,
+    commutative: true,
 );
 
 define_op1!(
@@ -471,6 +551,7 @@ mod tests {
     use std::ops::{BitAnd, BitOr, BitXor, Not};
 
     use crate::ops::elementwise::op2::tests::test_op2;
+    use crate::ops::elementwise::op2_scalar::tests::test_op2_scalar;
     use crate::scalar::bool8;
 
     /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
@@ -479,7 +560,7 @@ mod tests {
     fn simd_bodies_all_levels() {
         use fearless_simd::Simd;
 
-        use super::{AndKernel, BitwiseShiftRightKernel, NotKernel, OrKernel, XorKernel};
+        use super::{BitAndKernel, BitOrKernel, BitXorKernel, BitwiseShiftRightKernel, NotKernel};
         use crate::ops::elementwise::op1::Op1Kernel;
         use crate::ops::elementwise::op2::Op2Kernel;
         use crate::util::{SimdTestValues, assert_same_elements, for_each_simd_level};
@@ -538,9 +619,9 @@ mod tests {
                 };
             }
             simd.vectorize(|| {
-                ints!(case!(AndKernel, |x, y| x & y));
-                ints!(case!(OrKernel, |x, y| x | y));
-                ints!(case!(XorKernel, |x, y| x ^ y));
+                ints!(case!(BitAndKernel, |x, y| x & y));
+                ints!(case!(BitOrKernel, |x, y| x | y));
+                ints!(case!(BitXorKernel, |x, y| x ^ y));
                 macro_rules! not {
                     ($kernel:ident, $t:ty, $_t:ty, $f:expr) => {
                         case1!($kernel, $t, |x: $t| !x)
@@ -554,6 +635,18 @@ mod tests {
     }
 
     test_op2!(bitand, |a, b| a & b, [u8, u32, bool8], any_strategy);
+    test_op2_scalar!(
+        bitand_scalar, &, |a, b| a & b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool8], any_strategy
+    );
+    test_op2_scalar!(
+        bitor_scalar, |, |a, b| a | b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool8], any_strategy
+    );
+    test_op2_scalar!(
+        bitxor_scalar, ^, |a, b| a ^ b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool8], any_strategy
+    );
     test_op2!(
         bitwise_shift_left,
         |a, b| a.unbounded_shl(b as u32),

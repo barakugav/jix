@@ -111,8 +111,8 @@ mod compact;
 /// let scaled = array                               // Array<Compact>
 ///     .exp()                                       // Array<Exp<Compact>>
 ///     .floor()                                     // Array<Floor<Exp<Compact>>>
-///     .map(|x| x * 2.0f32)                         // Array<Map<Floor<...>>>
-///     + ones;                                      // Array<Add<Map<...>, Compact>>
+///     * 2.0                                        // Array<MulScalar<Floor<...>, f32>>
+///     + ones;                                      // Array<Add<MulScalar<...>, Compact>>
 /// // Lazy views are still arrays: reading data runs the pipeline on demand, possibly on a
 /// // subset of the original array.
 /// assert_eq!(scaled.shape(), &[2, 3]);
@@ -121,7 +121,7 @@ mod compact;
 ///
 /// // Materialize the result and write to a file.
 /// let result = scaled
-///     .argmax(/* dim */ 1)                        // Array<ArgMax<Add<Map<...>, Compact>>>
+///     .argmax(/* dim */ 1)                        // Array<ArgMax<Add<MulScalar<...>, Compact>>>
 ///     .cast::<i16>()                               // Array<Cast<ArgMax<Add<...>>>>
 ///     // materialize the pipeline by recompressing
 ///     .compact()?;                                 // Array<Compact>

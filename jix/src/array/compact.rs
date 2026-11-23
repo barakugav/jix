@@ -47,9 +47,9 @@ impl<S: StorageBase> Array<S> {
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
     /// let result =                  // Array<Compact>
-    ///     a.map(|x| x * 7.399_f32)  // Array<Map<Compact>>
-    ///    .floor()                   // Array<Floor<Map<Compact>>>
-    ///    .compact()?;               // Array<Compact> - materialize the pipeline
+    ///     (a * 7.399)               // Array<MulScalar<Compact, f32>>
+    ///     .floor()                  // Array<Floor<MulScalar<...>>>
+    ///     .compact()?;              // Array<Compact> - materialize the pipeline
     /// # Ok::<(), jix::Error>(())
     /// ```
     pub fn compact(&self) -> Result<Array<Compact<S::ElementType>>> {

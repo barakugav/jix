@@ -50,8 +50,8 @@ impl<T> CompactArray<T> {
     /// let scaled = array                               // Array<Compact>
     ///     .exp()                                       // Array<Exp<Compact>>
     ///     .floor()                                     // Array<Floor<Exp<Compact>>>
-    ///     .map(|x| x * 2.0f32)                         // Array<Map<Floor<...>>>
-    ///     + ones;                                      // Array<Add<Map<...>, Compact>>
+    ///     * 2.0                                        // Array<MulScalar<Floor<...>, f32>>
+    ///     + ones;                                      // Array<Add<MulScalar<...>, Compact>>
     /// assert_eq!(scaled.shape(), &[2, 3]);
     /// assert_eq!(scaled.dtype(), &f32::DTYPE);
     /// assert_eq!(scaled.to_ndarray::<Ix2>()?[[1, 1]], 957.0);

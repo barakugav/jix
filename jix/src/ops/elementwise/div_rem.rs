@@ -1,4 +1,5 @@
 use crate::ops::elementwise::op2::{define_array_op2_method, define_op2};
+use crate::ops::elementwise::op2_scalar::define_op2_scalar;
 use crate::ops::prelude::*;
 
 pub(crate) mod traits {
@@ -613,8 +614,7 @@ define_op2!(
     ///
     /// See [`jix::scalar::Div`](crate::scalar::Div) scalar trait for the per-element semantics.
     ///
-    /// Available via the `/` operator on arrays. For dividing every element by a constant, use
-    /// [`Array::map`]: `a.map(|x| x / 2i32)`.
+    /// Available via the `/` operator on arrays. For dividing by a scalar, see [`DivScalar`].
     ///
     /// The result is a lazy view.
     ///
@@ -634,6 +634,35 @@ define_op2!(
     crate::scalar::Div::div(status),
     simd: div_bulk,
     core_op: core::ops::Div::div,
+);
+define_op2_scalar!(
+    /// Element-wise division between an array and a scalar.
+    ///
+    /// See [`jix::scalar::Div`](crate::scalar::Div) scalar trait for the per-element semantics.
+    ///
+    /// Available via the `/` operator with a scalar on either side: `a / 2.0` is a
+    /// `DivScalar<S, T, Rhs>`, and `2.0 / a` a `DivScalar<S, T, Lhs>`.
+    ///
+    /// The result is a lazy view.
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use jix::ops::{DivScalar, Lhs};
+    /// use jix::storage::Compact;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 4.0])?;
+    /// assert_eq!((a.view() / 2.0).to_ndarray()?, array![0.5, 1.0, 2.0]);
+    /// let inv: Array<DivScalar<Compact<f32>, f32, Lhs>> = 1.0 / a;
+    /// assert_eq!(inv.to_ndarray()?, array![1.0, 0.5, 0.25]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    DivScalar,
+    DivKernel,
+    crate::scalar::Div,
+    core_op: core::ops::Div::div,
+    commutative: false,
 );
 define_op2!(
     /// Element-wise truncated division of two arrays.
@@ -732,7 +761,7 @@ define_op2!(
     /// per-element semantics.
     ///
     /// Available via the `%` operator on arrays and as [`Array::remainder_trunc`]. For the
-    /// remainder of every element by a constant, use [`Array::map`]: `a.map(|x| x % 3i32)`.
+    /// remainder by a scalar, see [`RemainderTruncScalar`].
     ///
     /// The result is a lazy view.
     ///
@@ -752,6 +781,33 @@ define_op2!(
     crate::scalar::RemainderTrunc::remainder_trunc(status),
     simd: remainder_trunc_bulk,
     core_op: core::ops::Rem::rem,
+);
+define_op2_scalar!(
+    /// Element-wise truncated remainder of an array and a scalar.
+    ///
+    /// See [`jix::scalar::RemainderTrunc`](crate::scalar::RemainderTrunc) scalar trait for the per-element
+    /// semantics.
+    ///
+    /// Available via the `%` operator with a scalar on either side: `a % 3` is a
+    /// `RemainderTruncScalar<S, T, Rhs>`, and `3 % a` a `RemainderTruncScalar<S, T, Lhs>`.
+    ///
+    /// The result is a lazy view.
+    ///
+    /// # Examples
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![7i32, -7, 9])?;
+    /// assert_eq!((a.view() % 3).to_ndarray()?, array![1, -1, 0]);
+    /// assert_eq!((10 % a).to_ndarray()?, array![3, 3, 1]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    RemainderTruncScalar,
+    RemainderTruncKernel,
+    crate::scalar::RemainderTrunc,
+    core_op: core::ops::Rem::rem,
+    commutative: false,
 );
 define_op2!(
     /// Element-wise floored remainder of two arrays.
@@ -838,6 +894,7 @@ mod tests {
     use ndarray::{Ix1, Ix2, IxDyn};
 
     use crate::ops::elementwise::op2::tests::test_op2;
+    use crate::ops::elementwise::op2_scalar::tests::test_op2_scalar;
 
     /// The `apply_bulk` of the kernels of this module (their scalar traits' SIMD `*_bulk`) against
     /// their scalar semantics (release builds: wrapping), on every SIMD level of the CPU, over edge
@@ -989,6 +1046,62 @@ mod tests {
         #[cfg(feature = "num-complex")]
         [complex_f32, complex_f64]
     );
+
+    test_op2_scalar!(
+        div_scalar, /, |a, b| a / b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64], op_safe_non_zero_strategy
+    );
+    #[cfg(feature = "half")]
+    test_op2_scalar!(div_scalar, /, |a, b| a / b, [f16], op_safe_non_zero_strategy);
+    test_op2_scalar!(
+        remainder_trunc_scalar, %, |a, b| a % b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64], op_safe_non_zero_strategy
+    );
+    #[cfg(feature = "half")]
+    test_op2_scalar!(remainder_trunc_scalar, %, |a, b| a % b, [f16], op_safe_non_zero_strategy);
+    #[cfg(feature = "num-complex")]
+    test_op2_scalar!(
+        div_scalar, /, |a, b| a / b, [complex_f32, complex_f64], op_safe_non_zero_strategy
+    );
+
+    #[test]
+    fn div_rem_scalar_by_zero() {
+        use crate::Array;
+        use crate::error::ErrorKind;
+
+        let a = Array::compact_ndarray(&ndarray::array![6i32, 0, -3]).unwrap();
+        let err = (a.view() / 0).to_ndarray::<Ix1>().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Arithmetic);
+        let err = (a.view() % 0).to_ndarray::<Ix1>().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Arithmetic);
+        let err = (12 / a.view()).to_ndarray::<Ix1>().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Arithmetic);
+        let err = (12 % a.view()).to_ndarray::<Ix1>().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Arithmetic);
+        let b = Array::compact_ndarray(&ndarray::array![5i32, -4, 3]).unwrap();
+        assert_eq!(
+            (13 / b.view()).to_ndarray::<Ix1>().unwrap(),
+            ndarray::array![2, -3, 4]
+        );
+        assert_eq!(
+            (-13 % b).to_ndarray::<Ix1>().unwrap(),
+            ndarray::array![-3, -1, -1]
+        );
+        assert_eq!(
+            (a.view() % 4).to_ndarray::<Ix1>().unwrap(),
+            ndarray::array![2, 0, -3]
+        );
+        assert_eq!(
+            (a / 3).to_ndarray::<Ix1>().unwrap(),
+            ndarray::array![2, 0, -1]
+        );
+        // Integer `MIN / -1` wraps.
+        let m = Array::compact_ndarray(&ndarray::array![i8::MIN, 4]).unwrap();
+        assert_eq!(
+            (m / -1).to_ndarray::<Ix1>().unwrap(),
+            ndarray::array![i8::MIN, -4]
+        );
+    }
 
     /// The floored remainder, from the truncated one: adjusted to the sign of `b`.
     fn remainder_floor_ref<T>(a: T, b: T) -> T

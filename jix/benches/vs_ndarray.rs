@@ -258,9 +258,9 @@ fn bench_op(c: &mut Criterion) {
 // ---------------------------------------------------------------------------------------------
 
 // The same chain the Python suite runs, over array operands only - see `array_impls.CHAIN_STEPS`.
-// Starting from `a`, the cycle builds up the shape of `a*a + b*b + a*b`. No scalar constants: jix
-// reads a 0-stride operand through the same strided loop as a real array, so a scalar chain would
-// measure that rather than whether fusing pays off.
+// Starting from `a`, the cycle builds up the shape of `a*a + b*b + a*b`. No scalar constants: real
+// operands keep the chain comparable with the Python suite, and literal constants can fold away
+// (see scripts/bench/DEVELOPER.md).
 //
 // Unrolled because each step produces a distinct storage type, so the chain cannot be built in a
 // loop. `.view()` on every use because the operand types are not `Clone`.
