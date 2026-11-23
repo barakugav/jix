@@ -1,11 +1,12 @@
 """Grouped-bar report renderer.
 
 One plot per operation. The x axis is discrete cases we chose deliberately; each case holds one
-bar per library; the y axis is performance relative to a baseline library, so a bar above the 1.0
-rule is better and a bar below it is worse.
+bar per library; the y axis is performance relative to a baseline library, so higher is always
+better.
 
-Bars rise from a common floor on a log axis, with a rule drawn at 1.0 - so the baseline library's
-bar tops out exactly on the rule, and a 40x win and a 300x loss share a readable plot.
+Bars rise from a common floor on a log axis - so the baseline library's bar tops out exactly on the
+1x tick, a loss is a bar shorter than it, and a 40x win and a 300x loss share a readable plot.
+Compressed size does not draw its baseline (the raw array), whose bar would just mark 1x.
 
 Per-platform results stack vertically into a single PNG per section.
 """
@@ -23,37 +24,37 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FixedLocator
 
-# The baseline library is neutral gray on purpose - it is a reference
-# line drawn as a bar, not one of the series being compared.
 THEME = {
-    "surface": "#fcfcfb",
+    "font": ["Helvetica Neue", "Arial", "DejaVu Sans"],
+    "surface": "#ffffff",
+    "grid": "#e1e0d9",
     "ink": "#0b0b0b",
     "sub": "#52514e",
     "muted": "#898781",
-    "grid": "#e1e0d9",
     "axis": "#c3c2b7",
-    "baseline": "#a8a69c",
 }
-# One hue per library family, one shade per variant, fixed across every plot. `jix` and `blosc2`
-# always mean the byte-shuffled build (regular shade); the unfiltered `-noshuffle` builds appear
-# only in the compression section, where the filter is the subject, and always get the light shade.
+# Fixed across every plot. jix is the subject, so it gets the one saturated hue and bold labels;
+# everything else is a soft tone that stays readable without competing, and the baseline libraries
+# share one light stone. `jix` and `blosc2` always mean the byte-shuffled build; the unfiltered
+# `-noshuffle` builds appear only in the compression section and reuse their library's color, hatched.
 LIBRARY_COLORS = {
-    "jix-noshuffle": "#a1d99b",
-    "jix": "#41ab5d",
-    "jix-plain": "#006d2c",
-    "blosc2-noshuffle": "#9ecae1",
-    "blosc2": "#4292c6",
-    "blosc2-chunked": "#08519c",
-    "zarr": "#f2c80f",
+    "numpy": "#cfccc2",
+    "ndarray": "#cfccc2",
+    "jix-plain": "#a8431a",
+    "jix": "#e8642c",
+    "blosc2": "#a8bdd2",
+    "blosc2-chunked": "#6f88a3",
+    "zarr": "#e0c48e",
 }
 BASELINE_LIBRARIES = {"numpy", "ndarray"}
 
 
-def library_color(library):
-    """Fixed color per library, shared by every plot in the report."""
-    if library in BASELINE_LIBRARIES:
-        return THEME["baseline"]
-    return LIBRARY_COLORS[library]
+def _bar_style(library):
+    """Fill, and hatching for the unfiltered variants, shared by the bars and the legend."""
+    color = LIBRARY_COLORS[library.removesuffix("-noshuffle")]
+    if library.endswith("-noshuffle"):
+        return {"facecolor": color, "hatch": "////", "edgecolor": THEME["surface"]}
+    return {"facecolor": color}
 
 
 def load_python(path, platform):
@@ -115,13 +116,13 @@ def load_rust(criterion_root, platform, case_labels=None):
     return rows
 
 
-# How each metric is turned into a bar height, and which direction is good. Everything except
-# throughput is a multiple of the baseline where shorter is better - so a bar twice the height of
-# the 1x rule took twice as long, used twice the memory, or stored twice the bytes.
+# How each metric is turned into a bar height, and which direction is good. The relative metrics
+# are a multiple of the baseline where higher is better - twice as fast, half the memory, or half
+# the bytes stored. Each maps to (the subtitle, the word for above 1x, the word for below it).
 RELATIVE = {
-    "time": "shorter is faster",
-    "bytes": "shorter is less memory",
-    "stored": "shorter is smaller on disk",
+    "time": ("higher is faster", "faster", "slower"),
+    "bytes": ("higher is less memory", "less", "more"),
+    "stored": ("higher is smaller on disk", "smaller", "larger"),
 }
 ABSOLUTE = {
     "throughput": "taller is faster",
@@ -136,8 +137,8 @@ def _score(value, baseline, metric, section):
     if metric == "memory":
         return value / 1e6  # MB
     if metric == "stored":
-        return 1.0 / value  # recorded as raw/stored; shown as the fraction of the raw array kept
-    return value / baseline  # time and bytes: a multiple of the baseline, less is better
+        return value  # recorded as raw/stored, the compression ratio
+    return baseline / value  # time and bytes: how many times better than the baseline
 
 
 def _format_score(score, metric="time"):
@@ -182,6 +183,7 @@ def _format_value(value, metric):
     return f"{value * 1e9:.0f} ns"
 
 
+@plt.rc_context({"font.family": THEME["font"]})
 def plot_section(rows, section, out_dir):
     """Render one section to a single PNG, one subplot row per platform.
 
@@ -189,7 +191,11 @@ def plot_section(rows, section, out_dir):
     ``cases`` (x order) and ``libraries`` (bar order).
     """
     metric = section.get("metric", "time")
-    cases, libraries = section["cases"], section["libraries"]
+    relative = metric in RELATIVE
+    cases = section["cases"]
+    # Compressed size does not draw its baseline, the raw array, whose bar would just mark 1x.
+    skip = section["baseline"] if metric == "stored" else None
+    libraries = [lib for lib in section["libraries"] if lib != skip]
     by_platform = defaultdict(dict)  # platform -> (case, library) -> value
     source = section.get("source", section["key"])
     for row in rows:
@@ -210,7 +216,7 @@ def plot_section(rows, section, out_dir):
             baseline = cells.get((case, section["baseline"]))
             for library in libraries:
                 value = cells.get((case, library))
-                if value is None or (baseline is None and metric in RELATIVE and metric != "stored"):
+                if value is None or (baseline is None and relative and metric != "stored"):
                     continue
                 score = _score(value, baseline, metric, section)
                 # A log axis cannot draw a zero; a linear one can, and for absolute memory zero is
@@ -225,27 +231,25 @@ def plot_section(rows, section, out_dir):
     if not log_scale:
         floor, ceiling = 0.0, max(everything) * 1.3
     else:
-        floor = 10 ** (math.floor(math.log10(min(everything))) - 0.15)
-        ceiling = 10 ** (math.log10(max(everything)) + 0.55)
-    if metric in RELATIVE:
-        # Keep headroom on both sides of the 1x rule, so it reads as a reference line rather than
-        # the top or bottom edge of the plot when every library lands on one side of it.
-        floor, ceiling = min(floor, 1 / 1.5), max(ceiling, 1.9)
+        floor = 10 ** (math.log10(min(everything)) - 0.45)
+        ceiling = 10 ** (math.log10(max(everything)) + 0.45)
+    if relative:
+        # Keep headroom on both sides of 1x, so the baseline is never the top or bottom edge of the
+        # plot when every library lands on one side of it.
+        floor, ceiling = min(floor, 1 / 1.9), max(ceiling, 1.9)
 
-    if metric in RELATIVE:
-        legend_line = f"relative to {section['baseline']}; {RELATIVE[metric]}"
-    else:
-        legend_line = ABSOLUTE[metric]
+    legend_line = f"relative to {section['baseline']}; {RELATIVE[metric][0]}" if relative else ABSOLUTE[metric]
     subtitle = f"{section.get('subtitle', '')} - {legend_line}"
     # Wide enough for the bars, but never so narrow that the header text runs off the edge.
     width = min(16.0, max(7.0, 0.30 * len(cases) * len(libraries) + 2.2, 0.058 * len(subtitle) + 0.4))
-    height = 2.55 * len(platforms) + 1.5
+    height = 2.55 * len(platforms) + 1.4
     fig, axes = plt.subplots(len(platforms), 1, figsize=(width, height), squeeze=False, sharex=True)
     fig.set_facecolor(THEME["surface"])
     axes = [ax for (ax,) in axes]
 
-    span = 0.84  # width of a case's bar group, leaving a gap between cases
-    bar_w = span / len(libraries)
+    # A case's bar group spans 0.84, leaving a gap between cases; fewer than three bars stay that
+    # wide each rather than stretching to fill it.
+    bar_w = 0.84 / max(len(libraries), 3)
     for ax, platform in zip(axes, platforms):
         ax.set_facecolor(THEME["surface"])
         for side in ("top", "right", "left"):
@@ -255,50 +259,54 @@ def plot_section(rows, section, out_dir):
         if log_scale:
             ax.set_yscale("log")
         ax.set_ylim(floor, ceiling)
-        ax.grid(axis="y", color=THEME["grid"], lw=0.7, zorder=0)
+        ax.grid(axis="y", color=THEME["grid"], lw=0.8, zorder=0)
         ax.set_axisbelow(True)
-
         for ci, case in enumerate(cases):
             for li, library in enumerate(libraries):
                 score = scores[platform].get((case, library))
                 if score is None:
                     continue
-                x = ci + (li + 0.5) * bar_w - span / 2
+                x = ci + (li + 0.5 - len(libraries) / 2) * bar_w
                 # bottom/height on a log axis still draws the rectangle floor -> score.
                 ax.bar(
                     x,
                     score - floor,
                     bottom=floor,
                     width=bar_w * 0.84,  # the gap between neighbouring bars
-                    color=library_color(library),
                     zorder=3,
                     linewidth=0,
+                    **_bar_style(library),
                 )
-                if library in BASELINE_LIBRARIES and metric in RELATIVE:
-                    continue  # the bar tops out on the 1x rule; a "1.00x" label adds nothing
+                if library in BASELINE_LIBRARIES and relative:
+                    continue  # the bar tops out on the 1x tick, which is labelled already
+                # A loss is labelled with how many times worse - "6.5x" under the "10x slower" tick
+                # rather than "0.15x".
+                jix = library.split("-")[0] == "jix"
                 ax.annotate(
-                    _format_score(score, metric),
+                    _format_score(1 / score if relative and score < 1 else score, metric),
                     (x, score),
                     textcoords="offset points",
                     xytext=(0, 3),
                     ha="center",
                     va="bottom",
-                    fontsize=6.4,
-                    rotation=90,
-                    color=THEME["sub"],
+                    zorder=5,  # over the grid line a label just under a tick would cross
+                    bbox={"boxstyle": "square,pad=0.1", "fc": THEME["surface"], "ec": "none"},
+                    fontsize=6.8,
+                    color=THEME["ink"] if jix else THEME["sub"],
+                    fontweight="bold" if jix else "normal",
                 )
-        if metric in RELATIVE:
-            # Every bar is read against this line, and it is where the baseline's own bar tops out.
-            ax.axhline(1.0, color=THEME["ink"], lw=1.2, zorder=4)
         if log_scale:
             decades = range(math.floor(math.log10(floor)), math.ceil(math.log10(ceiling)) + 1)
             ticks = [10.0**d for d in decades if floor <= 10.0**d <= ceiling]
+            if len(ticks) < 3:
+                # A range inside one decade gets 2x and 5x steps too, both ways from each decade.
+                steps = {round(s * 10.0**d, 12) for d in decades for s in (0.2, 0.5, 1, 2, 5)}
+                ticks = sorted(t for t in steps if floor <= t <= ceiling)
             ax.yaxis.set_major_locator(FixedLocator(ticks))
-            ax.set_yticklabels([_format_score(t, metric) for t in ticks], fontsize=7.5)
+            ax.set_yticklabels([_tick_label(t, metric, section["baseline"]) for t in ticks], fontsize=7.5)
         ax.minorticks_off()
-        ax.set_ylabel(
-            f"{platform}\n{section['unit']}" if "unit" in section else platform, color=THEME["sub"], fontsize=9
-        )
+        title = f"{platform} ({section['unit']})" if "unit" in section else platform
+        ax.set_title(title, loc="left", fontsize=9, fontweight="bold", color=THEME["sub"], pad=4)
 
     axes[-1].set_xticks(range(len(cases)))
     axes[-1].set_xticklabels(cases, fontsize=8, color=THEME["sub"])
@@ -316,23 +324,35 @@ def plot_section(rows, section, out_dir):
         va="top",
     )
     fig.text(0.008, 1 - 0.45 / height, subtitle, fontsize=8.2, color=THEME["muted"], va="top")
-    handles = [plt.Rectangle((0, 0), 1, 1, fc=library_color(lib), ec="none") for lib in libraries]
+    handles = [plt.Rectangle((0, 0), 1, 1, lw=0, **_bar_style(lib)) for lib in libraries]
     fig.legend(
         handles,
         libraries,
-        loc="lower center",
-        ncol=min(len(libraries), 7),
+        loc="upper left",
+        ncol=len(libraries),
         frameon=False,
         fontsize=8.5,
         labelcolor=THEME["sub"],
-        bbox_to_anchor=(0.5, 0.002),
+        handlelength=1.2,
+        columnspacing=1.4,
+        bbox_to_anchor=(0.003, 1 - 0.66 / height),
     )
-    fig.tight_layout(rect=(0, 0.04 + 0.2 / height, 1, 1 - 0.72 / height))
+    fig.tight_layout(rect=(0, 0.01, 1, 1 - 1.04 / height))
     out = Path(out_dir) / f"{section['key']}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150, facecolor=THEME["surface"])
     plt.close(fig)
     return out
+
+
+def _tick_label(tick, metric, baseline):
+    """A y tick: the baseline at 1x, and how many times better or worse elsewhere."""
+    if metric not in RELATIVE:
+        return _format_score(tick, metric)
+    if tick == 1:
+        return f"{baseline} 1x"
+    _, up, down = RELATIVE[metric]
+    return f"{round(tick, 6):g}x {up}" if tick > 1 else f"{round(1 / tick, 6):g}x {down}"
 
 
 def markdown_table(rows, section):

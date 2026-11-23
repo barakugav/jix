@@ -14,6 +14,10 @@ NumPy, Blosc2 and Zarr in Python.
 - **Codec settings are matched** across jix, Blosc2 and Zarr: zstd level 3, byte-shuffle.
 The array is `[130000, 200]` in Rust and Python - 104 MB as `i32/f32`.
 
+Most plots show each library's speed relative to NumPy (or `ndarray` in Rust), whose bar tops out
+on the `1x` line, so higher is always better: a bar above the line is faster, a bar below it is
+slower, by the multiple printed on the bar.
+
 In plots, the `jix` and `blosc2` labels always mean the byte-shuffled variant - the default for both libs, the configuration most people would actually
 use. The unfiltered variants appear only in the compression section, where the filter is the thing
 being measured. `jix-plain` is jix over an ordinary uncompressed in-memory buffer: it isolates the
