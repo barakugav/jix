@@ -105,9 +105,9 @@ pub struct CompactView<'a, ET>(
 /// Its block layout and compression settings are available through [`CompactArrayMethods`].
 pub struct CompactMmap<ET>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, ET>);
 macro_rules! impl_array_storage {
-    ($ty:ident < $($lt:lifetime,)? ET >) => {
-        impl<$($lt,)? ET> crate::storage::ArrayStorageImpl for $ty<$($lt,)? ET> {}
-        impl<$($lt,)? ET> StorageBase for $ty<$($lt,)? ET>
+    ($Storage:ident < $($lt:lifetime,)? ET >) => {
+        impl<$($lt,)? ET> crate::storage::ArrayStorageImpl for $Storage<$($lt,)? ET> {}
+        impl<$($lt,)? ET> StorageBase for $Storage<$($lt,)? ET>
         where
             ET: crate::ElementType,
         {
@@ -151,10 +151,10 @@ macro_rules! impl_array_storage {
                 }))
             }
 
-            type ElementTypeChange<NewET: ElementType> = $ty<$($lt,)? NewET>;
+            type ElementTypeChange<NewET: ElementType> = $Storage<$($lt,)? NewET>;
             #[inline]
             fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
-                Ok($ty(self.0.element_type_change()?))
+                Ok($Storage(self.0.element_type_change()?))
             }
         }
     };

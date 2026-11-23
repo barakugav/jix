@@ -76,16 +76,16 @@ where
 }
 
 macro_rules! define_op2_scalar {
-    (@lhs true, $ScalarOp:ident, $Kernel:ident, $trait:ident, $core_op_trait:ident, $core_op_fn:ident) => {
+    (@lhs true, $ScalarOp:ident, $Kernel:ident, $Trait:ident, $CoreTrait:ident, $core_fn:ident) => {
         crate::ops::elementwise::op2_scalar::define_op2_scalar!(
-            @lhs_core_ops Rhs, $ScalarOp, $trait, $core_op_trait, $core_op_fn
+            @lhs_core_ops Rhs, $ScalarOp, $Trait, $CoreTrait, $core_fn
         );
     };
-    (@lhs false, $ScalarOp:ident, $Kernel:ident, $trait:ident, $core_op_trait:ident, $core_op_fn:ident) => {
+    (@lhs false, $ScalarOp:ident, $Kernel:ident, $Trait:ident, $CoreTrait:ident, $core_fn:ident) => {
         impl<S, T> $ScalarOp<S, T, crate::ops::Lhs>
         where
             S: crate::Storage,
-            T: crate::scalar::$trait<S::Item, Output: crate::dtype::Dtyped> + Copy + 'static,
+            T: crate::scalar::$Trait<S::Item, Output: crate::dtype::Dtyped> + Copy + 'static,
         {
             #[doc = concat!("Constructs a [`", stringify!($ScalarOp), "`] storage of `scalar op array`. See the struct docs for semantics and examples.")]
             pub fn new(scalar: T, array: S) -> crate::error::Result<Self> {
@@ -101,9 +101,9 @@ macro_rules! define_op2_scalar {
         impl<S, T> crate::storage::StorageBase for $ScalarOp<S, T, crate::ops::Lhs>
         where
             S: crate::Storage,
-            T: crate::scalar::$trait<S::Item, Output: crate::dtype::Dtyped> + Copy + 'static,
+            T: crate::scalar::$Trait<S::Item, Output: crate::dtype::Dtyped> + Copy + 'static,
         {
-            type ElementType = <T as crate::scalar::$trait<S::Item>>::Output;
+            type ElementType = <T as crate::scalar::$Trait<S::Item>>::Output;
             crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
 
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
@@ -113,7 +113,7 @@ macro_rules! define_op2_scalar {
             crate::ops::impl_element_type_change_default!();
         }
         crate::ops::elementwise::op2_scalar::define_op2_scalar!(
-            @lhs_core_ops Lhs, $ScalarOp, $trait, $core_op_trait, $core_op_fn
+            @lhs_core_ops Lhs, $ScalarOp, $Trait, $CoreTrait, $core_fn
         );
     };
     (@lhs_core_ops $($args:tt)*) => {
@@ -135,30 +135,30 @@ macro_rules! define_op2_scalar {
         #[cfg(feature = "num-complex")]
         crate::ops::elementwise::op2_scalar::define_op2_scalar!(@lhs_core_op $($args)*, [crate::scalar::Complex<f64>]);
     };
-    (@lhs_core_op Rhs, $ScalarOp:ident, $trait:ident, $core_op_trait:ident, $core_op_fn:ident, [$T:ty]) => {
-        impl<S> core::ops::$core_op_trait<crate::Array<S>> for $T
+    (@lhs_core_op Rhs, $ScalarOp:ident, $Trait:ident, $CoreTrait:ident, $core_fn:ident, [$T:ty]) => {
+        impl<S> core::ops::$CoreTrait<crate::Array<S>> for $T
         where
             S: crate::Storage,
-            S::Item: crate::scalar::$trait<$T, Output: crate::dtype::Dtyped>,
+            S::Item: crate::scalar::$Trait<$T, Output: crate::dtype::Dtyped>,
         {
             type Output = crate::Array<$ScalarOp<S, $T, crate::ops::Rhs>>;
             #[doc = concat!("Applies the [`", stringify!($ScalarOp), "`] operation, see the op struct docs for details.")]
             #[track_caller]
-            fn $core_op_fn(self, array: crate::Array<S>) -> Self::Output {
+            fn $core_fn(self, array: crate::Array<S>) -> Self::Output {
                 $ScalarOp::<S, $T, crate::ops::Rhs>::new_array(array, self).unwrap()
             }
         }
     };
-    (@lhs_core_op Lhs, $ScalarOp:ident, $trait:ident, $core_op_trait:ident, $core_op_fn:ident, [$T:ty]) => {
-        impl<S> core::ops::$core_op_trait<crate::Array<S>> for $T
+    (@lhs_core_op Lhs, $ScalarOp:ident, $Trait:ident, $CoreTrait:ident, $core_fn:ident, [$T:ty]) => {
+        impl<S> core::ops::$CoreTrait<crate::Array<S>> for $T
         where
             S: crate::Storage,
-            $T: crate::scalar::$trait<S::Item, Output: crate::dtype::Dtyped>,
+            $T: crate::scalar::$Trait<S::Item, Output: crate::dtype::Dtyped>,
         {
             type Output = crate::Array<$ScalarOp<S, $T, crate::ops::Lhs>>;
             #[doc = concat!("Applies the [`", stringify!($ScalarOp), "`] operation, see the op struct docs for details.")]
             #[track_caller]
-            fn $core_op_fn(self, array: crate::Array<S>) -> Self::Output {
+            fn $core_fn(self, array: crate::Array<S>) -> Self::Output {
                 $ScalarOp::<S, $T, crate::ops::Lhs>::new_array(self, array).unwrap()
             }
         }
@@ -167,8 +167,8 @@ macro_rules! define_op2_scalar {
         $(#[$meta:meta])*
         $ScalarOp:ident,
         $Kernel:ident,
-        crate::scalar::$trait:ident,
-        $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident, commutative: $commutative:tt,)?
+        crate::scalar::$Trait:ident,
+        $(core_op: core::ops::$CoreTrait:ident::$core_fn:ident, commutative: $commutative:tt,)?
     ) => {
         $(#[$meta])*
         pub struct $ScalarOp<S, T, Side>(
@@ -182,7 +182,7 @@ macro_rules! define_op2_scalar {
         where
             S: crate::Storage,
             T: Copy + 'static,
-            S::Item: crate::scalar::$trait<T, Output: crate::dtype::Dtyped>,
+            S::Item: crate::scalar::$Trait<T, Output: crate::dtype::Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($ScalarOp), "`] storage of `array op scalar`. See the struct docs for semantics and examples.")]
             pub fn new(array: S, scalar: T) -> crate::error::Result<Self> {
@@ -199,9 +199,9 @@ macro_rules! define_op2_scalar {
         where
             S: crate::Storage,
             T: Copy + 'static,
-            S::Item: crate::scalar::$trait<T, Output: crate::dtype::Dtyped>,
+            S::Item: crate::scalar::$Trait<T, Output: crate::dtype::Dtyped>,
         {
-            type ElementType = <S::Item as crate::scalar::$trait<T>>::Output;
+            type ElementType = <S::Item as crate::scalar::$Trait<T>>::Output;
             crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
 
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
@@ -211,21 +211,21 @@ macro_rules! define_op2_scalar {
             crate::ops::impl_element_type_change_default!();
         }
         $(
-            impl<S, T> core::ops::$core_op_trait<T> for crate::Array<S>
+            impl<S, T> core::ops::$CoreTrait<T> for crate::Array<S>
             where
                 S: crate::Storage,
                 T: crate::dtype::Dtyped,
-                S::Item: crate::scalar::$trait<T, Output: crate::dtype::Dtyped>,
+                S::Item: crate::scalar::$Trait<T, Output: crate::dtype::Dtyped>,
             {
                 type Output = crate::Array<$ScalarOp<S, T, crate::ops::Rhs>>;
                 #[doc = concat!("Applies the [`", stringify!($ScalarOp), "`] operation, see the op struct docs for details.")]
                 #[track_caller]
-                fn $core_op_fn(self, scalar: T) -> Self::Output {
+                fn $core_fn(self, scalar: T) -> Self::Output {
                     $ScalarOp::<S, T, crate::ops::Rhs>::new_array(self, scalar).unwrap()
                 }
             }
             crate::ops::elementwise::op2_scalar::define_op2_scalar!(
-                @lhs $commutative, $ScalarOp, $Kernel, $trait, $core_op_trait, $core_op_fn
+                @lhs $commutative, $ScalarOp, $Kernel, $Trait, $CoreTrait, $core_fn
             );
         )?
     };

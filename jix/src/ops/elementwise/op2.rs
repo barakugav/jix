@@ -234,23 +234,23 @@ macro_rules! define_op2 {
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident,
-        crate::scalar::$trait:ident::$kernel_fn:ident $(($status:ident))?,
+        crate::scalar::$Trait:ident::$kernel_fn:ident $(($status:ident))?,
         simd: $bulk_fn:ident,
-        $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
+        $(core_op: core::ops::$CoreTrait:ident::$core_fn:ident,)?
     ) => {
         struct $Kernel;
         impl<T1, T2> crate::ops::elementwise::op2::Op2Kernel<T1, T2> for $Kernel
         where
-            T1: crate::scalar::$trait<T2> + Copy + 'static,
+            T1: crate::scalar::$Trait<T2> + Copy + 'static,
             T2: Copy + 'static,
         {
-            type Output = <T1 as crate::scalar::$trait<T2>>::Output;
+            type Output = <T1 as crate::scalar::$Trait<T2>>::Output;
 
             #[inline(always)]
             fn apply(&self, a: T1, b: T2, status: &mut ArithmeticStatus) -> Self::Output {
                 { let _ = status; } // suppress unused
                 $(let $status = status;)?
-                <T1 as crate::scalar::$trait<T2>>::$kernel_fn(a, b $(, $status)?)
+                <T1 as crate::scalar::$Trait<T2>>::$kernel_fn(a, b $(, $status)?)
             }
 
             #[inline(always)]
@@ -263,7 +263,7 @@ macro_rules! define_op2 {
             ) -> [Self::Output; N] {
                 { let _ = status; } // suppress unused
                 $(let $status = status;)?
-                <T1 as crate::scalar::$trait<T2>>::$bulk_fn(a, b, $($status,)? simd)
+                <T1 as crate::scalar::$Trait<T2>>::$bulk_fn(a, b, $($status,)? simd)
             }
         }
         $(#[$meta])*
@@ -272,7 +272,7 @@ macro_rules! define_op2 {
         where
             S1: crate::Storage,
             S2: crate::Storage,
-            S1::Item: crate::scalar::$trait<S2::Item, Output: crate::dtype::Dtyped>,
+            S1::Item: crate::scalar::$Trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(a: S1, b: S2) -> crate::error::Result<Self> {
@@ -289,9 +289,9 @@ macro_rules! define_op2 {
         where
             S1: crate::Storage,
             S2: crate::Storage,
-            S1::Item: crate::scalar::$trait<S2::Item, Output: crate::dtype::Dtyped>,
+            S1::Item: crate::scalar::$Trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
-            type ElementType = <S1::Item as crate::scalar::$trait<S2::Item>>::Output;
+            type ElementType = <S1::Item as crate::scalar::$Trait<S2::Item>>::Output;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
 
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
@@ -302,32 +302,32 @@ macro_rules! define_op2 {
         }
         define_op2!(@define_core
             impl $Op,
-            $trait,
-            $(core_op: $core_op_trait::$core_op_fn,)?
+            $Trait,
+            $(core_op: $CoreTrait::$core_fn,)?
         );
     };
 
     (
         @define_core
         impl $Op:ident,
-        $trait:ident,
+        $Trait:ident,
     ) => {};
     (
         @define_core
         impl $Op:ident,
-        $trait:ident,
-        core_op: $core_op_trait:ident::$core_op_fn:ident,
+        $Trait:ident,
+        core_op: $CoreTrait:ident::$core_fn:ident,
     ) => {
-        impl<S1, S2> core::ops::$core_op_trait<Array<S2>> for Array<S1>
+        impl<S1, S2> core::ops::$CoreTrait<Array<S2>> for Array<S1>
         where
             S1: crate::Storage,
             S2: crate::Storage,
-            S1::Item: crate::scalar::$trait<S2::Item, Output: crate::dtype::Dtyped>,
+            S1::Item: crate::scalar::$Trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S1, S2>>;
             #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
             #[track_caller]
-            fn $core_op_fn(self, b: Array<S2>) -> Self::Output {
+            fn $core_fn(self, b: Array<S2>) -> Self::Output {
                 $Op::new_array(self, b).unwrap()
             }
         }
@@ -335,26 +335,26 @@ macro_rules! define_op2 {
 }
 
 macro_rules! define_array_op2_method {
-    ($method:ident : $Op:ident, $($trait:ident)::+) => {
+    ($method:ident : $Op:ident, $($Trait:ident)::+) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
             S: crate::Storage,
             S2: crate::Storage,
-            S::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
+            S::Item: $($Trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, other).unwrap()
         }
     };
-    ($method:ident : $Op:ident, $($trait:ident)::+, fixed_rhs_type = $rhs_type:ty) => {
+    ($method:ident : $Op:ident, $($Trait:ident)::+, fixed_rhs_type = $rhs_type:ty) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
             S: crate::Storage,
             S2: crate::Storage<Item = $rhs_type>,
-            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+            S::Item: $($Trait)::+<Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, other).unwrap()
         }

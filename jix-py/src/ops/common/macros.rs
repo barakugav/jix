@@ -1,13 +1,13 @@
 macro_rules! define_op1_desc {
     (
-        $core_op:ident,
+        $CoreOp:ident,
         [$($ty:ty),*],
         $cast_kind:ident
     ) => {
         vec![
             $(
                 crate::ops::common::OpFnDescriptor::new1::<$ty>(crate::ops::common::CastKind::$cast_kind, |a| {
-                    let res = jix_core::ops::$core_op::new_array(a)
+                    let res = jix_core::ops::$CoreOp::new_array(a)
                         .map(crate::util::IntoAnyDyn::into_any_dyn);
                     <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
                 }),
@@ -16,7 +16,7 @@ macro_rules! define_op1_desc {
     };
 
     (
-        $core_op:ident,
+        $CoreOp:ident,
         extra_args = $extra_args_struct:ident as $args:ident $extra_args_group:tt,
         [$($ty:ty),*],
         $cast_kind:ident
@@ -25,7 +25,7 @@ macro_rules! define_op1_desc {
             $(
                 crate::ops::common::define_op1_desc!(
                     @inner_with_extra_args
-                    $core_op,
+                    $CoreOp,
                     extra_args = $extra_args_struct as $args $extra_args_group,
                     $ty,
                     $cast_kind
@@ -35,13 +35,13 @@ macro_rules! define_op1_desc {
     };
     (
         @inner_with_extra_args
-        $core_op:ident,
+        $CoreOp:ident,
         extra_args = $extra_args_struct:ident as $args:ident { $($accessor:expr),* $(,)? },
         $ty:ty,
         $cast_kind:ident
     ) => {
         crate::ops::common::OpFnDescriptor::<1, $extra_args_struct>::new1_args::<$ty>(crate::ops::common::CastKind::$cast_kind, |a, $args| {
-            let res = jix_core::ops::$core_op::new_array(a, $($accessor),*)
+            let res = jix_core::ops::$CoreOp::new_array(a, $($accessor),*)
                 .map(crate::util::IntoAnyDyn::into_any_dyn);
             <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
         })
@@ -51,14 +51,14 @@ macro_rules! define_op1_desc {
 macro_rules! define_op1_table {
     (
         $name:ident,
-        $core_op:ident,
+        $CoreOp:ident,
         dispatch = { $($dispatch:tt)* }
     ) => {{
         static DISPATCH_TABLE: ::std::sync::LazyLock<crate::ops::common::OpDescriptor<1, ()>> = ::std::sync::LazyLock::new(|| {
             crate::ops::common::OpDescriptor::new(
                 stringify!($name),
                 crate::ops::common::define_op1_desc!(
-                    $core_op,
+                    $CoreOp,
                     $($dispatch)*
                 ),
             )
@@ -70,7 +70,7 @@ macro_rules! define_op1_table {
 macro_rules! define_op1 {
     (
         $(#[$meta:meta])* $name:ident,
-        $core_op:ident,
+        $CoreOp:ident,
         dispatch = { $($dispatch:tt)* }
     ) => {
         $(#[$meta])*
@@ -82,7 +82,7 @@ macro_rules! define_op1 {
 
             let dispatch_table = crate::ops::common::define_op1_table!(
                 $name,
-                $core_op,
+                $CoreOp,
                 dispatch = { $($dispatch)* }
             );
             let res = dispatch_table.dispatch1(array)?;
@@ -94,51 +94,51 @@ macro_rules! define_op1 {
 
 macro_rules! define_op2_desc {
     (
-        $core_op:ident,
+        $CoreOp:ident,
         [$($items:tt)*],
         ($a_cast:ident, $b_cast:ident)
     ) => {{
         let mut descs = Vec::new();
-        crate::ops::common::define_op2_desc!(@push descs, $core_op, $a_cast, $b_cast, $($items)*);
+        crate::ops::common::define_op2_desc!(@push descs, $CoreOp, $a_cast, $b_cast, $($items)*);
         descs
     }};
     (
-        $core_op:ident,
+        $CoreOp:ident,
         [$($items:tt)*],
         $cast_kind:ident
     ) => {
-        crate::ops::common::define_op2_desc!($core_op, [$($items)*], ($cast_kind, $cast_kind))
+        crate::ops::common::define_op2_desc!($CoreOp, [$($items)*], ($cast_kind, $cast_kind))
     };
 
     (
-        @push $descs:ident, $core_op:ident, $a_cast:ident, $b_cast:ident,
+        @push $descs:ident, $CoreOp:ident, $a_cast:ident, $b_cast:ident,
         ($a_ty:ty, $b_ty:ty) $(, $($rest:tt)*)?
     ) => {
         $descs.push(crate::ops::common::define_op2_desc!(
-            @desc $core_op, $a_ty, $b_ty, $a_cast, $b_cast
+            @desc $CoreOp, $a_ty, $b_ty, $a_cast, $b_cast
         ));
         crate::ops::common::define_op2_desc!(
-            @push $descs, $core_op, $a_cast, $b_cast, $($($rest)*)?
+            @push $descs, $CoreOp, $a_cast, $b_cast, $($($rest)*)?
         );
     };
     (
-        @push $descs:ident, $core_op:ident, $a_cast:ident, $b_cast:ident,
+        @push $descs:ident, $CoreOp:ident, $a_cast:ident, $b_cast:ident,
         $ty:ty $(, $($rest:tt)*)?
     ) => {
         $descs.push(crate::ops::common::define_op2_desc!(
-            @desc $core_op, $ty, $ty, $a_cast, $b_cast
+            @desc $CoreOp, $ty, $ty, $a_cast, $b_cast
         ));
         crate::ops::common::define_op2_desc!(
-            @push $descs, $core_op, $a_cast, $b_cast, $($($rest)*)?
+            @push $descs, $CoreOp, $a_cast, $b_cast, $($($rest)*)?
         );
     };
-    (@push $descs:ident, $core_op:ident, $a_cast:ident, $b_cast:ident,) => {};
+    (@push $descs:ident, $CoreOp:ident, $a_cast:ident, $b_cast:ident,) => {};
 
-    (@desc $core_op:ident, $a_ty:ty, $b_ty:ty, $a_cast:ident, $b_cast:ident) => {
+    (@desc $CoreOp:ident, $a_ty:ty, $b_ty:ty, $a_cast:ident, $b_cast:ident) => {
         crate::ops::common::OpFnDescriptor::new2::<$a_ty, $b_ty>(
             [crate::ops::common::CastKind::$a_cast, crate::ops::common::CastKind::$b_cast],
             |a, b| {
-                let res = jix_core::ops::$core_op::new_array(a, b).map(crate::util::IntoAnyDyn::into_any_dyn);
+                let res = jix_core::ops::$CoreOp::new_array(a, b).map(crate::util::IntoAnyDyn::into_any_dyn);
                 <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
             },
         )
@@ -148,7 +148,7 @@ macro_rules! define_op2_desc {
 macro_rules! define_op2_table {
     (
         $name:ident,
-        $core_op:ident,
+        $CoreOp:ident,
         dispatch = { $($dispatch:tt)* }
         $(, $option:ident = $option_val:expr)*
     ) => {{
@@ -156,7 +156,7 @@ macro_rules! define_op2_table {
             crate::ops::common::OpDescriptor::new(
                 stringify!($name),
                 crate::ops::common::define_op2_desc!(
-                    $core_op,
+                    $CoreOp,
                     $($dispatch)*
                 ),
             )
@@ -169,7 +169,7 @@ macro_rules! define_op2_table {
 macro_rules! define_op2 {
     (
         $(#[$meta:meta])* $name:ident,
-        $core_op:ident,
+        $CoreOp:ident,
         dispatch = { $($dispatch:tt)* }
         $(, $option:ident = $option_val:expr)*
     ) => {
@@ -185,7 +185,7 @@ macro_rules! define_op2 {
 
             let dispatch_table = crate::ops::common::define_op2_table!(
                 $name,
-                $core_op,
+                $CoreOp,
                 dispatch = { $($dispatch)* }
                 $(, $option = $option_val)*
             );

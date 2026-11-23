@@ -14,10 +14,10 @@ pub(crate) mod traits {
     use crate::util::{ArrayExt, array2_map_inline};
 
     macro_rules! update_bulk_simd {
-        ($Trait:ident, $Op:ident::$op_bulk:ident) => {
-            update_bulk_simd!($Trait, $Op::$op_bulk, disable_on_x86_64 = []);
+        ($Trait:ident, $OpTrait:ident::$f_bulk:ident) => {
+            update_bulk_simd!($Trait, $OpTrait::$f_bulk, disable_on_x86_64 = []);
         };
-        ($Trait:ident, $Op:ident::$op_bulk:ident, disable_on_x86_64 = [$($disable_on_x86_64:ident),*]) => {
+        ($Trait:ident, $OpTrait:ident::$f_bulk:ident, disable_on_x86_64 = [$($disable_on_x86_64:ident),*]) => {
             #[inline(always)]
             fn update_bulk<const N: usize, S: fearless_simd::Simd>(
                 states: [Self::Output; N],
@@ -40,7 +40,7 @@ pub(crate) mod traits {
                     #[inline(always)]
                     |x| <_ as crate::scalar::Cast<Self::Output>>::cast(x),
                 );
-                <Self::Output as crate::scalar::$Op>::$op_bulk(states, items, simd)
+                <Self::Output as crate::scalar::$OpTrait>::$f_bulk(states, items, simd)
             }
         };
     }

@@ -167,20 +167,20 @@ macro_rules! define_op1 {
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident,
-        crate::scalar::$trait:ident::$kernel_fn:ident,
+        crate::scalar::$Trait:ident::$kernel_fn:ident,
         simd: $bulk_fn:ident,
-        $(core_op: core::ops::$core_op_trait:ident::$core_op_fn:ident,)?
+        $(core_op: core::ops::$CoreTrait:ident::$core_fn:ident,)?
     ) => {
         struct $Kernel;
         impl<T> crate::ops::elementwise::op1::Op1Kernel<T> for $Kernel
         where
-            T: crate::scalar::$trait + Copy + 'static,
+            T: crate::scalar::$Trait + Copy + 'static,
         {
-            type Output = <T as crate::scalar::$trait>::Output;
+            type Output = <T as crate::scalar::$Trait>::Output;
 
             #[inline(always)]
             fn apply(&self, x: T, _status: &mut ArithmeticStatus) -> Self::Output {
-                <T as crate::scalar::$trait>::$kernel_fn(x)
+                <T as crate::scalar::$Trait>::$kernel_fn(x)
             }
 
             #[inline(always)]
@@ -190,7 +190,7 @@ macro_rules! define_op1 {
                 _status: &mut ArithmeticStatus,
                 simd: S,
             ) -> [Self::Output; N] {
-                <T as crate::scalar::$trait>::$bulk_fn(xs, simd)
+                <T as crate::scalar::$Trait>::$bulk_fn(xs, simd)
             }
         }
         $(#[$meta])*
@@ -198,7 +198,7 @@ macro_rules! define_op1 {
         impl<S> $Op<S>
         where
             S: crate::Storage,
-            S::Item: crate::scalar::$trait<Output: crate::dtype::Dtyped>,
+            S::Item: crate::scalar::$Trait<Output: crate::dtype::Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(array: S) -> crate::error::Result<Self> {
@@ -214,9 +214,9 @@ macro_rules! define_op1 {
         impl<S> StorageBase for $Op<S>
         where
             S: crate::Storage,
-            S::Item: crate::scalar::$trait<Output: crate::dtype::Dtyped>,
+            S::Item: crate::scalar::$Trait<Output: crate::dtype::Dtyped>,
         {
-            type ElementType = <S::Item as crate::scalar::$trait>::Output;
+            type ElementType = <S::Item as crate::scalar::$Trait>::Output;
             crate::storage::impl_array_storage_forward!(<S>);
 
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
@@ -228,31 +228,31 @@ macro_rules! define_op1 {
 
         define_op1!(@define_core
             impl $Op,
-            $trait,
-            $(core_op: $core_op_trait::$core_op_fn,)?
+            $Trait,
+            $(core_op: $CoreTrait::$core_fn,)?
         );
     };
 
     (
         @define_core
         impl $Op:ident,
-        $trait:ident,
+        $Trait:ident,
     ) => {};
     (
         @define_core
         impl $Op:ident,
-        $trait:ident,
-        core_op: $core_op_trait:ident::$core_op_fn:ident,
+        $Trait:ident,
+        core_op: $CoreTrait:ident::$core_fn:ident,
     ) => {
-        impl<S> core::ops::$core_op_trait for Array<S>
+        impl<S> core::ops::$CoreTrait for Array<S>
         where
             S: crate::Storage,
-            S::Item: crate::scalar::$trait<Output: crate::dtype::Dtyped>,
+            S::Item: crate::scalar::$Trait<Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S>>;
             #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
             #[track_caller]
-            fn $core_op_fn(self) -> Self::Output {
+            fn $core_fn(self) -> Self::Output {
                 $Op::new_array(self).unwrap()
             }
         }
@@ -260,13 +260,13 @@ macro_rules! define_op1 {
 }
 
 macro_rules! define_array_op1_method {
-    ($method:ident : $Op:ident, $($trait:ident)::+) => {
+    ($method:ident : $Op:ident, $($Trait:ident)::+) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
         pub fn $method(self) -> crate::Array<$Op<S>>
         where
             S: crate::Storage,
-            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+            S::Item: $($Trait)::+<Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self).unwrap()
         }
