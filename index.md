@@ -371,6 +371,11 @@ unsafe fn negative_v1<T>(
 }
 ```
 
+We are going to use llvm-mca, a tool to estimate the number of CPU cycles for a given piece of code,
+to measure the performance of each version. The v1 loop in its steady state (long running inner
+loop) takes **63506** cycles for 8192 elements of f32 on Ice Lake (no `target-cpu=native`).
+
+
 #### 2. Inner loop
 
 The advancing of the multi-dim index is hard for the compiler to optimize, as it doesn't recognize
@@ -427,6 +432,9 @@ unsafe fn negative_v2_inner_loop<T>(
 }
 ```
 
+
+llvm-mca shows improvement: **63506 -> 7518**.
+
 From now on we will focus only on the inner loop.
 
 #### 3. Contiguity flags as const generics
@@ -462,6 +470,9 @@ unsafe fn negative_v3_inner_loop<
     }
 }
 ```
+
+llvm-mca shows improvement: **7518 -> 2057**.
+
 
 #### 4. Noalias hack
 
@@ -501,6 +512,11 @@ unsafe fn negative_v4_inner_loop<
     }
 }
 ```
+
+llvm-mca shows no improvement, because the compiler already generated a specialized loop for v3 with
+noalias guarded by a runtime check. v4 guarantees the noalias loop is generated, and improves the
+binary size.
+
 
 #### 5. Manual unrolling
 
@@ -544,6 +560,9 @@ unsafe fn negative_v5_inner_loop<
     }
 }
 ```
+
+llvm-mca shows improvement: **2057 -> 1716**.
+
 
 #### 6. Explicit SIMD
 
@@ -594,19 +613,13 @@ where
 }
 ```
 
-Measuring the number of cycles required by each loop to process 8192 elements of f32, assuming the
-loop is in its "steady state" (long running inner loop), on Ice Lake, using llvm-mca shows:
-- v1: 63507 cycles
-- v2: 6835 cycles
-- v3-v6: 437~522 cycles
+llvm-mca shows improvement: **1716 -> 437** (863 with AVX2).
 
-That's a **~140x speedup** from v1 to v6.
-The reason we don't see a difference between v3 and v6 is that the compiler already generates the
-best optimized code for the earlier versions, sometimes gated by alignment/noalias checks
-(that later versions eliminate). But that is not true for all kernels/ops, and
-from working on these kernels I learned that it's best to be explicit, and v6 (or similar
-approaches) are the most consistent. Relying on the compiler to automatically generate the best code
-is fragile and unreliable.
+From v1's 63506 cycles to v6's 437 cycles, that's a **~145x speedup**.
+Sometimes the compiler generates good loops without us being explicit, and sometimes it doesn't.
+It depends on the kernel, platform, code layout, and other voodoo factors.
+From working on these kernels I learned that it's best to be explicit, and v6 (or similar
+approaches) are the most consistent. Relying on the compiler alone is fragile and unreliable.
 
 I hope this example gave you a sense of the detail and effort involved in optimizing jix's
 low-level array operations. If you are curious, the real code can be found at

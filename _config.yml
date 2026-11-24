@@ -49,6 +49,7 @@ exclude:
   - Gemfile
   - Gemfile.lock
   - preview.py
+  - examples
   # general gitignore
   - target
   - "**/target"
