@@ -118,12 +118,16 @@ impl ReadContext {
     /// returned handle is dropped.
     #[inline]
     pub(crate) fn thread_ctx_with(params: &ReadParams) -> Result<impl AsRef<ReadContext> + use<>> {
-        let decompressor = THREAD_CTX
-            .try_with(|state| state.decompressor.take())
-            .ok()
-            .flatten();
-        let context = ReadContext::new(params.clone())?;
+        let (decompressor, buffer_pool) = THREAD_CTX
+            .try_with(|state| (state.decompressor.take(), state.buffer_pool.take()))
+            .unwrap_or_default();
+        let mut context = ReadContext::new(params.clone())?;
         context.decompressor.replace(decompressor);
+        // EXPERIMENTAL: reuse the scratch buffers the previous thread context left behind, see
+        // `set_thread_pool_retain_bytes`.
+        if let Some(buffer_pool) = buffer_pool {
+            context.buffer_pool = buffer_pool;
+        }
         Ok(ThreadCtx(context))
     }
 
@@ -181,11 +185,34 @@ impl Default for ReadContext {
 
 struct ThreadLocalState {
     decompressor: Cell<Option<zstd::bulk::Decompressor<'static>>>,
+    /// EXPERIMENTAL: the scratch buffers kept between thread contexts, `None` when
+    /// `pool_retain_bytes` is 0 or a thread context is alive.
+    buffer_pool: Cell<Option<BufferPool>>,
+    /// EXPERIMENTAL: see [`set_thread_pool_retain_bytes`].
+    pool_retain_bytes: Cell<usize>,
 }
 thread_local! {
     static THREAD_CTX: ThreadLocalState = const { ThreadLocalState {
         decompressor: Cell::new(None),
+        buffer_pool: Cell::new(None),
+        pool_retain_bytes: Cell::new(0),
     } };
+}
+
+/// EXPERIMENTAL (a hack to measure buffer reuse, not a design): sets how many bytes of scratch
+/// buffers the current thread keeps between the reads that create their own context
+/// ([`Array::get`], [`Array::to_ndarray`], the `to_buf_*` methods given `None`, ...).
+///
+/// `0`, the default, keeps none: every such read allocates its scratch buffers anew, as before.
+/// Otherwise, when a thread context is dropped, its buffer pool is kept in the thread (its
+/// buffers trimmed to at most `bytes` in total), and the next thread context starts from it.
+pub fn set_thread_pool_retain_bytes(bytes: usize) {
+    THREAD_CTX.with(|state| {
+        state.pool_retain_bytes.set(bytes);
+        if bytes == 0 {
+            drop(state.buffer_pool.take());
+        }
+    });
 }
 struct ThreadCtx(ReadContext);
 impl AsRef<ReadContext> for ThreadCtx {
@@ -197,9 +224,19 @@ impl AsRef<ReadContext> for ThreadCtx {
 impl Drop for ThreadCtx {
     #[inline]
     fn drop(&mut self) {
-        if let Some(decompressor) = self.0.decompressor.take() {
-            let _ = THREAD_CTX.try_with(|state| state.decompressor.replace(Some(decompressor)));
-        }
+        let decompressor = self.0.decompressor.take();
+        let _ = THREAD_CTX.try_with(|state| {
+            if let Some(decompressor) = decompressor {
+                state.decompressor.replace(Some(decompressor));
+            }
+            // EXPERIMENTAL: keep the scratch buffers for the next thread context.
+            let retain_bytes = state.pool_retain_bytes.get();
+            if retain_bytes > 0 {
+                let buffer_pool = std::mem::replace(&mut self.0.buffer_pool, BufferPool::new());
+                buffer_pool.trim_to(retain_bytes);
+                state.buffer_pool.set(Some(buffer_pool));
+            }
+        });
     }
 }
 

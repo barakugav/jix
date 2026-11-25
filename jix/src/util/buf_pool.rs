@@ -52,6 +52,27 @@ impl BufferPool {
         pool.push(buf.0);
     }
 
+    /// EXPERIMENTAL: frees buffers until the pooled ones hold at most `max_bytes` in total,
+    /// keeping the most recently returned buffers of each free list first.
+    pub(crate) fn trim_to(&self, max_bytes: usize) {
+        let align_standard = unsafe { &mut *self.align_standard.get() };
+        let align_other = unsafe { &mut *self.align_other.get() };
+        let mut total = 0usize;
+        let mut trim = |pool: &mut Vec<RawAlignedBytes>| {
+            // `allocate` pops from the back, so the back is the hottest: keep it first.
+            let mut keep_from = pool.len();
+            while keep_from > 0 && total + pool[keep_from - 1].capacity() <= max_bytes {
+                keep_from -= 1;
+                total += pool[keep_from].capacity();
+            }
+            pool.drain(..keep_from);
+        };
+        trim(align_standard);
+        for (_align, pool) in align_other.iter_mut() {
+            trim(pool);
+        }
+    }
+
     pub(crate) fn return_shared(&self, buf: Arc<PoolBuf>) {
         if let Some(buf) = Arc::into_inner(buf) {
             self.return_buf(buf);

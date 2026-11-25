@@ -451,6 +451,9 @@ const BLOCK_SIZE_BYTES_MAX: u64 = 1 << 30;
 
 #[doc(hidden)]
 pub mod __private {
+    /// EXPERIMENTAL: thread-local scratch buffer reuse, see `benches/thread_alloc.rs`.
+    #[doc(hidden)]
+    pub use crate::context::set_thread_pool_retain_bytes;
     pub use crate::storage::params::flags::{ArraySpecFlags, ReadTiling};
     pub use crate::storage::scalar::Scalar;
     #[doc(hidden)]
