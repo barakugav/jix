@@ -642,6 +642,13 @@ pub trait CompactArrayMethods {
     /// [`Array::read_params`](crate::Array::read_params).
     fn read_params_mut(&mut self) -> &mut crate::storage::ReadParams;
 
+    /// Whether dimension `dim` of [`block_shape`](Self::block_shape) is fixed. See
+    /// [`set_block_shape_fixed_dims`](Self::set_block_shape_fixed_dims).
+    ///
+    /// Fails with `InvalidArgument` if `dim` is out of bounds.
+    #[doc(hidden)]
+    fn block_shape_fixed_dim(&self, dim: usize) -> Result<bool>;
+
     /// Sets, per dimension, whether that dimension of [`block_shape`](Self::block_shape) is fixed
     /// when a later [`Array::compact`](crate::Array::compact) of this array, or of a view built on
     /// it, inherits the block shape. A fixed dimension keeps its block length, a non-fixed one may
@@ -676,6 +683,16 @@ macro_rules! impl_compact_array_methods {
 
             fn read_params_mut(&mut self) -> &mut crate::storage::ReadParams {
                 self.storage.0.spec.read_params_mut()
+            }
+
+            fn block_shape_fixed_dim(&self, dim: usize) -> crate::error::Result<bool> {
+                let ndim = self.storage.0.block_shape().len();
+                crate::error::ensure!(
+                    dim < ndim,
+                    InvalidArgument,
+                    "dim {dim} is out of bounds for an array with {ndim} dims"
+                );
+                Ok(self.storage.0.spec.as_ref().block_shape_fixed_dims().get(dim))
             }
 
             fn set_block_shape_fixed_dims(&mut self, fixed: &[bool]) -> crate::error::Result<()> {
@@ -1587,7 +1604,8 @@ mod tests {
 
         assert!(mmap.set_block_shape_fixed_dims(&[true]).is_err());
         mmap.set_block_shape_fixed_dims(&[true, false]).unwrap();
-        let fixed_dims = mmap.storage().0.spec.as_ref().block_shape_fixed_dims();
-        assert_eq!((fixed_dims.get(0), fixed_dims.get(1)), (true, false));
+        assert!(mmap.block_shape_fixed_dim(0).unwrap());
+        assert!(!mmap.block_shape_fixed_dim(1).unwrap());
+        assert!(mmap.block_shape_fixed_dim(2).is_err());
     }
 }

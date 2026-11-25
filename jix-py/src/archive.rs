@@ -1,6 +1,7 @@
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
+use jix_core::Array;
 use jix_core::storage::{CompactArrayMethods, CompactParams};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::inspect::{PyStaticConstant, PyStaticExpr};
@@ -10,7 +11,7 @@ use pyo3::types::{PyBytes, PyDict};
 use pyo3::{type_hint_identifier, type_hint_subscript};
 
 use crate::PyArray;
-use crate::array::resolve_array_params;
+use crate::array::{ResolvedParams, resolve_array_params};
 use crate::ops::asarray;
 use crate::util::IntoPyResult;
 
@@ -96,17 +97,7 @@ pub fn read_array(
 ) -> PyResult<PyArray> {
     let params = resolve_array_params(py, params, &["read_size", "block_shape_fixed_dims"])?;
     let validation = validation.map(|v| v.0).unwrap_or_default();
-    let apply_params = |array: &mut dyn CompactArrayMethods| -> PyResult<()> {
-        if let Some(read_size) = params.read_size {
-            array.read_params_mut().set_read_size(read_size);
-        }
-        if let Some(fixed_dims) = &params.block_shape_fixed_dims {
-            array
-                .set_block_shape_fixed_dims(fixed_dims)
-                .into_py_result()?;
-        }
-        Ok(())
-    };
+    let apply_params = |array: &mut dyn CompactArrayMethods| apply_read_params(array, &params);
 
     if let Ok(path) = path_or_reader.extract::<PathBuf>() {
         py.detach(|| {
@@ -123,14 +114,12 @@ pub fn read_array(
 
             Ok(if !mmap {
                 let mut array =
-                    jix_core::Array::read_from_file_with(&path, offset, len, validation)
-                        .into_py_result()?;
+                    Array::read_from_file_with(&path, offset, len, validation).into_py_result()?;
                 apply_params(&mut array)?;
                 PyArray::from_core(array.into_any())
             } else {
                 let mut array = unsafe {
-                    jix_core::Array::read_from_file_mmap(&path, offset, len, validation)
-                        .into_py_result()?
+                    Array::read_from_file_mmap(&path, offset, len, validation).into_py_result()?
                 };
                 apply_params(&mut array)?;
                 PyArray::from_core(array.into_any())
@@ -149,8 +138,7 @@ pub fn read_array(
         }
         // Can't detach the GIL since the reader is a Python object.
         let mut reader = BufReader::new(PyReader::new(path_or_reader.clone())?);
-        let mut array =
-            jix_core::Array::read_from(&mut reader, len, validation).into_py_result()?;
+        let mut array = Array::read_from(&mut reader, len, validation).into_py_result()?;
         apply_params(&mut array)?;
 
         // Leave the reader at the current position after reading the array, BufReader may have read ahead
@@ -165,6 +153,22 @@ pub fn read_array(
             "Expected a file path or a file-like object with a 'read' method, got {path_or_reader:?}"
         )))
     }
+}
+
+/// Applies the `read_size` and `block_shape_fixed_dims` keys of a parsed `params` dict.
+pub(crate) fn apply_read_params(
+    array: &mut dyn CompactArrayMethods,
+    params: &ResolvedParams,
+) -> PyResult<()> {
+    if let Some(read_size) = params.read_size {
+        array.read_params_mut().set_read_size(read_size);
+    }
+    if let Some(fixed_dims) = &params.block_shape_fixed_dims {
+        array
+            .set_block_shape_fixed_dims(fixed_dims)
+            .into_py_result()?;
+    }
+    Ok(())
 }
 
 /// The `validation` mode of [`crate::archive::read_array`].

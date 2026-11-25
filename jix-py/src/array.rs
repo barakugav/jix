@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fmt::Write;
 use std::ops::Range;
 use std::sync::Mutex;
 
@@ -19,8 +18,8 @@ use crate::type_hint::{
     Dim, ItemOrTuple, NumpyArray, NumpyDtype, Shape, ShapeLen, ValueOrUnimplemented,
 };
 use crate::util::{
-    DimArray, IntoPyResult, dim_arr, maybe_detach, numpy_empty_ordered, numpy_items,
-    strided_span_bytes,
+    DimArray, IntoPyResult, StorageFormatter, dim_arr, maybe_detach, numpy_empty_ordered,
+    numpy_items, strided_span_bytes,
 };
 
 /// A multi-dimensional compressed array.
@@ -816,46 +815,6 @@ impl PyArray {
             .collect::<DimArray<_>>()
             .join(" ");
 
-        /// Stop expanding the storage tree once this many nodes have been printed.
-        const MAX_ITEMS: usize = 8;
-
-        fn format_storage(
-            storage: &dyn StorageBase,
-            f: &mut std::fmt::Formatter<'_>,
-            n_printed: &mut usize,
-        ) -> std::fmt::Result {
-            let info = storage.info();
-            let deps = info.dependencies();
-            if ["Any", "IntoType", "IntoDim"].contains(&info.name()) && deps.len() == 1 {
-                return format_storage(deps[0], f, n_printed);
-            }
-            f.write_str(info.name())?;
-            *n_printed += 1;
-            if !deps.is_empty() {
-                f.write_char('<')?;
-                for (i, dep) in deps.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str(", ")?;
-                    }
-                    if *n_printed >= MAX_ITEMS {
-                        f.write_str("...")?;
-                        break;
-                    }
-                    format_storage(*dep, f, n_printed)?;
-                }
-                f.write_char('>')?;
-            }
-            Ok(())
-        }
-
-        struct StorageFormatter<'a>(&'a dyn StorageBase);
-        impl std::fmt::Display for StorageFormatter<'_> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let mut n_printed = 0;
-                format_storage(self.0, f, &mut n_printed)
-            }
-        }
-
         format!(
             "Array(shape=({}), dtype={}, storage={})",
             shape_str,
@@ -880,6 +839,13 @@ impl PyArray {
         params: Option<Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         crate::archive::write_array(slf, path_or_writer, append, params)
+    }
+
+    /// Support for `pickle`.
+    pub fn __reduce__<'py>(
+        slf: &Bound<'py, Self>,
+    ) -> PyResult<(Bound<'py, PyAny>, Bound<'py, PyTuple>)> {
+        crate::pickle::reduce_array(slf)
     }
 
     // == arithmetic ops ==

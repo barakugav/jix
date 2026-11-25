@@ -18,6 +18,7 @@ mod archive;
 mod array;
 mod dtype;
 mod ops;
+mod pickle;
 mod type_hint;
 mod util;
 
@@ -46,6 +47,9 @@ mod jix {
 
     #[pymodule_export]
     pub use crate::archive::{read_array, write_array};
+
+    #[pymodule_export]
+    pub use crate::pickle::_unpickle_array;
 
     #[pymodule_export]
     pub use crate::ops::{asarray, cast};

@@ -451,3 +451,95 @@ def test_failed_append_through_dangling_symlink_keeps_the_symlink(tmp_path):
         jix.write_array(failing, link, append=True)
     assert link.is_symlink()
     assert (tmp_path / "target.jix").stat().st_size == 0
+
+
+# ---------------------------------------------------------------------------
+# pickle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("protocol", range(pickle.HIGHEST_PROTOCOL + 1))
+def test_pickle_roundtrip(protocol):
+    data = np.arange(60, dtype=np.float32).reshape(3, 4, 5)
+    a = jix.compact(data, params={"block_shape": [2, 3, 5], "filters": ["bit-shuffle"]})
+    b = pickle.loads(pickle.dumps(a, protocol=protocol))
+    np.testing.assert_array_equal(b.numpy(), data)
+    assert b.dtype == a.dtype
+    assert b.__reduce__()[1] == a.__reduce__()[1]
+
+
+def test_pickle_struct_dtype():
+    dt = np.dtype([("x", np.int16), ("y", np.float64, (2,))])
+    data = np.zeros(5, dtype=dt)
+    data["x"] = np.arange(5)
+    data["y"] = np.arange(10).reshape(5, 2)
+    b = pickle.loads(pickle.dumps(jix.compact(data)))
+    assert b.dtype == dt
+    np.testing.assert_array_equal(b.numpy(), data)
+
+
+def test_pickle_format():
+    a = jix.compact([1, 2, 3], dtype=np.int32)
+    func, (version, kind, (archive, params)) = a.__reduce__()
+    assert func is jix._unpickle_array
+    assert b"jix.jix" not in pickle.dumps(a)
+    assert (version, kind) == (1, "Compact")
+    assert params == {"block_shape_fixed_dims": [False]}
+    buf = io.BytesIO()
+    jix.write_array(a, buf)
+    assert archive == buf.getvalue()
+
+
+def test_pickle_keeps_params():
+    a = jix.compact(np.zeros((8, 8), np.float32), params={"block_shape": [4, 8], "read_size": (64, 128)})
+    buf = io.BytesIO()
+    jix.write_array(a, buf)
+    buf.seek(0)
+    a2 = jix.read_array(buf, params={"block_shape_fixed_dims": [True, False], "read_size": 32})
+    for arr, params in [
+        (a, {"block_shape_fixed_dims": [True, True], "read_size": (64, 128)}),
+        (a2, {"block_shape_fixed_dims": [True, False], "read_size": (32, 32)}),
+    ]:
+        assert arr.__reduce__()[1][2][1] == params
+        assert pickle.loads(pickle.dumps(arr)).__reduce__()[1][2][1] == params
+
+
+def test_pickle_mmap(tmp_path):
+    p = tmp_path / "a.jix"
+    jix.write_array(make_array([1.0, 2.0, 3.0]), p)
+    b = pickle.loads(pickle.dumps(jix.read_array(p, mmap=True)))
+    p.unlink()
+    np.testing.assert_array_equal(b.numpy(), [1.0, 2.0, 3.0])
+
+
+@pytest.mark.parametrize(
+    "make",
+    [lambda a: a + 1, lambda a: jix.slice(a, (0, slice(1, 2))), lambda a: a.T, lambda a: jix.asarray(np.ones(3))],
+)
+def test_pickle_non_compact_raises(make):
+    with pytest.raises(TypeError, match="calling .compact"):
+        pickle.dumps(make(make_array([[1.0, 2.0], [3.0, 4.0]])))
+
+
+@pytest.mark.parametrize(
+    ("version", "kind", "args", "match"),
+    [
+        (2, "Compact", (b"", {}), "version 2"),
+        (1, "Plain", (b"", {}), 'kind "Plain"'),
+    ],
+)
+def test_unpickle_bad_input_raises(version, kind, args, match):
+    with pytest.raises(ValueError, match=match):
+        jix._unpickle_array(version, kind, args)
+
+
+def test_unpickle_bad_archive_raises():
+    with pytest.raises(RuntimeError, match="invalid header magic"):
+        jix._unpickle_array(1, "Compact", (b"not a jix archive", {}))
+
+
+def test_unpickle_ignores_unknown_params():
+    a = jix.compact([1.0, 2.0, 3.0])
+    func, (version, kind, (archive, params)) = a.__reduce__()
+    b = func(version, kind, (archive, {**params, "from_a_newer_jix": 1}))
+    np.testing.assert_array_equal(b.numpy(), [1.0, 2.0, 3.0])

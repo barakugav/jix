@@ -194,7 +194,7 @@ impl Operand {
                 where
                     T: Dtyped,
                 {
-                    let array = jix_core::Array::from_storage(
+                    let array = Array::from_storage(
                         jix_core::__private::Scalar::new(value, shape).into_py_result()?,
                     );
                     Ok(array.into_any_dyn())
