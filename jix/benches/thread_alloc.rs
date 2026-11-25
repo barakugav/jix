@@ -15,6 +15,29 @@
 //! Each iteration reads a different random position, so every read decodes a block. Run with
 //! `cargo bench --bench thread_alloc`, and `examples/thread_alloc_probe.rs` for the allocation
 //! counts behind the numbers.
+//!
+//! Results (2048x2048 i32, 4-vCPU Xeon @ 2.3GHz, 48 KiB L1d, glibc 2.39 malloc). The thread pool
+//! removes every allocation of the read (3 for a byte-shuffled block, 2 unfiltered, 4 bit
+//! shuffled, 5 for `a + b`) and matches `explicit_ctx`:
+//!
+//! ```text
+//! scenario                    get/fresh  get/thread_pool  saved
+//! plain                           44 ns            52 ns   -8 ns  (no allocation to save)
+//! compact [6, 2048] (auto)     14.8 us          14.1 us   0.7 us  (4.8%)
+//! compact [32, 32]              2.10 us          1.97 us   0.13 us (6.7%)
+//! compact [256, 256]           66.6 us          65.7 us   noise
+//! compact [512, 512]            280 us           294 us   noise
+//! compact [6, 2048] zeros       5.41 us          5.07 us   0.33 us (6.6%)
+//! compact [32, 32] zeros         810 ns           696 ns   114 ns (16%)
+//! compact [6, 2048] no_filter  49.1 us          47.8 us   ~1 us  (~3%, noisy)
+//! compact [6, 2048] bit_shuf   28.0 us          26.8 us   ~1 us  (~4%, noisy)
+//! lazy a + b                   29.5 us          28.6 us   0.9 us  (3.0%)
+//! lazy a.sum(1)                14.9 us          15.2 us   noise
+//! ```
+//!
+//! A `get` decodes the whole block it touches, which dwarfs the allocations: reuse saves ~0.1-1
+//! us per read, 3-7% for typical blocks and up to ~16% only for tiny blocks of trivially
+//! compressible data.
 
 #[path = "common/thread_alloc.rs"]
 mod scenarios;
