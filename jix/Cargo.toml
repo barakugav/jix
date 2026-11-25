@@ -103,5 +103,10 @@ bench = false     # needs valgrind: run it explicitly with `--bench valgrind`
 name = "vs_ndarray"
 harness = false
 
+# EXPERIMENTAL: scratch buffer reuse for small reads, see the file.
+[[bench]]
+name = "thread_alloc"
+harness = false
+
 [lib]
 bench = false
