@@ -37,6 +37,8 @@ where
 {
     type Output = K::Output;
 
+    const INNER_LOOPS: InnerLoops = K::INNER_LOOPS;
+
     #[inline(always)]
     fn apply(&self, x: T1, status: &mut ArithmeticStatus) -> Self::Output {
         self.kernel.apply(x, self.scalar, status)
@@ -58,6 +60,8 @@ where
     K: Op2Kernel<T2, T1>,
 {
     type Output = K::Output;
+
+    const INNER_LOOPS: InnerLoops = K::INNER_LOOPS;
 
     #[inline(always)]
     fn apply(&self, x: T1, status: &mut ArithmeticStatus) -> Self::Output {

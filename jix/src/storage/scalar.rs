@@ -1,6 +1,6 @@
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{Result, check_dtype, check_get_range, check_ndim};
-use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, Operand};
+use crate::ops::{ElementwisePipeline, ElementwisePipelineImpl, InnerLoops, Operand};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned, ReadTiling};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, CompactParams, Index, OutBuf, OutBufInner, StorageBase,
@@ -131,6 +131,7 @@ where
             // The value lives in the node, so there is nothing to walk.
             const N_OPERANDS: Option<usize> = Some(0);
             const MAX_ITEMSIZE: usize = size_of::<T>();
+            const INNER_LOOPS: InnerLoops = InnerLoops::ALL;
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {

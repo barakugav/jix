@@ -111,6 +111,7 @@ define_op1!(
     ExpKernel,
     crate::scalar::Exp::exp,
     simd: exp_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the natural logarithm (`ln x`) of each element.
@@ -144,6 +145,7 @@ define_op1!(
     LnKernel,
     crate::scalar::Ln::ln,
     simd: ln_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the base-2 logarithm of each element.
@@ -168,6 +170,7 @@ define_op1!(
     Log2Kernel,
     crate::scalar::Log2::log2,
     simd: log2_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the base-10 logarithm of each element.
@@ -192,6 +195,7 @@ define_op1!(
     Log10Kernel,
     crate::scalar::Log10::log10,
     simd: log10_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 
 impl<S: StorageBase> Array<S> {

@@ -556,6 +556,7 @@ define_op2!(
     AddKernel,
     crate::scalar::Add::add,
     simd: add_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::Add::add,
 );
 define_op2_scalar!(
@@ -612,6 +613,7 @@ define_op2!(
     SubKernel,
     crate::scalar::Sub::sub,
     simd: sub_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::Sub::sub,
 );
 define_op2_scalar!(
@@ -665,6 +667,7 @@ define_op2!(
     MulKernel,
     crate::scalar::Mul::mul,
     simd: mul_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::Mul::mul,
 );
 define_op2_scalar!(
@@ -725,6 +728,7 @@ define_op2!(
     PowKernel,
     crate::scalar::Pow::pow(status),
     simd: pow_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 
 impl<S: StorageBase> Array<S> {

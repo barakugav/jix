@@ -130,7 +130,7 @@ pub(crate) mod prelude {
     pub(crate) use std::ops::Range;
 
     pub(crate) use super::{
-        DimsArg, ElementwisePipeline, ElementwisePipelineImpl, Operand, max_itemsize,
+        DimsArg, ElementwisePipeline, ElementwisePipelineImpl, InnerLoops, Operand, max_itemsize,
         n_operands_sum,
     };
     pub(crate) use crate::context::{CacheScope, ReadContext};

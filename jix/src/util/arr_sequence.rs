@@ -3,7 +3,9 @@ use std::cell::UnsafeCell;
 use crate::array::Array;
 use crate::dtype::Dtype;
 use crate::error::{ArithmeticStatus, Result};
-use crate::ops::{ElementwisePipelineImpl, Operand, max_itemsize, n_operands_mul, n_operands_sum};
+use crate::ops::{
+    ElementwisePipelineImpl, InnerLoops, Operand, max_itemsize, n_operands_mul, n_operands_sum,
+};
 use crate::storage::{ArraySpec, Index, OutBuf};
 use crate::util::{ArrayExt, array_from_fn_inline};
 use crate::{ElementType, ReadContext, Storage, StorageBase};
@@ -126,6 +128,10 @@ pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> 
     /// pipelines.
     const MAX_ITEMSIZE: usize;
 
+    /// The [`and`](InnerLoops::and) of the [`INNER_LOOPS`](ElementwisePipelineImpl::INNER_LOOPS)
+    /// of the arrays' pipelines.
+    const INNER_LOOPS: InnerLoops;
+
     /// The leaf operands the pipeline reads from.
     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's;
 
@@ -219,6 +225,7 @@ impl<S: Storage, const N: usize> ArraySequenceTypedImpl for [Array<S>; N] {
             const N_OPERANDS: Option<usize> = n_operands_mul(D::N_OPERANDS, N);
             // All N items are held at once
             const MAX_ITEMSIZE: usize = max_itemsize(&[D::MAX_ITEMSIZE, N * size_of::<S::Item>()]);
+            const INNER_LOOPS: InnerLoops = D::INNER_LOOPS;
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -318,6 +325,7 @@ impl<'b, S: Storage, const N: usize> ArraySequenceTypedImpl for &'b [Array<S>; N
             const N_OPERANDS: Option<usize> = n_operands_mul(D::N_OPERANDS, N);
             // All N items are held at once
             const MAX_ITEMSIZE: usize = max_itemsize(&[D::MAX_ITEMSIZE, N * size_of::<S::Item>()]);
+            const INNER_LOOPS: InnerLoops = D::INNER_LOOPS;
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -423,6 +431,7 @@ impl<S: Storage> ArraySequenceTypedImpl for Vec<Array<S>> {
             // The number of arrays in the sequence is only known at runtime.
             const N_OPERANDS: Option<usize> = None;
             const MAX_ITEMSIZE: usize = D::MAX_ITEMSIZE;
+            const INNER_LOOPS: InnerLoops = D::INNER_LOOPS;
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -546,6 +555,7 @@ impl<'b, S: Storage> ArraySequenceTypedImpl for &'b [Array<S>] {
             // The number of arrays in the sequence is only known at runtime.
             const N_OPERANDS: Option<usize> = None;
             const MAX_ITEMSIZE: usize = D::MAX_ITEMSIZE;
+            const INNER_LOOPS: InnerLoops = D::INNER_LOOPS;
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -686,6 +696,7 @@ macro_rules! impl_array_sequence_for_tuple {
                 {
                     const N_OPERANDS: Option<usize> = n_operands_sum(&[$($D::N_OPERANDS),+]);
                     const MAX_ITEMSIZE: usize = max_itemsize(&[$($D::MAX_ITEMSIZE),+]);
+                    const INNER_LOOPS: InnerLoops = InnerLoops::and_all(&[$($D::INNER_LOOPS),+]);
 
                     #[inline(always)]
                     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {

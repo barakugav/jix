@@ -32,6 +32,9 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// leaves, every intermediate node and its output. Sizes the lanes of [`inner_loop`].
     const MAX_ITEMSIZE: usize;
 
+    /// The inner loops compiled for the pipeline: the [`and`](InnerLoops::and) of its kernels'.
+    const INNER_LOOPS: InnerLoops;
+
     /// The leaf operands the pipeline reads from.
     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's;
 
@@ -88,22 +91,22 @@ pub(crate) trait ElementwisePipelineImpl<T> {
             if let Some(n_operands) = Self::N_OPERANDS {
                 let n_operands = 1 + n_operands; // +1 for output
                 to_buf_fn = match n_operands {
-                    1 => Some(to_buf_impl::<_, 1>),
-                    2 => Some(to_buf_impl::<_, 2>),
-                    3 => Some(to_buf_impl::<_, 3>),
-                    4 => Some(to_buf_impl::<_, 4>),
-                    5 => Some(to_buf_impl::<_, 5>),
-                    6 => Some(to_buf_impl::<_, 6>),
-                    7 => Some(to_buf_impl::<_, 7>),
-                    8 => Some(to_buf_impl::<_, 8>),
-                    9 => Some(to_buf_impl::<_, 9>),
-                    10 => Some(to_buf_impl::<_, 10>),
-                    11 => Some(to_buf_impl::<_, 11>),
-                    12 => Some(to_buf_impl::<_, 12>),
-                    13 => Some(to_buf_impl::<_, 13>),
-                    14 => Some(to_buf_impl::<_, 14>),
-                    15 => Some(to_buf_impl::<_, 15>),
-                    16 => Some(to_buf_impl::<_, 16>),
+                    1 => Some(to_buf_impl::<_, _, 1>),
+                    2 => Some(to_buf_impl::<_, _, 2>),
+                    3 => Some(to_buf_impl::<_, _, 3>),
+                    4 => Some(to_buf_impl::<_, _, 4>),
+                    5 => Some(to_buf_impl::<_, _, 5>),
+                    6 => Some(to_buf_impl::<_, _, 6>),
+                    7 => Some(to_buf_impl::<_, _, 7>),
+                    8 => Some(to_buf_impl::<_, _, 8>),
+                    9 => Some(to_buf_impl::<_, _, 9>),
+                    10 => Some(to_buf_impl::<_, _, 10>),
+                    11 => Some(to_buf_impl::<_, _, 11>),
+                    12 => Some(to_buf_impl::<_, _, 12>),
+                    13 => Some(to_buf_impl::<_, _, 13>),
+                    14 => Some(to_buf_impl::<_, _, 14>),
+                    15 => Some(to_buf_impl::<_, _, 15>),
+                    16 => Some(to_buf_impl::<_, _, 16>),
                     _ => None,
                 }
             };
@@ -124,14 +127,132 @@ pub(crate) trait ElementwisePipelineImpl<T> {
 }
 impl<P, T> ElementwisePipeline<T> for P where P: ElementwisePipelineImpl<T> {}
 
-fn to_buf_impl<T, const N_OPERANDS: usize>(
-    pipeline: &impl ElementwisePipelineImpl<T>,
+/// Which inner loop variants are compiled for a kernel, or for a pipeline of kernels.
+///
+/// Every variant is a full copy of the fused pipeline body, so each one costs build time and binary
+/// size. A variant a pipeline does not ask for is never instantiated: the engine picks the loop of
+/// a run in an `if const` on these flags, so a variant left out is never referenced. Its runs go
+/// to another variant that can take them, at worst the strided loop, which is always compiled and
+/// handles any layout.
+///
+/// A kernel declares the variants that pay off for it, and a pipeline compiles a variant only if
+/// all its kernels ask for it ([`and`](Self::and)). One expensive scalar kernel, e.g. a libm call
+/// per element, dominates the cost of the whole fused body, so the fast loops buy little once one
+/// is in the chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InnerLoops {
+    /// Compile a loop for runs whose inputs and output are all contiguous.
+    pub(crate) contiguous: bool,
+    /// Compile a loop for runs with a contiguous output but strided inputs, e.g. a transposed or
+    /// sliced input read into a freshly allocated output.
+    pub(crate) gather: bool,
+    /// Compile a loop for runs with contiguous inputs but a strided output. The output's strides
+    /// pick the iteration order, so this takes a destination strided along every dim, such as a
+    /// `stack` along the last dim, or a strided `out=` from Python.
+    pub(crate) scatter: bool,
+    /// Compile the all-contiguous loop for every SIMD level and pick one at runtime, rather than
+    /// only for the baseline level. Has no effect without [`contiguous`](Self::contiguous); the
+    /// other loops are always compiled for the baseline level alone.
+    pub(crate) simd_dispatch: bool,
+}
+
+impl InnerLoops {
+    /// Every variant.
+    pub(crate) const ALL: Self = Self {
+        contiguous: true,
+        gather: true,
+        scatter: true,
+        simd_dispatch: true,
+    };
+
+    /// Every variant but [`scatter`](Self::scatter), whose runs are rare: what a kernel gets unless
+    /// it says otherwise. For unary kernels that are vectorized, by hand or by the compiler.
+    pub(crate) const DEFAULT: Self = Self {
+        scatter: false,
+        ..Self::ALL
+    };
+
+    /// The all-contiguous loop, at every SIMD level, plus the strided loop. Runs that are only
+    /// partly contiguous take the strided loop. For binary kernels, as numpy does.
+    pub(crate) const CONTIGUOUS: Self = Self {
+        gather: false,
+        ..Self::DEFAULT
+    };
+
+    /// The strided loop alone: kernels whose scalar cost per element dwarfs the gain of
+    /// contiguous reads and wider vectors, like a libm call.
+    pub(crate) const STRIDED: Self = Self {
+        contiguous: false,
+        gather: false,
+        scatter: false,
+        simd_dispatch: false,
+    };
+
+    /// The variants both `self` and `other` ask for, for a node and its children.
+    pub(crate) const fn and(self, other: Self) -> Self {
+        Self {
+            contiguous: self.contiguous && other.contiguous,
+            gather: self.gather && other.gather,
+            scatter: self.scatter && other.scatter,
+            simd_dispatch: self.simd_dispatch && other.simd_dispatch,
+        }
+    }
+
+    /// The [`and`](Self::and) of all of `loops`.
+    pub(crate) const fn and_all(loops: &[Self]) -> Self {
+        let mut res = Self::ALL;
+        let mut i = 0;
+        while i < loops.len() {
+            res = res.and(loops[i]);
+            i += 1;
+        }
+        res
+    }
+}
+
+type InnerLoopFn<T, P> = fn(&P, PtrMutNoalias<T>, usize, usize, &mut ArithmeticStatus);
+
+/// The inner loop for a run of the given layout, out of the variants `P` compiles.
+#[inline(always)]
+#[allow(clippy::collapsible_if)] // keep each `if const` alone, for the variant check to stand out
+fn select_inner_loop<T, P>(layout: RunLayout) -> InnerLoopFn<T, P>
+where
+    T: Dtyped,
+    P: ElementwisePipelineImpl<T>,
+{
+    // Each variant is behind an `if const`, so one left out is never instantiated, even in a
+    // debug build.
+    let RunLayout {
+        inputs_contiguous,
+        output_contiguous,
+    } = layout;
+    if const { P::INNER_LOOPS.contiguous } {
+        if inputs_contiguous && output_contiguous {
+            return inner_loop::<_, _, true, true>;
+        }
+    }
+    if const { P::INNER_LOOPS.gather } {
+        if output_contiguous {
+            return inner_loop::<_, _, false, true>;
+        }
+    }
+    if const { P::INNER_LOOPS.scatter } {
+        if inputs_contiguous {
+            return inner_loop::<_, _, true, false>;
+        }
+    }
+    inner_loop::<_, _, false, false>
+}
+
+fn to_buf_impl<T, P, const N_OPERANDS: usize>(
+    pipeline: &P,
     index: &Index<'_>,
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
 ) -> Result<()>
 where
     T: Dtyped,
+    P: ElementwisePipelineImpl<T>,
 {
     let out_operand = Operand::new_output(out, Dtype::new_ref::<T>());
     let operands = {
@@ -145,28 +266,23 @@ where
         operands,
         index,
         context,
-        &|dst, dst_stride, len, flags, status| {
-            let dst = dst.cast();
-            let inner_loop_fn = match (flags.inputs_contiguous, flags.output_contiguous) {
-                (true, true) => inner_loop::<_, _, true, true>,
-                (true, false) => inner_loop::<_, _, true, false>,
-                (false, true) => inner_loop::<_, _, false, true>,
-                (false, false) => inner_loop::<_, _, false, false>,
-            };
-            inner_loop_fn(pipeline, dst, dst_stride, len, status)
+        const { P::INNER_LOOPS },
+        &|dst, dst_stride, len, layout, status| {
+            select_inner_loop::<T, P>(layout)(pipeline, dst.cast(), dst_stride, len, status)
         },
     )
 }
 
 // like `to_buf_impl`, but the number of operands is not known at compile time.
-fn to_buf_impl_dyn<T>(
-    pipeline: &impl ElementwisePipelineImpl<T>,
+fn to_buf_impl_dyn<T, P>(
+    pipeline: &P,
     index: &Index<'_>,
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
 ) -> Result<()>
 where
     T: Dtyped,
+    P: ElementwisePipelineImpl<T>,
 {
     let out_operand = Operand::new_output(out, Dtype::new_ref::<T>());
     let operands = std::iter::once(&out_operand)
@@ -177,15 +293,9 @@ where
         &operands,
         index,
         context,
-        &|dst, dst_stride, len, flags, status| {
-            let dst = dst.cast();
-            let inner_loop_fn = match (flags.inputs_contiguous, flags.output_contiguous) {
-                (true, true) => inner_loop::<_, _, true, true>,
-                (true, false) => inner_loop::<_, _, true, false>,
-                (false, true) => inner_loop::<_, _, false, true>,
-                (false, false) => inner_loop::<_, _, false, false>,
-            };
-            inner_loop_fn(pipeline, dst, dst_stride, len, status)
+        const { P::INNER_LOOPS },
+        &|dst, dst_stride, len, layout, status| {
+            select_inner_loop::<T, P>(layout)(pipeline, dst.cast(), dst_stride, len, status)
         },
     )
 }
@@ -195,6 +305,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
     operands: [&Operand<'_>; N_OPERANDS],
     index: &Index<'_>,
     context: &ReadContext,
+    loops: InnerLoops,
     inner_loop: &InnerLoop<'_>,
 ) -> Result<()> {
     let strides = operands.map_inline_ref(|operand| operand.strides());
@@ -229,6 +340,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
         &layouts,
         iter.is_strides_aligned(),
         iter.inner_len(),
+        loops,
     );
     let mut staging = array_from_fn_inline::<_, N_OPERANDS>(|i| {
         need_staging[i].then(|| Staging::new(context, operands[i].dtype, chunk_len_max))
@@ -237,7 +349,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
     // A staged operand is read (or written) straight out of its scratch buffer, so it is
     // contiguous whatever the original strides say.
     let operand_contiguous = |i: usize| iter.is_contiguous()[i] || staging[i].is_some();
-    let inner_loop_flags = InnerLoopFlags {
+    let run_layout = RunLayout {
         inputs_contiguous: (1..N_OPERANDS).all(&operand_contiguous),
         output_contiguous: operand_contiguous(0),
     };
@@ -287,7 +399,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
                 dst,
                 dst_stride,
                 chunk_len,
-                inner_loop_flags,
+                run_layout,
                 &mut iteration_status,
             );
             status |= iteration_status;
@@ -322,6 +434,7 @@ fn to_buf_type_erased_dyn(
     operands: &[&Operand<'_>],
     index: &Index<'_>,
     context: &ReadContext,
+    loops: InnerLoops,
     inner_loop: &InnerLoop<'_>,
 ) -> Result<()> {
     let strides = operands
@@ -362,6 +475,7 @@ fn to_buf_type_erased_dyn(
         &layouts,
         iter.is_strides_aligned(),
         iter.inner_len(),
+        loops,
     );
     let mut staging = operands
         .iter()
@@ -374,7 +488,7 @@ fn to_buf_type_erased_dyn(
     // A staged operand is read (or written) straight out of its scratch buffer, so it is
     // contiguous whatever the original strides say.
     let operand_contiguous = |i: usize| iter.is_contiguous()[i] || staging[i].is_some();
-    let inner_loop_flags = InnerLoopFlags {
+    let run_layout = RunLayout {
         inputs_contiguous: (1..operands.len()).all(&operand_contiguous),
         output_contiguous: operand_contiguous(0),
     };
@@ -424,7 +538,7 @@ fn to_buf_type_erased_dyn(
                 dst,
                 dst_stride,
                 chunk_len,
-                inner_loop_flags,
+                run_layout,
                 &mut iteration_status,
             );
             status |= iteration_status;
@@ -474,6 +588,10 @@ fn stage_strided_inputs(is_contiguous: &[bool]) -> bool {
 /// The shortest inner run, in elements, worth filling a broadcast input's scratch buffer for.
 const STAGE_BROADCAST_MIN_LEN: usize = 64;
 
+/// Which operands to copy through a scratch buffer: the misaligned ones where [`REQUIRE_ALIGNED`],
+/// and, when the pipeline has a contiguous loop for them to reach, the ones whose staging turns the
+/// run contiguous.
+#[allow(clippy::too_many_arguments)]
 fn compute_need_staging(
     need_staging: &mut [bool],
     inner_strides: &[usize],
@@ -482,10 +600,11 @@ fn compute_need_staging(
     layouts: &[(Itemsize, Alignment)],
     is_strides_aligned: &[bool],
     inner_len: usize,
+    loops: InnerLoops,
 ) {
     let n_operands = need_staging.len();
     let is_output_operand = |op_i: usize| op_i == 0;
-    let stage_strided = stage_strided_inputs(is_contiguous);
+    let stage_strided = loops.contiguous && stage_strided_inputs(is_contiguous);
     for i in 0..n_operands {
         let need_staging_unaligned = REQUIRE_ALIGNED
             && !(is_strides_aligned[i]
@@ -500,14 +619,36 @@ fn compute_need_staging(
     // a scratch buffer with that element makes it contiguous again. That only buys the contiguous loop
     // if every other operand is contiguous or staged already.
     let is_broadcast = |i: usize| !is_output_operand(i) && inner_strides[i] == 0;
-    let stage = inner_len >= STAGE_BROADCAST_MIN_LEN
+    let stage = loops.contiguous
+        && inner_len >= STAGE_BROADCAST_MIN_LEN
         && (0..n_operands).all(|i| is_broadcast(i) || is_contiguous[i] || need_staging[i]);
     if stage {
         for (i, need_staging) in need_staging.iter_mut().enumerate() {
             *need_staging |= is_broadcast(i) && layouts[i].0 as usize <= 32;
         }
     }
+
+    // A pipeline that leaves out the scatter loop runs contiguous inputs into a strided output
+    // through the strided loop. Writing the run into a scratch buffer and scattering it from there
+    // takes the contiguous loop instead, for one extra pass over the output. That pays off for a
+    // narrow output, whose contiguous loop stores many elements per vector, but for a wide one the
+    // scatter costs about what the strided loop's own stores do.
+    let inputs_contiguous = (1..n_operands).all(|i| is_contiguous[i] || need_staging[i]);
+    if loops.contiguous
+        && !loops.scatter
+        && inputs_contiguous
+        && !(is_contiguous[0] || need_staging[0])
+        && inner_len >= STAGE_SCATTER_MIN_LEN
+        && layouts[0].0 as usize <= STAGE_SCATTER_MAX_ITEMSIZE
+    {
+        need_staging[0] = true;
+    }
 }
+
+/// The shortest inner run, in elements, worth staging the output for, see `compute_need_staging`.
+const STAGE_SCATTER_MIN_LEN: usize = 64;
+/// The widest output element, in bytes, worth staging for, see `compute_need_staging`.
+const STAGE_SCATTER_MAX_ITEMSIZE: usize = 2;
 
 /// A temporary buffer used to stage a chunk of an operand's data during a pipeline run.
 struct Staging {
@@ -615,7 +756,11 @@ fn inner_loop_impl<
 ) where
     T: Dtyped,
 {
-    unsafe { std::hint::assert_unchecked(OUT_CONTIGUOUS == (dst_stride == size_of::<T>())) };
+    // A pipeline that leaves out a contiguous variant runs its contiguous runs through a strided
+    // one, so only a contiguous variant can assume anything about the stride.
+    if OUT_CONTIGUOUS {
+        unsafe { std::hint::assert_unchecked(dst_stride == size_of::<T>()) };
+    }
     let dst = dst.as_mut_ptr();
     if REQUIRE_ALIGNED {
         debug_assert!(dst.is_aligned());
@@ -671,7 +816,7 @@ fn inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
     T: Dtyped,
     P: ElementwisePipelineImpl<T>,
 {
-    if const { IN_CONTIGUOUS && OUT_CONTIGUOUS } {
+    if const { IN_CONTIGUOUS && OUT_CONTIGUOUS && P::INNER_LOOPS.simd_dispatch } {
         fearless_simd::dispatch!(SimdLevel::new(), simd => inner_loop_per_level::<_, _, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(pipeline, dst, dst_stride, len, status, simd));
     } else {
         crate::scalar::simd::dispatch_baseline!(simd => inner_loop_per_level::<_, _, IN_CONTIGUOUS, OUT_CONTIGUOUS, _>(pipeline, dst, dst_stride, len, status, simd));
@@ -730,13 +875,14 @@ fn inner_loop_per_level<
     dispatch_lanes!(1 2 4 8 16 32 64 128 256 512);
 }
 
+/// Which operands of a run are contiguous, to pick its inner loop by.
 #[derive(Clone, Copy)]
-struct InnerLoopFlags {
+struct RunLayout {
     inputs_contiguous: bool,
     output_contiguous: bool,
 }
 type InnerLoop<'a> =
-    dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, InnerLoopFlags, &mut ArithmeticStatus) + 'a;
+    dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, RunLayout, &mut ArithmeticStatus) + 'a;
 
 /// One region a pipeline reads - or writes - plus the cursor it is walked through.
 ///
@@ -855,6 +1001,7 @@ impl<'a, T> OperandTyped<'a, T> {
 impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     const N_OPERANDS: Option<usize> = Some(1);
     const MAX_ITEMSIZE: usize = size_of::<T>();
+    const INNER_LOOPS: InnerLoops = InnerLoops::ALL;
 
     #[inline]
     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -1141,19 +1288,11 @@ mod tests {
         let start = vec![0; shape.len()];
         let index = Index::new(&start, shape).unwrap();
 
-        let lhs_pipeline = lhs_array
-            .storage
-            .read_as_elementwise_pipeline::<T>(&index, &context)
-            .unwrap();
-        let rhs_pipeline = rhs_array
-            .storage
-            .read_as_elementwise_pipeline::<T>(&index, &context)
-            .unwrap();
-
         // ---------------------------------------------------------------------------
         // A hand-written binary node over two `OperandTyped` leaves - the shape a real op takes.
+        // It compiles the inner loops `INNER_LOOPS_VARIANTS[V]` asks for.
         // ---------------------------------------------------------------------------
-        struct AddNode<P1, P2> {
+        struct AddNode<P1, P2, const V: usize> {
             lhs: P1,
             rhs: P2,
         }
@@ -1161,11 +1300,14 @@ mod tests {
             T: Dtyped + std::ops::Add<Output = T>,
             P1: ElementwisePipelineImpl<T>,
             P2: ElementwisePipelineImpl<T>,
-        > ElementwisePipelineImpl<T> for AddNode<P1, P2>
+            const V: usize,
+        > ElementwisePipelineImpl<T> for AddNode<P1, P2, V>
         {
             const N_OPERANDS: Option<usize> = Some(2);
             const MAX_ITEMSIZE: usize =
                 max_itemsize(&[size_of::<T>(), P1::MAX_ITEMSIZE, P2::MAX_ITEMSIZE]);
+            const INNER_LOOPS: InnerLoops =
+                InnerLoops::and_all(&[INNER_LOOPS_VARIANTS[V], P1::INNER_LOOPS, P2::INNER_LOOPS]);
 
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
                 self.lhs.operands().chain(self.rhs.operands())
@@ -1182,35 +1324,93 @@ mod tests {
                 array_from_fn_inline(|i| lhs[i] + rhs[i])
             }
         }
-        let mut node = AddNode {
-            lhs: lhs_pipeline,
-            rhs: rhs_pipeline,
-        };
 
-        if push {
-            {
-                let mut out = unsafe {
-                    StridedBuf::from_raw_parts_mut(dst.ptr_mut(), shape, &strides[0], itemsize)
-                };
-                node.to_buf(&index, &context, OutBuf::push(&mut out))
-                    .unwrap();
-            }
-            let got = (0..nitems)
-                .map(|k| dst.get::<T>(offs[0][k]))
-                .collect::<Vec<T>>();
-            assert_eq!(got, expected, "shape={shape:?} strides={strides:?}");
-        } else {
-            let mut buf = None;
-            node.to_buf(&index, &context, OutBuf::pull(&mut buf))
-                .unwrap();
-            let buf = buf.unwrap();
-            // The buffer picks its own layout, so walk it by its own strides.
-            let got = offsets(shape, buf.strides())
-                .into_iter()
-                .map(|off| unsafe { buf.data_ptr().add(off).cast::<T>().read_unaligned() })
-                .collect::<Vec<T>>();
-            assert_eq!(got, expected, "shape={shape:?} strides={strides:?}");
+        macro_rules! check_variants {
+            ($($v:literal)*) => {$(
+                if !cfg!(miri) || MIRI_INNER_LOOPS_VARIANTS.contains(&$v) {
+                    let mut node = AddNode::<_, _, $v> {
+                        lhs: lhs_array
+                            .storage
+                            .read_as_elementwise_pipeline::<T>(&index, &context)
+                            .unwrap(),
+                        rhs: rhs_array
+                            .storage
+                            .read_as_elementwise_pipeline::<T>(&index, &context)
+                            .unwrap(),
+                    };
+                    let variant = INNER_LOOPS_VARIANTS[$v];
+                    if push {
+                        // Overwrite the previous variant's result, so one that skips an element
+                        // fails.
+                        for &off in &offs[0] {
+                            dst.set::<T>(off, T::MAX);
+                        }
+                        {
+                            let mut out = unsafe {
+                                StridedBuf::from_raw_parts_mut(
+                                    dst.ptr_mut(),
+                                    shape,
+                                    &strides[0],
+                                    itemsize,
+                                )
+                            };
+                            node.to_buf(&index, &context, OutBuf::push(&mut out))
+                                .unwrap();
+                        }
+                        let got = (0..nitems)
+                            .map(|k| dst.get::<T>(offs[0][k]))
+                            .collect::<Vec<T>>();
+                        assert_eq!(
+                            got, expected,
+                            "shape={shape:?} strides={strides:?} {variant:?}"
+                        );
+                    } else {
+                        let mut buf = None;
+                        node.to_buf(&index, &context, OutBuf::pull(&mut buf))
+                            .unwrap();
+                        let buf = buf.unwrap();
+                        // The buffer picks its own layout, so walk it by its own strides.
+                        let got = offsets(shape, buf.strides())
+                            .into_iter()
+                            .map(|off| unsafe {
+                                buf.data_ptr().add(off).cast::<T>().read_unaligned()
+                            })
+                            .collect::<Vec<T>>();
+                        assert_eq!(
+                            got, expected,
+                            "shape={shape:?} strides={strides:?} {variant:?}"
+                        );
+                    }
+                }
+            )*};
         }
+        check_variants!(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15);
+    }
+
+    /// Every combination of the [`InnerLoops`] flags.
+    const INNER_LOOPS_VARIANTS: [InnerLoops; 16] = {
+        let mut variants = [InnerLoops::STRIDED; 16];
+        let mut i = 0;
+        while i < 16 {
+            variants[i] = InnerLoops {
+                contiguous: i & 1 != 0,
+                gather: i & 2 != 0,
+                scatter: i & 4 != 0,
+                simd_dispatch: i & 8 != 0,
+            };
+            i += 1;
+        }
+        variants
+    };
+    /// The [`INNER_LOOPS_VARIANTS`] Miri checks, being slow: the presets.
+    const MIRI_INNER_LOOPS_VARIANTS: [usize; 4] = [0, 9, 11, 15];
+
+    #[test]
+    fn inner_loops_variants_cover_the_presets() {
+        assert_eq!(INNER_LOOPS_VARIANTS[0], InnerLoops::STRIDED);
+        assert_eq!(INNER_LOOPS_VARIANTS[9], InnerLoops::CONTIGUOUS);
+        assert_eq!(INNER_LOOPS_VARIANTS[11], InnerLoops::DEFAULT);
+        assert_eq!(INNER_LOOPS_VARIANTS[15], InnerLoops::ALL);
     }
 
     // ---------------------------------------------------------------------------
@@ -1288,6 +1488,70 @@ mod tests {
         for push in [false, true] {
             check_add(&[4, 100], [&[2, 1], &[0, 0], &[2, 1]], [0; 3], push);
             check_add(&[4, 100], [&[2, 1], &[2, 1], &[0, 0]], [0, 1, 1], push);
+        }
+    }
+
+    #[test]
+    fn contiguous_inputs_into_a_strided_output() {
+        // An output strided along every dim, `out[:, ::2]`, from contiguous inputs: the run a
+        // scatter loop takes. Without one, a narrow output goes through scratch for the contiguous
+        // loop, once the run is long enough, and a wide one through the strided loop.
+        use core::ops::{Add, Neg};
+
+        use crate::Storage;
+
+        fn read_into_every_other_column<S>(array: &Array<S>) -> Vec<S::Item>
+        where
+            S: Storage<Item: Default>,
+        {
+            let (rows, cols) = (array.shape()[0] as usize, array.shape()[1] as usize);
+            let itemsize = size_of::<S::Item>();
+            let mut dst = vec![S::Item::default(); rows * cols * 2];
+            {
+                // SAFETY: `dst` holds `rows` rows of `2 * cols` items.
+                let mut out = unsafe {
+                    StridedBuf::from_raw_parts_mut(
+                        dst.as_mut_ptr().cast::<u8>(),
+                        &[rows, cols],
+                        &[2 * cols * itemsize, 2 * itemsize],
+                        itemsize,
+                    )
+                };
+                let index = [0..rows as u64, 0..cols as u64];
+                array.to_buf_strided_into(&index, &mut out, None).unwrap();
+            }
+            dst.into_iter().step_by(2).collect()
+        }
+
+        for cols in [STAGE_SCATTER_MIN_LEN - 1, 100, 9000] {
+            let a = ndarray::Array2::from_shape_fn((3, cols), |(i, j)| (i * cols + j) as i16 - 150);
+            let b = ndarray::Array2::from_shape_fn((3, cols), |(i, j)| (i * 7 + j * 3) as i16);
+            macro_rules! plain {
+                ($x:expr) => {
+                    Array::plain_ndarray_ref(&$x).unwrap()
+                };
+            }
+
+            // Narrow outputs: a binary kernel, a unary one, and a `bool8` out of wider inputs.
+            let got = read_into_every_other_column(&plain!(a).add(plain!(b)));
+            let expected = a.iter().zip(&b).map(|(&x, &y)| x.wrapping_add(y));
+            assert_eq!(got, expected.collect::<Vec<_>>());
+            let got = read_into_every_other_column(&plain!(a).neg());
+            let expected = a.iter().map(|&x| x.wrapping_neg());
+            assert_eq!(got, expected.collect::<Vec<_>>());
+            let af = a.mapv(f32::from);
+            let bf = b.mapv(f32::from);
+            let got = read_into_every_other_column(&plain!(af).less(plain!(bf)));
+            let expected = af.iter().zip(&bf).map(|(&x, &y)| x < y);
+            assert_eq!(
+                got.iter().map(|&x| x.into()).collect::<Vec<bool>>(),
+                expected.collect::<Vec<_>>()
+            );
+
+            // A wide output stays on the strided loop.
+            let got = read_into_every_other_column(&plain!(af).add(plain!(bf)));
+            let expected = af.iter().zip(&bf).map(|(&x, &y)| x + y);
+            assert_eq!(got, expected.collect::<Vec<_>>());
         }
     }
 
@@ -2120,6 +2384,156 @@ mod tests {
             |xs: [i16; 2]| xs[0] as i8,
         );
         assert_eq!(declared_max_itemsize::<_, i8>(&mapped.storage, &index), 8);
+    }
+
+    /// The declared `INNER_LOOPS` for a pipeline over `storage`.
+    fn declared_inner_loops<S, T>(storage: &S) -> InnerLoops
+    where
+        S: StorageBase,
+        T: Dtyped,
+    {
+        fn declared<T, P: ElementwisePipelineImpl<T>>(_pipeline: &P) -> InnerLoops {
+            P::INNER_LOOPS
+        }
+        let context = ReadContext::default();
+        let (start, size) = split_ranges(&full_index(storage.shape()));
+        let pipeline = storage
+            .read_as_elementwise_pipeline::<T>(&Index::new(&start, &size).unwrap(), &context)
+            .unwrap();
+        declared::<T, _>(&pipeline)
+    }
+
+    #[test]
+    fn inner_loops_and() {
+        let (all, default, contiguous, strided) = (
+            InnerLoops::ALL,
+            InnerLoops::DEFAULT,
+            InnerLoops::CONTIGUOUS,
+            InnerLoops::STRIDED,
+        );
+        assert_eq!(all.and(all), all);
+        assert_eq!(all.and(default), default);
+        assert_eq!(default.and(contiguous), contiguous);
+        assert_eq!(contiguous.and(default), contiguous);
+        assert_eq!(contiguous.and(strided), strided);
+        assert_eq!(InnerLoops::and_all(&[]), all);
+        assert_eq!(InnerLoops::and_all(&[all, contiguous, default]), contiguous);
+        assert_eq!(InnerLoops::and_all(&[all, strided, contiguous]), strided);
+
+        let no_dispatch = InnerLoops {
+            simd_dispatch: false,
+            ..all
+        };
+        let only_scatter = InnerLoops {
+            scatter: true,
+            ..strided
+        };
+        assert_eq!(
+            no_dispatch.and(only_scatter),
+            InnerLoops {
+                contiguous: false,
+                gather: false,
+                scatter: true,
+                simd_dispatch: false,
+            }
+        );
+    }
+
+    #[test]
+    fn inner_loops_are_the_and_of_the_kernels() {
+        use core::ops::{Add, Neg};
+
+        let (all, default, contiguous, strided) = (
+            InnerLoops::ALL,
+            InnerLoops::DEFAULT,
+            InnerLoops::CONTIGUOUS,
+            InnerLoops::STRIDED,
+        );
+        let arr = || {
+            let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as f32);
+            Array::compact_ndarray(&nd).unwrap()
+        };
+        let cond = || {
+            let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| {
+                crate::scalar::bool8::from((i + j) % 2 == 0)
+            });
+            Array::compact_ndarray(&nd).unwrap()
+        };
+        macro_rules! check {
+            ($array:expr, $T:ty, $expected:expr) => {
+                assert_eq!(
+                    declared_inner_loops::<_, $T>(&$array.storage),
+                    $expected,
+                    "{}",
+                    stringify!($array)
+                );
+            };
+        }
+
+        // Leaves ask for nothing, so a pipeline is as wide as its kernels.
+        check!(arr(), f32, all);
+        check!(scalar_4x5(1.0), f32, all);
+        check!(arr().neg(), f32, default);
+        check!(arr().cast::<f64>(), f64, default);
+        check!(arr().map(|x| x * 2.0), f32, default);
+
+        // Binary kernels leave out the gather loop, libm kernels everything but the strided one.
+        check!(arr().add(arr()), f32, contiguous);
+        check!(arr().greater(arr()), crate::scalar::bool8, contiguous);
+        check!(arr().pow(arr()), f32, strided);
+        check!(arr().exp(), f32, strided);
+        check!(arr().log10(), f32, strided);
+
+        // A binary kernel with a scalar operand keeps the binary kernel's loops.
+        check!(arr() + 2.0f32, f32, contiguous);
+        check!(2.0f32 - arr(), f32, contiguous);
+
+        // A node gets the variants all of its kernels ask for.
+        check!(arr().add(arr()).neg(), f32, contiguous);
+        check!(arr().neg().add(arr().neg()), f32, contiguous);
+        check!(arr().add(arr()).sin(), f32, strided);
+        check!(arr().add(arr().ln()), f32, strided);
+        check!(arr().cast::<f64>().neg(), f64, default);
+        check!(arr().clamp(arr(), arr()), f32, contiguous);
+        check!(arr().clamp(arr().cos(), arr()), f32, strided);
+        check!(cond().select(arr(), arr()), f32, contiguous);
+        check!(arr().less(arr()).select(arr().tan(), arr()), f32, strided);
+
+        // Sequences: the variants every array's pipeline asks for.
+        let f = |xs: [f32; 2]| xs[0] + xs[1];
+        check!(crate::ops::map_multiple([arr(), arr()], f), f32, default);
+        check!(
+            crate::ops::map_multiple([arr().exp(), arr().exp()], f),
+            f32,
+            strided
+        );
+        let f = |(x, y): (f32, f32)| x + y;
+        check!(
+            crate::ops::map_multiple((arr(), arr().neg()), f),
+            f32,
+            default
+        );
+        check!(
+            crate::ops::map_multiple((arr(), arr().add(arr())), f),
+            f32,
+            contiguous
+        );
+        check!(
+            crate::ops::map_multiple((arr().atan(), arr()), f),
+            f32,
+            strided
+        );
+        let f = |xs: &[f32]| xs[0];
+        check!(
+            crate::ops::map_multiple(vec![arr(), arr()], f),
+            f32,
+            default
+        );
+        check!(
+            crate::ops::map_multiple(vec![arr().asin()], f),
+            f32,
+            strided
+        );
     }
 
     #[test]

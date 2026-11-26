@@ -348,6 +348,8 @@ where
         {
             const N_OPERANDS: Option<usize> = D::N_OPERANDS;
             const MAX_ITEMSIZE: usize = max_itemsize(&[size_of::<T>(), D::MAX_ITEMSIZE]);
+            // The closure is opaque, so it gets what kernels get by default.
+            const INNER_LOOPS: InnerLoops = InnerLoops::DEFAULT.and(D::INNER_LOOPS);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {

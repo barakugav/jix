@@ -224,6 +224,7 @@ define_op2!(
     BitAndKernel,
     crate::scalar::BitAnd::bitand,
     simd: bitand_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::BitAnd::bitand,
 );
 define_op2_scalar!(
@@ -284,6 +285,7 @@ define_op2!(
     BitOrKernel,
     crate::scalar::BitOr::bitor,
     simd: bitor_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::BitOr::bitor,
 );
 define_op2_scalar!(
@@ -344,6 +346,7 @@ define_op2!(
     BitXorKernel,
     crate::scalar::BitXor::bitxor,
     simd: bitxor_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::BitXor::bitxor,
 );
 define_op2_scalar!(
@@ -437,6 +440,7 @@ define_op2!(
     BitwiseShiftLeftKernel,
     crate::scalar::Shl::shl,
     simd: shl_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 
 define_op2!(
@@ -470,6 +474,7 @@ define_op2!(
     BitwiseShiftRightKernel,
     crate::scalar::Shr::shr,
     simd: shr_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise bitwise left rotation (`a.rotate_left(b)`).
@@ -503,6 +508,7 @@ define_op2!(
     BitwiseRotateLeftKernel,
     crate::scalar::RotateLeft::rotate_left,
     simd: rotate_left_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 
 define_op2!(
@@ -537,6 +543,7 @@ define_op2!(
     BitwiseRotateRightKernel,
     crate::scalar::RotateRight::rotate_right,
     simd: rotate_right_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 
 impl<S: StorageBase> Array<S> {

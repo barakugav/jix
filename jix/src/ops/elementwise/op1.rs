@@ -9,6 +9,9 @@ pub(crate) struct Op1<S, K> {
 pub(crate) trait Op1Kernel<T> {
     type Output;
 
+    /// The inner loops worth compiling for the kernel.
+    const INNER_LOOPS: InnerLoops = InnerLoops::DEFAULT;
+
     fn apply(&self, x: T, status: &mut ArithmeticStatus) -> Self::Output;
 
     #[inline(always)]
@@ -97,6 +100,7 @@ where
         {
             const N_OPERANDS: Option<usize> = P::N_OPERANDS;
             const MAX_ITEMSIZE: usize = max_itemsize(&[size_of::<T>(), P::MAX_ITEMSIZE]);
+            const INNER_LOOPS: InnerLoops = K::INNER_LOOPS.and(P::INNER_LOOPS);
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
@@ -169,6 +173,7 @@ macro_rules! define_op1 {
         $Kernel:ident,
         crate::scalar::$Trait:ident::$kernel_fn:ident,
         simd: $bulk_fn:ident,
+        $(inner_loops: $inner_loops:expr,)?
         $(core_op: core::ops::$CoreTrait:ident::$core_fn:ident,)?
     ) => {
         struct $Kernel;
@@ -177,6 +182,8 @@ macro_rules! define_op1 {
             T: crate::scalar::$Trait + Copy + 'static,
         {
             type Output = <T as crate::scalar::$Trait>::Output;
+
+            $(const INNER_LOOPS: crate::ops::InnerLoops = $inner_loops;)?
 
             #[inline(always)]
             fn apply(&self, x: T, _status: &mut ArithmeticStatus) -> Self::Output {

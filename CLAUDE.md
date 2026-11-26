@@ -226,6 +226,12 @@ hidden module of the function's name that `#[pymodule_export]` relies on, and th
 shadow it - that is why `cast` lives in `elementwise/casting.rs`. After changing the Python surface,
 regenerate stubs with `maturin generate-stubs --out python`.
 
+An element-wise kernel also picks the inner loop variants compiled for it, `InnerLoops`
+(`ops/elementwise/pipeline.rs`, `inner_loops:` in `define_op1!` / `define_op2!`): `DEFAULT` (no
+scatter loop) for vectorized unary kernels, `CONTIGUOUS` for binary ones, `STRIDED` for per-element
+scalar ones such as libm calls. A pipeline compiles only the variants all its kernels ask for, and
+every variant is a full copy of the fused loop, so this weighs directly on build time and binary size.
+
 ## Testing Conventions
 
 - **Rust:** tests are inline `#[cfg(test)] mod tests` blocks inside the source files (no top-level

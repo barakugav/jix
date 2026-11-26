@@ -633,6 +633,7 @@ define_op2!(
     DivKernel,
     crate::scalar::Div::div(status),
     simd: div_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::Div::div,
 );
 define_op2_scalar!(
@@ -693,6 +694,7 @@ define_op2!(
     DivideTruncKernel,
     crate::scalar::DivideTrunc::divide_trunc(status),
     simd: divide_trunc_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise floored division of two arrays.
@@ -723,6 +725,7 @@ define_op2!(
     DivideFloorKernel,
     crate::scalar::DivideFloor::divide_floor(status),
     simd: divide_floor_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise Euclidean division of two arrays.
@@ -753,6 +756,7 @@ define_op2!(
     DivideEuclidKernel,
     crate::scalar::DivideEuclid::divide_euclid(status),
     simd: divide_euclid_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise truncated remainder of two arrays (`a % b`).
@@ -780,6 +784,7 @@ define_op2!(
     RemainderTruncKernel,
     crate::scalar::RemainderTrunc::remainder_trunc(status),
     simd: remainder_trunc_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
     core_op: core::ops::Rem::rem,
 );
 define_op2_scalar!(
@@ -832,6 +837,7 @@ define_op2!(
     RemainderFloorKernel,
     crate::scalar::RemainderFloor::remainder_floor(status),
     simd: remainder_floor_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise Euclidean remainder of two arrays.
@@ -856,6 +862,7 @@ define_op2!(
     RemainderEuclidKernel,
     crate::scalar::RemainderEuclid::remainder_euclid(status),
     simd: remainder_euclid_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 
 impl<S: StorageBase> Array<S> {

@@ -87,6 +87,7 @@ define_op1!(
     SinKernel,
     crate::scalar::Sin::sin,
     simd: sin_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the cosine of each element (input in radians).
@@ -118,6 +119,7 @@ define_op1!(
     CosKernel,
     crate::scalar::Cos::cos,
     simd: cos_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the tangent of each element (input in radians).
@@ -148,6 +150,7 @@ define_op1!(
     TanKernel,
     crate::scalar::Tan::tan,
     simd: tan_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
@@ -178,6 +181,7 @@ define_op1!(
     AsinKernel,
     crate::scalar::Asin::asin,
     simd: asin_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
@@ -208,6 +212,7 @@ define_op1!(
     AcosKernel,
     crate::scalar::Acos::acos,
     simd: acos_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 define_op1!(
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
@@ -238,6 +243,7 @@ define_op1!(
     AtanKernel,
     crate::scalar::Atan::atan,
     simd: atan_bulk,
+    inner_loops: InnerLoops::STRIDED,
 );
 
 impl<S: StorageBase> Array<S> {

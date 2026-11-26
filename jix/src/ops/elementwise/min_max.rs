@@ -127,6 +127,7 @@ define_op2!(
     MaximumKernel,
     crate::scalar::Maximum::maximum,
     simd: maximum_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 define_op2!(
     /// Element-wise minimum of two arrays.
@@ -161,6 +162,7 @@ define_op2!(
     MinimumKernel,
     crate::scalar::Minimum::minimum,
     simd: minimum_bulk,
+    inner_loops: InnerLoops::CONTIGUOUS,
 );
 
 /// Element-wise clamp of `a` to the range `[min, max]`.
@@ -320,6 +322,13 @@ where
                 P::MAX_ITEMSIZE,
                 PMin::MAX_ITEMSIZE,
                 PMax::MAX_ITEMSIZE,
+            ]);
+            // Like the binary kernels, the max and min of `clamp` leave out the gather loop.
+            const INNER_LOOPS: InnerLoops = InnerLoops::and_all(&[
+                InnerLoops::CONTIGUOUS,
+                P::INNER_LOOPS,
+                PMin::INNER_LOOPS,
+                PMax::INNER_LOOPS,
             ]);
 
             #[inline]
