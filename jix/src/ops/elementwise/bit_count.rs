@@ -27,7 +27,7 @@ pub(crate) mod traits {
         impl CountZeros for [i32] {
             type Output = u32;
             fn count_zeros = |x| x.count_zeros(),
-            fn count_zeros_bulk = |x| (!x).count_ones().bitcast::<S::u32s>(),
+            fn count_zeros_bulk = |x| (!x).count_ones().cast_unsigned(),
         }
     );
     impl_scalar_op1!(
@@ -107,6 +107,7 @@ pub(crate) mod traits {
         swap_bytes,
         swap_bytes_bulk,
         Self
+        // TODO: use fearless_simd swap_bytes. Looks like LLVM auto-vectorization is faster
     );
     int_op1!(
         /// Bit-order reversal operation, as [`u32::reverse_bits`].
@@ -117,6 +118,7 @@ pub(crate) mod traits {
         reverse_bits,
         reverse_bits_bulk,
         Self
+        // TODO: use fearless_simd reverse_bits. Looks like LLVM auto-vectorization is faster
     );
 }
 

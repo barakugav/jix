@@ -83,7 +83,7 @@ pub(crate) mod traits {
                 #[allow(unused_imports)]
                 use {
                     crate::util::ArrayExt,
-                    fearless_simd::{Bytes, SimdCvtFloat, SimdCvtTruncate},
+                    fearless_simd::{Bytes, SimdFloat, SimdInt},
                     simd::{NarrowVectors, SimdElementExt, WidenVectors},
                 };
                 $(
@@ -107,10 +107,10 @@ pub(crate) mod traits {
         (@step narrow, $v:ident) => { NarrowVectors::<S>::narrow($v) };
         (@step saturating_narrow, $v:ident) => { NarrowVectors::<S>::saturating_narrow($v) };
         (@step bitcast, $v:ident) => { $v.map_inline(#[inline(always)] |x| x.bitcast()) };
-        (@step float, $v:ident) => { $v.map_inline(#[inline(always)] |x| SimdCvtFloat::float_from(x)) };
-        (@step truncate, $v:ident) => { $v.map_inline(#[inline(always)] |x| SimdCvtTruncate::truncate_from_precise(x)) };
+        (@step float, $v:ident) => { $v.map_inline(#[inline(always)] |x| x.to_float()) };
+        (@step truncate, $v:ident) => { $v.map_inline(#[inline(always)] |x| x.to_int_precise()) };
         (@step truncate($T:ident), $v:ident) => {
-            $v.map_inline(#[inline(always)] |x| -> <$T as SimdElementExt>::V<S> { SimdCvtTruncate::truncate_from_precise(x) })
+            $v.map_inline(#[inline(always)] |x| -> <$T as SimdElementExt>::V<S> { x.to_int_precise() })
         };
         (@vectors_in narrow) => { 2 };
         (@vectors_in saturating_narrow) => { 2 };
