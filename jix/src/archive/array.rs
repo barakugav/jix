@@ -659,8 +659,8 @@ mod tests {
         .unwrap();
         a.set_block_shape_fixed_dims(&[false, false]).unwrap();
         assert_eq!(a.storage().0.block_shape(), &[8, 32]);
-        let fixed_dims = a.storage().0.spec.as_ref().block_shape_fixed_dims();
-        assert_eq!((fixed_dims.get(0), fixed_dims.get(1)), (false, false));
+        assert!(!a.block_shape_fixed_dim(0).unwrap());
+        assert!(!a.block_shape_fixed_dim(1).unwrap());
         assert_eq!(
             a.into_typed::<i32>()
                 .unwrap()

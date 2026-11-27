@@ -58,3 +58,8 @@ def log2(array: Any):
 def log10(array: Any):
     """Alias for [`jix.log`][jix.log] with `base=10`"""
     return log(array, base=10)
+
+
+def _unpickle_array(*args):
+    """Rebuild a pickled `jix.Array`. Pickles refer to this function by name, so it must stay here."""
+    return jix._unpickle_array(*args)  # noqa: F405

@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::mem::{ManuallyDrop, MaybeUninit};
 
 use jix_core::error::ErrorKind;
@@ -433,6 +434,46 @@ pub(crate) fn array_try_map<T, U, E, const N: usize>(
             f(i, item)
         },
     )
+}
+
+pub(crate) struct StorageFormatter<'a>(pub(crate) &'a dyn StorageBase);
+impl StorageFormatter<'_> {
+    fn format_storage(
+        storage: &dyn StorageBase,
+        f: &mut std::fmt::Formatter<'_>,
+        n_printed: &mut usize,
+    ) -> std::fmt::Result {
+        let info = storage.info();
+        let deps = info.dependencies();
+        if ["Any", "IntoType", "IntoDim"].contains(&info.name()) && deps.len() == 1 {
+            return Self::format_storage(deps[0], f, n_printed);
+        }
+        f.write_str(info.name())?;
+        *n_printed += 1;
+        if !deps.is_empty() {
+            const MAX_ITEMS: usize = 8;
+
+            f.write_char('<')?;
+            for (i, dep) in deps.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                if *n_printed >= MAX_ITEMS {
+                    f.write_str("...")?;
+                    break;
+                }
+                Self::format_storage(*dep, f, n_printed)?;
+            }
+            f.write_char('>')?;
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Display for StorageFormatter<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut n_printed = 0;
+        Self::format_storage(self.0, f, &mut n_printed)
+    }
 }
 
 #[cfg(test)]
