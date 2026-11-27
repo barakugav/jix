@@ -234,38 +234,12 @@ macro_rules! define_op2 {
         $(#[$meta:meta])*
         $Op:ident,
         $Kernel:ident,
-        crate::scalar::$Trait:ident::$kernel_fn:ident $(($status:ident))?,
+        crate::scalar::$Trait:ident::$kernel_fn:ident $(($fallible:ident))?,
         simd: $bulk_fn:ident,
         $(core_op: core::ops::$CoreTrait:ident::$core_fn:ident,)?
     ) => {
         struct $Kernel;
-        impl<T1, T2> crate::ops::elementwise::op2::Op2Kernel<T1, T2> for $Kernel
-        where
-            T1: crate::scalar::$Trait<T2> + Copy + 'static,
-            T2: Copy + 'static,
-        {
-            type Output = <T1 as crate::scalar::$Trait<T2>>::Output;
-
-            #[inline(always)]
-            fn apply(&self, a: T1, b: T2, status: &mut ArithmeticStatus) -> Self::Output {
-                { let _ = status; } // suppress unused
-                $(let $status = status;)?
-                <T1 as crate::scalar::$Trait<T2>>::$kernel_fn(a, b $(, $status)?)
-            }
-
-            #[inline(always)]
-            fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
-                &self,
-                a: [T1; N],
-                b: [T2; N],
-                status: &mut ArithmeticStatus,
-                simd: S,
-            ) -> [Self::Output; N] {
-                { let _ = status; } // suppress unused
-                $(let $status = status;)?
-                <T1 as crate::scalar::$Trait<T2>>::$bulk_fn(a, b, $($status,)? simd)
-            }
-        }
+        define_op2!(@kernel $Kernel, $Trait::$kernel_fn $(($fallible))?, $bulk_fn);
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::elementwise::op2::Op2<S1, S2, $Kernel>);
         impl<S1, S2> $Op<S1, S2>
@@ -305,6 +279,65 @@ macro_rules! define_op2 {
             $Trait,
             $(core_op: $CoreTrait::$core_fn,)?
         );
+    };
+
+    (@kernel $Kernel:ident, $Trait:ident::$kernel_fn:ident, $bulk_fn:ident) => {
+        impl<T1, T2> crate::ops::elementwise::op2::Op2Kernel<T1, T2> for $Kernel
+        where
+            T1: crate::scalar::$Trait<T2> + Copy + 'static,
+            T2: Copy + 'static,
+        {
+            type Output = <T1 as crate::scalar::$Trait<T2>>::Output;
+
+            #[inline(always)]
+            fn apply(&self, a: T1, b: T2, _status: &mut ArithmeticStatus) -> Self::Output {
+                <T1 as crate::scalar::$Trait<T2>>::$kernel_fn(a, b)
+            }
+
+            #[inline(always)]
+            fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
+                &self,
+                a: [T1; N],
+                b: [T2; N],
+                _status: &mut ArithmeticStatus,
+                simd: S,
+            ) -> [Self::Output; N] {
+                <T1 as crate::scalar::$Trait<T2>>::$bulk_fn(a, b, simd)
+            }
+        }
+    };
+    // A fallible op: its errors are added to the read's `status`, its `Error` converted into it.
+    (@kernel $Kernel:ident, $Trait:ident::$kernel_fn:ident(fallible), $bulk_fn:ident) => {
+        impl<T1, T2> crate::ops::elementwise::op2::Op2Kernel<T1, T2> for $Kernel
+        where
+            T1: crate::scalar::$Trait<T2, Output: crate::dtype::Dtyped> + Copy + 'static,
+            T2: Copy + 'static,
+        {
+            type Output = <T1 as crate::scalar::$Trait<T2>>::Output;
+
+            #[inline(always)]
+            fn apply(&self, a: T1, b: T2, status: &mut ArithmeticStatus) -> Self::Output {
+                let mut error = <T1 as crate::scalar::$Trait<T2>>::Error::default();
+                let result = <T1 as crate::scalar::$Trait<T2>>::$kernel_fn(a, b);
+                let y = crate::scalar::traits_util::unwrap_or_record(result, &mut error);
+                *status |= error.into();
+                y
+            }
+
+            #[inline(always)]
+            fn apply_bulk<const N: usize, S: fearless_simd::Simd>(
+                &self,
+                a: [T1; N],
+                b: [T2; N],
+                status: &mut ArithmeticStatus,
+                simd: S,
+            ) -> [Self::Output; N] {
+                let mut error = <T1 as crate::scalar::$Trait<T2>>::Error::default();
+                let ys = <T1 as crate::scalar::$Trait<T2>>::$bulk_fn(a, b, &mut error, simd);
+                *status |= error.into();
+                ys
+            }
+        }
     };
 
     (

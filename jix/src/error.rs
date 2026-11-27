@@ -339,83 +339,80 @@ pub(crate) enum ArithmeticErrorKind {
     NegativePower = 2,
 }
 
-/// The arithmetic errors an element-wise computation hit.
-///
-/// Scalar kernels that can hit an error, like [`scalar::Div`](crate::scalar::Div), take a
-/// `&mut ArithmeticStatus`: rather than panicking, they produce a fallback value for the element
-/// and set the status to error. After the computation, [`into_result`](Self::into_result) turns
-/// the status into `Ok` or an error with [`ErrorKind::Arithmetic`].
-///
-/// ```
-/// use jix::error::{ArithmeticStatus, ErrorKind};
-/// use jix::scalar::Div;
-///
-/// let mut status = ArithmeticStatus::default();
-/// assert_eq!(7i32.div(2, &mut status), 3);
-/// assert!(status.into_result().is_ok());
-/// assert_eq!(7i32.div(0, &mut status), 0);
-/// assert_eq!(
-///     status.into_result().unwrap_err().kind(),
-///     ErrorKind::Arithmetic
-/// );
-/// ```
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ArithmeticStatus(u8);
-impl ArithmeticStatus {
-    /// Create a new `ArithmeticStatus` with no errors set.
-    pub fn new() -> Self {
-        Self::default()
-    }
+pub(crate) use arithmetic_status::ArithmeticStatus;
+mod arithmetic_status {
+    use super::{ArithmeticErrorKind, Error, ErrorKind, Result};
 
-    /// Set `error` if `cond` holds.
-    #[inline(always)]
-    pub(crate) fn set_if(&mut self, error: ArithmeticErrorKind, cond: bool) {
-        self.0 |= error as u8 * cond as u8;
-    }
-
-    /// Whether `error` is set.
-    #[inline(always)]
-    pub(crate) fn contains(self, error: ArithmeticErrorKind) -> bool {
-        (self.0 & error as u8) != 0
-    }
-
-    /// Whether no error is set.
-    #[inline(always)]
-    pub(crate) fn is_ok(self) -> bool {
-        self.0 == 0
-    }
-
-    /// `Ok` if no error is set, else an [`ErrorKind::Arithmetic`] error describing the first one.
-    #[inline]
-    pub fn into_result(self) -> Result<()> {
-        #[cold]
-        #[inline(never)]
-        fn fail(status: ArithmeticStatus) -> Result<()> {
-            let message = if status.contains(ArithmeticErrorKind::DivideByZero) {
-                "integer division or modulo by zero"
-            } else if status.contains(ArithmeticErrorKind::NegativePower) {
-                "integers to negative integer powers are not allowed"
-            } else {
-                "unknown arithmetic error"
-            };
-            Err(Error::new(ErrorKind::Arithmetic, message))
+    /// The arithmetic errors an element-wise computation hit.
+    ///
+    /// The `Error` of the fallible scalar traits, like [`scalar::Div`](crate::scalar::Div), for
+    /// every element type. Public, so it can be their associated type, but in a private module:
+    /// outside the crate it is only reachable as `<T as Div>::Error`, through the trait's bounds.
+    ///
+    /// The kernels OR the errors of every element into one status (`|=`), checked once per
+    /// inner loop; converting it gives `Ok` or an error with [`ErrorKind::Arithmetic`].
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct ArithmeticStatus(u8);
+    impl ArithmeticStatus {
+        /// Set `error` if `cond` holds.
+        #[inline(always)]
+        pub(crate) fn set_if(&mut self, error: ArithmeticErrorKind, cond: bool) {
+            self.0 |= error as u8 * cond as u8;
         }
-        if !self.is_ok() {
-            return fail(self);
+
+        /// Whether `error` is set.
+        #[inline(always)]
+        pub(crate) fn contains(self, error: ArithmeticErrorKind) -> bool {
+            (self.0 & error as u8) != 0
         }
-        Ok(())
+
+        /// Whether no error is set.
+        #[inline(always)]
+        pub(crate) fn is_ok(self) -> bool {
+            self.0 == 0
+        }
+
+        /// `Ok` if no error is set, else an [`ErrorKind::Arithmetic`] error describing the first
+        /// one.
+        #[inline]
+        pub(crate) fn into_result(self) -> Result<()> {
+            #[cold]
+            #[inline(never)]
+            fn fail(status: ArithmeticStatus) -> Result<()> {
+                let message = if status.contains(ArithmeticErrorKind::DivideByZero) {
+                    "integer division or modulo by zero"
+                } else if status.contains(ArithmeticErrorKind::NegativePower) {
+                    "integers to negative integer powers are not allowed"
+                } else {
+                    "unknown arithmetic error"
+                };
+                Err(Error::new(ErrorKind::Arithmetic, message))
+            }
+            if !self.is_ok() {
+                return fail(self);
+            }
+            Ok(())
+        }
     }
-}
-impl std::ops::BitOrAssign for ArithmeticStatus {
-    #[inline(always)]
-    fn bitor_assign(&mut self, rhs: Self) {
-        self.0 |= rhs.0;
+    impl std::ops::BitOrAssign for ArithmeticStatus {
+        #[inline(always)]
+        fn bitor_assign(&mut self, rhs: Self) {
+            self.0 |= rhs.0;
+        }
     }
-}
-impl From<ArithmeticErrorKind> for ArithmeticStatus {
-    #[inline(always)]
-    fn from(error: ArithmeticErrorKind) -> Self {
-        Self(error as u8)
+    impl From<ArithmeticErrorKind> for ArithmeticStatus {
+        #[inline(always)]
+        fn from(error: ArithmeticErrorKind) -> Self {
+            Self(error as u8)
+        }
+    }
+    impl From<ArithmeticStatus> for Result<()> {
+        /// `Ok` if no error is set, else an [`ErrorKind::Arithmetic`] error describing the first
+        /// one.
+        #[inline]
+        fn from(status: ArithmeticStatus) -> Self {
+            status.into_result()
+        }
     }
 }
 

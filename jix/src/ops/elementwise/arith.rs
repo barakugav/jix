@@ -4,7 +4,7 @@ use crate::ops::elementwise::op2_scalar::define_op2_scalar;
 use crate::ops::prelude::*;
 
 pub(crate) mod traits {
-    use crate::error::ArithmeticErrorKind;
+    use crate::error::{ArithmeticErrorKind, ArithmeticStatus};
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
     #[cfg(feature = "half")]
@@ -309,29 +309,40 @@ pub(crate) mod traits {
     );
     define_scalar_op2_trait!(
         /// Exponentiation operation: as [`i32::wrapping_pow`] for integers (wrapping on
-        /// overflow), [`f32::powf`] for floats (`+-inf` and `NaN` included, no error reported).
+        /// overflow), [`f32::powf`] for floats (`+-inf` and `NaN` included, never an error).
         ///
-        /// A negative exponent of an integer base gives `0` and reports an arithmetic error to
-        /// `status`.
+        /// A negative exponent of an integer base is an error.
+        ///
+        /// # Examples
+        /// ```
+        /// use jix::scalar::Pow;
+        ///
+        /// // `Pow::pow`, as the integers' inherent `pow` would take precedence
+        /// assert_eq!(Pow::pow(3i32, 4i32), Ok(81));
+        /// assert_eq!(Pow::pow(2u8, 9u32), Ok(0)); // wraps
+        /// assert_eq!(Pow::pow(2.0f64, -1i32), Ok(0.5));
+        /// assert!(Pow::pow(2i32, -1i32).is_err());
+        /// ```
         Pow,
-        /// Raise to the power of another value, reporting an arithmetic error to `status`.
-        pow(status),
+        /// Raise to the power of another value.
+        pow(fallible),
         bulk_fn: pow_bulk,
     );
 
     impl_scalar_op2!(
         impl Pow for [i8, i16, i32, i64, u8, u16, u32, u64] x [u8, u16, u32] {
-            fn pow = |a, b, _status| a.wrapping_pow(b as u32),
+            type Error = ArithmeticStatus;
+            fn pow = |a, b| Ok(a.wrapping_pow(b as u32)),
         }
     );
     impl_scalar_op2!(
         impl Pow for [i8, i16, i32, i64, u8, u16, u32, u64] x [i8, i16, i32, i64] {
-            fn pow = |a, b, status| {
-                status.set_if(ArithmeticErrorKind::NegativePower, b < 0);
+            type Error = ArithmeticStatus;
+            fn pow = |a, b| {
                 if let Ok(b) = u32::try_from(b) {
-                    a.wrapping_pow(b)
+                    Ok(a.wrapping_pow(b))
                 } else if b < 0 {
-                    0
+                    Err(ArithmeticErrorKind::NegativePower.into())
                 } else {
                     let (mut acc, mut base, mut exp): (Self, Self, u64) = (1, a, b as u64);
                     while exp > 0 {
@@ -341,37 +352,41 @@ pub(crate) mod traits {
                         base = base.wrapping_mul(base);
                         exp >>= 1;
                     }
-                    acc
+                    Ok(acc)
                 }
             },
         }
     );
     impl_scalar_op2!(
         impl Pow for [f32, f64] x [i8, u8, i16, u16, i32] {
-            fn pow = |a, b, _status| match b {
+            type Error = ArithmeticStatus;
+            fn pow = |a, b| Ok(match b {
                 0 => 1.0,
                 1 => a,
                 2 => a * a,
                 // compute a**i32 in f64
                 _ if size_of_val(&b) >= 4 => (a as f64).powf(b as f64) as Self,
                 _ => a.powf(b as Self),
-            },
+            }),
         }
     );
     impl_scalar_op2!(
         impl Pow for [f32, f64] x [f32] {
-            fn pow = |a, b, _status| a.powf(b as Self),
+            type Error = ArithmeticStatus;
+            fn pow = |a, b| Ok(a.powf(b as Self)),
         }
     );
     impl_scalar_op2!(
         impl Pow for [f64] x [f64] {
-            fn pow = |a, b, _status| a.powf(b),
+            type Error = ArithmeticStatus;
+            fn pow = |a, b| Ok(a.powf(b)),
         }
     );
     #[cfg(feature = "half")]
     impl_scalar_op2!(
         impl Pow for [f16] x [i8, u8, i16, u16, i32] {
-            fn pow = |a, b, _status| {
+            type Error = ArithmeticStatus;
+            fn pow = |a, b| {
                 let a = a.to_f32();
                 let p = match b {
                     0 => 1.0,
@@ -381,14 +396,15 @@ pub(crate) mod traits {
                     _ if size_of_val(&b) >= 4 => (a as f64).powf(b as f64) as f32,
                     _ => a.powf(b as f32),
                 };
-                f16::from_f32(p)
+                Ok(f16::from_f32(p))
             },
         }
     );
     #[cfg(feature = "half")]
     impl_scalar_op2!(
         impl Pow for [f16] {
-            fn pow = |a, b, _status| f16::from_f32(a.to_f32().powf(b.to_f32())),
+            type Error = ArithmeticStatus;
+            fn pow = |a, b| Ok(f16::from_f32(a.to_f32().powf(b.to_f32()))),
         }
     );
 }
@@ -723,7 +739,7 @@ define_op2!(
     /// ```
     Pow,
     PowKernel,
-    crate::scalar::Pow::pow(status),
+    crate::scalar::Pow::pow(fallible),
     simd: pow_bulk,
 );
 
@@ -1234,47 +1250,38 @@ mod tests {
         use crate::error::{ArithmeticErrorKind, ArithmeticStatus};
         use crate::scalar::Pow;
 
-        let mut status = ArithmeticStatus::default();
         // Wraps on overflow.
-        assert_eq!(Pow::pow(3i32, 40u32, &mut status), 689956897);
-        assert_eq!(Pow::pow(3u8, 9u8, &mut status), 227);
-        assert_eq!(Pow::pow(-2i8, 7i8, &mut status), -128);
-        assert_eq!(Pow::pow(-3i64, 0i64, &mut status), 1);
-        assert_eq!(Pow::pow(0u16, 0i16, &mut status), 1);
+        assert_eq!(Pow::pow(3i32, 40u32), Ok(689956897));
+        assert_eq!(Pow::pow(3u8, 9u8), Ok(227));
+        assert_eq!(Pow::pow(-2i8, 7i8), Ok(-128));
+        assert_eq!(Pow::pow(-3i64, 0i64), Ok(1));
+        assert_eq!(Pow::pow(0u16, 0i16), Ok(1));
         // Exponents beyond `u32`.
-        assert_eq!(Pow::pow(1i32, i64::MAX, &mut status), 1);
-        assert_eq!(Pow::pow(-1i32, (1i64 << 40) + 1, &mut status), -1);
-        assert_eq!(Pow::pow(2u64, 1i64 << 33, &mut status), 0);
+        assert_eq!(Pow::pow(1i32, i64::MAX), Ok(1));
+        assert_eq!(Pow::pow(-1i32, (1i64 << 40) + 1), Ok(-1));
+        assert_eq!(Pow::pow(2u64, 1i64 << 33), Ok(0));
         let mut squared = 3u32;
         for _ in 0..33 {
             squared = squared.wrapping_mul(squared);
         }
-        assert_eq!(Pow::pow(3u32, 1i64 << 33, &mut status), squared);
-        assert!(status.is_ok());
+        assert_eq!(Pow::pow(3u32, 1i64 << 33), Ok(squared));
 
-        // A negative exponent: `0`, and an error.
-        assert_eq!(Pow::pow(2i32, -1i32, &mut status), 0);
-        assert!(status.contains(ArithmeticErrorKind::NegativePower));
-        let mut status = ArithmeticStatus::default();
-        assert_eq!(Pow::pow(1u8, i64::MIN, &mut status), 0);
-        assert!(status.contains(ArithmeticErrorKind::NegativePower));
+        // A negative exponent: an error.
+        let negative_power = ArithmeticStatus::from(ArithmeticErrorKind::NegativePower);
+        assert_eq!(Pow::pow(2i32, -1i32), Err(negative_power));
+        assert_eq!(Pow::pow(1u8, i64::MIN), Err(negative_power));
     }
 
     #[test]
     fn float_pow_odd_i32_exponent_keeps_sign() {
-        use crate::error::ArithmeticStatus;
         use crate::scalar::Pow;
 
-        let mut status = ArithmeticStatus::default();
         let odd = (1i32 << 24) + 1;
-        assert_eq!(Pow::pow(-1.0f32, odd, &mut status), -1.0);
-        assert_eq!(Pow::pow(-1.0f32, -odd, &mut status), -1.0);
-        assert_eq!(Pow::pow(-2.0f32, odd, &mut status), f32::NEG_INFINITY);
+        assert_eq!(Pow::pow(-1.0f32, odd), Ok(-1.0));
+        assert_eq!(Pow::pow(-1.0f32, -odd), Ok(-1.0));
+        assert_eq!(Pow::pow(-2.0f32, odd), Ok(f32::NEG_INFINITY));
         #[cfg(feature = "half")]
-        assert_eq!(
-            Pow::pow(f16::from_f32(-1.0), odd, &mut status),
-            f16::from_f32(-1.0)
-        );
+        assert_eq!(Pow::pow(f16::from_f32(-1.0), odd), Ok(f16::from_f32(-1.0)));
     }
 
     #[test]
@@ -1299,20 +1306,17 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn int_pow_random(a in proptest::num::i32::ANY, b in -3i64..100) {
-            use crate::error::{ArithmeticErrorKind, ArithmeticStatus};
+            use crate::error::ArithmeticErrorKind;
             use crate::scalar::Pow;
 
-            let mut status = ArithmeticStatus::default();
-            let res = Pow::pow(a, b, &mut status);
+            let res = Pow::pow(a, b);
             if b < 0 {
-                proptest::prop_assert_eq!(res, 0);
-                proptest::prop_assert!(status.contains(ArithmeticErrorKind::NegativePower));
+                proptest::prop_assert_eq!(res, Err(ArithmeticErrorKind::NegativePower.into()));
             } else {
-                proptest::prop_assert_eq!(res, (0..b).fold(1i32, |acc, _| acc.wrapping_mul(a)));
-                proptest::prop_assert!(status.is_ok());
-                let mut status = ArithmeticStatus::default();
-                proptest::prop_assert_eq!(res, Pow::pow(a, b as i32, &mut status));
-                proptest::prop_assert_eq!(res, Pow::pow(a, b as u32, &mut status));
+                let expected = (0..b).fold(1i32, |acc, _| acc.wrapping_mul(a));
+                proptest::prop_assert_eq!(res, Ok(expected));
+                proptest::prop_assert_eq!(Pow::pow(a, b as i32), Ok(expected));
+                proptest::prop_assert_eq!(Pow::pow(a, b as u32), Ok(expected));
             }
         }
     }
