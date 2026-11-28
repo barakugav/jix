@@ -47,6 +47,9 @@ cd jix && cargo bench                            # Rust benchmarks (criterion; H
 cd jix && cargo bench --bench valgrind           # Valgrind instruction counts (Linux + valgrind + gungraun-runner 0.20.0); used by the pr_report CI job
 
 # --- Static analysis of the hot loops (llvm-mca, every wheel platform; setup in the script's docstring) ---
+# Needs the llvm-mca of rustc's LLVM major version, from the LLVM release on GitHub
+# (github.com/llvm/llvm-project/releases). If downloading it is blocked, ask for access to GitHub:
+# never analyze with another llvm-mca version (e.g. the distro's), its numbers are meaningless.
 python scripts/analyze_llvm_mca/analyze.py --out <dir> [--platform x86_64-v3] [--fn 'add_*']
 python scripts/analyze_llvm_mca/compare.py <new dir> <base dir>   # per-kernel speedups between two runs
 

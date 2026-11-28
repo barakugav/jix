@@ -24,18 +24,22 @@ A build takes about 8 minutes per platform, two at a time. Outputs, under `--out
 
 Setup:
 - A Rust toolchain (pick it with `RUSTUP_TOOLCHAIN`) with the targets of `PLATFORMS` and the
-  `llvm-tools` component, for `opt`. The beta, 1.100, has LLVM 23:
-      rustup toolchain install beta --profile minimal --component llvm-tools
-      rustup target add --toolchain beta i686-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin
-      export RUSTUP_TOOLCHAIN=beta
-  Its unstable flags (`-Zverbose-asm`) are enabled by `RUSTC_BOOTSTRAP=1`, so it may be stable
-  or beta.
+  `llvm-tools` component, for `opt`. Stable 1.100 has LLVM 23:
+      rustup toolchain install 1.100 --profile minimal --component llvm-tools
+      rustup target add --toolchain 1.100 i686-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin
+      export RUSTUP_TOOLCHAIN=1.100
+  Its unstable flag (`-Zverbose-asm`) is enabled by `RUSTC_BOOTSTRAP=1`, so no nightly is needed.
 - llvm-mca of rustc's LLVM major version (`rustc -vV`), at `$LLVM_MCA`, `llvm-mca-<major>` or
-  `llvm-mca`. rustup's llvm-tools has none: take it from the LLVM release, e.g. for LLVM 23.1.4
-  (beta 1.100.0-beta.7):
-      curl -sSLO https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.4/LLVM-23.1.4-Linux-X64.tar.xz
-      tar -xJf LLVM-23.1.4-Linux-X64.tar.xz LLVM-23.1.4-Linux-X64/bin/llvm-mca  # static binary
-      sudo install LLVM-23.1.4-Linux-X64/bin/llvm-mca /usr/local/bin/llvm-mca-23
+  `llvm-mca`. rustup's llvm-tools has none: take it from the LLVM release on GitHub, e.g. for
+  LLVM 23.1.5 (1.100.0):
+      curl -sSLO https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.5/LLVM-23.1.5-Linux-X64.tar.xz
+      tar -xJf LLVM-23.1.5-Linux-X64.tar.xz LLVM-23.1.5-Linux-X64/bin/llvm-mca  # static binary
+      sudo install LLVM-23.1.5-Linux-X64/bin/llvm-mca /usr/local/bin/llvm-mca-23
+  Without `sudo`, extract it anywhere and set `$LLVM_MCA` to it. If the download is blocked (a
+  sandbox, a proxy, a permission prompt), get access to the GitHub release
+  (https://github.com/llvm/llvm-project/releases/tag/llvmorg-<version>): do not fall back to
+  another llvm-mca, such as the distro's. Another major version has other scheduling models and
+  flags, so its numbers are meaningless here (and the script refuses it).
 - `c++filt` (binutils), which demangles Rust's v0 symbols.
 
 The crate is compiled as an rlib, never linked, so any rustup target builds without its linker or
@@ -76,7 +80,7 @@ Caveats:
 - llvm-mca assumes every load hits L1 and ignores the front end. Branches are not followed.
 - Calls are free in llvm-mca: a kernel whose hot loop calls something (libm's `expf`) is flagged
   `*`, its real cost is higher. x86-64's register-indirect calls are named by the GOT entry last
-  loaded into the register.
+  loaded into the register, or into the register it was copied from.
 - A kernel must not call a Rust function in any loop (a closure or helper LLVM did not inline,
   `half`'s software f16 arithmetic), unless `#[cold]`: summary.md lists them, and the script exits
   with an error.
@@ -810,17 +814,24 @@ def flatten(lines: list[str], loop: Loop) -> list[str] | None:
 
 # x86-64 loads the GOT entry of a function a loop calls into a register before the loop.
 GOT_LOAD_RE = re.compile(r"^mov\s+(\w+), qword ptr \[rip \+ (\S+)@GOTPCREL\]$")
+# A register copied to another (`mov r14, rsi`), or overwritten with a register or an immediate.
+MOV_REG_RE = re.compile(r"^mov\s+(\w+), (\w+)$")
 
 
 def callees(isa: str, lines: list[str], loops: list[Loop]) -> list[str]:
     """The functions called in `loops`: a register-indirect call calls the function whose GOT entry
-    was last loaded into the register."""
+    was last loaded into the register, or into the register it was copied from."""
     in_loops = {i for lp in loops for i in range(lp.start, lp.end + 1)}
     got: dict[str, str] = {}
     out = set()
     for i, x in enumerate(lines):
         if m := GOT_LOAD_RE.match(x):
             got[m.group(1)] = m.group(2)
+        elif m := MOV_REG_RE.match(x):
+            if m.group(2) in got:
+                got[m.group(1)] = got[m.group(2)]
+            else:
+                got.pop(m.group(1), None)
         elif i in in_loops and not is_label(x) and is_call(isa, mnemonic(x)):
             target = x.split(None, 1)[1].strip().removesuffix("@PLT")
             out.add(got.get(target, target))

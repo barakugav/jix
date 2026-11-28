@@ -1,6 +1,6 @@
 //! Building blocks of the SIMD `*_bulk` functions of the scalar traits.
 
-use fearless_simd::{Simd, SimdBase, SimdElement};
+use fearless_simd::{Simd, SimdBase, SimdElement, SimdFloat};
 
 use crate::error::ArithmeticStatus;
 use crate::scalar::bool8;
@@ -379,4 +379,9 @@ fn for_each_unrolled(n: usize, mut f: impl FnMut(usize)) {
             f(i);
         }
     }
+}
+
+#[inline(always)]
+pub(crate) fn is_f64_on_sse2<S: Simd, V: SimdFloat<S>>(x: &V) -> bool {
+    simd_level(x.token()) == SimdLevel::Sse2 && size_of::<V::Element>() == 8
 }

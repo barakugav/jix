@@ -306,38 +306,38 @@ macro_rules! impl_scalar_op2 {
     };
 }
 
-/// Define the float scalar trait `$Trait` as `f32`'s `$f`, with an `f16` impl through `f32`.
 macro_rules! float_op1 {
     (
         $(#[$trait_meta:meta])* $Trait:ident,
         $(#[$fn_meta:meta])* $f:ident,
-        $f_bulk:ident $(, $simd:ident="enabled")?
+        $f_bulk:ident, simd = "enabled"
+    ) => {
+        crate::scalar::traits_util::float_op1!(
+            $(#[$trait_meta])* $Trait,
+            $(#[$fn_meta])* $f,
+            $f_bulk, simd = |x| x.$f()
+        );
+    };
+    (
+        $(#[$trait_meta:meta])* $Trait:ident,
+        $(#[$fn_meta:meta])* $f:ident,
+        $f_bulk:ident $(, simd = |$x:ident| $simd:expr)?
     ) => {
         crate::scalar::traits_util::define_scalar_op1_trait!(
             $(#[$trait_meta])* $Trait,
             $(#[$fn_meta])* $f,
             bulk_fn: $f_bulk,
         );
-        crate::scalar::traits_util::float_op1!(@impl $Trait, $f, $f_bulk $(, $simd="enabled")?);
+        crate::scalar::traits_util::impl_scalar_op1!(
+            impl $Trait for [f32, f64] {
+                fn $f = |x| x.$f(),
+                $(fn $f_bulk = |$x| $simd,)?
+            }
+        );
         #[cfg(feature = "half")]
         crate::scalar::traits_util::impl_scalar_op1!(
             impl $Trait for [crate::scalar::f16] {
                 fn $f = |x| crate::scalar::f16::from_f32(x.to_f32().$f()),
-            }
-        );
-    };
-    (@impl $Trait:ident, $f:ident, $f_bulk:ident, simd="enabled") => {
-        crate::scalar::traits_util::impl_scalar_op1!(
-            impl $Trait for [f32, f64] {
-                fn $f = |x| x.$f(),
-                fn $f_bulk = |x| x.$f(),
-            }
-        );
-    };
-    (@impl $Trait:ident, $f:ident, $f_bulk:ident) => {
-        crate::scalar::traits_util::impl_scalar_op1!(
-            impl $Trait for [f32, f64] {
-                fn $f = |x| x.$f(),
             }
         );
     };

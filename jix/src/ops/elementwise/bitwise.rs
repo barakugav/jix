@@ -108,14 +108,14 @@ pub(crate) mod traits {
     impl_scalar_op2!(
         impl Shr for [i32] x [i32, u32] {
             fn shr = |a, b| a.unbounded_shr(b.shift_count()),
-            fn shr_bulk = |a, b| a >> b.bitcast::<S::u32s>().min(31).bitcast::<S::i32s>(),
+            fn shr_bulk = |a, b| a >> b.cast_unsigned().min(31).cast_signed(),
         }
     );
     impl_scalar_op2!(
         impl Shr for [u32] x [i32, u32] {
             fn shr = |a, b| a.unbounded_shr(b.shift_count()),
             fn shr_bulk = |a, b| {
-                let n = b.bitcast::<S::u32s>();
+                let n = b.cast_unsigned();
                 let zero = SimdBase::splat(fearless_simd::ExtractToken::token(&a), 0);
                 n.simd_lt(32).select(a >> (n & 31), zero)
             },

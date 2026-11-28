@@ -2,7 +2,9 @@ use crate::ops::elementwise::op1::{define_array_op1_method, define_op1};
 use crate::ops::prelude::*;
 
 pub(crate) mod traits {
-    use crate::scalar::traits_util::float_op1;
+    use fearless_simd::{Select, Simd, SimdFloat};
+
+    use crate::scalar::{simd::is_f64_on_sse2, traits_util::float_op1};
 
     float_op1!(
         /// Flooring operation, as [`f32::floor`].
@@ -10,7 +12,7 @@ pub(crate) mod traits {
         /// Round down to the nearest integer (towards -inf).
         floor,
         floor_bulk,
-        simd = "enabled"
+        simd = |x| crate::ops::elementwise::rounding::traits::floor(x)
     );
     float_op1!(
         /// Ceiling operation, as [`f32::ceil`].
@@ -18,7 +20,7 @@ pub(crate) mod traits {
         /// Round up to the nearest integer (towards +inf).
         ceil,
         ceil_bulk,
-        simd = "enabled"
+        simd = |x| crate::ops::elementwise::rounding::traits::ceil(x)
     );
     float_op1!(
         /// Rounding operation, as [`f32::round`].
@@ -27,8 +29,30 @@ pub(crate) mod traits {
         Round,
         /// Round to the nearest integer.
         round,
-        round_bulk
+        round_bulk,
+        simd = "enabled"
     );
+
+    #[inline(always)]
+    pub(crate) fn floor<S: Simd, V: SimdFloat<S>>(x: V) -> V {
+        if is_f64_on_sse2(&x) {
+            // fearless_simd converts f64 to i64 and back one element at a time
+            let (rounded, one) = (x.round_ties_even(), V::Element::from(1u8));
+            return rounded.simd_gt(x).select(rounded - one, rounded);
+        }
+
+        x.floor()
+    }
+
+    #[inline(always)]
+    pub(crate) fn ceil<S: Simd, V: SimdFloat<S>>(x: V) -> V {
+        if is_f64_on_sse2(&x) {
+            // fearless_simd converts f64 to i64 and back one element at a time
+            return -floor(-x);
+        }
+
+        x.ceil()
+    }
 }
 
 define_op1!(
