@@ -1,6 +1,6 @@
 [package]
 name = "jix"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Barak Ugav <barakugav@gmail.com>"]
 edition = "2024"
 rust-version = "1.89.0"
@@ -21,7 +21,7 @@ include = [
 ]
 
 [dependencies]
-jix-macros = { path = "../jix-macros", version = "=0.1.0" }
+jix-macros = { path = "../jix-macros", version = "=0.1.1" }
 ndarray = ">=0.16,<0.18"
 memmap2 = "0.9"
 zstd = { version = "0.14.5", default-features = false }
